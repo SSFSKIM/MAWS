@@ -1,11 +1,13 @@
-import { mkdirSync, symlinkSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectId } from '@shared/graph/ids';
 import { ProjectRecordSchema } from '@shared/ipc/schema/session';
+import { runGit } from '../../../test/support/git-fixture';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
+import { gitDirs, locate } from './projects';
 
 describe('projects and the membership rule', () => {
   let dir: ReturnType<typeof tempDir>;
@@ -134,6 +136,85 @@ describe('projects and the membership rule', () => {
     expect(originOf(record.projectId!)).toBe('discovered');
     expect(index.projects.add(directory).id).toBe(record.projectId);
     expect(originOf(record.projectId!)).toBe('user');
+  });
+
+  describe('linked git worktrees (Decision Log, 2026-10-01)', () => {
+    // A main checkout with one commit, in the test's own tree (git's isolated fixture environment, never a real repo).
+    const checkout = async (name: string) => {
+      const path = repo(name);
+      await runGit(path, ['init', '-q', '-b', 'main']);
+      writeFileSync(join(path, 'README.md'), 'hello\n');
+      await runGit(path, ['add', 'README.md']);
+      await runGit(path, ['commit', '-q', '-m', 'initial']);
+      return path;
+    };
+    // The real git call, counted per root.
+    const counted = () => {
+      const roots: string[] = [];
+      return { roots, gitDirsOf: (root: string) => (roots.push(root), gitDirs(root)) };
+    };
+
+    it('a sibling linked worktree (git worktree add ../sibling) belongs to the main checkout, its root the worktree, from any directory inside it', async () => {
+      const main = await checkout('main');
+      await runGit(main, ['worktree', 'add', '-q', '../sibling', '-b', 'feature']);
+      const sibling = join(tree.path, 'sibling');
+      mkdirSync(join(sibling, 'src/deep'), { recursive: true });
+      expect(locate(sibling)).toEqual({ realpath: sibling, projectDirectory: main, worktreePath: sibling });
+      expect(locate(join(sibling, 'src/deep'))).toEqual({ realpath: join(sibling, 'src/deep'), projectDirectory: main, worktreePath: sibling });
+
+      // A managed worktree the engine made inside the linked one belongs to the main checkout too.
+      await runGit(sibling, ['worktree', 'add', '-q', '.claude/worktrees/wt', '-b', 'wt']);
+      const managed = join(sibling, '.claude/worktrees/wt');
+      expect(locate(managed)).toEqual({ realpath: managed, projectDirectory: main, worktreePath: managed });
+
+      // Discovery files a session there under the main checkout's project, with the worktree and its branch.
+      const inMain = index.sessions.upsertFromSummary(summary({ directory: main })).record;
+      const inSibling = index.sessions.upsertFromSummary(summary({ directory: join(sibling, 'src'), gitBranch: 'feature' })).record;
+      expect(inSibling.projectId).toBe(inMain.projectId);
+      expect(inSibling.worktree).toEqual({ path: sibling, branch: 'feature' });
+      expect(index.projects.list().map((p) => p.directory)).toEqual([main]);
+      expect(index.projects.resolveMembership(sibling)).toEqual({ projectId: inMain.projectId, worktree: { path: sibling, branch: null } });
+
+      // An explicit add still registers the directory it is given.
+      expect(index.projects.add(sibling).directory).toBe(sibling);
+    });
+
+    it('a main checkout, a directory inside it and a plain directory do not fold, and need no git call', async () => {
+      const main = await checkout('main');
+      mkdirSync(join(main, 'src'));
+      const plain = repo('plain');
+      const { roots, gitDirsOf } = counted();
+      expect(locate(main, gitDirsOf)).toEqual({ realpath: main, projectDirectory: main, worktreePath: null });
+      expect(locate(join(main, 'src'), gitDirsOf)).toEqual({ realpath: join(main, 'src'), projectDirectory: join(main, 'src'), worktreePath: null });
+      expect(locate(plain, gitDirsOf)).toEqual({ realpath: plain, projectDirectory: plain, worktreePath: null });
+      expect(roots).toEqual([]);
+    });
+
+    it('a .git file of no linked checkout worktree does not fold: a separate git dir (git dir = common dir), a bare repository\'s worktree', async () => {
+      const separate = repo('separate');
+      await runGit(separate, ['init', '-q', '-b', 'main', `--separate-git-dir=${join(repo('store'), '.git')}`]);
+      const main = await checkout('main');
+      await runGit(tree.path, ['clone', '-q', '--bare', main, 'bare.git']);
+      await runGit(join(tree.path, 'bare.git'), ['worktree', 'add', '-q', '../bare-wt', '-b', 'feature']);
+      const bareWorktree = join(tree.path, 'bare-wt');
+
+      const { roots, gitDirsOf } = counted();
+      expect(locate(separate, gitDirsOf)).toEqual({ realpath: separate, projectDirectory: separate, worktreePath: null });
+      expect(locate(bareWorktree, gitDirsOf)).toEqual({ realpath: bareWorktree, projectDirectory: bareWorktree, worktreePath: null });
+      expect(roots).toEqual([separate, bareWorktree]); // each was a candidate: its `.git` is a file
+    });
+
+    it('git runs once per directory: a second locate answers from the cache', async () => {
+      const main = await checkout('main');
+      await runGit(main, ['worktree', 'add', '-q', '../sibling', '-b', 'feature']);
+      const sibling = join(tree.path, 'sibling');
+      const { roots, gitDirsOf } = counted();
+      const first = locate(sibling, gitDirsOf);
+      expect(first.projectDirectory).toBe(main);
+      expect(locate(sibling, gitDirsOf)).toEqual(first);
+      expect(locate(join(tree.path, 'sibling/.'), gitDirsOf)).toEqual(first); // the same directory by another spelling
+      expect(roots).toEqual([sibling]);
+    });
   });
 
   it('update renames and reorders; new projects go to the end; an unknown id fails', () => {

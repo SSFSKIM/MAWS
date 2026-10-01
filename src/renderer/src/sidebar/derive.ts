@@ -1,42 +1,17 @@
-// The sidebar's readings of the stores (C5 execution document, M3; residue *Sidebar scale* and *Needs-you ordering
-// and grouping*): which sessions go in which section, what a row says, and how old it is. Pure, so the layout is
-// testable without React.
+// The sidebar's readings of the stores (§5.1 as amended 2026-10-01, W5; C5 execution document, M3): the two levels of
+// the drill-in (the project list, then one project's page with its sessions grouped Main first and then each worktree),
+// what a row says, and how old it is. Pure, so the layout is testable without React.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
+import type { WorktreeInfo } from '@shared/sessions/worktree';
 import { holderLine, waitingItem, type NeedsYouRow } from '../attention/derive';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 
-// A project renders at most this many sessions before "Show N more" (residue *Sidebar scale*: no virtualisation).
-export const PROJECT_PAGE = 20;
-
-export interface SidebarInput {
-  records: Map<AppSessionId, SessionRecord>;
-  digests: Map<AppSessionId, SessionDigest>;
-  projects: ProjectRecord[]; // in sidebar order
-  rows: NeedsYouRow[]; // the Needs-you rows, in their order
-  sort: SidebarSort;
-  query: string;
-}
-
-export interface ProjectSection {
-  project: ProjectRecord;
-  sessions: SessionRecord[]; // sorted; pinned sessions are under Pinned instead
-  rollup: { needsYou: number; working: number };
-}
-
-export interface SidebarModel {
-  needsYou: NeedsYouRow[];
-  pinned: SessionRecord[];
-  projects: ProjectSection[]; // while searching, only the projects with a match
-  other: SessionRecord[]; // no project, or a project the list does not hold
-  searching: boolean;
-  // Whether Pinned and Other sessions hold anything before the search filters them: a section with sessions keeps its
-  // heading while a search empties it, one with none shows no heading.
-  hasPinned: boolean;
-  hasOther: boolean;
-}
+// "Other sessions": the pseudo-project at the end of the list, for sessions without a (known) project.
+export const OTHER_SESSIONS = 'other' as const;
+export type ProjectKey = ProjectId | typeof OTHER_SESSIONS;
 
 const isWorking = (digest: SessionDigest | undefined) => digest?.phase === 'working' || digest?.phase === 'starting';
 
@@ -51,47 +26,146 @@ export function sessionMatcher(query: string, projects: ReadonlyMap<ProjectId, P
     (record.projectId !== null && (projects.get(record.projectId)?.name.toLowerCase().includes(q) ?? false));
 }
 
-export function sidebarModel({ records, digests, projects, rows, sort, query }: SidebarInput): SidebarModel {
+// ---- level one: the project list ---------------------------------------------------------------------------------------
+
+export interface ProjectListInput {
+  records: ReadonlyMap<AppSessionId, SessionRecord>;
+  digests: ReadonlyMap<AppSessionId, SessionDigest>;
+  projects: readonly ProjectRecord[];
+  rows: NeedsYouRow[]; // the Needs-you rows: a project's waiting count is how many of its sessions have one
+}
+
+export interface ProjectEntry {
+  key: ProjectKey;
+  project: ProjectRecord | null; // null for Other sessions
+  name: string;
+  sessions: SessionRecord[]; // not archived, unsorted
+  rollup: { waiting: number; working: number };
+}
+
+const OTHER_NAME = 'Other sessions';
+
+// Every project, then Other sessions when it holds anything, each with its sessions and its waiting (◐) and working (●)
+// counts. Projects are sorted by recency of activity: the latest movement of any of their sessions (archived ones
+// included, so archiving does not demote a project), a project without sessions by when it was added; ties by the
+// project order, then the name.
+export function projectList({ records, digests, projects, rows }: ProjectListInput): ProjectEntry[] {
   const byId = new Map(projects.map((p) => [p.id, p]));
-  const matches = sessionMatcher(query, byId);
-  const order = (list: SessionRecord[]) => sortSessions(list, sort, { digests, rows });
   const waiting = new Set(rows.map((row) => row.appSessionId));
-
-  const live = [...records.values()].filter((r) => !r.archived);
-  const grouped = new Map<ProjectId | null, SessionRecord[]>();
-  for (const r of live) {
-    const key = r.projectId !== null && byId.has(r.projectId) ? r.projectId : null;
-    const list = grouped.get(key);
-    if (list) list.push(r);
-    else grouped.set(key, [r]);
+  const grouped = new Map<ProjectKey, { live: SessionRecord[]; activity: number }>();
+  for (const record of records.values()) {
+    const key: ProjectKey = record.projectId !== null && byId.has(record.projectId) ? record.projectId : OTHER_SESSIONS;
+    const entry = grouped.get(key) ?? { live: [], activity: Number.NEGATIVE_INFINITY };
+    if (!grouped.has(key)) grouped.set(key, entry);
+    entry.activity = Math.max(entry.activity, lastActivity(record, digests.get(record.appId)));
+    if (!record.archived) entry.live.push(record);
   }
-
-  const sections = projects.map((project) => {
-    const all = grouped.get(project.id) ?? [];
+  const entryOf = (key: ProjectKey, project: ProjectRecord | null): ProjectEntry => {
+    const sessions = grouped.get(key)?.live ?? [];
     return {
+      key,
       project,
-      sessions: order(all.filter((r) => !r.pinned && matches(r))),
-      rollup: {
-        needsYou: all.filter((r) => waiting.has(r.appId)).length,
-        working: all.filter((r) => isWorking(digests.get(r.appId))).length,
-      },
+      name: project?.name ?? OTHER_NAME,
+      sessions,
+      rollup: { waiting: sessions.filter((r) => waiting.has(r.appId)).length, working: sessions.filter((r) => isWorking(digests.get(r.appId))).length },
+    };
+  };
+  const activityOf = (key: ProjectKey, project: ProjectRecord) => grouped.get(key)?.activity ?? Date.parse(project.createdAt);
+  const listed = projects
+    .map((project) => ({ entry: entryOf(project.id, project), activity: activityOf(project.id, project) }))
+    .sort((a, b) => b.activity - a.activity || a.entry.project!.order - b.entry.project!.order || a.entry.name.localeCompare(b.entry.name))
+    .map(({ entry }) => entry);
+  const other = entryOf(OTHER_SESSIONS, null);
+  return other.sessions.length > 0 ? [...listed, other] : listed;
+}
+
+// The list while searching: the projects whose name matches, and those holding a session that matches.
+export function filterProjectList(entries: ProjectEntry[], query: string, projects: ReadonlyMap<ProjectId, ProjectRecord>): ProjectEntry[] {
+  const q = query.trim().toLowerCase();
+  if (q === '') return entries;
+  const matches = sessionMatcher(query, projects);
+  return entries.filter((e) => (e.project !== null && e.name.toLowerCase().includes(q)) || e.sessions.some(matches));
+}
+
+// ---- level two: one project's page -------------------------------------------------------------------------------------
+
+export interface SessionGroup {
+  key: string; // 'main', or the worktree's path
+  kind: 'main' | 'worktree';
+  label: string; // "Main", or the worktree's folder name
+  branch: string | null; // the checkout's branch, beside the label
+  path: string | null; // the worktree's path (null for Main)
+  sessions: SessionRecord[];
+}
+
+export interface ProjectPage {
+  pinned: SessionRecord[]; // pin keeps a session at the top of its project, above the groups
+  groups: SessionGroup[]; // Main first, then each worktree that holds a session, in `git worktree list` order
+  grouped: boolean; // a project with no worktree session shows one flat list, without a Main heading
+}
+
+export interface ProjectPageInput {
+  sessions: readonly SessionRecord[]; // the project's sessions, not archived
+  digests: Map<AppSessionId, SessionDigest>;
+  rows: NeedsYouRow[];
+  sort: SidebarSort;
+  matches: (record: SessionRecord) => boolean;
+  worktrees: readonly WorktreeInfo[] | null; // `git.worktree.list` for the project's directory, when read
+}
+
+const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
+const trimSlash = (path: string) => path.replace(/\/+$/, '');
+
+// The page: pinned sessions first, then Main, then each worktree with a session. Worktrees git lists come in git's
+// order with git's branch; a worktree git does not list (removed since, or not read yet) follows, by folder name, with
+// the branch its sessions recorded.
+export function projectPage({ sessions, digests, rows, sort, matches, worktrees }: ProjectPageInput): ProjectPage {
+  const order = (list: SessionRecord[]) => sortSessions(list, sort, { digests, rows });
+  const shown = sessions.filter(matches);
+  const pinned = order(shown.filter((r) => r.pinned));
+  const listed = new Map((worktrees ?? []).filter((w) => !w.isMain).map((w, i) => [trimSlash(w.path), { info: w, index: i }]));
+  const main: SessionRecord[] = [];
+  const byWorktree = new Map<string, SessionRecord[]>();
+  for (const record of shown) {
+    if (record.pinned) continue;
+    if (record.worktree === null) {
+      main.push(record);
+      continue;
+    }
+    const key = trimSlash(record.worktree.path);
+    const list = byWorktree.get(key);
+    if (list) list.push(record);
+    else byWorktree.set(key, [record]);
+  }
+  const worktreeGroups: SessionGroup[] = [...byWorktree].map(([path, list]) => {
+    const info = listed.get(path)?.info;
+    const recorded = list.find((r) => r.worktree?.branch ?? r.branch);
+    return {
+      key: path,
+      kind: 'worktree',
+      label: basename(path),
+      branch: info ? info.branch : (recorded?.worktree?.branch ?? recorded?.branch ?? null),
+      path,
+      sessions: order(list),
     };
   });
-  const searching = query.trim() !== '';
-  const others = (grouped.get(null) ?? []).filter((r) => !r.pinned);
-  return {
-    needsYou: rows.filter((row) => {
-      const r = records.get(row.appSessionId);
-      return r !== undefined && matches(r);
-    }),
-    pinned: order(live.filter((r) => r.pinned && matches(r))),
-    projects: searching ? sections.filter((s) => s.sessions.length > 0) : sections,
-    other: order(others.filter(matches)),
-    searching,
-    hasPinned: live.some((r) => r.pinned),
-    hasOther: others.length > 0,
-  };
+  worktreeGroups.sort((a, b) => {
+    const ia = listed.get(a.key)?.index ?? Number.POSITIVE_INFINITY;
+    const ib = listed.get(b.key)?.index ?? Number.POSITIVE_INFINITY;
+    return ia - ib || a.label.localeCompare(b.label);
+  });
+  const mainBranch = worktrees?.find((w) => w.isMain)?.branch ?? null;
+  const grouped = worktreeGroups.length > 0;
+  const groups: SessionGroup[] = [];
+  if (main.length > 0) groups.push({ key: 'main', kind: 'main', label: 'Main', branch: mainBranch, path: null, sessions: order(main) });
+  groups.push(...worktreeGroups);
+  return { pinned, groups, grouped };
 }
+
+// Whether a project's page needs `git.worktree.list` (its order and branches): only when a session sits in a worktree.
+export const hasWorktreeSessions = (sessions: readonly SessionRecord[]) => sessions.some((r) => r.worktree !== null);
+
+// ---- row text ----------------------------------------------------------------------------------------------------------
 
 // What a row says under its title (§5.1: the current activity while working, the last assistant line when idle):
 // the holder for a foreign-live session, the line of the item its Needs-you row shows (`waitingItem`), the activity
@@ -131,5 +205,5 @@ export function sessionAge(record: SessionRecord, digest: SessionDigest | null |
   return formatAge(now - lastActivity(record, digest));
 }
 
-// A Needs-you row shows how long its oldest item has waited.
+// A waiting request shows how long its item has waited (the request preview, C7's card).
 export const needsYouAge = (oldest: AttentionItem, now: number): string => formatAge(now - Date.parse(oldest.createdAt));

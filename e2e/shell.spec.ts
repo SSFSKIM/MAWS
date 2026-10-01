@@ -12,6 +12,7 @@ import { expect, test, type ElectronApplication, type Locator, type Page } from 
 import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
 import { formatChord } from '../src/shared/keymap/chord';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const SHELL_ENV = {
   MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json',
@@ -95,20 +96,26 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
       ['Resize right panel', '380'],
     ]);
 
-    await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toBeVisible();
-    expect(await needsYouRows(page), 'Needs you, longest wait first').toEqual([FIX, SIP, QUOTA]);
-    expect(await needsYouGlyphs(page)).toEqual(['Needs approval', 'Question', 'Plan review']);
-
-    expect(await treeRows(sidebar.getByRole('tree', { name: 'Pinned' }))).toEqual(['Workstation north star']);
-    expect(await sidebar.getByRole('tree', { name: 'Projects' }).locator('[data-kind="project"]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')))).toEqual(
-      ['MAWS', 'codex_somersault', USAGE_PROJECT],
-    );
-    expect(await treeRows(sidebar.getByRole('group', { name: 'MAWS' })), 'the pinned session is not repeated').toEqual([FIX, SIP, 'Charter + research']);
-    expect(await treeRows(sidebar.getByRole('group', { name: 'codex_somersault' }))).toEqual([QUOTA, 'Somersault terminal run', 'Trace stream reconnects']);
-    expect(await treeRows(sidebar.getByRole('group', { name: USAGE_PROJECT }))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
-    expect(await treeRows(sidebar.getByRole('tree', { name: 'Other sessions' }))).toEqual(['Terminal workflow notes']);
-
-    expect(await rowGlyphs(sidebar), 'every glyph as the glyph table labels it').toEqual({
+    // W5: the project list, most recently active first, with each project's waiting and working counts; no Needs-you or
+    // Pinned section. Each project's page lists its sessions, pinned first.
+    await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toHaveCount(0);
+    expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', 'Other sessions']);
+    expect(await rollups(sidebar)).toEqual({ [USAGE_PROJECT]: '●1', codex_somersault: '◐1', MAWS: '◐2●1', 'Other sessions': '' });
+    const pages: Record<string, string[]> = {
+      MAWS: ['Workstation north star', FIX, SIP, 'Charter + research'],
+      codex_somersault: [QUOTA, 'Somersault terminal run', 'Trace stream reconnects'],
+      [USAGE_PROJECT]: ['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory'],
+      'Other sessions': ['Terminal workflow notes'],
+    };
+    const glyphs: Record<string, string | null | undefined> = {};
+    const unread: string[] = [];
+    for (const [project, rows] of Object.entries(pages)) {
+      await openProject(page, project);
+      expect(await treeRows(shownLevel(sidebar)), `${project}'s page`).toEqual(rows);
+      Object.assign(glyphs, await rowGlyphs(shownLevel(sidebar)));
+      unread.push(...(await unreadRows(shownLevel(sidebar))).filter((title): title is string => title !== null));
+    }
+    expect(glyphs, 'every glyph as the glyph table labels it').toEqual({
       'Workstation north star': 'Done',
       [FIX]: 'Needs approval',
       [SIP]: 'Question',
@@ -121,9 +128,9 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
       'SDK wire inventory': 'Done',
       'Terminal workflow notes': 'Idle, unread',
     });
-    expect(await unreadRows(sidebar), 'unread dots on exactly the unread records').toEqual([FIX, QUOTA, 'Terminal workflow notes']);
+    expect(unread.sort(), 'unread dots on exactly the unread records').toEqual([FIX, QUOTA, 'Terminal workflow notes'].sort());
 
-    const foreign = sidebar.getByRole('treeitem', { name: 'Somersault terminal run' });
+    const foreign = await sidebarRow(page, 'Somersault terminal run');
     await expect(foreign).toContainText('Terminal · pid 7135');
     await foreign.click({ button: 'right' });
     await expect(page.getByRole('menu')).toBeVisible();
@@ -197,8 +204,8 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
       await expect(main.getByText('Charter + research needs you · Read: docs/charter.md')).toBeVisible();
     }
     expect(await badge()).toBe('4');
-    await expect(sidebar.getByRole('heading', { name: 'Needs you · 4' })).toBeVisible();
-    expect(await needsYouRows(page), 'the newest request is last').toEqual([FIX, SIP, QUOTA, 'Charter + research']);
+    await showProjectList(page);
+    await expect(projectRow(page, 'MAWS').getByLabel('3 waiting'), 'the new request counts on its project').toBeVisible();
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (toast)').toEqual([]);
   });
 
@@ -232,7 +239,7 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
 
   await test.step('The 8 s entry: Usage reset countdown ends its turn while nobody looks at it', async () => {
     await advanceTo(app, 8000);
-    const usageRow = sidebar.getByRole('treeitem', { name: 'Usage reset countdown' });
+    const usageRow = await sidebarRow(page, 'Usage reset countdown');
     await expect(usageRow.getByRole('img', { name: 'Idle, unread' })).toBeVisible();
     await expect(usageRow.getByRole('img', { name: 'Unread', exact: true })).toBeVisible();
     await expect(usageCard.getByTestId('card-activity')).toHaveText('Idle');
@@ -260,8 +267,8 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
   });
 
   await test.step('Item 5: tabs, the split, drags', async () => {
-    await sidebar.getByRole('treeitem', { name: SIP }).click();
-    await sidebar.getByRole('treeitem', { name: QUOTA }).click();
+    await (await sidebarRow(page, SIP)).click();
+    await (await sidebarRow(page, QUOTA)).click();
     expect(await tabLabels(page, 'Open tabs')).toEqual(four);
     for (const n of [1, 2, 3, 4]) {
       await menu(app, `tab.select:${n}`);
@@ -314,7 +321,7 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     // A sidebar row dragged onto a tab strip opens its session there.
     const strip = page.getByRole('tablist', { name: 'Open tabs' });
     const stripBox = (await strip.boundingBox())!;
-    await drag(page, sidebar.getByRole('treeitem', { name: 'Charter + research' }), { x: stripBox.x + stripBox.width - 8, y: stripBox.y + stripBox.height / 2 });
+    await drag(page, await sidebarRow(page, 'Charter + research'), { x: stripBox.x + stripBox.width - 8, y: stripBox.y + stripBox.height / 2 });
     await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the dropped row opens a tab' }).toEqual(['Overview', 'Charter + research · MAWS']);
   });
 
@@ -359,27 +366,26 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     expect(await tabLabels(page, 'Left pane tabs')).toEqual(['Overview', 'Charter + research · MAWS']);
   });
 
-  await test.step('Item 6: sizes, a collapsed project, the collapsed panel', async () => {
+  await test.step('Item 6: sizes, the open project, the collapsed panel', async () => {
     await dragBy(page, sidebar.getByRole('separator', { name: 'Resize sidebar' }), -60);
     await expect(sidebar.getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '240');
     const panelResizer = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
     await dragBy(page, panelResizer, 60);
     await expect(panelResizer).toHaveAttribute('aria-valuenow', '320');
-    const usageProject = sidebar.getByRole('treeitem', { name: USAGE_PROJECT });
-    await usageProject.click({ position: { x: 60, y: 12 } });
-    await expect(usageProject).toHaveAttribute('aria-expanded', 'false');
+    await showProjectList(page);
+    const usageProjectId = await projectRow(page, USAGE_PROJECT).getAttribute('data-menu').then((menuId) => menuId!.slice('project:'.length));
+    await openProject(page, USAGE_PROJECT);
     await menu(app, 'panel.toggle');
     await expect(panelResizer).toHaveCount(0);
     await expect.poll(async () => (await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0).toBe(0);
 
-    const usageProjectId = await usageProject.getAttribute('data-menu').then((menuId) => menuId!.slice('project:'.length));
     await expect
       .poll(async () => {
-        const regions = (await layoutGet(page, 'regions')) as { sidebar: { width: number; collapsedProjects: string[] }; panel: { width: number; collapsed: boolean } };
+        const regions = (await layoutGet(page, 'regions')) as { sidebar: { width: number; openProject: string | null }; panel: { width: number; collapsed: boolean } };
         const main = (await layoutGet(page, 'main.tabs')) as { panes: unknown[] };
-        return [regions.sidebar.width, regions.panel.width, regions.panel.collapsed, regions.sidebar.collapsedProjects.includes(usageProjectId), main.panes.length];
+        return [regions.sidebar.width, regions.panel.width, regions.panel.collapsed, regions.sidebar.openProject, main.panes.length];
       }, { message: 'the layout is written back' })
-      .toEqual([240, 320, true, true, 2]);
+      .toEqual([240, 320, true, usageProjectId, 2]);
     expect((await layoutList(page)).sort()).toEqual(['main.tabs', 'panel.pinned', 'regions', 'window.main']);
   });
 
@@ -397,13 +403,15 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
 async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void> {
   const { app, page } = maws;
   const sidebar = page.locator('[data-region="sidebar"]');
-  await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toBeVisible({ timeout: 10_000 });
+  // W5: the sidebar opens on the project page it showed at quit.
+  await expect(sidebar.getByRole('heading', { level: 2, name: USAGE_PROJECT })).toBeVisible({ timeout: 10_000 });
+  await expect(sidebar.getByTestId('sidebar-levels')).toHaveAttribute('data-level', '2');
 
   // The layout comes back as it was saved.
   await expect.poll(() => tabLabels(page, 'Left pane tabs'), { message: 'the tabs and the split are back' }).toEqual(saved.left);
   expect(await tabLabels(page, 'Right pane tabs')).toEqual(saved.right);
   await expect(sidebar.getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '240');
-  await expect(sidebar.getByRole('treeitem', { name: USAGE_PROJECT })).toHaveAttribute('aria-expanded', 'false');
+  expect(await treeRows(shownLevel(sidebar))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
   await expect(page.locator('[data-region="panel"]').getByRole('separator')).toHaveCount(0);
   expect((await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0, 'the panel stays collapsed').toBe(0);
   await page.waitForTimeout(500); // past the 250 ms write-back: hydration must not have rewritten anything
@@ -472,10 +480,17 @@ const layoutList = async (page: Page) => {
 };
 
 const needsYouRows = (page: Page) => page.locator('[aria-label="Needs you"] > li').evaluateAll((els) => els.map((el) => el.getAttribute('data-title')));
-const needsYouGlyphs = (page: Page) =>
-  page.locator('[aria-label="Needs you"] > li').evaluateAll((els) => els.map((el) => el.querySelector('[role="img"]')?.getAttribute('aria-label')));
 
 const treeRows = (scope: Locator) => scope.locator('[data-kind="session"]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
+
+// W5: the sidebar's level on screen (the other stays rendered, inert, while it slides away), the project list's rows,
+// and each project's counts as they read (◐ waiting, ● working).
+const shownLevel = (sidebar: Locator) => sidebar.locator('[data-level-pane]:not([inert])');
+const projectRows = (sidebar: Locator) => sidebar.locator('[data-level-pane="1"] [data-kind="project"]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
+const rollups = (sidebar: Locator) =>
+  sidebar
+    .locator('[data-level-pane="1"] [data-kind="project"]')
+    .evaluateAll((els) => Object.fromEntries(els.map((el) => [el.getAttribute('aria-label'), Array.from(el.querySelectorAll('[aria-label$=" waiting"], [aria-label$=" working"]')).map((n) => n.textContent).join('')])));
 
 const rowGlyphs = (sidebar: Locator) =>
   sidebar

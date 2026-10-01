@@ -17,6 +17,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import { invoke, launchReady, queueInterruptJournal, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { sidebarRow } from './support/sidebar';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -287,22 +288,23 @@ test('an undeclared dialog kind stays pending and unanswered', async ({ cards })
   expect(cards.consoleErrors()).toEqual([]);
 });
 
-// The real shell on C5's stub scenario: the sidebar's Needs-you row deep-links to the Overview card, whose article then
-// holds focus, and Enter answers the card's request there (the stub delivers it and the row leaves Needs you).
-test('the Overview card reached from the Needs-you row answers with Enter on its article', async () => {
+// The real shell on C5's stub scenario: the Overview (⌘0) shows the card, whose article holds focus, and Enter answers
+// the card's request there (the stub delivers it, and the card's request and the dock badge's count go).
+test('the Overview card answers with Enter on its article', async () => {
   const shell = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json', MAWS_SCENARIO_CLOCK: 'manual' } });
   try {
-    const { page } = shell;
+    const { app, page } = shell;
     const fix = 'Fix sidebar drag';
-    const row = page.locator(`[aria-label="Needs you"] > li[data-title="${fix}"] > button`);
-    await expect(row).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+    await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.click());
     const card = page.locator('[data-region="main"]').getByRole('article', { name: fix });
     await expect(card.getByRole('radio', { name: 'Allow once' })).toBeVisible(); // C7's card, not C5's preview
-    await row.focus();
+    const badge = () => app.evaluate(({ app }) => app.dock?.getBadge());
+    expect(await badge()).toBe('3');
+    await card.focus();
     await page.keyboard.press('Enter');
-    await expect(card).toBeFocused();
-    await page.keyboard.press('Enter');
-    await expect(page.locator(`[aria-label="Needs you"] > li[data-title="${fix}"]`)).toHaveCount(0);
+    await expect(card.getByRole('radio', { name: 'Allow once' })).toHaveCount(0);
+    await expect.poll(badge).toBe('2');
     expect(shell.consoleErrors()).toEqual([]);
   } finally {
     await shell.cleanup();
@@ -351,17 +353,17 @@ test('the real composer gives way to the card and returns with focus in the edit
 
     // A launched replay reports the fixture's engine session id, so the record keeps its app id but no longer its
     // title (C4 files the transcript under a record of its own again): the rows are found by app id.
-    const row = (id: string) => page.locator(`[role="treeitem"][data-menu="session:${id}"]`);
+    const openRow = async (id: string) => (await sidebarRow(page, { appSessionId: id })).click();
     const main = page.locator('[data-region="main"]');
     const left = main.locator('[data-pane="0"]');
     const right = main.locator('[data-pane="1"]');
     const message = (paneLocator: typeof left) => paneLocator.getByRole('textbox', { name: 'Message' });
-    await row(permissionId).click();
+    await openRow(permissionId);
     await expect(message(left)).toBeVisible();
-    await row(countingId).click();
+    await openRow(countingId);
     await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('pane.split')?.click());
     await expect(right.locator(`[data-composer="${countingId}"]`)).toBeVisible();
-    await row(permissionId).click();
+    await openRow(permissionId);
     await expect(left.locator(`[data-composer="${permissionId}"]`)).toBeVisible();
 
     // the right pane's session is busy with a slow turn

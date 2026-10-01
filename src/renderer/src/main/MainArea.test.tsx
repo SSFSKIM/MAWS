@@ -28,7 +28,12 @@ const strips = () => within(main()).getAllByRole('tablist');
 const tabNames = (strip = strips()[0]) => within(strip).getAllByRole('tab').map((t) => t.getAttribute('aria-label'));
 const tab = (name: string) => within(main()).getByRole('tab', { name });
 const selected = (strip = strips()[0]) => within(strip).getAllByRole('tab').find((t) => t.getAttribute('aria-selected') === 'true')?.getAttribute('aria-label');
-const sidebarRow = (title: string) => within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).getByRole('treeitem', { name: title });
+// A session's row, on its project's page (W5: the sidebar drills into one project at a time).
+const sidebarRow = (title: string) => {
+  const projectId = nine.sessions.find((r) => r.title.text === title)!.projectId ?? 'other';
+  act(() => useLayout.getState().setSidebar({ openProject: projectId as ProjectId }));
+  return within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).getByRole('treeitem', { name: title });
+};
 
 // A DataTransfer as a drag carries it; happy-dom's own cannot be filled from a test.
 function transfer() {

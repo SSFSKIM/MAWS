@@ -1,29 +1,32 @@
-// The sidebar (§5.1; mockup 01, light-first; C5 execution document, M3): search; Needs you with its hover cards;
-// Pinned; the project tree with roll-ups, "+" and disclosure; Other sessions; the footer. Everything reads the stores
-// through `derive.ts`; expansion and sort persist in the `regions` layout key, the search and "Show more" do not. One
-// context menu serves every row, and the three trees share one roving tab stop (`tree.ts`).
-import { ContextMenu, DropdownMenu } from 'radix-ui';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import { FolderIcon, GearIcon, IconButton, PlusIcon, SortIcon } from '../app/IconButton';
+// The sidebar (§5.1 as amended 2026-10-01, W5; C5 execution document, M3): a two-level drill-in under one search field.
+// Level one is the project list, most recently active first, with Other sessions at the end; a click on a project slides
+// its page in from the right (a short transform, none under reduced motion), and "‹ Projects" slides back. The open
+// project persists in the `regions` layout key (`openProject`), so a relaunch opens where the person left; the search
+// does not persist. The search filters the level on screen: projects (by name, or holding a matching session) on the
+// list, the open project's sessions on its page. Cross-project attention is the Overview's, the notifier's, the dock
+// badge's and ⌘⇧J's, which read the attention table directly. One context menu serves every row, and each level is one
+// roving tab stop (`tree.ts`).
+import { ContextMenu } from 'radix-ui';
+import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
+import type { WorktreeInfo } from '@shared/sessions/worktree';
+import { FolderIcon, GearIcon, IconButton, PlusIcon } from '../app/IconButton';
 import { useChordHint } from '../app/IconButton'; // C11
+import { ipc } from '../ipc/client';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { selectProjectOrder, useSessions } from '../stores/sessions';
-import type { SidebarSort } from '../overview/derive';
-import { PROJECT_PAGE, sidebarModel, type SidebarModel } from './derive';
+import { filterProjectList, hasWorktreeSessions, projectList, projectPage, sessionMatcher, type ProjectKey } from './derive';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
-import { NeedsYou } from './NeedsYou';
-import { ProjectGroup } from './ProjectGroup';
+import { ProjectPage } from './ProjectPage';
+import { ProjectRow } from './ProjectRow';
 import { registerProjectRevealer } from './reveal';
 import { runAddProject, useAddProjectEnabled } from './project-actions';
 import { Search } from './Search';
 import { SectionHeading } from './SectionHeading';
-import { SessionRow } from './SessionRow';
-import { moreNodeId, projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
+import { projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
 
 export function Sidebar() {
   const sessionsLoaded = useSessions((s) => s.loaded);
@@ -37,23 +40,22 @@ export function Sidebar() {
   );
 }
 
-type Section = 'pinned' | 'other';
-
-// The tree items on screen, in order: what the arrow keys walk.
-function visibleNodes(model: SidebarModel, open: { pinned: boolean; other: boolean; project(id: ProjectId): boolean; all(id: ProjectId): boolean }): TreeNode[] {
-  const session = (appSessionId: AppSessionId, parent: string | null): TreeNode => ({ id: sessionNodeId(appSessionId), kind: 'session', appSessionId, parent });
-  const nodes: TreeNode[] = open.pinned ? model.pinned.map((r) => session(r.appId, null)) : [];
-  for (const { project, sessions } of model.projects) {
-    const id = projectNodeId(project.id);
-    const expanded = open.project(project.id);
-    nodes.push({ id, kind: 'project', projectId: project.id, expanded });
-    if (!expanded) continue;
-    const shown = open.all(project.id) ? sessions : sessions.slice(0, PROJECT_PAGE);
-    nodes.push(...shown.map((r) => session(r.appId, id)));
-    if (shown.length < sessions.length) nodes.push({ id: moreNodeId(project.id), kind: 'more', projectId: project.id, parent: id });
-  }
-  if (open.other) nodes.push(...model.other.map((r) => session(r.appId, null)));
-  return nodes;
+// The checkouts of a project's repository in git's order (Main first), read when its page shows a worktree session and
+// read again when a worktree the page has not seen appears; null until the answer arrives or when it fails.
+function useWorktrees(directory: string | null, paths: string): readonly WorktreeInfo[] | null {
+  const [answer, setAnswer] = useState<{ directory: string; worktrees: WorktreeInfo[] } | null>(null);
+  useEffect(() => {
+    if (directory === null) return;
+    let live = true;
+    void ipc.invoke('git.worktree.list', { repoRoot: directory }).then(
+      (result) => live && setAnswer(result.ok ? { directory, worktrees: result.value.worktrees } : null),
+      () => live && setAnswer(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [directory, paths]);
+  return answer?.directory === directory ? answer.worktrees : null;
 }
 
 function SidebarBody() {
@@ -69,65 +71,99 @@ function SidebarBody() {
   });
 
   const [query, setQuery] = useState('');
-  const [showAll, setShowAll] = useState<ReadonlySet<ProjectId>>(new Set());
   const [focused, setFocused] = useState<string | null>(null);
-  const pendingFocus = useRef<string | null>(null); // a tree item to focus once a render shows it
+  // The page that slides out after "‹ Projects" stays rendered until its transform ends.
+  const [leaving, setLeaving] = useState<ProjectKey | null>(null);
+  const pendingFocus = useRef<string | 'page' | null>(null); // what takes focus once a render shows it
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
-  const scroller = useRef<HTMLDivElement>(null);
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const container = useRef<HTMLDivElement>(null);
+  const backRef = useRef<HTMLButtonElement>(null);
 
-  const model = useMemo(
-    () => sidebarModel({ records, digests, projects, rows, sort: sidebar.sort, query }),
-    [records, digests, projects, rows, sidebar.sort, query],
+  const byId = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
+  const everyEntry = useMemo(() => projectList({ records, digests, projects, rows }), [records, digests, projects, rows]);
+  const entries = useMemo(() => filterProjectList(everyEntry, query, byId), [everyEntry, query, byId]);
+  const searching = query.trim() !== '';
+
+  // The open project, when the list still holds it (a removed project, or Other sessions emptied, shows the list).
+  const openEntry = sidebar.openProject === null ? null : (everyEntry.find((e) => e.key === sidebar.openProject) ?? null);
+  const shownEntry = openEntry ?? (leaving === null ? null : (everyEntry.find((e) => e.key === leaving) ?? null));
+  const shownSessions = shownEntry?.sessions;
+  const worktreePaths = useMemo(
+    () => [...new Set((shownSessions ?? []).flatMap((r) => (r.worktree ? [r.worktree.path] : [])))].sort().join('\n'),
+    [shownSessions],
   );
-  // A search shows its matches whatever is collapsed, without changing what is.
-  const open = {
-    pinned: model.searching || !sidebar.collapsedSections.includes('pinned'),
-    other: model.searching || !sidebar.collapsedSections.includes('other'),
-    project: (id: ProjectId) => model.searching || !sidebar.collapsedProjects.includes(id),
-    all: (id: ProjectId) => showAll.has(id),
-  };
-  const nodes = visibleNodes(model, open);
-  const tabStop = nodes.some((n) => n.id === focused) ? focused : (nodes[0]?.id ?? null);
+  const worktreeDirectory = shownEntry?.project && shownSessions && hasWorktreeSessions(shownSessions) ? shownEntry.project.directory : null;
+  const worktrees = useWorktrees(worktreeDirectory, worktreePaths);
+  const page = useMemo(
+    () =>
+      shownSessions === undefined
+        ? null
+        : projectPage({ sessions: shownSessions, digests, rows, sort: sidebar.sort, matches: sessionMatcher(query, byId), worktrees }),
+    [shownSessions, digests, rows, sidebar.sort, query, byId, worktrees],
+  );
 
-  const itemElement = (id: string) => scroller.current?.querySelector<HTMLElement>(`[data-tree-id="${id}"]`) ?? null;
+  const projectNodes: TreeNode[] = entries.map((e) => ({ id: projectNodeId(e.key), kind: 'project' as const, key: e.key }));
+  const sessionNodes: TreeNode[] = page
+    ? [...page.pinned, ...page.groups.flatMap((g) => g.sessions)].map((r) => ({ id: sessionNodeId(r.appId), kind: 'session' as const, appSessionId: r.appId }))
+    : [];
+  const nodes = openEntry ? sessionNodes : projectNodes;
+  const selectedNode = selected === null ? null : sessionNodeId(selected);
+  const tabStop = nodes.some((n) => n.id === focused) ? focused : nodes.some((n) => n.id === selectedNode) ? selectedNode : (nodes[0]?.id ?? null);
+
+  const itemElement = (id: string) => container.current?.querySelector<HTMLElement>(`[data-tree-id="${CSS.escape(id)}"]`) ?? null;
   const focusItem = (id: string) => {
     const element = itemElement(id);
     if (element) element.focus();
     else pendingFocus.current = id;
   };
-  // An item not on screen yet (the first of a revealed page) takes focus after the render that shows it.
+  // What waits for a render takes focus after it: a page just opened on its first row (the selected session's when it is
+  // there) or its back control, a project row after "‹ Projects". `preventScroll`, since the levels sit side by side in
+  // a strip that is moving.
   useEffect(() => {
-    const id = pendingFocus.current;
-    const element = id === null ? null : itemElement(id);
+    const pending = pendingFocus.current;
+    if (pending === null) return;
+    if (pending === 'page') {
+      if (!openEntry) return;
+      pendingFocus.current = null;
+      const stop = tabStop === null ? null : itemElement(tabStop);
+      (stop ?? backRef.current)?.focus({ preventScroll: true });
+      return;
+    }
+    const element = itemElement(pending);
     if (!element) return;
     pendingFocus.current = null;
-    element.focus();
+    element.focus({ preventScroll: true });
   });
-  // A project revealed from outside (`reveal.ts`) may be hidden by the search: the search clears, and the project's
-  // row takes focus after the render that shows it (and that lifts a collapsed sidebar's `inert`).
+
+  const openProject = (key: ProjectKey) => {
+    setLeaving(null);
+    setFocused(null);
+    pendingFocus.current = 'page';
+    useLayout.getState().setSidebar({ openProject: key });
+  };
+  const back = () => {
+    const key = sidebar.openProject;
+    if (key === null) return;
+    setLeaving(key);
+    setFocused(projectNodeId(key));
+    pendingFocus.current = projectNodeId(key);
+    useLayout.getState().setSidebar({ openProject: null });
+  };
+
+  // A project revealed from outside (`reveal.ts`, the ⌘K palette) opens its page; the search clears so the page is
+  // whole, and the page takes focus after the render that shows it (and that lifts a collapsed sidebar's `inert`).
   useEffect(
     () =>
-      registerProjectRevealer((projectId) => {
+      registerProjectRevealer(() => {
         setQuery('');
-        requestAnimationFrame(() => focusItem(projectNodeId(projectId)));
+        setLeaving(null);
+        setFocused(null);
+        pendingFocus.current = 'page';
+        rerender(); // the page may already be open: the focus effect still runs
       }),
-    [], // eslint-disable-line react-hooks/exhaustive-deps -- focusItem reads refs only
+    [],
   );
-
-  const toggleSection = (section: Section) => {
-    const list = sidebar.collapsedSections;
-    useLayout.getState().setSidebar({ collapsedSections: list.includes(section) ? list.filter((s) => s !== section) : [...list, section] });
-  };
-  const toggleProject = (id: ProjectId) => {
-    if (model.searching) return;
-    const list = sidebar.collapsedProjects;
-    useLayout.getState().setSidebar({ collapsedProjects: list.includes(id) ? list.filter((p) => p !== id) : [...list, id] });
-  };
-  const showMore = (id: ProjectId) => {
-    setShowAll(new Set(showAll).add(id));
-    const next = model.projects.find((p) => p.project.id === id)?.sessions[PROJECT_PAGE];
-    if (next) focusItem(sessionNodeId(next.appId));
-  };
 
   const onTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     const id = (event.target as HTMLElement).getAttribute('data-tree-id');
@@ -142,121 +178,91 @@ function SidebarBody() {
       case 'open':
         useLayout.getState().openSession(command.appSessionId);
         break;
-      case 'toggle':
-        toggleProject(command.projectId);
+      case 'drill':
+        openProject(command.key);
         break;
-      case 'more':
-        showMore(command.projectId);
+      case 'back':
+        back();
         break;
     }
   };
 
+  const open = openEntry !== null;
   const tree = { tabStop, selected, onFocusItem: setFocused };
-  const treeProps = { onKeyDown: onTreeKeyDown, className: 'flex flex-col' };
+  const listEmpty = everyEntry.length === 0;
 
   return (
     <TreeContext.Provider value={tree}>
+      <div className="px-2.5 pt-2.5">
+        <Search
+          value={query}
+          onChange={setQuery}
+          label={open ? `Search ${openEntry.name}` : 'Search projects and sessions'}
+          onLeave={() => (tabStop ? focusItem(tabStop) : open && backRef.current?.focus())}
+        />
+      </div>
       <ContextMenu.Root modal={false} onOpenChange={(isOpen) => !isOpen && setMenuTarget(null)}>
         <ContextMenu.Trigger asChild>
           <div
-            ref={scroller}
+            ref={container}
             onContextMenu={(event) => {
               const target = menuTargetOf(event.target as Element);
               if (target) setMenuTarget(target);
               else event.preventDefault(); // no row, no menu
             }}
-            className="min-h-0 flex-1 overflow-y-auto px-2.5 py-2.5 [scrollbar-width:thin]"
+            className="relative min-h-0 flex-1 overflow-clip"
           >
-            <Search value={query} onChange={setQuery} onLeave={() => tabStop && focusItem(tabStop)} />
-            <NeedsYou rows={model.needsYou} />
-
-            {model.hasPinned && (
-              <>
-                <SectionHeading title="Pinned" collapse={{ expanded: open.pinned, onToggle: () => toggleSection('pinned'), controls: 'sidebar-pinned' }} />
-                {open.pinned && (
-                  <div role="tree" id="sidebar-pinned" aria-label="Pinned" {...treeProps}>
-                    {model.pinned.map((r) => (
-                      <SessionRow key={r.appId} record={r} level={1} />
+            <div
+              data-testid="sidebar-levels"
+              data-level={open ? 2 : 1}
+              data-open-project={openEntry?.key}
+              onTransitionEnd={(event) => event.target === event.currentTarget && !open && setLeaving(null)}
+              className="flex h-full w-[200%] transition-transform duration-200 ease-out motion-reduce:transition-none"
+              style={{ transform: open ? 'translateX(-50%)' : 'translateX(0)' }}
+            >
+              <div
+                data-level-pane={1}
+                inert={open}
+                aria-hidden={open || undefined}
+                className="h-full w-1/2 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
+              >
+                <SectionHeading title="Projects">{projects.length > 0 && <AddProjectButton />}</SectionHeading>
+                {listEmpty ? (
+                  <EmptyProjects />
+                ) : entries.length === 0 ? (
+                  <p className="m-0 px-[9px] py-1.5 text-ui-sm text-fg-faint">No projects match</p>
+                ) : (
+                  <div role="tree" aria-label="Projects" onKeyDown={onTreeKeyDown} className="flex flex-col">
+                    {entries.map((entry) => (
+                      <ProjectRow key={entry.key} entry={entry} onOpen={openProject} />
                     ))}
                   </div>
                 )}
-              </>
-            )}
-
-            <SectionHeading title="Projects">
-              <SortMenu sort={sidebar.sort} />
-              {projects.length > 0 && <AddProjectButton />}
-            </SectionHeading>
-            {projects.length === 0 ? (
-              <EmptyProjects />
-            ) : (
-              <div role="tree" aria-label="Projects" {...treeProps}>
-                {model.projects.map((section) => (
-                  <ProjectGroup
-                    key={section.project.id}
-                    section={section}
-                    expanded={open.project(section.project.id)}
-                    showAll={open.all(section.project.id)}
-                    onToggle={toggleProject}
-                    onShowMore={showMore}
-                  />
-                ))}
               </div>
-            )}
-
-            {model.hasOther && (
-              <>
-                <SectionHeading title="Other sessions" collapse={{ expanded: open.other, onToggle: () => toggleSection('other'), controls: 'sidebar-other' }} />
-                {open.other && (
-                  <div role="tree" id="sidebar-other" aria-label="Other sessions" {...treeProps}>
-                    {model.other.map((r) => (
-                      <SessionRow key={r.appId} record={r} level={1} />
-                    ))}
-                  </div>
+              <div
+                data-level-pane={2}
+                inert={!open}
+                aria-hidden={!open || undefined}
+                className="h-full w-1/2 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
+              >
+                {shownEntry && page && (
+                  <ProjectPage
+                    entry={shownEntry}
+                    page={page}
+                    sort={sidebar.sort}
+                    searching={searching}
+                    backRef={backRef}
+                    onBack={back}
+                    onTreeKeyDown={onTreeKeyDown}
+                  />
                 )}
-              </>
-            )}
+              </div>
+            </div>
           </div>
         </ContextMenu.Trigger>
         <SidebarMenuContent target={menuTarget} />
       </ContextMenu.Root>
     </TreeContext.Provider>
-  );
-}
-
-const SORTS: { value: SidebarSort; label: string }[] = [
-  { value: 'priority', label: 'Priority' },
-  { value: 'recency', label: 'Recency' },
-];
-
-function SortMenu({ sort }: { sort: SidebarSort }) {
-  return (
-    <DropdownMenu.Root modal={false}>
-      <DropdownMenu.Trigger asChild>
-        <IconButton label="Sort sessions" className="size-[22px]">
-          <SortIcon className="size-[13px]" />
-        </IconButton>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-36 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-          <DropdownMenu.Label className="px-2 py-1 text-ui-sm text-fg-muted">Sort sessions by</DropdownMenu.Label>
-          <DropdownMenu.RadioGroup value={sort} onValueChange={(value) => useLayout.getState().setSidebar({ sort: value as SidebarSort })}>
-            {SORTS.map(({ value, label }) => (
-              <DropdownMenu.RadioItem
-                key={value}
-                value={value}
-                className="flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover"
-              >
-                <span className="w-3 text-accent">
-                  <DropdownMenu.ItemIndicator>●</DropdownMenu.ItemIndicator>
-                </span>
-                {label}
-              </DropdownMenu.RadioItem>
-            ))}
-          </DropdownMenu.RadioGroup>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
   );
 }
 
@@ -291,20 +297,15 @@ function EmptyProjects() {
   );
 }
 
-// Until both snapshots have loaded: three placeholder rows under each section's heading.
+// Until both snapshots have loaded: the search field and a few placeholder project rows.
 function SidebarSkeleton() {
   return (
     <div className="min-h-0 flex-1 overflow-hidden px-2.5 py-2.5">
       <div className="mx-0.5 mb-3.5 h-8 rounded-sm border border-border" />
-      {['Needs you', 'Projects', 'Other sessions'].map((title) => (
-        <div key={title}>
-          <SectionHeading title={title} tone={title === 'Needs you' ? 'warning' : 'muted'} />
-          {[0, 1, 2].map((i) => (
-            <div key={i} data-testid="skeleton-row" aria-hidden className="flex h-[47px] flex-col justify-center gap-2 px-[9px]">
-              <div className="h-2.5 w-3/5 animate-pulse rounded-sm bg-bg-active motion-reduce:animate-none" />
-              <div className="h-2 w-4/5 animate-pulse rounded-sm bg-bg-hover motion-reduce:animate-none" />
-            </div>
-          ))}
+      <SectionHeading title="Projects" />
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <div key={i} data-testid="skeleton-row" aria-hidden className="flex h-(--row-h) items-center px-[9px]">
+          <div className="h-2.5 w-3/5 animate-pulse rounded-sm bg-bg-active motion-reduce:animate-none" />
         </div>
       ))}
     </div>

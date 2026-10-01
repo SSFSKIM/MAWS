@@ -11,7 +11,8 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { useAttention } from '../stores/attention';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { RequestPreview } from './RequestPreview';
-import { Sidebar } from './Sidebar';
+import { waitingItem } from '../attention/derive';
+import { HoverCard } from './HoverCard';
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
@@ -28,7 +29,21 @@ function withMain(outcome: 'delivered' | 'not_pending' = 'delivered') {
   window.maws = fake.client;
 }
 
-const needsRow = (title: string) => within(screen.getByRole('list', { name: 'Needs you' })).getByRole('button', { name: new RegExp(title) });
+// The card on a trigger of its own: the Needs-you rows it sat on are gone (W5), and W5's item 2 puts it on every session row.
+function Rows() {
+  return ['Fix sidebar drag', 'Charter + research'].map((title) => <Row key={title} title={title} />);
+}
+function Row({ title }: { title: string }) {
+  const items = useAttention((s) => s.bySession.get(idOf(title)) ?? []);
+  const waiting = waitingItem(items);
+  if (!waiting) return null;
+  return (
+    <HoverCard item={waiting.oldest} title={title}>
+      <button type="button">{title}</button>
+    </HoverCard>
+  );
+}
+const needsRow = (title: string) => screen.getByRole('button', { name: title });
 
 beforeEach(() => {
   resetShellStores();
@@ -44,7 +59,7 @@ describe('hover card approves read-only only', () => {
   it('previews the Bash request with its command and cwd, offers Open session and no Approve', async () => {
     withMain();
     const user = userEvent.setup();
-    render(<Sidebar />);
+    render(<Rows />);
     await user.hover(needsRow('Fix sidebar drag'));
     const card = await screen.findByRole('dialog', { name: 'Fix sidebar drag' });
     expect(await within(card).findByText('git log --oneline')).toBeTruthy();
@@ -59,8 +74,8 @@ describe('hover card approves read-only only', () => {
   it('offers Approve and Deny for the read-only request, and Approve answers allow once', async () => {
     withMain();
     const user = userEvent.setup();
-    render(<Sidebar />);
-    await user.hover(needsRow('Charter \\+ research'));
+    render(<Rows />);
+    await user.hover(needsRow('Charter + research'));
     const card = await screen.findByRole('dialog', { name: 'Charter + research' });
     const approve = await within(card).findByRole('button', { name: 'Approve' });
     expect(within(card).getByRole('button', { name: 'Deny' })).toBeTruthy();
@@ -73,8 +88,8 @@ describe('hover card approves read-only only', () => {
   it('Enter or Space on a focused Approve or Deny answers nothing; only a pointer click does', async () => {
     withMain();
     const user = userEvent.setup();
-    render(<Sidebar />);
-    await user.hover(needsRow('Charter \\+ research'));
+    render(<Rows />);
+    await user.hover(needsRow('Charter + research'));
     const card = await screen.findByRole('dialog', { name: 'Charter + research' });
     const approve = await within(card).findByRole('button', { name: 'Approve' });
     const deny = within(card).getByRole('button', { name: 'Deny' });
@@ -101,8 +116,8 @@ describe('hover card approves read-only only', () => {
   it('Enter on the focused row answers nothing', async () => {
     withMain();
     const user = userEvent.setup();
-    render(<Sidebar />);
-    needsRow('Charter \\+ research').focus();
+    render(<Rows />);
+    needsRow('Charter + research').focus();
     await screen.findByRole('dialog', { name: 'Charter + research' });
     await user.keyboard('{Enter}');
     expect(fake.invoked('session.answer')).toEqual([]);
@@ -111,8 +126,8 @@ describe('hover card approves read-only only', () => {
   it('shows "Not delivered" when the answer comes back other than delivered', async () => {
     withMain('not_pending');
     const user = userEvent.setup();
-    render(<Sidebar />);
-    await user.hover(needsRow('Charter \\+ research'));
+    render(<Rows />);
+    await user.hover(needsRow('Charter + research'));
     const card = await screen.findByRole('dialog', { name: 'Charter + research' });
     await user.click(await within(card).findByRole('button', { name: 'Approve' }));
     expect(await within(card).findByText('Not delivered')).toBeTruthy();

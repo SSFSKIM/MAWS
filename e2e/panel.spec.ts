@@ -12,6 +12,7 @@ import type { PanelChildMetrics, PanelHarnessApi, PanelHarnessTab } from '../src
 import { PANEL_CHILD_TAIL } from '../test/support/panel-child-tail';
 import { withNativeClipboard } from './support/clipboard';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
+import { sidebarRow } from './support/sidebar';
 import { CHARTER, otherThemeColours, panelScenario, scratchRepository, SIDEBAR_DRAG } from './support/panel-support';
 
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
@@ -44,7 +45,7 @@ const panelA = (page: Page) =>
 test('a restored Terminal tab reattaches to its running shell after a renderer reload', async ({ maws }) => {
   const { page } = maws;
   const panel = page.locator('[data-region="panel"]');
-  await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: 'Harness A' }).click();
+  await (await sidebarRow(page, 'Harness A')).click();
   await panel.getByRole('button', { name: 'Add a tool' }).click();
   await page.getByRole('menuitem', { name: 'Terminal' }).click();
 
@@ -951,17 +952,16 @@ test.describe('the product host over a scenario derived from C5’s records', ()
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
       const summary = panel.getByRole('tabpanel', { name: 'Session overview' });
-      const sidebar = page.locator('[data-region="sidebar"]');
       const title = summary.getByRole('heading', { level: 2 });
 
-      await sidebar.getByRole('treeitem', { name: CHARTER }).click();
+      await (await sidebarRow(page, CHARTER)).click();
       await expect(title).toContainText(CHARTER);
       await expect(summary.getByRole('region', { name: 'Environment' })).toContainText('⎇ main');
       await expect(summary.getByRole('region', { name: 'Push state' })).toContainText('1 ahead of origin/main');
       await expect(summary.getByRole('region', { name: 'Subagents' })).toContainText('2 working · 1 done'); // the fixture's digest
 
       // Fix sidebar drag in a split, focused: the summary follows; its probe directory does not exist on this machine.
-      await sidebar.getByRole('treeitem', { name: SIDEBAR_DRAG }).click();
+      await (await sidebarRow(page, SIDEBAR_DRAG)).click();
       await menu(app, 'pane.split');
       await expect(page.getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab', { name: tabNamed(SIDEBAR_DRAG) })).toBeVisible();
       await expect(title).toContainText(SIDEBAR_DRAG);
@@ -986,7 +986,7 @@ test.describe('the product host over a scenario derived from C5’s records', ()
   test('unregistered tools are named', async () => {
     await withScenario(async (maws, panel) => {
       const { page } = maws;
-      await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: CHARTER }).click();
+      await (await sidebarRow(page, CHARTER)).click();
       const summary = panel.getByRole('tabpanel', { name: 'Session overview' });
       const environment = summary.getByRole('region', { name: 'Environment' });
       await expect(environment).toContainText('⎇ main');

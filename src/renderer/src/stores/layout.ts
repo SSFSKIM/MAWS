@@ -10,9 +10,9 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import {
   LAYOUT_DEFAULTS,
   LayoutMainSchema,
-  LayoutRegionsSchema,
   PanelPinnedSchema,
   PanelSessionStateSchema,
+  StoredRegionsSchema,
   type LayoutKey,
   type LayoutMain,
   type LayoutRegions,
@@ -35,7 +35,6 @@ export interface LayoutState {
   panelActiveNoSession: string | null;
   hydrated: boolean;
   dragging: { tabId: string; fromPane: Pane } | null;
-  focusedCardAppId: AppSessionId | null;
   // The item a notification click (`attention.navigate`) asked to be shown, for C6's transcript to jump to and clear.
   focusRequest: { appSessionId: AppSessionId; attentionId: AttentionId } | null;
   // `settle` runs once the reads are in, before `known` is first asked and the early changes are captured (debt wave 5:
@@ -70,7 +69,6 @@ export interface LayoutState {
   panelTabsOf(appSessionId: AppSessionId): PanelTabRef[];
   updatePanelTabs(appSessionId: AppSessionId, fn: (refs: PanelTabRef[]) => PanelTabRef[], opts?: { activeTabId?: string }): void;
   setDragging(dragging: LayoutState['dragging']): void;
-  focusCard(appSessionId: AppSessionId | null): void;
   requestFocus(request: LayoutState['focusRequest']): void;
 }
 
@@ -119,7 +117,6 @@ export function createLayoutStore() {
       panelActiveNoSession: null,
       hydrated: false,
       dragging: null,
-      focusedCardAppId: null,
       focusRequest: null,
 
       async hydrate(client, known, settle) {
@@ -146,7 +143,7 @@ export function createLayoutStore() {
             })
           : [];
         const [regions, persistedMain, panelPinned, ...panels] = await Promise.all([
-          read('regions', LayoutRegionsSchema, LAYOUT_DEFAULTS.regions),
+          read('regions', StoredRegionsSchema, LAYOUT_DEFAULTS.regions), // W5: a version-1 value is migrated
           read('main.tabs', LayoutMainSchema, LAYOUT_DEFAULTS.main),
           read('panel.pinned', PanelPinnedSchema, LAYOUT_DEFAULTS.panelPinned),
           ...panelIds.map((id) => read(`panel.${id}`, PanelSessionStateSchema.nullable(), null)),
@@ -249,7 +246,6 @@ export function createLayoutStore() {
         get().setPanelTabs(appSessionId, { tabs: after, activeTabId: pinSelection(before, after, current, opts?.activeTabId ?? current) });
       },
       setDragging: (dragging) => set({ dragging }),
-      focusCard: (appSessionId) => set({ focusedCardAppId: appSessionId }),
       requestFocus: (focusRequest) => set({ focusRequest }),
     };
   });

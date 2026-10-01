@@ -1,8 +1,9 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import type { WorktreeInfo } from '@shared/sessions/worktree';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerSessionAction } from '../app/session-actions';
 import { registerSessionCreator } from '../keymap/actions-runtime';
@@ -18,14 +19,17 @@ const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
 const offs: (() => void)[] = [];
 
-const tree = (name: string) => screen.getByRole('tree', { name });
+const projectsTree = () => screen.getByRole('tree', { name: 'Projects' });
+const pageTree = (name: string) => screen.getByRole('tree', { name });
 const row = (title: string) => screen.getByRole('treeitem', { name: title });
-const rowTitles = (el: HTMLElement, level: number) =>
+const projectRows = () => within(projectsTree()).getAllByRole('treeitem').map((t) => t.getAttribute('aria-label'));
+const sessionRows = (el: HTMLElement) =>
   within(el)
     .queryAllByRole('treeitem')
-    .filter((t) => t.getAttribute('aria-level') === String(level))
+    .filter((t) => t.dataset.kind === 'session')
     .map((t) => t.getAttribute('aria-label'));
-const needsYouTitles = () => within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('listitem').map((li) => li.dataset.title);
+const level = () => screen.getByTestId('sidebar-levels').dataset.level;
+const openPage = (projectId: string) => act(() => useLayout.getState().setSidebar({ openProject: projectId as ProjectId }));
 
 beforeEach(() => resetShellStores());
 afterEach(() => {
@@ -34,52 +38,108 @@ afterEach(() => {
   delete (window as { maws?: MawsBridge }).maws;
 });
 
-describe('sidebar renders eleven sessions', () => {
+describe('the project list', () => {
   beforeEach(() => fillStores(nine));
 
-  it('in the order Needs you, Pinned, Projects, Other sessions', () => {
+  it('lists the projects most recently active first, then Other sessions, with no Needs-you or Pinned section', () => {
     render(<Sidebar />);
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Needs you · 3', 'Pinned', 'Projects', 'Other sessions']);
-    const sessions = screen.getAllByRole('treeitem').filter((t) => t.dataset.kind === 'session');
-    expect(sessions).toHaveLength(11);
+    expect(level()).toBe('1');
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Projects']);
+    expect(screen.queryByRole('list', { name: 'Needs you' })).toBeNull();
+    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'MAWS', 'Other sessions']);
+    expect(within(projectsTree()).queryAllByRole('treeitem').filter((t) => t.dataset.kind === 'session')).toHaveLength(0);
   });
 
-  it('lists the three Needs-you rows longest wait first', () => {
+  it('carries each project’s waiting (◐) and working (●) counts', () => {
     render(<Sidebar />);
-    expect(needsYouTitles()).toEqual(['Fix sidebar drag', 'Sidebar interaction pass', 'Quota reset recovery']);
-    const first = within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('listitem')[0];
-    expect(within(first).getByText('MAWS ·')).toBeTruthy();
-    expect(within(first).getByRole('img', { name: 'Needs approval' }).textContent).toBe('◐');
+    expect(within(row('MAWS')).getByLabelText('2 waiting').textContent).toBe('◐2');
+    expect(within(row('MAWS')).getByLabelText('1 working').textContent).toBe('●1');
+    expect(within(row('codex_somersault')).getByLabelText('1 waiting').textContent).toBe('◐1');
+    expect(within(row('codex_somersault')).queryByLabelText(/working/)).toBeNull();
+    expect(within(row('claude-usage-menubar')).getByLabelText('1 working')).toBeTruthy();
+    expect(within(row('Other sessions')).queryByLabelText(/waiting|working/)).toBeNull();
   });
 
-  it('puts the projects in order with the pinned session under Pinned only', () => {
+  it('a click opens the project’s page, persisted; "‹ Projects" goes back', async () => {
+    const user = userEvent.setup();
     render(<Sidebar />);
-    expect(rowTitles(tree('Pinned'), 1)).toEqual(['Workstation north star']);
-    expect(rowTitles(tree('Projects'), 1)).toEqual(['MAWS', 'codex_somersault', 'claude-usage-menubar']);
-    const maws = within(tree('Projects')).getByRole('group', { name: 'MAWS' });
-    expect(rowTitles(maws, 2)).toEqual(['Fix sidebar drag', 'Sidebar interaction pass', 'Charter + research']);
-    expect(rowTitles(tree('Other sessions'), 1)).toEqual(['Terminal workflow notes']);
+    await user.click(row('MAWS'));
+    expect(useLayout.getState().regions.sidebar.openProject).toBe('proj-maws');
+    expect(level()).toBe('2');
+    expect(screen.getByRole('heading', { level: 2, name: 'MAWS' })).toBeTruthy();
+    expect(sessionRows(pageTree('MAWS'))).toEqual(['Workstation north star', 'Fix sidebar drag', 'Sidebar interaction pass', 'Charter + research']);
+    await user.click(screen.getByRole('button', { name: 'Back to projects' }));
+    expect(useLayout.getState().regions.sidebar.openProject).toBeNull();
+    expect(level()).toBe('1');
+    expect(document.activeElement).toBe(row('MAWS'));
   });
 
-  it('shows an unread dot on exactly the unread records', () => {
+  it('the hidden level is inert and out of the accessibility tree', async () => {
     render(<Sidebar />);
-    const dotted = screen.getAllByLabelText('Unread').map((dot) => dot.closest('[role="treeitem"]')!.getAttribute('aria-label'));
-    expect(dotted.sort()).toEqual(['Fix sidebar drag', 'Quota reset recovery', 'Terminal workflow notes']);
-    expect(within(row('Settings idle probe')).getByRole('img', { name: 'Idle' }).textContent).toBe('○');
+    const panes = document.querySelectorAll<HTMLElement>('[data-level-pane]');
+    expect([...panes].map((p) => [p.dataset.levelPane, p.inert, p.getAttribute('aria-hidden')])).toEqual([
+      ['1', false, null],
+      ['2', true, 'true'],
+    ]);
+    openPage('proj-maws');
+    expect([...panes].map((p) => [p.dataset.levelPane, p.inert, p.getAttribute('aria-hidden')])).toEqual([
+      ['1', true, 'true'],
+      ['2', false, null],
+    ]);
   });
 
-  it('labels every glyph from the glyph table', () => {
+  it('opens where the layout says, and falls back to the list for a project that is gone', () => {
+    useLayout.getState().setSidebar({ openProject: 'proj-codex-somersault' as ProjectId });
+    const { unmount } = render(<Sidebar />);
+    expect(sessionRows(pageTree('codex_somersault'))).toEqual(['Quota reset recovery', 'Somersault terminal run', 'Trace stream reconnects']);
+    unmount();
+    useLayout.getState().setSidebar({ openProject: 'proj-removed' as ProjectId });
     render(<Sidebar />);
+    expect(level()).toBe('1');
+  });
+
+  it('Other sessions is a page of its own, without a "+"', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    expect(within(row('Other sessions')).queryByRole('button')).toBeNull();
+    await user.click(row('Other sessions'));
+    expect(useLayout.getState().regions.sidebar.openProject).toBe('other');
+    expect(sessionRows(pageTree('Other sessions'))).toEqual(['Terminal workflow notes']);
+    expect(screen.queryByRole('button', { name: /New session in/ })).toBeNull();
+  });
+});
+
+describe('a project’s page', () => {
+  beforeEach(() => fillStores(nine));
+
+  it('pins on top, then the rest in the chosen sort; the sort menu switches to recency', async () => {
+    const user = userEvent.setup();
+    openPage('proj-claude-usage-menubar');
+    render(<Sidebar />);
+    expect(sessionRows(pageTree('claude-usage-menubar'))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
+    await user.click(screen.getByRole('button', { name: 'Sort sessions' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Recency' }));
+    expect(useLayout.getState().regions.sidebar.sort).toBe('recency');
+  });
+
+  it('shows an unread dot on exactly the unread records and labels every glyph from the glyph table', () => {
+    render(<Sidebar />);
+    for (const project of ['proj-maws', 'proj-codex-somersault', 'other']) {
+      openPage(project);
+      for (const dot of screen.queryAllByLabelText('Unread')) expect(['Fix sidebar drag', 'Quota reset recovery', 'Terminal workflow notes']).toContain(dot.closest('[role="treeitem"]')!.getAttribute('aria-label'));
+    }
+    openPage('proj-codex-somersault');
     const label = (title: string) => within(row(title)).getAllByRole('img')[0].getAttribute('aria-label'); // the glyph leads the row
-    expect(label('Charter + research')).toBe('Working');
-    expect(label('Sidebar interaction pass')).toBe('Question');
     expect(label('Quota reset recovery')).toBe('Plan review');
     expect(label('Trace stream reconnects')).toBe('Done');
-    expect(label('Terminal workflow notes')).toBe('Idle, unread');
     expect(label('Somersault terminal run')).toBe('Live in terminal');
+    openPage('proj-maws');
+    expect(label('Charter + research')).toBe('Working');
+    expect(label('Sidebar interaction pass')).toBe('Question');
   });
 
   it('shows the foreign-live holder and offers Open only in its context menu', async () => {
+    openPage('proj-codex-somersault');
     render(<Sidebar />);
     const foreign = row('Somersault terminal run');
     expect(within(foreign).getByText('Terminal · pid 7135')).toBeTruthy();
@@ -88,30 +148,9 @@ describe('sidebar renders eleven sessions', () => {
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open']);
   });
 
-  // Debt wave 4 (C5 row): a worktree session's row carries its branch chip; a background job reads by its short id.
-  it('shows a worktree session’s branch chip and a background job’s short id', () => {
-    const drag = idOf('Fix sidebar drag');
-    const probe = idOf('Somersault terminal run');
-    fillStores({
-      ...nine,
-      sessions: nine.sessions.map((r) =>
-        r.appId === drag
-          ? { ...r, worktree: { path: '/work/maws/.claude/worktrees/accept-one', branch: 'worktree-accept-one' } }
-          : r.appId === probe
-            ? { ...r, holder: { kind: 'background_job' as const, pid: 4242, jobId: 'e6dcd828' } }
-            : r,
-      ),
-    });
-    render(<Sidebar />);
-    const chips = screen.getAllByTestId('session-row-branch');
-    expect(chips.map((chip) => [chip.closest('[role="treeitem"]')!.getAttribute('aria-label'), chip.textContent])).toEqual([
-      ['Fix sidebar drag', '⎇ worktree-accept-one'],
-    ]);
-    expect(within(row('Somersault terminal run')).getByText('bg · e6dcd828')).toBeTruthy();
-  });
-
   it('offers §5.1’s session actions in a session’s context menu, disabled until a handler registers', async () => {
     offs.push(registerSessionAction('open', vi.fn()));
+    openPage('proj-maws');
     render(<Sidebar />);
     fireEvent.contextMenu(row('Charter + research'));
     const menu = await screen.findByRole('menu');
@@ -121,121 +160,11 @@ describe('sidebar renders eleven sessions', () => {
     expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, true, true, true, true]);
   });
 
-  it('gives a collapsed project its roll-up and hides it while expanded', () => {
-    render(<Sidebar />);
-    const maws = row('MAWS');
-    expect(within(maws).queryByLabelText('2 need you')).toBeNull();
-    act(() => useLayout.getState().setSidebar({ collapsedProjects: ['proj-maws' as ProjectId] }));
-    expect(within(row('MAWS')).getByLabelText('2 need you').textContent).toContain('2');
-    expect(within(row('MAWS')).getByLabelText('1 working').textContent).toContain('1');
-    expect(within(tree('Projects')).queryByRole('group', { name: 'MAWS' })).toBeNull();
-  });
-});
-
-describe('sidebar tree keyboard', () => {
-  beforeEach(() => fillStores(nine));
-
-  it('is one tab stop that arrows move through, across sections', async () => {
-    const user = userEvent.setup();
-    render(<Sidebar />);
-    const stops = screen.getAllByRole('treeitem').filter((t) => t.tabIndex === 0);
-    expect(stops.map((t) => t.getAttribute('aria-label'))).toEqual(['Workstation north star']);
-    stops[0].focus();
-    await user.keyboard('{ArrowDown}');
-    expect(document.activeElement).toBe(row('MAWS'));
-    await user.keyboard('{ArrowDown}');
-    expect(document.activeElement).toBe(row('Fix sidebar drag'));
-    await user.keyboard('{ArrowUp}{ArrowUp}');
-    expect(document.activeElement).toBe(row('Workstation north star'));
-    expect(screen.getAllByRole('treeitem').filter((t) => t.tabIndex === 0)).toEqual([row('Workstation north star')]);
-  });
-
-  it('ArrowLeft and ArrowRight collapse and expand a project; Space toggles; ArrowLeft on a session goes to its project', async () => {
-    const user = userEvent.setup();
-    render(<Sidebar />);
-    row('Fix sidebar drag').focus();
-    await user.keyboard('{ArrowLeft}');
-    expect(document.activeElement).toBe(row('MAWS'));
-    await user.keyboard('{ArrowLeft}');
-    expect(useLayout.getState().regions.sidebar.collapsedProjects).toEqual(['proj-maws']);
-    expect(row('MAWS').getAttribute('aria-expanded')).toBe('false');
-    await user.keyboard('{ArrowRight}');
-    expect(useLayout.getState().regions.sidebar.collapsedProjects).toEqual([]);
-    await user.keyboard(' ');
-    expect(useLayout.getState().regions.sidebar.collapsedProjects).toEqual(['proj-maws']);
-  });
-
-  it('Enter on a session opens its tab in the focused pane', async () => {
-    const user = userEvent.setup();
-    render(<Sidebar />);
-    row('Charter + research').focus();
-    await user.keyboard('{Enter}');
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Charter + research') });
-    expect(row('Charter + research').getAttribute('aria-selected')).toBe('true');
-  });
-});
-
-describe('sidebar sections', () => {
-  beforeEach(() => fillStores(nine));
-
-  it('the search filters rows by title, project and directory and keeps the headings; Escape clears it', async () => {
-    const user = userEvent.setup();
-    render(<Sidebar />);
-    await user.type(screen.getByRole('searchbox', { name: 'Search sessions' }), 'quota');
-    expect(needsYouTitles()).toEqual(['Quota reset recovery']);
-    expect(screen.getAllByRole('treeitem').filter((t) => t.dataset.kind === 'session').map((t) => t.getAttribute('aria-label'))).toEqual(['Quota reset recovery']);
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Needs you · 1', 'Pinned', 'Projects', 'Other sessions']);
-    await user.keyboard('{Escape}');
-    expect(screen.getAllByRole('treeitem').filter((t) => t.dataset.kind === 'session')).toHaveLength(11);
-  });
-
-  it('searching shows the matches of a collapsed project without expanding it for good', async () => {
-    const user = userEvent.setup();
-    useLayout.getState().setSidebar({ collapsedProjects: ['proj-codex-somersault' as ProjectId] });
-    render(<Sidebar />);
-    await user.type(screen.getByRole('searchbox', { name: 'Search sessions' }), 'trace');
-    expect(row('Trace stream reconnects')).toBeTruthy();
-    expect(useLayout.getState().regions.sidebar.collapsedProjects).toEqual(['proj-codex-somersault']);
-  });
-
-  it('the sort menu on the Projects heading switches between priority and recency', async () => {
-    const user = userEvent.setup();
-    render(<Sidebar />);
-    await user.click(screen.getByRole('button', { name: 'Sort sessions' }));
-    await user.click(await screen.findByRole('menuitemradio', { name: 'Recency' }));
-    expect(useLayout.getState().regions.sidebar.sort).toBe('recency');
-    const usage = within(tree('Projects')).getByRole('group', { name: 'claude-usage-menubar' });
-    expect(rowTitles(usage, 2)).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
-  });
-
-  it('Pinned and Other sessions collapse, and the state persists in the layout', async () => {
-    const user = userEvent.setup();
-    render(<Sidebar />);
-    await user.click(screen.getByRole('button', { name: 'Pinned' }));
-    expect(useLayout.getState().regions.sidebar.collapsedSections).toEqual(['pinned']);
-    expect(screen.queryByRole('treeitem', { name: 'Workstation north star' })).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Other sessions' }));
-    expect(useLayout.getState().regions.sidebar.collapsedSections).toEqual(['pinned', 'other']);
-    await user.click(screen.getByRole('button', { name: 'Pinned' }));
-    expect(useLayout.getState().regions.sidebar.collapsedSections).toEqual(['other']);
-  });
-
-  it('a Needs-you row opens the Overview with its card focused; a double-click opens the session', async () => {
-    const user = userEvent.setup();
-    useLayout.getState().openSession(idOf('Charter + research'));
-    render(<Sidebar />);
-    const fix = within(screen.getByRole('list', { name: 'Needs you' })).getByRole('button', { name: /Fix sidebar drag/ });
-    await user.click(fix);
-    expect(activeTab(useLayout.getState().main)?.kind).toBe('overview');
-    expect(useLayout.getState().focusedCardAppId).toBe(idOf('Fix sidebar drag'));
-    await user.dblClick(fix);
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Fix sidebar drag') });
-  });
-
   it('a session row’s hover actions pin, and archive stays disabled until C10', async () => {
     const user = userEvent.setup();
     const pin = vi.fn();
     offs.push(registerSessionAction('pin', pin));
+    openPage('proj-maws');
     render(<Sidebar />);
     const charter = row('Charter + research');
     await user.click(within(charter).getByRole('button', { name: 'Pin Charter + research' }));
@@ -247,13 +176,14 @@ describe('sidebar sections', () => {
   });
 
   it('a session row carries its id for a drag to a tab strip', () => {
+    openPage('proj-maws');
     render(<Sidebar />);
     const setData = vi.fn();
     fireEvent.dragStart(row('Charter + research'), { dataTransfer: { setData, effectAllowed: 'none' } });
     expect(setData).toHaveBeenCalledWith('application/x-maws-session', idOf('Charter + research'));
   });
 
-  it('"Mark all read" marks the project’s unread sessions read through session.update', async () => {
+  it('"Mark all read" on a project row marks the project’s unread sessions read through session.update', async () => {
     const fake = fakeClient({ 'session.update': ({ appSessionId }: { appSessionId: AppSessionId }) => useSessions.getState().records.get(appSessionId) });
     window.maws = fake.client;
     render(<Sidebar />);
@@ -264,6 +194,126 @@ describe('sidebar sections', () => {
     expect(fake.invoked('session.update')).toEqual([
       { appSessionId: idOf('Fix sidebar drag'), patch: { unread: false, lastSeen: { messageUuid: null, at: expect.any(String) } } },
     ]);
+  });
+
+  it('the search filters the list by project and by the sessions it holds, then the open page by session; Escape clears it', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await user.type(screen.getByRole('searchbox', { name: 'Search projects and sessions' }), 'sidebar');
+    expect(projectRows()).toEqual(['MAWS']);
+    await user.click(row('MAWS'));
+    expect(sessionRows(pageTree('MAWS'))).toEqual(['Fix sidebar drag', 'Sidebar interaction pass']);
+    const field = screen.getByRole('searchbox', { name: 'Search MAWS' });
+    await user.click(field);
+    await user.keyboard('{Escape}');
+    expect(sessionRows(pageTree('MAWS'))).toHaveLength(4);
+    await user.type(field, 'nothing like it');
+    expect(screen.getByText('No sessions match')).toBeTruthy();
+  });
+
+  it('groups a project’s sessions Main first, then each worktree in git’s order, each with its branch and a "+"', async () => {
+    const maws = (title: string) => idOf(title);
+    const worktree = (path: string, branch: string | null) => ({ worktree: { path, branch } });
+    fillStores({
+      ...nine,
+      sessions: nine.sessions.map((r) =>
+        r.appId === maws('Fix sidebar drag')
+          ? { ...r, ...worktree('/Users/new/Developer/GitHub/MAWS/.claude/worktrees/accept-one', 'worktree-accept-one') }
+          : r.appId === maws('Charter + research')
+            ? { ...r, ...worktree('/Users/new/Developer/GitHub/MAWS-sibling', null), branch: 'feature/sibling' }
+            : r,
+      ),
+    });
+    const info = (path: string, branch: string, isMain = false): WorktreeInfo => ({
+      repoRoot: '/Users/new/Developer/GitHub/MAWS', path, branch, head: 'abc', isMain, locked: false, prunable: false, managed: path.includes('/.claude/'),
+    });
+    const fake = fakeClient({
+      'git.worktree.list': {
+        repoRoot: '/Users/new/Developer/GitHub/MAWS',
+        commonDir: '/Users/new/Developer/GitHub/MAWS/.git',
+        worktrees: [
+          info('/Users/new/Developer/GitHub/MAWS', 'master', true),
+          info('/Users/new/Developer/GitHub/MAWS-sibling', 'feature/sibling'),
+          info('/Users/new/Developer/GitHub/MAWS/.claude/worktrees/accept-one', 'worktree-accept-one'),
+        ],
+      },
+    });
+    window.maws = fake.client;
+    const creator = vi.fn(async () => 'app-new-wt' as AppSessionId);
+    offs.push(registerSessionCreator(creator));
+    openPage('proj-maws');
+    render(<Sidebar />);
+    await waitFor(() =>
+      expect(within(pageTree('MAWS')).getAllByRole('group').map((g) => g.getAttribute('aria-label'))).toEqual([
+        'Main · master',
+        'MAWS-sibling · feature/sibling',
+        'accept-one · worktree-accept-one',
+      ]),
+    );
+    expect(fake.invoked('git.worktree.list')).toEqual([{ repoRoot: '/Users/new/Developer/GitHub/MAWS' }]);
+    const groups = within(pageTree('MAWS')).getAllByRole('group');
+    expect(groups.map((g) => sessionRows(g))).toEqual([['Sidebar interaction pass'], ['Charter + research'], ['Fix sidebar drag']]);
+    expect(sessionRows(pageTree('MAWS'))[0]).toBe('Workstation north star'); // pinned, above the groups
+    const user = userEvent.setup();
+    await user.click(within(groups[1]).getByRole('button', { name: 'New session in MAWS-sibling' }));
+    expect(creator).toHaveBeenCalledWith('proj-maws', { kind: 'existingWorktree', repoRoot: '/Users/new/Developer/GitHub/MAWS', path: '/Users/new/Developer/GitHub/MAWS-sibling' });
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: 'app-new-wt' });
+    await user.click(within(groups[0]).getByRole('button', { name: 'New session in Main' }));
+    expect(creator).toHaveBeenLastCalledWith('proj-maws');
+  });
+
+  it('asks git for nothing when no session of the project sits in a worktree', () => {
+    const fake = fakeClient();
+    window.maws = fake.client;
+    openPage('proj-maws');
+    render(<Sidebar />);
+    expect(within(pageTree('MAWS')).queryAllByRole('group')).toHaveLength(0);
+    expect(fake.invoked('git.worktree.list')).toEqual([]);
+  });
+});
+
+describe('sidebar keyboard', () => {
+  beforeEach(() => fillStores(nine));
+
+  it('the list is one tab stop that arrows move through; Enter opens a page and focuses its first row', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    const stops = within(projectsTree()).getAllByRole('treeitem').filter((t) => t.tabIndex === 0);
+    expect(stops.map((t) => t.getAttribute('aria-label'))).toEqual(['claude-usage-menubar']);
+    stops[0].focus();
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(document.activeElement).toBe(row('MAWS'));
+    await user.keyboard('{End}');
+    expect(document.activeElement).toBe(row('Other sessions'));
+    await user.keyboard('{ArrowUp}{Enter}');
+    expect(useLayout.getState().regions.sidebar.openProject).toBe('proj-maws');
+    expect(document.activeElement).toBe(row('Workstation north star'));
+  });
+
+  it('on a page arrows move, Enter opens a session, and Backspace or ArrowLeft goes back to the project', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    row('MAWS').focus();
+    await user.keyboard('{ArrowRight}');
+    expect(document.activeElement).toBe(row('Workstation north star'));
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Sidebar interaction pass') });
+    expect(row('Sidebar interaction pass').getAttribute('aria-selected')).toBe('true');
+    await user.keyboard('{Backspace}');
+    expect(useLayout.getState().regions.sidebar.openProject).toBeNull();
+    expect(document.activeElement).toBe(row('MAWS'));
+    await user.keyboard('{Enter}');
+    expect(document.activeElement).toBe(row('Sidebar interaction pass')); // the selected session is the page's stop
+    await user.keyboard('{ArrowLeft}');
+    expect(document.activeElement).toBe(row('MAWS'));
+  });
+
+  it('ArrowDown from the search enters the level on screen', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await user.click(screen.getByRole('searchbox', { name: 'Search projects and sessions' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(row('claude-usage-menubar'));
   });
 });
 
@@ -277,35 +327,37 @@ describe('new sessions from the sidebar', () => {
     expect(plus.title).toBe('Not available here');
   });
 
-  it('with a creator, "+" opens an unstarted session tab in that project, and the sidebar does not list it', async () => {
+  it('with a creator, a project row’s "+" or its page’s "+" opens an unstarted session tab in that project, and the sidebar does not list it', async () => {
     const user = userEvent.setup();
     const creator = vi.fn(async () => 'app-new-1' as AppSessionId);
     offs.push(registerSessionCreator(creator));
     render(<Sidebar />);
     await user.click(within(row('MAWS')).getByRole('button', { name: 'New session in MAWS' }));
     expect(creator).toHaveBeenCalledWith('proj-maws');
+    expect(useLayout.getState().regions.sidebar.openProject).toBeNull(); // the "+" does not open the page
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: 'app-new-1' });
     expect(useSessions.getState().unstarted.get('app-new-1' as AppSessionId)?.projectId).toBe('proj-maws');
-    expect(screen.getAllByRole('treeitem').filter((t) => t.dataset.kind === 'session')).toHaveLength(11);
+    openPage('proj-maws');
+    await user.click(within(screen.getByRole('heading', { name: 'MAWS' }).parentElement!).getByRole('button', { name: 'New session in MAWS' }));
+    expect(creator).toHaveBeenCalledTimes(2);
+    expect(sessionRows(pageTree('MAWS'))).toHaveLength(4);
   });
 });
 
 describe('sidebar states', () => {
-  it('shows three skeleton rows per section until both snapshots have loaded', () => {
+  it('shows placeholder rows until both snapshots have loaded', () => {
     fillStores(nine, { loaded: false });
     render(<Sidebar />);
-    expect(screen.getAllByTestId('skeleton-row')).toHaveLength(9);
+    expect(screen.getAllByTestId('skeleton-row')).toHaveLength(6);
     act(() => useSessions.setState({ loaded: true }));
-    expect(screen.getAllByTestId('skeleton-row')).toHaveLength(9);
+    expect(screen.getAllByTestId('skeleton-row')).toHaveLength(6);
     act(() => useAttention.setState({ loaded: true }));
     expect(screen.queryAllByTestId('skeleton-row')).toHaveLength(0);
   });
 
-  it('an empty workspace reads "No projects yet" with its creation actions and keeps the Needs-you heading', async () => {
+  it('an empty workspace reads "No projects yet" with its creation actions', async () => {
     fillStores(scenarioFile('empty'));
     const { rerender } = render(<Sidebar />);
-    expect(screen.getByRole('heading', { name: 'Needs you · 0' })).toBeTruthy();
-    expect(screen.getByText('Nothing needs you right now')).toBeTruthy();
     expect(screen.getByText('No projects yet')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Add project' }) as HTMLButtonElement).disabled).toBe(true);
     const create = screen.getByRole('button', { name: 'New session' }) as HTMLButtonElement;
@@ -320,19 +372,21 @@ describe('sidebar states', () => {
 });
 
 describe('sidebar at scale', () => {
-  it('renders twenty sessions per project and "Show 100 more", fast', async () => {
+  it('lists the projects, and a project’s page renders all of its sessions, fast', async () => {
     const many = scenarioFile('many-sessions');
     fillStores(many);
-    const started = performance.now();
+    let started = performance.now();
     render(<Sidebar />);
-    const elapsed = performance.now() - started;
-    if (elapsed > 200) console.info(`[sidebar] many-sessions mounted in ${Math.round(elapsed)} ms`);
+    let elapsed = performance.now() - started;
+    if (elapsed > 200) console.info(`[sidebar] many-sessions list mounted in ${Math.round(elapsed)} ms`);
     expect(elapsed).toBeLessThan(1000);
-    const groups = within(tree('Projects')).getAllByRole('group');
-    expect(groups.map((g) => within(g).getAllByRole('treeitem').filter((t) => t.dataset.kind === 'session').length)).toEqual([20, 20, 20]);
-    expect(screen.getAllByRole('treeitem', { name: 'Show 100 more' })).toHaveLength(3);
-    await userEvent.setup().click(screen.getAllByRole('treeitem', { name: 'Show 100 more' })[0]);
-    expect(within(groups[0]).getAllByRole('treeitem').filter((t) => t.dataset.kind === 'session')).toHaveLength(120);
+    expect(projectRows()).toHaveLength(3);
+    started = performance.now();
+    await userEvent.setup().click(row('MAWS'));
+    elapsed = performance.now() - started;
+    if (elapsed > 300) console.info(`[sidebar] a 120-session page opened in ${Math.round(elapsed)} ms`);
+    expect(elapsed).toBeLessThan(2000);
+    expect(sessionRows(pageTree('MAWS'))).toHaveLength(many.sessions.filter((r) => r.projectId === 'proj-maws' && !r.archived).length);
   });
 });
 
@@ -355,7 +409,7 @@ describe('the footer gear', () => {
 // C11 end
 
 // C12 start: the memory budget's released mark (C12 execution document, Interfaces "Surfaces of the budget"): one muted
-// word on an idle row, with the release's time and budget in its title; no glyph, unread or Needs-you change.
+// word on an idle row, with the release's time and budget in its title; no glyph or unread change.
 describe('a released session’s row', () => {
   beforeEach(() => {
     fillStores(nine);
@@ -367,12 +421,12 @@ describe('a released session’s row', () => {
     const at = new Date(2026, 8, 29, 14, 2).toISOString();
     const digest = useSessions.getState().digests.get(id)!;
     act(() => useSessions.getState().applyDigest({ ...digest, released: { at, limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
+    openPage('proj-claude-usage-menubar');
     render(<Sidebar />);
     const mark = within(row('Settings idle probe')).getByText('released');
     expect(mark.getAttribute('title')).toBe('Released at 14:02 to stay under the 8 GB memory budget · Send resumes it');
     expect(within(row('Settings idle probe')).getByRole('img', { name: 'Idle' }).textContent).toBe('○'); // the idle glyph, unchanged
     expect(within(row('Settings idle probe')).queryByLabelText('Unread')).toBeNull();
-    expect(needsYouTitles()).not.toContain('Settings idle probe');
     expect(screen.getAllByText('released')).toHaveLength(1);
   });
 });

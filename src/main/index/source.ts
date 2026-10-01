@@ -69,6 +69,9 @@ export class IndexSessionSource implements SessionSource {
       this.logUnavailable();
       return () => {};
     }
+    // Sessions an earlier membership rule left in a linked worktree's own project move under its main checkout before the
+    // read model is seeded, so the sidebar never shows the old grouping.
+    this.write('linked-worktree refold', () => this.index.sessions.refoldLinkedWorktrees());
     this.writer = writer;
     const projects = this.index.projects.list();
     for (const project of projects) writer.observeProject(project);

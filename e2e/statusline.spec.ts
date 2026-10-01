@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchMaws, REPO_ROOT } from './support/launch';
+import { sidebarRow } from './support/sidebar';
 
 const QUOTA = 'Quota reset recovery'; // routed, its engine id unpinned: the drain target's windows
 const PROBE = 'Settings idle probe'; // routed, re-pinned below to account 477e393c…
@@ -45,7 +46,7 @@ const ENV = () => ({ MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_SCENARIO_CLOC
 
 // W2: the session's tab, then Session info in its panel: the Usage row (no status line carries the windows).
 async function open(page: Page, title: string): Promise<Locator> {
-  await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: title }).click();
+  await (await sidebarRow(page, title)).click();
   await expect(page.locator('[data-region="main"]').getByRole('tabpanel').getByRole('group', { name: 'Session status' })).toHaveCount(0);
   const tools = page.locator('[data-region="panel"]');
   if (!(await tools.locator('[data-session-info]').isVisible())) {

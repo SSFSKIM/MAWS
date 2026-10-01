@@ -1,16 +1,19 @@
-// Projects and the membership rule (C4 execution document, Interfaces "Index", *Project membership rule*). A session
-// belongs to the project whose directory equals the realpath of its effective directory, or whose
-// `<directory>/.claude/worktrees/<name>` contains it (then its record carries the worktree). Discovery creates a project
-// (origin `discovered`, named by the basename) for an existing directory with a session that has messages; a directory
-// that no longer exists has no project ("Other sessions"); a removed project is hidden and keeps its id, so rediscovery
-// never resurrects it. C5's `ProjectRecord` is the row projected.
+// Projects and the membership rule (C4 execution document, Interfaces "Index", *Project membership rule*, as amended by
+// its Decision Log on 2026-10-01). A session belongs to the project whose directory equals the realpath of its effective
+// directory, or whose `<directory>/.claude/worktrees/<name>` contains it, or whose checkout owns the linked git worktree
+// containing it (in both worktree cases its record carries the worktree). Discovery creates a project (origin
+// `discovered`, named by the basename) for an existing directory with a session that has messages; a directory that no
+// longer exists has no project ("Other sessions"); a removed project is hidden and keeps its id, so rediscovery never
+// resurrects it. C5's `ProjectRecord` is the row projected.
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { realpathSync, statSync } from 'node:fs';
-import { basename } from 'node:path';
+import { lstatSync, realpathSync, statSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import type { ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import { slugOf } from '../../engine-host/fs/paths';
+import { gitBinary, gitEnv } from '../git/runner';
 import type { Db } from './db';
 
 interface ProjectRow {
@@ -28,7 +31,8 @@ interface ProjectRow {
 export type Origin = ProjectRow['origin'];
 
 // Where a directory lands: its realpath (null when it does not exist), the project directory it belongs under, and the
-// worktree root when it lies inside `<project>/.claude/worktrees/<name>`.
+// worktree root when it lies inside `<project>/.claude/worktrees/<name>` or inside a linked worktree of the project's
+// checkout.
 export interface Location {
   realpath: string | null;
   projectDirectory: string | null;
@@ -36,8 +40,38 @@ export interface Location {
 }
 
 const WORKTREE = /^(.+)\/\.claude\/worktrees\/([^/]+)(?:\/.*)?$/;
+const REV_PARSE_TIMEOUT_MS = 2_000;
 
-export function locate(directory: string | null): Location {
+// A repository's git dir and common dir, absolute, as `git rev-parse` names them.
+export interface GitDirs {
+  gitDir: string;
+  commonDir: string;
+}
+
+// The git dirs of the repository at `root`, or null when git cannot say (not a repository, git missing, timed out). The
+// git service's binary and environment, run synchronously: discovery locates inside its database transactions.
+export function gitDirs(root: string): GitDirs | null {
+  try {
+    const out = execFileSync(gitBinary(process.env), ['-C', root, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], {
+      env: gitEnv(process.env),
+      encoding: 'utf8',
+      timeout: REV_PARSE_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const [gitDir, commonDir] = out.split('\n');
+    return gitDir && commonDir ? { gitDir, commonDir } : null;
+  } catch {
+    return null;
+  }
+}
+
+// Each directory's linked-worktree answer for the life of the process (null: not inside one). Discovery locates once per
+// transcript summary, thousands of times over a few hundred directories, so git runs at most once per directory; a
+// failure is remembered too, so a git that hangs costs its timeout once rather than on every summary.
+const linkedWorktrees = new Map<string, { main: string; root: string } | null>();
+
+// `gitDirsOf` is the seam a test counts git calls through; whichever call filled the cache, its answers are the cache's.
+export function locate(directory: string | null, gitDirsOf: (root: string) => GitDirs | null = gitDirs): Location {
   if (directory === null || directory === '') return { realpath: null, projectDirectory: null, worktreePath: null };
   let realpath: string;
   try {
@@ -46,8 +80,42 @@ export function locate(directory: string | null): Location {
     return { realpath: null, projectDirectory: null, worktreePath: null };
   }
   const worktree = WORKTREE.exec(realpath);
-  if (!worktree) return { realpath, projectDirectory: realpath, worktreePath: null };
-  return { realpath, projectDirectory: worktree[1], worktreePath: `${worktree[1]}/.claude/worktrees/${worktree[2]}` };
+  if (worktree) {
+    // A managed worktree made inside a linked worktree (the engine makes them under whichever checkout it runs in)
+    // belongs to the main checkout too, or it would bring the linked worktree back as a project of its own.
+    const projectDirectory = linkedWorktree(worktree[1], gitDirsOf)?.main ?? worktree[1];
+    return { realpath, projectDirectory, worktreePath: `${worktree[1]}/.claude/worktrees/${worktree[2]}` };
+  }
+  const linked = linkedWorktree(realpath, gitDirsOf);
+  if (linked) return { realpath, projectDirectory: linked.main, worktreePath: linked.root };
+  return { realpath, projectDirectory: realpath, worktreePath: null };
+}
+
+function linkedWorktree(directory: string, gitDirsOf: (root: string) => GitDirs | null): { main: string; root: string } | null {
+  let answer = linkedWorktrees.get(directory);
+  if (answer === undefined) linkedWorktrees.set(directory, (answer = findLinkedWorktree(directory, gitDirsOf)));
+  return answer;
+}
+
+// The nearest `.git` decides, as it does for git itself: a directory is a main checkout's, which folds nowhere and needs
+// no git call; a file is a linked worktree's or a submodule's (or a checkout's with a separate git dir), which only git
+// tells apart. A linked worktree's git dir is its own, under the common dir, and it folds only when that common dir is a
+// checkout's `.git` (a bare repository's or a submodule's worktrees have no checkout to fold under).
+function findLinkedWorktree(directory: string, gitDirsOf: (root: string) => GitDirs | null): { main: string; root: string } | null {
+  try {
+    for (let root = directory; ; root = dirname(root)) {
+      const entry = lstatSync(join(root, '.git'), { throwIfNoEntry: false });
+      if (entry !== undefined) {
+        if (!entry.isFile()) return null;
+        const dirs = gitDirsOf(root);
+        if (dirs === null || dirs.gitDir === dirs.commonDir || basename(dirs.commonDir) !== '.git') return null;
+        return { main: realpathSync.native(dirname(dirs.commonDir)).normalize('NFC'), root };
+      }
+      if (dirname(root) === root) return null;
+    }
+  } catch {
+    return null; // an ancestor that cannot be read, or a main checkout that is gone: no fold
+  }
 }
 
 const project = (row: ProjectRow): ProjectRecord => ({
@@ -142,6 +210,15 @@ export class ProjectStore {
     const row = this.db.get<{ id: string }>('SELECT id FROM projects WHERE directory = ?', location.projectDirectory);
     if (row) return row.id as ProjectId;
     return create ? this.ensureForDirectory(location.projectDirectory, 'discovered').id : null;
+  }
+
+  // Visible projects whose own directory now locates inside a worktree of another project's checkout: linked worktrees
+  // registered as projects of their own before the membership rule folded them (SessionStore.refoldLinkedWorktrees).
+  inWorktrees(): { id: ProjectId; origin: Origin; location: Location }[] {
+    return this.db.all<ProjectRow>('SELECT * FROM projects WHERE hidden = 0 ORDER BY sort_order, created_at, id').flatMap((row) => {
+      const location = locate(row.directory);
+      return location.worktreePath === null ? [] : [{ id: row.id as ProjectId, origin: row.origin, location }];
+    });
   }
 
   // After commit, once per transaction that changed projects, with that change's revision.

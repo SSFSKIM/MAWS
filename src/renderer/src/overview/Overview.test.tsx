@@ -129,17 +129,6 @@ describe('overview board', () => {
     expect(useLayout.getState().main.panes[1]?.activeTabId).toBe(`session:${idOf('Charter + research')}`);
   });
 
-  it('focusCard from the sidebar focuses and reveals the card, once', () => {
-    render(<Overview paneIndex={0} />);
-    const target = card('Quota reset recovery');
-    let revealed = 0;
-    target.scrollIntoView = () => void revealed++;
-    act(() => useLayout.getState().focusCard(idOf('Quota reset recovery')));
-    expect(document.activeElement).toBe(target);
-    expect(revealed).toBe(1);
-    expect(useLayout.getState().focusedCardAppId).toBeNull();
-  });
-
   it('an empty board reads "Nothing live or unread" with a new-session action', async () => {
     const user = userEvent.setup();
     resetShellStores();

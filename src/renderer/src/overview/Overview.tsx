@@ -1,12 +1,11 @@
 // The Overview board (§5.2; residue *Overview card*): one card per live or unread session, grouped Needs you first,
 // then the projects in sidebar order, then other sessions (`overviewGroups`). A scrolling `role="list"` of groups; the
 // cards share one tab stop and the arrow keys move focus across them in reading order (Home and End to the ends),
-// Enter opens the focused card's session and ⌘Enter opens it in the split. A sidebar Needs-you row deep-links here
-// through `focusCard`, which reveals and focuses that card once.
+// Enter opens the focused card's session and ⌘Enter opens it in the split.
 // Debt wave 5 (the cold first paint): while the engine host's discovery pass reads the store (a cold index, the owner's
 // first open), the board renders the cards it has and says above them, or in place of the empty board, that indexing
 // continues and how far it has come.
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
@@ -33,17 +32,6 @@ export function Overview({ paneIndex }: { paneIndex: PaneIndex }) {
   const board = useRef<HTMLDivElement>(null);
   const [current, setCurrent] = useState<AppSessionId | null>(null);
   const stop = current !== null && order.includes(current) ? current : (order[0] ?? null);
-
-  // A deep link from the sidebar: reveal and focus the card, then forget the request.
-  const focusRequest = useLayout((s) => s.focusedCardAppId);
-  useEffect(() => {
-    if (!focusRequest) return;
-    const card = board.current?.querySelector<HTMLElement>(`[data-card="${CSS.escape(focusRequest)}"]`);
-    if (!card) return;
-    card.scrollIntoView?.({ block: 'nearest' });
-    card.focus();
-    useLayout.getState().focusCard(null);
-  }, [focusRequest, order.length]);
 
   const focusCard = (index: number) => board.current?.querySelector<HTMLElement>(`[data-card="${CSS.escape(order[index])}"]`)?.focus();
 

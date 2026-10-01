@@ -8,6 +8,7 @@
 // session has no intent).
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import type { Location } from '@shared/sessions/intent';
 import { registerSlot } from '../app/slots';
 import { registerResubmitProvider } from '../composer/resubmit-seam';
 import { registerReleasedResume } from '../composer/resume-seam'; // C12
@@ -46,8 +47,8 @@ export function unstartedTitle(appSessionId: AppSessionId): { title: string; pro
 export const retainsTab = (appSessionId: string): boolean => useSetup.getState().intents.has(appSessionId as AppSessionId);
 
 // "+" and ⌘N: an app session id with a setup intent; C5 opens its tab.
-export async function createUnstartedSession(projectId: ProjectId | null, client: MawsBridge = ipc): Promise<AppSessionId | null> {
-  const result = await client.invoke('session.create', { projectId, location: null });
+export async function createUnstartedSession(projectId: ProjectId | null, client: MawsBridge = ipc, location: Location | null = null): Promise<AppSessionId | null> {
+  const result = await client.invoke('session.create', { projectId, location });
   if (!result.ok) {
     console.error('[sessions] session.create failed', result.error);
     return null;
@@ -64,7 +65,7 @@ export function connectSessions(client: MawsBridge = ipc): () => void {
     if (!live || !result.ok || result.value.mode !== 'index') return;
     registerSlot('newSession', NewSessionEmptyState);
     offs.push(
-      registerSessionCreator((projectId) => createUnstartedSession(projectId, client)),
+      registerSessionCreator((projectId, location) => createUnstartedSession(projectId, client, location ?? null)),
       registerCloseGuard('session', (ref) => (ref.kind === 'session' ? beforeCloseUnstarted(ref.appSessionId).then((r) => r === 'closed') : Promise.resolve(true))),
       registerUnstartedTitle(unstartedTitle),
       registerSessionActions(),

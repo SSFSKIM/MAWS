@@ -19,6 +19,7 @@ import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
+import { openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
 const AUTO_ROUTED = `${FIXTURES}/pass2/auto-routed.jsonl`;
@@ -93,9 +94,11 @@ async function addProject(page: Page, directory: string): Promise<{ id: string; 
   return { id: project.id, name: project.name };
 }
 
-// "+" on the project: C5's createSession runs C10's creator; the tab opens on the unstarted session's heading.
+// "+" on the project's page (W5: the sidebar drills into it, and its rows show there): C5's createSession runs C10's
+// creator; the tab opens on the unstarted session's heading.
 async function plus(page: Page, name: string): Promise<string> {
-  await page.getByRole('button', { name: `New session in ${name}`, exact: true }).click();
+  await openProject(page, name);
+  await page.locator('[data-region="sidebar"] [data-level-pane="2"]').getByRole('button', { name: `New session in ${name}`, exact: true }).click();
   await expect(page.getByRole('heading', { name: `New session in ${name}` })).toBeVisible();
   const intents = value(await invoke(page, 'session.intent.list', undefined)).intents;
   return intents.at(-1)!.appSessionId;
@@ -144,7 +147,8 @@ async function startDirect(page: Page, id: string, patch: CommandInput<'session.
   return value(await invoke(page, 'session.start', { appSessionId: id, message, options: {} }));
 }
 
-const row = (page: Page, id: string) => page.locator(`[data-menu="session:${id}"]`);
+// A session's row on the sidebar's level on screen (W5: the other level stays rendered while it slides away).
+const row = (page: Page, id: string) => page.locator(`[data-region="sidebar"] [data-level-pane]:not([inert]) [data-menu="session:${id}"]`);
 
 // Every text a transcript's load-failure alert showed (the alert stays until Retry), from before the first start: a
 // session started through "+" hydrates once the engine host knows it, never failing on an id not yet launched or bound.
@@ -173,7 +177,7 @@ function assertPickSeamBuilt(maws: MawsLaunch): void {
 }
 
 async function menu(page: Page, id: string, item: string): Promise<void> {
-  await row(page, id).click({ button: 'right' });
+  await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' });
   await page.getByRole('menuitem', { name: item, exact: true }).click();
 }
 
@@ -358,11 +362,14 @@ test.describe('sessions', () => {
     // the process stopped: C3's table lists it exited, or no longer at all
     await expect.poll(async () => value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === id)?.process ?? 'gone').toMatch(/^(exited|gone)$/);
 
-    await page.locator(`[data-menu="project:${project.id}"]`).first().click({ button: 'right' });
+    await showProjectList(page);
+    await projectRow(page, project.name).click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Archived sessions…' }).click();
     const archived = page.getByRole('dialog', { name: `Archived sessions · ${project.name}` });
     await archived.getByRole('button', { name: 'Unarchive' }).click();
     await expect(archived.getByText('No archived sessions.')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await openProject(page, project.name);
     await expect(row(page, id)).toBeVisible();
   });
 

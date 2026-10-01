@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commands, events, LAYOUT_DEFAULTS, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, TabRefSchema, tabId, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import { commands, events, LAYOUT_DEFAULTS, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, StoredRegionsSchema, TabRefSchema, tabId, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -9,6 +9,19 @@ describe('layout value shapes', () => {
     expect(LAYOUT_DEFAULTS.regions.sidebar.width).toBe(300);
     expect(LAYOUT_DEFAULTS.regions.panel.width).toBe(380);
     expect(LAYOUT_DEFAULTS.main.panes).toEqual([{ tabs: [{ id: 'overview', kind: 'overview', pinned: true }], activeTabId: 'overview' }]);
+  });
+
+  // W5: version 2's open project replaces version 1's collapsed lists; a stored version 1 keeps its sizes and sort.
+  it('reads a version-1 regions value as version 2, showing the project list', () => {
+    const v1 = {
+      version: 1,
+      sidebar: { width: 240, collapsed: true, sort: 'recency', collapsedProjects: ['proj-a'], collapsedSections: ['pinned'] },
+      panel: { width: 320, collapsed: false, maximized: false },
+    };
+    expect(StoredRegionsSchema.parse(v1)).toEqual({ version: 2, sidebar: { width: 240, collapsed: true, sort: 'recency', openProject: null }, panel: v1.panel });
+    const v2 = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, openProject: 'other' } };
+    expect(StoredRegionsSchema.parse(v2)).toEqual(v2);
+    expect(StoredRegionsSchema.safeParse({ ...v2, sidebar: { ...v2.sidebar, collapsedProjects: [] } }).success).toBe(false);
   });
 
   it('accepts the key grammar and nothing else', () => {

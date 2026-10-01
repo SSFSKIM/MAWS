@@ -51,11 +51,24 @@ export type PaneState = z.infer<typeof PaneStateSchema>;
 export const PanelTabRefSchema = z.strictObject({ id: z.string(), toolId: z.string(), pinned: z.boolean() });      // X5: what C5 persists of a panel tab; C8 owns the rest
 export type PanelTabRef = z.infer<typeof PanelTabRefSchema>;
 
-export const LayoutRegionsSchema = z.strictObject({ version: z.literal(1),                                       // key `regions`
+// W5 (§5.1 as amended 2026-10-01): the sidebar is a drill-in, and `openProject` is the project whose page is open (a
+// project id, `'other'` for Other sessions, null for the project list), remembered across launches. It replaces version
+// 1's `collapsedProjects` and `collapsedSections`, which `StoredRegionsSchema` reads and drops.
+export const OpenProjectSchema = z.union([ProjectIdSchema, z.literal('other')]).nullable();
+export const LayoutRegionsSchema = z.strictObject({ version: z.literal(2),                                       // key `regions`
+  sidebar: z.strictObject({ width: z.number().int(), collapsed: z.boolean(), sort: z.enum(['priority', 'recency']), openProject: OpenProjectSchema }),
+  panel:   z.strictObject({ width: z.number().int(), collapsed: z.boolean(), maximized: z.boolean() }) });
+export type LayoutRegions = z.infer<typeof LayoutRegionsSchema>;
+const RegionsV1Schema = z.strictObject({ version: z.literal(1),
   sidebar: z.strictObject({ width: z.number().int(), collapsed: z.boolean(), sort: z.enum(['priority', 'recency']),
                             collapsedProjects: z.array(ProjectIdSchema), collapsedSections: z.array(z.enum(['pinned', 'other'])) }),
   panel:   z.strictObject({ width: z.number().int(), collapsed: z.boolean(), maximized: z.boolean() }) });
-export type LayoutRegions = z.infer<typeof LayoutRegionsSchema>;
+// What hydration reads from `regions`: the current shape, or version 1 migrated (its widths, toggles and sort kept, the
+// project list showing).
+export const StoredRegionsSchema = z.union([
+  LayoutRegionsSchema,
+  RegionsV1Schema.transform(({ sidebar: { width, collapsed, sort }, panel }): LayoutRegions => ({ version: 2, sidebar: { width, collapsed, sort, openProject: null }, panel })),
+]);
 export const LayoutMainSchema = z.strictObject({ version: z.literal(1),                                          // key `main.tabs`
   panes: z.tuple([PaneStateSchema]).or(z.tuple([PaneStateSchema, PaneStateSchema])), focusedPane: z.union([z.literal(0), z.literal(1)]), splitRatio: z.number(),
   closedTabs: z.array(TabRefSchema).max(10) });                                                                    // ⌘⇧T history, newest last
@@ -71,8 +84,8 @@ const OVERVIEW_TAB = { id: 'overview', kind: 'overview', pinned: true } as const
 // Widths are the X7 tokens `--sidebar-w` and `--panel-w`.
 export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelPinned: PanelTabRef[] } = {
   regions: {
-    version: 1,
-    sidebar: { width: 300, collapsed: false, sort: 'priority', collapsedProjects: [], collapsedSections: [] },
+    version: 2,
+    sidebar: { width: 300, collapsed: false, sort: 'priority', openProject: null },
     panel: { width: 380, collapsed: false, maximized: false },
   },
   main: { version: 1, panes: [{ tabs: [OVERVIEW_TAB], activeTabId: 'overview' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [] },
