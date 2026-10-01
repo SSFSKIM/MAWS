@@ -462,7 +462,9 @@ export class SessionStore {
   // stay in that worktree's own project until its transcript moves. Each visible project whose directory now locates in
   // another project's worktree gives its sessions to that project, each keeping a worktree it already had (a managed one
   // made inside the linked worktree) and otherwise taking the linked worktree's root; a project discovery made is hidden
-  // then, while one the owner added stays. Run once per start; answers how many records moved.
+  // then, while one the owner added stays. Run once per start, once `warmLinkedWorktrees` has answered the visible
+  // projects' directories (IndexSessionSource.start), so its `locate` calls read the cache rather than run git; answers
+  // how many records moved.
   refoldLinkedWorktrees(): number {
     return this.db.transaction(() => {
       let moved = 0;

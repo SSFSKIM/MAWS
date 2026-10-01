@@ -5,9 +5,9 @@
 // `discovered`, named by the basename) for an existing directory with a session that has messages; a directory that no
 // longer exists has no project ("Other sessions"); a removed project is hidden and keeps its id, so rediscovery never
 // resurrects it. C5's `ProjectRecord` is the row projected.
-import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { lstatSync, realpathSync, statSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -41,9 +41,19 @@ export interface Location {
 
 const WORKTREE = /^(.+)\/\.claude\/worktrees\/([^/]+)(?:\/.*)?$/;
 const GIT_TIMEOUT_MS = 2_000;
+const WARM_CONCURRENCY = 4; // git calls the warm-up keeps in flight
+const EVIDENCE_FILES = 4; // top-level files of HEAD read for content evidence, smallest first
+const EVIDENCE_BYTES = 256 * 1024; // the largest one read
 
-// One git call with the git service's binary and environment, run synchronously (discovery locates inside its database
-// transactions); null when git cannot answer (not a repository, git missing, timed out).
+const LIST = ['worktree', 'list', '--porcelain', '-z'];
+const TREE = ['ls-tree', '-z', 'HEAD'];
+const TOP_LEVEL_FILE = /^(?:100644|100755) blob ([0-9a-f]{40}|[0-9a-f]{64})\t(.+)$/s;
+
+type LinkedWorktree = { main: string; root: string };
+
+// One git call with the git service's binary and environment; null when git cannot answer (not a repository, git
+// missing, timed out). `locate` runs it synchronously (discovery locates inside its database transactions); the warm-up
+// runs it in a child process main does not wait on.
 function gitOutput(directory: string, args: string[]): string | null {
   try {
     return execFileSync(gitBinary(process.env), ['-C', directory, ...args], {
@@ -57,6 +67,14 @@ function gitOutput(directory: string, args: string[]): string | null {
   }
 }
 
+function gitOutputAsync(directory: string, args: string[]): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(gitBinary(process.env), ['-C', directory, ...args], { env: gitEnv(process.env), encoding: 'utf8', timeout: GIT_TIMEOUT_MS }, (error, stdout) =>
+      resolve(error ? null : stdout),
+    );
+  });
+}
+
 const canonical = (path: string) => realpathSync.native(path).normalize('NFC');
 const exists = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined;
 
@@ -65,11 +83,23 @@ const exists = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== 
 // `.git`, else the common dir itself), so the answer is checked rather than taken. `root` must be one of the linked
 // entries: a submodule or a checkout with a separate git dir is the main worktree of its own repository, which git then
 // names after the git dir. The repository must not be bare. And the directory git names must hold a `.git` and the work
-// tree, at least one top-level entry of its HEAD: a separate git dir named `.git` makes git name that dir's parent, which
-// holds nothing of the work tree, and the real checkout is recorded nowhere git can read, so such a worktree stays a
+// tree (`holdsHead`): a separate git dir named `.git` makes git name that dir's parent, which may hold anything, files
+// named like the checkout's included, and the real checkout is recorded nowhere git can read, so such a worktree stays a
 // directory of its own rather than folding under the wrong one.
 export function mainWorktree(root: string): string | null {
-  const listed = gitOutput(root, ['worktree', 'list', '--porcelain', '-z']);
+  const main = listedMain(root, gitOutput(root, LIST));
+  return main !== null && holdsHead(main, gitOutput(main, TREE)) ? main : null;
+}
+
+// `mainWorktree` off main's thread; `holdsHeadOf` runs `holdsHead` over the main checkout's tree, once per warm-up.
+async function mainWorktreeAsync(root: string, holdsHeadOf: (main: string) => Promise<boolean>): Promise<string | null> {
+  const main = listedMain(root, await gitOutputAsync(root, LIST));
+  return main !== null && (await holdsHeadOf(main)) ? main : null;
+}
+
+// The directory `git worktree list` names as the main worktree, realpathed, when `root` is one of its linked entries,
+// the repository is not bare and that directory holds a `.git`.
+function listedMain(root: string, listed: string | null): string | null {
   if (listed === null) return null;
   const entries: { path: string; bare: boolean }[] = [];
   for (const line of listed.split('\0')) {
@@ -91,15 +121,41 @@ export function mainWorktree(root: string): string | null {
   } catch {
     return null; // a main checkout that is gone
   }
-  if (!exists(join(main, '.git'))) return null;
-  const names = gitOutput(main, ['ls-tree', '-z', '--name-only', 'HEAD'])?.split('\0') ?? [];
-  return names.some((name) => name !== '' && exists(join(main, name))) ? main : null;
+  return exists(join(main, '.git')) ? main : null;
+}
+
+// Whether `main` holds HEAD's work tree, judged by content, never by names: at least one regular top-level file has
+// exactly the bytes HEAD records for its path (git's blob id, the hash of `blob <size>\0` and the bytes; SHA-256 in a
+// SHA-256 repository). The smallest few non-empty files are read (an empty one matches any empty file of its name), each
+// at most EVIDENCE_BYTES. Every doubt answers no: a checkout whose top-level files are all edited, or whose HEAD tracks
+// none, stays apart, as every linked worktree did before the fold.
+function holdsHead(main: string, tree: string | null): boolean {
+  if (tree === null) return false;
+  const candidates: { path: string; id: string; size: number }[] = [];
+  for (const entry of tree.split('\0')) {
+    const match = TOP_LEVEL_FILE.exec(entry);
+    if (match === null) continue;
+    const path = join(main, match[2]);
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    if (stat?.isFile() && stat.size > 0 && stat.size <= EVIDENCE_BYTES) candidates.push({ path, id: match[1], size: stat.size });
+  }
+  candidates.sort((a, b) => a.size - b.size);
+  return candidates.slice(0, EVIDENCE_FILES).some(({ path, id }) => {
+    let bytes: Buffer;
+    try {
+      bytes = readFileSync(path);
+    } catch {
+      return false; // gone or unreadable since the stat
+    }
+    return createHash(id.length === 64 ? 'sha256' : 'sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex') === id;
+  });
 }
 
 // Each directory's linked-worktree answer for the life of the process (null: not inside one). Discovery locates once per
 // transcript summary, thousands of times over a few hundred directories, so git runs at most once per directory; a
-// failure is remembered too, so a git that hangs costs its timeout once rather than on every summary.
-const linkedWorktrees = new Map<string, { main: string; root: string } | null>();
+// failure is remembered too, so a git that hangs costs its timeout once rather than on every summary. The first answer
+// stays: `warmLinkedWorktrees` never replaces one `locate` computed meanwhile.
+const linkedWorktrees = new Map<string, LinkedWorktree | null>();
 
 // `mainWorktreeOf` is the seam a test counts git calls through; whichever call filled the cache, its answers are the
 // cache's.
@@ -123,28 +179,67 @@ export function locate(directory: string | null, mainWorktreeOf: (root: string) 
   return { realpath, projectDirectory: realpath, worktreePath: null };
 }
 
-function linkedWorktree(directory: string, mainWorktreeOf: (root: string) => string | null): { main: string; root: string } | null {
+function linkedWorktree(directory: string, mainWorktreeOf: (root: string) => string | null): LinkedWorktree | null {
   let answer = linkedWorktrees.get(directory);
   if (answer === undefined) linkedWorktrees.set(directory, (answer = findLinkedWorktree(directory, mainWorktreeOf)));
   return answer;
 }
 
+function findLinkedWorktree(directory: string, mainWorktreeOf: (root: string) => string | null): LinkedWorktree | null {
+  try {
+    const root = candidateRoot(directory);
+    const main = root === null ? null : mainWorktreeOf(root);
+    return root === null || main === null ? null : { main, root };
+  } catch {
+    return null; // a directory that cannot be read: no fold
+  }
+}
+
+// Answers the linked-worktree question for `directories` with git in child processes, WARM_CONCURRENCY at a time, so
+// that a later `locate` of each reads the cache instead of blocking main on git (`IndexSessionSource.start` warms the
+// visible projects' directories before its refold). Each main checkout's content is checked once per warm-up.
+export async function warmLinkedWorktrees(directories: Iterable<string>): Promise<void> {
+  const asked = new Set<string>();
+  for (const directory of directories) {
+    try {
+      const realpath = canonical(directory);
+      asked.add(WORKTREE.exec(realpath)?.[1] ?? realpath); // the directory `locate` asks about
+    } catch {
+      // gone: `locate` answers it without the cache
+    }
+  }
+  const queue = [...asked];
+  const checked = new Map<string, Promise<boolean>>();
+  const holdsHeadOf = (main: string) => {
+    let answer = checked.get(main);
+    if (answer === undefined) checked.set(main, (answer = gitOutputAsync(main, TREE).then((tree) => holdsHead(main, tree))));
+    return answer;
+  };
+  const worker = async () => {
+    for (let directory = queue.shift(); directory !== undefined; directory = queue.shift()) {
+      if (linkedWorktrees.has(directory)) continue;
+      let answer: LinkedWorktree | null = null;
+      try {
+        const root = candidateRoot(directory);
+        const main = root === null ? null : await mainWorktreeAsync(root, holdsHeadOf);
+        if (root !== null && main !== null) answer = { main, root };
+      } catch {
+        // a directory that cannot be read: no fold
+      }
+      if (!linkedWorktrees.has(directory)) linkedWorktrees.set(directory, answer);
+    }
+  };
+  await Promise.all(Array.from({ length: WARM_CONCURRENCY }, worker));
+}
+
 // The nearest `.git` decides, as it does for git itself: a directory is a main checkout's, which folds nowhere and needs
 // no git call; a file is a linked worktree's or a submodule's (or a checkout's with a separate git dir), which only git
-// tells apart (`mainWorktree`).
-function findLinkedWorktree(directory: string, mainWorktreeOf: (root: string) => string | null): { main: string; root: string } | null {
-  try {
-    for (let root = directory; ; root = dirname(root)) {
-      const entry = lstatSync(join(root, '.git'), { throwIfNoEntry: false });
-      if (entry !== undefined) {
-        if (!entry.isFile()) return null;
-        const main = mainWorktreeOf(root);
-        return main === null ? null : { main, root };
-      }
-      if (dirname(root) === root) return null;
-    }
-  } catch {
-    return null; // an ancestor that cannot be read: no fold
+// tells apart (`mainWorktree`). The root holding that file, else null; throws when an ancestor cannot be read.
+function candidateRoot(directory: string): string | null {
+  for (let root = directory; ; root = dirname(root)) {
+    const entry = lstatSync(join(root, '.git'), { throwIfNoEntry: false });
+    if (entry !== undefined) return entry.isFile() ? root : null;
+    if (dirname(root) === root) return null;
   }
 }
 

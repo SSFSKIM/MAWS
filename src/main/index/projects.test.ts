@@ -7,7 +7,7 @@ import { ProjectRecordSchema } from '@shared/ipc/schema/session';
 import { runGit } from '../../../test/support/git-fixture';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
-import { locate, mainWorktree } from './projects';
+import { locate, mainWorktree, warmLinkedWorktrees } from './projects';
 
 describe('projects and the membership rule', () => {
   let dir: ReturnType<typeof tempDir>;
@@ -239,6 +239,56 @@ describe('projects and the membership rule', () => {
       expect(inLinked.worktree).toBeNull();
       expect(index.projects.list().map((p) => p.directory)).toEqual([dotted.linked]);
       expect(index.sessions.refoldLinkedWorktrees()).toBe(0);
+    });
+
+    // The parent git names may be a directory of its own whose files merely share names with the checkout's: a same-named
+    // README proves nothing, only HEAD's content does. Both paths answer alike: `locate` on main's thread and the warm-up.
+    it('a linked worktree of a separate git dir does not fold under its parent when that parent holds a same-named file of other content', async () => {
+      const homes = ['home', 'home-warmed'].map((name) => {
+        const home = repo(name);
+        writeFileSync(join(home, 'README.md'), 'another project\n'); // `separated` commits README.md as 'hello\n'
+        return home;
+      });
+      const located = await separated('located', join(homes[0], '.git'));
+      const warmed = await separated('warmed', join(homes[1], '.git'));
+
+      expect(locate(located.linked)).toEqual(unfolded(located.linked));
+      const inLinked = index.sessions.upsertFromSummary(summary({ directory: located.linked })).record;
+      expect(inLinked.worktree).toBeNull();
+      expect(index.projects.list().map((p) => p.directory)).toEqual([located.linked]);
+      expect(index.sessions.refoldLinkedWorktrees()).toBe(0);
+      expect(index.projects.list().map((p) => p.directory)).toEqual([located.linked]);
+
+      await warmLinkedWorktrees([warmed.linked]);
+      const { roots, mainWorktreeOf } = counted();
+      expect(locate(warmed.linked, mainWorktreeOf)).toEqual(unfolded(warmed.linked));
+      expect(roots).toEqual([]); // answered by the warm-up
+    });
+
+    it('the main checkout is judged by content: one top-level file as HEAD records it is enough, none is no fold', async () => {
+      const main = await checkout('main');
+      writeFileSync(join(main, 'package.json'), '{}\n');
+      await runGit(main, ['add', 'package.json']);
+      await runGit(main, ['commit', '-q', '-m', 'package']);
+      await runGit(main, ['worktree', 'add', '-q', '../kept', '-b', 'kept']);
+      await runGit(main, ['worktree', 'add', '-q', '../edited', '-b', 'edited']);
+      const [kept, edited] = ['kept', 'edited'].map((name) => join(tree.path, name));
+
+      writeFileSync(join(main, 'README.md'), 'hello, edited\n');
+      expect(locate(kept)).toEqual({ realpath: kept, projectDirectory: main, worktreePath: kept }); // package.json still matches
+      writeFileSync(join(main, 'package.json'), '{ "edited": true }\n');
+      expect(locate(edited)).toEqual(unfolded(edited));
+    });
+
+    it('a warm-up answers for locate: a warmed linked worktree folds with no git call on main', async () => {
+      const main = await checkout('main');
+      await runGit(main, ['worktree', 'add', '-q', '../sibling', '-b', 'feature']);
+      const sibling = join(tree.path, 'sibling');
+      await warmLinkedWorktrees([sibling, main, join(tree.path, 'gone')]);
+      const { roots, mainWorktreeOf } = counted();
+      expect(locate(sibling, mainWorktreeOf)).toEqual({ realpath: sibling, projectDirectory: main, worktreePath: sibling });
+      expect(locate(main, mainWorktreeOf)).toEqual(unfolded(main));
+      expect(roots).toEqual([]);
     });
 
     it('git runs once per directory: a second locate answers from the cache', async () => {

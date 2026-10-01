@@ -2,14 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { CommandName, CommandResult } from '@shared/ipc/schema';
+import type { CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import { runGit } from '../../../test/support/git-fixture';
 import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
+import { warmLinkedWorktrees } from './projects';
 import type { ChangeCause } from './sessions';
 import { IndexSessionSource, type SourceHost } from './source';
 
@@ -100,26 +101,66 @@ describe('refolding linked worktrees under their main checkout', () => {
     expect(projectChanges).toBe(0);
   });
 
-  it('the session source refolds at start, before it seeds the read model', () => {
-    const discovered = index.projects.ensureForDirectory(sibling, 'discovered');
-    const appId = earlierRecord(discovered.id, sibling, 'feature');
-    const projects: ProjectRecord[] = [];
-    const records: SessionRecord[] = [];
+  // A source over the index whose engine host never becomes ready, with what reaches the read model and the renderer.
+  const started = (warm: (directories: string[]) => Promise<void>) => {
+    const seen = { projects: [] as ProjectRecord[], removedProjects: [] as ProjectId[], records: [] as SessionRecord[], emitted: [] as { name: EventName; payload: unknown }[] };
     const host: SourceHost = {
       dispatch: async () => ({ ok: true, value: undefined }) as CommandResult<CommandName>,
       onEvent: (() => () => {}) as SourceHost['onEvent'],
       onState: () => () => {},
       snapshot: () => ({ state: 'starting', pid: null, restarts: 0, revision: 1 }),
     };
-    const stop = new IndexSessionSource(index, host, { emit: () => true }).start({
-      observeProject: (project) => void projects.push(project),
-      observeRecord: (record) => void records.push(record),
+    const emit = (name: EventName, payload: unknown) => (seen.emitted.push({ name, payload }), true);
+    const stop = new IndexSessionSource(index, host, { emit, tickMs: 1, warmLinkedWorktrees: warm }).start({
+      observeProject: (project) => void seen.projects.push(project),
+      observeRecord: (record) => void seen.records.push(record),
       observeRemoved: () => {},
-      observeProjectRemoved: () => {},
+      observeProjectRemoved: (id) => void seen.removedProjects.push(id),
       setDigest: () => {},
     });
+    return { seen, stop };
+  };
+
+  it('the session source seeds the read model as the index holds it, then refolds once the warm-up answered, as ordinary change events', async () => {
+    const discovered = index.projects.ensureForDirectory(sibling, 'discovered');
+    const appId = earlierRecord(discovered.id, sibling, 'feature');
+    let warming: Promise<void> | null = null;
+    const { seen, stop } = started((directories) => (warming = warmLinkedWorktrees(directories)));
+    try {
+      expect(directoriesOf(seen.projects)).toEqual([sibling]);
+      expect(seen.records).toEqual([expect.objectContaining({ appId, projectId: discovered.id, worktree: null })]);
+      expect(warming).not.toBeNull();
+      await warming;
+      await vi.waitFor(() => expect(seen.emitted.map((e) => e.name).sort()).toEqual(['session.changed', 'session.projects.changed']));
+
+      const mainProject = index.projects.list().find((p) => p.directory === main)!;
+      const moved = { appId, projectId: mainProject.id, worktree: { path: sibling, branch: 'feature' } };
+      const changed = seen.emitted.find((e) => e.name === 'session.changed')!.payload as EventPayload<'session.changed'>;
+      expect(changed).toMatchObject({ cause: 'facts', record: moved });
+      const projectsChanged = seen.emitted.find((e) => e.name === 'session.projects.changed')!.payload as EventPayload<'session.projects.changed'>;
+      expect(directoriesOf(projectsChanged.projects)).toEqual([main]);
+      expect(seen.records.at(-1)).toMatchObject(moved);
+      expect(seen.projects.at(-1)).toMatchObject({ id: mainProject.id, directory: main });
+      expect(seen.removedProjects).toEqual([discovered.id]);
+    } finally {
+      stop();
+    }
+  });
+
+  it('a source stopped before the warm-up finishes runs no refold', async () => {
+    const discovered = index.projects.ensureForDirectory(sibling, 'discovered');
+    const appId = earlierRecord(discovered.id, sibling, 'feature');
+    let finish: () => void = () => {};
+    const { seen, stop } = started(() => new Promise<void>((resolve) => (finish = resolve)));
+    changes = [];
+    projectChanges = 0;
     stop();
-    expect(directoriesOf(projects)).toEqual([main]);
-    expect(records.find((r) => r.appId === appId)).toMatchObject({ projectId: projects[0].id, worktree: { path: sibling, branch: 'feature' } });
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(index.sessions.get(appId)).toMatchObject({ projectId: discovered.id, worktree: null });
+    expect(directoriesOf(index.projects.list())).toEqual([sibling]);
+    expect(changes).toEqual([]);
+    expect(projectChanges).toBe(0);
+    expect(seen.emitted).toEqual([]);
   });
 });
