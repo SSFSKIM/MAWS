@@ -1,12 +1,13 @@
 // Launches MAWS for an end-to-end test: the built app (`out/main/index.js` under the repo's Electron) by default, or
 // the executable named by MAWS_E2E_EXECUTABLE (the packaged `MAWS.app/Contents/MacOS/MAWS`). Every launch gets
-// MAWS_E2E=1, a fresh `userData` under the OS temp directory and an empty engine store (`CLAUDE_CONFIG_DIR`), so nothing
-// depends on or touches a real profile.
+// MAWS_E2E=1, a fresh `userData` under the OS temp directory, an empty engine store (`CLAUDE_CONFIG_DIR`) and a scratch
+// shell home, so nothing depends on or touches a real profile or the owner's shell history.
 // Later children's end-to-end tests start from here, through the `maws` fixture of `test`.
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron, test as base, type ElectronApplication, type Page } from '@playwright/test';
+import { writeScratchShellHome } from '../../test/support/shell-home';
 
 export const REPO_ROOT = resolve(__dirname, '../..');
 
@@ -15,6 +16,7 @@ export interface MawsLaunch {
   page: Page; // the first window
   consoleErrors(): string[]; // the first window's console errors and uncaught errors so far, from its first load on
   userData: string;
+  shellHome: string; // the scratch shell home under `userData` (ZDOTDIR, and where the shells' history goes)
   packaged: boolean;
   launchedAt: number; // Date.now() just before the process was started
   cleanup(): Promise<void>; // closes the app if it is still open and removes the profile it created; throws if the app would not close
@@ -61,6 +63,13 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   // ~/Library/Application Support/ClaudeUsage; statusline.spec.ts names its own copy of the fixture.
   env.MAWS_CLAUDE_USAGE_DIR = join(userData, 'claude-usage');
   // C7 end
+  // Every shell the app starts (a terminal, the echo test's, the hosts' login-shell captures) reads its zsh startup files
+  // from the profile's scratch shell home and writes its history there (test/support/shell-home.ts): a shell left
+  // running when the app quits saves its typed commands on the SIGHUP, which went to ~/.zsh_history. So the captured
+  // environment is the runner's plus the system profiles, not the owner's zsh files. HOME stays the owner's, which main
+  // and the engine read.
+  const shellHome = writeScratchShellHome(join(userData, 'shell-home'));
+  Object.assign(env, shellHome.env);
   Object.assign(env, opts.env); // C3
 
   let app: ElectronApplication | null = null;
@@ -81,7 +90,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();
     const consoleErrors = await collectConsoleErrors(page);
-    return { app, page, consoleErrors, userData, packaged: executable !== null, launchedAt, cleanup };
+    return { app, page, consoleErrors, userData, shellHome: shellHome.dir, packaged: executable !== null, launchedAt, cleanup };
   } catch (error) {
     await cleanup().catch((cleanupError) => console.error('[e2e] cleanup after a failed launch also failed', cleanupError));
     throw error;
