@@ -154,8 +154,9 @@ The sitting
     - ⌘R: the window reloads and sessions keep running.
     Record each.
 
-12. Quit (§10.6's quit, D8; 2 min). With a turn in flight, a background task and a terminal running `sleep 60`, press ⌘Q.
-    The question names all three. Choose Quit when idle and the banner appears ("MAWS will quit when 3 things finish");
+12. Quit (§10.6's quit, D8; 2 min). Keep one session idle with a background task still running, a different session
+    mid-turn, and a terminal running `sleep 60`; press ⌘Q. A session is counted once, with mid-turn taking precedence,
+    so foreground and background work in the same session cannot exercise both categories. The question names all three. Choose Quit when idle and the banner appears ("MAWS will quit when 3 things finish");
     choose Cancel. Press ⌘Q again and choose Quit. Reopen MAWS: step 9's queued message is still listed, and every
     session reads exited. Record.
 
