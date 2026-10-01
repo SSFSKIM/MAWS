@@ -94,7 +94,7 @@ TextEdit document).
 | `CUA_SHIM_CODEX_HOME` | `${CLAUDE_PLUGIN_DATA}/codex-home` | where session approvals and config are stored |
 | `CUA_SHIM_SESSION_ID` | Claude Code's session id | key for "allow this session" approvals |
 | `CUA_SHIM_PERSIST` | `session` | `session`, `always` or `none`: how an accepted approval is remembered |
-| `CUA_SHIM_SURFACES` | `computer` | `browser,computer` also enables OpenAI's browser control (untested) |
+| `CUA_SHIM_SURFACES` | `computer` | `browser,computer` adds OpenAI's browser API, but under this shim it lists no browsers: it needs a Codex login in `CODEX_HOME`, and the in-app browser (`iab`) only serves ChatGPT's own Codex threads |
 | `CUA_SHIM_HOST_NOTES` | built in | replacement host notes; `none` disables them |
 | `CUA_SHIM_LOG` | unset | JSONL journal of every frame, for debugging |
 | `CUA_SHIM_PLUGIN_MCP` | newest under `~/.codex/plugins/cache/openai-bundled/unified-computer-use/` | OpenAI's launch recipe to copy |

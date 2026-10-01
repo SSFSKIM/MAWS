@@ -311,3 +311,37 @@ Three of the open questions above are now settled, all from this Claude Code ses
   the handler returns the hook's response and skips `ask()` (`handle` in the elicitation class: "Elicitation resolved
   by hook"); the same order holds on the print-mode path. The hook input carries `mcp_server_name`, `message`, `mode`,
   `url`, `elicitation_id` and `requested_schema`, not the server's `_meta`, so an app filter has to go by `message`.
+
+## 2026-10-01 addendum: the browser surface (`cua.createBrowserTab("iab", …)`)
+
+Prompted by Codex describing its in-app browser control as `cua.createBrowserTab("iab", url, {visible:true})` through
+the same `js` tool. Source: `cua_node` in ChatGPT.app 26.924.22138 and the readable main process
+(`~/codex-app-src/readable/chatgpt-26.924/main-process/main-C5425b_s.js`, "main" below).
+
+- **Same server, other surface.** With `browser` in `CUA_REPL_ENABLED_SURFACES`, the `cua` global gains `getBrowser`,
+  `createBrowserTab`, `getTab`, `listBrowsers` and `listTabs`. They go through `nodeRepl.rpc("browser")` to
+  `@oai/browser-desktop/service` in the trusted worker and never touch Sky (report 03 §1.2).
+- **Discovery is by socket directory.** The service lists `/tmp/codex-browser-use/*.sock` (`BROWSER_USE_BACKEND_PATHS`
+  overrides) and asks each `getInfo` over JSON-RPC 2.0 with a 4-byte length prefix. Backend types are `iab`,
+  `extension` and `cdp`; the installed recipe sets `BROWSER_USE_AVAILABLE_BACKENDS=chrome,iab`. Live, ChatGPT's main
+  process held three sockets there, and two `ChatGPT for Chrome` native-messaging hosts
+  (`~/.codex/plugins/cache/openai-bundled/chrome/latest/extension-host/…`, children of Chrome) held one each.
+- **`iab` is ChatGPT.app's built-in browser panel, one backend per Codex conversation.** Its metadata is
+  `codexSessionId = conversationId` (main:151528), and `createTabForBrowserUse` opens a page in that conversation's
+  panel (main:151551). The service keeps only `iab` backends whose `codexSessionId` equals the session id in the call's
+  turn metadata (`Mee`/`Nee` in `browser-service.mjs`; diagnostic reasons `no-iab-backends`, `no-session-match`). A
+  Claude Code session id never matches, so `iab` is out of this shim's reach by design. Reaching one would mean
+  borrowing a live Codex thread's id and driving that thread's panel.
+- **The sockets have their own peer gate.** Packaged prod, beta and nightly builds load
+  `Resources/native/browser-use-peer-authorization.node` (team 2DC432GLL2; main:18981-19040). It reads the peer's
+  audit token and checks the code-signing identity of the peer, its parent and its grandparent; its strings list
+  `node`, `node_repl`, `codex` and `com.openai.codex*`, and the rejection `untrusted-process-ancestry`. Not exercised.
+- **Live, read-only (`w4-browser-inventory.mjs`, scratch `CODEX_HOME`).** With surfaces `browser,computer` the `js`
+  description gains the browser API. `cua.getState()` returned the app inventory and `browsers: []` with
+  `errors: ["Browsers: Error: Codex auth token is unavailable"]`. That string is in the `node_repl` binary beside
+  `getAuthStatus`, client name `codex-browser-use` and `BROWSER_CONFIG_AUTH_TOKEN`, and `node_repl` had started a Codex
+  app-server against the scratch home (it left `logs_2.sqlite`, `goals_1.sqlite` and `installation_id` there). Reading
+  (inferred): `node_repl` fetches the Codex login token through that app-server and hands it to the browser service,
+  so the browser surface lists nothing until `CODEX_HOME` holds a Codex login.
+- **Not tested:** the same inventory with `CUA_SHIM_CODEX_HOME=~/.codex`, which would show whether the Chrome
+  extension backend accepts this process chain; anything that opens a tab.
