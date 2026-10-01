@@ -179,9 +179,13 @@ export class ClaudeUsageReader {
     try {
       accounts = parseAccounts(JSON.parse(await readFile(join(this.opts.dir, 'accounts.json'), 'utf8')));
     } catch (error) {
-      // a torn write keeps what the last good read said; with nothing before, there is no data yet
-      if (previous?.available) return (this.last = { ...previous, readAt });
-      return (this.last = absent(`ClaudeUsage has no readable accounts.json at ${this.opts.dir}: ${messageOf(error)}`));
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        accounts = []; // an existing directory may have only Codex accounts, as AccountStore.accounts() allows
+      } else {
+        // a torn write keeps what the last good read said; with nothing before, there is no data yet
+        if (previous?.available) return (this.last = { ...previous, readAt });
+        return (this.last = absent(`ClaudeUsage has no readable accounts.json at ${this.opts.dir}: ${messageOf(error)}`));
+      }
     }
 
     let pins: Pick<Read, 'drainTarget' | 'drainTargetIsManual' | 'pins'>;
@@ -227,7 +231,8 @@ export class ClaudeUsageReader {
           try {
             return [parsePins(JSON.parse(await readFile(join(this.opts.dir, name), 'utf8')))];
           } catch (error) {
-            this.log(`${name} unreadable, left out: ${messageOf(error)}`);
+            // Only a file removed since readdir can be left out; a partial model set can invent a common target.
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
             return [];
           }
         }),
