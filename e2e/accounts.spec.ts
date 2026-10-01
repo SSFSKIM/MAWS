@@ -6,8 +6,13 @@
 // fixture: five accounts `1@` to `5@example.test`, drain target `2aca3c4b…` = 3@ (not manual), no account needing
 // reauthentication, the one window at 100 % 4@'s five-hour one; two Codex accounts; the relay's synthetic requests of
 // the last ten minutes. The owner's ClaudeUsage directory is never read, and under MAWS_E2E main answers `/usr/bin/open`
-// without running it, so nothing activates the owner's ClaudeUsage.
+// without running it, so nothing activates the owner's ClaudeUsage. W6 route executor: the fixture has no control token,
+// so the first two tests run without ClaudeUsage's control route, as before it existed; the third adds a token and a
+// stub of the route on a loopback port of this process (MAWS_CLAUDE_USAGE_CONTROL_URL). Under MAWS_E2E main reaches no
+// other port, so the owner's relay is never called.
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
@@ -234,5 +239,124 @@ test('usage: without ClaudeUsage data the pill is a muted dash and the popover s
     await expect(popoverOf(maws.page)).toBeVisible();
   } finally {
     await maws.cleanup();
+  }
+});
+
+// W6 route executor: ClaudeUsage's control route, as a stub of its contract on a loopback port of this process, with a
+// token in this test's own copy of the fixture. It answers the state with routing ready, accepts a route and answers its
+// drain target (writing nothing, so what the popover shows at once comes from that answer), refuses a route to 4@ as at
+// its limit, and toggles the panel; it records every request.
+test('usage: with ClaudeUsage’s control route (a stub), the actions enable, Route asks and posts, and a refusal shows its message', async () => {
+  test.setTimeout(120_000);
+  freshRequests();
+  const dir = join(scratch, 'claude-usage-route');
+  cpSync(usageDir, dir, { recursive: true });
+  cpSync(join(REPO_ROOT, 'test/fixtures/claude-usage/accounts.json'), join(dir, 'accounts.json')); // the first test marks 5@ for reauthentication
+  writeFileSync(join(dir, 'control-token'), 'e2e-control-token\n');
+  const accounts = JSON.parse(readFileSync(join(dir, 'accounts.json'), 'utf8')) as { uuid: string; email: string }[];
+  const uuidOf = (email: string) => accounts.find((a) => a.email === email)!.uuid;
+  const seen: { method: string; path: string; authorization: string | undefined; body: unknown }[] = [];
+  const send = (res: ServerResponse, status: number, body: unknown) => {
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body));
+  };
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    let text = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk: string) => (text += chunk));
+    req.on('end', () => {
+      const body = (text ? JSON.parse(text) : null) as { uuid?: string } | null;
+      seen.push({ method: req.method ?? '', path: req.url ?? '', authorization: req.headers.authorization, body });
+      if (req.headers.authorization !== 'Bearer e2e-control-token') return send(res, 401, { ok: false, reason: 'unauthorized', message: 'wrong token' });
+      const key = `${req.method} ${req.url}`;
+      if (key === 'GET /claudeusage/state') {
+        return send(res, 200, {
+          version: 1,
+          updatedAt: new Date().toISOString(),
+          routing: { enabled: true, ready: true, port: 8641, drainTarget: uuidOf('3@example.test'), drainTargetIsManual: false },
+          accounts: accounts.map((a) => ({
+            uuid: a.uuid,
+            email: a.email,
+            status: 'ready',
+            statusMessage: 'Ready',
+            isActive: false,
+            isRoutingHere: a.email === '3@example.test',
+            canRoute: a.email !== '3@example.test' && a.email !== '2@example.test', // ClaudeUsage's own word: 2@ may not take requests
+            needsReconnect: false,
+            canReconnect: false,
+            canRemove: true,
+          })),
+          codex: [],
+        });
+      }
+      if (key === 'POST /claudeusage/route') {
+        if (body?.uuid === uuidOf('4@example.test')) return send(res, 409, { ok: false, reason: 'unusable', message: '4@example.test is at its limit until its five-hour window resets' });
+        return send(res, 200, { ok: true, drainTarget: body?.uuid, drainTargetIsManual: true });
+      }
+      if (key === 'POST /claudeusage/panel') return send(res, 200, { ok: true, shown: true });
+      send(res, 404, { error: 'not_found' });
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const maws = await launchMaws({ env: { ...ENV(dir), MAWS_CLAUDE_USAGE_CONTROL_URL: url } });
+  const { page } = maws;
+  try {
+    await pillOf(page).click();
+    const popover = popoverOf(page);
+    await expect(popover).toBeVisible();
+
+    // The actions enable once main has the state, under no hint, each account's as ClaudeUsage says: not 2@'s Route.
+    for (const [name, count] of [['Route requests here', 4], ['Remove account…', 5], ['Add account…', 1]] as const) {
+      await expect(popover.getByRole('button', { name, exact: true })).toHaveCount(count);
+    }
+    for (const email of ['1@example.test', '4@example.test', '5@example.test']) await expect(card(page, email).getByRole('button', { name: 'Route requests here' })).toBeEnabled();
+    await expect(card(page, '2@example.test').getByRole('button', { name: 'Route requests here' })).toBeDisabled();
+    for (const button of await popover.getByRole('button', { name: 'Remove account…', exact: true }).all()) await expect(button).toBeEnabled();
+    await expect(popover.getByRole('button', { name: 'Add account…', exact: true })).toBeEnabled();
+    await expect(popover.locator('[data-controls-hint]')).toHaveCount(0);
+    expect(seen.length).toBeGreaterThan(0);
+    for (const s of seen) expect([s.method, s.path, s.authorization]).toEqual(['GET', '/claudeusage/state', 'Bearer e2e-control-token']);
+
+    // Route asks first, with the panel's warning; confirmed, it posts, and the popover is back with 1@ routing.
+    await card(page, '1@example.test').getByRole('button', { name: 'Route requests here' }).click();
+    const sheet = page.getByRole('dialog', { name: 'Route requests to 1@example.test?' });
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText('Existing sessions move at their next request, which rebuilds their prompt cache.');
+    expect(seen.some((s) => s.method === 'POST')).toBe(false);
+    await test.info().attach('usage-route-confirm', { body: await page.screenshot(), contentType: 'image/png' });
+    await sheet.getByRole('button', { name: 'Route requests here' }).click();
+    await expect(sheet).toBeHidden();
+    await expect(popover).toBeVisible();
+    await expect(card(page, '1@example.test')).toContainText('Routing here · chosen in ClaudeUsage');
+    await expect(card(page, '3@example.test')).not.toContainText('Routing here');
+    expect(seen.filter((s) => s.method === 'POST')).toEqual([{ method: 'POST', path: '/claudeusage/route', authorization: 'Bearer e2e-control-token', body: { uuid: uuidOf('1@example.test') } }]);
+    await test.info().attach('usage-routed', { body: await page.screenshot(), contentType: 'image/png' });
+
+    // ClaudeUsage writes its pins: C7's reader catches up with the same routing account.
+    const pinsFile = join(dir, 'pins.json');
+    const pins = JSON.parse(readFileSync(pinsFile, 'utf8')) as Record<string, unknown>;
+    writeFileSync(pinsFile, JSON.stringify({ ...pins, drainTarget: uuidOf('1@example.test'), drainTargetIsManual: true }, null, 2));
+    await page.waitForTimeout(1_500); // past the reader's debounce
+    await expect(card(page, '1@example.test')).toContainText('Routing here · chosen in ClaudeUsage');
+
+    // A refusal: the popover's notice is ClaudeUsage's message, and 1@ still routes.
+    await card(page, '4@example.test').getByRole('button', { name: 'Route requests here' }).click();
+    await page.getByRole('dialog', { name: 'Route requests to 4@example.test?' }).getByRole('button', { name: 'Route requests here' }).click();
+    await expect(popover).toBeVisible();
+    await expect(popover.locator('[data-controls-hint]')).toHaveText('4@example.test is at its limit until its five-hour window resets');
+    await expect(card(page, '1@example.test')).toContainText('Routing here');
+    await test.info().attach('usage-refused', { body: await page.screenshot(), contentType: 'image/png' });
+
+    // Open ClaudeUsage opens ClaudeUsage's own panel through the route: no activation and no instruction.
+    await popover.getByRole('button', { name: 'Open ClaudeUsage ↗' }).click();
+    await expect.poll(() => seen.filter((s) => s.path === '/claudeusage/panel').length).toBe(1);
+    await expect(popover.getByRole('status')).toHaveText('Waiting for ClaudeUsage…');
+    await expect(page.getByText('ClaudeUsage is in the menu bar · click its icon', { exact: true })).toHaveCount(0);
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

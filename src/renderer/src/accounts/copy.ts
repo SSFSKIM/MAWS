@@ -41,7 +41,8 @@ export const RELAY = {
 export const CLAUDE_USAGE_README_URL = 'https://github.com/SSFSKIM/claude-usage-menubar#readme';
 
 // W6 start: the top bar's usage pill and its popover, a copy of ClaudeUsage's panel (PanelView.swift, E1). The four
-// account actions render disabled with one hint until ClaudeUsage exposes its control route (`usage/controls.ts`).
+// account actions run through ClaudeUsage's control route, and render disabled under one hint while it does not answer
+// (`usage/controls.ts`).
 export const USAGE = {
   pill: (percent: number, limit: string, account: string) => `Usage · ${limit} ${percent}% · ${account}`,
   pillNoReading: (account: string) => `Usage · no readings yet for ${account}`,
@@ -61,6 +62,20 @@ export const USAGE = {
   codexLimits: "Limits show in ClaudeUsage's own panel",
   routingToggle: 'Route Claude Code through this app',
   routingToggleHint: "ClaudeUsage's own panel changes this",
+  // W6 route executor start: the actions through ClaudeUsage's control route (`usage/controls.ts`)
+  controlsBadToken: "ClaudeUsage's control token could not be read",
+  controlsStarting: 'ClaudeUsage is still starting',
+  routeNotReady: "Route requests here needs ClaudeUsage's “Route Claude Code through this app”, which its own panel turns on",
+  routeConfirm: { title: (email: string) => `Route requests to ${email}?`, body: 'Existing sessions move at their next request, which rebuilds their prompt cache.' },
+  // ClaudeUsage's own confirm (PanelView.swift `confirmingRemoval`), naming ClaudeUsage where its panel says "this app"
+  removeConfirm: {
+    title: (email: string) => `Remove ${email} from this Mac?`,
+    body: "Removes ClaudeUsage's saved sign-in and stops routing new requests to this account. Your Claude subscription and other machines are unchanged. To add it again, sign in again.",
+    label: 'Remove account',
+  },
+  signInAdd: "ClaudeUsage's sign-in sheet opens to add an account; finish signing in there",
+  signInReconnect: (email: string) => `ClaudeUsage's sign-in sheet opens to reconnect ${email}; finish signing in there`,
+  // W6 route executor end
 };
 
 // ClaudeUsage's serving chip (PanelView.swift `ServingChip`): what the account served in the relay's last ten minutes.

@@ -1,6 +1,6 @@
 // The usage popover (W6, E1; charter §5.2 and D-17 as amended 2026-10-01): a copy of ClaudeUsage's panel
 // (PanelView.swift, top to bottom) over C7's one read of its files: the header with the newest reading's age, the note,
-// the one hint for the actions ClaudeUsage does not expose yet, every account in its grid (AccountCard, the Accounts
+// the one hint for the actions or their notice (`controls.ts`), every account in its grid (AccountCard, the Accounts
 // tab's view model) with its saved sessions, what it served in the relay's last ten minutes, its limit bars and resets
 // and its actions, the add row, the Codex accounts, and the footer: the routing toggle's state, the relay's line and
 // its health over the last ten minutes, Refresh and the hand-off to ClaudeUsage's own panel. The geometry is
@@ -59,16 +59,16 @@ export function UsagePanel() {
   const actionsOf = (row: AccountRow) => (
     <>
       {row.state === 'needs_reauth' && (
-        <button type="button" className={`${BUTTON} ml-1.5`} disabled={!controls.reconnect.available} aria-describedby={describedBy} onClick={() => controls.reconnect.run({ uuid: row.uuid, email: row.email })}>
+        <button type="button" className={`${BUTTON} ml-1.5`} disabled={!controls.reconnect.available({ uuid: row.uuid, email: row.email })} aria-describedby={describedBy} onClick={() => controls.reconnect.run({ uuid: row.uuid, email: row.email })}>
           {USAGE.reconnect}
         </button>
       )}
       {row.role !== 'routing' && row.state !== 'needs_reauth' && (
-        <button type="button" className={ACTION} disabled={!controls.route.available} aria-describedby={describedBy} onClick={() => controls.route.run({ uuid: row.uuid })}>
+        <button type="button" className={ACTION} disabled={!controls.route.available({ uuid: row.uuid })} aria-describedby={describedBy} onClick={() => controls.route.run({ uuid: row.uuid })}>
           {USAGE.route}
         </button>
       )}
-      <button type="button" className={ACTION} disabled={!controls.remove.available} aria-describedby={describedBy} onClick={() => controls.remove.run({ uuid: row.uuid, email: row.email })}>
+      <button type="button" className={ACTION} disabled={!controls.remove.available({ uuid: row.uuid, email: row.email })} aria-describedby={describedBy} onClick={() => controls.remove.run({ uuid: row.uuid, email: row.email })}>
         {USAGE.remove}
       </button>
     </>
@@ -127,7 +127,7 @@ export function UsagePanel() {
 
       {available && (
         <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-ui-sm">
-          <button type="button" className={BUTTON} disabled={!controls.add.available} aria-describedby={describedBy} onClick={() => controls.add.run({ email: null })}>
+          <button type="button" className={BUTTON} disabled={!controls.add.available({ email: null })} aria-describedby={describedBy} onClick={() => controls.add.run({ email: null })}>
             {USAGE.add}
           </button>
           <span className="text-fg-muted">{USAGE.addHint}</span>

@@ -53,3 +53,30 @@ describe('settings.engineCustody and settings.engineApplied', () => {
   });
 });
 // C12 end
+
+// W6 route executor: ClaudeUsage's control API through main
+describe('settings.usageControls and settings.usageAction', () => {
+  it('are main’s', () => {
+    expect(commands['settings.usageControls'].owner).toBe('main');
+    expect(commands['settings.usageAction'].owner).toBe('main');
+  });
+  it('take each action with the fields it needs and nothing else', () => {
+    const input = commands['settings.usageAction'].input;
+    for (const ok of [{ action: 'route', uuid: 'u' }, { action: 'add', email: null }, { action: 'add', email: 'a@b' }, { action: 'add' }, { action: 'reconnect', uuid: 'u' }, { action: 'remove', uuid: 'u', confirm: true }, { action: 'remove', uuid: 'u' }, { action: 'panel' }]) {
+      expect(input.safeParse(ok).success, JSON.stringify(ok)).toBe(true);
+    }
+    for (const bad of [{ action: 'route' }, { action: 'route', uuid: '' }, { action: 'switch', uuid: 'u' }, { action: 'panel', uuid: 'u' }, { action: 'add', email: '' }]) {
+      expect(input.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+  it('answer availability with a reason, and an action’s result or refusal', () => {
+    const output = commands['settings.usageControls'].output;
+    expect(output.safeParse({ available: false, reason: 'no_route', state: null }).success).toBe(true);
+    expect(output.safeParse({ available: false, reason: 'gone', state: null }).success).toBe(false);
+    const result = commands['settings.usageAction'].output;
+    expect(result.safeParse({ ok: true, drainTarget: 'u', drainTargetIsManual: true, shown: null }).success).toBe(true);
+    expect(result.safeParse({ ok: true, drainTarget: 'u' }).success).toBe(false);
+    expect(result.safeParse({ ok: false, reason: 'not_ready', message: 'm' }).success).toBe(true);
+    expect(result.safeParse({ ok: false }).success).toBe(false);
+  });
+});

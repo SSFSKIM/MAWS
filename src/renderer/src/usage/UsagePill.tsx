@@ -4,18 +4,15 @@
 // data. A click opens the popover, the copy of ClaudeUsage's panel (`UsagePanel`); Esc or a click outside closes it.
 // The open state is a store so the menu's and palette's Usage action can open it too. Tokens only.
 import { Popover } from 'radix-ui';
-import { create } from 'zustand';
 import { USAGE } from '../accounts/copy';
 import { SEVERITY_BG } from '../accounts/LimitRow';
 import { accountsViewModel, usagePill } from '../accounts/model';
 import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
 import { useUsage } from '../stores/usage';
+import { useUsagePopover } from './popover';
 import { UsagePanel } from './UsagePanel';
 
-export const useUsagePopover = create<{ open: boolean; setOpen(open: boolean): void }>()((set) => ({
-  open: false,
-  setOpen: (open) => set({ open }),
-}));
+export { useUsagePopover } from './popover'; // W6 route executor: its own module, which the account actions reopen
 
 const CONTENT =
   'z-50 max-h-[min(700px,var(--radix-popover-content-available-height))] overflow-y-auto rounded-md border border-border-strong bg-bg-overlay shadow-float outline-none';

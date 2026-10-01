@@ -1,0 +1,309 @@
+// ClaudeUsage's control API client (W6 route executor) against a stub HTTP server on an ephemeral loopback port and a
+// token file in a temporary directory: the state and its absence, every action, each refusal, a wrong token and a
+// silent server. Nothing here reads ClaudeUsage's real directory or reaches its relay.
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { AddressInfo } from 'node:net';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { baseUrlFrom, ClaudeUsageControl, parseState, TOKEN_FILE } from './claude-usage-control';
+
+const TOKEN = 'c0ffee-token';
+const ROUTED = '477e393c-5c1a-4413-a3e6-7f5d1ed72cc3';
+const STATE = {
+  version: 1,
+  updatedAt: '2026-10-01T12:00:00Z',
+  routing: { enabled: true, ready: true, port: 8641, drainTarget: '2aca3c4b-1e77-4091-908b-d183f6b0f092', drainTargetIsManual: false, futureField: 1 },
+  accounts: [
+    { uuid: ROUTED, email: '1@example.test', status: 'ready', statusMessage: 'Ready', isActive: false, isRoutingHere: false, canRoute: true, needsReconnect: false, canReconnect: false, canRemove: true },
+    { uuid: '2aca3c4b-1e77-4091-908b-d183f6b0f092', email: '3@example.test', status: 'ready', isRoutingHere: true, canRoute: false, canReconnect: false, canRemove: true, plan: 'Max' },
+  ],
+  codex: [{ id: 'c0de0001', label: '6@example.test', isDrainTarget: true }],
+};
+
+interface Seen {
+  method: string;
+  path: string;
+  authorization: string | undefined;
+  body: unknown;
+}
+type Handler = (seen: Seen, res: ServerResponse) => void;
+
+let dir: string;
+let server: Server;
+let port: number;
+let seen: Seen[];
+let handler: Handler;
+
+const send = (res: ServerResponse, status: number, body?: unknown) => {
+  res.writeHead(status, { 'content-type': 'application/json' });
+  res.end(body === undefined ? '' : JSON.stringify(body));
+};
+
+// The contract as ClaudeUsage's `maws-control-route` branch built it: the token checked before the path, a 404 for an
+// unknown path, a 405 for a wrong method, and a refusal for each 409 it names.
+const contract: Handler = (req, res) => {
+  if (req.authorization !== `Bearer ${TOKEN}`) return send(res, 401, { ok: false, reason: 'unauthorized', message: 'wrong token' });
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const key = `${req.method} ${req.path}`;
+  if (key === 'GET /claudeusage/state') return send(res, 200, STATE);
+  if (key === 'POST /claudeusage/route') {
+    if (body.uuid === 'not-ready') return send(res, 409, { ok: false, reason: 'not_ready', message: 'Routing is off in ClaudeUsage' });
+    if (body.uuid === 'nobody') return send(res, 409, { ok: false, reason: 'unknown_account', message: 'ClaudeUsage has no such account' });
+    if (body.uuid === 'spent') return send(res, 409, { ok: false, reason: 'unusable', message: '4@example.test is at its limit' });
+    if (body.uuid === 'switching') return send(res, 409, { ok: false, reason: 'busy', message: 'ClaudeUsage is switching accounts' });
+    return send(res, 200, { ok: true, drainTarget: body.uuid, drainTargetIsManual: true });
+  }
+  if (key === 'POST /claudeusage/accounts/add') return send(res, 202, { ok: true });
+  if (key === 'POST /claudeusage/accounts/reconnect') {
+    if (body.uuid === ROUTED) return send(res, 409, { ok: false, reason: 'not_needed', message: '1@example.test does not need reconnecting' });
+    return send(res, 202, { ok: true });
+  }
+  if (key === 'POST /claudeusage/accounts/remove') {
+    if (body.confirm !== true) return send(res, 409, { ok: false, reason: 'confirm_required', message: 'Removing an account needs confirm' });
+    return send(res, 200, { ok: true });
+  }
+  if (key === 'POST /claudeusage/panel') return send(res, 200, { ok: true, shown: true });
+  send(res, 404, { error: 'not_found' });
+};
+
+beforeEach(async () => {
+  dir = mkdtempSync(join(tmpdir(), 'maws-usage-control-'));
+  writeFileSync(join(dir, TOKEN_FILE), `${TOKEN}\n`);
+  seen = [];
+  handler = contract;
+  server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    let text = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk: string) => (text += chunk));
+    req.on('end', () => {
+      const entry = { method: req.method ?? '', path: req.url ?? '', authorization: req.headers.authorization, body: text ? (JSON.parse(text) as unknown) : null };
+      seen.push(entry);
+      handler(entry, res);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  port = (server.address() as AddressInfo).port;
+});
+afterEach(async () => {
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// Through the port, as main reaches ClaudeUsage: no base URL, the port gateway.json names.
+const client = (options: Partial<ConstructorParameters<typeof ClaudeUsageControl>[0]> = {}) =>
+  new ClaudeUsageControl({ dir, port: async () => port, log: () => {}, ...options });
+
+describe('settings.usageControls', () => {
+  it('answers the state through gateway.json’s port with the token as a bearer, read leniently', async () => {
+    const answer = await client().controls();
+    expect(answer).toEqual({
+      available: true,
+      reason: null,
+      state: {
+        updatedAt: '2026-10-01T12:00:00Z',
+        routing: { enabled: true, ready: true, port: 8641, drainTarget: '2aca3c4b-1e77-4091-908b-d183f6b0f092', drainTargetIsManual: false },
+        accounts: [
+          { uuid: ROUTED, email: '1@example.test', status: 'ready', isRoutingHere: false, canRoute: true, canReconnect: false, canRemove: true },
+          { uuid: '2aca3c4b-1e77-4091-908b-d183f6b0f092', email: '3@example.test', status: 'ready', isRoutingHere: true, canRoute: false, canReconnect: false, canRemove: true },
+        ],
+        codex: [{ id: 'c0de0001', label: '6@example.test', isDrainTarget: true }],
+      },
+    });
+    expect(seen).toEqual([{ method: 'GET', path: '/claudeusage/state', authorization: `Bearer ${TOKEN}`, body: null }]);
+  });
+
+  it('reaches a base URL in place of the port when one is named (MAWS_CLAUDE_USAGE_CONTROL_URL)', async () => {
+    const answer = await client({ port: async () => null, baseUrl: `http://127.0.0.1:${port}/` }).controls();
+    expect(answer.available).toBe(true);
+    expect(seen.map((s) => s.path)).toEqual(['/claudeusage/state']);
+  });
+
+  it('takes the base URL from MAWS_CLAUDE_USAGE_CONTROL_URL under the end-to-end harness only', () => {
+    const url = 'http://127.0.0.1:8650';
+    expect(baseUrlFrom({ MAWS_CLAUDE_USAGE_CONTROL_URL: url })).toBeNull();
+    expect(baseUrlFrom({ MAWS_E2E: 'true', MAWS_CLAUDE_USAGE_CONTROL_URL: url })).toBeNull();
+    expect(baseUrlFrom({ MAWS_E2E: '1', MAWS_CLAUDE_USAGE_CONTROL_URL: url })).toBe(url);
+    expect(baseUrlFrom({ MAWS_E2E: '1', MAWS_CLAUDE_USAGE_CONTROL_URL: '' })).toBeNull();
+    expect(baseUrlFrom({ MAWS_E2E: '1' })).toBeNull();
+  });
+
+  it('sends the token only over plain http to a loopback host: any other base URL is no_route and nothing is sent', async () => {
+    const fetched = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('not sent in a test'));
+    try {
+      const refused = ['https://127.0.0.1:8650', 'http://example.test:8650', 'http://127.0.0.1.example.test:8650', 'http://localhost@example.test:8650', 'http://10.0.0.1:8650', 'http://[::2]:8650', 'file:///tmp/control', 'ws://127.0.0.1:8650', 'not a url'];
+      for (const baseUrl of refused) {
+        expect(await client({ baseUrl }).controls()).toEqual({ available: false, reason: 'no_route', state: null });
+        expect(await client({ baseUrl }).act({ action: 'route', uuid: ROUTED })).toMatchObject({ ok: false, reason: 'no_route' });
+      }
+      expect(fetched).not.toHaveBeenCalled();
+      for (const baseUrl of ['http://127.0.0.1:8650/', 'http://localhost:8650', 'http://[::1]:8650/relay/']) await client({ baseUrl }).controls();
+      expect(fetched.mock.calls.map(([url]) => String(url))).toEqual(['http://127.0.0.1:8650/claudeusage/state', 'http://localhost:8650/claudeusage/state', 'http://[::1]:8650/relay/claudeusage/state']);
+    } finally {
+      fetched.mockRestore();
+    }
+  });
+
+  it('reads the token on every use', async () => {
+    const control = client();
+    await control.controls();
+    writeFileSync(join(dir, TOKEN_FILE), 'rotated');
+    expect(await control.controls()).toEqual({ available: false, reason: 'bad_token', state: null });
+    expect(seen.map((s) => s.authorization)).toEqual([`Bearer ${TOKEN}`, 'Bearer rotated']);
+  });
+
+  it('checks one at a time; a call while a check runs gets a fresh check after it, one shared by every such call', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let updatedAt = 'before';
+    handler = (_req, res) => {
+      const body = { ...STATE, updatedAt }; // the state as it was when the request arrived
+      if (seen.length === 1) void held.then(() => send(res, 200, body));
+      else send(res, 200, body);
+    };
+    const control = client();
+    const first = control.controls();
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    updatedAt = 'after'; // the usage change that asks again came after the running check began
+    const second = control.controls();
+    const third = control.controls();
+    expect(third).toBe(second);
+    expect(seen).toHaveLength(1);
+    release();
+    expect((await Promise.all([first, second, third])).map((a) => a.state?.updatedAt)).toEqual(['before', 'after', 'after']);
+    expect(seen).toHaveLength(2);
+    expect((await control.controls()).state?.updatedAt).toBe('after'); // and alone again, one check
+    expect(seen).toHaveLength(3);
+  });
+
+  it('is no_route without a token file, without a port, on a 404 and on a refused connection; nothing is sent without a token', async () => {
+    rmSync(join(dir, TOKEN_FILE));
+    expect(await client().controls()).toEqual({ available: false, reason: 'no_route', state: null });
+    expect(seen).toEqual([]);
+    writeFileSync(join(dir, TOKEN_FILE), TOKEN);
+    expect(await client({ port: async () => null }).controls()).toEqual({ available: false, reason: 'no_route', state: null });
+    expect(seen).toEqual([]);
+    handler = (_req, res) => send(res, 404, { type: 'error', error: { type: 'not_found_error' } });
+    expect((await client().controls()).reason).toBe('no_route');
+    const closed = port;
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    expect(await client({ port: async () => closed }).controls()).toEqual({ available: false, reason: 'no_route', state: null });
+    server = createServer(); // afterEach closes a server
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  });
+
+  it('is bad_token on a 401, and for a token file that is empty or not a header value', async () => {
+    writeFileSync(join(dir, TOKEN_FILE), 'wrong');
+    expect(await client().controls()).toEqual({ available: false, reason: 'bad_token', state: null });
+    writeFileSync(join(dir, TOKEN_FILE), '\n');
+    expect((await client().controls()).reason).toBe('bad_token');
+    writeFileSync(join(dir, TOKEN_FILE), 'two words');
+    expect((await client().controls()).reason).toBe('bad_token');
+    expect(seen).toHaveLength(1); // only the first was sent
+  });
+
+  it('is timeout when the server does not answer in time', async () => {
+    handler = () => {}; // never answers
+    const started = Date.now();
+    expect(await client({ stateTimeoutMs: 200 }).controls()).toEqual({ available: false, reason: 'timeout', state: null });
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it('is starting on a 503: the relay answers before ClaudeUsage’s app is wired to it', async () => {
+    handler = (_req, res) => send(res, 503, { ok: false, reason: 'unavailable' });
+    expect(await client().controls()).toEqual({ available: false, reason: 'starting', state: null });
+  });
+
+  it('is failed on another status or an answer that is not the state', async () => {
+    handler = (_req, res) => send(res, 500, { ok: false });
+    expect((await client().controls()).reason).toBe('failed');
+    handler = (_req, res) => send(res, 405, { ok: false });
+    expect((await client().controls()).reason).toBe('failed');
+    handler = (_req, res) => send(res, 200, { hello: 'world' });
+    expect((await client().controls()).reason).toBe('failed');
+    handler = (_req, res) => {
+      res.writeHead(200);
+      res.end('not json');
+    };
+    expect((await client().controls()).reason).toBe('failed');
+  });
+});
+
+describe('settings.usageAction', () => {
+  it('posts each action with its body and answers ClaudeUsage’s result', async () => {
+    const control = client();
+    const done = { ok: true, drainTarget: null, drainTargetIsManual: false, shown: null };
+    expect(await control.act({ action: 'route', uuid: ROUTED })).toEqual({ ok: true, drainTarget: ROUTED, drainTargetIsManual: true, shown: null });
+    expect(await control.act({ action: 'add', email: null })).toEqual(done);
+    expect(await control.act({ action: 'add', email: 'new@example.test' })).toEqual(done);
+    expect(await control.act({ action: 'add' })).toEqual(done);
+    expect(await control.act({ action: 'reconnect', uuid: 'needs-reauth' })).toEqual(done);
+    expect(await control.act({ action: 'remove', uuid: ROUTED, confirm: true })).toEqual(done);
+    expect(await control.act({ action: 'panel' })).toEqual({ ...done, shown: true });
+    expect(seen.map(({ method, path, body }) => [method, path, body])).toEqual([
+      ['POST', '/claudeusage/route', { uuid: ROUTED }],
+      ['POST', '/claudeusage/accounts/add', { email: null }],
+      ['POST', '/claudeusage/accounts/add', { email: 'new@example.test' }],
+      ['POST', '/claudeusage/accounts/add', { email: null }],
+      ['POST', '/claudeusage/accounts/reconnect', { uuid: 'needs-reauth' }],
+      ['POST', '/claudeusage/accounts/remove', { uuid: ROUTED, confirm: true }],
+      ['POST', '/claudeusage/panel', {}],
+    ]);
+    for (const s of seen) expect(s.authorization).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it('answers each refusal with ClaudeUsage’s own reason and message', async () => {
+    const control = client();
+    expect(await control.act({ action: 'route', uuid: 'not-ready' })).toEqual({ ok: false, reason: 'not_ready', message: 'Routing is off in ClaudeUsage' });
+    expect(await control.act({ action: 'route', uuid: 'nobody' })).toEqual({ ok: false, reason: 'unknown_account', message: 'ClaudeUsage has no such account' });
+    expect(await control.act({ action: 'route', uuid: 'spent' })).toEqual({ ok: false, reason: 'unusable', message: '4@example.test is at its limit' });
+    expect(await control.act({ action: 'route', uuid: 'switching' })).toEqual({ ok: false, reason: 'busy', message: 'ClaudeUsage is switching accounts' });
+    expect(await control.act({ action: 'reconnect', uuid: ROUTED })).toEqual({ ok: false, reason: 'not_needed', message: '1@example.test does not need reconnecting' });
+    expect(await control.act({ action: 'remove', uuid: ROUTED })).toEqual({ ok: false, reason: 'confirm_required', message: 'Removing an account needs confirm' });
+    handler = (_req, res) => send(res, 409, 'refused');
+    expect(await control.act({ action: 'route', uuid: ROUTED })).toEqual({ ok: false, reason: 'refused', message: 'ClaudeUsage refused this (refused)' });
+  });
+
+  it('answers a route’s drain target as ClaudeUsage named it, else the account asked for, manual unless it says otherwise', async () => {
+    handler = (_req, res) => send(res, 200, { ok: true });
+    expect(await client().act({ action: 'route', uuid: ROUTED })).toEqual({ ok: true, drainTarget: ROUTED, drainTargetIsManual: true, shown: null });
+    handler = (_req, res) => send(res, 200, { ok: true, drainTarget: 'other', drainTargetIsManual: false });
+    expect(await client().act({ action: 'route', uuid: ROUTED })).toEqual({ ok: true, drainTarget: 'other', drainTargetIsManual: false, shown: null });
+    handler = (_req, res) => send(res, 200, { ok: true, shown: false });
+    expect(await client().act({ action: 'panel' })).toMatchObject({ ok: true, shown: false });
+  });
+
+  it('answers the reason, not a throw, when ClaudeUsage is not reached', async () => {
+    writeFileSync(join(dir, TOKEN_FILE), 'wrong');
+    expect(await client().act({ action: 'route', uuid: ROUTED })).toMatchObject({ ok: false, reason: 'bad_token' });
+    rmSync(join(dir, TOKEN_FILE));
+    expect(await client().act({ action: 'panel' })).toMatchObject({ ok: false, reason: 'no_route' });
+    writeFileSync(join(dir, TOKEN_FILE), TOKEN);
+    handler = (_req, res) => send(res, 404);
+    expect(await client().act({ action: 'add', email: null })).toMatchObject({ ok: false, reason: 'no_route' });
+    handler = (_req, res) => send(res, 503);
+    expect(await client().act({ action: 'add', email: null })).toEqual({ ok: false, reason: 'starting', message: 'ClaudeUsage is still starting' });
+    handler = (_req, res) => send(res, 400, { ok: false, reason: 'bad_request' });
+    expect(await client().act({ action: 'add', email: null })).toEqual({ ok: false, reason: 'failed', message: "ClaudeUsage's control route failed (HTTP 400)" });
+    handler = () => {};
+    expect(await client({ actionTimeoutMs: 200 }).act({ action: 'route', uuid: ROUTED })).toMatchObject({ ok: false, reason: 'timeout' });
+  });
+});
+
+describe('parseState', () => {
+  it('needs the version, the routing object and the accounts list; the rest defaults', () => {
+    expect(parseState(null)).toBeNull();
+    expect(parseState({ routing: {}, accounts: [] })).toBeNull();
+    expect(parseState({ version: 1, accounts: [] })).toBeNull();
+    expect(parseState({ version: 1, routing: {}, accounts: {} })).toBeNull();
+    expect(parseState({ version: 2, routing: {}, accounts: [{ email: 'no-uuid' }, 7, { uuid: 'u' }] })).toEqual({
+      updatedAt: null,
+      routing: { enabled: false, ready: false, port: null, drainTarget: null, drainTargetIsManual: false },
+      accounts: [{ uuid: 'u', email: '', status: '', isRoutingHere: false, canRoute: null, canReconnect: null, canRemove: null }],
+      codex: [],
+    });
+  });
+});

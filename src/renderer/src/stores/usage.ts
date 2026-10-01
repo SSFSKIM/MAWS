@@ -31,7 +31,24 @@ export interface UsageState {
   applySnapshot(snapshot: UsageSnapshot, pins?: 'replace' | 'merge'): void;
   setDirect(appSessionId: AppSessionId, reading: DirectReading | null): void;
   // C7 end
+  // W6 route executor start: a Route ClaudeUsage answered, laid over every snapshot until C7's reader catches up
+  routed: HeldRoute | null;
+  applyRoute(drainTarget: string, drainTargetIsManual: boolean): void;
+  // W6 route executor end
 }
+
+// W6 route executor start
+// ClaudeUsage answers a Route before its relay rewrites pins.json, and every snapshot until then (an event for an
+// unrelated file, a reply) still names the old drain target. The answered one is laid over each until a snapshot names
+// it or no longer lists it, another Route replaces it, or ROUTE_HOLD_MS pass, after which the reader's word stands even if it disagrees.
+export const ROUTE_HOLD_MS = 30_000;
+
+export interface HeldRoute {
+  drainTarget: string;
+  drainTargetIsManual: boolean;
+  until: number; // Date.now() past which a snapshot is taken as it is
+}
+// W6 route executor end
 
 // C7 start
 export interface DirectReading {
@@ -46,15 +63,30 @@ export function createUsageStore() {
     snapshot: null,
     pinsFor: {},
     direct: new Map(),
-    applySnapshot(snapshot, pins = 'replace') {
+    routed: null, // W6 route executor
+    applySnapshot(read, pins = 'replace') {
+      // W6 route executor start: the held Route, while the reader has not named it
+      const held = get().routed;
+      const gone = read.available && !read.accounts.some((a) => a.uuid === held?.drainTarget); // removed before the reader named it
+      const routed = held && read.drainTarget !== held.drainTarget && Date.now() < held.until && !gone ? held : null;
+      const snapshot = routed && read.available ? { ...read, drainTarget: routed.drainTarget, drainTargetIsManual: routed.drainTargetIsManual } : read;
+      // W6 route executor end
       const drain = snapshot.available ? snapshot.accounts.find((a) => a.uuid === snapshot.drainTarget) : undefined;
       set({
         snapshot,
         windows: drain?.windows ?? null,
         updatedAt: snapshot.readAt,
         pinsFor: pins === 'replace' ? snapshot.pinsFor : { ...get().pinsFor, ...snapshot.pinsFor },
+        routed, // W6 route executor
       });
     },
+    // W6 route executor start
+    applyRoute(drainTarget, drainTargetIsManual) {
+      set({ routed: { drainTarget, drainTargetIsManual, until: Date.now() + ROUTE_HOLD_MS } });
+      const { snapshot } = get();
+      if (snapshot) get().applySnapshot(snapshot, 'merge');
+    },
+    // W6 route executor end
     setDirect(appSessionId, reading) {
       const direct = new Map(get().direct);
       if (reading) direct.set(appSessionId, reading);
