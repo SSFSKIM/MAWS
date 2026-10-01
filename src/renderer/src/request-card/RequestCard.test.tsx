@@ -90,7 +90,7 @@ const unflaggedRead = syntheticRequest('flagged-read', (r) => delete r.requires_
 const reapply = fixtureRequest('pass2', 'grant-reapply-start', 30);
 const question = fixtureRequest('pass1', 'question-roundtrip', 137);
 const skippedQuestion = fixtureRequest('pass3', 'question-deny', 108); // the probe's question skipped by a plain deny
-// question-roundtrip's form with its previews dropped: its single-select pick then moves on by itself
+// question-roundtrip's form with its previews dropped: picks must still wait for Next
 const withoutPreviews = { ...question, questions: (question as Extract<RequestEvent, { kind: 'question.requested' }>).questions.map((q) => ({ ...q, options: q.options.map((o) => ({ ...o, preview: null })) })) } as RequestEvent;
 const elicitation = fixtureRequest('pass2', 'dialogs', 41);
 const plan: RequestEvent = { ...permission(), kind: 'plan.requested', plan: '# Plan\n\n1. Split the parser\n2. Test it', input: {} } as never;
@@ -264,15 +264,21 @@ describe('request card placements and delivery states', () => {
     await waitFor(() => expect(screen.getByText('Answered · Submitted')).toBeTruthy());
   });
 
-  it('a single-select pick moves on by itself; the pager goes back and forward over the questions seen', async () => {
-    mount(withoutPreviews, 'inline');
+  it.each(['inline', 'docked', 'card'] as const)('a single-select pick in %s waits for Next and can be changed, with the pager retaining the answer', async (placement) => {
+    mount(withoutPreviews, placement);
     const user = userEvent.setup();
     expect((screen.getByRole('button', { name: 'Show next question' }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(screen.getByRole('radio', { name: 'Blue' }));
-    await waitFor(() => expect(screen.getByText('2 of 2')).toBeTruthy());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 250))); // beyond the former auto-advance delay
+    expect(screen.getByText('1 of 2')).toBeTruthy();
+    await user.click(screen.getByRole('radio', { name: 'Red' }));
+    expect(screen.getByRole('radio', { name: 'Red' }).getAttribute('aria-checked')).toBe('true');
+    expect(answers()).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByText('2 of 2')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Show previous question' }));
     expect(screen.getByText('1 of 2')).toBeTruthy();
-    expect(screen.getByRole('radio', { name: 'Blue' }).getAttribute('aria-checked')).toBe('true'); // the pick is kept
+    expect(screen.getByRole('radio', { name: 'Red' }).getAttribute('aria-checked')).toBe('true'); // the changed pick is kept
     await user.click(screen.getByRole('button', { name: 'Show next question' }));
     expect(screen.getByText('2 of 2')).toBeTruthy();
   });
@@ -334,11 +340,14 @@ describe('request card placements and delivery states', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Blue', 'Which fruits do you like?': 'Apple, Pear' } }]));
   });
 
-  it('a pick that moves on by itself hands focus back to the frame, so the keys go on working', async () => {
+  it('Next keeps focus in the docked frame and the frame can continue with digits and Enter', async () => {
     mount(withoutPreviews, 'docked');
-    await userEvent.setup().click(screen.getByRole('radio', { name: 'Red' }));
-    await waitFor(() => expect(screen.getByText('2 of 2')).toBeTruthy());
-    expect(document.activeElement).toBe(frame());
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Red' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByText('2 of 2')).toBeTruthy();
+    expect(frame().contains(document.activeElement)).toBe(true);
+    focusOn(frame());
     await press('1');
     await press('{Enter}');
     await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Red', 'Which fruits do you like?': 'Apple' } }]));
@@ -356,9 +365,11 @@ describe('request card placements and delivery states', () => {
         </Pane>
       </>,
     );
-    await userEvent.setup().click(within(frame()).getByRole('radio', { name: 'Red' }));
-    await waitFor(() => expect(screen.getAllByText('2 of 2')).toHaveLength(2));
-    expect(document.activeElement).toBe(frame());
+    const user = userEvent.setup();
+    await user.click(within(frame()).getByRole('radio', { name: 'Red' }));
+    await user.click(within(frame()).getByRole('button', { name: 'Next' }));
+    expect(screen.getAllByText('2 of 2')).toHaveLength(2);
+    expect(frame().contains(document.activeElement)).toBe(true);
     expect(document.activeElement).not.toBe(article());
   });
 
