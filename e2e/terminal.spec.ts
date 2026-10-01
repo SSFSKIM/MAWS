@@ -300,7 +300,7 @@ test('opens a login shell in the session directory with the terminal environment
       await h.run(id, `[[ -o login ]] && echo "LOGIN:yes"`);
       await h.expectLine(id, 'LOGIN:yes');
       // the login profile it read and the history it keeps are the launch's scratch shell home's
-      await h.run(id, `echo "PROFILE:$${PROFILE_VARIABLE}"; [[ $HISTFILE == '${maws.shellHome}'/* ]] && echo "HISTORY:scratch"`);
+      await h.run(id, `echo "PROFILE:$${PROFILE_VARIABLE}"; [[ $HISTFILE == '${maws.shellHome.replace(/'/g, "'\\''")}'/* ]] && echo "HISTORY:scratch"`);
       await h.expectLine(id, 'PROFILE:.zprofile');
       await h.expectLine(id, 'HISTORY:scratch');
     }
