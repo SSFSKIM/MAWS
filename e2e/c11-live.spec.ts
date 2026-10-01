@@ -198,16 +198,21 @@ async function settled(w: Locator): Promise<string> {
   return w.innerText();
 }
 
-const statusLine = (main: Locator) => main.getByRole('group', { name: 'Session status' });
-async function openUsagePopover(page: Page, main: Locator): Promise<Locator> {
-  await statusLine(main).getByRole('button', { name: /^5h / }).click();
-  const footer = page.locator('[data-routing-footer]');
-  await expect(footer).toBeVisible();
-  return footer;
-}
-const popoverOf = (footer: Locator) => footer.locator('xpath=ancestor::*[@role="dialog"][1]');
 const sessionInfo = (page: Page, id: string) => page.locator(`[data-session-info="${id}"]`);
 const infoRow = async (page: Page, id: string, label: string) => (await sessionInfo(page, id).innerText()).match(new RegExp(`${label}\\n([^\\n]+)`))?.[1] ?? null;
+// W2: the status line and its usage popover are gone (§5.5 as amended 2026-10-01): Session info, opened from the panel's
+// "+", carries the windows (its Usage row) and the route with its switch (its Route row).
+async function openSessionInfo(page: Page, id: string): Promise<Locator> {
+  if (!(await sessionInfo(page, id).isVisible())) {
+    await page.locator('[data-region="panel"]').getByRole('button', { name: 'Add a tool' }).click();
+    await page.getByRole('menuitem', { name: 'Session info' }).click();
+  }
+  await expect(sessionInfo(page, id)).toBeVisible();
+  return sessionInfo(page, id);
+}
+const infoValue = (info: Locator, label: string) => info.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
+const routeRow = async (page: Page, id: string) => infoValue(await openSessionInfo(page, id), 'Route');
+const usageRow = async (page: Page, id: string) => infoValue(await openSessionInfo(page, id), 'Usage');
 
 // ---- 1. the twenty widgets over a live routed session, their controls, and changes read back ------------------------
 
@@ -329,17 +334,17 @@ test('every widget opens with live engine data; controls take effect and are rea
       expect(paths).toContain(join(scratch.config, 'settings.json'));
     });
 
-    await step('context and status agree on the model; usage windows equal the status line', async () => {
+    await step('context and status agree on the model; usage windows equal Session info’s', async () => {
       const context = await settled(await openWidget(live, 'context'));
       const statusText = await settled(await openWidget(live, 'status'));
       const usage = await settled(await openWidget(live, 'usage'));
       await closeWidgets(page);
-      const line = await statusLine(main).innerText();
+      const line = await (await usageRow(page, id)).innerText();
       const s = await status(page, id);
       observe('agree', { context: context.slice(0, 200), statusModel: statusText.match(/Model\n[^\n]+/)?.[0], resolved: s.model.resolved, usage: usage.slice(0, 400), line });
       expect(statusText).toContain(`Model\n${s.model.resolved}`);
       const five = line.match(/5h (\d+)%/)?.[1];
-      const week = line.match(/7d (\d+)%/)?.[1];
+      const week = line.match(/Weekly (\d+)%/)?.[1];
       expect(usage).toContain(`5h\n${five}%`);
       expect(usage).toContain(`Weekly\n${week}%`);
     });
@@ -363,10 +368,7 @@ test('every widget opens with live engine data; controls take effect and are rea
     await step('/effort low shows low in Session info', async () => {
       await typedLine(page, main, 'effort low');
       await expect.poll(async () => (await status(page, id)).effort).toBe('low');
-      const footer = await openUsagePopover(page, main);
-      await footer.getByRole('button', { name: 'Session info' }).click();
-      await page.keyboard.press('Escape'); // the popover stays open after a footer action (C7's footer seam has no close)
-      await expect(sessionInfo(page, id)).toBeVisible();
+      await openSessionInfo(page, id);
       await expect.poll(() => infoRow(page, id, 'Main')).toMatch(/· low$/);
       observe('effort', { main: await infoRow(page, id, 'Main') });
     });
@@ -423,11 +425,9 @@ test('every widget opens with live engine data; controls take effect and are rea
       await idle(page, id);
     });
 
-    await step('the Accounts tab and the status line read ClaudeUsage alike', async () => {
-      const footer = await openUsagePopover(page, main);
-      const popover = await popoverOf(footer).innerText();
-      await footer.getByRole('button', { name: 'Accounts', exact: true }).click();
-      await page.keyboard.press('Escape');
+    await step('the Accounts tab and Session info read ClaudeUsage alike', async () => {
+      const popover = await (await openSessionInfo(page, id)).innerText();
+      await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('accounts.open')?.click()); // the Accounts tab, from its menu item
       await expect(main.getByText('read from ClaudeUsage', { exact: false })).toBeVisible();
       const tab = await main.innerText();
       const usage = value(await invoke(page, 'settings.usage', { engineSessionIds: [] }));
@@ -453,10 +453,7 @@ test('a relay alias takes the local lane; the session switches to Direct and bac
     await step('start routed on Sonnet in auto; the lane reads Server', async () => {
       id = await plusSession(live, repo, 'Use the Bash tool to run exactly: git status --short. Then reply with exactly: LANE SONNET', { mode: 'auto' });
       await idle(page, id);
-      const footer = await openUsagePopover(page, main);
-      await footer.getByRole('button', { name: 'Session info' }).click();
-      await page.keyboard.press('Escape');
-      await expect(sessionInfo(page, id)).toBeVisible();
+      await openSessionInfo(page, id);
       await expect.poll(() => infoRow(page, id, 'Auto-mode lane'), { timeout: 30_000 }).toMatch(/^Server/);
       observe('sonnet', { lane: await infoRow(page, id, 'Auto-mode lane'), gateway: (await status(page, id)).gateway });
     });
@@ -496,8 +493,7 @@ test('a relay alias takes the local lane; the session switches to Direct and bac
       await send(page, main, 'Use the Bash tool with run_in_background set to true to run exactly: sleep 120. Do not wait for it. Then reply with exactly: STARTED');
       await idle(page, id);
       await expect.poll(async () => (await status(page, id)).backgroundTasks.length).toBe(1);
-      const footer = await openUsagePopover(page, main);
-      await footer.getByRole('button', { name: 'Switch to Direct…' }).click();
+      await (await routeRow(page, id)).getByRole('button', { name: 'Switch to Direct…' }).click();
       const sheet = page.getByRole('dialog', { name: /Switch this session to Direct/ });
       await expect(sheet).toBeVisible();
       const confirm = sheet.getByRole('button', { name: 'Stop them and switch' });
@@ -513,9 +509,7 @@ test('a relay alias takes the local lane; the session switches to Direct and bac
         return s !== null && s.process === 'ready' && s.gateway.mode === 'direct';
       }, { timeout: 90_000 }).toBe(true);
       const toast = (await seen(page)).find((t) => t.includes('restarted direct'));
-      const direct = await openUsagePopover(page, main);
-      const popover = await popoverOf(direct).innerText();
-      await page.keyboard.press('Escape');
+      const popover = await (await routeRow(page, id)).innerText();
       const statusText = await settled(await openWidget(live, 'status'));
       await closeWidgets(page);
       observe('direct', {
@@ -525,7 +519,7 @@ test('a relay alias takes the local lane; the session switches to Direct and bac
         route: await infoRow(page, id, 'Route'),
         main: await infoRow(page, id, 'Main'),
         popover,
-        line: await statusLine(main).innerText(),
+        line: await (await usageRow(page, id)).innerText(),
         statusRows: statusText.split('\n').filter((l) => /Login|Organization|Email|base URL/i.test(l)),
         transcript: (await main.innerText()).split('\n').filter((l) => /exited|Continued|restarted/i.test(l)),
       });
@@ -536,8 +530,7 @@ test('a relay alias takes the local lane; the session switches to Direct and bac
     });
 
     await step('Switch to gateway… offers no model and names no background work; the relay route returns', async () => {
-      const footer = await openUsagePopover(page, main);
-      await footer.getByRole('button', { name: 'Switch to gateway…' }).click();
+      await (await routeRow(page, id)).getByRole('button', { name: 'Switch to gateway…' }).click();
       const sheet = page.getByRole('dialog', { name: /Switch this session to the gateway/ });
       await expect(sheet).toBeVisible();
       const text = await sheet.innerText();
@@ -546,12 +539,11 @@ test('a relay alias takes the local lane; the session switches to Direct and bac
         const s = await status(page, id).catch(() => null);
         return s !== null && s.process === 'ready' && s.gateway.mode === 'gateway';
       }, { timeout: 90_000 }).toBe(true);
-      const back = await openUsagePopover(page, main);
-      await expect(back).toContainText("Routed through ClaudeUsage's relay");
-      const popover = await popoverOf(back).innerText();
-      await page.keyboard.press('Escape');
-      await expect(statusLine(main)).toContainText(/5h \d+%/, { timeout: 30_000 });
-      observe('back', { sheet: text, popover: popover.replace(/[\w.+-]+@[\w.-]+/g, '<account>'), line: await statusLine(main).innerText(), usageCost: await usageCost(page, id) });
+      const back = await routeRow(page, id);
+      await expect(back).toContainText('Gateway · ClaudeUsage relay');
+      const popover = await back.innerText();
+      await expect(await usageRow(page, id)).toContainText(/5h \d+%/, { timeout: 30_000 });
+      observe('back', { sheet: text, popover: popover.replace(/[\w.+-]+@[\w.-]+/g, '<account>'), line: await (await usageRow(page, id)).innerText(), usageCost: await usageCost(page, id) });
       expect(text).not.toContain('Claude models');
       expect(text).not.toContain('background');
     });

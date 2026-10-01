@@ -7,7 +7,6 @@
 import { Popover } from 'radix-ui';
 import { useMemo, useState } from 'react';
 import { useCommand } from '../../ipc/query';
-import { formatCwd } from '../../session/StatusLine';
 import { useSessions } from '../../stores/sessions';
 import { locationPath, type Location } from '../setup-intent';
 import type { ChipBinding } from './bindings';
@@ -23,6 +22,9 @@ export interface LocationChipProps {
 
 const sameLocation = (a: Location, b: Location) => a.kind === b.kind && locationPath(a) === locationPath(b);
 
+// macOS homes live under /Users/<name>; the renderer is told no home directory, and needs none for this (W2: moved here
+// from the status line, which is gone).
+export const formatCwd = (directory: string): string => directory.replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
 // The last segment of the home-abbreviated path: `~` for the home directory itself.
 export const directoryName = (path: string): string => formatCwd(path).split('/').filter(Boolean).at(-1) ?? path;
 

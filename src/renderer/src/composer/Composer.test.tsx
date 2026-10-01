@@ -14,14 +14,13 @@ import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
 import { useAttention } from '../stores/attention';
-import { insertComposerText, isStarting, prefillComposer, resetComposerStore, setupPhaseOf, useComposerStore } from '../stores/composer';
+import { insertComposerText, isStarting, prefillComposer, resetComposerStore, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { resetQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { resetCatalogStore } from '../stores/catalog';
-import { StatusLine } from '../session/StatusLine';
 import { Composer } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
 import { DockedCardFrame } from './docked/DockedCardFrame';
@@ -626,26 +625,25 @@ describe('unstarted send holds a starting state', () => {
     await waitFor(() => expect(primary().title).toBe('Your first message is with the setup above'));
   });
 
-  it('the setup phase is the status line’s activity: alone under the frame before the record exists, then the status line’s first field', async () => {
+  // W2 (C3): with no status line, the setup's phase shows in the composer's dock above the frame, before the record
+  // exists and after (the record exists from the launch, before C3's first status), and only while it runs.
+  it('the setup phase shows in the composer’s dock above the frame while it runs, before and after the record exists', async () => {
     const stub = stubIntent();
     const view = mount([{ index: 0, id: A }]);
     const setup = () => within(composerOf(0)).queryByRole('status', { name: 'Setup' });
     expect(setup()).toBeNull(); // nothing at rest: the unstarted tab is the heading and the frame
     act(() => stub.setPhase('Creating worktree one…'));
     await waitFor(() => expect(setup()?.textContent).toBe('Creating worktree one…'));
+    expect(setup()!.compareDocumentPosition(composerOf(0).querySelector('[data-composer-frame]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     act(() => stub.setPhase(null));
     await waitFor(() => expect(setup()).toBeNull());
     view.unmount();
-    // the record exists from the launch, before C3's first status: the status line carries the phase, the frame does not
     useSessions.setState({ records: new Map([[A, record(A)]]), engine: new Map() });
-    mount([{ index: 0, id: A }], <StatusLine record={record(A)} />);
+    mount([{ index: 0, id: A }]);
     act(() => stub.setPhase('Starting…'));
-    const line = () => screen.getByRole('group', { name: 'Session status' });
-    await waitFor(() => expect(within(line()).getByRole('status', { name: 'Setup' }).textContent).toBe('Starting…'));
-    expect(setup()).toBeNull();
+    await waitFor(() => expect(setup()?.textContent).toBe('Starting…'));
     act(() => stub.setPhase(null));
-    await waitFor(() => expect(within(line()).queryByRole('status', { name: 'Setup' })).toBeNull());
-    expect(setupPhaseOf(useComposerStore.getState(), A)).toBeNull();
+    await waitFor(() => expect(setup()).toBeNull());
   });
 
   // C10's M6 finding: a failed setup keeps its tab and its intent, and C3 keeps the failed launch's exited status for

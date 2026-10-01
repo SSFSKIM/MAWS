@@ -110,6 +110,7 @@ export const USAGE = {
   pinned: 'Pinned account',
   routing: 'Routing account',
   readingClaudeUsage: 'Reading ClaudeUsage…',
+  unavailable: 'ClaudeUsage is not installed or has no data', // W2: the status line's usage popover said it; its own words now
   fiveHour: '5h',
   weekly: 'Weekly',
   windows: 'Windows',

@@ -64,6 +64,7 @@ export const INFO = {
   usage: 'Usage',
   fromClaudeUsage: 'from ClaudeUsage, shared by every session',
   fromEngine: 'from the engine',
+  pace: 'Pace', // W2: the usage popover's pace line, here since the status line is gone
   cost: 'Cost',
   costLine: (total: string, since: string) => `${total} this session · ${since} since you last looked`,
   // Hooks and MCP

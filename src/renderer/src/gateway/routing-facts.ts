@@ -1,7 +1,8 @@
 // Routing facts (C11 execution document, Interfaces "Gateway", *Routing facts*): which route a session takes, whose
-// account the relay counts it against and why, and which switch the usage popover's footer offers. Pure: the footer
-// and Session info read it. §5.4 as amended: these facts live in the status line's popover and in Session info, never
-// around the composer frame. Also the footer's pace line (M4 refresh task "the popover footer as C7 asked").
+// account the relay counts it against and why, and which switch to offer. Pure: Session info reads it. §5.4 as amended
+// 2026-10-01 (W2): these facts live in Session info, whose Route row carries the switch, and the model selector's Route
+// segment, never around the composer frame. Also the pace line (M4 refresh task "the popover footer as C7 asked"),
+// Session info's Pace row since the status line's usage popover went.
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
 import type { Settings } from '@shared/ipc/schema';

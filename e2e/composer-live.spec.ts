@@ -409,15 +409,15 @@ test('bash, memory, paste, history recall, the palette, the status line and + di
     const pane = paneAt(page, 0);
     const m = await start(live, 'misc', 'repo-a', 0, { permissionMode: 'auto' });
 
-    await test.step('usage from ClaudeUsage (the M1 console read) and the status line', async () => {
+    await test.step('usage from ClaudeUsage (the M1 console read) and the context ring (W2: no status line)', async () => {
       await send(page, pane, 'Reply with exactly: STATUS ONE');
       await idle(page, m.id);
       const all = value(await invoke(page, 'settings.usage', { engineSessionIds: [] }));
       const mine = value(await invoke(page, 'settings.usage', { engineSessionIds: [m.session.sessionId as never] }));
-      const line = pane.getByRole('group', { name: 'Session status' });
-      await expect(line).toContainText(/ctx \d+% of /, { timeout: 30_000 }).catch(() => undefined);
+      const ring = pane.getByRole('button', { name: /^Context window/ });
+      await expect(ring).toHaveAttribute('aria-label', /^Context window \d+% full of /, { timeout: 30_000 }).catch(() => undefined);
       observe('misc.status', {
-        line: await line.innerText(),
+        line: await ring.getAttribute('aria-label'),
         available: all.available,
         accounts: all.accounts.map((a) => ({ uuid: a.uuid.slice(0, 8), fiveHour: a.windows.fiveHour?.percent ?? null, sevenDay: a.windows.sevenDay?.percent ?? null })),
         drainTarget: all.drainTarget?.slice(0, 8) ?? null,
@@ -591,7 +591,7 @@ test('bash, memory, paste, history recall, the palette, the status line and + di
       }
       await page.keyboard.press('Escape');
       const after = await chip.getAttribute('aria-label');
-      const line = await pane.getByRole('group', { name: 'Session status' }).innerText();
+      const line = await pane.getByRole('toolbar', { name: 'Composer tools' }).innerText(); // W2: the mode reads on its chip
       observe('misc.auto-after-haiku', { before, autoText, autoDisabled, after, line, models: value(await invoke(page, 'session.listModels', { appSessionId: m.id as never })) });
     });
 
@@ -638,7 +638,7 @@ test('the mode chip after switching the model to Haiku and requesting auto', asy
       status: { model: (await statusOf(page, h.id)).model, permissionMode: (await statusOf(page, h.id)).permissionMode },
       chip: await chip.getAttribute('aria-label'),
       chipTitle: await chip.getAttribute('title'),
-      line: await pane.getByRole('group', { name: 'Session status' }).innerText(),
+      line: await pane.getByRole('toolbar', { name: 'Composer tools' }).innerText(), // W2: no status line
       alerts: await page.locator('[role="alert"]').allInnerTexts(),
     });
   });
@@ -654,11 +654,12 @@ test('a session resumed Direct reads its windows from session.getUsage, or shows
     const status = await statusOf(page, d.id);
     const usage = await invoke(page, 'session.getUsage', { appSessionId: d.id as never });
     await page.waitForTimeout(3_000);
-    const line = await pane.getByRole('group', { name: 'Session status' }).innerText();
+    const windows = () => page.evaluate((id) => window.maws.invoke('session.getUsage', { appSessionId: id as never }), d.id); // W2: no status line shows them
+    const line = await windows();
     await send(page, pane, 'Reply with exactly: DIRECT ONE');
     await expect.poll(() => resultsOf(d.journalPath).length, { timeout: 120_000 }).toBeGreaterThan(0);
     await idle(page, d.id);
-    observe('direct', { gateway: status.gateway, usage, line, lineAfter: await pane.getByRole('group', { name: 'Session status' }).innerText(), results: resultsOf(d.journalPath) });
+    observe('direct', { gateway: status.gateway, usage, line, lineAfter: await windows(), results: resultsOf(d.journalPath) });
   });
 });
 

@@ -72,12 +72,12 @@ export const GATEWAY = {
   hint: 'D-19',
   defaultRoute: 'Default route',
   routes: { gateway: 'ClaudeUsage relay', direct: 'Direct' },
-  defaultRouteNote: 'New sessions start on this route; a session can be switched from its status line.',
+  defaultRouteNote: 'New sessions start on this route; a session can be switched from its Session info.', // W2: no status line
   policy: 'Relay unreachable at launch',
   policies: { ask: 'Ask each time', wait: 'Wait for the relay', direct: 'Run direct' },
   policyDirectNote: 'A session on a gateway model (claude/…) is asked instead: Direct cannot serve it.',
   offerDirect: 'Per-session Direct',
-  offerDirectLabel: 'Offer "Switch to Direct…" in the status line',
+  offerDirectLabel: 'Offer "Switch to Direct…" in Session info', // W2: no status line
   offerDirectNote: "The relay card's Run direct stays either way: Direct is the fallback when the relay is unreachable.",
   directLogin: 'Direct login',
   directLoginKnown: (login: string, email: string | null) => ["engine's own", login, email].filter(Boolean).join(' · '),

@@ -45,8 +45,6 @@ import { registerGatewayActions } from './gateway/actions';
 import { connectDirectLogin } from './gateway/direct-login';
 import { startRelayMonitor } from './gateway/relay-monitor';
 import { GatewayDialogs } from './gateway/SwitchSheet';
-import { UsageFooter } from './gateway/UsageFooter';
-import { registerUsagePopoverFooter } from './statusline';
 import { sessionInfoTool } from './tools/session-info';
 import { registerAllWidgets } from './widgets';
 import { registerAccountsTab } from './accounts';
@@ -95,7 +93,7 @@ export function App() {
   // C8a end
   // C7 start: the X4 card in C5's requestCard slot (docked, card, hover) and C6's transcript request slot (inline)
   useEffect(() => connectRequestCard(), []);
-  useEffect(() => connectStatusLine(), []); // the shared ClaudeUsage read and the near-limit banner, app-wide
+  useEffect(() => connectStatusLine(), []); // the shared ClaudeUsage read and the near-limit banner, app-wide (W2: no status line, the banner stays)
   useEffect(() => connectComposer(), []); // the composer in C5's composer slot
   useEffect(() => registerTranscriptActions({ editAndResubmit: editAndResubmitRow, editPrompt: editPromptRow }), []); // a bubble's Edit prefills the composer in edit mode; a blocked prompt's Edit prompt as a new message (W1)
   // C7 end
@@ -128,8 +126,8 @@ export function App() {
   useEffect(() => registerGatewayActions(), []);
   useEffect(() => startRelayMonitor(), []);
   useEffect(() => registerAllWidgets(), []);
-  // M4: the routing footer in C7's usage popover, and a Direct session's login from every get_status answer
-  useEffect(() => registerUsagePopoverFooter(UsageFooter), []);
+  // M4: a Direct session's login from every get_status answer (W2: the routing footer left with the status line; the
+  // route and its switch are Session info's)
   useEffect(() => connectDirectLogin(queryClient), []);
   // Session info in the panel's "+" menu, registered once and never unregistered, as C8a's block does
   useEffect(() => {

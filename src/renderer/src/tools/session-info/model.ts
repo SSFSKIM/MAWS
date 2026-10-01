@@ -1,7 +1,9 @@
 // Session info's six sections as rows (C11 execution document, Interfaces "Session info tool"; §5.6; mockup 06 vignette
 // 03 at Codex's key/value density, D-20): Engine, Model, Gateway, Permissions, Context·usage·cost, Hooks and MCP, from
 // C5's stores, C7's usage windows, the routing facts, the lane and the four bounded reads. Pure: the view gathers the
-// inputs and renders what this answers. A value not known yet reads `—`, never a guess.
+// inputs and renders what this answers. A value not known yet reads `—`, never a guess. W2 (§5.5 as amended
+// 2026-10-01): with the status line gone, the Route row carries the Direct⇄gateway switch as its action, with the reason
+// when none is offered, and the usage rows carry the pace line the usage popover's footer showed.
 import type { BinaryInfo } from '@shared/ipc/schema/engine';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
@@ -11,7 +13,8 @@ import type { SessionWindows } from '../../stores/usage';
 import { MODE_REFUSAL_WORDS } from '../../statusline/mode-menu';
 import { resetsIn, windowShown } from '../../statusline/format';
 import { directLoginOf } from '../../gateway/direct-login';
-import type { DirectLogin, RoutingFacts } from '../../gateway/routing-facts';
+import type { Route } from '../../gateway/copy';
+import { paceLine, type DirectLogin, type RoutingFacts } from '../../gateway/routing-facts';
 import { present as presentContext } from '../../widgets/ContextWidget';
 import { present as presentMcp } from '../../widgets/McpWidget';
 import { CONTEXT, MODEL } from '../../widgets/copy';
@@ -24,7 +27,8 @@ import type { BudgetState } from '@shared/ipc/schema/engine';
 import { BUDGET } from '../../budget/copy';
 // C12 end
 
-export type InfoRow = { label: string; value: string; note?: string; action?: 'permissions' };
+// W2: `route` is the Direct⇄gateway switch, offering `targets` (the routing facts' own)
+export type InfoRow = { label: string; value: string; note?: string; action?: 'permissions' | 'route'; targets?: Route[] };
 export type InfoSection = { title: string; rows: InfoRow[] };
 
 export interface SessionInfoInput {
@@ -100,10 +104,14 @@ function modelSection({ record, status, models }: SessionInfoInput): InfoSection
 function gatewaySection({ status, facts, directLogin, reads }: SessionInfoInput): InfoSection {
   const login = (reads.status && directLoginOf(reads.status)) ?? directLogin;
   const rows: InfoRow[] = [];
-  if (!status) rows.push({ label: INFO.route, value: facts.line });
-  else if (status.gateway.verified === 'routed') rows.push({ label: INFO.route, value: INFO.routed(status.gateway.baseUrl ?? NONE) });
-  else if (status.gateway.verified === 'direct') rows.push({ label: INFO.route, value: login ? INFO.directLogin(login.login) : INFO.direct });
-  else rows.push({ label: INFO.route, value: INFO.unverified, note: status.gateway.verified === 'mismatch' ? INFO.mismatch(status.gateway.mode) : INFO.pending });
+  let route: InfoRow;
+  if (!status) route = { label: INFO.route, value: facts.line };
+  else if (status.gateway.verified === 'routed') route = { label: INFO.route, value: INFO.routed(status.gateway.baseUrl ?? NONE) };
+  else if (status.gateway.verified === 'direct') route = { label: INFO.route, value: login ? INFO.directLogin(login.login) : INFO.direct };
+  else route = { label: INFO.route, value: INFO.unverified, note: status.gateway.verified === 'mismatch' ? INFO.mismatch(status.gateway.mode) : INFO.pending };
+  // W2: the switch the usage popover's footer offered, or why there is none (held elsewhere, archived)
+  const note = [route.note, facts.refusal].filter((n): n is string => typeof n === 'string').join(' · ');
+  rows.push({ ...route, note: note || undefined, ...(facts.targets.length > 0 ? { action: 'route' as const, targets: facts.targets } : {}) });
   const direct = status ? status.gateway.mode === 'direct' : facts.route === 'direct';
   if (direct) {
     if (login?.organization) rows.push({ label: INFO.organization, value: login.organization });
@@ -145,11 +153,14 @@ function usageSection({ digest, windows, now, reads }: SessionInfoInput): InfoSe
     return `${label} ${Math.round(shown.percent)}%${shown.resetInMs === null ? '' : ` · resets in ${resetsIn(shown.resetInMs)}`}`;
   };
   const usage = windows.windows ? [meter('5h', windows.windows.fiveHour), meter('Weekly', windows.windows.sevenDay)].filter((m) => m !== null).join(' · ') : '';
+  // W2: the pace the usage popover's footer gave a routed session, when a window runs out before it resets
+  const pace = windows.source === 'direct' || !windows.windows ? [] : [paceLine(windows.windows.sevenDay, 'weekly', now), paceLine(windows.windows.fiveHour, 'fiveHour', now)].filter((l) => l !== null);
   return {
     title: INFO.sections.usage,
     rows: [
       { label: INFO.context, value: context },
       { label: INFO.usage, value: usage || NONE, note: usage ? (windows.source === 'direct' ? INFO.fromEngine : INFO.fromClaudeUsage) : undefined },
+      ...(pace.length > 0 ? [{ label: INFO.pace, value: pace.join(' · ') }] : []),
       { label: INFO.cost, value: digest?.cost ? INFO.costLine(usd(digest.cost.totalUsd), usd(digest.cost.sinceSeenUsd)) : NONE },
     ],
   };

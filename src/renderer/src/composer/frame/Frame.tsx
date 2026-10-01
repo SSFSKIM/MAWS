@@ -25,9 +25,10 @@ export interface FrameProps {
   submit: ReactNode; // the submit control, beside the editor and outside its sink
   docked?: ReactNode; // a docked card, in the draft's place; null or absent: the draft shows
   onOpen?(what: 'models' | 'rules'): void; // a chip showing an engine read opened: the composer reads it then, not per mount
+  ring?: ReactNode; // W2: the session's context ring, in the toolbar
 }
 
-export function Frame({ bindings, cwd, dirty, attachments, editorHandle, editor, submit, docked = null, onOpen }: FrameProps) {
+export function Frame({ bindings, cwd, dirty, attachments, editorHandle, editor, submit, docked = null, onOpen, ring = null }: FrameProps) {
   const isDocked = docked !== null && docked !== undefined;
   return (
     <div data-composer-frame data-docked={isDocked || undefined} className="flex w-full min-w-0 flex-col gap-1">
@@ -40,7 +41,7 @@ export function Frame({ bindings, cwd, dirty, attachments, editorHandle, editor,
           <div className="min-w-0 flex-1 py-3">{editor}</div>
           <div className="mb-2 shrink-0">{submit}</div>
         </div>
-        <Toolbar bindings={bindings} cwd={cwd} dirty={dirty} editor={editorHandle} onOpen={onOpen} />
+        <Toolbar bindings={bindings} cwd={cwd} dirty={dirty} editor={editorHandle} onOpen={onOpen} ring={ring} />
       </div>
     </div>
   );

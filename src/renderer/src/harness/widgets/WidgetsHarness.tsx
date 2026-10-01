@@ -14,11 +14,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { ToastHost } from '../../app/ToastHost';
 import { connectDirectLogin } from '../../gateway/direct-login';
 import { GatewayDialogs } from '../../gateway/SwitchSheet';
-import { UsageFooter } from '../../gateway/UsageFooter';
 import { registerSessionActions } from '../../sessions/actions';
 import { SessionDialogs } from '../../sessions/SessionDialogs';
-import { registerUsagePopoverFooter } from '../../statusline';
-import { UsagePopoverBody } from '../../statusline/UsagePopover';
 import { useSessions } from '../../stores/sessions';
 import { sessionInfoTool } from '../../tools/session-info';
 import { panelHost } from '../../panel/host';
@@ -47,8 +44,8 @@ declare global {
 // (M3), whose reads (`list_models`, the summary `get_context_usage`) the replay-conformance driver issues.
 const PASSIVE: readonly WidgetCommandName[] = ['model', 'permissions', 'usage', 'context', 'compact', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'diff', 'export'];
 
-// M4: the session's routing facts as C7's usage popover shows them (its body with C11's footer), and C11's Session info
-// tool as C8a's host renders it for the shown session, beside the composer.
+// M4: C11's Session info tool as C8a's host renders it for the shown session, beside the composer (W2: with the route and
+// its switch, which the status line's usage popover carried before).
 function RoutePane({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
@@ -58,9 +55,6 @@ function RoutePane({ appSessionId }: { appSessionId: AppSessionId }) {
   const Info = sessionInfoTool.render;
   return (
     <aside className="flex min-w-0 flex-col gap-3">
-      <section aria-label="Account usage" className="rounded-md border border-border bg-bg-raised">
-        <UsagePopoverBody record={record} status={status} />
-      </section>
       <section aria-label="Session info" className="max-h-[32rem] rounded-md border border-border bg-bg-raised">
         <Info state={state} ctx={ctx} />
       </section>
@@ -149,7 +143,7 @@ export function WidgetsHarness() {
     const theme = new URLSearchParams(location.search).get('theme');
     if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
     mirrorLayout(start.pane);
-    const offs = [connectShell(), connectKeys(), connectUsage(), registerAllWidgets(), registerUsagePopoverFooter(UsageFooter), connectDirectLogin(queryClient), registerSessionActions()]; // C10's actions: /rename's dialog, Resume
+    const offs = [connectShell(), connectKeys(), connectUsage(), registerAllWidgets(), connectDirectLogin(queryClient), registerSessionActions()]; // C10's actions: /rename's dialog, Resume
     window.__maws_widgets = {
       show: (next) => {
         mirrorLayout(next);

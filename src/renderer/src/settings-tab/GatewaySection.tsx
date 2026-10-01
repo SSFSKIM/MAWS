@@ -1,6 +1,6 @@
 // The Gateway section (C11 execution document, Interfaces "Settings tab" Gateway; D-19; mockup 06 vignette 04): the
-// route new sessions start on, what a first send does when ClaudeUsage's relay is unreachable, whether the status line
-// offers the per-session Direct switch, the engine's own login as a Direct session last reported it, and the relay.
+// route new sessions start on, what a first send does when ClaudeUsage's relay is unreachable, whether Session info (W2:
+// no status line) offers the per-session Direct switch, the engine's own login as a Direct session last reported it, and the relay.
 import { useEffect, useState } from 'react';
 import type { Settings } from '@shared/ipc/schema';
 import { relayLine } from '../accounts/model';

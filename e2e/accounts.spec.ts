@@ -55,12 +55,16 @@ async function menu(app: ElectronApplication, id: string): Promise<void> {
 const panel = (page: Page) => page.locator('[data-region="main"]').getByRole('tabpanel');
 const card = (page: Page, email: string) => panel(page).locator(`[data-account][aria-label="${email}"]`);
 const meter = (scope: Locator, name: string) => scope.getByRole('meter', { name, exact: true });
-async function statusWindows(page: Page, title: string): Promise<[string, string]> {
+// W2: the session's windows as Session info's Usage row reads them (the status line that showed them is gone).
+async function sessionWindows(page: Page, title: string): Promise<[string, string]> {
   await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: title }).click();
-  const line = panel(page).getByRole('group', { name: 'Session status' });
-  const read = async (prefix: string) => /(\d+)%/.exec((await line.getByRole('button', { name: new RegExp(`^${prefix}`) }).textContent()) ?? '')![1]!;
-  await expect(line.getByRole('button', { name: /^5h \d+%/ })).toBeVisible();
-  return [await read('5h'), await read('7d')];
+  const tools = page.locator('[data-region="panel"]');
+  await tools.getByRole('button', { name: 'Add a tool' }).click();
+  await page.getByRole('menuitem', { name: 'Session info' }).click();
+  const usage = tools.locator('[data-session-info]').getByRole('term').filter({ hasText: /^Usage$/ }).locator('xpath=following-sibling::dd[1]');
+  await expect(usage).toHaveText(/^5h \d+% .* · Weekly \d+% /);
+  const text = (await usage.textContent()) ?? '';
+  return [/5h (\d+)%/.exec(text)![1]!, /Weekly (\d+)%/.exec(text)![1]!];
 }
 
 test('accounts: ClaudeUsage’s accounts in its geometry, the routing one and why, a reauth account, and the hand-off', async () => {
@@ -68,9 +72,9 @@ test('accounts: ClaudeUsage’s accounts in its geometry, the routing one and wh
   const maws = await launchMaws({ env: ENV() });
   const { app, page } = maws;
   try {
-    // The status line's windows for the unpinned routed session (the drain target's) and the re-pinned one (1@'s).
-    const [quota5h, quota7d] = await statusWindows(page, QUOTA);
-    const [probe5h, probe7d] = await statusWindows(page, PROBE);
+    // The windows Session info reads for the unpinned routed session (the drain target's) and the re-pinned one (1@'s).
+    const [quota5h, quota7d] = await sessionWindows(page, QUOTA);
+    const [probe5h, probe7d] = await sessionWindows(page, PROBE);
     expect([quota5h, quota7d, probe5h, probe7d]).toEqual(['53', '63', '77', '44']);
 
     await menu(app, 'accounts.open');
@@ -100,7 +104,7 @@ test('accounts: ClaudeUsage’s accounts in its geometry, the routing one and wh
     for (const email of ORDER) {
       expect(await card(page, email).locator('[data-limit]').evaluateAll((els) => els.map((el) => el.firstElementChild!.textContent))).toEqual(['5h', 'Weekly', 'Fable']);
     }
-    // The same percents as the status line: 3@ for the unpinned routed session, 1@ for the re-pinned one.
+    // The same percents as Session info: 3@ for the unpinned routed session, 1@ for the re-pinned one.
     await expect(meter(routing, 'Five-hour usage')).toHaveAttribute('aria-valuenow', quota5h);
     await expect(meter(routing, 'Weekly usage')).toHaveAttribute('aria-valuenow', quota7d);
     await expect(meter(card(page, '1@example.test'), 'Five-hour usage')).toHaveAttribute('aria-valuenow', probe5h);

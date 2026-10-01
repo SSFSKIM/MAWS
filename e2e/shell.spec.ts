@@ -252,14 +252,7 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     await expect(panel.getByText('Approval needed')).toBeVisible();
     await expect(panel.getByTestId('request-input')).toHaveText('git log --oneline');
     await expect(panel.locator('[data-composer-frame]')).toBeAttached(); // C7: the composer fills its slot; its frame waits behind the docked card
-    expect(await panel.getByRole('group', { name: 'Session status' }).getByRole('button').allTextContents()).toEqual([
-      '/private/tmp/maws-probe-qqboLh',
-      'ctx —',
-      '5h —',
-      '7d —',
-      '$—',
-      'auto',
-    ]);
+    await expect(panel.getByRole('group', { name: 'Session status' })).toHaveCount(0); // W2: nothing sits under the composer
 
     await menu(app, 'theme.light');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');

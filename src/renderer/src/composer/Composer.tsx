@@ -30,9 +30,8 @@ import { useCommand } from '../ipc/query';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { RequestCard } from '../request-card/RequestCard';
 import { nextMode } from '../statusline';
-import { SetupStatusLine } from '../statusline/SetupActivity';
 import { useAttention, selectPendingOf } from '../stores/attention';
-import { editingOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setSetupPhase, setStarting, useComposerStore, type Editing, type ResubmitState } from '../stores/composer';
+import { editingOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, useComposerStore, type Editing, type ResubmitState } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
@@ -48,6 +47,7 @@ import { afterAccepted, dispatchByMode, precheck, submitSerialized, type Dispatc
 import { newestUserUuid } from './edit-prefill';
 import { EditModeLine, RewindConfirm } from './EditMode';
 import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
+import { ContextRing } from './frame/ContextRing';
 import { Frame } from './frame/Frame';
 import { useGitWatch } from './frame/git-watch';
 import { QueueList } from './queue/QueueList';
@@ -173,12 +173,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // exited status for the id.
   const setup = status === null || record === null ? hook : null;
   const unstarted = setup !== null;
-  // The running setup's phase is also the status line's activity: published for it while this composer holds the hook.
+  // The running setup's phase, in words, shown in the composer's dock while it runs (W2: no status line carries it).
   const phase = setup?.phase ?? null;
-  useEffect(() => {
-    setSetupPhase(appSessionId, phase);
-    return () => setSetupPhase(appSessionId, null);
-  }, [appSessionId, phase]);
   const queue = useSessionQueue(appSessionId, client);
   const starting = useComposerStore((s) => isStarting(s, appSessionId));
   const handle = useRef<EditorHandle>(null);
@@ -417,6 +413,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   return (
     <section ref={rootRef} aria-label="Composer" data-composer={appSessionId} data-pane-index={paneIndex} className="flex min-w-0 flex-col gap-2">
+      {/* W2: the setup's phase in the dock above the frame, only while it runs (Claude Desktop's dock notices) */}
+      {phase !== null && (
+        <p role="status" aria-label="Setup" className="m-0 text-ui-sm text-fg-muted">
+          {phase}
+        </p>
+      )}
       {!unstarted && <QueueList appSessionId={appSessionId} queue={queue} sessionId={sessionId} cwd={cwd} client={client} />}
       {editing && (
         <EditModeLine
@@ -451,6 +453,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         bindings={bindings}
         cwd={cwd}
         dirty={repo?.dirty ?? false}
+        ring={unstarted ? null : <ContextRing appSessionId={appSessionId} />}
         attachments={attachmentsOf(doc)}
         editorHandle={handle}
         editor={
@@ -477,8 +480,6 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         }
         submit={<SubmitControl decision={shown} multiline={isMultiline(doc)} onPrimary={onPrimary} onStop={stop} onMenu={(id) => handle.current?.submit(id)} onHover={setHover} />}
       />
-      {/* a tab with no record has no status line yet: the setup's phase shows here, and only while it runs */}
-      {record === null && phase !== null && <SetupStatusLine phase={phase} />}
     </section>
   );
 }
