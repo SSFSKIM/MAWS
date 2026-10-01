@@ -729,7 +729,7 @@ describe('revisable log', () => {
     b.text('m2', 0, 'Fallback answer');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'boundary', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'boundary', 'assistant_text']); // W1: a boundary is no work, so this turn has no divider
     expect(list.some((row) => row.kind === 'assistant_text' && row.markdown === 'Refused answer')).toBe(false);
     expect(find(list, 'boundary')).toMatchObject({ boundaryKind: 'retraction', text: 'Response retracted · refusal · switched to fallback' });
   });

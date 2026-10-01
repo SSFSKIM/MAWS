@@ -556,52 +556,6 @@
     "turnId": "turn:4c6e1bdb-4af7-467d-a602-4775821aaeff"
   },
   {
-    "at": "2026-09-29T01:45:02.284Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-09-29T01:45:02.301Z",
-    "expanded": true,
-    "firstDeniedCell": null,
-    "id": "divider:turn:4c6e1bdb-4af7-467d-a602-4775821aaeff",
-    "kind": "divider",
-    "origin": "human",
-    "startedAt": "2026-09-29T01:45:02.286Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0,
-      "denials": [],
-      "durationMs": 13,
-      "model": null,
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": null,
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 0,
-        "cacheReadInputTokens": 0,
-        "inputTokens": 0,
-        "outputTokens": 0,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:4c6e1bdb-4af7-467d-a602-4775821aaeff"
-  },
-  {
     "at": "2026-09-29T01:45:02.290Z",
     "boundaryKind": "reset",
     "detail": "4b753410-1ce5-4000-a1e5-72af5ac4ebc2",

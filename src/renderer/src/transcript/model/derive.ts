@@ -97,8 +97,12 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 
 // The rows of a turn that stay in view when its work area folds, in event order among its work (W1): a prompt the
 // engine took into the turn at its next tool boundary (a steer, at its delivery position, so it splits the work around
-// it, Codex's persistent unit), a hook that got in the way, and the answer. The divider folds everything else.
-export const isPersistentRow = (row: Row): boolean => row.kind === 'user' || (row.kind === 'assistant_text' && row.phase === 'answer') || (row.kind === 'error' && row.scope === 'hook');
+// it, Codex's persistent unit), a hook that got in the way, the answer, a boundary (compaction, reset, retraction:
+// charter §5.3, the visible transcript stays true to the model's context) and a slash command's output. The divider
+// folds everything else, so a turn of a local command alone (`/compact`: its boundary and its output) has no work and
+// no "Worked for 0s" divider.
+export const isPersistentRow = (row: Row): boolean =>
+  row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || (row.kind === 'assistant_text' && row.phase === 'answer') || (row.kind === 'error' && row.scope === 'hook');
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
@@ -280,7 +284,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (event.bash?.part === 'output') {
           const at = items.findIndex((item) => item.kind === 'row' && item.row.kind === 'bash' && item.row.exitCode === null);
           if (at >= 0) items[at] = { kind: 'row', row: withBashOutput((items[at] as { row: RowOf<'bash'> }).row, event) };
-        } else if (isLocalCommand(event.origin, event.content)) {
+        } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) { // a synthetic one is the engine's caveat for the model (W1)
           items.push({ kind: 'row', row: localCommandRow(event, turn.id) });
         } else if (isInterruptionMarker(event.origin, event.content)) {
           // The engine's interrupt marker is never a bubble, whatever turn it landed in: the stopped divider says it.
@@ -835,7 +839,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         else if (event.bash?.part === 'output') {
           const at = rows.findIndex((row) => row.kind === 'bash' && row.exitCode === null);
           if (at >= 0) rows[at] = withBashOutput(rows[at] as RowOf<'bash'>, event);
-        } else if (isLocalCommand(event.origin, event.content)) rows.push(localCommandRow(event, null));
+        } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) rows.push(localCommandRow(event, null));
         break;
       }
       case 'boundary.compaction':

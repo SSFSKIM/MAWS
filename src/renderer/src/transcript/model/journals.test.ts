@@ -238,6 +238,20 @@ describe('fixture gates through the model', () => {
     expect(ofKind(rows, 'error').find((row) => row.scope === 'hook' && row.text.startsWith('A hook blocked'))?.action).toBe('edit_prompt');
   });
 
+  // W1 (A5): `/compact` opens a turn of its own (seq 39) holding the boundary (seq 43), the engine's synthetic summary
+  // (seq 44) and the command's output (seq 45). Neither the boundary nor the output is work, so the turn has no
+  // "Worked for 0s" divider and both stay in view; the summary is no bubble.
+  it('pass3/compact: the /compact turn reads its one-line prompt, the boundary and the output, with no divider and no summary bubble', () => {
+    const state = stateOf('pass3', 'compact');
+    const compact = state.order[1];
+    const rows = rowsOf(state).filter((row) => row.turnId === compact);
+    expect(rows.map((row) => row.kind)).toEqual(['user', 'boundary', 'local_command']);
+    expect(ofKind(rows, 'user')[0].text).toBe('/compact');
+    expect(ofKind(rows, 'boundary')[0]).toMatchObject({ boundaryKind: 'compaction', text: 'Context compacted · 29k → 1k tokens · manual' });
+    expect(ofKind(rowsFor('pass3', 'compact'), 'user').map((row) => row.text)).toEqual(['Reply ONE', '/compact', 'Reply TWO']);
+    expect(ofKind(rowsFor('pass3', 'compact'), 'divider')).toEqual([]); // nor any around it: two answers and a local command
+  });
+
   it('pass3/plan-outcomes: MAWS’s clear-and-implement (a deny with its fixed message) reads as such, beside the other two outcomes', () => {
     const plans = ofKind(rowsFor('pass3', 'plan-outcomes'), 'plan');
     expect(plans.map((row) => row.outcome)).toEqual(['keep_planning', 'implement', 'clear_and_implement']);

@@ -436,7 +436,9 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (event.messageUuid !== null) state.echoUuids.add(event.messageUuid);
         return;
       }
-      if (event.bash !== null || isLocalCommand(event.origin, event.content)) {
+      // W1 (A5): a synthetic one is the engine's `<local-command-caveat>` for the model (a meta record on disk, never on
+      // the wire), which falls through to the synthetic rule below: retained, no row
+      if (event.bash !== null || (isLocalCommand(event.origin, event.content) && !event.isSynthetic)) {
         if (!pushRouted(null)) batch.loose(event); // a bash or local_command row; never a turn
         return;
       }

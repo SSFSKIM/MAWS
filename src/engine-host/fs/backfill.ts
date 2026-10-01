@@ -141,10 +141,13 @@ function steeredPrompt(record: TranscriptRecord, base: Base, events: SessionEven
 
 function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   const content = messageContent(record);
-  const isMeta = record.isMeta === true;
+  // W1 (A5): the summary `/compact` writes after its boundary (`isCompactSummary`, w1-compact.jsonl line 29) is the
+  // engine's context for the model, which the live stream sends as a synthetic frame: no bubble and no turn, like meta.
+  const isMeta = record.isMeta === true || record.isCompactSummary === true;
   const marker = isInterruptMarker(record);
+  const local = isLocalCommandOutput(record);
   const turn = (origin: string | null): void => {
-    if (isMeta || marker) return; // the marker belongs to the turn it interrupted
+    if (isMeta || marker || local) return; // the marker belongs to the turn it interrupted, a command's output to the command's turn (W1)
     ctx.lastTurnUserUuid = uuid;
     events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
   };
@@ -286,13 +289,13 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
   const subtype = typeof record.subtype === 'string' ? record.subtype : null;
   switch (subtype) {
     case 'compact_boundary': {
-      const meta = record.compactMetadata as { trigger?: unknown; preTokens?: unknown } | undefined;
+      const meta = record.compactMetadata as { trigger?: unknown; preTokens?: unknown; postTokens?: unknown } | undefined;
       events.push({
         ...base(),
         kind: 'boundary.compaction',
         trigger: typeof meta?.trigger === 'string' ? meta.trigger : 'unknown',
         preTokens: typeof meta?.preTokens === 'number' ? meta.preTokens : 0,
-        postTokens: null,
+        postTokens: typeof meta?.postTokens === 'number' ? meta.postTokens : null, // W1: 2.1.283 writes it (w1-compact.jsonl line 28)
         logicalParentUuid: typeof record.logicalParentUuid === 'string' ? (record.logicalParentUuid as MessageUuid) : null,
         historical: true,
       });
@@ -330,7 +333,7 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
 // A prompt that opens a turn: a `user` record, not `isMeta`, not an interrupt marker, whose content is text or blocks
 // with no tool result (a tool result continues the turn its tool use is in). The follower reads turn boundaries by it.
 export function startsTurn(record: TranscriptRecord): boolean {
-  if (record.type !== 'user' || record.isMeta === true || isInterruptMarker(record)) return false;
+  if (record.type !== 'user' || record.isMeta === true || record.isCompactSummary === true || isInterruptMarker(record) || isLocalCommandOutput(record)) return false; // W1: a compact summary and a command's output too
   const content = messageContent(record);
   if (typeof content === 'string') return true;
   if (!Array.isArray(content)) return false;
@@ -352,6 +355,17 @@ function isInterruptMarker(record: TranscriptRecord): boolean {
     if (others.length > 0 && others.every((block) => block.type === 'text' && typeof block.text === 'string')) text = others.map((block) => block.text as string).join('');
   }
   return text !== null && INTERRUPT_MARKER.test(text.trim());
+}
+
+// W1 (A5): a slash command's output, `<local-command-stdout>…` after the command's own record (w1-compact.jsonl line
+// 32, the terminal's `/exit` in w1-terminal-queued.jsonl), is the engine's echo, not a prompt: it belongs to the
+// command's turn, as the live stream's replay of it does (pass3/compact seq 45), so it opens none of its own (a turn of
+// its own read "Worked for 0s" under a bubble-less divider).
+function isLocalCommandOutput(record: TranscriptRecord): boolean {
+  if (record.type !== 'user') return false;
+  const content = messageContent(record);
+  const text = typeof content === 'string' ? content : Array.isArray(content) && content.length === 1 && isContentBlock(content[0]) && content[0].type === 'text' && typeof content[0].text === 'string' ? content[0].text : null;
+  return text !== null && /^\s*<local-command-(stdout|caveat)>/.test(text);
 }
 
 function messageContent(record: TranscriptRecord): unknown {
