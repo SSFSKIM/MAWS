@@ -150,6 +150,12 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
   const question = questions[step];
   const last = step === count - 1;
   const answered = answerOf(draft, question) !== null;
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const restoreFocus = useRef(false);
+  const saveStep = (next: QuestionDraft) => {
+    if (next.step !== draft.step) restoreFocus.current = bodyRef.current?.contains(document.activeElement) ?? false;
+    save(next);
+  };
 
   const reply = (final: QuestionDraft) => {
     const answers = questionAnswers({ kind: 'question', questions, selected: final.selected, other: final.other });
@@ -158,11 +164,11 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
   const forward = () => {
     if (!answered) return;
     if (last) reply(draft);
-    else save(advance(draft, count));
+    else saveStep(advance(draft, count));
   };
   const skipStep = () => {
     const skipped = skip(draft, question, count);
-    save(skipped);
+    saveStep(skipped);
     if (last) reply(skipped);
   };
   const decline = () => submit(toAnswer({ kind: 'permission', decision: 'deny', message: '' }), 'Skipped');
@@ -181,7 +187,7 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
     timer.current = setTimeout(() => {
       timer.current = null;
       const now = useAttention.getState().drafts.get(item.id);
-      if (now && now.step === step) save(advance(now, count));
+      if (now && now.step === step) saveStep(advance(now, count));
     }, ADVANCE_MS);
   };
   const onToggle = (label: string, on: boolean) => save(toggle(draft, question, label, on));
@@ -191,7 +197,7 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
   };
   const show = (to: number) => {
     cancelAdvance();
-    save(goTo(draft, to, count));
+    saveStep(goTo(draft, to, count));
   };
 
   useEffect(() => {
@@ -208,13 +214,14 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
     });
   });
 
-  // A step change removes the focused option with its question: focus goes back to the key owner, so Enter and the
-  // digits go on working, or (inline, with no owner) to the new question's first option. Focus elsewhere is left be.
-  const bodyRef = useRef<HTMLDivElement>(null);
+  // Restoring focus keeps Enter and digits working after the focused option is removed, but another placement
+  // following the shared draft must not take focus (and the active pane) away. Focus elsewhere is left be.
   const shown = useRef(step);
   useLayoutEffect(() => {
     if (shown.current === step) return;
     shown.current = step;
+    if (!restoreFocus.current) return;
+    restoreFocus.current = false;
     const body = bodyRef.current;
     const active = document.activeElement;
     if (!body || (active !== null && active !== document.body)) return;

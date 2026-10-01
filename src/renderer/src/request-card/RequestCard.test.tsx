@@ -344,6 +344,24 @@ describe('request card placements and delivery states', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Red', 'Which fruits do you like?': 'Apple' } }]));
   });
 
+  it('a shared question advancing in the docked pane restores focus there, not to the Overview article', async () => {
+    const item = itemFor(withoutPreviews, APP);
+    render(
+      <>
+        <Pane>
+          <Card event={withoutPreviews} placement="card" item={item} />
+        </Pane>
+        <Pane index={1}>
+          <Card event={withoutPreviews} placement="docked" item={item} />
+        </Pane>
+      </>,
+    );
+    await userEvent.setup().click(within(frame()).getByRole('radio', { name: 'Red' }));
+    await waitFor(() => expect(screen.getAllByText('2 of 2')).toHaveLength(2));
+    expect(document.activeElement).toBe(frame());
+    expect(document.activeElement).not.toBe(article());
+  });
+
   it('Esc declines the whole question with the plain permission deny pass3/question-deny seq 110 recorded, docked and on the Overview card', async () => {
     const first = mount(skippedQuestion, 'docked');
     focusOn(frame());
