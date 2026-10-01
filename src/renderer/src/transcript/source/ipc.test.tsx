@@ -317,7 +317,7 @@ describe('ipcSource', () => {
         const fake = fakeClient();
         const hydrated = useTranscriptStore.getState().attach(APP, ipcSourceOver(fake.client, APP));
         if (sign === 'batch') fake.emit('session.eventBatch', batch([]));
-        else fake.emit('session.changed', { record: { appId: APP } as never, cause: 'live' as never, revision: 1 });
+        else fake.emit('session.changed', { record: { appId: APP, holder: { kind: 'none' } } as never, cause: 'live' as never, revision: 1 });
         fake.calls[0].answer(UNKNOWN);
         await settle();
         expect(fake.calls, sign).toHaveLength(2);
@@ -862,6 +862,26 @@ describe('ipcSource after MAWS yields to a foreign holder (W7)', () => {
     fake.emit('session.changed', changed({ kind: 'terminal', pid: 7 }));
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(fake.calls).toHaveLength(2);
+    store.detach(source.key!);
+  });
+
+  // review finding: the custody change can arrive while the first snapshot is still on its way with the old journal
+  it('remembers a turn to foreign-live heard while the snapshot is pending, and resets once the snapshot is live', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'MAWS wrote this.');
+    b.end(['u1']);
+    const liveForm = b.events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+    const fake = fakeClient();
+    const source = ipcSourceOver(fake.client, APP);
+    const store = useTranscriptStore.getState();
+    const hydrated = store.attach(source.key!, source);
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    fake.emit('session.changed', { record: { appId: APP, holder: { kind: 'terminal', pid: 7 } }, cause: 'live', revision: 1 } as never);
+    fake.calls[0].answer({ ok: true, value: { events: liveForm, lastSeq: liveForm.length, complete: true } } as never);
+    await hydrated;
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(2)); // the reset's hydration asks again
+    expect(fake.calls[1].name).toBe('session.events');
     store.detach(source.key!);
   });
 });

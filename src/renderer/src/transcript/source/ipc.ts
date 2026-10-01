@@ -126,14 +126,24 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     live: boolean;
     held: SessionEvent[][] | null;
     pass(batch: SessionEvent[]): void;
+    foreign: boolean; // W7: the record's latest custody seen, a foreign holder's (remembered while the snapshot is pending)
   }
   let latest: Subscription | null = null;
   const resets = new Set<() => void>();
+  // W7: a subscription that has the live form while its record is foreign-live starts over from disk, once.
+  const resetIfOverturned = (subscription: Subscription) => {
+    if (!subscription.live || !subscription.foreign) return;
+    subscription.live = false;
+    queueMicrotask(() => {
+      for (const listener of [...resets]) listener();
+    });
+  };
   return {
     key: appSessionId,
     subscribe(listener) {
       const subscription: Subscription = {
         live: false,
+        foreign: false, // W7
         held: [],
         batch: null,
         ended: new AbortController(),
@@ -152,13 +162,12 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (subscription.held) subscription.held.push(batch.events);
         else subscription.pass(batch.events);
       });
-      // W7: the record turned foreign-live after the live form was seen: the key starts over from disk, once
+      // W7: the record's custody, kept even while the snapshot is pending; foreign-live with the live form seen (now, or
+      // once the snapshot establishes it) starts the key over from disk
       const offChanged = client.on('session.changed', ({ record }) => {
-        if (record.appId !== appSessionId || !subscription.live || (record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job')) return;
-        subscription.live = false;
-        queueMicrotask(() => {
-          for (const listener of [...resets]) listener();
-        });
+        if (record.appId !== appSessionId) return;
+        subscription.foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job';
+        resetIfOverturned(subscription);
       });
       return () => {
         off();
@@ -180,6 +189,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         const waiting = subscription.held ?? [];
         subscription.held = null;
         for (const batch of waiting) subscription.pass(batch);
+        resetIfOverturned(subscription); // W7: a turn to foreign-live heard while this snapshot was on its way
       }
       return events;
     },
