@@ -1,6 +1,7 @@
 // The top bar's usage pill and its popover (W6, E1) over the committed ClaudeUsage fixture as C7's reader answers it at
 // the fixture's clock: the pill's reading and colour, the popover's sections in ClaudeUsage's panel order, the four
-// account actions disabled under the one hint, the hand-off to ClaudeUsage's own panel, and the absent case.
+// account actions disabled under the one hint, the hand-off to ClaudeUsage's own panel, and the absent case. The
+// retired Accounts tab's own suite moved here with its content (its order, geometry, states and hand-off).
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +12,9 @@ import { ClaudeUsageReader } from '../../../main/usage/claude-usage-reader';
 import { useGateway } from '../gateway/store';
 import { useNotices } from '../stores/notices';
 import { useUsage } from '../stores/usage';
+import { isActionEnabled, runAction } from '../keymap/actions-runtime';
 import { READ_ONLY_CONTROLS } from './controls';
+import { registerUsage } from '.';
 import { UsagePill, useUsagePopover } from './UsagePill';
 
 const NOW = Date.parse('2026-09-29T07:36:17Z');
@@ -19,6 +22,7 @@ const HINT = "Routing controls arrive when ClaudeUsage exposes its control route
 let fixture: UsageSnapshot;
 let calls: { name: string; input: unknown }[];
 let usageChanged: ((payload: unknown) => void)[];
+let installed: boolean;
 
 beforeAll(async () => {
   fixture = await new ClaudeUsageReader({ dir: join(__dirname, '../../../../test/fixtures/claude-usage'), emit: () => {}, log: () => {}, now: () => NOW }).snapshot([]);
@@ -28,6 +32,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   calls = [];
   usageChanged = [];
+  installed = true;
   window.maws = {
     invoke: vi.fn(async (name: string, input: unknown) => {
       calls.push({ name, input });
@@ -37,7 +42,7 @@ beforeEach(() => {
         case 'engine.relayHealth':
           return { ok: true, value: { url: 'http://127.0.0.1:8641', ok: true, status: 200, latencyMs: 2.6, checkedAt: new Date(NOW - 12_000).toISOString(), error: null } };
         case 'settings.claudeUsage.status':
-          return { ok: true, value: { installed: true, running: true, bundleId: 'com.haegi.ClaudeUsage', dataDirPresent: true, checkedAt: new Date(NOW).toISOString() } };
+          return { ok: true, value: { installed, running: true, bundleId: 'com.haegi.ClaudeUsage', dataDirPresent: true, checkedAt: new Date(NOW).toISOString() } };
         case 'settings.claudeUsage.open':
           return { ok: true, value: { opened: true, reason: null, instruction: 'ClaudeUsage is in the menu bar · click its icon' } };
         default:
@@ -189,5 +194,53 @@ describe('the usage popover', () => {
     expect(panel.querySelector('[data-account]')).toBeNull();
     expect(within(panel).queryByRole('button', { name: 'Add account…' })).toBeNull();
     expect(panel.querySelector('[data-codex]')).toBeNull();
+  });
+
+  // W6: from the retired Accounts tab's suite (C11 M5 pins), now the popover's
+  it('shows each account’s saved sessions and a reset that passed as 0 % with no reading since', async () => {
+    const panel = await openPanel();
+    expect(card(panel, '1@example.test').textContent).toContain('1 saved session');
+    expect(card(panel, '1@example.test').textContent).not.toContain('Routing here');
+    const twoFive = within(card(panel, '2@example.test')).getByRole('meter', { name: 'Five-hour usage' });
+    expect(twoFive.getAttribute('aria-valuenow')).toBe('0');
+    expect(card(panel, '2@example.test').textContent).toContain('5h · no reading since the window reset');
+    expect(card(panel, '3@example.test').textContent).toContain('Max · default_claude_max_20x');
+  });
+
+  it('a second hand-off while waiting restarts the 60 s wait', async () => {
+    const panel = await openPanel();
+    const open = () => fireEvent.click(within(panel).getByRole('button', { name: 'Open ClaudeUsage ↗' }));
+    open();
+    await settle();
+    await act(() => vi.advanceTimersByTimeAsync(40_000));
+    open();
+    await settle();
+    await act(() => vi.advanceTimersByTimeAsync(40_000));
+    expect(within(panel).getByRole('status').textContent).toBe('Waiting for ClaudeUsage…');
+    await act(() => vi.advanceTimersByTimeAsync(20_000));
+    expect(within(panel).queryByRole('status')).toBeNull();
+  });
+
+  it('offers Install ClaudeUsage when it is not installed', async () => {
+    installed = false;
+    const panel = await openPanel({ ...fixture, available: false, accounts: [] });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Install ClaudeUsage' }));
+    await settle();
+    expect(calls.at(-1)).toEqual({ name: 'layout.openExternal', input: { url: 'https://github.com/SSFSKIM/claude-usage-menubar#readme' } });
+  });
+
+  it('the Usage action (the retired Accounts tab’s id, kept for keymap overrides) opens the popover', async () => {
+    const off = registerUsage();
+    try {
+      useUsage.setState({ snapshot: fixture });
+      render(<UsagePill />);
+      expect(isActionEnabled('accounts.open')).toBe(true);
+      act(() => runAction('accounts.open'));
+      await settle();
+      expect(screen.getByRole('dialog', { name: 'Claude Usage' })).toBeTruthy();
+    } finally {
+      off();
+    }
+    expect(isActionEnabled('accounts.open')).toBe(false);
   });
 });

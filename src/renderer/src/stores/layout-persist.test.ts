@@ -51,14 +51,14 @@ describe('layout persistence', () => {
   });
 
   it('writes tabs opened before hydration over an existing main.tabs, before any later change and on beforeunload', async () => {
-    const saved = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [{ id: 'diagnostics', kind: 'diagnostics', pinned: false }, { id: 'accounts', kind: 'accounts', pinned: false }], activeTabId: 'diagnostics' }] };
+    const saved = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [{ id: 'diagnostics', kind: 'diagnostics', pinned: false }, { id: 'settings', kind: 'settings', section: null, pinned: false }], activeTabId: 'diagnostics' }] };
     const { store, hydrate, sets } = setup({ 'main.tabs': saved });
     store.getState().openSession(A); // a sidebar click or a notification navigation racing the first layout.get
     await hydrate((id) => id === A);
     window.dispatchEvent(new Event('beforeunload'));
     const written = sets().filter((s) => s.key === 'main.tabs');
     expect(written).toHaveLength(1);
-    expect((written[0].value as typeof saved).panes[0].tabs.map((t) => t.id)).toEqual(['diagnostics', `session:${A}`, 'accounts']); // opened after the saved active tab, over the saved tabs
+    expect((written[0].value as typeof saved).panes[0].tabs.map((t) => t.id)).toEqual(['diagnostics', `session:${A}`, 'settings']); // opened after the saved active tab, over the saved tabs
     expect(written[0].value).toBe(store.getState().main);
   });
 

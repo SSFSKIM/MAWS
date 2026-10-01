@@ -566,17 +566,16 @@ describe('⌃Tab follows DOM focus', () => {
   });
 });
 
-describe('accounts and settings tabs (C11)', () => {
-  it('render their fallbacks until C11 registers, titled Accounts and Settings, closable', async () => {
+describe('the settings tab (C11; W6: the Accounts tab retired into the usage popover)', () => {
+  it('renders its fallback until C11 registers, titled Settings, closable', async () => {
     const user = userEvent.setup();
     render(<Shell />);
-    act(() => useLayout.getState().openTab({ kind: 'accounts' }));
-    expect(tabNames()).toEqual(['Accounts']);
-    expect(within(main()).getByText('Accounts unavailable')).toBeTruthy();
+    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }));
     act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
+    expect(tabNames()).toEqual(['Diagnostics', 'Settings']);
     expect(within(main()).getByText('Settings unavailable')).toBeTruthy();
     await user.click(within(tab('Settings')).getByRole('button', { name: 'Close Settings', hidden: true }));
-    expect(tabNames()).toEqual(['Accounts']);
+    expect(tabNames()).toEqual(['Diagnostics']);
   });
 
   it('pass the settings section to the registered slot, following a second open', () => {

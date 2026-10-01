@@ -64,8 +64,6 @@ function useTabLabel(tab: TabRef): TabLabel {
       return { title: `Diff · ${tab.ref}`, secondary: null, glyph: null, fileType: null };
     case 'diagnostics':
       return { title: 'Diagnostics', secondary: null, glyph: null, fileType: null };
-    case 'accounts':
-      return { title: 'Accounts', secondary: null, glyph: null, fileType: null };
     case 'settings':
       return { title: 'Settings', secondary: null, glyph: null, fileType: null };
   }

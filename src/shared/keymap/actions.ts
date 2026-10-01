@@ -48,10 +48,12 @@ export const ACTIONS = {
   'composer.stop':        { title: 'Stop, holding waiting messages', chord: 'Cmd+.',     sink: 'renderer', menu: null, scope: 'app' }, // W1: nothing runs after it
   'composer.focus':       { title: 'Focus the composer',          chord: 'Cmd+L',        sink: 'renderer', menu: null, scope: 'app' },
   // C7 end
-  // C11 start: the Settings and Accounts tabs and the ClaudeUsage hand-off (C11 execution document, Keymap and action
-  // entries). settings.open's arg, when given, is the index of a Settings section; the relay card runs the hand-off.
+  // C11 start: the Settings tab and the ClaudeUsage hand-off (C11 execution document, Keymap and action entries).
+  // settings.open's arg, when given, is the index of a Settings section; the relay card runs the hand-off. W6: the
+  // Accounts tab retired; `accounts.open` keeps its id, which the settings' keymap overrides are keyed by, and opens the
+  // top bar's usage popover.
   'settings.open':           { title: 'Settings…',                chord: 'Cmd+,',        sink: 'menu', menu: 'app',  scope: 'app' },
-  'accounts.open':           { title: 'Accounts',                 chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  'accounts.open':           { title: 'Usage',                    chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'gateway.openClaudeUsage': { title: 'Open ClaudeUsage',         chord: null,           sink: 'renderer', menu: null, scope: 'app' },
   // C11 end
 } as const satisfies Record<string, ActionSpec>;

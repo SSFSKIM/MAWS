@@ -47,7 +47,6 @@ import { startRelayMonitor } from './gateway/relay-monitor';
 import { GatewayDialogs } from './gateway/SwitchSheet';
 import { sessionInfoTool } from './tools/session-info';
 import { registerAllWidgets } from './widgets';
-import { registerAccountsTab } from './accounts';
 import { connectMonoFont, connectTranscriptWidth, registerSettingsTab } from './settings-tab';
 // C11 end
 // C12 start
@@ -56,7 +55,7 @@ import { connectBudget } from './budget/store';
 import { connectQuitWait } from './lifecycle/quit-wait';
 // C12 end
 // W6 start
-import { registerUsagePill } from './usage';
+import { registerUsage } from './usage';
 // W6 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
@@ -124,8 +123,8 @@ export function App() {
     if (import.meta.env.DEV) window.__maws_agents = agentsDevSurface();
   }, []);
   // C8b end
-  // C11 start: Settings…, Accounts and Open ClaudeUsage in the action table; the relay monitor's app-wide banner while a
-  // routed session is live; a widget for every name of the slash palette
+  // C11 start: Settings… and Open ClaudeUsage in the action table (W6: Usage is the usage popover's); the relay
+  // monitor's app-wide banner while a routed session is live; a widget for every name of the slash palette
   useEffect(() => registerGatewayActions(), []);
   useEffect(() => startRelayMonitor(), []);
   useEffect(() => registerAllWidgets(), []);
@@ -136,9 +135,9 @@ export function App() {
   useEffect(() => {
     registerPanelTool(sessionInfoTool);
   }, []);
-  // M5: the Accounts and Settings tabs in C5's slots, and appearance.monoFont as the root --font-mono override
+  // M5: the Settings tab in C5's slot (W6: the Accounts tab retired into the top bar's usage popover), and
+  // appearance.monoFont as the root --font-mono override
   useEffect(() => {
-    registerAccountsTab();
     registerSettingsTab();
   }, []);
   useEffect(() => connectMonoFont(), []);
@@ -148,8 +147,8 @@ export function App() {
   useEffect(() => connectBudget(), []);
   useEffect(() => connectQuitWait(), []); // M4: Quit when idle's banner while main holds the quit
   // C12 end
-  // W6 start: the top bar's usage pill and its popover, the copy of ClaudeUsage's panel (E1)
-  useEffect(() => registerUsagePill(), []);
+  // W6 start: the top bar's usage pill and its popover, the copy of ClaudeUsage's panel (E1), and the Usage action
+  useEffect(() => registerUsage(), []);
   // W6 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.

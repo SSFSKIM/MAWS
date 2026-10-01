@@ -185,26 +185,24 @@ describe('layout store transitions', () => {
   });
 });
 
-// C11's eighth ask: two singleton tab kinds, opened like any tab, closable, never pinned.
-describe('accounts and settings tabs', () => {
+// C11's eighth ask: a singleton tab kind, opened like any tab, closable, never pinned (W6: the Accounts tab, the other
+// singleton, retired into the top bar's usage popover).
+describe('the settings tab', () => {
   const settings = (section: 'engine' | 'keyboard' | null) => ({ kind: 'settings' as const, section });
 
-  it('open as singletons: a second open activates the existing tab, and for settings updates its section', () => {
+  it('opens as a singleton: a second open activates the existing tab and updates its section', () => {
     let m = openTab(abc(), settings('engine'));
-    m = openTab(m, { kind: 'accounts' });
-    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c', 'settings', 'accounts']]);
+    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c', 'settings']]);
     m = openTab(activateTab(m, 'session:a'), settings('keyboard'));
-    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c', 'settings', 'accounts']]);
+    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c', 'settings']]);
     expect(active(m)).toEqual(['settings']);
     expect(m.panes[0].tabs.find((t) => t.id === 'settings')).toEqual({ id: 'settings', kind: 'settings', section: 'keyboard', pinned: false });
-    m = openTab(activateTab(m, 'session:a'), { kind: 'accounts' });
-    expect(active(m)).toEqual(['accounts']);
   });
 
-  it('are closable and never pinned', () => {
-    const m = openTab(openTab(base, settings(null)), { kind: 'accounts' });
-    expect(togglePinned(togglePinned(m, 'settings'), 'accounts')).toBe(m);
-    expect(ids(closeTab(closeTab(m, 'settings'), 'accounts'))).toEqual([[]]);
+  it('is closable and never pinned', () => {
+    const m = openTab(base, settings(null));
+    expect(togglePinned(m, 'settings')).toBe(m);
+    expect(ids(closeTab(m, 'settings'))).toEqual([[]]);
     expect(LayoutMainSchema.safeParse(m).success).toBe(true);
   });
 });

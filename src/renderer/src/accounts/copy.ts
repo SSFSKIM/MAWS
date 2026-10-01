@@ -1,15 +1,9 @@
-// The Accounts tab's words (C11 execution document, Interfaces "Accounts tab"; mockup 06 vignette 01). ClaudeUsage owns
-// sign-in, reconnect and removal (D-19): every action here is a hand-off that names ClaudeUsage.
+// The accounts' words (C11 execution document, Interfaces "Accounts tab"; mockup 06 vignette 01), shown since W6 in the
+// top bar's usage popover, the Accounts tab having retired into it. ClaudeUsage owns sign-in, reconnect and removal
+// (D-19).
 
 export const ACCOUNTS = {
-  title: 'Accounts',
-  readFrom: (ago: string) => `read from ClaudeUsage · updated ${ago}`,
   openClaudeUsage: 'Open ClaudeUsage ↗',
-  note: 'The relay picks the account whose weekly window resets soonest; a manual choice in ClaudeUsage wins while it is usable.',
-  addAccount: 'Add account in ClaudeUsage ↗',
-  addHint: 'Signs in without changing what this Mac is using',
-  reconnect: 'Reconnect in ClaudeUsage ↗',
-  remove: 'Remove in ClaudeUsage ↗',
   waiting: 'Waiting for ClaudeUsage…',
   unavailable: 'ClaudeUsage is not installed or has no data',
   install: 'Install ClaudeUsage',

@@ -427,17 +427,19 @@ test('every widget opens with live engine data; controls take effect and are rea
       await idle(page, id);
     });
 
-    await step('the Accounts tab and Session info read ClaudeUsage alike', async () => {
+    await step('the usage popover and Session info read ClaudeUsage alike', async () => {
       const popover = await (await openSessionInfo(page, id)).innerText();
-      await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('accounts.open')?.click()); // the Accounts tab, from its menu item
-      await expect(main.getByText('read from ClaudeUsage', { exact: false })).toBeVisible();
-      const tab = await main.innerText();
+      await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('accounts.open')?.click()); // W6: View › Usage, the top bar's usage popover (the Accounts tab retired into it)
+      const usagePopover = page.getByRole('dialog', { name: 'Claude Usage' });
+      await expect(usagePopover.getByText(/^updated /)).toBeVisible();
+      const tab = await usagePopover.innerText();
       const usage = value(await invoke(page, 'settings.usage', { engineSessionIds: [] }));
       const drain = usage.accounts.find((a) => a.uuid === usage.drainTarget);
-      // what the tab marks routing is the relay's drain target; emails stay out of the observations
+      // what the popover marks routing is the relay's drain target; emails stay out of the observations
       observe('accounts', { accounts: usage.accounts.length, drainManual: usage.drainTargetIsManual, routingMarkOnDrain: drain ? tab.indexOf(drain.email) < tab.indexOf('Routing here') : null, popoverHasRouting: popover.includes('routing') });
       if (drain) expect(tab.indexOf(drain.email)).toBeLessThan(tab.indexOf('Routing here'));
       await page.screenshot({ path: join(scratch.root, 'accounts-live.png') }); // the owner's accounts: kept in the scratch only
+      await page.keyboard.press('Escape');
     });
 
     observe('cost', { total_cost_usd: await usageCost(page, id) });
