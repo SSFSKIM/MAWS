@@ -49,7 +49,7 @@ export function resetShellStores(): void {
     panelBySession: new Map(),
     panelActiveNoSession: null,
     hydrated: true,
-    focusedCardAppId: null,
     focusRequest: null,
+    overviewOpen: false,
   });
 }

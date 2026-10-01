@@ -18,6 +18,7 @@ import { LiveLedger } from '../test/live/support/live';
 import { framesOf, journal, liveScratch, liveSkipReason, mainResults, printSession, recordOf, resumeLive, statusOf, terminalSession, userWrites, type LiveScratch } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { sidebarRow } from './support/sidebar';
 
 const skip = liveSkipReason();
 test.skip(skip !== null, skip ?? '');
@@ -85,7 +86,7 @@ const controlIn = (pane: Locator) => pane.locator('[data-submit-state]');
 const editorText = (pane: Locator) => pane.locator('[contenteditable="true"]').innerText();
 
 async function open(page: Page, record: SessionRecord, pane: Locator): Promise<void> {
-  await page.locator(`[role="treeitem"][data-menu="session:${record.appId}"]`).click();
+  await (await sidebarRow(page, { appSessionId: record.appId })).click(); // W5: on its project's page, opened first
   await expect(pane.locator(`[data-composer="${record.appId}"]`)).toBeVisible();
 }
 

@@ -113,7 +113,7 @@ function mirrorLayout(panes: [HarnessPane, HarnessPane]) {
   const tabsOf = (pane: HarnessPane) =>
     pane !== null && 'composer' in pane
       ? { tabs: [{ id: `session:${pane.composer}`, kind: 'session' as const, appSessionId: pane.composer as AppSessionId, pinned: false }], activeTabId: `session:${pane.composer}` }
-      : { tabs: [{ id: 'overview' as const, kind: 'overview' as const, pinned: true as const }], activeTabId: 'overview' };
+      : { tabs: [{ id: 'diagnostics' as const, kind: 'diagnostics' as const, pinned: false }], activeTabId: 'diagnostics' }; // W5: a tab of no session (the Overview is no tab)
   useLayout.setState((s) => ({ main: { ...s.main, panes: [tabsOf(panes[0]), tabsOf(panes[1])], focusedPane: s.main.focusedPane } }));
 }
 

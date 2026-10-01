@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT } from './support/launch';
+import { projectRow, sidebarRow } from './support/sidebar';
 
 test.skip(process.env.MAWS_C12_E2E !== '1', 'the budget replay runs under pnpm e2e:c12 (MAWS_C12_E2E=1)');
 
@@ -55,28 +56,38 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
   const maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/c12-budget.json', MAWS_SCENARIO_CLOCK: 'manual' } });
   try {
     const { app, page } = maws;
-    const sidebar = page.locator('[data-region="sidebar"]');
     const main = page.locator('[data-region="main"]');
     const banner = page.locator('[data-banner-host]').getByRole('status').filter({ hasText: 'Memory budget exceeded' });
     value(await invoke(page, 'settings.set', { engine: { statefulMcpServers: ['c12-kernel'] } }));
-    await expect(sidebar.getByRole('treeitem', { name: RELEASED_TITLE })).toBeVisible();
+    await expect(projectRow(page, 'MAWS')).toBeVisible(); // the stub's records are in
+    const row = await sidebarRow(page, RELEASED_TITLE); // W5: on its project's page, opened here
+    await expect(row).toBeVisible();
 
     // The release: at 1000 the host releases the least recently used idle session, at 2000 its process has exited.
     await advanceTo(app, 2000);
-    const row = sidebar.getByRole('treeitem', { name: RELEASED_TITLE });
     const mark = row.getByText('released', { exact: true });
     await expect(mark).toBeVisible();
     await expect(mark).toHaveAttribute('title', /^Released at \d\d:\d\d to stay under the 2 GB memory budget · Send resumes it$/);
     await expect(row.getByRole('img', { name: 'Idle' })).toBeVisible(); // the idle glyph: no failed or exited glyph
     await expect(row.getByLabel('Unread')).toHaveCount(0);
-    const card = main.getByRole('article', { name: RELEASED_TITLE });
+    // W5: the Overview floats over the main area from the top bar's button rather than showing as the first tab.
+    const overview = main.getByRole('dialog', { name: 'Overview' });
+    const overviewButton = main.locator('[data-top-bar]').getByRole('button', { name: /^Overview/ });
+    await overviewButton.click();
+    const card = overview.getByRole('article', { name: RELEASED_TITLE });
     await expect(card.getByText('released', { exact: true })).toBeVisible(); // still on the Overview, idle
     await expect(card.getByTestId('card-activity')).toHaveText('Idle');
-    await expect(sidebar.getByRole('list', { name: 'Needs you' })).toHaveCount(0); // no Needs-you item
+    // No Needs-you item. W5 has no Needs-you list: what waits is counted on the project's row (◐N) and the Overview
+    // button, and both count nothing.
+    await expect(projectRow(page, 'MAWS').locator('[aria-label$=" waiting"]')).toHaveCount(0);
+    await expect(overviewButton).toHaveAccessibleName('Overview');
     expect(value(await invoke(page, 'attention.list', undefined))).toEqual([]);
     await shoot(page, testInfo, 'released');
 
-    // Its tab: Send is enabled and says it resumes the session; Session info reads the budget and the release.
+    // Its tab, the Overview closed first (it floats over the composer): Send is enabled and says it resumes the session;
+    // Session info reads the budget and the release.
+    await overview.getByRole('button', { name: 'Close Overview' }).click();
+    await expect(overview).toHaveCount(0);
     await row.click();
     const message = main.getByRole('textbox', { name: 'Message' });
     await message.click();

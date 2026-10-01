@@ -1,11 +1,13 @@
 // One pane of the main region (§5.2, D-8; residue *Split*): its tab strip over the active tab's content. A pointer
 // press or focus anywhere inside makes it the focused pane, the target of ⌘1…9, ⌘\ and ⌃Tab. Only the active tab's
-// content is mounted; a tab's content remounts when it becomes active again.
+// content is mounted; a tab's content remounts when it becomes active again. With no tab open (W5: the Overview is no
+// tab), the pane offers the Overview and a new session.
 import { useId, useRef } from 'react';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { Diagnostics } from '../app/Diagnostics';
 import { useSlot } from '../app/slots';
-import { Overview } from '../overview/Overview';
+import { useChordHint } from '../app/IconButton';
+import { createSession, runAction, useActionEnabled, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { SessionPane } from '../session/SessionPane';
 import { useLayout } from '../stores/layout';
@@ -52,11 +54,12 @@ export function Pane({ index, split, column }: { index: PaneIndex; split: boolea
       </div>
       <div
         role="tabpanel"
-        aria-labelledby={`${idPrefix}-tab-${activeIndex}`}
+        aria-labelledby={active ? `${idPrefix}-tab-${activeIndex}` : undefined}
+        aria-label={active ? undefined : 'No open tabs'}
         className="relative min-h-0 min-w-0 overflow-hidden"
         style={{ gridRow: 3, gridColumn: column }}
       >
-        {active && <TabContent key={active.id} tab={active} paneIndex={index} />}
+        {active ? <TabContent key={active.id} tab={active} paneIndex={index} /> : <EmptyPane />}
       </div>
     </section>
   );
@@ -64,8 +67,6 @@ export function Pane({ index, split, column }: { index: PaneIndex; split: boolea
 
 function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
   switch (tab.kind) {
-    case 'overview':
-      return <Overview paneIndex={paneIndex} />;
     case 'session':
       return <SessionPane appSessionId={tab.appSessionId} paneIndex={paneIndex} />;
     case 'agent':
@@ -85,6 +86,28 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
     case 'settings':
       return <SettingsTab section={tab.section} />;
   }
+}
+
+const TEXT_BUTTON =
+  'rounded-sm border border-border-strong px-2.5 py-1 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:border-border disabled:text-fg-faint disabled:hover:bg-transparent';
+
+function EmptyPane() {
+  const canCreate = useSessionCreatorRegistered();
+  const canOverview = useActionEnabled('tab.overview');
+  const chord = useChordHint('tab.overview');
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 text-ui text-fg-muted">
+      <p className="m-0">No open tabs</p>
+      <div className="flex gap-2">
+        <button type="button" disabled={!canOverview} onClick={() => runAction('tab.overview')} className={TEXT_BUTTON}>
+          {chord ? `Overview ${chord}` : 'Overview'}
+        </button>
+        <button type="button" disabled={!canCreate} title={canCreate ? undefined : 'Not available here'} onClick={() => void createSession(null)} className={TEXT_BUTTON}>
+          New session
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function AccountsTab() {

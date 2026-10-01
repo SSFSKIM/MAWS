@@ -6,6 +6,7 @@
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { LayoutMain, TabRef } from '@shared/ipc/schema/layout';
 import type { ActionId } from '@shared/keymap/actions';
+import type { Location } from '@shared/sessions/intent';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { createHandlerRegistry } from './registry';
@@ -25,22 +26,24 @@ export const useActionEnabled = (id: ActionId): boolean => registry.useEnabled(i
 // The owner's design (charter §19, 2026-09-28): no modal sheet. "+" and "New session" ask the registered creator for an
 // app session id with a setup intent and no engine process (C10's `session.create`; in launch mode `scenario` the
 // stub's), and the shell opens that unstarted session's tab. A project id cannot ride the numeric `layout.action` arg,
-// so the "+" buttons call `createSession(projectId)` directly and C10's `session.new` handler calls it with null.
-export type SessionCreator = (projectId: ProjectId | null) => Promise<AppSessionId | null>;
+// so the "+" buttons call `createSession(projectId)` directly and C10's `session.new` handler calls it with null. W5: a
+// worktree group's "+" in the sidebar names the checkout as the location, which the creator puts on the intent (a
+// creator without intents ignores it).
+export type SessionCreator = (projectId: ProjectId | null, location?: Location | null) => Promise<AppSessionId | null>;
 
-const creators = createHandlerRegistry<'create', [ProjectId | null]>('session creator');
+const creators = createHandlerRegistry<'create', [ProjectId | null, (Location | null)?]>('session creator');
 
 export const registerSessionCreator = (fn: SessionCreator): (() => void) => creators.register('create', fn);
 export const isSessionCreatorRegistered = (): boolean => creators.has('create');
 export const useSessionCreatorRegistered = (): boolean => creators.useEnabled('create');
 
 // C12: answers the new session's id (null when none was made), so the Worktrees… dialog can set its location.
-export async function createSession(projectId: ProjectId | null, opts: { pane?: 0 | 1 | 'focused' } = {}): Promise<AppSessionId | null> {
+export async function createSession(projectId: ProjectId | null, opts: { pane?: 0 | 1 | 'focused'; location?: Location } = {}): Promise<AppSessionId | null> {
   const creator = creators.get('create') as SessionCreator | undefined;
   if (!creator) return null; // C12
   let appSessionId: AppSessionId | null;
   try {
-    appSessionId = await creator(projectId);
+    appSessionId = await (opts.location ? creator(projectId, opts.location) : creator(projectId));
   } catch (error) {
     console.error('[actions] session creator failed', error);
     return null; // C12
@@ -66,7 +69,7 @@ const findTab = (main: LayoutMain, id: string): TabRef | null => main.panes.flat
 
 export async function requestCloseTab(id: string): Promise<void> {
   const ref = findTab(useLayout.getState().main, id);
-  if (!ref || ref.kind === 'overview') return;
+  if (!ref) return;
   const guard = closeGuards.get(ref.kind) as CloseGuard | undefined;
   if (guard) {
     let close: boolean;

@@ -19,6 +19,7 @@ import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
+import { openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
 const AUTO_ROUTED = `${FIXTURES}/pass2/auto-routed.jsonl`;
@@ -93,9 +94,11 @@ async function addProject(page: Page, directory: string): Promise<{ id: string; 
   return { id: project.id, name: project.name };
 }
 
-// "+" on the project: C5's createSession runs C10's creator; the tab opens on the unstarted session's heading.
+// "+" on the project's page (W5: the sidebar drills into it, and its rows show there): C5's createSession runs C10's
+// creator; the tab opens on the unstarted session's heading.
 async function plus(page: Page, name: string): Promise<string> {
-  await page.getByRole('button', { name: `New session in ${name}`, exact: true }).click();
+  await openProject(page, name);
+  await page.locator('[data-region="sidebar"] [data-level-pane="2"]').getByRole('button', { name: `New session in ${name}`, exact: true }).click();
   await expect(page.getByRole('heading', { name: `New session in ${name}` })).toBeVisible();
   const intents = value(await invoke(page, 'session.intent.list', undefined)).intents;
   return intents.at(-1)!.appSessionId;
@@ -144,7 +147,8 @@ async function startDirect(page: Page, id: string, patch: CommandInput<'session.
   return value(await invoke(page, 'session.start', { appSessionId: id, message, options: {} }));
 }
 
-const row = (page: Page, id: string) => page.locator(`[data-menu="session:${id}"]`);
+// A session's row on the sidebar's level on screen (W5: the other level stays rendered while it slides away).
+const row = (page: Page, id: string) => page.locator(`[data-region="sidebar"] [data-level-pane]:not([inert]) [data-menu="session:${id}"]`);
 
 // Every text a transcript's load-failure alert showed (the alert stays until Retry), from before the first start: a
 // session started through "+" hydrates once the engine host knows it, never failing on an id not yet launched or bound.
@@ -173,7 +177,7 @@ function assertPickSeamBuilt(maws: MawsLaunch): void {
 }
 
 async function menu(page: Page, id: string, item: string): Promise<void> {
-  await row(page, id).click({ button: 'right' });
+  await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' });
   await page.getByRole('menuitem', { name: item, exact: true }).click();
 }
 
@@ -310,7 +314,7 @@ test.describe('sessions', () => {
     expect(args[args.indexOf('--session-id') + 1]).toBe(forkId);
     const records = value(await invoke(page, 'session.list', {})).sessions;
     expect(records.map((r) => r.engineSessionId).sort()).toEqual([sourceId, forkId].sort());
-    await expect(page.getByRole('tab')).toHaveCount(3); // Overview, the source, the fork
+    await expect(page.getByRole('tab')).toHaveCount(2); // the source, the fork (W5: the Overview is no tab)
   });
 
   test('rollback keeps the tab: a launch past the fixture list is refused, the worktree and record go, the failure card stays, and Back to editing returns the message to the editor', async () => {
@@ -358,11 +362,14 @@ test.describe('sessions', () => {
     // the process stopped: C3's table lists it exited, or no longer at all
     await expect.poll(async () => value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === id)?.process ?? 'gone').toMatch(/^(exited|gone)$/);
 
-    await page.locator(`[data-menu="project:${project.id}"]`).first().click({ button: 'right' });
+    await showProjectList(page);
+    await projectRow(page, project.name).click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Archived sessions…' }).click();
     const archived = page.getByRole('dialog', { name: `Archived sessions · ${project.name}` });
     await archived.getByRole('button', { name: 'Unarchive' }).click();
     await expect(archived.getByText('No archived sessions.')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await openProject(page, project.name);
     await expect(row(page, id)).toBeVisible();
   });
 
@@ -477,7 +484,7 @@ test.describe('sessions', () => {
     expect(metas.filter((m) => m.event === 'spawn'), 'one retry, never chained').toHaveLength(2);
     expect(metas.filter((m) => m.event === 'init_failed').map((m) => m.code)).toEqual(['no_output', 'no_output']);
     expect(value(await invoke(page, 'session.status', { appSessionId: record.appId }))).toMatchObject({ process: 'exited', exit: { reason: 'crash' } });
-    await row(page, record.appId).click({ button: 'right' });
+    await (await sidebarRow(page, { appSessionId: record.appId })).click({ button: 'right' }); // W5: on its project's page
     await expect(page.getByRole('menuitem', { name: 'Resume', exact: true }), 'the row can be resumed again').toBeEnabled();
     await page.keyboard.press('Escape');
   });
@@ -515,7 +522,7 @@ test.describe('sessions', () => {
     expect(value(await invoke(page, 'session.start', { appSessionId: id, message: null, options: {} })), 'the fresh read, whatever the sidebar shows yet').toEqual({ status: 'held', appSessionId: id, holder: job, attach: { jobId: 'e6dcd828', command } });
     await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: id }))!.holder, { timeout: 2_000, message: 'foreign-live in the sidebar within two seconds' }).toEqual(job);
 
-    await row(page, id).click({ button: 'right' });
+    await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' }); // W5: on its project's page
     await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Attach in a terminal tab']);
     await page.keyboard.press('Escape');
     await row(page, id).click();
@@ -548,7 +555,7 @@ test.describe('sessions', () => {
     await expect(notice).toContainText(`Live in Terminal · pid ${pid} · read-only`, { timeout: 5_000 });
     await expect(notice.getByRole('button', { name: 'Attach in a terminal tab' })).toHaveCount(0);
     await expect(notice.getByRole('button', { name: 'Fork a copy' })).toBeVisible();
-    await row(page, id).click({ button: 'right' });
+    await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' });
     await expect(page.getByRole('menuitem')).toHaveText(['Open']);
     await page.keyboard.press('Escape');
     await store.removeRegistryRecord(pid);
@@ -591,7 +598,7 @@ test.describe('sessions', () => {
     expect(second.maws.consoleErrors()).toEqual([]);
   });
 
-  test("C5's acceptance item 10, replay clause: a replayed read-only request reaches Needs you through a recorded session and the hover card's Approve answers the broker", async () => {
+  test("C5's acceptance item 10, replay clause: a replayed read-only request reaches the session's row through a recorded session and its hover card's Approve answers the broker", async () => {
     const { page, trustedRepos } = await begin({ fixtures: [READ_ONLY] });
     const project = await addProject(page, trustedRepos[0]!.root);
     const id = await plus(page, project.name);
@@ -601,19 +608,19 @@ test.describe('sessions', () => {
     await untilPhase(page, id, 'ready');
     expect((await setupOf(page, id)).at(-1)!.outcome).toMatchObject({ kind: 'ready', firstTurn: 'sent' });
 
-    const needsYou = page.getByRole('list', { name: 'Needs you' });
-    const entry = needsYou.getByRole('listitem').first();
-    await expect(entry).toBeVisible({ timeout: 20_000 });
-    // C7's X4 card in C5's hover placement (registered in C5's requestCard slot): the tool as its heading
+    // W5: the session's row (on its project's page, opened by "+") waits with the approval glyph; its hover card holds
+    // C7's X4 card in C5's hover placement (registered in C5's requestCard slot), the tool as its heading.
+    const entry = row(page, id);
+    await expect(entry.getByRole('img', { name: 'Needs approval' })).toBeVisible({ timeout: 20_000 });
     const card = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Read' }) });
     await expect(async () => {
       await page.mouse.move(700, 400);
-      await entry.getByRole('button').first().hover();
+      await entry.hover();
       await expect(card).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 10_000 });
     await expect(card.getByText('Approval needed')).toBeVisible();
     await card.getByRole('button', { name: 'Approve' }).click();
-    await expect(needsYou.getByRole('listitem')).toHaveCount(0);
+    await expect(entry.getByRole('img', { name: 'Needs approval' })).toHaveCount(0);
     await turnEnded(page, id);
   });
 });

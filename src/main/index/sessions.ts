@@ -457,6 +457,31 @@ export class SessionStore {
     return () => void this.bindingListeners.delete(listener);
   }
 
+  // Records filed by the membership rule before it folded linked worktrees (C4 execution document, Decision Log,
+  // 2026-10-01): discovery re-summarises only transcripts that changed, so a session in a linked worktree would otherwise
+  // stay in that worktree's own project until its transcript moves. Each visible project whose directory now locates in
+  // another project's worktree gives its sessions to that project, each keeping a worktree it already had (a managed one
+  // made inside the linked worktree) and otherwise taking the linked worktree's root; a project discovery made is hidden
+  // then, while one the owner added stays. Run once per start, once `warmLinkedWorktrees` has answered the visible
+  // projects' directories (IndexSessionSource.start), so its `locate` calls read the cache rather than run git; answers
+  // how many records moved.
+  refoldLinkedWorktrees(): number {
+    return this.db.transaction(() => {
+      let moved = 0;
+      for (const folded of this.projects.inWorktrees()) {
+        const projectId = this.projects.projectAt(folded.location, true);
+        for (const row of this.db.all<SessionRow>('SELECT * FROM sessions WHERE project_id = ?', folded.id)) {
+          const values = { project_id: projectId, worktree_path: row.worktree_path ?? folded.location.worktreePath, worktree_branch: row.worktree_branch ?? row.branch };
+          if (!this.write(row, values)) continue;
+          this.changed(row.app_id as AppSessionId, 'facts');
+          moved += 1;
+        }
+        if (folded.origin === 'discovered') this.projects.hide(folded.id);
+      }
+      return moved;
+    });
+  }
+
   // Sessions without a project whose directory is `directory` or lies in one of its worktrees join a new project.
   attachOrphans(projectId: ProjectId, directory: string): void {
     const rows = this.db.all<SessionRow>(

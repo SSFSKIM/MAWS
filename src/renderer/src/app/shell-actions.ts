@@ -5,6 +5,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { registerAction, requestCloseTab } from '../keymap/actions-runtime';
 import { focusPaneElement } from '../main/pane-dom';
+import { focusOverview } from '../overview/OverviewPanel';
 import { togglePalette } from '../palette/CommandPalette';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
@@ -33,7 +34,8 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       if (tab) void requestCloseTab(tab.id);
     }),
     registerAction('tab.reopen', () => layout().reopenClosed()),
-    registerAction('tab.overview', () => layout().openTab({ kind: 'overview' })),
+    // W5: ⌘0, the View menu and the palette open the floating Overview, or bring focus back to it when it is open.
+    registerAction('tab.overview', () => (layout().overviewOpen ? focusOverview() : layout().setOverviewOpen(true))),
     registerAction('tab.select', (n) => {
       if (n !== null) layout().selectTab(n);
     }),

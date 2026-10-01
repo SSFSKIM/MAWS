@@ -19,8 +19,7 @@ const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? pat
 export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSessionId, SessionRecord>): { title: string; branch: string | null } {
   switch (tab?.kind) {
     case undefined:
-    case 'overview':
-      return { title: 'Overview', branch: null };
+      return { title: '', branch: null }; // an empty main area (W5: the Overview is no tab)
     case 'session':
     case 'agent': {
       const record = records.get(tab.appSessionId);

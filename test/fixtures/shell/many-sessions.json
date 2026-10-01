@@ -71,10 +71,13 @@
    "appId": "app-84ec4979-0001",
    "engineSessionId": "84ec4979-bcde-4f42-a38b-760009ccead4",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Review tab strip #2",
     "source": "user"
@@ -112,10 +115,13 @@
    "appId": "app-2fc31fc8-0002",
    "engineSessionId": "2fc31fc8-c28e-491d-9e81-bc9d668d3342",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Refactor tab strip #3",
     "source": "user"
@@ -317,10 +323,13 @@
    "appId": "app-8c33cf65-0007",
    "engineSessionId": "8c33cf65-6cbc-49f4-a292-70b575cf9a43",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Untangle tab strip #8",
     "source": "user"
@@ -358,10 +367,13 @@
    "appId": "app-eeba6466-0008",
    "engineSessionId": "eeba6466-60c2-4d7b-83d7-3f70bf39e13e",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Review journal replay #9",
     "source": "user"
@@ -563,10 +575,13 @@
    "appId": "app-d4af67b3-0013",
    "engineSessionId": "d4af67b3-3992-445c-9d0c-cd24c98530d5",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Test status line #14",
     "source": "user"
@@ -604,10 +619,13 @@
    "appId": "app-371813ff-0014",
    "engineSessionId": "371813ff-ca42-47c3-9f0f-95ee1500fcef",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Probe quota countdown #15",
     "source": "user"
@@ -809,10 +827,13 @@
    "appId": "app-d243ae93-0019",
    "engineSessionId": "d243ae93-5f4b-48a0-8ded-a7ddf83af30b",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Fix journal replay #20",
     "source": "user"
@@ -850,10 +871,13 @@
    "appId": "app-950e2ead-0020",
    "engineSessionId": "950e2ead-4618-412f-b789-053c6bd0fd55",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Document quota countdown #21",
     "source": "user"
@@ -1055,10 +1079,13 @@
    "appId": "app-76244ef0-0025",
    "engineSessionId": "76244ef0-f445-406c-8d7b-3cbccbf5d24c",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Fix quota countdown #26",
     "source": "user"
@@ -1096,10 +1123,13 @@
    "appId": "app-3e248498-0026",
    "engineSessionId": "3e248498-f3b8-4c1a-80ee-6257121c7bc4",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Fix sidebar drag #27",
     "source": "user"
@@ -1301,10 +1331,13 @@
    "appId": "app-84db31fd-0031",
    "engineSessionId": "84db31fd-2e4e-4480-a8d1-f4cc4a6d0306",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Refactor hook output #32",
     "source": "user"
@@ -1342,10 +1375,13 @@
    "appId": "app-f90d010a-0032",
    "engineSessionId": "f90d010a-ec6b-441b-b318-b4e910e9b834",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Review hook output #33",
     "source": "user"
@@ -1547,10 +1583,13 @@
    "appId": "app-b485ac1e-0037",
    "engineSessionId": "b485ac1e-4dd3-45cf-bfff-3632bc6525d1",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Review trace stream #38",
     "source": "user"
@@ -1588,10 +1627,13 @@
    "appId": "app-edaeb8e7-0038",
    "engineSessionId": "edaeb8e7-158c-4c99-b78e-c77bf8c82c19",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Test status line #39",
     "source": "user"
@@ -1793,10 +1835,13 @@
    "appId": "app-2fb34da1-0043",
    "engineSessionId": "2fb34da1-13c0-4da4-b1ca-0df74d435fc5",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Port hook output #44",
     "source": "user"
@@ -1834,10 +1879,13 @@
    "appId": "app-216b4261-0044",
    "engineSessionId": "216b4261-959e-438d-be96-d8284cd451ef",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Trace sidebar drag #45",
     "source": "user"
@@ -2039,10 +2087,13 @@
    "appId": "app-c359e2de-0049",
    "engineSessionId": "c359e2de-e63b-4708-bf87-de26ee7e4cd4",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Test menu bar icon #50",
     "source": "user"
@@ -2080,10 +2131,13 @@
    "appId": "app-13b47ccb-0050",
    "engineSessionId": "13b47ccb-ca35-4a59-a63d-5529e00a9dee",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Refactor settings migration #51",
     "source": "user"
@@ -2285,10 +2339,13 @@
    "appId": "app-470a242e-0055",
    "engineSessionId": "470a242e-a6de-4897-b1db-72d5993a2c0d",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Untangle usage chart #56",
     "source": "user"
@@ -2326,10 +2383,13 @@
    "appId": "app-a3553093-0056",
    "engineSessionId": "a3553093-ded0-43d6-9236-f2b4ac9737de",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Probe tab strip #57",
     "source": "user"
@@ -2531,10 +2591,13 @@
    "appId": "app-a3856ed5-0061",
    "engineSessionId": "a3856ed5-ac47-4247-8869-1718102fbe78",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Probe reconnect loop #62",
     "source": "user"
@@ -2572,10 +2635,13 @@
    "appId": "app-e3430f9b-0062",
    "engineSessionId": "e3430f9b-12a7-4f11-b80e-64e8b12bfa10",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Document sidebar drag #63",
     "source": "user"
@@ -2777,10 +2843,13 @@
    "appId": "app-3daa4d41-0067",
    "engineSessionId": "3daa4d41-b29c-4d02-a46f-faac1afbf0ad",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Fix settings migration #68",
     "source": "user"
@@ -2818,10 +2887,13 @@
    "appId": "app-b9f2e963-0068",
    "engineSessionId": "b9f2e963-fabe-4607-a546-e70b9eab0180",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Fix usage chart #69",
     "source": "user"
@@ -3023,10 +3095,13 @@
    "appId": "app-d35dcf1e-0073",
    "engineSessionId": "d35dcf1e-1090-4c0a-92ae-5bdcd8862ee7",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Document trace stream #74",
     "source": "user"
@@ -3064,10 +3139,13 @@
    "appId": "app-7cc7a438-0074",
    "engineSessionId": "7cc7a438-2cc0-47ea-bf2f-fc5e5e96ccc5",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Review status line #75",
     "source": "user"
@@ -3269,10 +3347,13 @@
    "appId": "app-9ee45b52-0079",
    "engineSessionId": "9ee45b52-000c-46fb-b676-05277f237078",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Review palette search #80",
     "source": "user"
@@ -3310,10 +3391,13 @@
    "appId": "app-37d2edce-0080",
    "engineSessionId": "37d2edce-3fe9-4af1-82ef-c915a1b8c225",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Port palette search #81",
     "source": "user"
@@ -3515,10 +3599,13 @@
    "appId": "app-e261a057-0085",
    "engineSessionId": "e261a057-a7be-4c5b-94ef-700f1e009f7e",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Refactor tab strip #86",
     "source": "user"
@@ -3556,10 +3643,13 @@
    "appId": "app-858dafba-0086",
    "engineSessionId": "858dafba-37ea-42fe-9fbe-3bac6f4acddd",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Test trace stream #87",
     "source": "user"
@@ -3761,10 +3851,13 @@
    "appId": "app-88c0f4e9-0091",
    "engineSessionId": "88c0f4e9-b9bd-4a1d-822c-c3faa0048038",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Fix trace stream #92",
     "source": "user"
@@ -3802,10 +3895,13 @@
    "appId": "app-0460a2a3-0092",
    "engineSessionId": "0460a2a3-3be5-4a26-bed2-558481dc710b",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Trace sidebar drag #93",
     "source": "user"
@@ -4007,10 +4103,13 @@
    "appId": "app-e30e2536-0097",
    "engineSessionId": "e30e2536-620a-4347-bdde-7a185d093f47",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Speed up hook output #98",
     "source": "user"
@@ -4048,10 +4147,13 @@
    "appId": "app-23abe397-0098",
    "engineSessionId": "23abe397-91de-4332-8273-83831ebae57e",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Probe palette search #99",
     "source": "user"
@@ -4253,10 +4355,13 @@
    "appId": "app-2adac7d1-0103",
    "engineSessionId": "2adac7d1-671f-48e6-8e1b-24b6b970f6db",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Probe usage chart #104",
     "source": "user"
@@ -4294,10 +4399,13 @@
    "appId": "app-b8ee6b03-0104",
    "engineSessionId": "b8ee6b03-93a9-4676-95db-1200f7e526d4",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Trace trace stream #105",
     "source": "user"
@@ -4499,10 +4607,13 @@
    "appId": "app-0222591d-0109",
    "engineSessionId": "0222591d-e9cb-4961-bc74-56eb3e9bab13",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Untangle quota countdown #110",
     "source": "user"
@@ -4540,10 +4651,13 @@
    "appId": "app-63cde6bc-0110",
    "engineSessionId": "63cde6bc-51e5-41fe-891f-6097961eb178",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Document trace stream #111",
     "source": "user"
@@ -4745,10 +4859,13 @@
    "appId": "app-92f622eb-0115",
    "engineSessionId": "92f622eb-b115-49b6-91a3-268917c18b42",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/scale-alpha",
+    "branch": "worktree-scale-alpha"
+   },
+   "branch": "worktree-scale-alpha",
    "title": {
     "text": "Review quota countdown #116",
     "source": "user"
@@ -4786,10 +4903,13 @@
    "appId": "app-aa6a323c-0116",
    "engineSessionId": "aa6a323c-1577-48ed-8a29-a0f65d5a2b40",
    "projectId": "proj-maws",
-   "directory": "/Users/new/Developer/GitHub/MAWS",
+   "directory": "/Users/new/Developer/GitHub/MAWS-scale-beta",
    "additionalDirectories": [],
-   "worktree": null,
-   "branch": null,
+   "worktree": {
+    "path": "/Users/new/Developer/GitHub/MAWS-scale-beta",
+    "branch": "scale-beta"
+   },
+   "branch": "scale-beta",
    "title": {
     "text": "Port hook output #117",
     "source": "user"

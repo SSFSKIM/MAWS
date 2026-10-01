@@ -30,6 +30,9 @@
   --radius-2xl: 22px;
   --shadow-composer: 0 0 0 1px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.04), 0 4px 40px 8px rgba(0,0,0,0.024);
   --row-h: 30px; --toolbar-h: 44px; --sidebar-w: 300px; --panel-w: 380px;
+  /* W5: the top bar above the tab strip, and the floating Overview's lift off the main area */
+  --topbar-h: 30px;
+  --shadow-float: 0 0 0 1px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.10), 0 24px 64px rgba(0,0,0,0.08);
 
   /* Terminal (C9, X7 extension; values advisory): a VS Code-light-derived readable set on a white ground. */
   --term-bg: var(--bg-raised); --term-fg: var(--fg); --term-cursor: #c9663f; --term-cursor-fg: #ffffff; --term-selection: rgba(201,102,63,0.25);
@@ -57,6 +60,7 @@
   --diff-add-bg: rgba(76,195,138,0.16); --diff-del-bg: rgba(242,109,109,0.16);
   /* W2 (C1): Codex's dark composer edge, a faint inner light instead of a shadow */
   --shadow-composer: inset 0 0 1px rgba(255,255,255,0.2);
+  --shadow-float: inset 0 0 1px rgba(255,255,255,0.2), 0 8px 24px rgba(0,0,0,0.45), 0 24px 64px rgba(0,0,0,0.35);
 
   /* Terminal (C9): the same family on the raised dark ground. */
   --term-bg: var(--bg-raised); --term-fg: var(--fg); --term-cursor: #d97757; --term-cursor-fg: #1a1a1a; --term-selection: rgba(217,119,87,0.30);

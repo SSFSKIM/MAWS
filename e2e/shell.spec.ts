@@ -12,6 +12,7 @@ import { expect, test, type ElectronApplication, type Locator, type Page } from 
 import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
 import { formatChord } from '../src/shared/keymap/chord';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const SHELL_ENV = {
   MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json',
@@ -59,6 +60,53 @@ test('shell: sidebar, overview, hover approve, tabs and split, persistence, them
   }
 });
 
+// W5 at scale (many-sessions.json: three projects of 120 sessions, a third of MAWS's in a managed and a sibling
+// worktree): the project list, then a page that renders every session of the project in 30px rows, grouped Main first
+// and then per worktree, scrolling; the hover card names a worktree row's branch and folder; Backspace goes back.
+test('sidebar at scale: two levels, 30px rows, worktree groups, a scrolling page', async () => {
+  const maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/many-sessions.json', MAWS_SCENARIO_CLOCK: 'manual' } });
+  try {
+    const { app, page } = maws;
+    const sidebar = page.locator('[data-region="sidebar"]');
+    await expect(sidebar.locator('[data-level-pane="1"] [data-kind="project"]')).toHaveCount(3, { timeout: 15_000 });
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 1360, height: 860 }));
+    const heights = (scope: Locator) => scope.evaluateAll((els) => [...new Set(els.map((el) => Math.round(el.getBoundingClientRect().height)))]);
+    expect(await heights(sidebar.locator('[data-level-pane="1"] [data-kind="project"]')), 'project rows are 30px').toEqual([30]);
+
+    await openProject(page, 'MAWS');
+    const level = sidebar.locator('[data-level-pane="2"]');
+    const rows = level.locator('[data-kind="session"]');
+    await expect(rows, 'every session of the project, no cap').toHaveCount(120);
+    expect(await heights(rows), 'session rows are 30px').toEqual([30]);
+    const groups = await level.getByRole('group').evaluateAll((els) => els.map((el) => [el.getAttribute('aria-label'), el.querySelectorAll('[data-kind="session"]').length]));
+    expect(groups.map(([label]) => label)).toEqual([expect.stringMatching(/^Main( · .+)?$/), 'MAWS-scale-beta · scale-beta', 'scale-alpha · worktree-scale-alpha']);
+    expect(groups.map(([, count]) => count)).toEqual([80, 20, 20]);
+    expect(await level.evaluate((el) => el.scrollHeight > el.clientHeight), 'the page scrolls').toBe(true);
+    const last = rows.last();
+    await last.scrollIntoViewIfNeeded();
+    await expect(last).toBeInViewport();
+
+    const alpha = level.getByRole('group', { name: 'scale-alpha · worktree-scale-alpha' }).locator('[data-kind="session"]').first();
+    await alpha.scrollIntoViewIfNeeded();
+    const title = (await alpha.getAttribute('aria-label'))!;
+    const card = page.getByRole('dialog', { name: title });
+    await expect(async () => {
+      await page.mouse.move(700, 400);
+      await alpha.hover();
+      await expect(card).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 10_000 });
+    await expect(card.getByTestId('hover-place')).toHaveText('⎇ worktree-scale-alpha · worktree scale-alpha');
+
+    await alpha.focus();
+    await page.keyboard.press('Backspace');
+    await expect(sidebar.getByTestId('sidebar-levels')).toHaveAttribute('data-level', '1');
+    await expect(sidebar.locator('[data-level-pane="1"] [data-kind="project"][aria-label="MAWS"]')).toBeFocused();
+    expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
 interface Saved {
   regions: unknown;
   main: unknown;
@@ -72,11 +120,14 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
   const { app, page } = maws;
   const sidebar = page.locator('[data-region="sidebar"]');
   const main = page.locator('[data-region="main"]');
-  const board = main.getByRole('list', { name: 'Overview' });
+  // W5: the Overview floats over the main area, opened from the top bar's button (or ⌘0); it is no tab.
+  const overview = main.getByRole('dialog', { name: 'Overview' });
+  const overviewButton = main.locator('[data-top-bar]').getByRole('button', { name: /^Overview/ });
+  const board = overview.getByRole('list', { name: 'Overview' });
   const usageCard = board.getByRole('article', { name: 'Usage reset countdown' });
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   const badge = () => app.evaluate(({ app }) => app.dock?.getBadge());
-  const four = ['Overview', `${FIX} · MAWS`, `${SIP} · MAWS`, `${QUOTA} · codex_somersault`];
+  const three = [`${FIX} · MAWS`, `${SIP} · MAWS`, `${QUOTA} · codex_somersault`];
 
   for (const name of ['sidebar', 'main', 'panel']) await expect(page.locator(`[data-region="${name}"]`)).toBeVisible({ timeout: 10_000 });
   const tokens = await themeTokens(page); // once the stylesheet is in
@@ -95,20 +146,26 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
       ['Resize right panel', '380'],
     ]);
 
-    await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toBeVisible();
-    expect(await needsYouRows(page), 'Needs you, longest wait first').toEqual([FIX, SIP, QUOTA]);
-    expect(await needsYouGlyphs(page)).toEqual(['Needs approval', 'Question', 'Plan review']);
-
-    expect(await treeRows(sidebar.getByRole('tree', { name: 'Pinned' }))).toEqual(['Workstation north star']);
-    expect(await sidebar.getByRole('tree', { name: 'Projects' }).locator('[data-kind="project"]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')))).toEqual(
-      ['MAWS', 'codex_somersault', USAGE_PROJECT],
-    );
-    expect(await treeRows(sidebar.getByRole('group', { name: 'MAWS' })), 'the pinned session is not repeated').toEqual([FIX, SIP, 'Charter + research']);
-    expect(await treeRows(sidebar.getByRole('group', { name: 'codex_somersault' }))).toEqual([QUOTA, 'Somersault terminal run', 'Trace stream reconnects']);
-    expect(await treeRows(sidebar.getByRole('group', { name: USAGE_PROJECT }))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
-    expect(await treeRows(sidebar.getByRole('tree', { name: 'Other sessions' }))).toEqual(['Terminal workflow notes']);
-
-    expect(await rowGlyphs(sidebar), 'every glyph as the glyph table labels it').toEqual({
+    // W5: the project list, most recently active first, with each project's waiting and working counts; no Needs-you or
+    // Pinned section. Each project's page lists its sessions, pinned first.
+    await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toHaveCount(0);
+    expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', 'Other sessions']);
+    expect(await rollups(sidebar)).toEqual({ [USAGE_PROJECT]: '●1', codex_somersault: '◐1', MAWS: '◐2●1', 'Other sessions': '' });
+    const pages: Record<string, string[]> = {
+      MAWS: ['Workstation north star', FIX, SIP, 'Charter + research'],
+      codex_somersault: [QUOTA, 'Somersault terminal run', 'Trace stream reconnects'],
+      [USAGE_PROJECT]: ['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory'],
+      'Other sessions': ['Terminal workflow notes'],
+    };
+    const glyphs: Record<string, string | null | undefined> = {};
+    const unread: string[] = [];
+    for (const [project, rows] of Object.entries(pages)) {
+      await openProject(page, project);
+      expect(await treeRows(shownLevel(sidebar)), `${project}'s page`).toEqual(rows);
+      Object.assign(glyphs, await rowGlyphs(shownLevel(sidebar)));
+      unread.push(...(await unreadRows(shownLevel(sidebar))).filter((title): title is string => title !== null));
+    }
+    expect(glyphs, 'every glyph as the glyph table labels it').toEqual({
       'Workstation north star': 'Done',
       [FIX]: 'Needs approval',
       [SIP]: 'Question',
@@ -121,10 +178,13 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
       'SDK wire inventory': 'Done',
       'Terminal workflow notes': 'Idle, unread',
     });
-    expect(await unreadRows(sidebar), 'unread dots on exactly the unread records').toEqual([FIX, QUOTA, 'Terminal workflow notes']);
+    expect(unread.sort(), 'unread dots on exactly the unread records').toEqual([FIX, QUOTA, 'Terminal workflow notes'].sort());
 
-    const foreign = sidebar.getByRole('treeitem', { name: 'Somersault terminal run' });
-    await expect(foreign).toContainText('Terminal · pid 7135');
+    const foreignCard = await hoverRow(page, 'Somersault terminal run'); // W5: the row is one line; its holder is in the hover card
+    await expect(foreignCard.getByTestId('hover-activity')).toHaveText('Terminal · pid 7135');
+    await unhover(page, foreignCard);
+    const foreign = await sidebarRow(page, 'Somersault terminal run');
+    expect((await foreign.boundingBox())!.height, 'a 30px row').toBe(30);
     await foreign.click({ button: 'right' });
     await expect(page.getByRole('menu')).toBeVisible();
     expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers Open only').toEqual(['Open']);
@@ -133,8 +193,25 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     expect(await noLeftovers(page, tokens.dark), 'no dark colour in the light theme').toEqual([]);
   });
 
-  await test.step('Item 2: the Overview board', async () => {
-    expect(await tabLabels(page, 'Open tabs')).toEqual(['Overview']);
+  await test.step('Item 2: the Overview board, floating over the main area', async () => {
+    expect(await tabLabels(page, 'Open tabs'), 'no tab: the Overview is not one').toEqual([]);
+    await expect(main.getByText('No open tabs')).toBeVisible();
+    await expect(main.locator('[data-top-bar]')).toHaveCSS('height', '30px');
+    await expect(overviewButton).toHaveAccessibleName('Overview, 3 waiting');
+    await overviewButton.click();
+    await expect(overview).toBeVisible();
+    await expect(overviewButton).toHaveAttribute('aria-pressed', 'true');
+    await expect(overview, 'focus moves onto the panel, not a card (Esc on a card declines its request)').toBeFocused();
+    // Dragged by its header (a real pointer), it moves and its rect persists in `regions`.
+    const header = overview.locator('[data-overview-header]');
+    const before = (await overview.boundingBox())!;
+    const grip = (await header.boundingBox())!;
+    await page.mouse.move(grip.x + 200, grip.y + grip.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(grip.x + 200, grip.y + grip.height / 2 + 30, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(async () => Math.round((await overview.boundingBox())!.y - before.y), { message: 'the header drags the panel' }).toBe(30);
+    await expect.poll(async () => ((await layoutGet(page, 'regions')) as { overview: unknown }).overview, { message: 'the rect persists' }).not.toBeNull();
     expect(await overviewGroups(board)).toEqual({
       'Needs you': [FIX, SIP, QUOTA],
       MAWS: ['Charter + research'],
@@ -197,25 +274,24 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
       await expect(main.getByText('Charter + research needs you · Read: docs/charter.md')).toBeVisible();
     }
     expect(await badge()).toBe('4');
-    await expect(sidebar.getByRole('heading', { name: 'Needs you · 4' })).toBeVisible();
-    expect(await needsYouRows(page), 'the newest request is last').toEqual([FIX, SIP, QUOTA, 'Charter + research']);
+    await showProjectList(page);
+    await expect(projectRow(page, 'MAWS').getByLabel('3 waiting'), 'the new request counts on its project').toBeVisible();
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (toast)').toEqual([]);
   });
 
   await test.step('Item 3: approve the read-only request from its hover card, by pointer only', async () => {
-    // Keyboard first: focus opens the hover card, and neither Enter on the focused row nor Enter on a focused Approve
-    // answers (§5.1: approval from the hover card is an explicit click).
-    const charterRow = page.locator('[aria-label="Needs you"] > li[data-title="Charter + research"] > button');
+    // Keyboard first: arrowing onto the session's row opens its hover card (W5: every session row has one), and Enter
+    // on a focused Approve answers nothing (§5.1: approval from the hover card is an explicit click).
     const charterDialog = page.getByRole('dialog', { name: 'Charter + research' });
-    await charterRow.focus();
+    await (await sidebarRow(page, SIP)).focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(await sidebarRow(page, 'Charter + research')).toBeFocused();
     await expect(charterDialog.getByRole('button', { name: 'Approve' })).toBeVisible();
     await charterDialog.getByRole('button', { name: 'Approve' }).focus();
     await page.keyboard.press('Enter');
-    await charterRow.focus();
-    await page.keyboard.press('Enter'); // the row deep-links to the Overview card
     await page.waitForTimeout(300);
-    expect(await needsYouRows(page), 'Enter answered nothing').toEqual([FIX, SIP, QUOTA, 'Charter + research']);
-    await expect(board.getByRole('article', { name: 'Charter + research' })).toBeFocused();
+    expect(await badge(), 'Enter answered nothing').toBe('4');
+    await (await sidebarRow(page, SIP)).focus();
     await page.locator('[data-region="main"]').hover({ position: { x: 400, y: 300 } });
     await expect(charterDialog).toHaveCount(0);
 
@@ -224,24 +300,27 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     await expect(charterHover.getByRole('button', { name: 'Deny' })).toBeVisible();
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (hover card)').toEqual([]);
     await charterHover.getByRole('button', { name: 'Approve' }).click();
-    await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toBeVisible();
-    expect(await needsYouRows(page)).toEqual([FIX, SIP, QUOTA]);
+    await expect(charterHover.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+    await showProjectList(page);
+    await expect(projectRow(page, 'MAWS').getByLabel('2 waiting')).toBeVisible();
     await expect(board.getByRole('article', { name: 'Charter + research' }).getByTestId('card-activity')).toHaveText('Continuing');
     await expect.poll(badge).toBe('3');
   });
 
   await test.step('The 8 s entry: Usage reset countdown ends its turn while nobody looks at it', async () => {
     await advanceTo(app, 8000);
-    const usageRow = sidebar.getByRole('treeitem', { name: 'Usage reset countdown' });
+    const usageRow = await sidebarRow(page, 'Usage reset countdown');
     await expect(usageRow.getByRole('img', { name: 'Idle, unread' })).toBeVisible();
     await expect(usageRow.getByRole('img', { name: 'Unread', exact: true })).toBeVisible();
     await expect(usageCard.getByTestId('card-activity')).toHaveText('Idle');
     await expect(usageCard.getByRole('img', { name: 'Unread', exact: true })).toBeVisible();
+    await overviewButton.click(); // the button closes it too
+    await expect(overview).toHaveCount(0);
   });
 
   await test.step('Item 2: ⌘⇧J lands on the oldest Needs-you session', async () => {
     await menu(app, 'attention.next');
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Overview', `${FIX} · MAWS`]);
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${FIX} · MAWS`]);
     const fixTab = page.getByRole('tab', { name: `${FIX} · MAWS` });
     await expect(fixTab).toHaveAttribute('aria-selected', 'true');
     await expect(fixTab.getByRole('img', { name: 'Needs approval' })).toHaveText('◐');
@@ -260,62 +339,66 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
   });
 
   await test.step('Item 5: tabs, the split, drags', async () => {
-    await sidebar.getByRole('treeitem', { name: SIP }).click();
-    await sidebar.getByRole('treeitem', { name: QUOTA }).click();
-    expect(await tabLabels(page, 'Open tabs')).toEqual(four);
-    for (const n of [1, 2, 3, 4]) {
+    await (await sidebarRow(page, SIP)).click();
+    await (await sidebarRow(page, QUOTA)).click();
+    expect(await tabLabels(page, 'Open tabs')).toEqual(three);
+    for (const n of [1, 2, 3]) {
       await menu(app, `tab.select:${n}`);
-      await expect.poll(() => selectedTab(page, 'Open tabs'), { message: `⌘${n}` }).toBe(four[n - 1]);
+      await expect.poll(() => selectedTab(page, 'Open tabs'), { message: `⌘${n}` }).toBe(three[n - 1]);
     }
-    await page.getByRole('tab', { name: four[3] }).focus();
+    await page.getByRole('tab', { name: three[2] }).focus();
     await page.keyboard.press('Control+Tab');
-    await expect.poll(() => selectedTab(page, 'Open tabs'), { message: '⌃Tab wraps' }).toBe('Overview');
+    await expect.poll(() => selectedTab(page, 'Open tabs'), { message: '⌃Tab wraps' }).toBe(three[0]);
     await page.keyboard.press('Control+Shift+Tab');
-    await expect.poll(() => selectedTab(page, 'Open tabs'), { message: '⌃⇧Tab' }).toBe(four[3]);
+    await expect.poll(() => selectedTab(page, 'Open tabs'), { message: '⌃⇧Tab' }).toBe(three[2]);
 
     await menu(app, 'tab.close');
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(four.slice(0, 3));
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(three.slice(0, 2));
     await menu(app, 'tab.reopen');
-    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: '⌘⇧T restores the tab where it was' }).toEqual(four);
-    expect(await selectedTab(page, 'Open tabs')).toBe(four[3]);
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: '⌘⇧T restores the tab where it was' }).toEqual(three);
+    expect(await selectedTab(page, 'Open tabs')).toBe(three[2]);
 
-    await page.getByRole('tab', { name: four[2] }).click({ button: 'middle' });
-    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'middle-click closes' }).toEqual([four[0], four[1], four[3]]);
+    await page.getByRole('tab', { name: three[1] }).click({ button: 'middle' });
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'middle-click closes' }).toEqual([three[0], three[2]]);
 
-    await expect(page.getByRole('tab', { name: 'Overview' }).getByRole('button'), 'the Overview has no close control').toHaveCount(0);
-    await menu(app, 'tab.select:1');
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Overview');
-    await menu(app, 'tab.close');
-    await page.waitForTimeout(300);
-    expect(await tabLabels(page, 'Open tabs'), '⌘W on the Overview does nothing').toEqual([four[0], four[1], four[3]]);
+    // ⌘0 floats the Overview over the session, which stays mounted behind it; Esc closes it and gives focus back.
+    const shown = main.getByRole('tabpanel');
+    await menu(app, 'tab.overview');
+    await expect(overview).toBeVisible();
+    await expect(overview).toBeFocused();
+    await expect(shown.locator('.transcript')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(overview).toHaveCount(0);
+    expect(await tabLabels(page, 'Open tabs'), 'the Overview is no tab').toEqual([three[0], three[2]]);
 
     // Drag a session tab onto the main region's right edge: the second pane opens with it.
     const mainBox = (await main.boundingBox())!;
-    await drag(page, page.getByRole('tab', { name: four[1] }), { x: mainBox.x + mainBox.width - 24, y: mainBox.y + mainBox.height / 2 });
-    await expect.poll(() => tabLabels(page, 'Right pane tabs'), { message: 'the drop edge opens the split' }).toEqual([four[1]]);
-    expect(await tabLabels(page, 'Left pane tabs')).toEqual([four[0], four[3]]);
+    await drag(page, page.getByRole('tab', { name: three[0] }), { x: mainBox.x + mainBox.width - 24, y: mainBox.y + mainBox.height / 2 });
+    await expect.poll(() => tabLabels(page, 'Right pane tabs'), { message: 'the drop edge opens the split' }).toEqual([three[0]]);
+    expect(await tabLabels(page, 'Left pane tabs')).toEqual([three[2]]);
     await expect(main.getByRole('separator', { name: 'Resize panes' })).toBeVisible();
 
-    // ⌘\ moves the focused pane's active tab across.
-    await page.getByRole('tab', { name: four[3] }).click();
+    // ⌘\ moves the focused pane's active tab across; the pane it empties goes, and the split with it.
+    await page.getByRole('tab', { name: three[2] }).click();
     await menu(app, 'pane.split');
-    await expect.poll(() => tabLabels(page, 'Left pane tabs'), { message: '⌘\\ moves the active tab' }).toEqual(['Overview']);
-    expect(await tabLabels(page, 'Right pane tabs')).toContain(four[3]);
-    expect((await tabLabels(page, 'Right pane tabs')).sort()).toEqual([four[1], four[3]].sort());
-
-    // Closing the right pane's last tab collapses the split.
-    await menu(app, 'tab.close');
-    await expect.poll(() => tabLabels(page, 'Right pane tabs').then((tabs) => tabs.length)).toBe(1);
-    await menu(app, 'tab.close');
-    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the split collapses on its last close' }).toEqual(['Overview']);
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: '⌘\\ moves the active tab, and the emptied pane collapses the split' }).toEqual([three[0], three[2]]);
     await expect(page.getByRole('tablist', { name: 'Right pane tabs' })).toHaveCount(0);
     await expect(main.getByRole('separator', { name: 'Resize panes' })).toHaveCount(0);
+
+    // Closing the last tab leaves the main area empty, offering the Overview and a new session.
+    await menu(app, 'tab.close');
+    await menu(app, 'tab.close');
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([]);
+    await expect(main.getByText('No open tabs')).toBeVisible();
+    await menu(app, 'tab.reopen');
+    await menu(app, 'tab.reopen');
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: '⌘⇧T twice' }).toEqual([three[0], three[2]]);
 
     // A sidebar row dragged onto a tab strip opens its session there.
     const strip = page.getByRole('tablist', { name: 'Open tabs' });
     const stripBox = (await strip.boundingBox())!;
-    await drag(page, sidebar.getByRole('treeitem', { name: 'Charter + research' }), { x: stripBox.x + stripBox.width - 8, y: stripBox.y + stripBox.height / 2 });
-    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the dropped row opens a tab' }).toEqual(['Overview', 'Charter + research · MAWS']);
+    await drag(page, await sidebarRow(page, 'Charter + research'), { x: stripBox.x + stripBox.width - 8, y: stripBox.y + stripBox.height / 2 });
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the dropped row opens a tab' }).toEqual([three[0], three[2], 'Charter + research · MAWS']);
   });
 
   await test.step('Item 8: the ⌘K palette', async () => {
@@ -342,7 +425,7 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     await expect(palette.getByRole('group', { name: 'Sessions' }).getByRole('option')).toContainText(QUOTA);
     await page.keyboard.press('Enter');
     await expect(palette).toHaveCount(0);
-    await expect.poll(() => selectedTab(page, 'Open tabs'), { message: '⏎ opens it' }).toBe(four[3]);
+    await expect.poll(() => selectedTab(page, 'Open tabs'), { message: '⏎ opens it' }).toBe(three[2]);
 
     await menu(app, 'palette.open');
     await page.keyboard.type('dark');
@@ -355,31 +438,30 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     await page.keyboard.type('quota');
     await expect(palette.getByRole('group', { name: 'Sessions' }).getByRole('option')).toHaveCount(1);
     await page.keyboard.press('Meta+Enter');
-    await expect.poll(() => tabLabels(page, 'Right pane tabs'), { message: '⌘⏎ opens it in the split' }).toEqual([four[3]]);
-    expect(await tabLabels(page, 'Left pane tabs')).toEqual(['Overview', 'Charter + research · MAWS']);
+    await expect.poll(() => tabLabels(page, 'Right pane tabs'), { message: '⌘⏎ opens it in the split' }).toEqual([three[2]]);
+    expect(await tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research · MAWS']);
   });
 
-  await test.step('Item 6: sizes, a collapsed project, the collapsed panel', async () => {
+  await test.step('Item 6: sizes, the open project, the collapsed panel', async () => {
     await dragBy(page, sidebar.getByRole('separator', { name: 'Resize sidebar' }), -60);
     await expect(sidebar.getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '240');
     const panelResizer = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
     await dragBy(page, panelResizer, 60);
     await expect(panelResizer).toHaveAttribute('aria-valuenow', '320');
-    const usageProject = sidebar.getByRole('treeitem', { name: USAGE_PROJECT });
-    await usageProject.click({ position: { x: 60, y: 12 } });
-    await expect(usageProject).toHaveAttribute('aria-expanded', 'false');
+    await showProjectList(page);
+    const usageProjectId = await projectRow(page, USAGE_PROJECT).getAttribute('data-menu').then((menuId) => menuId!.slice('project:'.length));
+    await openProject(page, USAGE_PROJECT);
     await menu(app, 'panel.toggle');
     await expect(panelResizer).toHaveCount(0);
     await expect.poll(async () => (await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0).toBe(0);
 
-    const usageProjectId = await usageProject.getAttribute('data-menu').then((menuId) => menuId!.slice('project:'.length));
     await expect
       .poll(async () => {
-        const regions = (await layoutGet(page, 'regions')) as { sidebar: { width: number; collapsedProjects: string[] }; panel: { width: number; collapsed: boolean } };
+        const regions = (await layoutGet(page, 'regions')) as { sidebar: { width: number; openProject: string | null }; panel: { width: number; collapsed: boolean } };
         const main = (await layoutGet(page, 'main.tabs')) as { panes: unknown[] };
-        return [regions.sidebar.width, regions.panel.width, regions.panel.collapsed, regions.sidebar.collapsedProjects.includes(usageProjectId), main.panes.length];
+        return [regions.sidebar.width, regions.panel.width, regions.panel.collapsed, regions.sidebar.openProject, main.panes.length];
       }, { message: 'the layout is written back' })
-      .toEqual([240, 320, true, true, 2]);
+      .toEqual([240, 320, true, usageProjectId, 2]);
     expect((await layoutList(page)).sort()).toEqual(['main.tabs', 'panel.pinned', 'regions', 'window.main']);
   });
 
@@ -397,13 +479,17 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
 async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void> {
   const { app, page } = maws;
   const sidebar = page.locator('[data-region="sidebar"]');
-  await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toBeVisible({ timeout: 10_000 });
+  // W5: the sidebar opens on the project page it showed at quit.
+  await expect(sidebar.getByRole('heading', { level: 2, name: USAGE_PROJECT })).toBeVisible({ timeout: 10_000 });
+  await expect(sidebar.getByTestId('sidebar-levels')).toHaveAttribute('data-level', '2');
+  // W5: the app opens to the last active tab; the Overview stays closed until asked for.
+  await expect(page.locator('[data-region="main"]').getByRole('dialog', { name: 'Overview' })).toHaveCount(0);
 
   // The layout comes back as it was saved.
   await expect.poll(() => tabLabels(page, 'Left pane tabs'), { message: 'the tabs and the split are back' }).toEqual(saved.left);
   expect(await tabLabels(page, 'Right pane tabs')).toEqual(saved.right);
   await expect(sidebar.getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '240');
-  await expect(sidebar.getByRole('treeitem', { name: USAGE_PROJECT })).toHaveAttribute('aria-expanded', 'false');
+  expect(await treeRows(shownLevel(sidebar))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
   await expect(page.locator('[data-region="panel"]').getByRole('separator')).toHaveCount(0);
   expect((await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0, 'the panel stays collapsed').toBe(0);
   await page.waitForTimeout(500); // past the 250 ms write-back: hydration must not have rewritten anything
@@ -471,11 +557,17 @@ const layoutList = async (page: Page) => {
   return result.value.keys;
 };
 
-const needsYouRows = (page: Page) => page.locator('[aria-label="Needs you"] > li').evaluateAll((els) => els.map((el) => el.getAttribute('data-title')));
-const needsYouGlyphs = (page: Page) =>
-  page.locator('[aria-label="Needs you"] > li').evaluateAll((els) => els.map((el) => el.querySelector('[role="img"]')?.getAttribute('aria-label')));
 
 const treeRows = (scope: Locator) => scope.locator('[data-kind="session"]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
+
+// W5: the sidebar's level on screen (the other stays rendered, inert, while it slides away), the project list's rows,
+// and each project's counts as they read (◐ waiting, ● working).
+const shownLevel = (sidebar: Locator) => sidebar.locator('[data-level-pane]:not([inert])');
+const projectRows = (sidebar: Locator) => sidebar.locator('[data-level-pane="1"] [data-kind="project"]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
+const rollups = (sidebar: Locator) =>
+  sidebar
+    .locator('[data-level-pane="1"] [data-kind="project"]')
+    .evaluateAll((els) => Object.fromEntries(els.map((el) => [el.getAttribute('aria-label'), Array.from(el.querySelectorAll('[aria-label$=" waiting"], [aria-label$=" working"]')).map((n) => n.textContent).join('')])));
 
 const rowGlyphs = (sidebar: Locator) =>
   sidebar
@@ -505,14 +597,15 @@ const tabLabels = (page: Page, strip: string) =>
 
 const selectedTab = (page: Page, strip: string) => page.getByRole('tablist', { name: strip }).locator('[role="tab"][aria-selected="true"]').getAttribute('aria-label');
 
-// Hovers a Needs-you row with the pointer and returns its open hover card. The hover is retried from a neutral point:
-// now and then, right after a Radix menu has closed, Chromium keeps the synthetic pointer's hover state stale and the
-// row sees no pointerenter although it is the hit target (the card then never opens; a fresh move in fixes it).
+// Hovers a session's row (on its project's page, W5) with the pointer and returns its open hover card. The hover is
+// retried from a neutral point: now and then, right after a Radix menu has closed, Chromium keeps the synthetic pointer's
+// hover state stale and the row sees no pointerenter although it is the hit target (a fresh move in fixes it).
 async function hoverRow(page: Page, title: string): Promise<Locator> {
   const card = page.getByRole('dialog', { name: title });
+  const row = await sidebarRow(page, title);
   await expect(async () => {
     await page.mouse.move(700, 400);
-    await page.locator(`[aria-label="Needs you"] > li[data-title="${title}"] > button`).hover();
+    await row.hover();
     await expect(card).toBeVisible({ timeout: 2_000 });
   }, `the hover card of ${title} opens`).toPass({ timeout: 10_000 });
   return card;

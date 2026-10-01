@@ -21,6 +21,7 @@ import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { scratchConfigHome } from '../test/live/support/live';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { CHARTER } from './support/panel-support';
+import { sidebarOf, sidebarRow } from './support/sidebar';
 
 function skipReason(): string | null {
   if (process.env.MAWS_CODE_LIVE !== '1') return 'the C8c live acceptance runs only under MAWS_CODE_LIVE=1';
@@ -98,7 +99,9 @@ test('live: Files, the viewer and Review over this checkout', async () => {
     await hideWindow(maws);
     const { page } = maws;
     const panel = page.locator('[data-region="panel"]');
-    await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: CHARTER }).click();
+    // W5: the row is on its project's page; the page is opened once the stub's records are in.
+    await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+    await (await sidebarRow(page, CHARTER)).click();
 
     await test.step('Files: one root for the repository', async () => {
       await addTool(page, 'Files');
@@ -191,7 +194,7 @@ test('live: Files, the viewer and Review over this checkout', async () => {
 
     await test.step('Files: a session in a worktree has two roots, its directory and the worktree, in record order', async () => {
       if (mainCheckout === worktree) throw new Error(`this run is not in a linked worktree: ${worktree}`);
-      await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: WORKTREE_SESSION }).click();
+      await (await sidebarRow(page, WORKTREE_SESSION)).click(); // W5: in its worktree's group on the project's page
       await addTool(page, 'Files');
       const roots = panel.locator('[data-tool="files"] [role="treeitem"][data-kind="root"]');
       await expect(roots).toHaveCount(2);
@@ -267,8 +270,9 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
     const status = async () => ((await invoke('session.status', { appSessionId: record!.appId })) as { value?: { process?: string; engineState?: string } }).value;
     await expect.poll(async () => (await status())?.process, { timeout: 60_000 }).toBe('ready');
 
-    // Open the session, so the transcript (C6's slot, with C8c's registered callbacks) shows the turn's receipt.
-    await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: new RegExp(record!.title.text.slice(0, 20).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) }).first().click();
+    // Open the session, so the transcript (C6's slot, with C8c's registered callbacks) shows the turn's receipt. Its row
+    // by the record's id (W5: on its project's page, opened first), since the title follows the session's prompts.
+    await (await sidebarRow(page, { appSessionId: record!.appId })).click();
     const prompt = `Use the Edit tool exactly once on ${target} to change the line "${before[lineNo - 1]}" into "${edited}". Change nothing else and do not run any other tool than Read and Edit. Then reply DONE.`;
     const sent = await invoke('session.send', { appSessionId: record!.appId, content: prompt });
     observed.sent = sent;

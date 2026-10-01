@@ -1,4 +1,4 @@
-// A pane's tab strip (§5.2, D-13; residue *Tab strip*): a custom `role="tablist"`, browser-like, the Overview first.
+// A pane's tab strip (§5.2, D-13; residue *Tab strip*): a custom `role="tablist"`, browser-like.
 // One tab stop (the active tab); ArrowLeft and ArrowRight move focus along the strip, wrapping, Enter activates the
 // focused tab and Delete closes it. Overflow scrolls horizontally with the active tab kept in view. Drops: a tab
 // (`application/x-maws-tab`) moves to the pointer's position, computed against the tabs' midpoints, and a sidebar row
@@ -52,7 +52,8 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
     strip.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [activeTabId]);
 
-  // After a keyboard close, focus goes to the tab that took the closed one's place (or the new last tab).
+  // After a keyboard close, focus goes to the tab that took the closed one's place (or the new last tab), or, when the
+  // pane survives with none (the only pane's last tab), to the empty pane's own controls.
   const refocus = useRef<{ id: string; index: number } | null>(null);
   const stripTabs = state?.tabs;
   useEffect(() => {
@@ -60,8 +61,9 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
     if (!pending || stripTabs?.some((t) => t.id === pending.id)) return;
     refocus.current = null;
     const remaining = strip.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [];
-    remaining[Math.min(pending.index, remaining.length - 1)]?.focus();
-  }, [stripTabs]);
+    if (remaining.length === 0) focusPaneElement(pane);
+    else remaining[Math.min(pending.index, remaining.length - 1)].focus();
+  }, [stripTabs, pane]);
 
   if (!state) return null;
   const tabs = state.tabs;
@@ -82,7 +84,6 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
         break;
       case 'Delete':
       case 'Backspace':
-        if (tab.kind === 'overview') return;
         // Focus stays on the tab while its guard decides; only a close that happens hands it to the neighbour (the
         // effect below, once the tab has left the strip).
         refocus.current = { id: tab.id, index };

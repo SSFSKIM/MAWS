@@ -36,27 +36,29 @@ describe('layout persistence', () => {
     vi.useRealTimers();
   });
 
-  it('writes nothing before hydration, and hydration writes only the keys layout.json lacks', async () => {
-    const regions = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 410 } };
+  it('writes nothing before hydration, and hydration writes only the keys layout.json lacks and those changed meanwhile', async () => {
+    const regions = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 410, sort: 'recency' as const } };
     const { store, hydrate, sets } = setup({ regions, 'main.tabs': undefined });
     store.getState().setSidebar({ width: 260 }); // the persisted value is not known yet: writing now would clobber it
     vi.advanceTimersByTime(1000);
     expect(sets()).toEqual([]);
     await hydrate();
     vi.advanceTimersByTime(1000);
-    expect(sets()).toEqual([{ key: 'main.tabs', value: LAYOUT_DEFAULTS.main }]); // a first launch materialises the default
-    expect(store.getState().regions.sidebar.width).toBe(410);
+    // W5: the change is replayed over the persisted regions (as a tab opened early is over the tabs) and written once
+    const replayed = { ...regions, sidebar: { ...regions.sidebar, width: 260 } };
+    expect(sets()).toEqual([{ key: 'main.tabs', value: LAYOUT_DEFAULTS.main }, { key: 'regions', value: replayed }]); // a first launch materialises the default
+    expect(store.getState().regions).toEqual(replayed);
   });
 
   it('writes tabs opened before hydration over an existing main.tabs, before any later change and on beforeunload', async () => {
-    const saved = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [...LAYOUT_DEFAULTS.main.panes[0].tabs, { id: 'diagnostics', kind: 'diagnostics', pinned: false }], activeTabId: 'overview' }] };
+    const saved = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [{ id: 'diagnostics', kind: 'diagnostics', pinned: false }, { id: 'accounts', kind: 'accounts', pinned: false }], activeTabId: 'diagnostics' }] };
     const { store, hydrate, sets } = setup({ 'main.tabs': saved });
     store.getState().openSession(A); // a sidebar click or a notification navigation racing the first layout.get
     await hydrate((id) => id === A);
     window.dispatchEvent(new Event('beforeunload'));
     const written = sets().filter((s) => s.key === 'main.tabs');
     expect(written).toHaveLength(1);
-    expect((written[0].value as typeof saved).panes[0].tabs.map((t) => t.id)).toEqual(['overview', `session:${A}`, 'diagnostics']); // opened after the active Overview, over the saved tabs
+    expect((written[0].value as typeof saved).panes[0].tabs.map((t) => t.id)).toEqual(['diagnostics', `session:${A}`, 'accounts']); // opened after the saved active tab, over the saved tabs
     expect(written[0].value).toBe(store.getState().main);
   });
 
@@ -201,7 +203,7 @@ describe('panel tabs from the host', () => {
   });
 });
 
-// C8's eleventh ask: a session's panel refs read and written while another session or the Overview is on screen.
+// C8's eleventh ask: a session's panel refs read and written while another session, or none, is on screen.
 describe('panel tabs of a session not on screen', () => {
   const B = 'app-b' as AppSessionId;
   const terminal = { id: 'term-1', toolId: 'terminal', pinned: false };
@@ -226,7 +228,7 @@ describe('panel tabs of a session not on screen', () => {
     expect(store.getState().effectivePanelTabs(A)).toEqual([files, terminal]);
   });
 
-  it('reads the pins first and files a pinned ref to panel.pinned, with the Overview on screen', async () => {
+  it('reads the pins first and files a pinned ref to panel.pinned, with no session on screen', async () => {
     const pin = { id: 'p1', toolId: 'review', pinned: true };
     const { store, hydrate, sets } = setup({ 'panel.pinned': [pin] });
     await hydrate();

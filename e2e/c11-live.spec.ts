@@ -21,6 +21,7 @@ import type { JournalRow } from '@shared/wire/journal';
 import { invoke, value } from './support/c7-replay';
 import { c11LiveSkipReason, c11Scratch, Forwarder, FORWARDER_PORT, relayCatalogue, type C11Scratch } from './support/c11-live';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { openProject, sidebarRow } from './support/sidebar';
 
 const skip = c11LiveSkipReason();
 test.skip(skip !== null, skip ?? '');
@@ -147,7 +148,8 @@ async function plusSession(live: Live, repo: string, first: string, opts: { mode
   const name = repo.split('/').at(-1)!;
   const projects = value(await invoke(page, 'session.projects.list', undefined)).projects;
   if (!projects.some((p) => p.directory === repo)) value(await invoke(page, 'session.projects.add', { directory: repo }));
-  await page.getByRole('button', { name: `New session in ${name}`, exact: true }).click();
+  await openProject(page, name); // W5: the "+" beside the name on the project's page
+  await page.locator('[data-region="sidebar"] [data-level-pane="2"]').getByRole('button', { name: `New session in ${name}`, exact: true }).click();
   await expect(page.getByRole('heading', { name: `New session in ${name}` })).toBeVisible();
   const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
   const w = await openWidget(live, 'model'); // W3: the model selector, a pick applies at once
@@ -350,9 +352,10 @@ test('every widget opens with live engine data; controls take effect and are rea
     });
 
     await step('/rename Live C11 renames and the sidebar follows within 2 s', async () => {
+      const row = await sidebarRow(page, { appSessionId: id }); // W5: on its project's page, opened before the clock starts
       const t0 = Date.now();
       await typedLine(page, main, 'rename Live C11');
-      await expect(page.locator(`[data-menu="session:${id}"]`)).toContainText('Live C11', { timeout: 2_000 });
+      await expect(row).toContainText('Live C11', { timeout: 2_000 });
       observe('rename', { ms: Date.now() - t0 });
     });
 

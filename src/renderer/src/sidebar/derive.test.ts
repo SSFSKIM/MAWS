@@ -5,106 +5,179 @@ import type { SessionDigest } from '@shared/ipc/schema';
 import { digest, item, project, record } from '../../../../test/support/builders';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario } from '../../../../test/support/scenario';
-import { needsYou } from '../attention/derive';
+import { holderLine, needsYou, waitingItem } from '../attention/derive';
 import { orderProjects } from '../overview/derive';
-import { formatAge, needsYouAge, PROJECT_PAGE, rowBranch, secondaryLine, sessionAge, sidebarModel, type SidebarInput } from './derive';
+import type { WorktreeInfo } from '@shared/sessions/worktree';
+import {
+  filterProjectList,
+  formatAge,
+  hasWorktreeSessions,
+  needsYouAge,
+  OTHER_SESSIONS,
+  projectList,
+  projectPage,
+  rowBranch,
+  sessionAge,
+  sessionMatcher,
+  type ProjectListInput,
+  type ProjectPageInput,
+} from './derive';
 
 const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'));
 const records = new Map(scenario.sessions.map((r) => [r.appId, r]));
 const digests = new Map(scenario.digests.map((d) => [d.appSessionId, { ...d, revision: 1 } as SessionDigest]));
 const bySession = new Map(scenario.attention.map((a) => [a.appSessionId, a.items]));
 const rows = needsYou(bySession, records);
-const base: SidebarInput = { records, digests, projects: orderProjects(scenario.projects), rows, sort: 'priority', query: '' };
-const titleOf = (id: AppSessionId) => records.get(id)?.title.text;
+const projects = orderProjects(scenario.projects);
+const byId = new Map(projects.map((p) => [p.id, p]));
+const base: ProjectListInput = { records, digests, projects, rows };
+const titleOf = (id: AppSessionId) => records.get(id)?.title.text ?? id;
 const titles = (list: { appId: AppSessionId }[]) => list.map((r) => titleOf(r.appId));
+const everyone = () => true;
 
-describe('sidebar model', () => {
-  it('lays out Needs you, Pinned, the projects in order and Other sessions', () => {
-    const model = sidebarModel(base);
-    expect(model.needsYou.map((row) => titleOf(row.appSessionId))).toEqual(['Fix sidebar drag', 'Sidebar interaction pass', 'Quota reset recovery']);
-    expect(titles(model.pinned)).toEqual(['Workstation north star']);
-    expect(model.projects.map((p) => [p.project.name, p.sessions.length])).toEqual([
-      ['MAWS', 3],
-      ['codex_somersault', 3],
-      ['claude-usage-menubar', 3],
+describe('the project list', () => {
+  it('lists every project, most recently active first, then Other sessions', () => {
+    const list = projectList(base);
+    expect(list.map((e) => [e.key, e.name, e.sessions.length])).toEqual([
+      ['proj-claude-usage-menubar', 'claude-usage-menubar', 3],
+      ['proj-codex-somersault', 'codex_somersault', 3],
+      ['proj-maws', 'MAWS', 4],
+      [OTHER_SESSIONS, 'Other sessions', 1],
     ]);
-    expect(titles(model.other)).toEqual(['Terminal workflow notes']);
+    expect(list.at(-1)!.project).toBeNull();
   });
 
-  it('does not repeat a pinned session under its project', () => {
-    const maws = sidebarModel(base).projects[0];
-    expect(titles(maws.sessions)).not.toContain('Workstation north star');
-    expect(titles(maws.sessions)).toEqual(['Fix sidebar drag', 'Sidebar interaction pass', 'Charter + research']);
+  it('counts each project’s waiting (Needs-you rows) and working sessions', () => {
+    const rollups = Object.fromEntries(projectList(base).map((e) => [e.name, e.rollup]));
+    expect(rollups).toEqual({
+      MAWS: { waiting: 2, working: 1 },
+      codex_somersault: { waiting: 1, working: 0 },
+      'claude-usage-menubar': { waiting: 0, working: 1 },
+      'Other sessions': { waiting: 0, working: 0 },
+    });
   });
 
-  it('rolls a project up into its Needs-you and working counts', () => {
-    const [maws, codex, usage] = sidebarModel(base).projects;
-    expect(maws.rollup).toEqual({ needsYou: 2, working: 1 });
-    expect(codex.rollup).toEqual({ needsYou: 1, working: 0 });
-    expect(usage.rollup).toEqual({ needsYou: 0, working: 1 });
-  });
-
-  it('sorts by recency when asked', () => {
-    const usage = sidebarModel({ ...base, sort: 'recency' }).projects[2];
-    expect(titles(usage.sessions)).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
-  });
-
-  it('hides archived sessions and puts a session of an unknown project under Other sessions', () => {
+  it('hides archived sessions, keeps their activity for the order, and puts a session of an unknown project under Other sessions', () => {
+    const a = project('a', 0, { createdAt: '2026-09-01T00:00:00Z' });
+    const b = project('b', 1, { createdAt: '2026-09-02T00:00:00Z' });
     const recs = new Map([
-      ['a' as AppSessionId, record('a', { archived: true })],
+      ['old' as AppSessionId, record('old', { projectId: a.id, archived: true, updatedAt: '2026-09-28T12:00:00Z' })],
+      ['new' as AppSessionId, record('new', { projectId: b.id, updatedAt: '2026-09-27T12:00:00Z' })],
       ['stray' as AppSessionId, record('stray', { projectId: 'gone' as never })],
     ]);
-    const model = sidebarModel({ records: recs, digests: new Map(), projects: [], rows: [], sort: 'priority', query: '' });
-    expect(model.other.map((r) => r.appId)).toEqual(['stray']);
+    const list = projectList({ records: recs, digests: new Map(), projects: [a, b], rows: [] });
+    expect(list.map((e) => [e.name, e.sessions.map((r) => r.appId)])).toEqual([
+      ['a', []],
+      ['b', ['new']],
+      ['Other sessions', ['stray']],
+    ]);
   });
 
-  it('filters rows by title, project name and directory, keeping only the projects with a match', () => {
-    const byTitle = sidebarModel({ ...base, query: 'QUOTA' });
-    expect(byTitle.needsYou.map((row) => titleOf(row.appSessionId))).toEqual(['Quota reset recovery']);
-    expect(byTitle.projects.map((p) => [p.project.name, titles(p.sessions)])).toEqual([['codex_somersault', ['Quota reset recovery']]]);
-    expect(byTitle.pinned).toEqual([]);
-    expect(byTitle.other).toEqual([]);
-    expect(byTitle.searching).toBe(true);
+  it('places a project without sessions by when it was added, and leaves Other sessions out when it is empty', () => {
+    const fresh = project('fresh', 5, { createdAt: '2026-09-30T00:00:00Z' });
+    const list = projectList({ ...base, records: new Map([...records].filter(([, r]) => r.projectId !== null)), projects: [...projects, fresh] });
+    expect(list.map((e) => e.name)).toEqual(['fresh', 'claude-usage-menubar', 'codex_somersault', 'MAWS']);
+  });
 
-    const byProject = sidebarModel({ ...base, query: 'usage-menu' });
-    expect(byProject.projects.map((p) => [p.project.name, p.sessions.length])).toEqual([['claude-usage-menubar', 3]]);
+  it('filters by project name, or by a session the project holds (title, directory)', () => {
+    const list = projectList(base);
+    expect(filterProjectList(list, 'QUOTA', byId).map((e) => e.name)).toEqual(['codex_somersault']);
+    expect(filterProjectList(list, 'usage-menu', byId).map((e) => e.name)).toEqual(['claude-usage-menubar']);
+    expect(filterProjectList(list, 'qqboLh', byId).map((e) => e.name)).toEqual(['MAWS']);
+    expect(filterProjectList(list, 'terminal workflow', byId).map((e) => e.name)).toEqual(['Other sessions']);
+    expect(filterProjectList(list, '  ', byId)).toBe(list);
+  });
+});
 
-    const byDirectory = sidebarModel({ ...base, query: 'qqboLh' });
-    expect(byDirectory.projects.flatMap((p) => titles(p.sessions))).toEqual(['Fix sidebar drag']);
+describe('a project’s page', () => {
+  const maws = () => projectList(base).find((e) => e.key === 'proj-maws')!;
+  const page = (over: Partial<ProjectPageInput> = {}) =>
+    projectPage({ sessions: maws().sessions, digests, rows, sort: 'priority', matches: everyone, worktrees: null, ...over });
+
+  it('puts pinned sessions on top and, without a worktree session, one flat Main list', () => {
+    const p = page();
+    expect(titles(p.pinned)).toEqual(['Workstation north star']);
+    expect(p.grouped).toBe(false);
+    expect(p.groups.map((g) => [g.label, titles(g.sessions)])).toEqual([['Main', ['Fix sidebar drag', 'Sidebar interaction pass', 'Charter + research']]]);
+  });
+
+  it('sorts by recency when asked, and filters by the search', () => {
+    const usage = projectList(base).find((e) => e.key === 'proj-claude-usage-menubar')!;
+    const recency = projectPage({ sessions: usage.sessions, digests, rows, sort: 'recency', matches: everyone, worktrees: null });
+    expect(titles(recency.groups[0].sessions)).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
+    const searched = page({ matches: sessionMatcher('sidebar', byId) });
+    expect(titles(searched.groups[0].sessions)).toEqual(['Fix sidebar drag', 'Sidebar interaction pass']);
+    expect(searched.pinned).toEqual([]);
+  });
+
+  it('groups Main first, then each worktree in the listed order with the listed branch, then worktrees not listed', () => {
+    const at = (path: string, branch: string | null) => ({ worktree: { path, branch }, branch: 'stale' });
+    const recs = [
+      record('m', { projectId: 'p' as never }),
+      record('b1', { projectId: 'p' as never, ...at('/r/.claude/worktrees/beta', 'worktree-beta') }),
+      record('a1', { projectId: 'p' as never, ...at('/sib/alpha', null) }),
+      record('a2', { projectId: 'p' as never, ...at('/sib/alpha/', null), pinned: true }),
+      record('z1', { projectId: 'p' as never, ...at('/gone/zeta', 'zeta') }),
+    ];
+    const info = (path: string, branch: string | null, isMain = false): WorktreeInfo => ({ repoRoot: '/r', path, branch, head: 'h', isMain, locked: false, prunable: false, managed: path.includes('/.claude/') });
+    const worktrees = [info('/r', 'main', true), info('/sib/alpha', 'alpha'), info('/r/.claude/worktrees/beta', 'worktree-beta')];
+    const p = projectPage({ sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone, worktrees });
+    const ids = (list: { appId: AppSessionId }[]) => list.map((r) => r.appId);
+    expect(p.grouped).toBe(true);
+    expect(ids(p.pinned)).toEqual(['a2']);
+    expect(p.groups.map((g) => [g.kind, g.label, g.branch, g.path, ids(g.sessions)])).toEqual([
+      ['main', 'Main', 'main', null, ['m']],
+      ['worktree', 'alpha', 'alpha', '/sib/alpha', ['a1']],
+      ['worktree', 'beta', 'worktree-beta', '/r/.claude/worktrees/beta', ['b1']],
+      ['worktree', 'zeta', 'zeta', '/gone/zeta', ['z1']],
+    ]);
+    // Before the list answers: the worktrees by folder name, each with the branch its sessions recorded.
+    const unlisted = projectPage({ sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone, worktrees: null });
+    expect(unlisted.groups.map((g) => [g.label, g.branch])).toEqual([
+      ['Main', null],
+      ['alpha', 'stale'],
+      ['beta', 'worktree-beta'],
+      ['zeta', 'zeta'],
+    ]);
+    expect(hasWorktreeSessions(recs)).toBe(true);
+    expect(hasWorktreeSessions([recs[0]])).toBe(false);
+  });
+
+  it('renders every session of a large project: no page cap', () => {
+    const p = project('p', 0);
+    const recs = Array.from({ length: 250 }, (_, i) => record(`s${i}`, { projectId: p.id }));
+    expect(projectPage({ sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone, worktrees: null }).groups[0].sessions).toHaveLength(250);
   });
 });
 
 describe('sidebar row text', () => {
   const at = (iso: string) => Date.parse(iso);
 
-  it('the secondary line: holder for foreign-live, the waiting item, the activity while working, else the last answer', () => {
-    const r = record('r');
-    expect(secondaryLine(record('t', { holder: { kind: 'terminal', pid: 7135 } }), digest('t', { phase: 'foreign', lastAssistantLine: 'x' }), [])).toBe('Terminal · pid 7135');
+  // W5: the row is one line; what its second line said (the holder, the activity) is in the hover card, which reads these.
+  it('the holder of a foreign-live session, a background job by its short id', () => {
+    expect(holderLine(record('t', { holder: { kind: 'terminal', pid: 7135 } }))).toBe('Terminal · pid 7135');
     // debt wave 4: a background job reads by the short id `claude --bg` printed, its pid only without one
-    expect(secondaryLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: 'e6dcd828' } }), null, [])).toBe('bg · e6dcd828');
-    expect(secondaryLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: null } }), null, [])).toBe('bg · pid 4242');
-    expect(secondaryLine(record('b', { holder: { kind: 'background_job', pid: null, jobId: null } }), null, [])).toBe('Background job');
-    expect(secondaryLine(r, digest('r', { phase: 'waiting', lastAssistantLine: 'old' }), [item('r', 'question', '2026-09-28T10:00:00Z', { summary: 'Which color?' })])).toBe('Which color?');
-    expect(secondaryLine(r, digest('r', { phase: 'working', activity: 'Running bun test', lastAssistantLine: 'old' }), [])).toBe('Running bun test');
-    expect(secondaryLine(r, digest('r', { phase: 'idle', lastAssistantLine: 'Done.' }), [])).toBe('Done.');
-    expect(secondaryLine(r, null, [])).toBeNull();
+    expect(holderLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: 'e6dcd828' } }))).toBe('bg · e6dcd828');
+    expect(holderLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: null } }))).toBe('bg · pid 4242');
+    expect(holderLine(record('b', { holder: { kind: 'background_job', pid: null, jobId: null } }))).toBe('Background job');
+    expect(holderLine(record('s'))).toBeNull();
   });
 
-  it('the branch chip: a worktree session’s branch, none for a session in the project directory', () => {
+  it('a worktree session’s branch, none for a session in the project directory', () => {
     expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: 'worktree-a' }, branch: 'stale' }))).toBe('worktree-a');
     expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: null }, branch: 'from-index' }))).toBe('from-index');
     expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: null } }))).toBeNull();
     expect(rowBranch(record('p', { branch: 'main' }))).toBeNull();
   });
 
-  it('the waiting item is the one its Needs-you row shows: an actionable item outranks an older held message', () => {
+  it('the waiting item a hover card shows is the one main notifies: an actionable item outranks an older held message', () => {
     const r = record('r');
     const held = item('r', 'held_peer_message', '2026-09-28T09:00:00Z', { summary: 'Message from reviewer' });
     const permission = item('r', 'permission', '2026-09-28T10:00:00Z', { summary: 'Bash: git push' });
     const pending = [held, permission];
     expect(needsYou(new Map([[r.appId, pending]]), new Map([[r.appId, r]]))[0].oldest).toBe(permission);
-    expect(secondaryLine(r, digest('r', { phase: 'waiting' }), pending)).toBe('Bash: git push');
-    expect(secondaryLine(r, digest('r', { phase: 'idle' }), [held])).toBe('Message from reviewer');
+    expect(waitingItem(pending)?.oldest).toBe(permission);
+    expect(waitingItem([held])?.oldest).toBe(held);
   });
 
   it('ages read now, minutes, hours, days, weeks', () => {
@@ -123,14 +196,5 @@ describe('sidebar row text', () => {
     const discovered = record('d', { updatedAt: '2026-09-28T10:29:30Z' });
     expect(sessionAge(discovered, digest('d', { phase: 'exited', lastTurnEndedAt: '2026-09-26T10:00:00Z' }), now)).toBe('2d');
     expect(needsYouAge(item('r', 'permission', '2026-09-28T10:26:00Z'), now)).toBe('4m');
-  });
-});
-
-describe('show more', () => {
-  it('pages a project at twenty sessions', () => {
-    expect(PROJECT_PAGE).toBe(20);
-    const p = project('p', 0);
-    const recs = new Map(Array.from({ length: 25 }, (_, i) => [`s${i}` as AppSessionId, record(`s${i}`, { projectId: p.id })]));
-    expect(sidebarModel({ records: recs, digests: new Map(), projects: [p], rows: [], sort: 'priority', query: '' }).projects[0].sessions).toHaveLength(25);
   });
 });

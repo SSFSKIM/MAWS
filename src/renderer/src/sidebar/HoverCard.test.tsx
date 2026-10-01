@@ -3,14 +3,16 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, RequestId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId, RequestId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { item } from '../../../../test/support/builders';
 import { ev } from '../../../../test/support/events';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { useAttention } from '../stores/attention';
+import { useSessions } from '../stores/sessions';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { RequestPreview } from './RequestPreview';
+import { useLayout } from '../stores/layout';
 import { Sidebar } from './Sidebar';
 
 const nine = scenarioFile('nine-sessions');
@@ -28,11 +30,13 @@ function withMain(outcome: 'delivered' | 'not_pending' = 'delivered') {
   window.maws = fake.client;
 }
 
-const needsRow = (title: string) => within(screen.getByRole('list', { name: 'Needs you' })).getByRole('button', { name: new RegExp(title) });
+// W5: the card sits on every session row; both requests' sessions are on MAWS's page.
+const needsRow = (title: string) => screen.getByRole('treeitem', { name: title });
 
 beforeEach(() => {
   resetShellStores();
   fillStores(nine);
+  useLayout.getState().setSidebar({ openProject: 'proj-maws' as ProjectId });
   act(() => useAttention.getState().applyChanged({ appSessionId: readOp.appSessionId, items: readOp.items }));
 });
 afterEach(() => {
@@ -60,7 +64,7 @@ describe('hover card approves read-only only', () => {
     withMain();
     const user = userEvent.setup();
     render(<Sidebar />);
-    await user.hover(needsRow('Charter \\+ research'));
+    await user.hover(needsRow('Charter + research'));
     const card = await screen.findByRole('dialog', { name: 'Charter + research' });
     const approve = await within(card).findByRole('button', { name: 'Approve' });
     expect(within(card).getByRole('button', { name: 'Deny' })).toBeTruthy();
@@ -74,7 +78,7 @@ describe('hover card approves read-only only', () => {
     withMain();
     const user = userEvent.setup();
     render(<Sidebar />);
-    await user.hover(needsRow('Charter \\+ research'));
+    await user.hover(needsRow('Charter + research'));
     const card = await screen.findByRole('dialog', { name: 'Charter + research' });
     const approve = await within(card).findByRole('button', { name: 'Approve' });
     const deny = within(card).getByRole('button', { name: 'Deny' });
@@ -102,7 +106,7 @@ describe('hover card approves read-only only', () => {
     withMain();
     const user = userEvent.setup();
     render(<Sidebar />);
-    needsRow('Charter \\+ research').focus();
+    needsRow('Charter + research').focus();
     await screen.findByRole('dialog', { name: 'Charter + research' });
     await user.keyboard('{Enter}');
     expect(fake.invoked('session.answer')).toEqual([]);
@@ -112,10 +116,68 @@ describe('hover card approves read-only only', () => {
     withMain('not_pending');
     const user = userEvent.setup();
     render(<Sidebar />);
-    await user.hover(needsRow('Charter \\+ research'));
+    await user.hover(needsRow('Charter + research'));
     const card = await screen.findByRole('dialog', { name: 'Charter + research' });
     await user.click(await within(card).findByRole('button', { name: 'Approve' }));
     expect(await within(card).findByText('Not delivered')).toBeTruthy();
+  });
+});
+
+// W5 (D2): what the one-line row leaves out, in the card: status, age and context, branch and worktree, the holder or
+// the activity, the last answer.
+describe('a session row’s hover card', () => {
+  const open = async (title: string) => {
+    await userEvent.setup().hover(needsRow(title));
+    return screen.findByRole('dialog', { name: title });
+  };
+
+  it('a working session: its status, age and context, its activity and its last answer', async () => {
+    withMain();
+    useLayout.getState().setSidebar({ openProject: 'proj-claude-usage-menubar' as ProjectId });
+    const digest = useSessions.getState().digests.get(idOf('Usage reset countdown'))!;
+    act(() => useSessions.getState().applyDigest({ ...digest, context: { percent: 41.4, totalTokens: 414_000, maxTokens: 1_000_000, autoCompactThreshold: null }, revision: digest.revision + 1 }));
+    render(<Sidebar />);
+    const card = await open('Usage reset countdown');
+    expect(within(card).getByRole('heading', { name: 'Usage reset countdown' })).toBeTruthy();
+    expect(within(card).getByTestId('hover-meta').textContent).toBe('Working · now · ctx 41%');
+    expect(within(card).getByTestId('hover-activity').textContent).toBe('Running curl -sI https://example.com | head -1');
+    expect(within(card).getByTestId('hover-answer').textContent).toMatch(/^The request succeeded/);
+    expect(within(card).queryByRole('button', { name: 'Approve' })).toBeNull(); // nothing waits
+  });
+
+  it('a foreign-live session names its holder', async () => {
+    withMain();
+    useLayout.getState().setSidebar({ openProject: 'proj-codex-somersault' as ProjectId });
+    render(<Sidebar />);
+    const card = await open('Somersault terminal run');
+    expect(within(card).getByTestId('hover-activity').textContent).toBe('Terminal · pid 7135');
+    expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Live in terminal · /);
+  });
+
+  it('a worktree session names its branch and the worktree’s folder; a main session its branch', async () => {
+    withMain();
+    const charter = idOf('Charter + research');
+    const drag = idOf('Fix sidebar drag');
+    act(() =>
+      fillStores({
+        ...nine,
+        sessions: nine.sessions.map((r) =>
+          r.appId === charter
+            ? { ...r, worktree: { path: '/Users/new/Developer/GitHub/MAWS-sibling', branch: 'feature/sibling' } }
+            : r.appId === drag
+              ? { ...r, branch: 'master' }
+              : r,
+        ),
+      }),
+    );
+    render(<Sidebar />);
+    const sibling = await open('Charter + research');
+    const place = within(sibling).getByTestId('hover-place');
+    expect(place.textContent).toBe('⎇ feature/sibling · worktree MAWS-sibling');
+    expect(place.getAttribute('title')).toBe('/Users/new/Developer/GitHub/MAWS-sibling');
+    await userEvent.setup().unhover(needsRow('Charter + research'));
+    const main = await open('Fix sidebar drag');
+    expect(within(main).getByTestId('hover-place').textContent).toBe('⎇ master');
   });
 });
 

@@ -15,6 +15,7 @@ import type { CardsHarnessApi, HarnessIntent } from '../src/renderer/src/harness
 import type { EditorHarnessApi } from '../src/renderer/src/harness/composer/editor-api';
 import { invoke, launchReady, turnsJournal, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT } from './support/launch';
+import { sidebarRow } from './support/sidebar';
 
 test.skip(process.env.MAWS_C7_SHOTS !== '1', 'the mockup screenshots run only under MAWS_C7_SHOTS=1');
 test.skip(!existsSync(join(REPO_ROOT, 'out/renderer/harness.html')), 'the screenshots need a harness build');
@@ -123,7 +124,7 @@ test('the shell: the frame docked under a live transcript, the docked approvals,
     const [live, approval, edit] = [await appIdOf(sessions.live), await appIdOf(sessions.approval), await appIdOf(sessions.edit)];
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     const open = async (id: string) => {
-      await page.locator(`[role="treeitem"][data-menu="session:${id}"]`).click();
+      await (await sidebarRow(page, { appSessionId: id })).click(); // W5: on its project's page, opened first
       await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
     };
     const message = pane.getByRole('textbox', { name: 'Message' });

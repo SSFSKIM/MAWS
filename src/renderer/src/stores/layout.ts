@@ -9,10 +9,10 @@ import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import {
   LAYOUT_DEFAULTS,
-  LayoutMainSchema,
-  LayoutRegionsSchema,
   PanelPinnedSchema,
   PanelSessionStateSchema,
+  StoredMainSchema,
+  StoredRegionsSchema,
   type LayoutKey,
   type LayoutMain,
   type LayoutRegions,
@@ -35,7 +35,9 @@ export interface LayoutState {
   panelActiveNoSession: string | null;
   hydrated: boolean;
   dragging: { tabId: string; fromPane: Pane } | null;
-  focusedCardAppId: AppSessionId | null;
+  // W5: whether the floating Overview is open (transient: the app opens to the last active tab, §5.2 as amended); its
+  // rect persists in `regions.overview`.
+  overviewOpen: boolean;
   // The item a notification click (`attention.navigate`) asked to be shown, for C6's transcript to jump to and clear.
   focusRequest: { appSessionId: AppSessionId; attentionId: AttentionId } | null;
   // `settle` runs once the reads are in, before `known` is first asked and the early changes are captured (debt wave 5:
@@ -57,6 +59,8 @@ export interface LayoutState {
   dropSession(appSessionId: AppSessionId): void; // session.removed
   setSidebar(patch: Partial<LayoutRegions['sidebar']>): void;
   setPanel(patch: Partial<LayoutRegions['panel']>): void;
+  setOverviewOpen(open: boolean): void;
+  setOverviewRect(rect: LayoutRegions['overview']): void;
   setPanelTabPinned(appSessionId: AppSessionId, tabId: string, pinned: boolean): void;
   // The panel host's `onChange` (PanelHostProps): pinned refs go to `panel.pinned` (D-10), the rest to the session's own
   // key; with no session only the pins are kept, and the selection goes to `panelActiveNoSession`.
@@ -70,7 +74,6 @@ export interface LayoutState {
   panelTabsOf(appSessionId: AppSessionId): PanelTabRef[];
   updatePanelTabs(appSessionId: AppSessionId, fn: (refs: PanelTabRef[]) => PanelTabRef[], opts?: { activeTabId?: string }): void;
   setDragging(dragging: LayoutState['dragging']): void;
-  focusCard(appSessionId: AppSessionId | null): void;
   requestFocus(request: LayoutState['focusRequest']): void;
 }
 
@@ -104,6 +107,13 @@ export function createLayoutStore() {
       if (!get().hydrated) early.push(next);
       set({ main: next(get().main) });
     };
+    // The regions likewise (W5: a project opened in the sidebar, or a region toggled, before the persisted value arrives
+    // is kept over it).
+    const earlyRegions: ((r: LayoutRegions) => LayoutRegions)[] = [];
+    const regions = (next: (r: LayoutRegions) => LayoutRegions) => {
+      if (!get().hydrated) earlyRegions.push(next);
+      set({ regions: next(get().regions) });
+    };
     // Every change of the pins goes through here, so the no-session selection is revalidated against them each time;
     // an unchanged list keeps its identity, so nothing is persisted for a selection change alone.
     const pins = (next: PanelTabRef[], requested?: string | null) => {
@@ -119,7 +129,7 @@ export function createLayoutStore() {
       panelActiveNoSession: null,
       hydrated: false,
       dragging: null,
-      focusedCardAppId: null,
+      overviewOpen: false,
       focusRequest: null,
 
       async hydrate(client, known, settle) {
@@ -145,9 +155,9 @@ export function createLayoutStore() {
               return match && key !== 'panel.pinned' ? [match[1] as AppSessionId] : [];
             })
           : [];
-        const [regions, persistedMain, panelPinned, ...panels] = await Promise.all([
-          read('regions', LayoutRegionsSchema, LAYOUT_DEFAULTS.regions),
-          read('main.tabs', LayoutMainSchema, LAYOUT_DEFAULTS.main),
+        const [persistedRegions, persistedMain, panelPinned, ...panels] = await Promise.all([
+          read('regions', StoredRegionsSchema, LAYOUT_DEFAULTS.regions), // W5: a version-1 value is migrated
+          read('main.tabs', StoredMainSchema, LAYOUT_DEFAULTS.main), // W5: an Overview tab is dropped
           read('panel.pinned', PanelPinnedSchema, LAYOUT_DEFAULTS.panelPinned),
           ...panelIds.map((id) => read(`panel.${id}`, PanelSessionStateSchema.nullable(), null)),
         ]);
@@ -159,6 +169,7 @@ export function createLayoutStore() {
         });
         const replayed = early.splice(0);
         const hydratedMain = replayed.reduce((m, change) => change(m), model.repairMain(persistedMain, known));
+        const regions = earlyRegions.splice(0).reduce((r, change) => change(r), persistedRegions);
         set({ regions, main: hydratedMain, ...pins(panelPinned), panelBySession, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
         // fixed keys (acceptance item 6 lists them). Tabs replayed over the saved ones differ from what layout.json holds,
@@ -166,6 +177,7 @@ export function createLayoutStore() {
         // is written only when it changes.
         const unsaved = new Set(absent);
         if (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain)) unsaved.add('main.tabs');
+        if (regions !== persistedRegions) unsaved.add('regions');
         const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned };
         for (const key of unsaved) {
           if (!(key in values)) continue;
@@ -179,7 +191,7 @@ export function createLayoutStore() {
       openSession: (appSessionId, opts) => main((m) => model.openSession(m, appSessionId, opts)),
       closeTab(id) {
         const pane = get().main.panes.find((p) => p.tabs.some((t) => t.id === id));
-        if (pane && id !== 'overview') closedAt.set(id, pane.tabs.findIndex((t) => t.id === id));
+        if (pane) closedAt.set(id, pane.tabs.findIndex((t) => t.id === id));
         main((m) => model.closeTab(m, id));
       },
       reopenClosed() {
@@ -210,8 +222,10 @@ export function createLayoutStore() {
         }
       },
 
-      setSidebar: (patch) => set({ regions: { ...get().regions, sidebar: { ...get().regions.sidebar, ...patch } } }),
-      setPanel: (patch) => set({ regions: { ...get().regions, panel: { ...get().regions.panel, ...patch } } }),
+      setSidebar: (patch) => regions((r) => ({ ...r, sidebar: { ...r.sidebar, ...patch } })),
+      setPanel: (patch) => regions((r) => ({ ...r, panel: { ...r.panel, ...patch } })),
+      setOverviewOpen: (overviewOpen) => set({ overviewOpen }),
+      setOverviewRect: (overview) => regions((r) => ({ ...r, overview })),
       setPanelTabPinned(appSessionId, tabId, pinned) {
         const own = get().panelBySession.get(appSessionId) ?? { tabs: [], activeTabId: null };
         const panelBySession = new Map(get().panelBySession);
@@ -249,7 +263,6 @@ export function createLayoutStore() {
         get().setPanelTabs(appSessionId, { tabs: after, activeTabId: pinSelection(before, after, current, opts?.activeTabId ?? current) });
       },
       setDragging: (dragging) => set({ dragging }),
-      focusCard: (appSessionId) => set({ focusedCardAppId: appSessionId }),
       requestFocus: (focusRequest) => set({ focusRequest }),
     };
   });
