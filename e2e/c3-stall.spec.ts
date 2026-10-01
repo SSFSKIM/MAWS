@@ -9,12 +9,13 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, value } from './support/c7-replay';
 import { journalSpend, ownerFileCheck, scratchRepo, stateOf } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { openProject, sidebarRow } from './support/sidebar';
 
 const ON = process.env.MAWS_C3_STALL === '1';
 test.skip(!ON, 'the C3 stall reproduction goes only under MAWS_C3_STALL=1');
@@ -55,10 +56,16 @@ const sh = (cmd: string, args: string[], timeout = 20_000): string => {
 
 const main = (page: Page) => page.locator('[data-region="main"]');
 const sidebar = (page: Page) => page.locator('[data-region="sidebar"]');
-const rowOf = (page: Page, id: string) => page.locator(`[role="treeitem"][data-menu="session:${id}"]`);
 async function statusOrNull(page: Page, id: string): Promise<EngineSessionStatus | null> {
   const r = await invoke(page, 'session.status', { appSessionId: id as AppSessionId });
   return r.ok ? r.value : null;
+}
+
+// A session's row (W5: on its project's page, which this opens), once the index lists the record: a fresh launch reads
+// the store a moment after the window shows.
+async function rowOf(page: Page, id: string): Promise<Locator> {
+  await expect.poll(async () => value(await invoke(page, 'session.list', { includeArchived: true })).sessions.some((r) => r.appId === id), { timeout: 30_000 }).toBe(true);
+  return sidebarRow(page, { appSessionId: id });
 }
 
 async function open(label: string): Promise<MawsLaunch> {
@@ -87,7 +94,7 @@ const engines = () => sh('/bin/ps', ['-axo', 'pid=,ppid=,etime=,stat=,command=']
 
 async function send(page: Page, id: string, text: string): Promise<void> {
   const before = (await statusOrNull(page, id))?.lastEventSeq ?? 0;
-  await rowOf(page, id).click();
+  await (await rowOf(page, id)).click();
   await expect(main(page).locator(`[data-composer="${id}"]`)).toBeVisible({ timeout: 20_000 });
   await main(page).getByRole('textbox', { name: 'Message' }).click();
   await page.keyboard.insertText(text);
@@ -138,7 +145,8 @@ async function makeDeep(page: Page): Promise<string> {
   const known = value(await invoke(page, 'session.projects.list', undefined)).projects.some((p) => p.directory === repo);
   if (!known) value(await invoke(page, 'session.projects.add', { directory: repo }));
   const before = new Set(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId));
-  await sidebar(page).getByRole('button', { name: 'New session in deep', exact: true }).click();
+  await openProject(page, 'deep'); // W5: the "+" beside the name on the project's page
+  await sidebar(page).locator('[data-level-pane="2"]').getByRole('button', { name: 'New session in deep', exact: true }).click();
   let id: AppSessionId | undefined;
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !before.has(i.appSessionId))?.appSessionId)).toBeDefined();
   value(await invoke(page, 'session.intent.patch', { appSessionId: id!, patch: { model: 'haiku', permissionMode: 'auto' } }));
@@ -195,10 +203,11 @@ test('the deep session resumed from its row in a fresh app launch, repeatedly', 
     const maws = await open(`i${i}`);
     const { page } = maws;
     try {
-      await expect(rowOf(page, id)).toBeVisible({ timeout: 30_000 });
+      const row = await rowOf(page, id);
+      await expect(row).toBeVisible({ timeout: 30_000 });
       const enginesBefore = engines();
       const t0 = Date.now();
-      await rowOf(page, id).click({ button: 'right' });
+      await row.click({ button: 'right' });
       await page.getByRole('menuitem', { name: 'Resume', exact: true }).click();
       let status: EngineSessionStatus | null = null;
       let captured = false;

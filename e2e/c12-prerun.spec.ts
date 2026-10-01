@@ -19,7 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { _electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { _electron, expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -29,6 +29,7 @@ import { synthesise } from '../test/support/synth-transcript';
 import { invoke, value } from './support/c7-replay';
 import { collectConsoleErrors, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { taskEnded, type TaskEventLike } from './support/c12-task-end';
+import { openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 import {
   captureLoginShell, EVIDENCE, journalSpend, lsPin, ownerFileCheck, prerunScratch, prerunSkipReason, printRun, ptyEngine, recorder, scratchRepo, shoot, stateOf,
   terminalEnv, transcriptFile, transcriptUsdEstimate, trustInScratch, git,
@@ -101,7 +102,6 @@ const launches: (() => string[])[] = [];
 const main = (page: Page) => page.locator('[data-region="main"]');
 const sidebar = (page: Page) => page.locator('[data-region="sidebar"]');
 const panel = (page: Page) => page.locator('[data-region="panel"]');
-const rowOf = (page: Page, id: string) => page.locator(`[role="treeitem"][data-menu="session:${id}"]`);
 const statusOf = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));
 async function statusOrNull(page: Page, id: string): Promise<EngineSessionStatus | null> {
   const r = await invoke(page, 'session.status', { appSessionId: id as AppSessionId });
@@ -110,6 +110,35 @@ async function statusOrNull(page: Page, id: string): Promise<EngineSessionStatus
 const digests = async (page: Page) => value(await invoke(page, 'session.digests', undefined)).digests;
 const digestOf = async (page: Page, id: string) => (await digests(page)).find((d) => d.appSessionId === id) ?? null;
 const records = async (page: Page, includeArchived = false) => value(await invoke(page, 'session.list', { includeArchived })).sessions;
+
+// A session's row (W5: on its project's page, which this opens), once the index lists the record: a fresh launch reads
+// the store a moment after the window shows.
+async function rowOf(page: Page, id: string): Promise<Locator> {
+  await expect.poll(async () => (await records(page, true)).some((r) => r.appId === id), { timeout: 30_000 }).toBe(true);
+  return sidebarRow(page, { appSessionId: id });
+}
+
+// A session row's hover card (W5: the row is one line; who holds a foreign session, the activity and the last answer
+// are in its card), opened with the pointer from a neutral point: now and then Chromium keeps a stale hover state and
+// the row sees no pointerenter, which a fresh move in fixes.
+async function hoverCardOf(page: Page, id: string): Promise<Locator> {
+  const row = await rowOf(page, id);
+  const card = page.getByRole('dialog', { name: (await row.getAttribute('aria-label'))!, exact: true });
+  await expect(async () => {
+    await page.mouse.move(700, 400);
+    await row.hover();
+    await expect(card).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 10_000 });
+  return card;
+}
+
+// The floating Overview (W5: no tab; the top bar's button floats it over the main area), opened when it is not.
+async function openOverview(page: Page): Promise<Locator> {
+  const overview = main(page).getByRole('dialog', { name: 'Overview' });
+  if (!(await overview.isVisible())) await main(page).locator('[data-top-bar]').getByRole('button', { name: /^Overview/ }).click();
+  await expect(overview).toBeVisible();
+  return overview;
+}
 
 // The owner build over the run's profile and scratch home, the window's console errors collected; the subagent model is
 // Haiku in this profile (the settings row the owner's Settings › Engine carries), since no item needs the owner's model
@@ -130,13 +159,14 @@ async function recordOf(page: Page, sessionId: string, timeout = 30_000): Promis
   return found!;
 }
 
-// A project's session rows in the sidebar (expanding the project when it is collapsed).
+// A project's session rows in the sidebar (W5: on the project's page, opened from the project list; projects no longer
+// expand in place).
 async function projectRows(page: Page, projectName: string): Promise<string[]> {
-  const project = sidebar(page).locator(`[role="treeitem"][data-kind="project"][aria-label="${projectName}"]`);
-  await expect(project).toBeVisible({ timeout: 30_000 });
-  if ((await project.getAttribute('aria-expanded')) === 'false') await project.click();
-  const group = sidebar(page).getByRole('group', { name: projectName });
-  return group.locator('[role="treeitem"][data-kind="session"]').evaluateAll((els) => els.map((el) => el.getAttribute('data-menu')!.replace(/^session:/, '')));
+  await expect(projectRow(page, projectName)).toBeVisible({ timeout: 30_000 });
+  await openProject(page, projectName);
+  return sidebar(page)
+    .locator('[data-level-pane="2"] [role="treeitem"][data-kind="session"]')
+    .evaluateAll((els) => els.map((el) => el.getAttribute('data-menu')!.replace(/^session:/, '')));
 }
 
 // ---- §10.1 ---------------------------------------------------------------------------------------------------------
@@ -169,12 +199,16 @@ test('§10.1 terminal-started sessions show under their projects, the live one f
     const southRows = await projectRows(page, 'south');
     expect(northRows.sort()).toEqual([ids.northOne!, ids.northLive!].sort());
     expect(southRows).toEqual([ids.southOne!]);
-    const liveRow = rowOf(page, ids.northLive!);
+    const liveRow = await rowOf(page, ids.northLive!);
     await expect(liveRow.getByRole('img', { name: 'Live in terminal' })).toBeVisible({ timeout: 20_000 });
-    await expect(liveRow).toContainText(`Terminal · pid ${term.pid}`);
+    // W5: the holder line left the one-line row for its hover card.
+    const liveCard = await hoverCardOf(page, ids.northLive!);
+    await expect(liveCard.getByTestId('hover-activity')).toHaveText(`Terminal · pid ${term.pid}`);
+    await main(page).hover({ position: { x: 400, y: 300 } });
+    await expect(liveCard).toHaveCount(0);
     await expect.poll(async () => (await digestOf(page, ids.northLive!))?.phase, { timeout: 20_000 }).toBe('foreign');
     const phases = Object.fromEntries(await Promise.all(Object.entries(ids).map(async ([k, id]) => [k, (await digestOf(page, id))?.phase ?? null] as const)));
-    const board = main(page).getByRole('list', { name: 'Overview' });
+    const board = (await openOverview(page)).getByRole('list', { name: 'Overview' });
     await expect(board.locator(`[data-card="${ids.northLive}"]`).getByTestId('card-activity')).toHaveText(`Terminal · pid ${term.pid}`);
     rec.note('10.1', {
       projects: { north: northRows.length, south: southRows.length }, phases, liveRowLine: `Terminal · pid ${term.pid}`, overviewCard: 'foreign card with the holder line',
@@ -216,10 +250,14 @@ test('§10.1 real store, read only', async () => {
     launches.push(errors);
     await expect(main(page)).toBeVisible({ timeout: 60_000 });
     const shellMs = Date.now() - launchedAt;
-    const board = main(page).getByRole('list', { name: 'Overview' });
+    // W5: the app opens with no Overview shown; the first card is timed on the panel opened as soon as the shell shows.
+    const board = (await openOverview(page)).getByRole('list', { name: 'Overview' });
     await expect(board.getByRole('article').first()).toBeVisible({ timeout: 120_000 });
     const firstCardMs = Date.now() - launchedAt;
-    await expect(sidebar(page).getByRole('tree', { name: 'Projects' }).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 120_000 });
+    // The project list by its level rather than its tree's role: a page left open by an earlier run takes the list out
+    // of the accessibility tree (its level is inert while the page shows) but keeps it rendered.
+    const projectList = sidebar(page).locator('[data-level-pane="1"] [data-kind="project"]');
+    await expect(projectList.first()).toBeVisible({ timeout: 120_000 });
     const firstProjectMs = Date.now() - launchedAt;
     // The index settles: the session count stops moving for 5 s.
     let last = -1;
@@ -239,9 +277,18 @@ test('§10.1 real store, read only', async () => {
     const projects = value(await invoke(page, 'session.projects.list', undefined)).projects;
     const ds = await digests(page);
     const foreign = ds.filter((d) => d.phase === 'foreign').length;
-    const projectRowsShown = await sidebar(page).getByRole('tree', { name: 'Projects' }).locator('[data-kind="project"]').count();
+    const projectRowsShown = await sidebar(page).locator('[data-level-pane="1"] [data-kind="project"][data-menu^="project:"]').count(); // W5: not Other sessions' row
     const cards = await board.getByRole('article').count();
-    const foreignGlyphs = await sidebar(page).getByRole('img', { name: /^Live (in terminal|as background job)$/ }).count();
+    // W5: session rows live on each project's page, so the foreign glyphs are counted page by page (Other sessions too),
+    // each page reached by its row's id, taken once: the list reorders as the owner's sessions work.
+    let foreignGlyphs = 0;
+    for (const key of await projectList.evaluateAll((els) => els.map((el) => el.getAttribute('data-tree-id')!))) {
+      await showProjectList(page);
+      await sidebar(page).locator(`[data-level-pane="1"] [data-tree-id="${key}"]`).click();
+      await expect(sidebar(page).getByTestId('sidebar-levels')).toHaveAttribute('data-level', '2');
+      foreignGlyphs += await sidebar(page).locator('[data-level-pane="2"]').getByRole('img', { name: /^Live (in terminal|as background job)$/ }).count();
+    }
+    await showProjectList(page);
     await page.screenshot({ path: join(outside, 'prerun-10.1-realstore-light.png') });
     const engineSessions = value(await invoke(page, 'engine.sessions', undefined));
     rec.note('10.1.realstore', {
@@ -291,7 +338,8 @@ async function plus(page: Page, repo: string, first: string, o: { mode?: string;
   await addProject(page, repo);
   const name = repo.split('/').at(-1)!;
   const known = new Set(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId));
-  await sidebar(page).getByRole('button', { name: `New session in ${name}`, exact: true }).click();
+  await openProject(page, name); // W5: the "+" beside the name on the project's page
+  await sidebar(page).locator('[data-level-pane="2"]').getByRole('button', { name: `New session in ${name}`, exact: true }).click();
   await expect(page.getByRole('heading', { name: `New session in ${name}` })).toBeVisible();
   let id: AppSessionId | undefined;
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !known.has(i.appSessionId))?.appSessionId)).toBeDefined();
@@ -320,7 +368,7 @@ async function plus(page: Page, repo: string, first: string, o: { mode?: string;
 }
 
 async function openRow(page: Page, id: string): Promise<void> {
-  await rowOf(page, id).click();
+  await (await rowOf(page, id)).click();
   await expect(main(page).locator(`[data-composer="${id}"]`)).toBeVisible({ timeout: 20_000 });
 }
 
@@ -551,8 +599,8 @@ test('§10.3 from Overview cards: approve P, answer Q; R asks while the window i
     await expect.poll(async () => (await notifiedNow()).some((n: Notified) => n.appSessionId === R), { timeout: 20_000 }).toBe(true);
     const notified = await notifiedNow();
 
-    await page.getByRole('tab', { name: 'Overview' }).click();
-    const board = main(page).getByRole('list', { name: 'Overview' });
+    const overview = await openOverview(page);
+    const board = overview.getByRole('list', { name: 'Overview' });
     const cardP = board.locator(`[data-card="${P}"]`);
     const cardQ = board.locator(`[data-card="${Q}"]`);
     await expect(cardP.getByRole('button', { name: 'Allow', exact: true })).toBeVisible({ timeout: 20_000 });
@@ -566,6 +614,9 @@ test('§10.3 from Overview cards: approve P, answer Q; R asks while the window i
     await idle(page, Q);
     const answeredP = existsSync(join(repos.P, 'c12-p.txt'));
     const qReply = (await digestOf(page, Q))?.lastAssistantLine ?? null;
+    // W5: the Overview closed first, since it floats over the pane and its own card for R answers to the same names.
+    await overview.getByRole('button', { name: 'Close Overview' }).click();
+    await expect(overview).toHaveCount(0);
 
     await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('attention.next')?.click());
     await expect(main(page).locator(`[data-composer="${R}"]`)).toBeVisible({ timeout: 10_000 });
@@ -623,7 +674,7 @@ function pieces(item: string) {
 async function ensureLive(page: Page, id: string): Promise<void> {
   const s = await statusOrNull(page, id);
   if (s && s.process === 'ready') return;
-  await rowOf(page, id).click({ button: 'right' });
+  await (await rowOf(page, id)).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Resume', exact: true }).click();
   const card = page.getByRole('group', { name: 'Trust this folder?' });
   await expect.poll(async () => (await card.isVisible()) || (await statusOrNull(page, id))?.process === 'ready', { timeout: 120_000 }).toBe(true);
@@ -852,7 +903,7 @@ test('§10.5 the archived deep session resumes from a terminal with claude --res
   const out: Record<string, unknown> = {};
   try {
     await step('archive the deep session', async () => {
-      await rowOf(page, id!).click({ button: 'right' });
+      await (await rowOf(page, id!)).click({ button: 'right' });
       await page.getByRole('menuitem', { name: 'Archive', exact: true }).click();
       const sheet = page.getByRole('dialog', { name: /^Archive “/ });
       await expect(sheet).toBeVisible();
@@ -934,7 +985,7 @@ test('§10.6 in brief on the owner build: one release and its Send-to-resume; th
       await expect.poll(async () => (await statusOf(page, x1)).exit?.reason ?? null, { timeout: 30_000 }).toBe('budget');
       const releasedMs = Date.now() - at;
       value(await invoke(page, 'settings.set', { engine: { memoryBudgetMiB: null } }));
-      await expect(rowOf(page, x1)).toContainText('released', { timeout: 15_000 });
+      await expect(await rowOf(page, x1)).toContainText('released', { timeout: 15_000 });
       const others = await Promise.all([x2, x3].map(async (i) => (await statusOf(page, i)).process));
       const attention = value(await invoke(page, 'attention.list', undefined)).filter((i) => i.appSessionId === x1).length;
       const shots = await shoot(page, '10.6-released');
@@ -1077,7 +1128,7 @@ test('§10.7 a 500-turn transcript stays anchored while old work expands; stream
   try {
     const record = await recordOf(page, sessionId, 60_000);
     await step('old work expands while scrolled mid-way; the anchor holds', async () => {
-      await rowOf(page, record.appId).click();
+      await (await rowOf(page, record.appId)).click();
       await expect(scroller(page)).toBeVisible({ timeout: 30_000 });
       await settle(page, 2_000);
       const trials: Record<string, unknown>[] = [];
@@ -1368,7 +1419,7 @@ test('§10.9 queue, steer, stop and resume as labelled; a paused queue survives 
       maws = await open();
       page = maws.page;
       const stored = value(await invoke(page, 'session.queue.list', { appSessionId: id as AppSessionId }));
-      await rowOf(page, id).click();
+      await (await rowOf(page, id)).click();
       await expect(list()).toContainText('1 queued', { timeout: 20_000 });
       out.survives = { beforeQuit: before, afterRelaunch: { entries: stored.entries.map((e) => e.state), paused: stored.paused, pauseReason: (stored as { pauseReason?: unknown }).pauseReason ?? null }, shown: await list().innerText(), screenshots: await shoot(page, '10.9-queue-survived') };
       expect(stored.entries.map((e) => e.state)).toEqual(['queued']);
@@ -1504,8 +1555,8 @@ test('C8 item 9: Attach adds the Terminal tab and activates its session (a claud
     const { page } = maws;
     try {
       await expect.poll(async () => (bg = (await records(page)).find((r) => r.directory === repo && r.holder.kind === 'background_job')) !== undefined, { timeout: 60_000 }).toBe(true);
-      if (northOne) await rowOf(page, northOne).click(); // another session is focused before the attach
-      await rowOf(page, bg!.appId).click({ button: 'right' });
+      if (northOne) await (await rowOf(page, northOne)).click(); // another session is focused before the attach
+      await (await rowOf(page, bg!.appId)).click({ button: 'right' });
       const items = await page.getByRole('menuitem').allTextContents();
       await page.getByRole('menuitem', { name: 'Attach in a terminal tab' }).click();
       await expect(page.locator(`[data-tab-id="session:${bg!.appId}"]`)).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });

@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type Locator } from '@playwright/test';
 import { launchMaws, REPO_ROOT, test } from './support/launch';
+import { sidebarOf, sidebarRow } from './support/sidebar';
 
 test.skip(process.env.MAWS_PANEL_LIVE !== '1', 'the live check runs only under MAWS_PANEL_LIVE=1');
 
@@ -88,8 +89,10 @@ test('live: the summary over this repository matches git', async () => {
     const summary = panel.getByRole('tabpanel', { name: 'Session overview' });
     const section = (name: string): Locator => summary.getByRole('region', { name });
     const changeLine = summary.getByTestId('change-line');
+    // W5: a session's row is on its project's page, opened first, once the stub's records are in.
     const open = async (title: string) => {
-      await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: title }).click();
+      await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+      await (await sidebarRow(page, title)).click();
       await expect(summary.getByRole('heading', { level: 2 })).toContainText(title);
     };
 

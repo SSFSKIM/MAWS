@@ -13,6 +13,7 @@ import { buildCodeScratch, GENERATED_LINES, generatedLine, MARKER_LINE, SVG_TEXT
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
 import { CHARTER } from './support/panel-support';
+import { sidebarOf, sidebarRow } from './support/sidebar';
 
 const REFUSAL = "path outside the session's directories";
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
@@ -353,7 +354,9 @@ async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scrat
   try {
     maws = await launchMaws({ env: scratch.env });
     const { page } = maws;
-    await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: CHARTER }).click();
+    // W5: the row is on its project's page; the page is opened once the stub's records are in.
+    await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+    await (await sidebarRow(page, CHARTER)).click();
     const panel = page.locator('[data-region="panel"]');
     await expect(panel.getByRole('tabpanel', { name: 'Session overview' }).getByRole('heading', { level: 2 })).toContainText(CHARTER);
     await body({ maws, page, panel, scratch });

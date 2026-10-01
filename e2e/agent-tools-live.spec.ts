@@ -23,6 +23,7 @@ import { expect, type Page } from '@playwright/test';
 import { ENGINE_BIN, ENGINE_VERSION, GATEWAY_AUTH_TOKEN, RELAY_URL } from '../src/engine-host/launch';
 import { scratchConfigHome } from '../test/live/support/live';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
+import { sidebarRow } from './support/sidebar';
 
 function skipReason(): string | null {
   if (process.env.MAWS_C8B_LIVE !== '1') return 'the C8b live acceptance runs only under MAWS_C8B_LIVE=1';
@@ -447,8 +448,9 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       )
       .toBe(true);
     await page.evaluate(installProbes);
-    // By the record's id: the title follows the session's latest prompt (the record's summary), so it changes as the run goes.
-    await page.locator(`[data-region="sidebar"] [data-menu="session:${record!.appId}"]`).click();
+    // By the record's id: the title follows the session's latest prompt (the record's summary), so it changes as the run
+    // goes. W5: the row is on its project's page, opened first.
+    await (await sidebarRow(page, { appSessionId: record!.appId })).click();
     return { launch, page, invoke, record: record! };
   };
   const launchSession = async (invoke: Invoke, record: { appId: string; directory: string }, maxBudgetUsd: number, extraEnv: Record<string, string> | null = null) => {
@@ -563,7 +565,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       expect(drillRows).not.toBeNull();
       expect(drillRows).toBe(tabRows);
       // back to the session's main tab for the steps below
-      await page.locator(`[data-region="sidebar"] [data-menu="session:${record.appId}"]`).click();
+      await (await sidebarRow(page, { appSessionId: record.appId })).click();
     });
 
     await step('iii', 'a child’s permission renders inline and Allow lets it finish', async () => {

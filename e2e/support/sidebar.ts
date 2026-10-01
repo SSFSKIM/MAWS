@@ -9,9 +9,10 @@ const levelsOf = (page: Page) => sidebarOf(page).getByTestId('sidebar-levels');
 // The project list's row of a project, by name ("Other sessions" included).
 export const projectRow = (page: Page, name: string) => sidebarOf(page).locator(`[data-level-pane="1"] [data-kind="project"][aria-label="${name}"]`);
 
-// The levels slide (a 200ms transform): a row's box is where it will stay only once the slide has ended.
+// The levels slide (a 200ms transform): a row's box is where it will stay only once the slide has ended, so the slide is
+// finished at once (a hidden window, which some specs use, may not run it at all).
 async function settled(page: Page): Promise<void> {
-  await expect.poll(() => levelsOf(page).evaluate((el) => el.getAnimations().length), { message: 'the sidebar levels stop sliding' }).toBe(0);
+  await levelsOf(page).evaluate((el) => el.getAnimations().forEach((animation) => animation.finish()));
 }
 
 // Back to the project list, when a page is open.
