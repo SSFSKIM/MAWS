@@ -9,6 +9,7 @@ import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
 import { isOpen, needsYou, type NeedsYouRow } from '../attention/derive';
+import type { QuestionDraft } from '../request-card/question-steps';
 
 export interface AttentionState {
   loaded: boolean;
@@ -21,12 +22,16 @@ export interface AttentionState {
   // swap shows it as a notice instead of waiting for a read that will not come.
   requests: Map<AttentionId, SessionEvent | null>;
   unreadable: Map<AttentionId, string>; // why an item's request could not be read; forgotten once the item is not pending
+  // W4: a question card's answers in progress, beside its request, so a remount or a move between placements resumes
+  // them (`request-card/question-steps.ts`); dropped once the item is no longer open.
+  drafts: Map<AttentionId, QuestionDraft>;
   beginSnapshot(): void;
   applySnapshot(items: AttentionItem[]): void;
   applyChanged(change: EventPayload<'attention.changed'>): void;
   applyNotified(notified: EventPayload<'attention.notified'>): void;
   loadRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // once per item; a failed read is retried once
   retryRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // an unreadable item's read, asked again (the card's Retry)
+  setDraft(id: AttentionId, draft: QuestionDraft): void;
 }
 
 export const REQUEST_RETRY_MS = 1_000; // the wait before a failed `attention.request` read is retried, once
@@ -46,6 +51,14 @@ function forgetSettled(state: Pick<AttentionState, 'requests' | 'unreadable'>, b
   return { requests, unreadable };
 }
 
+// The drafts of items no longer open (answered, retired, gone) are dropped.
+function forgetClosedDrafts(drafts: Map<AttentionId, QuestionDraft>, bySession: Map<AppSessionId, AttentionItem[]>): Partial<AttentionState> {
+  if (drafts.size === 0) return {};
+  const open = new Set([...bySession.values()].flatMap((items) => items.filter(isOpen).map((item) => item.id)));
+  const kept = new Map([...drafts].filter(([id]) => open.has(id)));
+  return kept.size === drafts.size ? {} : { drafts: kept };
+}
+
 export function createAttentionStore() {
   const inFlight = new Map<AttentionId, Promise<void>>();
   return create<AttentionState>()((set, get) => ({
@@ -56,6 +69,7 @@ export function createAttentionStore() {
     pendingReplacements: null,
     requests: new Map(),
     unreadable: new Map(),
+    drafts: new Map(),
     beginSnapshot() {
       set({ pendingReplacements: new Map() });
     },
@@ -63,7 +77,7 @@ export function createAttentionStore() {
       const bySession = new Map<AppSessionId, AttentionItem[]>();
       for (const item of items) bySession.set(item.appSessionId, [...(bySession.get(item.appSessionId) ?? []), item]);
       for (const [appSessionId, replacement] of get().pendingReplacements ?? []) bySession.set(appSessionId, replacement);
-      set({ bySession, version: get().version + 1, loaded: true, pendingReplacements: null, ...forgetSettled(get(), bySession) });
+      set({ bySession, version: get().version + 1, loaded: true, pendingReplacements: null, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
     },
     applyChanged({ appSessionId, items }) {
       const buffer = get().pendingReplacements;
@@ -72,7 +86,7 @@ export function createAttentionStore() {
         return;
       }
       const bySession = new Map(get().bySession).set(appSessionId, items);
-      set({ bySession, version: get().version + 1, ...forgetSettled(get(), bySession) });
+      set({ bySession, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
     },
     applyNotified({ delivery }) {
       set({ notificationDelivery: delivery });
@@ -113,6 +127,9 @@ export function createAttentionStore() {
       unreadable.delete(item.id);
       set({ requests, unreadable });
       return get().loadRequest(client, item);
+    },
+    setDraft(id, draft) {
+      set({ drafts: new Map(get().drafts).set(id, draft) });
     },
   }));
 }

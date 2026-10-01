@@ -35,6 +35,7 @@ export function fillStores(scenario: Scenario, opts: { loaded?: boolean } = {}):
     pendingReplacements: null,
     requests: new Map(),
     unreadable: new Map(),
+    drafts: new Map(),
   });
 }
 

@@ -150,3 +150,22 @@ describe('the originating request of an item, fetched once', () => {
     expect(store.getState().requests.get(older.id)).toBe(event); // a read request stays cached
   });
 });
+
+// W4: the question stepper's draft lives beside the request until the item is no longer open.
+describe('a question card’s draft', () => {
+  it('is kept while its item is open (pending or delivered) and dropped once it retires or leaves', () => {
+    const store = createAttentionStore();
+    store.getState().applySnapshot([older, newer]);
+    const draft = { step: 1, reached: 1, selected: { q: ['Red'] }, other: {} };
+    store.getState().setDraft(newer.id, draft);
+    store.getState().setDraft(older.id, draft);
+    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'delivered' }] });
+    expect(store.getState().drafts.get(newer.id)).toBe(draft);
+    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'retired' }] });
+    expect(store.getState().drafts.has(newer.id)).toBe(false);
+    expect(store.getState().drafts.get(older.id)).toBe(draft);
+    store.getState().beginSnapshot();
+    store.getState().applySnapshot([]);
+    expect(store.getState().drafts.size).toBe(0);
+  });
+});

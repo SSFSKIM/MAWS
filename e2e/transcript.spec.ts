@@ -305,6 +305,27 @@ async function loadAll(page: Page, fixture: string) {
   await settle(page, 300);
 }
 
+// W4: an answered question is one compact widget, a line per question reading "header → answer", no options listed,
+// and it stays in view with its turn folded (the owner's ruling), where the thinking around it folds away.
+test('an answered question reads as one compact receipt that stays in view when its turn folds', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, 'pass1/question-roundtrip');
+  const divider = page.locator('[data-kind="divider"] button[aria-expanded]').first();
+  await expect(divider).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('[data-kind="thinking"]')).toHaveCount(0); // the folded work
+  const widget = page.locator('[data-kind="question"] .transcript-question');
+  await expect(widget).toBeVisible();
+  expect(await widget.locator('[data-question]').allTextContents()).toEqual(['Color→Red', 'Fruits→Apple, Pear']);
+  await expect(widget).not.toContainText('Blue');
+  await expect(widget).not.toContainText('Chosen');
+  const box = (await widget.boundingBox())!;
+  expect(box.width, 'a compact widget, 480 px at most').toBeLessThanOrEqual(480);
+  expect(box.height, 'two lines').toBeLessThan(72);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 test('the denied count jumps to the standalone denied cell', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);

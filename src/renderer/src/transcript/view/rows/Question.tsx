@@ -1,62 +1,42 @@
-// An answered question in history (Derivation, *Requests*): each question under its header with its options, the
-// chosen ones marked (a multi-select answer is the labels joined by `, `), an answer that is no option shown as the
-// answer. Option descriptions go through the shared markdown pipeline; previews are never rendered (they are C7's live
-// form concern and need the isolated frame of §5.3). No controls: a pending question is C7's card in the slot.
+// An answered question in history (Derivation, *Requests*; W4, the owner's compact receipt): one bordered widget, one
+// line per question reading "header (or the question) → answer", the question in full as the line's title. An answer
+// that is no option reads as written; a question left out of the reply reads Not answered, and every question of a
+// request declined whole reads Skipped. No options, no previews, no controls: a pending question is C7's card in the
+// slot. The row stays in view when its turn folds (isPersistentRow).
 import type { Question } from '@shared/graph/events';
 import { QUESTION } from '../../model/copy';
 import type { Row } from '../../model/rows';
-import { Markdown } from '../markdown/Markdown';
 
-function picked(question: Question, answers: Record<string, string> | null): string[] {
-  const answer = answers?.[question.question];
-  if (answer === undefined) return [];
-  return question.multiSelect ? answer.split(', ') : [answer];
-}
-
-// A question the human skipped: the card's Skip answers the request with a plain permission deny, which C3 reports as
-// `question.answered` with no answers (C3's broker, `pass3/question-deny`), so an answer map that is present and empty.
+// A question the human declined whole: the card's Esc answers the request with a plain permission deny, which C3
+// reports as `question.answered` with no answers (C3's broker, `pass3/question-deny`), so an answer map that is present
+// and empty. Skipping every question one by one sends the same empty map.
 const wasSkipped = (answers: Record<string, string> | null) => answers !== null && Object.keys(answers).length === 0;
 
-function QuestionItem({ question, answers }: { question: Question; answers: Record<string, string> | null }) {
-  const chosen = picked(question, answers);
-  const labels = new Set(question.options.map((option) => option.label));
-  const other = chosen.filter((answer) => !labels.has(answer));
+function QuestionLine({ question, answers }: { question: Question; answers: Record<string, string> | null }) {
+  const answer = answers?.[question.question];
   return (
-    <div className="transcript-question-item" data-question="">
-      <div className="transcript-question-header" data-question-header="">
-        {question.header}
-      </div>
-      <div className="transcript-question-text">{question.question}</div>
-      <ul className="transcript-question-options">
-        {question.options.map((option) => {
-          const isChosen = chosen.includes(option.label);
-          return (
-            <li key={option.label} className="transcript-question-option" data-chosen={isChosen ? '' : undefined}>
-              <span className="transcript-question-label" data-option-label="">
-                {option.label}
-              </span>
-              {isChosen && <span className="transcript-badge">{QUESTION.chosen}</span>}
-              {option.description && (
-                <div className="transcript-question-description">
-                  <Markdown markdown={option.description} live={false} />
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-      {other.length > 0 && <div className="transcript-question-answer">{QUESTION.answer(other.join(', '))}</div>}
-      {answers?.[question.question] === undefined && <div className="transcript-question-answer">{wasSkipped(answers) ? QUESTION.skipped : QUESTION.notAnswered}</div>}
-    </div>
+    <li className="transcript-question-line" data-question="" title={question.question}>
+      <span className="transcript-question-label" data-question-label="">
+        {question.header || question.question}
+      </span>
+      <span className="transcript-question-arrow" aria-hidden="true">
+        →
+      </span>
+      <span className="transcript-question-answer" data-answer={answer === undefined ? 'none' : ''}>
+        {answer ?? (wasSkipped(answers) ? QUESTION.skipped : QUESTION.notAnswered)}
+      </span>
+    </li>
   );
 }
 
 export function QuestionRow({ row }: { row: Extract<Row, { kind: 'question' }> }) {
   return (
     <section className="transcript-question" aria-label={QUESTION.heading}>
-      {row.questions.map((question) => (
-        <QuestionItem key={question.question} question={question} answers={row.answers} />
-      ))}
+      <ul className="transcript-question-lines">
+        {row.questions.map((question) => (
+          <QuestionLine key={question.question} question={question} answers={row.answers} />
+        ))}
+      </ul>
     </section>
   );
 }

@@ -332,25 +332,20 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 
 /* Requests in history: plan and question (no controls; a pending request is C7's card in the slot) */
 .transcript-badge { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--fg); font-size: var(--text-ui-sm); font-weight: 500; }
-.transcript-plan, .transcript-question { margin: 4px 0 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); }
+.transcript-plan { margin: 4px 0 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); }
 .transcript-plan-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-plan-body { padding: 4px 12px; overflow-wrap: anywhere; }
 .transcript-plan-body:not([data-open]) { max-height: 144px; overflow: hidden; }
 .transcript-plan-body[data-overflows]:not([data-open]) { mask-image: linear-gradient(to bottom, var(--fg) 70%, transparent); }
 .transcript-plan-more { margin: 0 12px 8px; }
-.transcript-question-item { padding: 10px 12px; }
-.transcript-question-item + .transcript-question-item { border-top: 1px solid var(--border); }
-.transcript-question-header { color: var(--fg-muted); font-size: var(--text-ui-sm); font-weight: 500; }
-.transcript-question-text { margin: 2px 0 6px; }
-.transcript-question-options { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.transcript-question-option { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.transcript-question-option[data-chosen] { border-color: var(--accent); }
-.transcript-question-option .transcript-badge { margin-left: 8px; }
-.transcript-question-label { font-weight: 500; }
-.transcript-question-description { color: var(--fg-muted); font-size: var(--text-ui-sm); }
-.transcript-question-description .transcript-prose > :first-child { margin-top: 0; }
-.transcript-question-description .transcript-prose > :last-child { margin-bottom: 0; }
-.transcript-question-answer { margin-top: 6px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
+/* W4: the answered question as one compact widget, a line per question (Claude Desktop's 480 px receipt) */
+.transcript-question { width: fit-content; min-width: 200px; max-width: min(480px, 100%); margin: 4px 0 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); }
+.transcript-question-lines { display: grid; gap: 2px; margin: 0; padding: 6px 12px; list-style: none; }
+.transcript-question-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; line-height: 1.5; }
+.transcript-question-label { flex: none; max-width: 45%; overflow: hidden; color: var(--fg); font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+.transcript-question-arrow { flex: none; color: var(--fg-faint); }
+.transcript-question-answer { min-width: 0; color: var(--fg-muted); overflow-wrap: anywhere; }
+.transcript-question-answer[data-answer="none"] { color: var(--fg-faint); }
 
 /* A pending request's slot: C7's card, or the placeholder */
 .transcript-slot { margin: 4px 0 10px; }

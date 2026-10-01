@@ -59,10 +59,12 @@ describe('toAnswer validates against RequestAnswerSchema for every variant', () 
     expect(toAnswer(state)).toEqual({ kind: 'question', answers: { [color.question]: 'Teal, mostly', [fruits.question]: 'Apple, Fig' } });
   });
 
-  it('an incomplete question form has no answers and cannot become an answer', () => {
+  // W4: the stepper's Skip leaves a question out; the pinned engine reads an absent answer as unanswered.
+  it('a question with no answer (a blank Other is none) is left out of the reply, and none at all is an empty map', () => {
     const state: VariantState = { kind: 'question', questions: question.questions, selected: { [color.question]: ['Red'] }, other: { [fruits.question]: '   ' } };
-    expect(questionAnswers(state)).toBeNull();
-    expect(() => toAnswer(state)).toThrow(/Which fruits do you like\?/);
+    expect(questionAnswers(state)).toEqual({ [color.question]: 'Red' });
+    expect(toAnswer(state)).toEqual({ kind: 'question', answers: { [color.question]: 'Red' } });
+    expect(toAnswer({ kind: 'question', questions: question.questions, selected: {}, other: {} })).toEqual({ kind: 'question', answers: {} });
   });
 
   it('refuses a dialog result the kind does not have, cancelled for the auto-mode fallback, and any undeclared kind', () => {

@@ -280,8 +280,11 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
 
   // Hover, the card sits in C5's dialog named for the session; the card itself is named for its request and tool.
   const named = hover ? { role: 'group', 'aria-label': title === null ? heading.text : `${heading.text}: ${title}` } : {};
+  // W4: a question in the transcript is Claude Desktop's 480 px card; docked it fills the frame that stands in for the
+  // composer, and the Overview card is its own width.
+  const questionCard = placement === 'inline' && request?.kind === 'question.requested' ? 'max-w-[480px] rounded-lg border border-border bg-bg-raised p-3' : '';
   const content = (
-    <div ref={rootRef} data-request-card={item.id} aria-busy={busy} {...named} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'}`}>
+    <div ref={rootRef} data-request-card={item.id} aria-busy={busy} {...named} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'} ${questionCard}`}>
       {!framed && (
         <div className={`flex items-center gap-1.5 ${TONE[heading.tone]}`}>
           <span aria-hidden>{heading.char}</span>

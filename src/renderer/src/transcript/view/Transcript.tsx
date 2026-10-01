@@ -27,7 +27,7 @@ export const OVERSCAN = 6;
 // Per-kind first guesses, replaced by measurement as rows render.
 const ESTIMATES: Record<RowKind, number> = {
   time: 56, user: 96, assistant_text: 140, divider: 40, group: 32, cell: 28, receipt: 150, subagent: 32, agent_message: 32,
-  thinking: 32, plan: 260, question: 220, request_slot: 48, error: 36, boundary: 36, bash: 120, local_command: 48,
+  thinking: 32, plan: 260, question: 64, request_slot: 48, error: 36, boundary: 36, bash: 120, local_command: 48,
 };
 export function estimateRow(row: Row): number {
   if (row.kind === 'group' && row.expanded) return 280;

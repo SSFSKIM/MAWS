@@ -79,7 +79,7 @@ function mount(event: RequestEvent, placement: Placement, over: Partial<Attentio
 
 const press = async (key: string) => userEvent.setup().keyboard(key);
 const focusOn = (element: HTMLElement) => act(() => element.focus());
-const frame = () => screen.getByRole('group', { name: /./ });
+const frame = () => document.querySelector<HTMLElement>('[data-docked-frame]')!; // a multi-select question is a named group too
 const article = () => screen.getByRole('article');
 
 const refusal = syntheticRequest('refusal-fallback-dialog');
@@ -90,6 +90,8 @@ const unflaggedRead = syntheticRequest('flagged-read', (r) => delete r.requires_
 const reapply = fixtureRequest('pass2', 'grant-reapply-start', 30);
 const question = fixtureRequest('pass1', 'question-roundtrip', 137);
 const skippedQuestion = fixtureRequest('pass3', 'question-deny', 108); // the probe's question skipped by a plain deny
+// question-roundtrip's form with its previews dropped: its single-select pick then moves on by itself
+const withoutPreviews = { ...question, questions: (question as Extract<RequestEvent, { kind: 'question.requested' }>).questions.map((q) => ({ ...q, options: q.options.map((o) => ({ ...o, preview: null })) })) } as RequestEvent;
 const elicitation = fixtureRequest('pass2', 'dialogs', 41);
 const plan: RequestEvent = { ...permission(), kind: 'plan.requested', plan: '# Plan\n\n1. Split the parser\n2. Test it', input: {} } as never;
 
@@ -236,32 +238,136 @@ describe('edit prompt restores the initiating prompt', () => {
 });
 
 describe('request card placements and delivery states', () => {
-  it('the question form submits every answer as question-roundtrip seq 138 recorded, once complete', async () => {
+  // W4: one question at a time, every answer sent as the one reply (question-roundtrip seq 138).
+  it('the question card steps through the questions and submits every answer as question-roundtrip seq 138 recorded', async () => {
     mount(question, 'inline');
-    const submit = screen.getByRole('button', { name: 'Submit' });
-    expect((submit as HTMLButtonElement).disabled).toBe(true);
     const user = userEvent.setup();
+    expect(screen.getByText('1 of 2')).toBeTruthy();
+    expect(screen.getByText('Which color do you prefer?')).toBeTruthy();
+    expect(screen.queryByText('Which fruits do you like?')).toBeNull(); // one question at a time
+    const next = screen.getByRole('button', { name: 'Next' });
+    expect((next as HTMLButtonElement).disabled).toBe(true);
     await user.click(screen.getByRole('radio', { name: 'Red' }));
     expect(screen.getByTitle('Preview of Red').getAttribute('sandbox')).toBe(''); // no allow-scripts, no allow-same-origin
     expect(screen.getByTitle('Preview of Red').getAttribute('srcdoc')).toContain('This is a red preview');
-    expect((submit as HTMLButtonElement).disabled).toBe(true); // the fruits are still unanswered
+    expect(screen.getByText('1 of 2')).toBeTruthy(); // a question with previews waits for Next
+    await user.click(next);
+    expect(screen.getByText('2 of 2')).toBeTruthy();
+    expect(screen.getByText('Which fruits do you like?')).toBeTruthy();
+    const submit = screen.getByRole('button', { name: 'Submit' });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
     await user.click(screen.getByRole('checkbox', { name: 'Apple' }));
     await user.click(screen.getByRole('checkbox', { name: 'Pear' }));
+    expect(answers()).toEqual([]); // nothing leaves before Submit
     await user.click(submit);
     await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Red', 'Which fruits do you like?': 'Apple, Pear' } }]));
+    await waitFor(() => expect(screen.getByText('Answered · Submitted')).toBeTruthy());
   });
 
-  it('Skip declines a question with the plain permission deny pass3/question-deny seq 110 recorded, and Esc on the docked frame skips too', async () => {
-    const first = mount(skippedQuestion, 'inline');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Skip' }));
+  it('a single-select pick moves on by itself; the pager goes back and forward over the questions seen', async () => {
+    mount(withoutPreviews, 'inline');
+    const user = userEvent.setup();
+    expect((screen.getByRole('button', { name: 'Show next question' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('radio', { name: 'Blue' }));
+    await waitFor(() => expect(screen.getByText('2 of 2')).toBeTruthy());
+    await user.click(screen.getByRole('button', { name: 'Show previous question' }));
+    expect(screen.getByText('1 of 2')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Blue' }).getAttribute('aria-checked')).toBe('true'); // the pick is kept
+    await user.click(screen.getByRole('button', { name: 'Show next question' }));
+    expect(screen.getByText('2 of 2')).toBeTruthy();
+  });
+
+  it('Other moves on with Next or Enter in its box, and its text is the answer', async () => {
+    mount(question, 'inline');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Other…' }));
+    expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(true); // blank is no answer
+    await user.type(screen.getByRole('textbox', { name: 'Other answer to Which color do you prefer?' }), 'Teal{Enter}');
+    expect(screen.getByText('2 of 2')).toBeTruthy();
+    await user.click(screen.getByRole('checkbox', { name: 'Pear' }));
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Teal', 'Which fruits do you like?': 'Pear' } }]));
+  });
+
+  it('Skip leaves a question out of the reply; skipping the last sends the rest, and skipping every one sends none', async () => {
+    const first = mount(question, 'inline');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    expect(screen.getByText('2 of 2')).toBeTruthy();
+    await user.click(screen.getByRole('checkbox', { name: 'Apple' }));
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which fruits do you like?': 'Apple' } }]));
+    first.view.unmount();
+    mount(skippedQuestion, 'inline');
+    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    await waitFor(() => expect(answers().at(-1)).toEqual({ kind: 'question', answers: {} })); // the engine: "The user did not answer the questions."
+    await waitFor(() => expect(screen.getByText('Answered · Skipped')).toBeTruthy());
+  });
+
+  it('the picks live beside the request: a remount, or the same item in another placement, resumes at the same question', async () => {
+    const first = mount(question, 'inline');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Red' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Pear' }));
+    first.view.unmount();
+    mount(question, 'docked');
+    expect(screen.getByText('2 of 2')).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Pear' }).getAttribute('aria-checked')).toBe('true');
+    await user.click(screen.getByRole('button', { name: 'Show previous question' }));
+    expect(screen.getByRole('radio', { name: 'Red' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('docked, digits pick, Enter is Next then Submit, and focus stays with the frame across the steps', async () => {
+    mount(question, 'docked');
+    focusOn(frame());
+    await press('{Enter}');
+    expect(screen.getByText('1 of 2')).toBeTruthy(); // nothing chosen: Enter does nothing
+    await press('2');
+    expect(screen.getByRole('radio', { name: 'Blue' }).getAttribute('aria-checked')).toBe('true');
+    await press('{Enter}');
+    expect(screen.getByText('2 of 2')).toBeTruthy();
+    expect(document.activeElement).toBe(frame());
+    await press('1');
+    await press('2');
+    await press('{Enter}');
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Blue', 'Which fruits do you like?': 'Apple, Pear' } }]));
+  });
+
+  it('a pick that moves on by itself hands focus back to the frame, so the keys go on working', async () => {
+    mount(withoutPreviews, 'docked');
+    await userEvent.setup().click(screen.getByRole('radio', { name: 'Red' }));
+    await waitFor(() => expect(screen.getByText('2 of 2')).toBeTruthy());
+    expect(document.activeElement).toBe(frame());
+    await press('1');
+    await press('{Enter}');
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Red', 'Which fruits do you like?': 'Apple' } }]));
+  });
+
+  it('Esc declines the whole question with the plain permission deny pass3/question-deny seq 110 recorded, docked and on the Overview card', async () => {
+    const first = mount(skippedQuestion, 'docked');
+    focusOn(frame());
+    await press('{Escape}');
     // the answer C3's broker writes as the recorded deny (broker.test.ts pins the wire over the same fixture)
     await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }]));
     await waitFor(() => expect(screen.getByText('Answered · Skipped')).toBeTruthy());
     first.view.unmount();
-    mount(skippedQuestion, 'docked');
-    focusOn(frame());
+    mount(question, 'card');
+    focusOn(article());
     await press('{Escape}');
     await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }, { kind: 'permission', decision: 'deny' }]));
+  });
+
+  it('the Overview card steps with digits and Enter on its article', async () => {
+    mount(question, 'card');
+    focusOn(article());
+    await press('1');
+    await press('{Enter}');
+    expect(screen.getByText('2 of 2')).toBeTruthy();
+    expect(document.activeElement).toBe(article());
+    await press('2');
+    await press('{Enter}');
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Red', 'Which fruits do you like?': 'Pear' } }]));
   });
 
   it('the elicitation form for pass2/dialogs seq 41 has one required text input and accepts { color: teal }', async () => {
