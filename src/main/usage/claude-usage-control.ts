@@ -46,16 +46,26 @@ const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
 export class ClaudeUsageControl {
   private checking: Promise<UsageControlsAnswer> | null = null;
+  private following: Promise<UsageControlsAnswer> | null = null;
   private readonly log: (message: string) => void;
 
   constructor(private readonly opts: ClaudeUsageControlOptions) {
     this.log = opts.log ?? ((message) => console.warn(`[claude-usage-control] ${message}`));
   }
 
-  // settings.usageControls: one check at a time; a caller while one runs gets its answer.
+  // settings.usageControls: one check at a time. A caller while one runs may be asking about a change that came after it
+  // began, so it gets the check that starts when that one ends, one shared by every caller in the meantime.
   controls(): Promise<UsageControlsAnswer> {
-    this.checking ??= this.check().finally(() => (this.checking = null));
-    return this.checking;
+    if (this.checking === null) {
+      this.checking = this.check().finally(() => (this.checking = null));
+      return this.checking;
+    }
+    const follow = () => {
+      this.following = null;
+      return this.controls();
+    };
+    this.following ??= this.checking.then(follow, follow);
+    return this.following;
   }
 
   // settings.usageAction: ClaudeUsage's answer, a 409 with its own reason and message.

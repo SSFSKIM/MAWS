@@ -154,11 +154,28 @@ describe('settings.usageControls', () => {
     expect(seen.map((s) => s.authorization)).toEqual([`Bearer ${TOKEN}`, 'Bearer rotated']);
   });
 
-  it('asks once for callers that overlap', async () => {
+  it('checks one at a time; a call while a check runs gets a fresh check after it, one shared by every such call', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let updatedAt = 'before';
+    handler = (_req, res) => {
+      const body = { ...STATE, updatedAt }; // the state as it was when the request arrived
+      if (seen.length === 1) void held.then(() => send(res, 200, body));
+      else send(res, 200, body);
+    };
     const control = client();
-    const [a, b] = await Promise.all([control.controls(), control.controls()]);
-    expect(a).toBe(b);
+    const first = control.controls();
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    updatedAt = 'after'; // the usage change that asks again came after the running check began
+    const second = control.controls();
+    const third = control.controls();
+    expect(third).toBe(second);
     expect(seen).toHaveLength(1);
+    release();
+    expect((await Promise.all([first, second, third])).map((a) => a.state?.updatedAt)).toEqual(['before', 'after', 'after']);
+    expect(seen).toHaveLength(2);
+    expect((await control.controls()).state?.updatedAt).toBe('after'); // and alone again, one check
+    expect(seen).toHaveLength(3);
   });
 
   it('is no_route without a token file, without a port, on a 404 and on a refused connection; nothing is sent without a token', async () => {
