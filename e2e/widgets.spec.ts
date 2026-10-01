@@ -395,7 +395,7 @@ test.describe('interactive', () => {
     await page.evaluate((id) => (window as unknown as WidgetsWindow).__maws_widgets.control('setPermissionMode', { appSessionId: id, mode: 'auto' }), READY);
     await expect(widget(page, 'permissions').getByRole('menuitemradio', { checked: true })).toContainText('Manual');
     await page.keyboard.press('Escape'); // the widget's dialog is modal: the composer under it is out of reach until it closes
-    await expect(page.getByRole('note', { name: 'Permission mode notice' })).toContainText("Auto mode isn't available for this session. Using default instead.");
+    await expect(page.getByRole('note', { name: 'Permission mode notice' })).toContainText("Auto mode isn't available for this session. Using Manual instead.");
     const log = await calls(backend);
     expect(log.filter((c) => c.subtype === 'set_permission_mode').map((c) => c.input)).toEqual([
       { appSessionId: READY, mode: 'default' },

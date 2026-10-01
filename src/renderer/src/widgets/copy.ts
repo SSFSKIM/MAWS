@@ -253,7 +253,7 @@ export const MODEL = {
   group: { claude: 'Claude', gateway: 'Gateway' } as const,
   list: (group: string) => `${group} models`,
   oneM: '1M',
-  cannotHoldAuto: 'Cannot hold auto mode · runs in default',
+  cannotHoldAuto: `Cannot hold auto mode · runs in ${PERMISSION_MODE_LABELS.default}`,
   current: 'current',
   pending: 'set · the next init frame confirms it',
   none: 'The engine listed no models',
