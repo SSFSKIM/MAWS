@@ -1,8 +1,8 @@
 // One tab of a pane's strip (§5.2; mockup 01 `.tab`; residue *Tab strip*): the status glyph of a session, the title,
 // the project as `small`, and a close control revealed on hover and focus. It is a `div role="tab"` rather than a
 // button because it holds that inner button and native drag attributes. A middle-click closes it; its context menu
-// pins it, moves it to the other pane and closes it or the others. The Overview has no close control, no menu and
-// does not drag: it is first and permanent.
+// pins it, moves it to the other pane and closes it or the others. (The Overview is no tab since W5: it floats over the
+// main area.)
 import { ContextMenu } from 'radix-ui';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -54,8 +54,6 @@ function useTabLabel(tab: TabRef): TabLabel {
   const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : ('' as AppSessionId);
   const session = useSessionLabel(appSessionId);
   switch (tab.kind) {
-    case 'overview':
-      return { title: 'Overview', secondary: null, glyph: null, fileType: null };
     case 'session':
       return session;
     case 'agent':
@@ -85,11 +83,10 @@ export interface TabProps {
 export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
   const label = useTabLabel(tab);
   const name = label.secondary ? `${label.title} · ${label.secondary}` : label.title;
-  const permanent = tab.kind === 'overview';
   const closeChord = useChordHint('tab.close');
 
   const onAuxClick = (event: MouseEvent) => {
-    if (event.button === 1 && !permanent) void requestCloseTab(tab.id);
+    if (event.button === 1) void requestCloseTab(tab.id);
   };
 
   const element = (
@@ -100,7 +97,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
       aria-label={name}
       tabIndex={stop ? 0 : -1}
       data-tab-id={tab.id}
-      draggable={!permanent}
+      draggable
       onDragStart={(event) => {
         event.dataTransfer.setData(TAB_DRAG_TYPE, tab.id);
         event.dataTransfer.effectAllowed = 'move';
@@ -117,30 +114,27 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
     >
       {label.glyph && <GlyphMark glyph={label.glyph} />}
       {label.fileType && <span className="font-mono text-info">{label.fileType}</span>}
-      {tab.pinned && !permanent && <span aria-label="Pinned" role="img" className="size-1 shrink-0 rounded-full bg-fg-muted" />}
+      {tab.pinned && <span aria-label="Pinned" role="img" className="size-1 shrink-0 rounded-full bg-fg-muted" />}
       <span className="truncate">{label.title}</span>
       {label.secondary && <small className="shrink-0 text-fg-muted">{label.secondary}</small>}
-      {!permanent && (
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label={`Close ${label.title}`}
-          title={closeChord ? `Close tab · ${closeChord}` : 'Close tab'}
-          onClick={(event) => {
-            event.stopPropagation();
-            void requestCloseTab(tab.id);
-          }}
-          className={`-mr-1 ml-0.5 inline-flex size-4 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-active hover:text-fg ${
-            active ? '' : 'invisible group-hover/tab:visible group-focus-visible/tab:visible'
-          }`}
-        >
-          <span aria-hidden>×</span>
-        </button>
-      )}
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={`Close ${label.title}`}
+        title={closeChord ? `Close tab · ${closeChord}` : 'Close tab'}
+        onClick={(event) => {
+          event.stopPropagation();
+          void requestCloseTab(tab.id);
+        }}
+        className={`-mr-1 ml-0.5 inline-flex size-4 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-active hover:text-fg ${
+          active ? '' : 'invisible group-hover/tab:visible group-focus-visible/tab:visible'
+        }`}
+      >
+        <span aria-hidden>×</span>
+      </button>
     </div>
   );
 
-  if (permanent) return element;
   return (
     <ContextMenu.Root modal={false}>
       <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
@@ -176,7 +170,7 @@ function moveToOtherPane(id: string, pane: 0 | 1) {
   layout.moveTab(id, to, layout.main.panes[to]?.tabs.length ?? 0);
 }
 
-// The pane's other tabs, except the pinned ones and the Overview, each through its close guard.
+// The pane's other tabs, except the pinned ones, each through its close guard.
 async function closeOthers(id: string, pane: 0 | 1) {
   const others = useLayout.getState().main.panes[pane]?.tabs.filter((t) => t.id !== id && !t.pinned) ?? [];
   for (const other of others) await requestCloseTab(other.id);

@@ -129,7 +129,7 @@ function tabTitle(tabId: string, toolId: string): string {
 
 const api: PanelHarnessApi = {
   switchSession(id) {
-    if (id === null) useLayout.getState().activateTab('overview');
+    if (id === null) useLayout.getState().openTab({ kind: 'diagnostics' }); // W5: a tab of no session (the Overview is no tab)
     else useLayout.getState().openSession(fakeId(id));
   },
   addTool(toolId, opts = {}) {

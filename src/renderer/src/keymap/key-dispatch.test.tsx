@@ -133,6 +133,21 @@ describe('key dispatch follows DOM focus', () => {
     }
   });
 
+  // W5: every sidebar row has a hover card; one open under the pointer takes no key from the pane.
+  it('Enter on a card while a sidebar row’s hover card is open still answers', async () => {
+    const card = document.createElement('div');
+    card.setAttribute('role', 'dialog');
+    card.dataset.state = 'open';
+    card.dataset.hoverCard = '';
+    document.body.append(card);
+    try {
+      await enterOn('card A');
+      expect(fired()).toEqual(['cardA×1']);
+    } finally {
+      card.remove();
+    }
+  });
+
   it('Enter during IME composition fires nothing', () => {
     const card = screen.getByLabelText('card A');
     act(() => card.focus());

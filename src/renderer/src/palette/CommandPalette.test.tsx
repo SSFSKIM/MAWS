@@ -93,6 +93,7 @@ describe('command palette', () => {
   });
 
   it('⌘⏎ on a session opens it in the split', async () => {
+    useLayout.getState().openSession(idOf('Charter + research')); // a tab beside which to split (an empty pane takes the session itself)
     const user = await openAndType('quota');
     await user.keyboard('{Meta>}{Enter}{/Meta}');
     expect(useLayout.getState().main.panes).toHaveLength(2);
@@ -109,28 +110,29 @@ describe('command palette', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('a project reveals it in the sidebar: shown, expanded', async () => {
-    useLayout.getState().setSidebar({ collapsed: true, collapsedProjects: [nine.projects[1].id] });
+  it('a project reveals it in the sidebar: shown, its page open', async () => {
+    useLayout.getState().setSidebar({ collapsed: true, openProject: null });
     const user = await openAndType(nine.projects[1].name.slice(0, 7));
     expect(options('Projects')).toEqual([nine.projects[1].name]);
     await user.click(within(group('Projects')!).getByRole('option'));
-    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, collapsedProjects: [] });
+    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, openProject: nine.projects[1].id });
   });
 
-  it('a project the sidebar’s search hides is revealed: the search clears and the project row takes focus', async () => {
+  it('a project the sidebar’s search hides is revealed: the search clears and the project’s page takes focus', async () => {
     const project = nine.projects[1];
     const user = userEvent.setup();
     render(<Sidebar />);
-    await user.type(screen.getByRole('searchbox', { name: 'Search sessions' }), 'Terminal workflow');
+    await user.type(screen.getByRole('searchbox', { name: 'Search projects and sessions' }), 'Terminal workflow');
     const projectRow = () => document.querySelector<HTMLElement>(`[data-tree-id="${projectNodeId(project.id)}"]`);
     expect(projectRow()).toBeNull(); // the filter hides the project
     render(<CommandPalette />);
     act(() => runAction('palette.open'));
     await user.keyboard(project.name.slice(0, 7));
     await user.click(within(group('Projects')!).getByRole('option'));
-    expect((screen.getByRole('searchbox', { name: 'Search sessions' }) as HTMLInputElement).value).toBe('');
-    await vi.waitFor(() => expect(document.activeElement).toBe(projectRow()));
-    expect(projectRow()!.getAttribute('aria-label')).toBe(project.name);
+    expect((screen.getByRole('searchbox', { name: `Search ${project.name}` }) as HTMLInputElement).value).toBe('');
+    const page = screen.getByRole('tree', { name: project.name });
+    await vi.waitFor(() => expect(page.contains(document.activeElement)).toBe(true));
+    expect(document.activeElement!.getAttribute('aria-label')).toBe('Quota reset recovery'); // the page's first row
   });
 });
 

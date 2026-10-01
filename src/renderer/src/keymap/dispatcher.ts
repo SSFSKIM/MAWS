@@ -41,8 +41,10 @@ export function connectActions(client: MawsBridge = ipc): () => void {
 const RENDERER_ACTIONS = ACTION_IDS.filter((id) => ACTIONS[id].sink === 'renderer');
 // Inputs that take a keypress as a click, not as text: they are buttons, refused as buttons are.
 export const BUTTON_LIKE_INPUTS: ReadonlySet<string> = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'color', 'file', 'image']);
-// A Radix menu, dialog or popover while open (their content carries the role and `data-state="open"`).
-const OPEN_OVERLAY = ['menu', 'dialog', 'alertdialog'].map((role) => `[role="${role}"][data-state="open"]`).join(', ');
+// A Radix menu, dialog or popover while open (their content carries the role and `data-state="open"`). A sidebar row's
+// hover card is not one: it opens under the pointer without taking focus (W5 puts one on every row), and a key from
+// inside it lands on a button, which the pane scope refuses anyway.
+const OPEN_OVERLAY = ['menu', 'dialog', 'alertdialog'].map((role) => `[role="${role}"][data-state="open"]:not([data-hover-card])`).join(', ');
 
 function isTextEntry(element: Element): boolean {
   if (element instanceof HTMLInputElement) return !BUTTON_LIKE_INPUTS.has(element.type);

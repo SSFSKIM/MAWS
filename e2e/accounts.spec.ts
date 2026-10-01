@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { launchMaws, REPO_ROOT } from './support/launch';
+import { sidebarRow } from './support/sidebar';
 
 const QUOTA = 'Quota reset recovery'; // routed, its engine id unpinned: the drain target's windows
 const PROBE = 'Settings idle probe'; // routed, re-pinned below to account 477e393c… (1@example.test)
@@ -57,7 +58,7 @@ const card = (page: Page, email: string) => panel(page).locator(`[data-account][
 const meter = (scope: Locator, name: string) => scope.getByRole('meter', { name, exact: true });
 // W2: the session's windows as Session info's Usage row reads them (the status line that showed them is gone).
 async function sessionWindows(page: Page, title: string): Promise<[string, string]> {
-  await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: title }).click();
+  await (await sidebarRow(page, title)).click();
   const tools = page.locator('[data-region="panel"]');
   await tools.getByRole('button', { name: 'Add a tool' }).click();
   await page.getByRole('menuitem', { name: 'Session info' }).click();

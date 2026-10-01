@@ -1,6 +1,7 @@
 // The tab and pane model (C5 execution document, "Tab and pane transitions"; residue *Tab strip* and *Split*): pure
 // functions over the persisted `main.tabs` value, one per row of the transition table, so the table is testable
-// without a store. At most two panes (D-8); Overview is permanent and first; a tab id exists at most once across panes.
+// without a store. At most two panes (D-8); a tab id exists at most once across panes. The Overview is not a tab (W5,
+// §5.2 as amended 2026-10-01): it floats over the main area, so the only pane may be empty.
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, tabId, UNPINNABLE_KINDS, type LayoutMain, type PaneState, type TabRef, type TabTarget } from '@shared/ipc/schema/layout';
 
@@ -8,13 +9,8 @@ type Pane = 0 | 1;
 export type PaneTarget = Pane | 'focused' | 'other';
 
 const CLOSED_MAX = 10;
-const OVERVIEW: TabRef = { id: 'overview', kind: 'overview', pinned: true };
 
-const toRef = (target: TabTarget): TabRef => {
-  const id = tabId(target);
-  if (target.kind === 'overview') return OVERVIEW;
-  return { ...target, id, pinned: false } as TabRef;
-};
+const toRef = (target: TabTarget): TabRef => ({ ...target, id: tabId(target), pinned: false }) as TabRef;
 
 // The pane at an index the caller knows exists (the focused pane, or one `locate` found).
 const paneAt = (main: LayoutMain, pane: Pane): PaneState => main.panes[pane] as PaneState;
@@ -26,7 +22,7 @@ export function activeTab(main: LayoutMain): TabRef | null {
 }
 
 // The session a tab belongs to, which the right panel shows (C8's tenth ask): a session, agent or diff tab's, a file
-// tab's when it was opened from a session; none for the Overview and the app-wide tabs.
+// tab's when it was opened from a session; none for the app-wide tabs.
 export function sessionOfTab(tab: TabRef | null): AppSessionId | null {
   switch (tab?.kind) {
     case 'session':
@@ -47,7 +43,7 @@ function locate(main: LayoutMain, id: string): { pane: Pane; index: number } | n
   return null;
 }
 
-// Pinned tabs precede unpinned, keeping relative order (Overview is pinned, so it stays first).
+// Pinned tabs precede unpinned, keeping relative order.
 const pinnedFirst = (tabs: TabRef[]) => [...tabs.filter((t) => t.pinned), ...tabs.filter((t) => !t.pinned)];
 
 function withPanes(main: LayoutMain, panes: PaneState[], focusedPane: Pane): LayoutMain {
@@ -66,13 +62,11 @@ function without(pane: PaneState, id: string): PaneState {
   return { tabs, activeTabId: (tabs[index] ?? tabs[index - 1]).id };
 }
 
-// Index 0 belongs to Overview wherever it is (§5.2: first and permanent), Overview itself included when it moves;
-// then the pinned tabs, then the rest. `index` is clamped into the tab's own region.
+// The pinned tabs first, then the rest; `index` is clamped into the tab's own region.
 function insertAt(pane: PaneState, tab: TabRef, index: number, activate: boolean): PaneState {
-  const floor = tab.kind === 'overview' ? 0 : pane.tabs[0]?.kind === 'overview' ? 1 : 0;
-  const pinnedEnd = pane.tabs.filter((t) => t.pinned).length; // Overview is pinned and first, so this is the pinned region's end
+  const pinnedEnd = pane.tabs.filter((t) => t.pinned).length;
   const clamp = (lo: number, hi: number) => Math.max(lo, Math.min(index, hi));
-  const at = tab.kind === 'overview' ? 0 : tab.pinned ? clamp(floor, pinnedEnd) : clamp(pinnedEnd, pane.tabs.length);
+  const at = tab.pinned ? clamp(0, pinnedEnd) : clamp(pinnedEnd, pane.tabs.length);
   const tabs = [...pane.tabs.slice(0, at), tab, ...pane.tabs.slice(at)];
   return { tabs, activeTabId: activate ? tab.id : pane.activeTabId };
 }
@@ -83,9 +77,11 @@ const paneOf = (main: LayoutMain, target: PaneTarget): Pane => {
   return target;
 };
 
-// Places a tab (not open anywhere) into a pane, creating pane 1 when asked for and absent.
+// Places a tab (not open anywhere) into a pane, creating pane 1 when asked for and absent. An empty only pane is never
+// split: the tab goes into it (pane 0 is never left empty beside pane 1).
 function place(main: LayoutMain, tab: TabRef, pane: Pane, index: number | 'afterActive', activate: boolean): LayoutMain {
   const panes = [...main.panes] as PaneState[];
+  if (pane === 1 && panes.length === 1 && panes[0].tabs.length === 0) return place(main, tab, 0, index, activate);
   if (pane === 1 && panes.length === 1) {
     return { ...main, panes: [panes[0], { tabs: [tab], activeTabId: tab.id }], focusedPane: 1, splitRatio: 0.5 };
   }
@@ -146,7 +142,6 @@ export function focusPane(main: LayoutMain, pane: Pane): LayoutMain {
 }
 
 export function closeTab(main: LayoutMain, id: string): LayoutMain {
-  if (id === 'overview') return main;
   const found = locate(main, id);
   if (!found) return main;
   const tab = paneAt(main, found.pane).tabs[found.index];
@@ -190,6 +185,7 @@ export function selectTab(main: LayoutMain, n: number): LayoutMain {
 
 export function cycleTab(main: LayoutMain, delta: 1 | -1): LayoutMain {
   const { tabs, activeTabId } = paneAt(main, main.focusedPane);
+  if (tabs.length === 0) return main;
   const at = tabs.findIndex((t) => t.id === activeTabId);
   return activateTab(main, tabs[(at + delta + tabs.length) % tabs.length].id);
 }
@@ -227,23 +223,16 @@ export function setSplitRatio(main: LayoutMain, ratio: number): LayoutMain {
   return { ...main, splitRatio: Math.min(0.75, Math.max(0.25, ratio)) };
 }
 
-// Hydration: a session or agent tab whose record no longer exists is dropped silently; Overview exists exactly once
-// and leads its pane, pinned tabs precede the rest, every pane's active tab is one of its tabs, and an empty result
-// falls back to the default.
+// Hydration: a session or agent tab whose record no longer exists is dropped silently, a tab id exists once, pinned tabs
+// precede the rest, every pane's active tab is one of its tabs, and an empty result falls back to the default (one
+// empty pane).
 export function repairMain(main: LayoutMain, known: (appSessionId: AppSessionId) => boolean): LayoutMain {
   const keep = (t: TabRef) => (t.kind !== 'session' && t.kind !== 'agent') || known(t.appSessionId);
   const seen = new Set<string>();
   const panes = main.panes.map((p): PaneState => {
     const tabs = pinnedFirst(p.tabs.filter((t) => keep(t) && !seen.has(t.id) && seen.add(t.id)));
-    const overview = tabs.findIndex((t) => t.kind === 'overview');
-    if (overview > 0) tabs.unshift(...tabs.splice(overview, 1)); // a hand-edited file cannot move Overview off index 0
     return { tabs, activeTabId: tabs.some((t) => t.id === p.activeTabId) ? p.activeTabId : (tabs[0]?.id ?? '') };
   });
-  if (!seen.has('overview')) {
-    const first = panes.find((p) => p.tabs.length > 0) ?? panes[0];
-    first.tabs = [OVERVIEW, ...first.tabs];
-    if (!first.activeTabId) first.activeTabId = 'overview';
-  }
   const repaired = withPanes(main, panes, main.focusedPane);
   return { ...repaired, closedTabs: main.closedTabs.filter(keep) };
 }

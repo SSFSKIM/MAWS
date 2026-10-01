@@ -21,7 +21,7 @@ vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagno
 
 const A = 'app-a' as AppSessionId;
 const sessionTab = (id: string): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id as AppSessionId, pinned: false });
-const withActive = (tab: TabRef): LayoutMain => ({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [LAYOUT_DEFAULTS.main.panes[0].tabs[0], tab], activeTabId: tab.id }] });
+const withActive = (tab: TabRef): LayoutMain => ({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [tab], activeTabId: tab.id }] });
 
 const region = (name: string) => document.querySelector<HTMLElement>(`[data-region="${name}"]`)!;
 const grid = () => region('main').parentElement!;
@@ -31,7 +31,7 @@ const setWindowWidth = (width: number) => (window as unknown as { happyDOM: { se
 
 beforeEach(() => {
   setWindowWidth(1440); // the app window's default size
-  useLayout.setState({ regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, panelPinned: [], panelBySession: new Map(), panelActiveNoSession: null, hydrated: true });
+  useLayout.setState({ regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, panelPinned: [], panelBySession: new Map(), panelActiveNoSession: null, hydrated: true, overviewOpen: false });
   useSessions.setState({ records: new Map() });
 });
 afterEach(() => {
@@ -50,6 +50,23 @@ describe('shell frame', () => {
       [region('sidebar').id, '300'],
       [region('panel').id, '380'],
     ]);
+  });
+
+  // W5: the main region opens with MAWS's top bar, whose Overview button toggles the board floating over the panes.
+  it('puts the top bar above the panes, its Overview button toggling the floating Overview', async () => {
+    const user = userEvent.setup();
+    render(<Shell />);
+    const topBar = region('main').querySelector<HTMLElement>('[data-top-bar]')!;
+    expect(region('main').firstElementChild).toBe(topBar);
+    const toggle = within(topBar).getByRole('button', { name: 'Overview' });
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
+    await user.click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(within(region('main')).getByRole('dialog', { name: 'Overview' })).toBeTruthy();
+    await user.click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
   });
 
   it('lays the regions on a grid whose columns are the layout store’s widths', () => {
@@ -138,9 +155,9 @@ describe('shell frame', () => {
 });
 
 describe('toolbar', () => {
-  it('titles the active tab: Overview, a session with its branch, a file by basename', () => {
+  it('titles the active tab: nothing for an empty pane, a session with its branch, a file by basename', () => {
     const records = new Map([[A, record('app-a', { title: { text: 'Fix sidebar drag', source: 'user' }, branch: 'feat/sidebar' })]]);
-    expect(toolbarTitle({ id: 'overview', kind: 'overview', pinned: true }, records)).toEqual({ title: 'Overview', branch: null });
+    expect(toolbarTitle(null, records)).toEqual({ title: '', branch: null });
     expect(toolbarTitle(sessionTab('app-a'), records)).toEqual({ title: 'Fix sidebar drag', branch: 'feat/sidebar' });
     expect(toolbarTitle({ id: 'file:/r/src/app.ts', kind: 'file', path: '/r/src/app.ts', line: null, appSessionId: null, pinned: false }, records)).toEqual({ title: 'app.ts', branch: null });
     expect(toolbarTitle({ id: 'diagnostics', kind: 'diagnostics', pinned: false }, records).title).toBe('Diagnostics');
@@ -150,7 +167,8 @@ describe('toolbar', () => {
     useSessions.setState({ records: new Map([[A, record('app-a', { title: { text: 'Fix sidebar drag', source: 'user' }, branch: 'feat/sidebar' })]]) });
     render(<Shell />);
     const toolbar = screen.getByRole('banner');
-    expect(within(toolbar).getByText('Overview')).toBeTruthy();
+    expect(within(toolbar).queryByText('Overview')).toBeNull(); // an empty pane leaves the title blank and no branch chip
+    expect(within(toolbar).queryByText(/⎇/)).toBeNull();
     act(() => useLayout.setState({ main: withActive(sessionTab('app-a')) }));
     expect(within(toolbar).getByText('Fix sidebar drag')).toBeTruthy();
     expect(within(toolbar).getByText('⎇ feat/sidebar')).toBeTruthy();
@@ -178,7 +196,7 @@ describe('toolbar', () => {
     useSettings.setState({ state: null });
   });
 
-  it('the session menu is disabled on the Overview and lists the §5.1 actions for a session, unregistered ones disabled', async () => {
+  it('the session menu is disabled with no tab open and lists the §5.1 actions for a session, unregistered ones disabled', async () => {
     const user = userEvent.setup();
     useSessions.setState({ records: new Map([[A, record('app-a')]]) });
     render(<Shell />);
@@ -284,7 +302,7 @@ describe('right panel', () => {
     expect(useLayout.getState().regions.panel.maximized).toBe(true);
   });
 
-  it('with the Overview focused, round-trips the selection between two pins and falls back when the selected pin goes', () => {
+  it('with no tab open, round-trips the selection between two pins and falls back when the selected pin goes', () => {
     let props: PanelHostProps | null = null;
     registerSlot('panelHost', (p) => {
       props = p;
@@ -308,7 +326,7 @@ describe('right panel', () => {
     expect(props!.activeTabId).toBeNull();
   });
 
-  it('shows no session when the focused pane is on the Overview', () => {
+  it('shows no session when the focused pane is empty', () => {
     let props: PanelHostProps | null = null;
     registerSlot('panelHost', (p) => {
       props = p;

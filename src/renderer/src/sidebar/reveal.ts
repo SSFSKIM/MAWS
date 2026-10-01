@@ -1,7 +1,6 @@
-// Revealing a project in the sidebar from outside it (the ⌘K palette's project entries). The sidebar's search filter
-// is local to the sidebar and can hide the project's row, so the reveal is the sidebar's to carry out: this shows the
-// sidebar and expands the project (persisted), then hands the project to the mounted sidebar, which clears its search
-// and focuses the project's row. With no sidebar mounted (still loading) there is no search to clear or row to focus.
+// Revealing a project in the sidebar from outside it (the ⌘K palette's project entries). This shows the sidebar and
+// opens the project's page (persisted, W5), then tells the mounted sidebar, which clears its search (it could hide the
+// page's rows) and focuses the page. With no sidebar mounted (still loading) there is no search to clear or row to focus.
 import type { ProjectId } from '@shared/graph/ids';
 import { useLayout } from '../stores/layout';
 
@@ -16,7 +15,6 @@ export function registerProjectRevealer(fn: (projectId: ProjectId) => void): () 
 }
 
 export function revealProject(projectId: ProjectId): void {
-  const { regions, setSidebar } = useLayout.getState();
-  setSidebar({ collapsed: false, collapsedProjects: regions.sidebar.collapsedProjects.filter((id) => id !== projectId) });
+  useLayout.getState().setSidebar({ collapsed: false, openProject: projectId });
   revealer?.(projectId);
 }

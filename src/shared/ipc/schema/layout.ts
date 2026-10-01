@@ -7,8 +7,9 @@ import { AgentIdSchema, AppSessionIdSchema, ProjectIdSchema } from '../../graph/
 import { ACTION_IDS } from '../../keymap/actions';
 import type { CommandSpec } from './common';
 
+// W5 (§5.2 as amended 2026-10-01): the Overview is no longer a tab; it floats over the main area (`regions.overview`).
+// A stored `main.tabs` that still holds its tab is read through `StoredMainSchema`, which drops it.
 export const TabRefSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ id: z.literal('overview'), kind: z.literal('overview'), pinned: z.literal(true) }),
   z.strictObject({ id: z.string(), kind: z.literal('session'), appSessionId: AppSessionIdSchema, pinned: z.boolean() }),
   z.strictObject({ id: z.string(), kind: z.literal('agent'),   appSessionId: AppSessionIdSchema, agentId: AgentIdSchema, pinned: z.boolean() }),   // a child's transcript in the main area (C6 child variant); C8's drill-in stays in the panel
   z.strictObject({ id: z.string(), kind: z.literal('file'),    path: z.string(), line: z.number().int().nullable(), appSessionId: AppSessionIdSchema.nullable(), pinned: z.boolean() }),
@@ -24,8 +25,6 @@ export type TabTarget = DistributiveOmit<TabRef, 'id' | 'pinned'>; // what `open
 // Deterministic ids: a session has at most one tab across both panes.
 export function tabId(tab: TabTarget): string {
   switch (tab.kind) {
-    case 'overview':
-      return 'overview';
     case 'session':
       return `session:${tab.appSessionId}`;
     case 'agent':
@@ -43,23 +42,63 @@ export function tabId(tab: TabTarget): string {
   }
 }
 
-// Tab kinds the pin control never applies to: Overview is pinned for good, C11's two singletons never are.
-export const UNPINNABLE_KINDS: ReadonlySet<TabRef['kind']> = new Set(['overview', 'accounts', 'settings']);
+// Tab kinds the pin control never applies to: C11's two singletons.
+export const UNPINNABLE_KINDS: ReadonlySet<TabRef['kind']> = new Set(['accounts', 'settings']);
 
-export const PaneStateSchema = z.strictObject({ tabs: z.array(TabRefSchema).min(1), activeTabId: z.string() });
+// A pane holds at least one tab, except that the only pane may be empty (W5: with the Overview out of the strip, closing
+// the last tab leaves an empty main area; `activeTabId` is '' then).
+export const PaneStateSchema = z.strictObject({ tabs: z.array(TabRefSchema), activeTabId: z.string() });
 export type PaneState = z.infer<typeof PaneStateSchema>;
 export const PanelTabRefSchema = z.strictObject({ id: z.string(), toolId: z.string(), pinned: z.boolean() });      // X5: what C5 persists of a panel tab; C8 owns the rest
 export type PanelTabRef = z.infer<typeof PanelTabRefSchema>;
 
-export const LayoutRegionsSchema = z.strictObject({ version: z.literal(1),                                       // key `regions`
+// W5 (§5.1 as amended 2026-10-01): the sidebar is a drill-in, and `openProject` is the project whose page is open (a
+// project id, `'other'` for Other sessions, null for the project list), remembered across launches. It replaces version
+// 1's `collapsedProjects` and `collapsedSections`, which `StoredRegionsSchema` reads and drops.
+export const OpenProjectSchema = z.union([ProjectIdSchema, z.literal('other')]).nullable();
+// The floating Overview's rect, in px from the top left of the main area under the top bar (null: the default place).
+export const OverviewRectSchema = z.strictObject({ x: z.number().int(), y: z.number().int(), width: z.number().int(), height: z.number().int() });
+export type OverviewRect = z.infer<typeof OverviewRectSchema>;
+export const LayoutRegionsSchema = z.strictObject({ version: z.literal(2),                                       // key `regions`
+  sidebar: z.strictObject({ width: z.number().int(), collapsed: z.boolean(), sort: z.enum(['priority', 'recency']), openProject: OpenProjectSchema }),
+  panel:   z.strictObject({ width: z.number().int(), collapsed: z.boolean(), maximized: z.boolean() }),
+  overview: OverviewRectSchema.nullable() });
+export type LayoutRegions = z.infer<typeof LayoutRegionsSchema>;
+const RegionsV1Schema = z.strictObject({ version: z.literal(1),
   sidebar: z.strictObject({ width: z.number().int(), collapsed: z.boolean(), sort: z.enum(['priority', 'recency']),
                             collapsedProjects: z.array(ProjectIdSchema), collapsedSections: z.array(z.enum(['pinned', 'other'])) }),
   panel:   z.strictObject({ width: z.number().int(), collapsed: z.boolean(), maximized: z.boolean() }) });
-export type LayoutRegions = z.infer<typeof LayoutRegionsSchema>;
+// What hydration reads from `regions`: the current shape, or version 1 migrated (its widths, toggles and sort kept, the
+// project list showing).
+export const StoredRegionsSchema = z.union([
+  LayoutRegionsSchema,
+  RegionsV1Schema.transform(({ sidebar: { width, collapsed, sort }, panel }): LayoutRegions => ({ version: 2, sidebar: { width, collapsed, sort, openProject: null }, panel, overview: null })),
+]);
 export const LayoutMainSchema = z.strictObject({ version: z.literal(1),                                          // key `main.tabs`
   panes: z.tuple([PaneStateSchema]).or(z.tuple([PaneStateSchema, PaneStateSchema])), focusedPane: z.union([z.literal(0), z.literal(1)]), splitRatio: z.number(),
   closedTabs: z.array(TabRefSchema).max(10) });                                                                    // ⌘⇧T history, newest last
 export type LayoutMain = z.infer<typeof LayoutMainSchema>;
+// What hydration reads from `main.tabs`: the Overview's tab, which every layout before W5 held, is dropped from the panes
+// and the closed-tab history (a pane it leaves empty goes; a pane whose active tab it was activates its first tab). The
+// rewrite is total: a pane or tab that is not an object passes through untouched for the schema to reject, because a
+// throw here would fail hydration's reads as a whole instead of falling back to the default.
+type Entries = { tabs: unknown[]; activeTabId?: unknown };
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+const isOverviewRef = (tab: unknown) => isRecord(tab) && tab.kind === 'overview';
+const hasTabs = (pane: unknown): pane is Entries => isRecord(pane) && Array.isArray(pane.tabs);
+const idOf = (tab: unknown) => (isRecord(tab) ? tab.id : undefined);
+export const StoredMainSchema = z.preprocess((value) => {
+  if (!isRecord(value) || !Array.isArray(value.panes)) return value;
+  const panes = (value.panes as unknown[]).map((pane) => {
+    if (!hasTabs(pane)) return pane;
+    const tabs = pane.tabs.filter((t) => !isOverviewRef(t));
+    const active = tabs.some((t) => idOf(t) === pane.activeTabId) ? pane.activeTabId : (idOf(tabs[0]) ?? '');
+    return { ...pane, tabs, activeTabId: active };
+  });
+  const kept = panes.filter((pane) => !hasTabs(pane) || pane.tabs.length > 0);
+  const closedTabs = Array.isArray(value.closedTabs) ? (value.closedTabs as unknown[]).filter((t) => !isOverviewRef(t)) : value.closedTabs;
+  return { ...value, panes: kept.length > 0 ? kept : [{ tabs: [], activeTabId: '' }], focusedPane: kept.length < panes.length ? 0 : value.focusedPane, closedTabs };
+}, LayoutMainSchema);
 export const PanelPinnedSchema = z.array(PanelTabRefSchema);                                                      // key `panel.pinned`: the global pins (D-10)
 export const PanelSessionStateSchema = z.strictObject({ tabs: z.array(PanelTabRefSchema), activeTabId: z.string().nullable() });   // key `panel.<appSessionId>`
 export type PanelSessionState = z.infer<typeof PanelSessionStateSchema>;
@@ -67,15 +106,15 @@ export const WindowStateSchema = z.strictObject({ bounds: z.strictObject({ x: z.
                                                   maximized: z.boolean(), fullscreen: z.boolean() });              // key `window.main`, main only, never crosses IPC
 export type WindowState = z.infer<typeof WindowStateSchema>;
 
-const OVERVIEW_TAB = { id: 'overview', kind: 'overview', pinned: true } as const satisfies TabRef;
 // Widths are the X7 tokens `--sidebar-w` and `--panel-w`.
 export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelPinned: PanelTabRef[] } = {
   regions: {
-    version: 1,
-    sidebar: { width: 300, collapsed: false, sort: 'priority', collapsedProjects: [], collapsedSections: [] },
+    version: 2,
+    sidebar: { width: 300, collapsed: false, sort: 'priority', openProject: null },
     panel: { width: 380, collapsed: false, maximized: false },
+    overview: null,
   },
-  main: { version: 1, panes: [{ tabs: [OVERVIEW_TAB], activeTabId: 'overview' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [] },
+  main: { version: 1, panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [] },
   panelPinned: [],
 };
 

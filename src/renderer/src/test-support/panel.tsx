@@ -79,8 +79,8 @@ export function probeTool(id: string, over: Partial<PanelTool<ProbeState, unknow
 export const ref = (id: string, pinned = false): PanelTabRef => ({ id, toolId: id.split(':')[0], pinned });
 export const sessionTab = (id: AppSessionId): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
 export const mainShowing = (...ids: AppSessionId[]): LayoutMain => {
-  const tabs = [LAYOUT_DEFAULTS.main.panes[0].tabs[0], ...ids.map(sessionTab)];
-  return { ...LAYOUT_DEFAULTS.main, panes: [{ tabs, activeTabId: tabs.at(-1)!.id }] };
+  const tabs = ids.map(sessionTab);
+  return { ...LAYOUT_DEFAULTS.main, panes: [{ tabs, activeTabId: tabs.at(-1)?.id ?? '' }] };
 };
 
 // The host as C5's region hands it its props, with `onChange` recorded per call.

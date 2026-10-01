@@ -128,7 +128,7 @@ describe('session creator', () => {
     expect(creator).toHaveBeenCalledWith(P);
     expect(useSessions.getState().unstarted.get(NEW)).toEqual({ projectId: P, createdAt: expect.any(String) });
     const pane = useLayout.getState().main.panes[0];
-    expect(pane.tabs.map((t) => t.id)).toEqual(['overview', `session:${NEW}`]);
+    expect(pane.tabs.map((t) => t.id)).toEqual([`session:${NEW}`]);
     expect(pane.activeTabId).toBe(`session:${NEW}`);
   });
 

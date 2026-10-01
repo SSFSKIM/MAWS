@@ -52,9 +52,9 @@ beforeEach(async () => {
   await act(() => useTranscriptStore.getState().attach(A, ipcSource(A))); // the session pane's transcript
   offEditor = registerBubbleEditor((props) => <BubbleEdit {...props} />);
   // the shell's pane 0 shows A's tab, focused: where a bubble's Edit is clicked
-  const overview = { tabs: [{ id: 'overview' as const, kind: 'overview' as const, pinned: true as const }], activeTabId: 'overview' };
+  const other = { tabs: [{ id: 'diagnostics' as const, kind: 'diagnostics' as const, pinned: false }], activeTabId: 'diagnostics' };
   const session = { tabs: [{ id: `session:${A}`, kind: 'session' as const, appSessionId: A, pinned: false }], activeTabId: `session:${A}` };
-  useLayout.setState((s) => ({ main: { ...s.main, panes: [session, overview], focusedPane: 0 } }));
+  useLayout.setState((s) => ({ main: { ...s.main, panes: [session, other], focusedPane: 0 } }));
 });
 afterEach(() => {
   offEditor();

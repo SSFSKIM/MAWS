@@ -25,6 +25,7 @@ import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { c12LiveSkipReason, c12Scratch, lsPin, ownerFileCheck, psRead, spend, treeOf, type C12Scratch } from './support/c12-live';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { openProject, sidebarRow } from './support/sidebar';
 
 const skip = c12LiveSkipReason();
 test.skip(skip !== null, skip ?? '');
@@ -69,7 +70,7 @@ test.afterAll(() => {
 
 const main = (page: Page) => page.locator('[data-region="main"]');
 const sidebar = (page: Page) => page.locator('[data-region="sidebar"]');
-const rowOf = (page: Page, id: string) => page.locator(`[role="treeitem"][data-menu="session:${id}"]`);
+const rowOf = (page: Page, id: string) => sidebarRow(page, { appSessionId: id }); // W5: on its project's page, opened first
 const statusOf = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));
 const sessions = async (page: Page) => value(await invoke(page, 'engine.sessions', undefined));
 const budget = async (page: Page) => value(await invoke(page, 'engine.budget', undefined));
@@ -165,7 +166,7 @@ async function send(page: Page, text: string): Promise<void> {
 }
 
 async function open(page: Page, id: string): Promise<void> {
-  await rowOf(page, id).click();
+  await (await rowOf(page, id)).click();
   await expect(main(page).locator(`[data-composer="${id}"]`)).toBeVisible();
 }
 
@@ -199,7 +200,8 @@ async function plus(page: Page, repo: string, first: string): Promise<string> {
   const spent = spend(scratch.userData).upperBoundUsd;
   if (spent >= MAX_USD) throw new Error(`spend limit: the journals show US$${spent} of US$${MAX_USD}`);
   const known = new Set(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId));
-  await sidebar(page).getByRole('button', { name: `New session in ${name}`, exact: true }).click();
+  await openProject(page, name); // W5: the "+" beside the name on the project's page
+  await sidebar(page).locator('[data-level-pane="2"]').getByRole('button', { name: `New session in ${name}`, exact: true }).click();
   await expect(page.getByRole('heading', { name: `New session in ${name}` })).toBeVisible();
   let id: AppSessionId | undefined;
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !known.has(i.appSessionId))?.appSessionId)).toBeDefined();
@@ -386,13 +388,13 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
     await test.step('the released rows read idle with the mark; attention and the notifier log unchanged; Session info says when and why', async () => {
       const released = (run.releases as { label: string }[]).map((r) => r.label);
       for (const l of released) {
-        const row = rowOf(page, ids[l]!);
+        const row = await rowOf(page, ids[l]!);
         await expect(row.getByText('released', { exact: true }), `${l}'s mark`).toBeVisible();
         await expect(row.getByRole('img', { name: 'Idle' })).toBeVisible();
       }
       const attentionAfter = value(await invoke(page, 'attention.list', undefined));
       const notifiedAfter = (await notified(page)).length;
-      const markTitle = await rowOf(page, ids.B1!).getByText('released', { exact: true }).getAttribute('title');
+      const markTitle = await (await rowOf(page, ids.B1!)).getByText('released', { exact: true }).getAttribute('title');
       await open(page, ids.B1!);
       const panel = page.locator('[data-region="panel"]');
       await panel.getByRole('button', { name: 'Add a tool' }).click();

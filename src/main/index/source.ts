@@ -14,6 +14,7 @@ import type { HostSupervisor } from '../hosts/supervisor';
 import type { ReadModelWriter as ShellReadModelWriter, SessionSource } from '../sessions/read-model';
 import { toSessionRecordPatch } from '@shared/engine/status';
 import type { Index } from './index';
+import { warmLinkedWorktrees } from './projects';
 import { contested, type BindingChange, type ChangeCause } from './sessions';
 
 // C5's read-model port (C5 execution document, "Main modules"), as far as this source writes through it: records,
@@ -27,6 +28,7 @@ export interface SourceOptions {
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean; // main → renderer (src/main/ipc/events)
   tickMs?: number; // session.changed coalescing and fs.bind batching; 16 ms
   now?: () => string;
+  warmLinkedWorktrees?: (directories: string[]) => Promise<void>; // projects.ts's; a test holds the warm-up open
 }
 
 const TICK_MS = 16;
@@ -110,7 +112,20 @@ export class IndexSessionSource implements SessionSource {
     ];
     if (this.host.snapshot('engine-host').state === 'ready') void this.sync();
 
+    // Sessions an earlier membership rule left in a linked worktree's own project move under its main checkout. Telling
+    // linked worktrees apart takes git, a few hundred calls on a large store, so they run off main's thread first (the
+    // visible projects' directories warm `locate`'s cache), and the refold then reads the cache, its moves going out as
+    // ordinary changes: the sidebar regroups live. A source stopped before the warm-up ends refolds nothing.
+    let stopped = false;
+    const warm = this.options.warmLinkedWorktrees ?? warmLinkedWorktrees;
+    warm(projects.map((p) => p.directory))
+      .then(() => {
+        if (!stopped) this.write('linked-worktree refold', () => this.index.sessions.refoldLinkedWorktrees());
+      })
+      .catch((error: unknown) => console.error('[index] linked-worktree warm-up failed:', error instanceof Error ? error.message : error));
+
     return () => {
+      stopped = true;
       for (const off of this.offs) off();
       this.offs = [];
       if (this.timer) clearTimeout(this.timer);

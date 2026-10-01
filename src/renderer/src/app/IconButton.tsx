@@ -75,6 +75,11 @@ export const ChevronDownIcon = ({ className }: { className?: string }) => (
     <path d="m4 6 4 4 4-4" />
   </Icon>
 );
+export const ChevronLeftIcon = ({ className }: { className?: string }) => (
+  <Icon className={className}>
+    <path d="m10 4-4 4 4 4" />
+  </Icon>
+);
 export const FolderIcon = ({ className }: { className?: string }) => (
   <Icon className={className}>
     <path d="M2 4h5l1.5 2H14v7H2z" />

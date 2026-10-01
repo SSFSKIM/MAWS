@@ -36,6 +36,8 @@ const DiffTab: Slots['diffTab'] = ({ tab }) => <Placeholder className="font-mono
 const NewSession: Slots['newSession'] = () => null;
 const AccountsTab: Slots['accountsTab'] = () => <Placeholder className="h-full">Accounts unavailable</Placeholder>;
 const SettingsTab: Slots['settingsTab'] = () => <Placeholder className="h-full">Settings unavailable</Placeholder>;
+// The top bar's right end holds nothing until W6 registers the usage pill there.
+const TopBarEnd: Slots['topBarEnd'] = () => null;
 
 export const FALLBACKS: Slots = {
   transcript: Transcript,
@@ -47,4 +49,5 @@ export const FALLBACKS: Slots = {
   newSession: NewSession,
   accountsTab: AccountsTab,
   settingsTab: SettingsTab,
+  topBarEnd: TopBarEnd,
 };
