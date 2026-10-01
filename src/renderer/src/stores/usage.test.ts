@@ -19,7 +19,7 @@ function account(uuid: string, win: Windows): AccountUsage {
 
 const SNAP: UsageSnapshot = {
   available: true, dataDir: '/cu', readAt: '2026-09-29T07:35:00Z', error: null, drainTarget: 'drain', drainTargetIsManual: false,
-  accounts: [account('drain', windows(53, 63)), account('other', windows(77, 44))], pinsFor: { 'eng-pinned': 'other' },
+  accounts: [account('drain', windows(53, 63)), account('other', windows(77, 44))], pinsFor: { 'eng-pinned': 'other' }, gateway: null, codex: null, activity: null,
 };
 
 describe('usage store: windowsFor', () => {

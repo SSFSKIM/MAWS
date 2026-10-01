@@ -40,7 +40,7 @@ const snapshot: UsageSnapshot = {
     { uuid: 'u1', email: '1@example.test', displayName: '1', planLabel: 'Max', rateLimitTier: null, needsReauthentication: false, lastSeenActive: null, pinnedSessionCount: 1, credentialOwnership: null, windows: { fiveHour: null, sevenDay: null, scoped: [] } },
     { uuid: 'u3', email: '3@example.test', displayName: '3', planLabel: 'Max', rateLimitTier: null, needsReauthentication: false, lastSeenActive: null, pinnedSessionCount: 8, credentialOwnership: null, windows: { fiveHour: null, sevenDay: null, scoped: [] } },
   ],
-  pinsFor: { [record.engineSessionId!]: 'u1' },
+  pinsFor: { [record.engineSessionId!]: 'u1' }, gateway: null, codex: null, activity: null,
 };
 
 beforeEach(() => {

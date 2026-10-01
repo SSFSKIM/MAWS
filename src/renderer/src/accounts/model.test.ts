@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { ClaudeUsageReader } from '../../../main/usage/claude-usage-reader';
-import { accountsViewModel, automaticChoice } from './model';
+import { accountsViewModel, automaticChoice, healthLine, severityOf, usagePill } from './model';
 
 const FIXTURE = join(__dirname, '../../../../test/fixtures/claude-usage');
 const NOW = Date.parse('2026-09-29T07:36:17Z');
@@ -29,7 +29,7 @@ async function read(edit?: { accounts?: (a: Record<string, unknown>[]) => unknow
     const parsed = JSON.parse(readFileSync(path, 'utf8'));
     writeFileSync(path, JSON.stringify(fn(parsed) ?? parsed));
   }
-  const reader = new ClaudeUsageReader({ dir, emit: () => {}, log: () => {} });
+  const reader = new ClaudeUsageReader({ dir, emit: () => {}, log: () => {}, now: () => NOW });
   return reader.snapshot([]);
 }
 
@@ -99,3 +99,52 @@ describe('automaticChoice re-runs the relay\'s order', () => {
     expect(automaticChoice(tied, null, NOW)).toBe(ACCOUNT.three); // else the lower 5-hour percent: 53 against 77
   });
 });
+
+// W6 start: the top bar's pill and the rest of the copy of ClaudeUsage's panel (E1)
+describe('the usage pill and popover model (W6)', () => {
+  it("colours by ClaudeUsage's rule for a reading without severity: 75 % a warning, 95 % critical", () => {
+    expect([0, 74, 75, 94, 95, 100].map(severityOf)).toEqual(['normal', 'normal', 'warning', 'warning', 'critical', 'critical']);
+  });
+
+  it("the pill is the routing account's most binding percent in its worst severity", async () => {
+    const model = accountsViewModel(await read(), null, NOW);
+    expect(usagePill(model)).toEqual({ percent: 82, severity: 'warning', dimmed: false, account: '3@example.test', limit: 'Fable' });
+    expect(model.rows.find((r) => r.email === '4@example.test')!.limits[0]).toMatchObject({ percent: 100, severity: 'critical' });
+    // the drain target needing reauthentication dims the pill; with no drain target the panel's first account shows
+    const reauth = await read({ accounts: (a) => a.map((x) => (x.email === '3@example.test' ? { ...x, needsReauthentication: true } : x)) });
+    expect(usagePill(accountsViewModel(reauth, null, NOW))).toMatchObject({ percent: 82, dimmed: true });
+    const none = await read({ pins: (p) => ({ ...p, drainTarget: null }) });
+    expect(usagePill(accountsViewModel(none, null, NOW))).toMatchObject({ account: '4@example.test', percent: 100, severity: 'critical' });
+  });
+
+  it('the pill has nothing to show without data or readings', async () => {
+    const snapshot = await read();
+    expect(usagePill(null)).toEqual({ percent: null, severity: null, dimmed: false, account: null, limit: null });
+    expect(usagePill(accountsViewModel({ ...snapshot, available: false }, null, NOW)).percent).toBeNull();
+    const bare = snapshot.accounts.map((a) => ({ ...a, windows: { fiveHour: null, sevenDay: null, scoped: [] } }));
+    expect(usagePill(accountsViewModel({ ...snapshot, accounts: bare }, null, NOW))).toMatchObject({ percent: null, severity: null, account: '3@example.test' });
+  });
+
+  it("carries each account's last ten minutes, the newest server, the Codex section, the toggle and the health line", async () => {
+    const model = accountsViewModel(await read(), null, NOW);
+    const row = (email: string) => [...model.rows, ...model.codex!].find((r) => r.email === email)!;
+    expect(row('3@example.test')).toMatchObject({ activity: { requests: 5 }, latest: true, severity: 'warning' });
+    expect(row('1@example.test')).toMatchObject({ activity: { requests: 1 }, latest: false });
+    expect(row('2@example.test')).toMatchObject({ activity: null, latest: false });
+    expect(model.codex!.map((r) => [r.email, r.role, r.state, r.pinnedSessionCount, r.provider, r.limits.length])).toEqual([
+      ['6@example.test', 'routing', 'no_readings', 2, 'codex', 0],
+      ['7@example.test', 'other', 'needs_reauth', 1, 'codex', 0],
+    ]);
+    expect(row('6@example.test')).toMatchObject({ routingWhy: 'relay_choice', activity: { requests: 1 }, latest: false });
+    expect(model.gateway).toEqual({ routingEnabled: true, port: 8641 });
+    expect(model.health).toEqual({ line: 'Last 10 min: 8 requests · response start median 1.0s, p95 3.2s · 1 stall, 1 connection error, 1 refused, 1 held', degraded: true });
+  });
+
+  it("writes the health line as ClaudeUsage's GatewayHealthText does", () => {
+    const quiet = { requests: 1, served: 1, firstByteP50: 12.4, firstByteP95: 12.4, stalls: 0, transportFailures: 0, refused: 0, unreachable: 0, held: 0 };
+    expect(healthLine(quiet)).toEqual({ line: 'Last 10 min: 1 request · response start median 12s, p95 12s · no errors', degraded: false });
+    expect(healthLine({ ...quiet, firstByteP50: null, unreachable: 2, transportFailures: 2 })).toEqual({ line: 'Last 10 min: 1 request · 2 connection errors, 2 unreachable', degraded: true });
+    expect(healthLine({ ...quiet, requests: 0 })).toBeNull();
+  });
+});
+// W6 end

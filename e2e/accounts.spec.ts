@@ -42,6 +42,26 @@ test.afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const ENV = (dir = usageDir) => ({ MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_SCENARIO_CLOCK: 'manual', MAWS_CLAUDE_USAGE_DIR: dir });
 
+// W6: the relay's requests (synthetic, `gateway-requests.jsonl`) moved so the newest ended 30 s ago, at the start of the
+// test that reads them: the popover counts the last ten minutes from the wall clock.
+function freshRequests(): void {
+  const file = join(usageDir, 'gateway-requests.jsonl');
+  const rows = readFileSync(join(REPO_ROOT, 'test/fixtures/claude-usage/gateway-requests.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { startedAt: string; totalSeconds: number });
+  const newest = Math.max(...rows.map((row) => Date.parse(row.startedAt) + row.totalSeconds * 1000));
+  const offset = Date.now() - 30_000 - newest;
+  writeFileSync(file, rows.map((row) => JSON.stringify({ ...row, startedAt: new Date(Date.parse(row.startedAt) + offset).toISOString() })).join('\n') + '\n');
+}
+// A token's computed colour, for comparing a rendered colour with it.
+const tokenColor = (page: Page, token: string) =>
+  page.evaluate((token) => {
+    const probe = document.createElement('span');
+    probe.style.color = `var(${token})`;
+    document.body.append(probe);
+    const rgb = getComputedStyle(probe).color;
+    probe.remove();
+    return rgb;
+  }, token);
+
 // Clicks an application-menu item by id once the page has registered its handler (the menu enables it then).
 async function menu(app: ElectronApplication, id: string): Promise<void> {
   const click = () =>
@@ -153,6 +173,73 @@ test('accounts: without ClaudeUsage data the tab says so', async () => {
     await menu(maws.app, 'accounts.open');
     await expect(panel(maws.page).getByText('ClaudeUsage is not installed or has no data')).toBeVisible();
     await expect(panel(maws.page).locator('[data-account]')).toHaveCount(0);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// W6 (E1): the top bar's usage pill and its popover, the copy of ClaudeUsage's panel, in both themes.
+const HINT = "Routing controls arrive when ClaudeUsage exposes its control route; use ClaudeUsage's own panel for now";
+test('usage: the top bar pill reads the routing account and opens the copy of ClaudeUsage’s panel', async () => {
+  test.setTimeout(90_000);
+  freshRequests();
+  const maws = await launchMaws({ env: ENV() });
+  const { app, page } = maws;
+  try {
+    const pill = page.locator('[data-top-bar] [data-usage-pill]');
+    // 3@ routes; its most binding limit is the Fable week at 82 %, a warning
+    await expect(pill).toHaveText('82');
+    await expect(pill).toHaveAttribute('data-severity', 'warning');
+    await expect(pill.locator('[data-dot]')).toHaveCSS('background-color', await tokenColor(page, '--warning'));
+
+    await pill.click();
+    const popover = page.getByRole('dialog', { name: 'Claude Usage' });
+    await expect(popover).toBeVisible();
+    await expect(popover.getByRole('heading', { name: 'Claude Usage' })).toBeVisible();
+    await expect(popover.getByText('Usage includes all machines. Activity below is from this Mac.')).toBeVisible();
+    const accounts = popover.locator('[data-account]:not([data-codex] [data-account])');
+    await expect(accounts).toHaveCount(5);
+    expect(await accounts.evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')))).toEqual(ORDER);
+    const routing = popover.locator('[data-account][aria-label="3@example.test"]');
+    await expect(routing.locator('[data-serving="latest"]')).toHaveText(/^5 requests · 97% cached · (just now|1m ago)$/);
+    await expect(meter(routing, 'Fable weekly usage').locator('span')).toHaveCSS('background-color', await tokenColor(page, '--warning'));
+    await expect(meter(routing, 'Five-hour usage').locator('span')).toHaveCSS('background-color', await tokenColor(page, '--success'));
+    await expect(popover.locator('[data-codex] [data-account]')).toHaveCount(2);
+    await expect(popover.getByRole('checkbox', { name: 'Route Claude Code through this app' })).toBeChecked();
+    await expect(popover.getByRole('checkbox', { name: 'Route Claude Code through this app' })).toBeDisabled();
+    await expect(popover.locator('[data-health]')).toHaveText('Last 10 min: 8 requests · response start median 1.0s, p95 3.2s · 1 stall, 1 connection error, 1 refused, 1 held');
+
+    // the four actions, disabled under the one hint
+    await expect(popover.getByText(HINT, { exact: true })).toBeVisible();
+    for (const name of ['Route requests here', 'Remove account…', 'Add account…']) {
+      const buttons = popover.getByRole('button', { name, exact: true });
+      expect(await buttons.count()).toBeGreaterThan(0);
+      for (const button of await buttons.all()) await expect(button).toBeDisabled();
+    }
+    await test.info().attach('usage-popover-light', { body: await page.screenshot(), contentType: 'image/png' });
+
+    // the dark theme: the same reading in the dark tokens
+    await menu(app, 'theme.dark');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(pill.locator('[data-dot]')).toHaveCSS('background-color', await tokenColor(page, '--warning'));
+    await expect(popover).toBeVisible();
+    await test.info().attach('usage-popover-dark', { body: await page.screenshot(), contentType: 'image/png' });
+    await page.keyboard.press('Escape');
+    await expect(popover).toBeHidden();
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+test('usage: without ClaudeUsage data the pill is a muted dash', async () => {
+  const maws = await launchMaws({ env: ENV(join(scratch, 'absent')) });
+  try {
+    const pill = maws.page.locator('[data-top-bar] [data-usage-pill]');
+    await expect(pill).toHaveText('--');
+    await expect(pill).toHaveAttribute('data-severity', 'none');
+    await pill.click();
+    await expect(maws.page.getByRole('dialog', { name: 'Claude Usage' }).getByText('ClaudeUsage is not installed or has no data')).toBeVisible();
   } finally {
     await maws.cleanup();
   }

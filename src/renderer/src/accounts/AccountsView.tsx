@@ -2,45 +2,20 @@
 // panel geometry): ClaudeUsage's accounts as C7's one reader carries them (D-17), with the routing account marked and
 // why, the add row, and the relay's line. Sign-in, reconnect and removal are ClaudeUsage's (D-19): each is a hand-off,
 // and the tab updates by itself when ClaudeUsage rewrites its files (C7's watcher); nothing here polls ClaudeUsage.
-import { useEffect, useState } from 'react';
-import type { ClaudeUsageOpenIntent } from '@shared/ipc/schema';
-import { openClaudeUsage } from '../gateway/actions';
+import { useEffect } from 'react';
 import { useGateway } from '../gateway/store';
 import { ipc } from '../ipc/client';
 import { ago } from '../statusline/format';
 import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
 import { useUsage } from '../stores/usage';
+import { useHandOff } from '../usage/hand-off';
 import { AccountCard } from './AccountCard';
 import { ACCOUNTS, CLAUDE_USAGE_README_URL } from './copy';
 import { accountsViewModel, relayLine } from './model';
 
 const TEXT_ACTION = 'rounded-sm px-1.5 py-1 text-ui-sm whitespace-nowrap text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
 const LINK = 'rounded-sm px-1 text-ui-sm whitespace-nowrap text-fg outline-accent hover:underline focus-visible:outline-2';
-export const HAND_OFF_WAIT_MS = 60_000;
-
-// After a hand-off: `Waiting for ClaudeUsage…` until ClaudeUsage's next rewrite reaches C7's reader, at most 60 s from
-// the latest hand-off (each one names a new thing to wait for, so it restarts the wait).
-function useHandOff() {
-  const [handOffs, setHandOffs] = useState(0); // the hand-offs that opened ClaudeUsage; each restarts the wait
-  const [settled, setSettled] = useState(0); // the last of them whose wait ended
-  const waiting = handOffs > settled;
-  useEffect(() => {
-    if (handOffs === 0) return;
-    const done = () => setSettled(handOffs);
-    const off = ipc.on('settings.usageChanged', done);
-    const timer = setTimeout(done, HAND_OFF_WAIT_MS);
-    return () => {
-      off();
-      clearTimeout(timer);
-    };
-  }, [handOffs]);
-  const handOff = (intent: ClaudeUsageOpenIntent) => {
-    void openClaudeUsage(intent).then((result) => {
-      if (result?.opened) setHandOffs((n) => n + 1);
-    });
-  };
-  return { waiting, handOff };
-}
+const BUTTON = 'rounded-sm border border-border-strong bg-bg-hover px-2 py-1 text-ui-sm font-medium whitespace-nowrap outline-accent hover:bg-bg-active focus-visible:outline-2';
 
 export function AccountsView() {
   const snapshot = useUsage((s) => s.snapshot);
@@ -101,7 +76,23 @@ export function AccountsView() {
             className={`grid grid-cols-1 gap-x-4 px-5 pt-1.5 [&>*:nth-child(n+2)]:border-t [&>*:nth-child(n+2)]:border-border ${model!.columns === 2 ? '@min-[620px]:grid-cols-2 @min-[620px]:[&>*:nth-child(2)]:border-t-0' : ''}`}
           >
             {model!.rows.map((row) => (
-              <AccountCard key={row.uuid} row={row} handOff={handOff} />
+              <AccountCard
+                key={row.uuid}
+                row={row}
+                now={now}
+                actions={
+                  <>
+                    {row.state === 'needs_reauth' && (
+                      <button type="button" className={`${BUTTON} ml-1.5`} onClick={() => handOff({ intent: 'reconnect', accountEmail: row.email })}>
+                        {ACCOUNTS.reconnect}
+                      </button>
+                    )}
+                    <button type="button" className={TEXT_ACTION} onClick={() => handOff({ intent: 'remove', accountEmail: row.email })}>
+                      {ACCOUNTS.remove}
+                    </button>
+                  </>
+                }
+              />
             ))}
           </div>
         )}

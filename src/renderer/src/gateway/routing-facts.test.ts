@@ -26,7 +26,7 @@ const account = (uuid: string, email: string): AccountUsage => ({
 });
 const snapshot = (pinsFor: Record<string, string> = {}): UsageSnapshot => ({
   available: true, dataDir: '/x', readAt: '2026-09-29T07:36:17Z', error: null, drainTarget: 'u3', drainTargetIsManual: false,
-  accounts: [account('u1', '1@example.test'), account('u3', '3@example.test')], pinsFor,
+  accounts: [account('u1', '1@example.test'), account('u3', '3@example.test')], pinsFor, gateway: null, codex: null, activity: null,
 });
 const settings = (patch: Partial<Settings['gateway']> = {}): Settings => ({ ...SETTINGS_DEFAULTS_V6, gateway: { ...SETTINGS_DEFAULTS_V6.gateway, ...patch } });
 

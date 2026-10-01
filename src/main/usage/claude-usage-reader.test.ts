@@ -178,3 +178,49 @@ describe('claude-usage reader availability (C11)', () => {
   });
 });
 // C11 end
+
+// W6 start: what the top bar's usage popover shows beside the accounts (E1)
+describe('claude-usage reader, the rest of the panel (W6)', () => {
+  const NOW = Date.parse('2026-09-29T07:36:17Z');
+  const C6 = 'c0de0001-0000-4000-8000-000000000006';
+  const C7 = 'c0de0002-0000-4000-8000-000000000007';
+  const at = (dir: string) => {
+    const r = new ClaudeUsageReader({ dir, emit: () => {}, log: () => {}, now: () => NOW });
+    readers.push(r);
+    return r;
+  };
+
+  it("reads gateway.json's toggle, the Codex accounts with their drain target and pins, and the last ten minutes", async () => {
+    const snapshot = UsageSnapshotSchema.parse(await at(FIXTURE).snapshot([]));
+    expect(snapshot.readAt).toBe('2026-09-29T07:36:17.000Z');
+    expect(snapshot.gateway).toEqual({ routingEnabled: true, port: 8641 });
+    expect(snapshot.codex).toEqual({
+      drainTarget: C6, // both models' pins files name it
+      drainTargetIsManual: false,
+      accounts: [
+        { accountId: C6, email: '6@example.test', planLabel: 'Pro', needsReauthentication: false, pinnedSessionCount: 2 },
+        { accountId: C7, email: '7@example.test', planLabel: 'Plus', needsReauthentication: true, pinnedSessionCount: 1 },
+      ],
+    });
+    expect(snapshot.activity!.health.requests).toBe(8);
+    expect(snapshot.activity!.accounts.find((a) => a.account === DRAIN)!.requests).toBe(5);
+  });
+
+  it('no Codex drain target when the models disagree; each file absent is null, and a torn one keeps the last reading', async () => {
+    const dir = copy();
+    const sol = join(dir, 'codex-pins.gpt-6.1-sol.json');
+    writeFileSync(sol, JSON.stringify({ ...JSON.parse(readFileSync(sol, 'utf8')), drainTarget: C7 }));
+    const r = at(dir);
+    expect((await r.snapshot([])).codex!.drainTarget).toBeNull();
+    writeFileSync(join(dir, 'gateway.json'), '{"routingEnab');
+    writeFileSync(join(dir, 'codex-accounts.json'), '[{"accountID"');
+    await r.refresh();
+    const torn = await r.snapshot([]);
+    expect(torn.gateway).toEqual({ routingEnabled: true, port: 8641 });
+    expect(torn.codex!.accounts).toHaveLength(2);
+    for (const name of ['gateway.json', 'codex-accounts.json', 'gateway-requests.jsonl']) rmSync(join(dir, name));
+    await r.refresh();
+    expect(await r.snapshot([])).toMatchObject({ available: true, gateway: null, codex: null, activity: null });
+  });
+});
+// W6 end

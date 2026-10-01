@@ -45,3 +45,38 @@ export const RELAY = {
 
 // ClaudeUsage's repository, whose README says how to install it (the Accounts tab's `Install ClaudeUsage`).
 export const CLAUDE_USAGE_README_URL = 'https://github.com/SSFSKIM/claude-usage-menubar#readme';
+
+// W6 start: the top bar's usage pill and its popover, a copy of ClaudeUsage's panel (PanelView.swift, E1). The four
+// account actions render disabled with one hint until ClaudeUsage exposes its control route (`usage/controls.ts`).
+export const USAGE = {
+  pill: (percent: number, limit: string, account: string) => `Usage · ${limit} ${percent}% · ${account}`,
+  pillNoReading: (account: string) => `Usage · no readings yet for ${account}`,
+  pillNoData: 'Usage · ClaudeUsage has no data',
+  title: 'Claude Usage',
+  updated: (ago: string) => `updated ${ago}`,
+  note: 'Usage includes all machines. Activity below is from this Mac.',
+  controlsUnavailable: "Routing controls arrive when ClaudeUsage exposes its control route; use ClaudeUsage's own panel for now",
+  route: 'Route requests here',
+  reconnect: 'Reconnect…',
+  remove: 'Remove account…',
+  add: 'Add account…',
+  addHint: 'Signs in without changing what this Mac is using.',
+  codexTitle: 'Codex accounts',
+  codexNote: 'Used by GPT models routed through this app.',
+  codexEmpty: 'No Codex accounts connected.',
+  codexLimits: "Limits show in ClaudeUsage's own panel",
+  routingToggle: 'Route Claude Code through this app',
+  routingToggleHint: "ClaudeUsage's own panel changes this",
+};
+
+// ClaudeUsage's serving chip (PanelView.swift `ServingChip`): what the account served in the relay's last ten minutes.
+export const serving = (requests: number, cacheHitRatio: number | null, ago: string) =>
+  [requests === 1 ? '1 request' : `${requests} requests`, ...(cacheHitRatio === null ? [] : [`${Math.round(cacheHitRatio * 100)}% cached`]), ago].join(' · ');
+
+// The relay's health line (PanelView.swift `GatewayHealthText`).
+export const HEALTH = {
+  line: (body: string) => `Last 10 min: ${body}`,
+  responseStart: (p50: string, p95: string) => `response start median ${p50}, p95 ${p95}`,
+  noErrors: 'no errors',
+};
+// W6 end
