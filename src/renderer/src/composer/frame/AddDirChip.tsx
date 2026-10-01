@@ -1,4 +1,4 @@
-// The chip row's `+ dir` (C7 execution document, "Composer frame"): main's directory picker, then the binding's set
+// The toolbar's `+ dir` (C7 execution document, "Composer frame"; W2: in the toolbar, no chip row): main's directory picker, then the binding's set
 // with the directories so far plus the picked one (a live session applies it through flag settings and re-reads the
 // rules; an unstarted one patches its intent). The location popover lists the directories.
 import { useState } from 'react';

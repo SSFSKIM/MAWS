@@ -263,10 +263,7 @@ describe("composer DOM under C5's dispatcher", () => {
     act(() => useAttention.setState({ bySession: new Map([[A, [item]]]), requests: new Map([[item.id, event]]), version: 1 }));
     const frame = await within(composerOf(0)).findByRole('group', { name: 'Approval needed' });
     expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(true); // the box and the toolbar
-    const chips = within(composerOf(0)).getByRole('button', { name: /^Location/ });
-    expect(chips.closest('[hidden]')).toBeNull(); // the chip row stays, above the card (mockup 04)
-    expect(chips.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools', hidden: true }).closest('[hidden]')).not.toBeNull();
+    expect(within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools', hidden: true }).closest('[hidden]')).not.toBeNull(); // W2: the location and `+ dir` with it
     expect(editorOf().editor.getText()).toBe('a draft kept aside'); // mounted, hidden
     await waitFor(() => expect(document.activeElement).toBe(frame)); // the pane held focus
     expect(useComposerStore.getState().docked.get(A)?.has('req-a' as never)).toBe(true);

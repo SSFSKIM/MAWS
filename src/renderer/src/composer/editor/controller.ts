@@ -51,7 +51,6 @@ export interface EditorHandle {
   removeAttachment(id: string): void;
   attachPicked(files: PickedFile[]): Promise<void>; // `layout.pickFiles`'s answer: bytes attach, a path is mentioned
   openSlash(): void; // the "+" menu's Slash commands: the palette at `/`
-  openMention(): void; // the toolbar's `@`: the `@` menu at the caret (after a space, the terminal's trigger rule)
   openWidget(name: string, args?: string): boolean; // whether a widget is registered for the name (C11: `args`, default '')
   setEditing(editing: Editing | null): void; // M4b: the edit mode the document (and so the draft) carries
 }
@@ -431,12 +430,6 @@ export class EditorController {
         }
       },
       openSlash: () => void editor().chain().focus().insertContentAt(1, '/').run(),
-      openMention: () => {
-        const e = editor();
-        const { from } = e.state.selection;
-        const before = from > 1 ? e.state.doc.textBetween(from - 1, from, '\n', ' ') : '';
-        e.chain().focus().insertContent(before === '' || /\s/.test(before) ? '@' : ' @').run();
-      },
       openWidget: (name, args = '' /* C11: the argument a widget opens with */) => {
         if (!slashWidget(name)) return false;
         this.view.setWidget({ name, args });

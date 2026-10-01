@@ -1,8 +1,8 @@
 // The composer (C7 execution document, "Composer public surface", "Submit control and queue", "Composer frame",
 // "Unstarted sessions and the docked host"; M4): what C7 renders in C5's `composer` slot for a live, exited or
-// unstarted session. The queued list, then the frame: the chip row over the live or the intent binding, the attachment
-// strip, the box with M3's editor and the submit control, the toolbar. When a request or a docked card needs the
-// human, it takes the place of the box and the toolbar under the chip row (they stay mounted and hidden, so the editor
+// unstarted session. The queued list, then the frame over the live or the intent binding: the attachment strip, the
+// box with M3's editor and the submit control, the toolbar (W2: the location and `+ dir` with it). When a request or a
+// docked card needs the human, it takes the place of the box and the toolbar (they stay mounted and hidden, so the editor
 // keeps its document, history and undo) and the docked frame takes focus when the pane held it; when it retires, focus
 // goes back to the editor.
 //

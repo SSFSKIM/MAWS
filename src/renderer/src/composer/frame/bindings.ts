@@ -30,7 +30,7 @@ export interface ModelChoice {
 }
 
 export interface FrameBindings {
-  location: ChipBinding<Location, Location>; // the chip row's LocationChip
+  location: ChipBinding<Location, Location>; // the toolbar's LocationChip (W2)
   branch: ChipBinding<string | null, string>; // inside the location chip's popover
   model: ChipBinding<ModelChoice, ModelInfo> & { names?: readonly ModelInfo[] }; // the toolbar's ModelChip (effort inside); names: the route's catalogue, for the chip's label before this mount has listed the models
   mode: ModeBinding; // the toolbar's ModeChip, on the shared mode menu (M5)

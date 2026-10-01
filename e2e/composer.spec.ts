@@ -546,7 +546,7 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   await expect(frame).toBeFocused();
   await expect(messageIn(page, 0)).toBeHidden();
   await expect(p.getByRole('toolbar', { name: 'Composer tools' })).toBeHidden(); // the card takes the box's and the toolbar's place
-  await expect(p.getByRole('button', { name: `Location ${repo}` })).toBeVisible(); // under the same chip row (mockup 04)
+  await expect(p.getByRole('button', { name: `Location ${repo}` })).toBeHidden(); // W2: the location is the toolbar's, no chip row stays above the card
   await page.keyboard.press('Enter');
   await expect.poll(() => cards(page, 'stubAccepts')).toBe(1);
   await cards(page, 'undockStub');
@@ -819,5 +819,19 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   await page.keyboard.press('Meta+A');
   await page.keyboard.press('Backspace');
   await expect.poll(async () => (await box.boundingBox())!.height).toBe(44);
+
+  // C2: nothing above the box at rest, one toolbar row below it: + · location · + dir · mode … model (no @, no mic)
+  const frameBox = (await p.locator('[data-composer-frame]').boundingBox())!;
+  const boxAtRest = (await box.boundingBox())!;
+  const toolbar = p.getByRole('toolbar', { name: 'Composer tools' });
+  const tools = (await toolbar.boundingBox())!;
+  expect(boxAtRest.y).toBe(frameBox.y);
+  expect(tools.y).toBeGreaterThanOrEqual(boxAtRest.y + boxAtRest.height);
+  expect(frameBox.y + frameBox.height).toBe(tools.y + tools.height);
+  console.log(`W2 composer at rest: box ${boxAtRest.height}px, toolbar ${tools.height}px, frame ${frameBox.height}px, ${frameBox.width}px wide`);
+  const labels = await toolbar.getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label') ?? ''));
+  expect(labels).toEqual(['Add files, photos or commands', expect.stringMatching(/^Location /), 'Add a directory', expect.stringMatching(/^Permission mode /), expect.stringMatching(/^Model /)]);
+  await expect(toolbar.getByRole('button', { name: 'Mention a file or agent' })).toHaveCount(0);
+  await expect(toolbar.getByRole('button', { name: 'Voice input' })).toHaveCount(0);
   expect(editor.consoleErrors()).toEqual([]);
 });

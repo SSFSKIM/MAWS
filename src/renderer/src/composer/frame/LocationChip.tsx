@@ -1,4 +1,4 @@
-// The chip row's location (C7 execution document, "Composer frame" Location): the directory's or worktree's name (the
+// The toolbar's location (C7 execution document, "Composer frame" Location; W2: in the toolbar, no chip row): the directory's or worktree's name (the
 // path in the popover and the tooltip), with its branch and a dirty marker. Its popover offers the project directory,
 // a new worktree with a name and the branch it starts from, each existing worktree with its branch and how many
 // sessions run there, and the branch picker (a search over the branches with a create action), and lists the
