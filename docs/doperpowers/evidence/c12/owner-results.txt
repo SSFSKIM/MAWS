@@ -4,29 +4,57 @@ MAWS P0 sitting: the owner's results
 Fill one row per step of owner-script.txt: the result (pass, fail or note), what you saw, and a screenshot path if
 useful. The architect completes recomposition.txt from this file and prerun.txt.
 
-Date:
-MAWS commit (git rev-parse --short HEAD):
-Engine: 2.1.283 (pinned); terminal `claude --version`:
+Date: 2026-09-30 (sitting in progress)
+MAWS source baseline: ad8bcab3; GUI uses the existing packaged build (build commit not embedded/independently verified).
+Engine: 2.1.283 (pinned); installed terminal CLI: 2.1.286 (verified with --version and native onboarding).
+Native Select All retest build: ffdfcdb9; packaged with installed Electron after the normal packaging download failed
+on DNS during the network outage. This fixed bundle is separate from the owner's running root bundle.
+
+Owner confirmed steps 1, 2, 3 and 6 in chat; no measurements or screenshots supplied with that confirmation.
+Architect delegated the remaining steps to native cua_repl observation. Active tests use a copied app bundle,
+fresh config and userData under /private/tmp/maws-owner-cua-npoh1_yc, and a scratch repository. The scratch
+Claude settings inherit the existing user/project tool-denial rules (10 distinct rules); original settings are
+not edited. Scratch equivalents do not establish parity with the owner's hooks/plugins or account feature gates.
+Existing real-profile MAWS remains running and is used only for read-only historical observations.
+End-of-GUI check: both scratch app processes exited, original MAWS PID 33586 remained. Scratch background job was
+stopped; scratch agents --json returned []. No scratch project key appeared in the owner's ~/.claude.json. Original
+MAWS settings.json checksum stayed identical. User settings.json checksum changed at 23:09:53, matching the owner's
+/model astra command during the interruption; current model is astra and its deny array still exactly matches the ten
+rules copied at the start. Do not describe the entire user settings file as byte-identical across this sitting.
+The shell-spawning tests wrote real shell history and touched the shared clipboard during the first native pass;
+the test-isolation corrective addresses that separately. No native test relies on the contaminated terminal command.
+
+Test-isolation follow-up: 01431460 integrated at 11d9e3a9. Reviewer-medium's scratch-path quoting finding was fixed
+in a separate commit. Worker reported 4,653 units passed, one skipped; terminal log confirms 13/13. Final-head
+panel 23/23 and c12 4/4 passed with no failures/skips; typecheck and lint passed. Panel opened at load 18.79,
+c12 at 15.32. Both history files kept their sizes and mtimes before, between and after those final two suites;
+earlier leaked history entries were not removed. No clipboard-restoration warnings or console errors appeared
+in those logs; the clipboard lock was released. Tests still require exclusive pasteboard use, not arbitrary
+concurrent owner copying. The gate wrapper's final exit 1 was its diagnostic ls of the already-released lock;
+both test commands exited 0. The full live pre-run was deliberately skipped; its monitor ordering fix was
+inspected, not certified by a new full live run. No owner bundle was rebuilt or replaced for this integration.
+Local logs: /tmp/maws-a576-gates.log, /tmp/maws-a576-e2e-panel.log, /tmp/maws-a576-e2e-c12.log,
+/tmp/maws-a576-final-tc-lint.log and /tmp/maws-a576-e2e-terminal.log.
 
 | Step | Result | Notes | Screenshot |
 |---|---|---|---|
-| B1 build (codesign -dv, first five lines) | | | |
-| B2 ~/.claude.json scratch entries and ~/.Trash emptied | | | |
-| B3 ClaudeUsage running; a terminal claude kept live | | | |
-| B4 opened; notifications allowed; first-open time to a full Overview | | | |
-| B5 stateful MCP servers (the list) | | | |
-| 1 Overview, foreign-live (§10.1) | | | |
-| 2 new worktree, trust card, settings as in the terminal (§10.2) | | | |
-| 3 Overview approve and answer; native notification for R; ⌘⇧J lands on R (§10.3) | | | |
-| 4 relay (line cleared = delivered), SendMessage row, Review, Terminal, viewer tab, workflow (§10.4) | | | |
-| 5 resume from the terminal (2.1.285) and in MAWS (§10.5) | | | |
-| 6 budget: X of 8 GB, three per-tree figures, the release, the resume (§10.6) | | | |
-| 7 longest transcript anchored; streaming holds the reader (§10.7) | | | |
-| 8 twelve widgets, `!git status`, `#` note, a rebinding (§10.8) | | | |
-| 9 queue, steer, stop, resume; denial when collapsed; ⌘. with an approval pending (§10.9) | | | |
-| 10 themes and taste beside Claude Desktop, Codex and ClaudeUsage (§10.10) | | | |
-| 11 IME, ⌘-click, ⌘A and Select All, Open on GitHub and push state, Open panel, ⌘R | | | |
-| 12 quit question (three parts), Quit when idle banner, Cancel, Quit; the queued message after reopening | | | |
-| 13 terminal launch environment: foreground or background subagent; TaskCreate or TodoWrite or none | | | |
-| 14 C8: both themes over the panel, Open on GitHub against an upstream, a monitor, Attach by hand, This branch disabled on master | | | |
-| 15 split-pane irritations (M5.3); ExitPlanMode and EnterPlanMode denies; sleep and wake (optional) | | | |
+| B1 build (codesign -dv, first five lines) | observed, not development-signed | Root bundle: Identifier=Electron; Mach-O thin arm64; CodeDirectory flags=0x20002(adhoc,linker-signed); Signature=adhoc; TeamIdentifier=not set. Owner's build/signing actions not independently supplied. Fixed retest bundle separately packaged from ffdfcdb9. | |
+| B2 ~/.claude.json scratch entries and ~/.Trash emptied | not performed by architect | Protected owner config and Trash left alone. | |
+| B3 ClaudeUsage running; a terminal claude kept live | observed | Existing relay answered HTTP 200, never restarted. Original MAWS and terminal sessions observed read-only; all new live tests used scratch config. | |
+| B4 opened; notifications allowed; first-open time to a full Overview | owner step 1 confirmed; no new timing | No notification permission changed by architect. No new cold-store timing claimed. | |
+| B5 stateful MCP servers (the list) | unchanged | No owner's engine policy edited. Scratch defaults only. | |
+| 1 Overview, foreign-live (§10.1) | owner-confirmed | Confirmed in chat, 2026-09-30. | |
+| 2 new worktree, trust card, settings as in the terminal (§10.2) | owner-confirmed | Confirmed in chat, 2026-09-30. | |
+| 3 Overview approve and answer; native notification for R; ⌘⇧J lands on R (§10.3) | owner-confirmed | Confirmed in chat, 2026-09-30; no separate notification/signature detail supplied. | |
+| 4 relay (line cleared = delivered), SendMessage row, Review, Terminal, viewer tab, workflow (§10.4) | pass (scratch native GUI) | Sonnet parent dispatched a Haiku child. Relay showed Asked, then cleared and re-enabled; parent SendMessage row visible, inbox.txt independently contained the exact marker. Intermediate forwarded label was not sampled. Child stopped on scratch stop file. Review opened; Terminal pwd matched scratch repo; Files opened README.txt in a read-only tab. Background work showed completed sitting workflow, Echo 2/2, alpha and beta rows. | CUA 1790828406034-4skfdo; 1790828444894-3qthdt. |
+| 5 resume from the terminal (2.1.285) and in MAWS (§10.5) | pass (scratch native GUI; installed CLI is now 2.1.286) | Archived engine session 7908cd51-98a4-4396-a040-1366975b16ac. Installed CLI 2.1.286 resumed it inside Terminal under explicit scratch config/relay env and correctly identified the denied and interrupted commands. Exited CLI, unarchived and used row Resume in MAWS 2.1.283; BACK IN MAWS correctly recalled the terminal turn. No launch stall observed. | CUA 1790830035486-g0abm2; scratch transcript corroborates. |
+| 6 budget: X of 8 GB, three per-tree figures, the release, the resume (§10.6) | owner-confirmed | Confirmed in chat, 2026-09-30; numerical measurements not supplied. | |
+| 7 longest transcript anchored; streaming holds the reader (§10.7) | pass (real-store read; scratch stream) | Native GUI opened the original 809406bb-43f0-4d12-a0eb-4f20d6cc4941; Session info verified id. Scrolled 25 pages into old work, expanded “Continued for 3h 35m · 10 tool calls”: heading stayed at the same screen position, no jump to latest. Streaming half passed in scratch: scrolled up while the long answer ran; the old relay heading stayed fixed across observations, Jump to latest remained available, and stopping later revealed 49 generated paragraphs rather than having dragged the reader down. | CUA screenshots 1790827825455-74kyvk (before), 1790827869848-56r0jg (after), in this session's tool-results. |
+| 8 twelve widgets, `!git status`, `#` note, a rebinding (§10.8) | pass (scratch native GUI) | Opened all twelve slash widgets. Context resolved 33,303/1M; config and permissions showed the ten preserved denies. No MCP/hooks configured in scratch. Shell-prefix git -C status exited 0. Project-only # note saved to scratch repo/CLAUDE.md. Diagnostics rebound to Cmd+Ctrl+D, invoked successfully, reset via confirmation and verified Unbound. Cmd+W/K/1 were captured as conflicts without closing/navigating Settings. | Native AX observations in session transcript. |
+| 9 queue, steer, stop, resume; denial when collapsed; ⌘. with an approval pending (§10.9) | pass (scratch native GUI) | Queued a marker during a long answer, Stop preserved it with Queue paused because you interrupted, Resume sent it and returned QUEUED ONE. Option+Enter submitted a steer; STEERED NOW followed the foreground sleep tool's completion (not an immediate tool kill). Default-mode touch denial showed 1 denied and created no file. Cmd+period with a second approval pending retired its card and returned idle, with no approval-lost warning. A second paused marker remained through step 12's quit and reopen. | CUA 1790828975843-s4wtf4; native AX observations. |
+| 10 themes and taste beside Claude Desktop, Codex and ClaudeUsage (§10.10) | partial; reference access limited | Scratch Light→Dark→Light worked. Readable session, Files and terminal surfaces; rename and archive sheets inspected. Accounts read four real relay accounts; handoff reported ClaudeUsage is in the menu bar, click its icon (not a foreground panel). ClaudeUsage CUA timed out; Codex CUA explicitly refused access, not retried through another path. Claude Desktop Code opened but composer was replaced by a billing notice. Full side-by-side sheet comparison is not verified. Narrow split exposed Settings content clipped beyond its pane; record for owner's split-pane feedback, not an approved redesign. Direct login reads unknown until a Direct session runs; no login/account mutation attempted. | CUA 1790829158995-oee9es (dark); 1790829439742-rpa3n8 (rename); 1790829474103-7y3zuw (narrow split). |
+| 11 IME, ⌘-click, ⌘A and Select All, Open on GitHub and push state, Open panel, ⌘R | partial; one bug fixed and native-retested | Native Add project picker works. Cmd+R preserved live engine turn. Cmd+A selected terminal buffer, but native Edit→Select All failed on original build. Fix ffdfcdb9 built in isolated worktree, native-retested on copied fixed bundle: menu and Cmd+A both select terminal buffer, normal search-field menu selection still selects its text. Real-upstream navigation passed (step 14). IME not certified: Ctrl+Space followed by physical letter keys produced Latin gks, not Hangul composition; unexecuted input cleared. Modifier-click not performed because the exposed CUA click API has no modifier argument or held-key API. Neither limitation is recorded as a product failure. | CUA 1790835393091-xrnbmf (fixed native menu); 1790835411552-n80ibx (Cmd+A). |
+| 12 quit question (three parts), Quit when idle banner, Cancel, Quit; the queued message after reopening | pass (scratch native GUI) | Corrected setup: one idle session holding background sleep, another session mid-turn, plus terminal sleep. Native dialog named all three; Quit when idle showed 3 things finish; Cancel worked; Quit ended scratch app while owner's app stayed open. Reopened same scratch profile on fixed build ffdfcdb9: all three rows Done/session ended, CUA QUEUE SURVIVED QUIT still listed as paused. Earlier setup put background and foreground in one session, correctly counted only once; no product defect. | CUA 1790835194307-8faj23 (three categories); 1790835325895-n27xs2 (persisted queue). |
+| 13 terminal launch environment: foreground or background subagent; TaskCreate or TodoWrite or none | pass (scratch observation, Sonnet) | Pinned 2.1.283 interactive CLI under explicit scratch config/relay, model sonnet. Agent ran in background (waiting-for-background-agent line and later completion); final two-item task list was plain text, with no TaskCreate/TodoWrite call in the transcript. This is not an assertion about the owner's full config or newly changed default model. | CUA 1790835762884-cqvc1j; scratch transcript 87b0a735-774b-4c40-b8f8-55e1b963adef. |
+| 14 C8: both themes over the panel, Open on GitHub against an upstream, a monitor, Attach by hand, This branch disabled on master | functional checks pass; full theme comparison partial | This branch disabled with correct master explanation. Monitor unavailable, no gates changed. Created scratch job 8f982dbd using installed CLI 2.1.286; from another session its menu contained exactly Open and Attach in a terminal tab. Attach activated job's session and rendered BG READY in a Terminal. Closed attachment, stopped job, agents --json returned []. Public octocat/Hello-World scratch clone showed Up to date with origin/master; Open on GitHub opened github.com/octocat/Hello-World/tree/master in Chrome. Both themes observed on session/Files, but not every panel surface side-by-side with references (see step 10). | CUA 1790835879470-sy8r06 (Attach); Chrome native AX verified URL. |
+| 15 split-pane irritations (M5.3); ExitPlanMode and EnterPlanMode denies; sleep and wake (optional) | decision closed; feedback pending | Owner explicitly keeps all settings and all denied tools denied, including EnterPlanMode. No settings change. Split-pane feedback being collected separately by owner. Optional sleep/wake not run because it would interrupt their concurrent work. | |

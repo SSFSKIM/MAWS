@@ -1,15 +1,22 @@
 import type { MenuItemConstructorOptions } from 'electron';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '@shared/ipc/schema';
 import { ACTIONS, ACTION_IDS, type ActionId } from '@shared/keymap/actions';
 import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
 
+interface Contents {
+  id: number;
+  selectAll(): void;
+}
 const electron = vi.hoisted(() => ({
   setApplicationMenu: vi.fn(),
+  windows: [] as { webContents: Contents }[],
+  focused: null as Contents | null,
 }));
 vi.mock('electron', () => ({
   Menu: { buildFromTemplate: (template: unknown) => ({ template }), setApplicationMenu: electron.setApplicationMenu },
-  BrowserWindow: { getAllWindows: () => [] },
+  BrowserWindow: { getAllWindows: () => electron.windows },
+  webContents: { getFocusedWebContents: () => electron.focused },
 }));
 
 const { emit } = await import('./ipc/events');
@@ -23,7 +30,7 @@ const MENU_SINK = ACTION_IDS.filter((id) => ACTIONS[id].sink === 'menu');
 function items(template: Item[]): Item[] {
   return template.flatMap((item) => [item, ...(Array.isArray(item.submenu) ? items(item.submenu) : [])]);
 }
-const actionItems = (template: Item[]) => items(template).filter((item) => item.id !== undefined);
+const actionItems = (template: Item[]) => items(template).filter((item) => item.id !== undefined && item.id !== 'edit.selectAll');
 const actionOf = (item: Item) => item.id!.split(':')[0] as ActionId;
 const byId = (template: Item[], id: string) => items(template).find((item) => item.id === id);
 const top = (template: Item[], label: string) => template.find((item) => item.label === label);
@@ -98,10 +105,58 @@ describe('application menu', () => {
     expect(roles).not.toContain('close');
     expect(roles).not.toContain('resetZoom'); // ⌘0 is the Overview
     const edit = (top(template, 'Edit')!.submenu as Item[]).map((item) => item.role);
-    expect(edit).toEqual(expect.arrayContaining(['undo', 'redo', 'cut', 'copy', 'paste', 'selectAll']));
+    expect(edit).toEqual(expect.arrayContaining(['undo', 'redo', 'cut', 'copy', 'paste']));
     expect((top(template, 'Window')!.submenu as Item[]).map((item) => item.role).filter(Boolean)).toEqual(['minimize', 'zoom', 'front']);
     const accelerators = actionItems(template).map((item) => item.accelerator).filter(Boolean);
     expect(new Set(accelerators).size).toBe(accelerators.length);
+  });
+});
+
+// Sitting finding (2026-09-30): Edit ▸ Select All left a focused terminal's buffer unselected. The `selectAll` role sends
+// AppKit's `selectAll:` to the focused element (a terminal's is xterm's empty helper textarea) and ignores `click`
+// (electron.d.ts, MenuItemConstructorOptions.role), so the item is the app's own.
+describe('Edit ▸ Select All', () => {
+  const selectAll = (send = vi.fn()) => (top(menuTemplate(ACTIONS, {}, ALL, send), 'Edit')!.submenu as Item[]).find((item) => item.label === 'Select All')!;
+  const contents = (id: number): Contents => ({ id, selectAll: vi.fn() });
+  afterEach(() => {
+    electron.windows = [];
+    electron.focused = null;
+  });
+
+  it('is the app’s own item holding ⌘A rather than the selectAll role', () => {
+    expect(selectAll()).toMatchObject({ id: 'edit.selectAll', accelerator: 'Cmd+A' });
+    expect(selectAll().role).toBeUndefined();
+  });
+
+  it('runs the editor command in the focused page, as the role did, and tells the page so a focused terminal selects its buffer', () => {
+    const page = contents(1);
+    electron.windows = [{ webContents: page }];
+    electron.focused = page;
+    const send = vi.fn();
+    (selectAll(send).click as () => void)();
+    expect(page.selectAll).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls).toEqual([['layout.selectAll', {}]]);
+  });
+
+  it('runs it in the window’s page when no contents hold focus (a window shown without being key)', () => {
+    const page = contents(1);
+    electron.windows = [{ webContents: page }];
+    const send = vi.fn();
+    (selectAll(send).click as () => void)();
+    expect(page.selectAll).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls).toEqual([['layout.selectAll', {}]]);
+  });
+
+  it('runs it in other focused contents (DevTools) and leaves the page alone', () => {
+    const page = contents(1);
+    const devtools = contents(2);
+    electron.windows = [{ webContents: page }];
+    electron.focused = devtools;
+    const send = vi.fn();
+    (selectAll(send).click as () => void)();
+    expect(devtools.selectAll).toHaveBeenCalledTimes(1);
+    expect(page.selectAll).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 });
 
