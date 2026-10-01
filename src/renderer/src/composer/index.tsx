@@ -3,8 +3,12 @@
 // transcript's request renderers; M3 the slash widget registry C11 fills; M4 the Composer, its one app-level key
 // handler, text insertion for C11, and the setup-intent seam C10 registers its hook through; M4b the fork seam C10
 // registers its provider through and C6's edit-and-resubmit action (registered from App.tsx).
+import type { MawsBridge } from '@shared/ipc/schema';
 import { registerSlot } from '../app/slots';
+import { registerBubbleEditor, registerTranscriptActions } from '../transcript';
 import { Composer } from './Composer';
+import { BubbleEdit } from './InlineEdit';
+import { editAndResubmitRow, editPromptRow } from './resubmit-seam';
 
 export { Composer, type ComposerProps } from './Composer';
 export { ComposerAppKeys } from './ComposerAppKeys';
@@ -20,4 +24,11 @@ export { registerSetupIntentHook, type SetupIntent, type SetupIntentHook, type S
 // Called once from App.tsx's C7 block: the composer in C5's `composer` slot (C5's registry has no disposer).
 export function connectComposer(): void {
   registerSlot('composer', Composer);
+}
+
+// W3 (B6): a bubble's Edit and a blocked prompt's Edit prompt edit the bubble in place, C7's editor standing in for it
+// (the harness passes the client its composers use).
+export function connectInlineEdit(client?: MawsBridge): () => void {
+  const offs = [registerTranscriptActions({ editAndResubmit: editAndResubmitRow, editPrompt: editPromptRow }), registerBubbleEditor((props) => <BubbleEdit {...props} client={client} />)];
+  return () => offs.forEach((off) => off());
 }

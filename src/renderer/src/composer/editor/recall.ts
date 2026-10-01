@@ -81,7 +81,7 @@ export function prefillToDoc(prefill: Prefill): ComposerDoc {
     data: image.data,
     persisted: true,
   }));
-  const doc = textToDoc(
+  return textToDoc(
     prefill.text,
     (placeholder) => {
       if (placeholder.kind !== 'pasted') return unavailable(placeholder);
@@ -90,7 +90,6 @@ export function prefillToDoc(prefill: Prefill): ComposerDoc {
     },
     images,
   );
-  return { ...doc, attrs: { ...doc.attrs, editing: prefill.editing } }; // edit mode rides in the draft (M4b)
 }
 
 // A user row's text as the human typed it: the neutralised `<\pasted_content` restored, and the one newline C6 keeps

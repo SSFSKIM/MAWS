@@ -59,7 +59,6 @@ export function entryDoc(content: string | readonly ContentBlock[]): ComposerDoc
     text: pasted.text,
     pasted: pasted.bodies.map((body, i) => ({ name: `Pasted text #${i + 1}`, text: body })),
     images: images.map((b, i) => ({ name: `Image #${i + 1}`, mediaType: b.source?.media_type ?? 'image/png', data: base64Of(b)! })),
-    editing: null,
   };
   const doc = prefillToDoc(prefill);
   const pdfs: Attachment[] = documents.map((b, i) => {

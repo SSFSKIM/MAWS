@@ -59,7 +59,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     const { port, saved } = drafts(null);
     const handle = createRef<EditorHandle>();
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onPrefill={onPrefill} />);
-    act(() => prefillComposer(APP, { text: 'fix [Pasted text #1 +2 lines]', pasted: [{ name: 'Pasted text #1', text: 'a\nb' }], editing: null }));
+    act(() => prefillComposer(APP, { text: 'fix [Pasted text #1 +2 lines]', pasted: [{ name: 'Pasted text #1', text: 'a\nb' }] }));
     await waitFor(() => expect(onPrefill).toHaveBeenCalledTimes(1));
     expect(contentOf(container).textContent).toContain('fix');
     expect(handle.current?.serialize().pastedContents['1']?.content).toBe('a\nb');

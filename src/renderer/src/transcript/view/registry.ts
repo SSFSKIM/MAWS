@@ -3,7 +3,8 @@
 // waves, and each contributes its callbacks from its own block. Registrations merge over DEFAULT_ACTIONS in order, so a
 // later registration of a key wins; a disposer removes its own registration, which restores an earlier registration of
 // the same key if one remains.
-import { useSyncExternalStore } from 'react';
+import { useSyncExternalStore, type ReactNode } from 'react';
+import type { Row } from '../model/rows';
 import { DEFAULT_ACTIONS, type TranscriptActions } from './context';
 import type { TranscriptProps } from './Transcript';
 
@@ -63,3 +64,21 @@ export function registerRequestRenderer(render: TranscriptProps['renderRequest']
 
 const latestRenderer = () => renderers.at(-1);
 export const useRegisteredRequestRenderer = (): RequestRenderer | undefined => useSyncExternalStore(subscribe, latestRenderer);
+
+// W3 (B6): C7's in-place editor for a user bubble, rendered around every bubble of a session transcript with the bubble
+// as its children; it shows the bubble unless that bubble is the one its session edits. The latest registration wins.
+export type BubbleEditor = (props: { storeKey: string; row: Extract<Row, { kind: 'user' }>; children: ReactNode }) => ReactNode;
+let bubbleEditor: BubbleEditor | null = null;
+
+export function registerBubbleEditor(editor: BubbleEditor): () => void {
+  bubbleEditor = editor;
+  for (const listener of listeners) listener();
+  return () => {
+    if (bubbleEditor !== editor) return;
+    bubbleEditor = null;
+    for (const listener of listeners) listener();
+  };
+}
+
+const latestBubbleEditor = () => bubbleEditor;
+export const useRegisteredBubbleEditor = (): BubbleEditor | null => useSyncExternalStore(subscribe, latestBubbleEditor);

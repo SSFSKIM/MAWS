@@ -16,7 +16,7 @@ export type { TranscriptProps } from './view/Transcript';
 // The shell's transcript: the actions each child registers from its own block, merged over the defaults, and the slot
 // component that mounts one Transcript over the session's IPC source with them (registered into C5's slot at rebase).
 export { DEFAULT_ACTIONS } from './view/context';
-export { registerRequestRenderer, registerTranscriptActions } from './view/registry';
+export { registerBubbleEditor, registerRequestRenderer, registerTranscriptActions, type BubbleEditor } from './view/registry'; // W3: registerBubbleEditor
 // The merged registry read (the one TranscriptSlot uses), so a Transcript mounted elsewhere (C8b's drill-in, C5's agent
 // tab) passes `actions={useRegisteredActions()}` and gets every child's registered callbacks.
 export { registeredActions, useRegisteredActions } from './view/registry';

@@ -1,10 +1,12 @@
+// The resubmit state machine over a bubble edited in place (W3, B6): Send rewinds once with the seen cursor and resends
+// the edited text; nothing ever repeats a rewind; an uncertain rewind is reconciled against the transcript.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { editingOf, prefillComposer, resetComposerStore, resubmitRecordOf, setEditing, useComposerStore } from '../stores/composer';
+import { inlineEditOf, resetComposerStore, resubmitRecordOf, setInlineEdit, useComposerStore, type InlineEdit } from '../stores/composer';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore, type TranscriptEntry } from '../stores/transcript';
@@ -12,23 +14,19 @@ import { applyEvents, createState } from '../transcript';
 import { builder, uuid } from '../transcript/model/test-events';
 import { resetShellStores } from '../test-support/shell-stores';
 import {
-  askToRewind,
+  cancelInlineEdit,
   cancelRewind,
   confirmRewind,
-  enterEditMode,
-  keepEditing,
-  leaveEditMode,
-  REWIND_WINDOW_MS,
-  registerResubmitProvider,
-  resubmitProvider,
-  resubmitSendFailed,
-  resubmitSent,
-  restoreEditMode,
-  rewindAgain,
   entryShowsRewind,
-  settleRestoredEdit,
-  takeAutoSend,
-  transcriptShowsRewind,
+  forkInlineEdit,
+  keepEditing,
+  registerResubmitProvider,
+  REWIND_WINDOW_MS,
+  REWOUND_COPY,
+  resubmitProvider,
+  rewindAgain,
+  sendInlineEdit,
+  startInlineEdit,
 } from './resubmit-seam';
 
 const A = 'app-a' as AppSessionId;
@@ -38,31 +36,41 @@ type RewindResult = CommandResult<'session.rewind'>;
 let fake: FakeClient;
 let client: MawsBridge;
 let rewinds: { input: unknown; answer(result: RewindResult): void }[];
+let sendFails = false;
+let sent: unknown[] = [];
 
-// session.rewind answered by the test, one call at a time; everything else by the fake.
+// session.rewind answered by the test, one call at a time; session.send by the flag; everything else by the fake.
 beforeEach(() => {
   resetShellStores();
   resetComposerStore();
   useNotices.setState({ notices: [] });
   useTranscriptStore.setState({ entries: {} });
   useSessions.setState({ engine: new Map([[A, status(A)]]) });
-  fake = fakeClient();
+  fake = fakeClient({ 'session.history.append': undefined });
   rewinds = [];
+  sendFails = false;
+  sent = [];
   client = {
     ...fake.client,
     invoke: ((name, input) => {
+      if (name === 'session.send') {
+        sent.push(input);
+        return Promise.resolve(sendFails ? { ok: false, error: { code: 'internal', message: 'write failed' } } : { ok: true, value: { messageUuid: null, disposition: 'sent', queueId: 'q' } });
+      }
       if (name !== 'session.rewind') return fake.client.invoke(name, input);
       return new Promise<RewindResult>((resolve) => rewinds.push({ input, answer: resolve }));
     }) as MawsBridge['invoke'],
   };
 });
 afterEach(() => {
-  leaveEditMode(A); // disposes any timer or subscription a case left behind
+  cancelInlineEdit(A); // disposes any timer or subscription a case left behind (refused while in flight)
   vi.useRealTimers();
 });
 
 const record = () => resubmitRecordOf(useComposerStore.getState(), A);
+const edit = () => inlineEditOf(useComposerStore.getState(), A);
 const toasts = () => useNotices.getState().notices.map((n) => n.text);
+const sends = () => sent;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const rewound = (): RewindResult => ({ ok: true, value: { rewound: true, reason: null, error: null, prefillText: 'the old text', precedingAssistantUuid: null, files: null } });
 const refused = (reason: string): RewindResult => ({ ok: true, value: { rewound: false, reason, error: reason.replace(/_/g, ' '), prefillText: null, precedingAssistantUuid: null, files: null } });
@@ -72,71 +80,86 @@ const batch = (events: Partial<SessionEvent>[]) =>
 const boundary = (target: string) => batch([{ kind: 'boundary.rewind', targetMessageUuid: u(target), precedingAssistantUuid: null, prefillText: null } as Partial<SessionEvent>]);
 const listening = () => fake.calls.filter((c) => c === 'on session.eventBatch').length;
 
-// Edit mode on `u-1`, seen cursor `u-2`, confirmed: the rewind is in flight.
-function confirmed(advanceTo: MessageUuid | null = null): { outcome: ReturnType<typeof confirmRewind> } {
-  enterEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-2') });
-  askToRewind(A);
-  expect(record().state).toBe('confirming');
-  const outcome = confirmRewind(client, A, advanceTo);
+// The bubble `u-1` edited in place with `u-2` the newest message seen: its text edited, the transcript showing `u-2`.
+function editing(over: Partial<InlineEdit> = {}): void {
+  setInlineEdit(A, { messageUuid: u('u-1'), seenCursor: u('u-2'), kind: 'edit', text: 'turn one edited', pasted: [], images: [], ...over });
+  const b = builder();
+  b.turn('u-1');
+  b.end(['u-1']);
+  b.turn('u-2');
+  b.end(['u-2']);
+  useTranscriptStore.setState({ entries: { [A]: { phase: 'live', rows: ROWS, state: applyEvents(createState(null, null), b.events) } as unknown as TranscriptEntry } });
+}
+// The transcript's user rows, u-2 the newest (the seen-cursor reading uses only the user rows' message uuids).
+const ROWS = [{ kind: 'user', messageUuid: u('u-1') }, { kind: 'user', messageUuid: u('u-2') }];
+
+// Send: the rewind is in flight.
+function sending(): Promise<unknown> {
+  const outcome = sendInlineEdit(client, A);
   expect(record().state).toBe('rewinding');
-  return { outcome };
+  return outcome;
 }
 
-describe('resubmit state never repeats a rewind and reconciles an uncertain one', () => {
-  it('rewinds once to the target with the seen cursor captured when the edit began, files untouched, then sends as part of that decision', async () => {
-    const { outcome } = confirmed();
+describe('a bubble edited in place: Send rewinds once and resends', () => {
+  it('rewinds once to the target with the seen cursor captured when the edit began, files untouched, then sends the edited text and ends the edit', async () => {
+    editing();
+    const outcome = sending();
     expect(rewinds.map((r) => r.input)).toEqual([{ appSessionId: A, targetMessageUuid: 'u-1', lastSeenMessageUuid: 'u-2', files: false }]);
     rewinds[0].answer(rewound());
     expect(await outcome).toBe('rewound');
-    expect(record()).toMatchObject({ state: 'rewound_awaiting_send', autoSend: true });
-    expect([takeAutoSend(A), takeAutoSend(A)]).toEqual([true, false]); // the composer sends once
+    await vi.waitFor(() => expect(sends()).toEqual([{ appSessionId: A, content: 'turn one edited' }]));
+    await vi.waitFor(() => expect(edit()).toBeNull());
+    expect(record().state).toBe('idle');
     expect(listening()).toBe(0); // a definite answer needs no transcript
+    expect(rewinds).toHaveLength(1);
   });
 
-  it('a confirm over a newer turn carries the advanced cursor', async () => {
-    const { outcome } = confirmed(u('u-3'));
-    expect(editingOf(useComposerStore.getState(), A)).toEqual({ messageUuid: 'u-1', seenCursor: 'u-3' });
-    expect(rewinds[0].input).toMatchObject({ lastSeenMessageUuid: 'u-3' });
+  it('a newer turn since the edit began asks first; the confirm carries the advanced cursor, a cancel issues nothing', async () => {
+    editing({ seenCursor: u('u-1') }); // the transcript's newest is u-2: a turn began after the edit
+    await sendInlineEdit(client, A);
+    expect(record().state).toBe('confirming');
+    cancelRewind(A);
+    expect([record().state, rewinds.length]).toEqual(['idle', 0]);
+    await sendInlineEdit(client, A);
+    const outcome = confirmRewind(client, A);
+    expect(edit()).toMatchObject({ seenCursor: 'u-2' });
+    expect(rewinds[0].input).toMatchObject({ lastSeenMessageUuid: 'u-2' });
     rewinds[0].answer(rewound());
     await outcome;
   });
 
-  it('a cancelled confirm issues nothing and keeps edit mode', () => {
-    enterEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-1') });
-    askToRewind(A);
-    cancelRewind(A);
-    expect(record().state).toBe('idle');
-    expect(rewinds).toEqual([]);
-    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
-  });
-
-  it("a refusal returns to idle with the engine's reason, edit mode kept; the next Send confirms again", async () => {
-    const { outcome } = confirmed();
+  it("a refusal returns to idle with the engine's reason, the edit kept; the next Send rewinds again", async () => {
+    editing();
+    const outcome = sending();
     rewinds[0].answer(refused('unseen_later_turn'));
     expect(await outcome).toBe('refused');
     expect(record().state).toBe('idle');
-    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
+    expect(edit()).not.toBeNull();
     expect(toasts()).toEqual([expect.stringContaining('unseen_later_turn')]);
-    askToRewind(A);
-    expect(record().state).toBe('confirming');
-    expect(rewinds).toHaveLength(1);
+    void sending();
+    expect(rewinds).toHaveLength(2);
   });
 
-  it('a send failure after the rewind stays rewound and says so; a successful send leaves edit mode', async () => {
-    const { outcome } = confirmed();
+  it('a send that fails after the rewind stays rewound with the failure; Retry sends again and never rewinds', async () => {
+    editing();
+    sendFails = true;
+    const outcome = sending();
     rewinds[0].answer(rewound());
     await outcome;
-    resubmitSendFailed(A);
-    expect(record()).toMatchObject({ state: 'rewound_awaiting_send', sendFailed: true });
-    resubmitSent(A);
+    await vi.waitFor(() => expect(record()).toMatchObject({ state: 'rewound_awaiting_send', sendFailed: true }));
+    expect(edit()).not.toBeNull(); // the text is kept for the retry
+    sendFails = false;
+    expect(await sendInlineEdit(client, A)).toBe('sent');
     expect(record().state).toBe('idle');
-    expect(editingOf(useComposerStore.getState(), A)).toBeNull();
+    expect(edit()).toBeNull();
     expect(rewinds).toHaveLength(1);
+    expect(sends()).toHaveLength(2);
   });
 
   for (const code of ['timeout', 'internal'] as const) {
     it(`a rewind that rejects with ${code} while the process is ready waits for the transcript and issues nothing`, async () => {
-      const { outcome } = confirmed();
+      editing();
+      const outcome = sending();
       expect(listening()).toBe(0); // subscribed only once uncertain
       rewinds[0].answer(failed(code));
       expect(await outcome).toBe('uncertain');
@@ -146,16 +169,18 @@ describe('resubmit state never repeats a rewind and reconciles an uncertain one'
       expect(record().state).toBe('rewind_uncertain');
       boundary('u-1');
       expect(record()).toMatchObject({ state: 'rewound_awaiting_send', autoSend: false }); // confirmed later: Send is the human's
-      expect(takeAutoSend(A)).toBe(false);
+      await settle();
+      expect(sends()).toEqual([]);
       expect(rewinds).toHaveLength(1);
       boundary('u-1'); // unsubscribed: a repeat is not heard
       expect(record().state).toBe('rewound_awaiting_send');
     });
   }
 
-  it('with no boundary for the window the rewind is unresolved; Rewind again issues exactly one more, whose target_not_found means the first applied: edit mode ends, text kept', async () => {
+  it('with no boundary for the window the rewind is unresolved; Rewind again issues exactly one more, whose target_not_found means the first applied: the edit ends, its text in the composer', async () => {
     vi.useFakeTimers();
-    const { outcome } = confirmed();
+    editing();
+    const outcome = sending();
     rewinds[0].answer(failed('timeout'));
     await outcome;
     await vi.advanceTimersByTimeAsync(REWIND_WINDOW_MS - 1);
@@ -169,140 +194,98 @@ describe('resubmit state never repeats a rewind and reconciles an uncertain one'
     rewinds[1].answer(refused('target_not_found'));
     expect(await again).toBe('refused');
     expect(record().state).toBe('idle');
-    expect(editingOf(useComposerStore.getState(), A)).toBeNull(); // confirming again could only loop
-    expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
+    expect(edit()).toBeNull(); // rewinding again could only loop
+    expect(useComposerStore.getState().prefills.get(A)).toMatchObject({ text: 'turn one edited' });
+    expect(toasts()).toEqual([REWOUND_COPY]);
   });
 
-  it('a boundary while unresolved confirms the rewind; Keep editing returns to idle', async () => {
+  it('unresolved: Send without rewinding sends alone; Keep editing returns to idle and nothing listens any more', async () => {
     vi.useFakeTimers();
-    let { outcome } = confirmed();
+    editing();
+    let outcome = sending();
     rewinds[0].answer(failed('internal'));
     await outcome;
     await vi.advanceTimersByTimeAsync(REWIND_WINDOW_MS);
-    boundary('u-1');
-    expect(record().state).toBe('rewound_awaiting_send');
+    expect(await sendInlineEdit(client, A, 'without_rewinding')).toBe('sent');
+    expect(rewinds).toHaveLength(1);
+    expect(edit()).toBeNull();
 
-    leaveEditMode(A);
-    ({ outcome } = confirmed());
+    editing();
+    outcome = sending();
     rewinds[1].answer(failed('internal'));
     await outcome;
     await vi.advanceTimersByTimeAsync(REWIND_WINDOW_MS);
+    expect(await sendInlineEdit(client, A)).toBe('stale'); // a plain Send while unresolved does nothing
     keepEditing(A);
     expect(record().state).toBe('idle');
-    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
-    await vi.advanceTimersByTimeAsync(REWIND_WINDOW_MS);
+    expect(edit()).not.toBeNull();
     boundary('u-1'); // nothing listens any more
     expect(record().state).toBe('idle');
   });
 
-  it('the engine exiting while the rewind is in flight returns to idle with the banner, edit mode kept, and a late answer is ignored', async () => {
-    const { outcome } = confirmed();
+  it('the engine exiting while the rewind is in flight returns to idle with the exit note, the edit kept, and a late answer is ignored', async () => {
+    editing();
+    const outcome = sending();
     useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' })]]) });
     expect(record()).toMatchObject({ state: 'idle', exited: true });
-    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
+    expect(edit()).not.toBeNull();
     rewinds[0].answer(rewound());
     expect(await outcome).toBe('stale');
     expect(record()).toMatchObject({ state: 'idle', exited: true, autoSend: false });
+    expect(sends()).toEqual([]);
   });
 
-  it('a process.exited event while uncertain returns to idle with the banner', async () => {
-    const { outcome } = confirmed();
+  it('a process.exited event while uncertain returns to idle with the note; a rejection after the process left is the exit', async () => {
+    editing();
+    let outcome = sending();
     rewinds[0].answer(failed('timeout'));
     await outcome;
     batch([{ kind: 'process.exited', code: 1, signal: null, reason: 'crash', lostAttentionCount: 0 } as Partial<SessionEvent>]);
     expect(record()).toMatchObject({ state: 'idle', exited: true });
-    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
-    askToRewind(A); // the next Send confirms against the transcript as it then stands
-    expect(record()).toMatchObject({ state: 'confirming', exited: false });
-  });
+    expect(edit()).not.toBeNull();
 
-  it('a rejection after the process left is the exit, not an uncertain rewind', async () => {
-    const { outcome } = confirmed();
+    useSessions.setState({ engine: new Map([[A, status(A)]]) });
+    outcome = sending();
     useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' })]]) });
-    rewinds[0].answer(failed('internal'));
+    rewinds[1].answer(failed('internal'));
     expect(await outcome).toBe('stale');
-    expect(listening()).toBe(0);
   });
 
-  it('leaving edit mode after the rewind says where the text is; leaving is refused while the rewind is in flight', async () => {
-    const { outcome } = confirmed();
-    leaveEditMode(A);
-    expect(record().state).toBe('rewinding'); // in flight: edit mode stays
+  it('Cancel is refused while the rewind is in flight; after the rewind the edited text goes into the composer', async () => {
+    editing();
+    sendFails = true;
+    const outcome = sending();
+    expect(cancelInlineEdit(A)).toBe(false);
+    expect(record().state).toBe('rewinding');
     rewinds[0].answer(rewound());
     await outcome;
-    leaveEditMode(A);
-    expect(editingOf(useComposerStore.getState(), A)).toBeNull();
-    expect(record().state).toBe('idle');
-    expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
-    await settle();
+    await vi.waitFor(() => expect(record().sendFailed).toBe(true));
+    expect(cancelInlineEdit(A)).toBe(true);
+    expect(edit()).toBeNull();
+    expect(useComposerStore.getState().prefills.get(A)).toMatchObject({ text: 'turn one edited' });
   });
 
-  it('target_not_found always means the target left the conversation: edit mode ends and says so, restored edit or fresh', async () => {
-    restoreEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-2') });
-    expect(record().state).toBe('idle');
-    askToRewind(A);
-    const outcome = confirmRewind(client, A, null);
-    rewinds[0].answer(refused('target_not_found'));
-    expect(await outcome).toBe('refused');
-    expect(editingOf(useComposerStore.getState(), A)).toBeNull();
-    expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
-
-    useNotices.setState({ notices: [] });
-    const fresh = confirmed().outcome; // a new edit, not a restored one
-    rewinds[1].answer(refused('target_not_found'));
-    await fresh;
-    expect(editingOf(useComposerStore.getState(), A)).toBeNull();
-    expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
+  it('a blocked prompt (a hook stopped it) is sent as a new message, never rewound', async () => {
+    editing({ kind: 'blocked', seenCursor: null });
+    expect(await sendInlineEdit(client, A)).toBe('sent');
+    expect(rewinds).toEqual([]);
+    expect(sends()).toEqual([{ appSessionId: A, content: 'turn one edited' }]);
+    expect(edit()).toBeNull();
   });
 
-  // This launch's hydrated transcript, through C6's own model: three turns (u1, u2, u3), then the rewinds named.
-  function transcript(...rewinds: string[]): TranscriptEntry {
-    const b = builder();
-    for (const turn of ['u1', 'u2', 'u3']) {
-      b.turn(turn);
-      b.end([turn]);
-    }
-    for (const target of rewinds) b.emit('boundary.rewind', { targetMessageUuid: target.startsWith('u-') ? u(target) : uuid(target), precedingAssistantUuid: null, prefillText: null });
-    const state = applyEvents(createState(null, null), b.events);
-    return { phase: 'live', rows: [], state } as unknown as TranscriptEntry;
-  }
-  const hydrated = (...rewinds: string[]) => useTranscriptStore.setState({ entries: { [A]: transcript(...rewinds) } });
-
-  it('a restored edit whose rewind the hydrated transcript shows ends at once; otherwise it stays', () => {
-    restoreEditMode(A, { messageUuid: uuid('u2'), seenCursor: uuid('u3') });
-    hydrated('u2');
-    settleRestoredEdit(A, false);
-    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
-    settleRestoredEdit(A, true);
-    expect(editingOf(useComposerStore.getState(), A)).toBeNull();
-    expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
-    enterEditMode(A, { messageUuid: uuid('u2'), seenCursor: uuid('u3') });
-    settleRestoredEdit(A, true); // not restored: the transcript is not consulted
-    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
+  it('a new edit is refused while a rewind is in flight or unconfirmed', async () => {
+    editing();
+    const outcome = sending();
+    const row = { kind: 'user', id: 'r-5', messageUuid: u('u-5'), text: 'another', attachments: [], placeholders: [] } as never;
+    expect(startInlineEdit(A, row, 'edit')).toBe(false);
+    expect(toasts()).toEqual(['A rewind is in progress']);
+    expect(edit()).toMatchObject({ messageUuid: 'u-1' });
+    rewinds[0].answer(rewound());
+    await outcome;
   });
+});
 
-  it('a restored edit to an earlier launch’s message stays when this launch rewound to another message', () => {
-    restoreEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-1') });
-    hydrated('u2');
-    expect(transcriptShowsRewind(A, u('u-1'))).toBe(false);
-    settleRestoredEdit(A, true);
-    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
-    expect(toasts()).toEqual([]);
-  });
-
-  it('what the selector reads flips when a later boundary names the edit’s own target, over an earlier rewind', () => {
-    expect(entryShowsRewind(transcript('u2'), u('u-1'))).toBe(false); // a rewind boundary shown, to another message
-    expect(entryShowsRewind(transcript('u2', 'u-1'), u('u-1'))).toBe(true);
-    expect(entryShowsRewind(undefined, u('u-1'))).toBe(false);
-    expect(entryShowsRewind({ ...transcript('u-1'), phase: 'hydrating' }, u('u-1'))).toBe(false);
-  });
-
-  it('a rewind to a message before the edited one ends the edit (its message is off the chain); one after it does not', () => {
-    expect(entryShowsRewind(transcript('u1'), uuid('u2'))).toBe(true); // u2's turn hidden with u1's
-    expect(entryShowsRewind(transcript('u3'), uuid('u2'))).toBe(false); // u2 still on the chain
-    expect(entryShowsRewind(transcript(), uuid('u2'))).toBe(false);
-  });
-
+describe('the fork seam', () => {
   it('a provider is null until one registers; its disposer removes only itself', () => {
     expect(resubmitProvider()).toBeNull();
     const provider = { forkFrom: vi.fn() };
@@ -316,27 +299,42 @@ describe('resubmit state never repeats a rewind and reconciles an uncertain one'
     expect(resubmitProvider()).toBeNull();
   });
 
-  it('a prefill is refused while a rewind is in flight or unconfirmed (it would overwrite the confirmed text); once unresolved a new edit replaces the last one', async () => {
-    vi.useFakeTimers();
-    const next = { text: 'another message', editing: { messageUuid: u('u-5'), seenCursor: u('u-5') } };
-    const { outcome } = confirmed();
-    prefillComposer(A, next); // rewinding
-    expect(useComposerStore.getState().prefills.has(A)).toBe(false);
-    rewinds[0].answer(failed('timeout'));
-    await outcome;
-    prefillComposer(A, next); // rewind_uncertain
-    expect(useComposerStore.getState().prefills.has(A)).toBe(false);
-    expect(toasts()).toEqual(['A rewind is in progress', 'A rewind is in progress']);
-    expect(record().state).toBe('rewind_uncertain');
-    expect(editingOf(useComposerStore.getState(), A)).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' });
+  it('Fork sends the edited text in a forked session from that message, ends the edit and leaves this session alone', async () => {
+    const forkFrom = vi.fn(async () => ({ appSessionId: 'app-fork' as AppSessionId }));
+    const off = registerResubmitProvider({ forkFrom });
+    try {
+      editing();
+      expect(await forkInlineEdit(client, A)).toBe(true);
+      expect(forkFrom).toHaveBeenCalledWith({ appSessionId: A, messageUuid: 'u-1', content: 'turn one edited' });
+      expect(rewinds).toEqual([]);
+      expect(sends()).toEqual([]);
+      expect(edit()).toBeNull();
+    } finally {
+      off();
+    }
+  });
+});
 
-    await vi.advanceTimersByTimeAsync(REWIND_WINDOW_MS);
-    prefillComposer(A, next); // rewind_unresolved: the human may move on
-    expect(useComposerStore.getState().prefills.has(A)).toBe(true);
-    enterEditMode(A, next.editing); // the composer takes it
-    expect(record().state).toBe('idle');
-    boundary('u-1');
-    expect(record().state).toBe('idle');
-    setEditing(A, null);
+describe('the transcript decides an uncertain rewind', () => {
+  // This launch's hydrated transcript, through C6's own model: three turns (u1, u2, u3), then the rewinds named.
+  function transcript(...targets: string[]): TranscriptEntry {
+    const b = builder();
+    for (const turn of ['u1', 'u2', 'u3']) {
+      b.turn(turn);
+      b.end([turn]);
+    }
+    for (const target of targets) b.emit('boundary.rewind', { targetMessageUuid: target.startsWith('u-') ? u(target) : uuid(target), precedingAssistantUuid: null, prefillText: null });
+    const state = applyEvents(createState(null, null), b.events);
+    return { phase: 'live', rows: [], state } as unknown as TranscriptEntry;
+  }
+
+  it('a boundary names the target, or a rewind to an earlier message hid it; a later one, or none, proves nothing', () => {
+    expect(entryShowsRewind(transcript('u2'), u('u-1'))).toBe(false); // a rewind boundary shown, to another message
+    expect(entryShowsRewind(transcript('u2', 'u-1'), u('u-1'))).toBe(true);
+    expect(entryShowsRewind(undefined, u('u-1'))).toBe(false);
+    expect(entryShowsRewind({ ...transcript('u-1'), phase: 'hydrating' }, u('u-1'))).toBe(false);
+    expect(entryShowsRewind(transcript('u1'), uuid('u2'))).toBe(true); // u2's turn hidden with u1's
+    expect(entryShowsRewind(transcript('u3'), uuid('u2'))).toBe(false); // u2 still on the chain
+    expect(entryShowsRewind(transcript(), uuid('u2'))).toBe(false);
   });
 });

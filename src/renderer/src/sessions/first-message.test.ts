@@ -15,7 +15,7 @@ const ctx = { sessionId: 's1', cwd: '/r' }; // a fixed tag id, so two sends of o
 
 describe('messagePrefill', () => {
   it('hands plain text back as typed', () => {
-    expect(messagePrefill({ content: 'Reply OK', display: 'Reply OK' })).toEqual({ text: 'Reply OK', pasted: [], images: [], editing: null });
+    expect(messagePrefill({ content: 'Reply OK', display: 'Reply OK' })).toEqual({ text: 'Reply OK', pasted: [], images: [] });
   });
 
   it('restores pasted bodies behind their placeholders and re-attaches images without their placeholders', () => {
@@ -24,7 +24,7 @@ describe('messagePrefill', () => {
     const sent = serializeDraft(doc, ctx);
     expect(sent.display).toBe('see [Pasted text #1 +2 lines] then\nmore [Image #2]');
     const prefill = messagePrefill({ content: sent.content, display: sent.display });
-    expect(prefill).toEqual({ text: 'see [Pasted text #1 +2 lines] then\nmore', pasted: [{ name: 'Pasted text #1', text: body }], images: [{ name: 'Image #2', mediaType: 'image/png', data: PNG }], editing: null });
+    expect(prefill).toEqual({ text: 'see [Pasted text #1 +2 lines] then\nmore', pasted: [{ name: 'Pasted text #1', text: body }], images: [{ name: 'Image #2', mediaType: 'image/png', data: PNG }] });
     // what the editor rebuilds from it sends the same message again
     const again = serializeDraft(prefillToDoc(prefill), ctx);
     expect(again.display).toBe(sent.display);
@@ -33,7 +33,7 @@ describe('messagePrefill', () => {
 
   it('keeps a PDF as its placeholder: a prefill cannot carry a document back', () => {
     const content = [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0=' } }, { type: 'text', text: 'read this' }];
-    expect(messagePrefill({ content, display: 'read this [PDF #1]' })).toEqual({ text: 'read this [PDF #1]', pasted: [], images: [], editing: null });
+    expect(messagePrefill({ content, display: 'read this [PDF #1]' })).toEqual({ text: 'read this [PDF #1]', pasted: [], images: [] });
   });
 });
 

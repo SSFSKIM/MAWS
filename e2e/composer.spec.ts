@@ -578,10 +578,15 @@ async function written(page: Page, id: string): Promise<{ rewinds: number; cance
   };
 }
 
+// W3 (B6): Edit turns the bubble itself into an editor (Codex's pattern); its Send rewinds this session to that message
+// and resends. Once the rewind hid the bubble with its turn and the resend still waits, the composer's dock carries it.
+const inlineEditor = (page: Page) => pane(page, 0).getByRole('region', { name: 'Edit your message' });
+const inlineStatus = (page: Page) => inlineEditor(page).getByRole('status');
 const editLine = (page: Page) => pane(page, 0).locator('[data-edit-mode]');
 
 // Two prompts sent from the composer over `rewindJournal`, then the second bubble's Edit (C6's, through the adapter
-// App.tsx registers): the composer holds `turn two` in edit mode and ` edited` is typed.
+// App.tsx registers): the bubble becomes an editor holding `turn two`, nothing goes into the composer, and ` edited` is
+// typed at its end.
 async function startEdit(page: Page, id: string, replay: RewindReplay): Promise<void> {
   await openComposerPage(page);
   await launchReady(page, id, rewindJournal(scratch, id, replay));
@@ -596,29 +601,39 @@ async function startEdit(page: Page, id: string, replay: RewindReplay): Promise<
   const bubble = pane(page, 0).locator('.transcript-user').filter({ hasText: 'turn two' });
   await bubble.hover();
   await bubble.getByRole('button', { name: 'Edit' }).click();
-  await expect(editLine(page)).toHaveText(/Editing an earlier message · sending forks this session from here/);
-  await expect(messageIn(page, 0)).toHaveText('turn two');
-  await messageIn(page, 0).click();
+  const field = inlineEditor(page).getByRole('textbox', { name: 'Edited message' });
+  await expect(field).toHaveValue('turn two');
+  await expect(field).toBeFocused();
+  await expect(messageIn(page, 0)).toHaveText(''); // nothing is pulled into the composer
+  await expect(pane(page, 0).getByText('Editing an earlier message')).toHaveCount(0);
   await page.keyboard.press('End');
   await page.keyboard.type(' edited');
 }
 
-// Send in edit mode asks to rewind, and the confirm is given (after `beforeConfirm`).
-async function confirmResubmit(page: Page, beforeConfirm: () => Promise<unknown> = async () => {}): Promise<void> {
-  await messageIn(page, 0).click();
-  await page.keyboard.press('Enter');
-  const dialog = page.getByRole('alertdialog');
-  await expect(dialog).toContainText('Forking is not available here. Rewind this session to that message and resend instead?');
-  await beforeConfirm();
-  await dialog.getByRole('button', { name: 'Rewind and resend' }).click();
+// The editor's Send (after `beforeSend`): this session rewinds to that message, no confirm when nothing newer started.
+async function sendEdit(page: Page, beforeSend: () => Promise<unknown> = async () => {}): Promise<void> {
+  await beforeSend();
+  await inlineEditor(page).getByRole('button', { name: 'Send' }).click();
 }
 
-async function editSecondPrompt(page: Page, id: string, replay: RewindReplay, beforeConfirm?: () => Promise<unknown>): Promise<void> {
+async function editSecondPrompt(page: Page, id: string, replay: RewindReplay, beforeSend?: () => Promise<unknown>): Promise<void> {
   await startEdit(page, id, replay);
-  await confirmResubmit(page, beforeConfirm);
+  await sendEdit(page, beforeSend);
 }
 
-test('edit-and-resubmit never repeats a rewind: a send that fails after the replayed rewind retries the send alone', async ({ editor }) => {
+test('edit in place: Send rewinds to the message and resends, the bubble replaced by the edited one', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-edit-in-place';
+  await editSecondPrompt(page, id, 'answered');
+  await expect.poll(() => sent(page, id)).toEqual(['turn one', 'turn two', 'turn two edited']);
+  await expect(inlineEditor(page)).toHaveCount(0);
+  await expect(editLine(page)).toHaveCount(0);
+  await expect(pane(page, 0).locator('.transcript-user').filter({ hasText: /^turn two$/ })).toHaveCount(0); // the rewound bubble left with its turn
+  expect(await written(page, id)).toEqual({ rewinds: 1, cancels: 0, users: 3 });
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test('edit in place never repeats a rewind: a send that fails after the replayed rewind retries the send alone from the dock', async ({ editor }) => {
   const { page } = editor;
   const id = 'c7-resubmit-send-fails';
   await editSecondPrompt(page, id, 'answered', () => cards(page, 'failNextSend', id)); // the resend after the rewind fails
@@ -627,110 +642,63 @@ test('edit-and-resubmit never repeats a rewind: a send that fails after the repl
   await editLine(page).getByRole('button', { name: 'Retry' }).click();
   await expect.poll(() => sent(page, id)).toEqual(['turn one', 'turn two', 'turn two edited']);
   await expect(editLine(page)).toHaveCount(0);
-  await expect(messageIn(page, 0)).toHaveText('');
   expect(await written(page, id)).toEqual({ rewinds: 1, cancels: 0, users: 3 });
   expect((await statusOf(page, id)).process).toBe('ready');
   expect(editor.consoleErrors()).toEqual([]);
 });
 
-test('edit-and-resubmit reconciles an unconfirmed rewind: held past the bridge timeout, its late answer lets Send go', async ({ editor }) => {
+test('edit in place reconciles an unconfirmed rewind: held past the bridge timeout, its late answer lets Send go', async ({ editor }) => {
   test.setTimeout(90_000);
   const { page } = editor;
   const id = 'c7-resubmit-held';
   await editSecondPrompt(page, id, 'held');
-  await expect(editLine(page)).toHaveText(/Rewind unconfirmed · checking the transcript…/, { timeout: 15_000 }); // C3's 8 s bound answered `timeout`
-  await expect(messageIn(page, 0)).toHaveAttribute('contenteditable', 'false');
-  await expect(messageIn(page, 0)).toHaveText('turn two edited');
+  await expect(inlineStatus(page)).toHaveText(/Rewind unconfirmed · checking the transcript…/, { timeout: 15_000 }); // C3's 8 s bound answered `timeout`
+  await expect(inlineEditor(page).getByRole('textbox', { name: 'Edited message' })).toHaveAttribute('readonly', '');
   expect(await written(page, id)).toEqual({ rewinds: 1, cancels: 1, users: 2 });
 
   // the held answer is released: a read of the test's own goes first, and the late `rewound: true` follows it
   value(await invoke(page, 'session.getContextUsage', { appSessionId: id, detail: 'summary' }));
-  await expect(editLine(page)).toHaveText(/Rewound/);
+  await expect(editLine(page)).toHaveText(/Rewound · send your edited message/); // the bubble left with its turn
   expect(await sent(page, id)).toEqual(['turn one', 'turn two']); // confirmed by the transcript: Send is the human's
-  await control(page, 0).click();
+  await editLine(page).getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => sent(page, id)).toEqual(['turn one', 'turn two', 'turn two edited']);
   await expect(editLine(page)).toHaveCount(0);
   expect(await written(page, id)).toEqual({ rewinds: 1, cancels: 1, users: 3 });
   expect(editor.consoleErrors()).toEqual([]);
 });
 
-test('edit-and-resubmit reconciles an unconfirmed rewind: withheld for the whole window, Send without rewinding sends alone', async ({ editor }) => {
+test('edit in place reconciles an unconfirmed rewind: withheld for the whole window, Send without rewinding sends alone', async ({ editor }) => {
   test.setTimeout(90_000);
   const { page } = editor;
   const id = 'c7-resubmit-withheld';
   await openComposerPage(page);
   await cards(page, 'rewindWindow', 2_000); // C3's late window is 60 s; the composer's is shortened for the run
   await editSecondPrompt(page, id, 'withheld');
-  await expect(editLine(page)).toHaveText(/Rewind unconfirmed · checking the transcript…/, { timeout: 15_000 });
-  await expect(editLine(page)).toHaveText(/The rewind could not be confirmed/);
-  expect(await editLine(page).getByRole('button').allTextContents()).toEqual(['Rewind again', 'Send without rewinding', 'Keep editing']);
-  await expect(messageIn(page, 0)).toHaveAttribute('contenteditable', 'true');
-  await editLine(page).getByRole('button', { name: 'Send without rewinding' }).click();
+  await expect(inlineStatus(page)).toHaveText(/Rewind unconfirmed · checking the transcript…/, { timeout: 15_000 });
+  await expect(inlineStatus(page)).toHaveText(/The rewind could not be confirmed/);
+  expect(await inlineEditor(page).getByRole('button').allTextContents()).toEqual(['Rewind again', 'Send without rewinding', 'Keep editing']);
+  await expect(inlineEditor(page).getByRole('textbox', { name: 'Edited message' })).not.toHaveAttribute('readonly', '');
+  await inlineEditor(page).getByRole('button', { name: 'Send without rewinding' }).click();
   await expect.poll(() => sent(page, id)).toEqual(['turn one', 'turn two', 'turn two edited']);
-  await expect(editLine(page)).toHaveCount(0);
+  await expect(inlineEditor(page)).toHaveCount(0);
   expect(await written(page, id)).toEqual({ rewinds: 1, cancels: 1, users: 3 });
   await cards(page, 'rewindWindow', null);
   expect(editor.consoleErrors()).toEqual([]);
 });
 
-test('edit-and-resubmit keeps edit mode across a reload, and Send after it confirms, rewinds and resends', async ({ editor }) => {
+test('edit in place: Cancel and Esc put the bubble back, and nothing is written', async ({ editor }) => {
   const { page } = editor;
-  await openComposerPage(page);
-  // a record the index holds (C4's drafts need one), with the replay launched behind it
-  let id: string | null = null;
-  await expect
-    .poll(async () => {
-      id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === transcriptSession)?.appId ?? null;
-      return id;
-    })
-    .not.toBeNull();
-  await startEdit(page, id!, 'answered');
-  const drafted = async () => ((value(await invoke(page, 'session.drafts.get', { appSessionId: id! })) as { doc: { attrs?: { editing?: unknown } } } | null)?.doc.attrs?.editing ?? null);
-  await expect.poll(drafted).toMatchObject({ messageUuid: expect.any(String) }); // the draft carries the edit
-
-  await page.reload();
-  await openComposerPage(page);
-  await showPanes(page, [{ composer: id!, transcript: true }, null]);
-  await expect(editLine(page)).toHaveText(/Editing an earlier message · sending forks this session from here/);
-  await expect(messageIn(page, 0)).toHaveText('turn two edited');
-  await confirmResubmit(page);
-  await expect.poll(() => sent(page, id!)).toEqual(['turn two edited']); // the event log restarted with the page
-  await expect(editLine(page)).toHaveCount(0);
-  expect(await written(page, id!)).toEqual({ rewinds: 1, cancels: 0, users: 3 });
-  expect(editor.consoleErrors()).toEqual([]);
-});
-
-test('edit-and-resubmit across a reload during an unconfirmed rewind: edit mode is back at idle, and the late answer ends it with the text kept', async ({ editor }) => {
-  test.setTimeout(90_000);
-  const { page } = editor;
-  await openComposerPage(page);
-  let id: string | null = null;
-  await expect
-    .poll(async () => {
-      id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === transcriptSession)?.appId ?? null;
-      return id;
-    })
-    .not.toBeNull();
-  await startEdit(page, id!, 'held');
-  await confirmResubmit(page);
-  await expect(editLine(page)).toHaveText(/Rewind unconfirmed · checking the transcript…/, { timeout: 15_000 });
-  const drafted = async () => ((value(await invoke(page, 'session.drafts.get', { appSessionId: id! })) as { doc: { attrs?: { editing?: unknown } } } | null)?.doc.attrs?.editing ?? null);
-  await expect.poll(drafted).toMatchObject({ messageUuid: expect.any(String) });
-
-  await page.reload();
-  await openComposerPage(page);
-  await showPanes(page, [{ composer: id!, transcript: true }, null]);
-  await expect(editLine(page)).toHaveText(/Editing an earlier message · sending forks this session from here/); // idle, nothing issued
-  await expect(messageIn(page, 0)).toHaveText('turn two edited');
-  expect(await written(page, id!)).toEqual({ rewinds: 1, cancels: 1, users: 2 });
-
-  value(await invoke(page, 'session.getContextUsage', { appSessionId: id!, detail: 'summary' })); // the held answer comes late
-  await expect(editLine(page)).toHaveCount(0); // the transcript shows the rewind: edit mode ends
-  await expect(messageIn(page, 0)).toHaveText('turn two edited');
-  await messageIn(page, 0).click();
-  await page.keyboard.press('Enter'); // an ordinary send now
-  await expect.poll(() => sent(page, id!)).toEqual(['turn two edited']);
-  expect(await written(page, id!)).toEqual({ rewinds: 1, cancels: 1, users: 3 });
+  const id = 'c7-edit-cancel';
+  await startEdit(page, id, 'answered');
+  await inlineEditor(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(inlineEditor(page)).toHaveCount(0);
+  const bubble = pane(page, 0).locator('.transcript-user').filter({ hasText: 'turn two' });
+  await bubble.hover();
+  await bubble.getByRole('button', { name: 'Edit' }).click();
+  await expect(inlineEditor(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(inlineEditor(page)).toHaveCount(0);
+  expect(await written(page, id)).toEqual({ rewinds: 0, cancels: 0, users: 2 });
   expect(editor.consoleErrors()).toEqual([]);
 });
 

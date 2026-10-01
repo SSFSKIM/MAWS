@@ -49,7 +49,6 @@ function rowPrefill(row: UserRow): Prefill {
       const parts = a.kind === 'image' && a.dataUrl !== null ? dataUrl(a.dataUrl) : null;
       return parts ? [{ name: a.name, mediaType: a.mediaType ?? parts[1], data: parts[2] }] : [];
     }),
-    editing: null,
   };
 }
 

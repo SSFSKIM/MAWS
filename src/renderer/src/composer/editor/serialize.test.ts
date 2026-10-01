@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { docOfDraft } from './drafts'; // W3
 import { join } from 'node:path';
 import { Editor, type JSONContent } from '@tiptap/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -40,12 +41,12 @@ describe('serializeDraft maps docs to user content', () => {
     expect(s).toMatchObject({ mode: 'send', text: 'a\nb\nc', content: 'a\nb\nc', display: 'a\nb\nc', omitted: 0, empty: false, pastedContents: {} });
   });
 
-  it('ignores the edit mode a document carries (M4b): nothing of it reaches the content, the display or the history', () => {
-    const plain = real(docOf([paragraph(textNode('the edited prompt'))], [png]));
-    const edited = real({ ...plain, attrs: { ...plain.attrs, editing: { messageUuid: 'u-1', seenCursor: 'u-2' } } });
-    expect(edited.attrs?.editing).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' }); // the schema keeps it
-    expect(serializeDraft(edited, ctx)).toEqual(serializeDraft(plain, ctx));
-    expect(JSON.stringify(serializeDraft(edited, ctx))).not.toContain('u-1');
+  // W3 (B6): a draft from before W3 carries the retired edit mode; it loads without it and serialises as the text alone
+  it('loads a draft carrying the retired edit mode without it', () => {
+    const plain = docOf([paragraph(textNode('the edited prompt'))], [png]);
+    const old = docOfDraft({ doc: { ...plain, attrs: { ...plain.attrs, editing: { messageUuid: 'u-1', seenCursor: 'u-2' } } }, attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' })!;
+    expect(old.attrs).toEqual(plain.attrs);
+    expect(serializeDraft(real(old), ctx)).toEqual(serializeDraft(real(plain), ctx));
   });
 
   it('renders mentions in their text forms', () => {

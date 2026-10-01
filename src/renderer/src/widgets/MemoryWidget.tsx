@@ -31,7 +31,7 @@ export function present(dialog: GetMemoryDialogResponse): MemoryView {
 export function MemoryBody({ view, appSessionId, close }: { view: MemoryView; appSessionId: AppSessionId; close(): void }) {
   const addNote = () => {
     close();
-    prefillComposer(appSessionId, { text: '# ', editing: null });
+    prefillComposer(appSessionId, { text: '# ' });
   };
   return (
     <div className="flex flex-col">

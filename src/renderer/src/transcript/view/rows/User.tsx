@@ -5,12 +5,14 @@
 // the engine (a `next` steer, or one held in MAWS's queue) is dimmed with what it waits for, and a steer the engine took
 // says it was sent during the turn it sits in. W2 (B2, Codex's bubble): the time, Copy and Edit overlay beside the
 // bubble on hover or focus instead of reserving a line under it, and the collapse follows the rendered height (a long
-// paragraph folds as a long list does), measured while folded and again whenever the content's size changes.
+// paragraph folds as a long list does), measured while folded and again whenever the content's size changes. W3 (B6):
+// Edit edits the bubble in place: C7's registered editor stands in the bubble's place while its session edits it.
 import { useLayoutEffect, useRef, useState } from 'react';
 import { NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
 import type { Attachment, Row } from '../../model/rows';
 import { placeholdersOf, untaggedUserText } from '../../model/user-text';
-import { useActions, useDisclosure } from '../context';
+import { useActions, useDisclosure, useTranscriptContext } from '../context';
+import { useRegisteredBubbleEditor } from '../registry';
 import { Markdown } from '../markdown/Markdown';
 import { Chevron, clockTime, copyText } from './parts';
 
@@ -34,6 +36,8 @@ function segmentsOf(row: UserRowData): Segment[] {
 
 export function UserRow({ row }: { row: UserRowData }) {
   const actions = useActions();
+  const { storeKey, variant } = useTranscriptContext();
+  const renderEditor = useRegisteredBubbleEditor();
   const [open, toggle] = useDisclosure(`bubble:${row.id}`);
   const content = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
@@ -54,52 +58,55 @@ export function UserRow({ row }: { row: UserRowData }) {
     return () => observer.disconnect();
   }, [open, row.text, row.attachments]);
 
+  const body = (
+    <div className="transcript-user-body">
+      <div className="transcript-user-bubble" data-bubble="" data-open={open ? '' : undefined} data-collapsed={overflows && !open ? '' : undefined}>
+        <div ref={content} className="transcript-user-content" data-user-content="">
+          <div>
+            {segmentsOf(row).map((segment, i) =>
+              segment.kind === 'text' ? (
+                <Markdown key={i} markdown={segment.text} live={false} />
+              ) : (
+                <PastedBlock key={i} rowId={row.id} n={segment.n} lines={segment.lines} attachment={segment.attachment} />
+              ),
+            )}
+            {files.length > 0 && (
+              <div className="transcript-attachments">
+                {files.map((file, i) =>
+                  file.kind === 'image' && file.dataUrl ? (
+                    <img key={i} className="transcript-attachment-image" src={file.dataUrl} alt={file.name} />
+                  ) : (
+                    <span key={i} className="transcript-chip" data-chip="file" title={file.mediaType ?? undefined}>
+                      {file.name}
+                    </span>
+                  ),
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        {(open || overflows) && (
+          <button type="button" className="transcript-quiet-button" aria-expanded={open} onClick={toggle}>
+            {open ? 'Show less' : 'Show more'}
+          </button>
+        )}
+      </div>
+      <div className="transcript-user-actions">
+        <span>{clockTime(row.at)}</span>
+        <button type="button" onClick={() => copyText(untaggedUserText(row.text, row.attachments, row.placeholders))}>
+          Copy
+        </button>
+        {row.editable && !row.pending && (
+          <button type="button" title="Edit here · Send rewinds this session to this message" onClick={() => actions.editAndResubmit(row)}>
+            Edit
+          </button>
+        )}
+      </div>
+    </div>
+  );
   return (
     <section className="transcript-user" aria-label="Your message" data-pending={row.pending} data-steer={row.steer ? '' : undefined}>
-      <div className="transcript-user-body">
-        <div className="transcript-user-bubble" data-bubble="" data-open={open ? '' : undefined} data-collapsed={overflows && !open ? '' : undefined}>
-          <div ref={content} className="transcript-user-content" data-user-content="">
-            <div>
-              {segmentsOf(row).map((segment, i) =>
-                segment.kind === 'text' ? (
-                  <Markdown key={i} markdown={segment.text} live={false} />
-                ) : (
-                  <PastedBlock key={i} rowId={row.id} n={segment.n} lines={segment.lines} attachment={segment.attachment} />
-                ),
-              )}
-              {files.length > 0 && (
-                <div className="transcript-attachments">
-                  {files.map((file, i) =>
-                    file.kind === 'image' && file.dataUrl ? (
-                      <img key={i} className="transcript-attachment-image" src={file.dataUrl} alt={file.name} />
-                    ) : (
-                      <span key={i} className="transcript-chip" data-chip="file" title={file.mediaType ?? undefined}>
-                        {file.name}
-                      </span>
-                    ),
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-          {(open || overflows) && (
-            <button type="button" className="transcript-quiet-button" aria-expanded={open} onClick={toggle}>
-              {open ? 'Show less' : 'Show more'}
-            </button>
-          )}
-        </div>
-        <div className="transcript-user-actions">
-          <span>{clockTime(row.at)}</span>
-          <button type="button" onClick={() => copyText(untaggedUserText(row.text, row.attachments, row.placeholders))}>
-            Copy
-          </button>
-          {row.editable && !row.pending && (
-            <button type="button" title="Edit and resubmit forks history" onClick={() => actions.editAndResubmit(row)}>
-              Edit
-            </button>
-          )}
-        </div>
-      </div>
+      {renderEditor && variant === 'session' ? renderEditor({ storeKey, row, children: body }) : body}
       {(row.dropped || caption !== null) && (
         <div className="transcript-user-meta">
           {row.dropped && <span className="transcript-not-sent">{NOT_SENT}</span>}

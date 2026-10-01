@@ -75,7 +75,7 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
   });
 
   it('rebuilds a prefill: pasted bodies in placeholder order, a missing one unavailable, images re-attached', () => {
-    const d = prefillToDoc({ text: 'fix\n[Pasted text #1 +3 lines]\nand [Pasted text #2 +1 lines]', pasted: [{ name: 'Pasted text #1', text: 'a\nb\nc' }], images: [{ name: 'i.png', mediaType: 'image/png', data: 'iVBO' }], editing: null });
+    const d = prefillToDoc({ text: 'fix\n[Pasted text #1 +3 lines]\nand [Pasted text #2 +1 lines]', pasted: [{ name: 'Pasted text #1', text: 'a\nb\nc' }], images: [{ name: 'i.png', mediaType: 'image/png', data: 'iVBO' }] });
     const s = serializeDraft(d, { sessionId: 'e', cwd: '/' });
     expect(s.display).toBe('fix\n[Pasted text #1 +3 lines]\nand [Pasted text #2 +1 lines] [Image #3]');
     expect(s.omitted).toBe(1);

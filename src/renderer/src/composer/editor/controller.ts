@@ -11,14 +11,14 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { PickedFile } from '@shared/ipc/schema/layout';
 import type { Draft } from '@shared/ipc/schema/session';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
-import { memoryTargetOf, requestChipWidget, takePrefill, useComposerStore, type Editing, type Prefill } from '../../stores/composer';
+import { memoryTargetOf, requestChipWidget, takePrefill, useComposerStore, type Prefill } from '../../stores/composer';
 import { toast } from '../../stores/notices';
 import { useTranscriptStore } from '../../transcript';
 import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
 import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
-import { atomId, attachmentsOf, editingOfDoc, emptyDoc, isMultiline, mentionNode, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
+import { atomId, attachmentsOf, emptyDoc, isMultiline, mentionNode, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
 import { createDraftWriter, docOfDraft, isEmptyDoc, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
@@ -38,9 +38,9 @@ export interface DraftPort {
 }
 
 // How a submission was asked for: Enter and ⌘Enter send (W1: while a turn runs the Composer makes that a `next`
-// steer), ⌥Enter holds; the Composer's control adds its caret menu's Queue and Send now (M4), and edit mode its Send
-// without rewinding (M4b), which reach the caller's `onSubmit` through the same path as a key.
-export type SubmitHow = 'send' | 'hold' | 'queue' | 'interrupt_and_send' | 'send_without_rewinding';
+// steer), ⌥Enter holds; the Composer's control adds its caret menu's Queue and Send now (M4), which reach the caller's
+// `onSubmit` through the same path as a key.
+export type SubmitHow = 'send' | 'hold' | 'queue' | 'interrupt_and_send';
 
 export interface EditorHandle {
   focus(): void;
@@ -53,7 +53,6 @@ export interface EditorHandle {
   attachPicked(files: PickedFile[]): Promise<void>; // `layout.pickFiles`'s answer: bytes attach, a path is mentioned
   openSlash(): void; // the "+" menu's Slash commands: the palette at `/`
   openWidget(name: string, args?: string): boolean; // whether a widget is registered for the name (C11: `args`, default '')
-  setEditing(editing: Editing | null): void; // M4b: the edit mode the document (and so the draft) carries
 }
 
 // What the controller reads from the component, refreshed after every render.
@@ -70,7 +69,7 @@ export interface ControllerInputs {
   onPrefill?(prefill: Prefill): void;
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;
-  onRestore?(doc: ComposerDoc): void; // a draft was restored into the editor (M4b: it may carry an edit mode)
+  onRestore?(doc: ComposerDoc): void; // a draft was restored into the editor
 }
 
 // The component's state the controller sets.
@@ -237,7 +236,7 @@ export class EditorController {
     // draft clear as a palette choice's do. Only a one-line document: a multi-line draft that starts with a widget's name
     // is a message, and sends as text.
     const plain =
-      s.mode === 'send' && typeof s.content === 'string' && Object.keys(s.pastedContents).length === 0 && !isMultiline(editor.getJSON()) && editingOfDoc({ attrs: editor.state.doc.attrs }) === null;
+      s.mode === 'send' && typeof s.content === 'string' && Object.keys(s.pastedContents).length === 0 && !isMultiline(editor.getJSON());
     const typed = plain ? /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(s.display.trim()) : null;
     const widget = typed ? slashWidget(typed[1]) : null;
     if (typed && widget) {
@@ -302,8 +301,8 @@ export class EditorController {
     this.silent = options.silently;
     try {
       editor.commands.setContent(doc, { emitUpdate: true });
-      // `setContent` replaces the content and keeps the document node's own attributes: the strip and the edit go with it here
-      editor.view.dispatch(editor.state.tr.setDocAttribute('attachments', attachmentsOf(doc)).setDocAttribute('editing', editingOfDoc(doc)));
+      // `setContent` replaces the content and keeps the document node's own attributes: the strip goes with it here
+      editor.view.dispatch(editor.state.tr.setDocAttribute('attachments', attachmentsOf(doc)));
     } finally {
       this.silent = false;
     }
@@ -329,10 +328,8 @@ export class EditorController {
     }
     const next = historyNavigation(this.nav, direction, this.recalls.length, doc);
     this.nav = next.nav;
-    // What is shown carries the edit mode the editor is in (M4b), so walking history changes no edit and so is no edit.
-    const carrying = (shown: ComposerDoc): ComposerDoc => ({ ...shown, attrs: { ...shown.attrs, editing: editingOfDoc({ attrs: editor.state.doc.attrs }) } });
-    if (next.show?.kind === 'entry') this.setDoc(carrying(recallDoc(this.recalls[next.show.index])), { silently: true, caret: 'end' });
-    else if (next.show?.kind === 'draft') this.setDoc(carrying(next.show.doc), { silently: true, caret: 'end' });
+    if (next.show?.kind === 'entry') this.setDoc(recallDoc(this.recalls[next.show.index]), { silently: true, caret: 'end' });
+    else if (next.show?.kind === 'draft') this.setDoc(next.show.doc, { silently: true, caret: 'end' });
     // The caret sits at the end of what is shown, where a recalled `/compact` would open the palette and take the next
     // arrow and Enter from the walk: a recall opens no popup.
     if (next.show) closeSuggestions(editor);
@@ -398,20 +395,6 @@ export class EditorController {
     }
   }
 
-  // The edit mode into the document, written into the draft as any change is; before the draft has been read, or while
-  // a submission is in flight (whose answer replaces the document), it changes the document without a write.
-  private setEditing(editing: Editing | null): void {
-    const editor = this.editor;
-    if (!editor || this.busy) return;
-    const current = editingOfDoc({ attrs: editor.state.doc.attrs });
-    if (current?.messageUuid === editing?.messageUuid && current?.seenCursor === editing?.seenCursor) return;
-    this.silent = !this.loaded;
-    try {
-      editor.view.dispatch(editor.state.tr.setDocAttribute('editing', editing));
-    } finally {
-      this.silent = false;
-    }
-  }
 
   handle(): EditorHandle {
     const editor = () => this.editor!;
@@ -439,7 +422,6 @@ export class EditorController {
       },
       openSlash: () => void editor().chain().focus().insertContentAt(1, '/').run(),
       openWidget: (name, args = '' /* C11: the argument a widget opens with */) => this.openWidget(name, args),
-      setEditing: (editing) => this.setEditing(editing),
     };
   }
 }

@@ -589,7 +589,7 @@ describe('unstarted send holds a starting state', () => {
     act(() => void vi.advanceTimersByTime(750));
     expect(stub.patch).toHaveBeenCalledTimes(1);
     expect(stub.patch.mock.calls[0][0]).toMatchObject({ draft: { doc: { type: 'doc' } } });
-    act(() => prefillComposer(A, { text: 'handed back', editing: null }));
+    act(() => prefillComposer(A, { text: 'handed back' }));
     act(() => void vi.advanceTimersByTime(800));
     expect(stub.patch).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(stub.patch.mock.calls[1][0])).toContain('handed back');
@@ -597,14 +597,14 @@ describe('unstarted send holds a starting state', () => {
     expect(invoked('session.drafts.get')).toEqual([]);
   });
 
-  it('an intent draft that carries an edit mode restores no edit mode (an unstarted session has nothing to rewind) and is written back without it', async () => {
+  // W3 (B6): the composer has no edit mode; a draft written before W3 may still carry one, which loads as plain text
+  it('a draft that carries the retired edit mode restores its text and nothing of the edit', async () => {
     const doc = { ...docOf([paragraph(textNode('kept in the intent'))]), attrs: { attachments: [], editing: { messageUuid: 'u-1', seenCursor: 'u-1' } } };
-    const stub = stubIntent({ draft: { doc, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } });
+    stubIntent({ draft: { doc, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } });
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(editorOf().editor.getText()).toBe('kept in the intent'));
     expect(composerOf(0).querySelector('[data-edit-mode]')).toBeNull();
-    await waitFor(() => expect(stub.patch).toHaveBeenCalledTimes(1), { timeout: 2_000 });
-    expect(stub.patch.mock.calls[0][0]).toMatchObject({ draft: { doc: { attrs: { editing: null } } } });
+    expect(useComposerStore.getState().inlineEdits.size).toBe(0);
     expect(invoked('session.drafts.set')).toEqual([]);
   });
 
