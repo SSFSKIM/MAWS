@@ -21,7 +21,7 @@ import { OPERATION_COMMANDS } from '../engine/operations';
 import * as files from './schema/files';
 // C8c end
 // C11 start
-import { SETTINGS_DEFAULTS_V4 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V5 } from '../settings/defaults';
 // C11 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
@@ -250,7 +250,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V4, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V5, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -285,7 +285,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V4, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V5, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -513,7 +513,7 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('settings.get and settings.changed carry the whole version 3 state', () => {
-      const state = { settings: { ...SETTINGS_DEFAULTS_V4, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      const state = { settings: { ...SETTINGS_DEFAULTS_V5, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);

@@ -10,7 +10,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SetupIntent } from '@shared/sessions/intent';
-import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
 import { runAction } from '../keymap/actions-runtime';
 import { panelHost } from '../panel/host';
 import { patchIntent } from '../sessions/setup-actions';
@@ -47,7 +47,7 @@ const leaving = (close: () => void, open: () => unknown) => () => {
 function Footer({ appSessionId, record, status, close }: { appSessionId: AppSessionId; record: SessionRecord; status: EngineSessionStatus | null; close: () => void }) {
   const now = useNow(POPOVER_TICK_MS);
   const snapshot = useUsage((s) => s.snapshot);
-  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V4;
+  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V5;
   const login = useGateway((s) => s.directLogin.get(appSessionId) ?? null);
   const switching = useGateway((s) => s.switching.get(appSessionId) ?? null);
   const shown = useSessionWindows(record, status);
@@ -109,7 +109,7 @@ function Footer({ appSessionId, record, status, close }: { appSessionId: AppSess
 // patch). Disabled while its start runs or its first message waits behind a card: the launch already read the route,
 // and the relay card's `Run direct` is the way there.
 function UnstartedFooter({ appSessionId, intent, close }: { appSessionId: AppSessionId; intent: SetupIntent; close: () => void }) {
-  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V4;
+  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V5;
   const starting = useSetup((s) => isStarting(s, appSessionId)) || intent.message !== null;
   const [error, setError] = useState<string | null>(null);
   const route = unstartedRoute(intent, settings);

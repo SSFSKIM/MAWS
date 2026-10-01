@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { registerAction } from '../keymap/actions-runtime';
@@ -29,7 +29,7 @@ const record = scenario.sessions.find((r) => r.appId === READY)!;
 let backend: WidgetBackend;
 const offs: (() => void)[] = [];
 
-const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V4, gateway: { ...SETTINGS_DEFAULTS_V4.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
+const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V5, gateway: { ...SETTINGS_DEFAULTS_V5.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
 
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: scenario.engine, records: scenario.sessions });

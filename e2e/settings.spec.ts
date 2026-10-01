@@ -40,16 +40,16 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
     try {
       const { app, page } = maws;
       // Main migrated C5's file to version 3 on load, keeping its theme, override and notification choices. C12: to
-      // version 4, with the memory budget's defaults.
+      // version 4, with the memory budget's defaults. W2: to version 5, with the transcript's default width.
       expect(readSettings(userData)).toMatchObject({
-        version: 4, // C12
+        version: 5, // C12: 4; W2: 5
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
         notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
         engine: { binaryPath: null, pinnedVersion: '2.1.283', subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */ },
         gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
         usage: { nearLimitPercent: 90 },
-        appearance: { monoFont: null },
+        appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
       });
 
       // Settings… sits in the application menu at ⌘, and opens the singleton tab.
@@ -137,6 +137,29 @@ test('settings: the monospace font applies to the root --font-mono and to the Ap
     await row.getByRole('textbox', { name: 'Monospace font' }).fill('');
     await row.getByRole('textbox', { name: 'Monospace font' }).press('Enter');
     await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--font-mono'))).toBe('');
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// W2: Claude Desktop's width setting moves the one column the transcript's rows and the composer frame share.
+test('settings: the transcript width applies to the root --measure, and Narrow restores the token', async () => {
+  const maws = await launchMaws();
+  try {
+    const { app, page } = maws;
+    await menu(app, 'settings.open');
+    const row = panel(page).getByRole('group', { name: 'Transcript width' });
+    const measure = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--measure').trim());
+    await expect(row.getByRole('radio', { name: 'Narrow' })).toBeChecked();
+    expect(await measure()).toBe('768px');
+    await row.getByText('Wide', { exact: true }).click();
+    await expect.poll(measure).toBe('1280px');
+    await row.getByText('Medium', { exact: true }).click();
+    await expect.poll(measure).toBe('960px');
+    await row.getByText('Narrow', { exact: true }).click();
+    await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--measure'))).toBe('');
+    expect(await measure()).toBe('768px');
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();

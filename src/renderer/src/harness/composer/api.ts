@@ -7,7 +7,8 @@ export type HarnessPlacement = 'docked' | 'card' | 'hover' | 'inline';
 // M4b: a composer pane may show the session's transcript above it (C6's slot, whose bubbles offer Edit).
 // M6: or sit in C5's own session pane (`shell`), which centres an unstarted session's frame under its heading; such a
 // pane spans the page (the mockup checklist's screenshots).
-export type HarnessPane = { appSessionId: string; placement: HarnessPlacement } | { counter: true } | { composer: string; transcript?: boolean; shell?: boolean } | null;
+// W2: `wide` spans the page (a transcript pane's column then reaches its cap).
+export type HarnessPane = { appSessionId: string; placement: HarnessPlacement } | { counter: true } | { composer: string; transcript?: boolean; shell?: boolean; wide?: boolean } | null;
 
 // M4: the stub of C10's setup intent the page registers (the fields the composer reads).
 export interface HarnessIntent {

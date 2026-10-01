@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
 import { DEFAULT_SETTINGS, openSettingsStore, resolveTheme } from './store';
 
 let dir: string;
@@ -15,7 +15,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const v3 = (theme: string) => ({ ...SETTINGS_DEFAULTS_V4, theme });
+const v3 = (theme: string) => ({ ...SETTINGS_DEFAULTS_V5, theme });
 const v3Json = (theme: string) => JSON.stringify(v3(theme));
 const FIXTURES = join(__dirname, '../../../test/fixtures/settings');
 
@@ -36,7 +36,7 @@ describe('settings store', () => {
   it.each([
     ['unparseable JSON', '{"version":3,'],
     ['an unknown theme', JSON.stringify({ ...v3('sepia') })],
-    ['an unknown later version', JSON.stringify({ ...v3('dark'), version: 5 })], // C12: 4 is the current version
+    ['an unknown later version', JSON.stringify({ ...v3('dark'), version: 6 })], // C12: 4 is the current version; W2: 5
     ['a version 2 file with a version 3 section', JSON.stringify({ version: 2, theme: 'dark', keymap: {}, notifications: { enabled: true, sound: false }, usage: { nearLimitPercent: 90 } })],
     ['an unknown key', JSON.stringify({ ...v3('dark'), font: 'x' })],
     ['a version 1 file that is not valid version 1', '{"version":1,"theme":"sepia"}'],
@@ -80,9 +80,9 @@ describe('settings store', () => {
     const store = openSettingsStore(file);
     store.update({ keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null }, notifications: { enabled: false, sound: true } });
     expect(openSettingsStore(file).settings).toEqual({
-      ...SETTINGS_DEFAULTS_V4,
+      ...SETTINGS_DEFAULTS_V5,
       keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null },
-      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V4.notifications.kinds },
+      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V5.notifications.kinds },
     });
   });
 
@@ -100,36 +100,47 @@ describe('settings migrate v1 and v2 to v3', () => {
     writeFileSync(file, readFileSync(join(FIXTURES, 'v1.json')));
     expect(openSettingsStore(file).settings).toEqual(v3('dark'));
     expect(readFileSync(file, 'utf8')).toBe(v3Json('dark'));
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^\[settings\] migrated .*settings\.json from version 1 to 4$/)); // C12: to 4
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^\[settings\] migrated .*settings\.json from version 1 to 5$/)); // C12: to 4; W2: to 5
   });
 
   it("migrates C5's version 2 file keeping its keymap override and notification policy, and rewrites it once", () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     writeFileSync(file, readFileSync(join(FIXTURES, 'v2.json')));
-    const migrated = { ...v3('system'), keymap: { 'attention.next': 'Cmd+Alt+J' }, notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V4.notifications.kinds } };
+    const migrated = { ...v3('system'), keymap: { 'attention.next': 'Cmd+Alt+J' }, notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V5.notifications.kinds } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 2 to 4$/)); // C12: to 4
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 2 to 5$/)); // C12: to 4; W2: to 5
     log.mockClear();
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(log).not.toHaveBeenCalled();
   });
 
   // C12 start: C11's version 3 file gains the budget's defaults and is rewritten once
-  it('migrates a version 3 file to version 4 with the budget’s defaults, rewrites it once and logs one line', () => {
+  it('migrates a version 3 file to version 4 with the budget’s defaults, rewrites it once and logs one line', () => { // W2: to 5
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const { memoryBudgetMiB: _m, statefulMcpServers: _s, ...engineV3 } = SETTINGS_DEFAULTS_V4.engine;
+    const { memoryBudgetMiB: _m, statefulMcpServers: _s, ...engineV3 } = SETTINGS_DEFAULTS_V5.engine;
     void _m;
     void _s;
-    writeFileSync(file, JSON.stringify({ ...v3('dark'), version: 3, engine: { ...engineV3, subagentModel: 'haiku' } }));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V4.engine, subagentModel: 'haiku' } };
+    writeFileSync(file, JSON.stringify({ ...v3('dark'), version: 3, engine: { ...engineV3, subagentModel: 'haiku' }, appearance: { monoFont: null } }));
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V5.engine, subagentModel: 'haiku' } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 3 to 4$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 3 to 5$/));
   });
   // C12 end
 
-  it('never rewrites a file that is already version 4, nor writes defaults into it', () => { // C12: version 4
+  // W2 start: C12's version 4 file gains the transcript's default width and is rewritten once
+  it('migrates a version 4 file to version 5 with the default width, rewrites it once and logs one line', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    writeFileSync(file, JSON.stringify({ ...v3('dark'), version: 4, appearance: { monoFont: 'Hack' } }));
+    const migrated = { ...v3('dark'), appearance: { monoFont: 'Hack', transcriptWidth: 768 } };
+    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 4 to 5$/));
+  });
+  // W2 end
+
+  it('never rewrites a file that is already version 5, nor writes defaults into it', () => { // C12: version 4; W2: version 5
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const text = JSON.stringify({ ...v3('system'), usage: { nearLimitPercent: 80 } }, null, 2); // not the store's own formatting
     writeFileSync(file, text);

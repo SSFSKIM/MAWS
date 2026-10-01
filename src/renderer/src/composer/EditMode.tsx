@@ -37,7 +37,7 @@ export function EditModeLine({ resubmit, onLeave, onRetry, onRewindAgain, onSend
   const { text, warn } = lineCopy(resubmit);
   const leavable = resubmit.state !== 'rewinding' && resubmit.state !== 'rewind_uncertain';
   return (
-    <div data-edit-mode={resubmit.state} className={`mx-auto flex w-full max-w-[720px] min-w-0 items-center gap-1 rounded-md border-l-2 bg-bg-raised px-2.5 py-1 text-ui-sm ${warn ? 'border-warning' : 'border-accent'}`}>
+    <div data-edit-mode={resubmit.state} className={`flex w-full min-w-0 items-center gap-1 rounded-md border-l-2 bg-bg-raised px-2.5 py-1 text-ui-sm ${warn ? 'border-warning' : 'border-accent'}`}>
       <span role="status" className={`min-w-0 flex-1 truncate ${warn ? 'text-warning' : 'text-fg-muted'}`}>
         {text}
       </span>

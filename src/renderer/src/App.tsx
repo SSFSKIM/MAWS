@@ -50,7 +50,7 @@ import { registerUsagePopoverFooter } from './statusline';
 import { sessionInfoTool } from './tools/session-info';
 import { registerAllWidgets } from './widgets';
 import { registerAccountsTab } from './accounts';
-import { connectMonoFont, registerSettingsTab } from './settings-tab';
+import { connectMonoFont, connectTranscriptWidth, registerSettingsTab } from './settings-tab';
 // C11 end
 // C12 start
 import { BudgetSheets } from './budget/BudgetSheets';
@@ -141,6 +141,7 @@ export function App() {
     registerSettingsTab();
   }, []);
   useEffect(() => connectMonoFont(), []);
+  useEffect(() => connectTranscriptWidth(), []); // W2: appearance.transcriptWidth as the root --measure
   // C11 end
   // C12 start: the engine host's memory budget (Session info's line, Settings' default) and its app-wide banner
   useEffect(() => connectBudget(), []);

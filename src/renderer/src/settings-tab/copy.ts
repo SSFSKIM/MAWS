@@ -115,6 +115,10 @@ export const APPEARANCE = {
   monoFont: 'Monospace font',
   monoFontPlaceholder: 'the default stack (SF Mono)',
   monoFontNote: 'Name a Nerd Font to draw prompt glyphs in the terminal',
+  // W2: Claude Desktop's setting, in its words
+  transcriptWidth: 'Transcript width',
+  transcriptWidths: { 768: 'Narrow', 960: 'Medium', 1280: 'Wide' },
+  transcriptWidthNote: 'Maximum width of the transcript and composer columns',
   // U+E0A0 (branch) and U+E0B0 (right arrow): the powerline glyphs a prompt draws
   preview: 'main  ~/project  $',
 };

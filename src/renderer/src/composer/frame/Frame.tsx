@@ -2,8 +2,8 @@
 // correction, D-20 after Claude Desktop): the chip row above the box; the attachment strip when there are attachments;
 // the box holding only the editor and the submit control at its right (one line at rest, growing to a cap, then the
 // editor scrolls); the toolbar below the box, outside its border. Nothing around it: no heading, no hint line. The
-// same component sits centred on an unstarted session and docked under the transcript (C5 places it); C5's column
-// sizes it at about two thirds of the pane capped near 720 px, and the frame caps itself there too for other hosts.
+// same component sits centred on an unstarted session and docked under the transcript (C5 places it); it fills the
+// column C5 puts it in, the transcript's own (W2), and caps nothing itself.
 // A docked card (a request, or C10's trust and relay-down cards) takes the place of the draft's parts, the attachment
 // strip, the box and the toolbar, under the same chip row (architect's ruling on M6, mockup 04): those parts stay
 // mounted and hidden, so the editor keeps its document, and they hide in the same commit the card mounts.
@@ -30,7 +30,7 @@ export interface FrameProps {
 export function Frame({ bindings, cwd, dirty, attachments, editorHandle, editor, submit, docked = null, onOpen }: FrameProps) {
   const isDocked = docked !== null && docked !== undefined;
   return (
-    <div data-composer-frame data-docked={isDocked || undefined} className="mx-auto flex w-full max-w-[720px] min-w-0 flex-col gap-1">
+    <div data-composer-frame data-docked={isDocked || undefined} className="flex w-full min-w-0 flex-col gap-1">
       <ChipRow bindings={bindings} cwd={cwd} dirty={dirty} onOpen={() => onOpen?.('rules')} />
       {docked}
       <div data-composer-draft hidden={isDocked} className="flex min-w-0 flex-col gap-1">

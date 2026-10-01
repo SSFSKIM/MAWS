@@ -727,3 +727,44 @@ test('edit-and-resubmit across a reload during an unconfirmed rewind: edit mode 
   expect(await written(page, id!)).toEqual({ rewinds: 1, cancels: 1, users: 3 });
   expect(editor.consoleErrors()).toEqual([]);
 });
+
+// ---- W2: proportions -----------------------------------------------------------------------------------------------
+
+// The rendered box of an element, and its padding, read in the page.
+const geometry = (locator: ReturnType<Page['locator']>) =>
+  locator.evaluate((el) => {
+    const style = getComputedStyle(el);
+    const box = el.getBoundingClientRect();
+    return { left: box.left, width: box.width, height: box.height, padLeft: parseFloat(style.paddingLeft), padRight: parseFloat(style.paddingRight), fontSize: style.fontSize, lineHeight: style.lineHeight };
+  });
+
+// B1 (charter §6 as amended 2026-10-01): the transcript's rows and the composer frame share one column, Codex's. In a pane
+// wider than the column both sit at its 768px cap with 16px inside, so the frame is exactly the 736px of text; the prose
+// is 14px at a 22.75px pitch.
+test('W2: a transcript row and the composer frame share one column, and the prose is 14px', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'w2-column';
+  await openComposerPage(page);
+  await launchReady(page, id, turnsJournal(scratch, id, 1));
+  await showPanes(page, [{ composer: id, transcript: true, wide: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type('turn one');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  const p = pane(page, 0);
+  const userRow = p.locator('.transcript-row[data-kind="user"]').first();
+  await expect(userRow).toBeVisible();
+
+  const row = await geometry(userRow);
+  const column = await geometry(p.locator('[data-composer]').locator('xpath=..'));
+  const frame = await geometry(p.locator('[data-composer-frame]'));
+  expect(row.width).toBe(768); // the column's cap, in px
+  expect([row.padLeft, row.padRight]).toEqual([16, 16]);
+  expect(column.width).toBe(row.width); // the composer's column is the transcript's
+  expect(column.left).toBe(row.left);
+  expect(frame.width).toBe(row.width - row.padLeft - row.padRight); // 736: the frame is exactly the text's width
+  expect(frame.left).toBe(row.left + row.padLeft);
+  expect(row.fontSize).toBe('14px');
+  expect(await geometry(userRow.locator('.transcript-user-bubble p').first())).toMatchObject({ fontSize: '14px', lineHeight: '22.75px' });
+  expect(editor.consoleErrors()).toEqual([]);
+});

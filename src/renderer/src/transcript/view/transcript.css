@@ -1,15 +1,13 @@
 /* Transcript component styles (C6). X7 tokens only; layout values after mockup 02 (advisory). */
 
+/* A row sits in the column it shares with the composer frame (`.thread-column`, app.css; W2) */
 .transcript-row {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: calc(var(--measure) + 48px);
-  margin: 0 auto;
-  padding: 0 24px;
   font-size: var(--text-prose);
   color: var(--fg);
   outline: none;
 }
+/* The scroller is the query container a wide block measures the pane by */
+[data-transcript-scroller] { container-type: inline-size; }
 .transcript-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .transcript-disclosure {
@@ -109,9 +107,24 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-mermaid-failed { margin-top: -8px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-mermaid:not([data-drawn]) > .transcript-mermaid-diagram { position: absolute; inset: 0 0 auto 0; visibility: hidden; pointer-events: none; }
 .transcript-prose :not(pre) > code { padding: 1px 5px; border-radius: 4px; background: var(--bg-active); font-family: var(--font-mono); font-size: 0.9em; }
-.transcript-prose h1 { font-size: calc(var(--text-prose) * 1.3); }
-.transcript-prose h2 { font-size: calc(var(--text-prose) * 1.2); }
-.transcript-prose h3 { font-size: calc(var(--text-prose) * 1.1); }
+/* W2: Codex's heading scale (1.5, 1.25, 1.125 and 1 of the prose; 28, 24.5, 24.5 and 21px lines at 14px) */
+.transcript-prose h1 { font-size: calc(var(--text-prose) * 1.5); line-height: calc(var(--text-prose) * 2); }
+.transcript-prose h2 { font-size: calc(var(--text-prose) * 1.25); line-height: calc(var(--text-prose) * 1.75); }
+.transcript-prose h3 { font-size: calc(var(--text-prose) * 1.125); line-height: calc(var(--text-prose) * 1.75); }
+.transcript-prose :is(h4, h5, h6) { font-size: var(--text-prose); line-height: calc(var(--text-prose) * 1.5); }
+/* A fence draws at the code size (Streamdown's body is text-sm, the chrome size) */
+.transcript-prose [data-streamdown="code-block-body"] { font-size: var(--text-code); }
+.transcript-prose pre code { font-size: inherit; }
+/* W2: an answer's wide table or code block may break out of the text to --measure-wide, centred on the column and never
+   past the pane; one no wider than the text keeps the text's width */
+:is(.transcript-answer, .transcript-commentary) > .transcript-prose > [dir] > :is([data-streamdown="table-wrapper"], [data-streamdown="code-block"]) {
+  position: relative;
+  left: 50%;
+  transform: translateX(-50%);
+  width: fit-content;
+  min-width: 100%;
+  max-width: min(calc(var(--measure-wide) - 2 * var(--measure-pad)), calc(100cqi - 2 * var(--measure-pad)));
+}
 .transcript-prose a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .transcript-image { max-width: 100%; border-radius: var(--radius-sm); }
 

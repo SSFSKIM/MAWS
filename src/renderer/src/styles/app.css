@@ -85,3 +85,16 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+/* W2 (B1, C1; charter §5.4 and §6 as amended 2026-10-01): the one column the transcript's rows and the composer frame
+   share, as Codex's thread column does: --measure wide with --measure-pad inside, centred; on a pane narrower than
+   that, the pane's width. */
+@layer components {
+  .thread-column {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: var(--measure);
+    margin-inline: auto;
+    padding-inline: var(--measure-pad);
+  }
+}
