@@ -116,10 +116,12 @@ describe('permissions', () => {
     expect(controls('session.setPermissionMode')).toEqual([{ appSessionId: READY, mode: 'acceptEdits' }]);
   });
 
-  it('a refusal toasts its words (auto on Haiku, auto-routed seq 156)', async () => {
+  // W3: Haiku's live row omits `supportsAutoMode` (reads.jsonl seq 3), which the gate now reads as no auto, so the widget
+  // opens and says why instead of sending a set_permission_mode the engine refuses (auto-routed seq 156)
+  it('auto on Haiku opens the widget, which says why, and sends nothing', async () => {
     setStatus({ model: { requested: 'haiku', resolved: 'claude-haiku-4-5-20251001' }, permissionMode: { requested: 'default', effective: 'default', refusal: null } });
-    expect(await TYPED_APPLY.permissions!(READY, 'auto')).toBe(true);
-    await toastSoon().toEqual([['warning', 'This model does not support auto mode']]);
+    expect(await TYPED_APPLY.permissions!(READY, 'auto')).toBe(false);
+    expect(controls('session.setPermissionMode')).toEqual([]);
   });
 
   it('opens instead for bypassPermissions (it asks first) and for a word that is no mode', async () => {

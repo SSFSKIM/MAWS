@@ -5,7 +5,7 @@ import { createNoticesStore } from '../stores/notices';
 import { createSettingsStore } from '../stores/settings';
 import { createUsageStore } from '../stores/usage';
 import { bannerKey, connectNearLimitBanners, nearLimitBanners, thresholdFrom } from './near-limit';
-import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V6 } from '@shared/settings/defaults';
 
 const NOW = Date.parse('2026-09-29T08:00:00Z');
 const at = (ms: number) => new Date(NOW + ms).toISOString();
@@ -65,8 +65,8 @@ describe('near-limit banner posts once per window', () => {
 
   it('reads the threshold from settings v3’s usage.nearLimitPercent, 90 before the settings are read', () => {
     expect(thresholdFrom(null)).toBe(90);
-    expect(thresholdFrom(SETTINGS_DEFAULTS_V5)).toBe(90);
-    expect(thresholdFrom({ ...SETTINGS_DEFAULTS_V5, usage: { nearLimitPercent: 75 } })).toBe(75);
+    expect(thresholdFrom(SETTINGS_DEFAULTS_V6)).toBe(90);
+    expect(thresholdFrom({ ...SETTINGS_DEFAULTS_V6, usage: { nearLimitPercent: 75 } })).toBe(75);
   });
 });
 
@@ -211,7 +211,7 @@ describe('near-limit banner posts once per window: the notices adapter', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(banners().map((b) => b.id)).not.toContain(fable);
     // C11's field (settings v3): the state as main sends it
-    const state = { settings: { ...SETTINGS_DEFAULTS_V5, theme: 'system' as const, usage: { nearLimitPercent: 80 } }, resolvedTheme: 'light' as const };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V6, theme: 'system' as const, usage: { nearLimitPercent: 80 } }, resolvedTheme: 'light' as const };
     settingsStore.setState({ state });
     expect(banners().map((b) => b.id)).toContain(fable);
     off();

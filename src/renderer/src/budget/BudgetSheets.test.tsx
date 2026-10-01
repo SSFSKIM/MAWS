@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import type { BudgetState } from '@shared/ipc/schema/engine';
-import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V6 } from '@shared/settings/defaults';
 import { humanTurn, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { useSessions } from '../stores/sessions';
@@ -40,7 +40,7 @@ beforeEach(() => {
     records: new Map([TURN, SLEEP, KERNEL].map((id) => [id, record(id, { title: { text: `Session ${id.slice(4)}`, source: 'user' } })])),
     engine: new Map(statuses.map((s) => [s.appSessionId, s])),
   });
-  useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V5, engine: { ...SETTINGS_DEFAULTS_V5.engine, statefulMcpServers: ['c12-kernel'] } }, resolvedTheme: 'light' } });
+  useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V6, engine: { ...SETTINGS_DEFAULTS_V6.engine, statefulMcpServers: ['c12-kernel'] } }, resolvedTheme: 'light' } });
   useBudget.getState().apply(state);
 });
 afterEach(() => {

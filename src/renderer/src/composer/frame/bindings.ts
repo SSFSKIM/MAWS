@@ -67,7 +67,7 @@ export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean 
   const gated = gate.starting ? STARTING : intent.message !== null ? MESSAGE_HELD : null;
   const through = <V>(write: (v: V) => Parameters<SetupIntentHook['patch']>[0]) => (gated === null ? (v: V) => hook.patch(write(v)) : refused(gated));
   const location = intent.location;
-  const chosen = options.models.find((m) => m.value === intent.model);
+  const chosen = options.models.find((m) => m.value === (intent.model ?? defaults?.model ?? DEFAULT_ROW));
   return {
     location: { value: location, options: options.locations, disabled: gated, set: through((l: Location) => ({ location: l })) },
     branch: {
@@ -91,11 +91,11 @@ export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean 
       set: through((m: ModelChoice) => ({ model: m.model, effort: m.effort })),
     },
     mode: {
-      value: intent.permissionMode,
+      value: intent.permissionMode ?? defaults?.defaultMode ?? 'auto', // W3: what the launch passes for an intent that chose none
       options: MODE_OPTIONS.map((o) => o.mode),
       disabled: gated,
       refusal: null,
-      autoUnavailable: chosen?.supportsAutoMode === false ? MODE_REFUSAL_WORDS.auto_mode_model : null,
+      autoUnavailable: chosen !== undefined && chosen.supportsAutoMode !== true ? MODE_REFUSAL_WORDS.auto_mode_model : null, // W3: absent is not auto
       set: through((permissionMode) => ({ permissionMode })),
     },
     directories: { value: intent.additionalDirectories, options: [], disabled: gated, set: through((additionalDirectories: string[]) => ({ additionalDirectories })) },

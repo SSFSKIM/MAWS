@@ -15,7 +15,8 @@ describe('the model catalogue', () => {
   });
 
   it('notes a model that cannot hold auto mode only when the mode is auto', () => {
-    expect(autoModeNote(haiku, 'auto')).toBe('This model cannot hold auto mode; the engine will run in default.');
+    expect(autoModeNote(haiku, 'auto')).toBe("Auto mode isn't available for Haiku. This session will use acceptEdits instead."); // W3: the fallback
+    expect(autoModeNote(haiku, 'auto', 'default')).toBe("Auto mode isn't available for Haiku. This session will use default instead.");
     expect(autoModeNote(haiku, 'default')).toBeNull();
     expect(autoModeNote(haiku, null)).toBeNull();
     expect(autoModeNote(sonnet, 'auto')).toBeNull();
@@ -26,7 +27,7 @@ describe('the model catalogue', () => {
     expect(autoModeNote(astra, 'auto')).toBe(note);
     expect(autoModeNote(astra, null)).toBe(note);
     expect(autoModeNote(astra, 'default')).toBeNull();
-    expect(autoModeNote({ ...astra, supportsAutoMode: false }, 'auto')).toBe('This model cannot hold auto mode; the engine will run in default.');
+    expect(autoModeNote({ ...astra, supportsAutoMode: false }, 'auto')).toBe("Auto mode isn't available for astra. This session will use acceptEdits instead.");
     expect(autoModeNote(null, 'auto')).toBeNull();
   });
 

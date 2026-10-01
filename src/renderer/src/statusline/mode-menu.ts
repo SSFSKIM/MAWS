@@ -18,12 +18,13 @@ export interface ModeOption {
   confirm: boolean; // asks before switching
 }
 
+// W3 (charter §5.1 as amended 2026-10-01): auto and bypass first, the modes people run; ⇧Tab keeps the terminal's cycle.
 export const MODE_OPTIONS: readonly ModeOption[] = [
+  { mode: 'auto', description: 'A classifier approves what is safe and asks for the rest', confirm: false },
+  { mode: 'bypassPermissions', description: 'Every tool runs without asking', confirm: true },
   { mode: 'default', description: 'Asks before each tool that needs approval', confirm: false },
   { mode: 'acceptEdits', description: 'File edits are approved; other tools ask', confirm: false },
   { mode: 'plan', description: 'Reads and plans; changes nothing', confirm: false },
-  { mode: 'auto', description: 'A classifier approves what is safe and asks for the rest', confirm: false },
-  { mode: 'bypassPermissions', description: 'Every tool runs without asking', confirm: true },
 ];
 
 export const BYPASS_CONFIRM = 'Bypass permissions runs every tool without asking, file edits and shell commands included.';
@@ -47,12 +48,13 @@ export function nextMode(current: PermissionMode | null, autoAvailable: boolean)
   return at === -1 ? 'default' : cycle[(at + 1) % cycle.length];
 }
 
-// Why auto cannot be chosen: `session.listModels` marks the session's model `supportsAutoMode: false`. An unknown model
-// (the list not read yet, or the model not in it) is offered; the engine then refuses in words.
+// Why auto cannot be chosen: `session.listModels` does not mark the session's model `supportsAutoMode: true` (W3: Haiku's
+// live row omits the key, reads.jsonl seq 3, and the engine refuses it). An unknown model (the list not read yet, or the
+// model not in it) is offered; the engine then refuses in words.
 export function autoUnavailableReason(models: readonly Pick<ModelOption, 'value' | 'resolvedModel' | 'supportsAutoMode'>[] | null, model: EngineSessionStatus['model']): string | null {
   const names = [model.resolved, model.requested].filter((n): n is string => n !== null);
   const option = models?.find((m) => names.includes(m.value) || names.includes(m.resolvedModel));
-  return option?.supportsAutoMode === false ? MODE_REFUSAL_WORDS.auto_mode_model : null;
+  return option !== undefined && option.supportsAutoMode !== true ? MODE_REFUSAL_WORDS.auto_mode_model : null;
 }
 
 // The menu's input: the frame's binding fields (value, options, disabled, set) with the two facts only the mode menu

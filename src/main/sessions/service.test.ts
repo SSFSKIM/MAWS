@@ -37,10 +37,18 @@ describe('session service', () => {
   const create = async (path = h.work) => (await h.service.create({ projectId: null, location: { kind: 'directory', path } })).appSessionId;
 
   describe('intents', () => {
+    // W3 (charter D-18 and §5.1 as amended 2026-10-01): the user's permissions.defaultMode seeds a new intent's mode
+    it("create seeds the mode from the user's defaultMode", async () => {
+      h.dispose();
+      h = await new SessionHarness({ userDefaults: async () => ({ model: null, effortLevel: null, defaultMode: 'acceptEdits' }) }).start();
+      const { intent } = await h.service.create({ projectId: null, location: null });
+      expect(intent.permissionMode).toBe('acceptEdits');
+    });
+
     it('create persists an intent file, publishes it, and makes no record and no launch', async () => {
       const { appSessionId, intent } = await h.service.create({ projectId: null, location: null });
       expect(intentFile(h, appSessionId)).toEqual(intent);
-      expect(intent).toMatchObject({ kind: 'create', gateway: 'gateway', trust: 'unanswered', trustKey: null, message: null, draft: null, model: null, permissionMode: null });
+      expect(intent).toMatchObject({ kind: 'create', gateway: 'gateway', trust: 'unanswered', trustKey: null, message: null, draft: null, model: null, permissionMode: 'auto' }); // W3: no user defaultMode, so MAWS's auto
       expect(h.index.sessions.get(appSessionId)).toBeNull();
       expect(h.host.launches).toEqual([]);
       expect(h.events.some((e) => e.name === 'session.intent.changed')).toBe(true);
@@ -199,7 +207,7 @@ describe('session service', () => {
 
     it("falls back to direct for a Claude model when settings say so, with the session's notice", async () => {
       h.dispose();
-      h = await new SessionHarness({ settings: () => ({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'direct' }, engine: { subagentModel: null } }) }).start();
+      h = await new SessionHarness({ settings: () => ({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'direct' }, engine: { subagentModel: null }, permissions: { autoFallback: 'acceptEdits' } }) }).start();
       h.trustDirectory(h.work);
       h.host.relay = DOWN_RELAY;
       const id = await create();

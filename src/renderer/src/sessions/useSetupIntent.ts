@@ -3,6 +3,7 @@
 // through C7's `registerSetupIntentHook` at module load, so this module's `SetupIntentHook` extends C7's landed type:
 // the intent is C10's whole `SetupIntent` (C7 reads a subset) and `patch` takes C10's patch (C7 writes a subset).
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogue, ModelCatalogueEntry } from '@shared/sessions/models';
 import { autoModeNote, BUILTIN_MODELS } from '@shared/sessions/models';
@@ -12,6 +13,7 @@ import { defaultBranchName, type WorktreeInfo } from '@shared/sessions/worktree'
 import type { ModelInfo, SetupIntentHook as ComposerSetupIntentHook } from '../composer/setup-intent';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
+import { useSettings } from '../stores/settings'; // W3
 import { patchIntent, startIntent, type HookResult } from './setup-actions';
 import { useSetup } from './store';
 
@@ -88,10 +90,10 @@ export function modelsOf(catalogue: ModelCatalogue): ModelInfo[] {
 
 // The note beside the mode and model chips for the model the launch would use (`default` when the intent leaves it
 // to the engine).
-export function noteFor(catalogue: ModelCatalogue, intent: Pick<SetupIntent, 'model' | 'permissionMode'>): string | null {
+export function noteFor(catalogue: ModelCatalogue, intent: Pick<SetupIntent, 'model' | 'permissionMode'>, fallback: PermissionMode = 'acceptEdits'): string | null {
   const value = intent.model ?? 'default';
   const entry: ModelCatalogueEntry | null = catalogue.models.find((m) => m.value === value) ?? (intent.model === null ? null : { value: intent.model, displayName: intent.model });
-  return autoModeNote(entry, intent.permissionMode);
+  return autoModeNote(entry, intent.permissionMode, fallback); // W3: the mode MAWS sets when auto is refused
 }
 
 // The running setup's phase as the composer says it (Interfaces, "The unstarted session": `Creating worktree <name>` ·
@@ -153,6 +155,7 @@ function useSetupOptions(
   const [facts, setFacts] = useState<RepositoryFacts | null>(null);
   const [catalogue, setCatalogue] = useState<ModelCatalogue>(BUILTIN_FALLBACK);
   const [worktreeName] = useState(() => defaultWorktreeName());
+  const fallback = useSettings((s) => s.state?.settings.permissions.autoFallback) ?? 'acceptEdits'; // W3
 
   // Only an unstarted session reads it: C7 calls this hook from every composer, and a started session's has no intent.
   const route = intent?.gateway ?? null;
@@ -184,9 +187,9 @@ function useSetupOptions(
       locations: locationsOf({ projectDirectory: projectDirectory ?? facts?.repoRoot ?? baseDirectoryOf(intent.location), intent, repoRoot: facts?.repoRoot ?? null, worktrees: facts?.worktrees ?? [], worktreeName }),
       branches: facts?.branches ?? [],
       models: modelsOf(catalogue),
-      autoModeNote: noteFor(catalogue, intent),
+      autoModeNote: noteFor(catalogue, intent, fallback),
     };
-  }, [intent, projectDirectory, facts, catalogue, worktreeName]);
+  }, [intent, projectDirectory, facts, catalogue, worktreeName, fallback]);
   // A failed trust check is read again at Send (the directory may be readable now): the refusal stands only while the
   // check still fails.
   const recheck = useCallback(async () => {

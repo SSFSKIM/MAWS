@@ -37,14 +37,16 @@ export function isGatewayModel(value: string): boolean {
   return value.startsWith('claude/');
 }
 
-export const CANNOT_HOLD_AUTO_NOTE = 'This model cannot hold auto mode; the engine will run in default.';
+// W3 (charter D-18 as amended 2026-10-01): Claude Desktop's notice in MAWS's words, with the mode MAWS sets instead.
+export const autoFallbackNotice = (fallback: string): string => `Auto mode isn't available for this session. Using ${fallback} instead.`;
+export const cannotHoldAutoNote = (model: string, fallback: string): string => `Auto mode isn't available for ${model}. This session will use ${fallback} instead.`;
 export const GATEWAY_AUTO_NOTE = 'Auto-mode reviews for this model run locally on Sonnet 5 and count against your usage.';
 
-// A model that cannot hold auto mode, when auto is chosen; else a gateway model's local auto-mode lane (§19), when the
-// mode is auto or left to settings (the owner's settings default is auto, D-18); else nothing.
-export function autoModeNote(entry: ModelCatalogueEntry | null, permissionMode: PermissionMode | null): string | null {
+// A model that cannot hold auto mode, when auto is chosen (W3: with the fallback the launch will set); else a gateway
+// model's local auto-mode lane (§19), when the mode is auto or left to settings (D-18); else nothing.
+export function autoModeNote(entry: ModelCatalogueEntry | null, permissionMode: PermissionMode | null, fallback: PermissionMode = 'acceptEdits'): string | null {
   if (!entry) return null;
-  if (permissionMode === 'auto' && entry.supportsAutoMode !== true) return CANNOT_HOLD_AUTO_NOTE;
+  if (permissionMode === 'auto' && entry.supportsAutoMode !== true) return cannotHoldAutoNote(entry.displayName, fallback);
   if (isGatewayModel(entry.value) && (permissionMode === 'auto' || permissionMode === null)) return GATEWAY_AUTO_NOTE;
   return null;
 }

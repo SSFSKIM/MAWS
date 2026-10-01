@@ -105,6 +105,13 @@ export class SessionStatusTracker {
     if (effective !== null) this.setMode(effective);
   }
 
+  // W3: auto asked at launch and refused by the engine (silently, pass2/auto-haiku seq 4): the fallback the host set is
+  // the effective mode, auto stays requested (so a resume asks again), and the refusal says why until the human picks.
+  fallBack(effective: PermissionMode, refusal: AutoModeRefusalCode): void {
+    this.setMode(effective);
+    this.refusal = refusal;
+  }
+
   // A main-lane turn.started: the local-lane observation belongs to the turn it was made in (C11's correction).
   turnStarted(eventId: EventId): void {
     this.currentTurnEventId = eventId;

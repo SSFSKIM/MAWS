@@ -40,6 +40,9 @@ export const ENGINE = {
   subagent: 'Subagent model',
   subagentPlaceholder: 'inherit', // W3: the engine's own word for no override (each agent's model, else the session's)
   subagentNote: 'Sets CLAUDE_CODE_SUBAGENT_MODEL per launch for new sessions; Session info shows what a session actually got.',
+  // W3 (charter D-18 as amended 2026-10-01)
+  autoFallback: 'When auto mode is unavailable',
+  autoFallbackNote: "Some models (Haiku), fast mode and auto mode's circuit breaker refuse auto. MAWS then sets this mode for the session and says so; the next resume asks for auto again.",
 };
 
 // C12 start: the memory budget's rows in Settings › Engine (C12 execution document, "Surfaces of the budget")

@@ -1,8 +1,8 @@
 // X2 `settings.*`: the persisted app settings and the theme resolved from them (charter §12 C1 *Theme switching*).
 // Version 2 (C5): the keymap overrides and the notification policy. Version 3 (C11): the engine binary, the gateway
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
-// memory budget. Version 5 (W2): the transcript's width. Migrations live in `src/shared/settings/defaults.ts`, run by
-// main's store; the schema never defaults.
+// memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
+// auto. Migrations live in `src/shared/settings/defaults.ts`, run by main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
 import { CHORD_PATTERN } from '../../keymap/chord';
@@ -57,9 +57,14 @@ const AppearanceSettingsSchema = z.strictObject({
 });
 const NotificationSettingsSchema = z.strictObject({ enabled: z.boolean(), sound: z.boolean(), kinds: NotificationKindsSchema });
 // C11 end
+// W3: charter D-18 and §5.1 as amended 2026-10-01: when the engine refuses auto for a session (a model without auto mode,
+// fast mode, the circuit breaker, settings), MAWS sets this mode explicitly and says so; any engine mode but auto.
+export const AutoFallbackSchema = PermissionModeSchema.exclude(['auto']);
+export type AutoFallback = z.infer<typeof AutoFallbackSchema>;
+const PermissionsSettingsSchema = z.strictObject({ autoFallback: AutoFallbackSchema });
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(5), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth)
+  version: z.literal(6), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.
@@ -71,6 +76,7 @@ export const SettingsSchema = z.strictObject({
   usage: UsageSettingsSchema,
   appearance: AppearanceSettingsSchema,
   // C11 end
+  permissions: PermissionsSettingsSchema, // W3
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -85,6 +91,7 @@ export const SettingsPatchSchema = z.strictObject({
   gateway: GatewaySettingsSchema.partial().optional(),
   usage: UsageSettingsSchema.partial().optional(),
   appearance: AppearanceSettingsSchema.partial().optional(),
+  permissions: PermissionsSettingsSchema.partial().optional(), // W3
 });
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
 

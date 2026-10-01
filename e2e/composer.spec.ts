@@ -500,6 +500,8 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   await expect(p.getByRole('button', { name: `Location ${repo}` })).toBeVisible();
   await expect(p.getByRole('region', { name: 'Queued messages' })).toHaveCount(0);
 
+  // W3 (C5): an intent that chose no mode shows what the launch passes, the user's defaultMode, else auto; never a printed default
+  await expect(p.getByRole('button', { name: /^Permission mode/ })).toHaveAttribute('aria-label', 'Permission mode auto');
   // a chip writes through the intent
   await p.getByRole('button', { name: /^Permission mode/ }).click();
   await page.getByRole('menuitemradio', { name: /^plan/ }).click();

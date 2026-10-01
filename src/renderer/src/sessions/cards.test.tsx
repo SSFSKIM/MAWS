@@ -21,7 +21,7 @@ import { TrustCard } from './TrustCard';
 // C11 start
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
-import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V6 } from '@shared/settings/defaults';
 import { GatewayDialogs } from '../gateway/SwitchSheet';
 import { registerAction } from '../keymap/actions-runtime';
 import { useSettings } from '../stores/settings';
@@ -244,7 +244,7 @@ describe('relay card, with C11', () => {
   afterEach(() => useSettings.setState({ state: null }));
 
   it("settings' relayUnreachable 'wait' makes Open ClaudeUsage, then start the primary, and it runs C11's hand-off", async () => {
-    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V5, gateway: { ...SETTINGS_DEFAULTS_V5.gateway, relayUnreachable: 'wait' } }, resolvedTheme: 'light' } as never });
+    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V6, gateway: { ...SETTINGS_DEFAULTS_V6.gateway, relayUnreachable: 'wait' } }, resolvedTheme: 'light' } as never });
     const handOff = vi.fn();
     const off = registerAction('gateway.openClaudeUsage', handOff);
     const card = await docked();

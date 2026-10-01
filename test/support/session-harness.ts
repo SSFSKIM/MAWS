@@ -32,6 +32,7 @@ export interface HarnessOptions {
   watchdogMs?: number;
   stopWaitMs?: number;
   launchGate?: SessionServiceDeps['launchGate']; // C12: main's custody gate
+  userDefaults?: SessionServiceDeps['userDefaults']; // W3: the user's settings.json as main reads it
 }
 
 export class SessionHarness {
@@ -107,6 +108,7 @@ export class SessionHarness {
       replay: this.opts.replay ?? null,
       settings: this.opts.settings,
       launchGate: this.opts.launchGate, // C12
+      userDefaults: this.opts.userDefaults, // W3
       timing: { watchdogMs: this.opts.watchdogMs ?? 2_000, stopWaitMs: this.opts.stopWaitMs ?? 200 },
       log: () => {},
     });

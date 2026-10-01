@@ -356,7 +356,7 @@ test.describe('interactive', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
-  test('permissions mode refusal: haiku, then auto, reads the refusal with the mode still default', async ({ backend }) => {
+  test('permissions mode refusal: haiku, then auto, reads the refusal with the mode still default and the composer’s notice', async ({ backend }) => {
     const { page } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await pick(page, 'permissions');
@@ -370,9 +370,15 @@ test.describe('interactive', () => {
     await expect(widget(page, 'model').getByRole('button', { name: 'Haiku · Select model' })).toBeVisible(); // applied, back on the effort view
 
     await pick(page, 'permissions');
-    await widget(page, 'permissions').getByRole('menuitemradio', { name: /^auto/ }).click();
-    await expect(widget(page, 'permissions').getByRole('alert')).toHaveText('This model does not support auto mode'); // seq 156, as C3 maps it
+    // W3 (C5): Haiku's live row omits supportsAutoMode (reads.jsonl seq 3), which the gate reads as no auto: the item says why
+    const auto = widget(page, 'permissions').getByRole('menuitemradio', { name: /^auto/ });
+    await expect(auto).toBeDisabled();
+    await expect(auto).toContainText('This model does not support auto mode');
+    // the engine's own refusal, asked for directly (seq 156, as C3 maps it): the mode stays, and the composer says so in
+    // Claude Desktop's words
+    await page.evaluate((id) => (window as unknown as WidgetsWindow).__maws_widgets.control('setPermissionMode', { appSessionId: id, mode: 'auto' }), READY);
     await expect(widget(page, 'permissions').getByRole('menuitemradio', { checked: true })).toContainText('default');
+    await expect(page.getByRole('note', { name: 'Permission mode notice' })).toContainText("Auto mode isn't available for this session. Using default instead.");
     const log = await calls(backend);
     expect(log.filter((c) => c.subtype === 'set_permission_mode').map((c) => c.input)).toEqual([
       { appSessionId: READY, mode: 'default' },

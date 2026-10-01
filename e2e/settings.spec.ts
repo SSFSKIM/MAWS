@@ -40,9 +40,10 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
     try {
       const { app, page } = maws;
       // Main migrated C5's file to version 3 on load, keeping its theme, override and notification choices. C12: to
-      // version 4, with the memory budget's defaults. W2: to version 5, with the transcript's default width.
+      // version 4, with the memory budget's defaults. W2: to version 5, with the transcript's default width. W3: to
+      // version 6, with acceptEdits as the auto fallback.
       expect(readSettings(userData)).toMatchObject({
-        version: 5, // C12: 4; W2: 5
+        version: 6, // C12: 4; W2: 5; W3: 6
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
         notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
@@ -50,6 +51,7 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
         gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
         usage: { nearLimitPercent: 90 },
         appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
+        permissions: { autoFallback: 'acceptEdits' }, // W3
       });
 
       // Settings… sits in the application menu at ⌘, and opens the singleton tab.

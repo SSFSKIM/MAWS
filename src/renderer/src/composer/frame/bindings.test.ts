@@ -127,6 +127,15 @@ describe('the model chip names the model and the effort the engine uses', () => 
     expect(intentBindings(chosen, { starting: false }, { model: 'fable', effortLevel: 'xhigh', defaultMode: null }).model.label).toBe('sol high');
   });
 
+  it('an unstarted mode is the intent’s, else the user’s defaultMode, else auto; auto is off for a row that does not say it holds auto', () => {
+    expect(intentBindings(hook(), { starting: false }).mode.value).toBe('auto');
+    expect(intentBindings(hook(), { starting: false }, { model: null, effortLevel: null, defaultMode: 'plan' }).mode.value).toBe('plan');
+    expect(intentBindings(hook({ permissionMode: 'default' }), { starting: false }, { model: null, effortLevel: null, defaultMode: 'plan' }).mode.value).toBe('default');
+    const haiku = hook({ model: 'haiku' });
+    haiku.options.models = [{ value: 'haiku', displayName: 'Haiku' }]; // reads.jsonl seq 3: the key is absent
+    expect(intentBindings(haiku, { starting: false }).mode.autoUnavailable).toBe('This model does not support auto mode');
+  });
+
   it('a live session: the resolved model by its named row, with the effort get_settings applied, else the requested one', () => {
     const s = { ...status(APP), model: { requested: null, resolved: 'claude-opus-5-5[1m]' }, effort: null };
     expect(liveBindings(s, record(APP), { modelNames: catalogue, effort: 'high' }).model.label).toBe('opus high');

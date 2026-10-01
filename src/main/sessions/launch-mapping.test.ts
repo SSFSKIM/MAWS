@@ -4,7 +4,7 @@ import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
 import { record } from '../../../test/support/builders';
-import { bootstrapSpec, C10_SETTING_DEFAULTS, intentLaunchSpec, readSettings, resumeLaunchSpec, toLaunchSpec, trustMapping, type C10Settings } from './launch-mapping';
+import { bootstrapSpec, C10_SETTING_DEFAULTS, intentLaunchSpec, readSettings, resumeLaunchSpec, toLaunchSpec, trustMapping, type C10Settings, seedPermissionMode } from './launch-mapping';
 
 const APP = 'a0000000-0000-4000-8000-000000000001' as AppSessionId;
 const BOOT = 'b0000000-0000-4000-8000-000000000002' as AppSessionId;
@@ -40,9 +40,18 @@ describe('launch mapping', () => {
 
   it('fills subagentModel from the settings seam (null until C11 lands settings v3)', () => {
     expect(readSettings()).toEqual(C10_SETTING_DEFAULTS);
-    expect(C10_SETTING_DEFAULTS).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask' }, engine: { subagentModel: null } });
+    expect(C10_SETTING_DEFAULTS).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask' }, engine: { subagentModel: null }, permissions: { autoFallback: 'acceptEdits' } });
     const settings: C10Settings = { ...C10_SETTING_DEFAULTS, engine: { subagentModel: 'sonnet' } };
     expect(toLaunchSpec(base, settings).subagentModel).toBe('sonnet');
+  });
+
+  // W3 (charter D-18 as amended 2026-10-01): an auto launch carries the fallback the host sets when the engine refuses it
+  it('passes the auto fallback with an auto launch only, and seeds a mode from the user’s defaultMode, else auto', () => {
+    const settings: C10Settings = { ...C10_SETTING_DEFAULTS, permissions: { autoFallback: 'plan' } };
+    expect(toLaunchSpec({ ...base, permissionMode: 'auto' }, settings).permissionFallback).toBe('plan');
+    expect(toLaunchSpec({ ...base, permissionMode: 'acceptEdits' }, settings).permissionFallback).toBeNull();
+    expect(seedPermissionMode({ defaultMode: null })).toBe('auto');
+    expect(seedPermissionMode({ defaultMode: 'acceptEdits' })).toBe('acceptEdits');
   });
 
   it('attests the trust key, not the session directory, only for an accepted decision given for that key', () => {

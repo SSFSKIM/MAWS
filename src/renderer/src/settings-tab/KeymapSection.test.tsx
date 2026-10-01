@@ -4,7 +4,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V6 } from '@shared/settings/defaults';
 import { useSettings } from '../stores/settings';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { KeymapSection } from './KeymapSection';
@@ -15,7 +15,7 @@ function Live() {
   return <KeymapSection keymap={keymap} />;
 }
 function renderSection(keymap = {}) {
-  b = settingsBridge({ ...SETTINGS_DEFAULTS_V5, keymap });
+  b = settingsBridge({ ...SETTINGS_DEFAULTS_V6, keymap });
   window.maws = b.bridge;
   render(<Live />);
 }

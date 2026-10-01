@@ -49,11 +49,11 @@ describe('the session service reads the settings store', () => {
     expect(h.host.launches.map((spec) => spec.subagentModel)).toEqual(['sonnet']);
   });
 
-  it('maps the three fields C10 reads and nothing else', () => {
+  it('maps the four fields C10 reads and nothing else', () => { // W3: the auto fallback
     const dir = mkdtempSync(join(tmpdir(), 'maws-c11-session-settings-'));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const store = openSettingsStore(join(dir, 'settings.json'));
     store.update({ gateway: { relayUnreachable: 'wait', offerDirect: false }, engine: { subagentModel: 'haiku', pinnedVersion: '9.9.9' } });
-    expect(sessionSettingsOf(store.settings)).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'wait' }, engine: { subagentModel: 'haiku' } });
+    expect(sessionSettingsOf(store.settings)).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'wait' }, engine: { subagentModel: 'haiku' }, permissions: { autoFallback: 'acceptEdits' } });
   });
 });

@@ -5,8 +5,8 @@ import * as z from 'zod';
 import { ACTION_IDS } from '../keymap/actions';
 import { ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
-export const SETTINGS_DEFAULTS_V5: Settings = {
-  version: 5, // C12: 4; W2: 5
+export const SETTINGS_DEFAULTS_V6: Settings = {
+  version: 6, // C12: 4; W2: 5; W3: 6
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
   notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
@@ -14,6 +14,7 @@ export const SETTINGS_DEFAULTS_V5: Settings = {
   gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true }, // D-19
   usage: { nearLimitPercent: 90 },
   appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
+  permissions: { autoFallback: 'acceptEdits' }, // W3: the owner's ruling of 2026-10-01 (charter D-18)
 };
 
 // The earlier files, as their versions wrote them: C1's and C5's.
@@ -25,8 +26,13 @@ const SettingsV2Schema = z.strictObject({
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
 
+// W3 start: W2's version 5, as it wrote it: version 6's sections less the permissions
+const SettingsV5Schema = SettingsSchema.omit({ permissions: true }).extend({ version: z.literal(5) });
+type SettingsV5 = z.infer<typeof SettingsV5Schema>;
+// W3 end
+
 // W2 start: C12's version 4, as it wrote it: version 5's sections less the transcript's width
-const SettingsV4Schema = SettingsSchema.extend({
+const SettingsV4Schema = SettingsV5Schema.extend({
   version: z.literal(4),
   appearance: SettingsSchema.shape.appearance.omit({ transcriptWidth: true }),
 });
@@ -40,13 +46,16 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 });
 // C12 end
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V5);
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V6);
 
-// W2: v4 → v5, the transcript's default width
-const fromV4 = (v4: SettingsV4): Settings => ({ ...v4, version: 5, appearance: { ...v4.appearance, transcriptWidth: defaults().appearance.transcriptWidth } });
+// W3: v5 → v6, the auto fallback's default
+const fromV5 = (v5: SettingsV5): Settings => ({ ...v5, version: 6, permissions: defaults().permissions });
+// W2: v4 → v5, the transcript's default width (W3: then v5 → v6)
+const fromV4 = (v4: SettingsV4): Settings => fromV5({ ...v4, version: 5, appearance: { ...v4.appearance, transcriptWidth: defaults().appearance.transcriptWidth } });
 
 // v1 → v2 (C5's step: no keymap overrides, the notification defaults) → v3 (the sections C11 adds, with their
-// defaults) → v4 (C12's budget) → v5 (W2's transcript width). A version 5 object is validated and returned as it is;
+// defaults) → v4 (C12's budget) → v5 (W2's transcript width) → v6 (W3's auto fallback). A version 6 object is validated
+// and returned as it is;
 // anything else (another version, an invalid file of a known version) throws the schema's error, which the store turns
 // into the defaults with a warning.
 export function migrateSettings(raw: unknown): Settings {
@@ -70,6 +79,8 @@ export function migrateSettings(raw: unknown): Settings {
     // C12 end
     case 4:
       return fromV4(SettingsV4Schema.parse(raw)); // W2
+    case 5:
+      return fromV5(SettingsV5Schema.parse(raw)); // W3
     default:
       return SettingsSchema.parse(raw);
   }
@@ -79,7 +90,7 @@ export function migrateSettings(raw: unknown): Settings {
 // field, and `notifications.kinds` a second level, key by key, so a kinds patch never replaces the sibling kinds. The
 // theme and the keymap are values of their own and are replaced whole. A key present as `undefined` changes nothing.
 export function applySettingsPatch(state: Settings, patch: SettingsPatch): Settings {
-  const { notifications, engine, gateway, usage, appearance, ...values } = patch;
+  const { notifications, engine, gateway, usage, appearance, permissions, ...values } = patch;
   const next: Settings = { ...state, ...defined(values) };
   if (notifications) {
     const { kinds, ...fields } = notifications;
@@ -89,6 +100,7 @@ export function applySettingsPatch(state: Settings, patch: SettingsPatch): Setti
   if (gateway) next.gateway = { ...state.gateway, ...defined(gateway) };
   if (usage) next.usage = { ...state.usage, ...defined(usage) };
   if (appearance) next.appearance = { ...state.appearance, ...defined(appearance) };
+  if (permissions) next.permissions = { ...state.permissions, ...defined(permissions) }; // W3
   return next;
 }
 

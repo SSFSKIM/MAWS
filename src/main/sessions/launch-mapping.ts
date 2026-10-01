@@ -16,11 +16,17 @@ type Gateway = LaunchSpec['gateway'];
 export interface C10Settings {
   gateway: { defaultRoute: Gateway; relayUnreachable: 'ask' | 'direct' | 'wait' };
   engine: { subagentModel: string | null };
+  permissions: { autoFallback: PermissionMode }; // W3: settings v6, the mode a refused auto falls back to
 }
 export const C10_SETTING_DEFAULTS: C10Settings = Object.freeze({
   gateway: Object.freeze({ defaultRoute: 'gateway', relayUnreachable: 'ask' }),
   engine: Object.freeze({ subagentModel: null }),
+  permissions: Object.freeze({ autoFallback: 'acceptEdits' }),
 }) as C10Settings;
+
+// W3 (charter D-18 and §5.1 as amended 2026-10-01): a session's permission mode when nothing chose one, the user's own
+// `permissions.defaultMode`, else auto, MAWS's default.
+export const seedPermissionMode = (defaults: { defaultMode: PermissionMode | null }): PermissionMode => defaults.defaultMode ?? 'auto';
 
 export function readSettings(): C10Settings {
   return C10_SETTING_DEFAULTS;
@@ -50,6 +56,7 @@ export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSet
     model: input.model,
     effort: input.effort,
     permissionMode: input.permissionMode,
+    permissionFallback: input.permissionMode === 'auto' ? settings.permissions.autoFallback : null, // W3
     gateway: input.gateway,
     subagentModel: settings.engine.subagentModel,
     resume: input.resume,

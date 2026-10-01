@@ -47,6 +47,7 @@ import { serializeDraft, type Serialized } from './editor/serialize';
 import { afterAccepted, dispatchByMode, precheck, submitSerialized, type Dispatch } from './editor/submit'; // C12: afterAccepted, precheck
 import { newestUserUuid } from './edit-prefill';
 import { useEffectiveEffort } from './effective-effort'; // W3
+import { autoFallbackNotice } from '@shared/sessions/models'; // W3
 import { EditModeLine, RewindConfirm } from './EditMode';
 import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
 import { ContextRing } from './frame/ContextRing';
@@ -216,6 +217,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // W3: an unstarted tab names what the engine will use, the user's own settings included (read only)
   const userDefaults = useCommand('settings.userEngineDefaults', undefined, { enabled: unstarted, staleTime: 30_000 }).data ?? null;
   const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults) : status || record ? liveBindings(status, record, reads, client) : endedBindings();
+  // W3 (C5): the engine refused auto and the host set the fallback (requested auto, a refusal, another effective mode)
+  const permission = status?.permissionMode ?? null;
+  const modeNote = setup ? setup.options.autoModeNote : permission && permission.requested === 'auto' && permission.effective !== 'auto' && permission.refusal !== null ? autoFallbackNotice(permission.effective) : null;
+  const [dismissedNote, setDismissedNote] = useState<string | null>(null);
 
   // ---- the submit control's state ------------------------------------------------------------------------------
   const draft = useMemo(() => serializeDraft(doc, { sessionId: null, cwd: '' }), [doc]);
@@ -432,6 +437,16 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {phase !== null && (
         <p role="status" aria-label="Setup" className="m-0 text-ui-sm text-fg-muted">
           {phase}
+        </p>
+      )}
+      {/* W3 (C5): Claude Desktop's notice when the engine refused auto and MAWS set the fallback, or an unstarted tab's
+          note on its model and mode (C10's autoModeNote) */}
+      {modeNote !== null && modeNote !== dismissedNote && (
+        <p role="note" aria-label="Permission mode notice" className="m-0 flex items-baseline gap-2 text-ui-sm text-fg-muted">
+          <span className="min-w-0 flex-1">{modeNote}</span>
+          <button type="button" aria-label="Dismiss" className="shrink-0 rounded-sm px-1 text-fg-faint outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2" onClick={() => setDismissedNote(modeNote)}>
+            ×
+          </button>
         </p>
       )}
       {!unstarted && <QueueList appSessionId={appSessionId} queue={queue} sessionId={sessionId} cwd={cwd} client={client} />}

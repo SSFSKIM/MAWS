@@ -379,6 +379,18 @@ describe("composer DOM under C5's dispatcher", () => {
     }
   });
 
+  // W3 (C5): the host fell back from a refused auto (requested auto, the fallback effective, the refusal): the dock says so
+  // in Claude Desktop's words, the chip shows the mode with the refusal, and the note can be put away
+  it('says when auto was refused and the fallback set, and the chip shows the fallback with the refusal', async () => {
+    live(A, { status: { permissionMode: { requested: 'auto', effective: 'acceptEdits', refusal: 'auto_mode_model' } } });
+    mount([{ index: 0, id: A }]);
+    const note = within(composerOf(0)).getByRole('note', { name: 'Permission mode notice' });
+    expect(note.textContent).toContain("Auto mode isn't available for this session. Using acceptEdits instead.");
+    expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode / }).getAttribute('aria-label')).toBe('Permission mode acceptEdits · This model does not support auto mode');
+    await userEvent.click(within(note).getByRole('button', { name: 'Dismiss' }));
+    expect(within(composerOf(0)).queryByRole('note', { name: 'Permission mode notice' })).toBeNull();
+  });
+
   it('renews the route’s catalogue when the process becomes ready, not at each mount of a ready session', async () => {
     live(A, { status: { process: 'initializing' } });
     const view = mount([{ index: 0, id: A }]);
