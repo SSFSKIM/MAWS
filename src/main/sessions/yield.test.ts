@@ -47,7 +47,7 @@ const idle = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus => (
 
 // W7 (charter §4.3 as amended 2026-10-01): a live MAWS process yields once the foreign process writes.
 describe('a live MAWS process yields to a foreign writer', () => {
-  it('posts a notice, pauses the queue and stops at once when nothing would be lost', async () => {
+  it('posts a notice and stops at once when nothing would be lost, leaving an empty queue unpaused', async () => {
     const h = harness({ kind: 'self', contestedBy: TERMINAL }, { 'session.status': idle() });
     h.fire('fs.foreignWrite', { sessionId: S, appSessionId: APP, holder: TERMINAL });
     await h.settle();
@@ -56,19 +56,20 @@ describe('a live MAWS process yields to a foreign writer', () => {
     expect(notice).toMatchObject({ seq: null, kind: 'notice.posted', key: 'session:yielded' });
     expect(notice.id.startsWith(`${APP}:`)).toBe(true); // an app-synthesised event: main's read model keeps it
     expect(notice.text).toBe('A terminal (pid 96367) started writing this session. MAWS stops its own process once it is idle and follows the transcript read-only.');
-    expect(h.calls.map((c) => c.name)).toEqual(['session.queue.setPaused', 'session.status', 'session.stop']);
-    expect(h.calls[0].input).toEqual({ appSessionId: APP, paused: true });
-    expect(h.calls[2].input).toEqual({ appSessionId: APP, reason: 'stop' });
+    expect(h.calls.map((c) => c.name)).toEqual(['session.status', 'session.stop']);
+    expect(h.calls[1].input).toEqual({ appSessionId: APP, reason: 'stop' });
   });
 
-  it('lets a turn in flight finish, then stops once, and forgets the session after its exit', async () => {
-    const h = harness({ kind: 'self', contestedBy: TERMINAL }, { 'session.status': busy() });
+  it('lets a turn in flight finish with its queue paused, then stops once, and forgets the session after its exit', async () => {
+    const queued = { length: 1, paused: false };
+    const h = harness({ kind: 'self', contestedBy: TERMINAL }, { 'session.status': busy({ queue: queued, keepAlive: ['turn', 'queued_messages'] }) });
     h.fire('fs.foreignWrite', { sessionId: S, appSessionId: APP, holder: TERMINAL });
     await h.settle();
-    expect(h.calls.map((c) => c.name)).toEqual(['session.queue.setPaused', 'session.status']);
+    expect(h.calls.map((c) => c.name)).toEqual(['session.status', 'session.queue.setPaused']);
+    expect(h.calls[1].input).toEqual({ appSessionId: APP, paused: true });
     h.fire('session.status', { appSessionId: APP, status: busy() });
     expect(h.calls.filter((c) => c.name === 'session.stop')).toHaveLength(0);
-    h.fire('session.status', { appSessionId: APP, status: idle({ keepAlive: ['queued_messages'] }) }); // its own paused queue
+    h.fire('session.status', { appSessionId: APP, status: idle({ queue: { length: 1, paused: true }, keepAlive: ['queued_messages'] }) }); // its own paused queue
     h.fire('session.status', { appSessionId: APP, status: idle() });
     expect(h.calls.filter((c) => c.name === 'session.stop')).toHaveLength(1);
     h.fire('session.status', { appSessionId: APP, status: idle({ process: 'exited' }) });
@@ -77,7 +78,7 @@ describe('a live MAWS process yields to a foreign writer', () => {
   });
 
   it('does nothing for a session MAWS does not run, and yields once per contest', async () => {
-    const h = harness({ kind: 'terminal', pid: 96367 });
+    const h = harness({ kind: 'terminal', pid: 96367 }, { 'session.status': busy() });
     h.fire('fs.foreignWrite', { sessionId: S, appSessionId: APP, holder: TERMINAL });
     await h.settle();
     expect(h.calls).toEqual([]);

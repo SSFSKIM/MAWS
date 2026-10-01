@@ -1,7 +1,8 @@
 // W7 (charter §4.3 as amended 2026-10-01; docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md, F1): a live MAWS
 // process yields when a foreign process that resumed the same session starts writing into it. The engine host reports
-// that first write (`fs.foreignWrite`, once per contest); MAWS posts a notice in the session, pauses its queue so nothing
-// more starts on its own branch, and stops its process as soon as nothing would be lost by it (no turn, no work in
+// that first write (`fs.foreignWrite`, once per contest); MAWS posts a notice in the session, pauses its queue while it
+// holds messages so none starts on its own branch (an empty queue is never paused: it would silently hold the resumed
+// session's next send, queue.ts), and stops its process as soon as nothing would be lost by it (no turn, no work in
 // flight, no pending request, no background task: the C12 keep-alive reasons, less the paused queue, which survives the
 // exit, and a stateful MCP server, whose state the other writer has already overtaken). A turn in flight finishes first.
 // After the exit the index re-applies the foreign holder and the pane follows the transcript read-only.
@@ -48,6 +49,15 @@ export function startYield(deps: YieldDeps): () => void {
   const log = deps.log ?? ((message: string) => console.warn(`[sessions] ${message}`));
   const yielding = new Set<AppSessionId>();
   const stopping = new Set<AppSessionId>();
+  // the queue paused while it holds messages (so a turn's end releases none), the process stopped once it can yield
+  const step = (appSessionId: AppSessionId, status: EngineSessionStatus) => {
+    if (status.queue.length > 0 && !status.queue.paused) {
+      hostCall(deps.dispatch, 'session.queue.setPaused', { appSessionId, paused: true }).catch((error: unknown) =>
+        log(`${appSessionId}: could not pause the queue while yielding: ${error instanceof Error ? error.message : String(error)}`),
+      );
+    }
+    if (canYield(status)) stop(appSessionId);
+  };
   const stop = (appSessionId: AppSessionId) => {
     if (stopping.has(appSessionId)) return;
     stopping.add(appSessionId);
@@ -63,14 +73,10 @@ export function startYield(deps: YieldDeps): () => void {
       const id = record.appId;
       yielding.add(id);
       deps.emit('session.eventBatch', { appSessionId: id, events: [yieldNotice(id, sessionId as SessionId, holder, now())] });
-      void (async () => {
-        try {
-          await hostCall(deps.dispatch, 'session.queue.setPaused', { appSessionId: id, paused: true });
-          if (canYield(await hostCall(deps.dispatch, 'session.status', { appSessionId: id }))) stop(id);
-        } catch (error) {
-          log(`${id}: could not begin yielding to the other writer: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      })();
+      hostCall(deps.dispatch, 'session.status', { appSessionId: id }).then(
+        (status) => yielding.has(id) && step(id, status),
+        (error: unknown) => log(`${id}: could not begin yielding to the other writer: ${error instanceof Error ? error.message : String(error)}`),
+      );
     }),
     deps.onEvent('session.status', ({ appSessionId, status }) => {
       const id = appSessionId as AppSessionId;
@@ -78,7 +84,7 @@ export function startYield(deps: YieldDeps): () => void {
       if (status.process === 'exited') {
         yielding.delete(id);
         stopping.delete(id);
-      } else if (canYield(status)) stop(id);
+      } else step(id, status);
     }),
   ];
   return () => offs.forEach((off) => off());
