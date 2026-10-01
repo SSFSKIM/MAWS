@@ -21,7 +21,7 @@ import { useSessions } from '../../stores/sessions';
 import { sessionInfoTool } from '../../tools/session-info';
 import { panelHost } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
-import { Composer, ComposerAppKeys, WIDGET_COMMANDS, type WidgetCommandName } from '../../composer';
+import { Composer, ComposerAppKeys, openWidgetDialog, WIDGET_COMMANDS, WidgetDialogHost, type WidgetCommandName } from '../../composer';
 import { slashWidget, useRegisteredWidgets } from '../../composer/mentions/widgets';
 import { connectShell } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
@@ -88,24 +88,17 @@ function mirrorLayout(pane: WidgetsPane) {
 }
 
 // A widget opened from the picker, placed as C7's editor places one opened from the palette (W3: the model selector's
-// names open the composer's model chip menu).
+// names in the composer's model chip menu, every other one in the app's floating dialog).
 function OpenedWidget({ appSessionId, name, args, close }: { appSessionId: AppSessionId; name: string; args: string; close(): void }) {
   useRegisteredWidgets(); // re-render once the registrations land
   const widget = slashWidget(name);
-  const inChip = widget?.placement === 'modelChip';
   useEffect(() => {
-    if (!inChip) return;
-    requestChipWidget(appSessionId, name, args);
+    if (!widget) return;
+    if (widget.placement === 'modelChip') requestChipWidget(appSessionId, name, args);
+    else openWidgetDialog(appSessionId, name, args);
     close();
-  }, [inChip, appSessionId, name, args, close]);
-  if (!widget) return <p className="m-0 text-fg-muted">No widget is registered for /{name}</p>;
-  if (inChip) return null;
-  const Widget = widget.component;
-  return (
-    <section aria-label={widget.title} className="mb-2 rounded-md border border-border bg-bg-raised p-2 text-ui">
-      <Widget appSessionId={appSessionId} args={args} close={close} />
-    </section>
-  );
+  }, [widget, appSessionId, name, args, close]);
+  return widget ? null : <p className="m-0 text-fg-muted">No widget is registered for /{name}</p>;
 }
 
 function Interactive({ appSessionId, opened, open, close }: { appSessionId: AppSessionId; opened: { name: string; args: string } | null; open(name: string): void; close(): void }) {
@@ -181,6 +174,7 @@ export function WidgetsHarness() {
         <Interactive key={appSessionId} appSessionId={appSessionId} opened={opened} open={(name) => setOpened({ name, args: '' })} close={() => setOpened(null)} />
       )}
       <ComposerAppKeys />
+      <WidgetDialogHost />
       <SessionDialogs />
       <GatewayDialogs />
       <ToastHost />

@@ -1,4 +1,5 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { closeWidgetDialog, useWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -226,9 +227,15 @@ describe('the editor mounts over its draft, takes prefills and submits through t
 // C11 start: the widget seam C11 added to the editor (C11 execution document, the Arguments rule; Decision (M2) item 11):
 // a typed `/<name> <args>` for a registered widget opens it with its argument, and the handle opens one with an argument.
 describe('a registered widget named at Enter opens with its argument', () => {
-  const opened = (container: HTMLElement) => container.querySelector('[data-test-widget]')?.textContent ?? null;
+  // W3 (C6): a widget opens as the app's floating dialog, never in the box: what the dialog host was asked to show
+  const opened = (container: HTMLElement) => {
+    expect(container.querySelector('[data-test-widget]'), 'nothing in the box').toBeNull();
+    const open = useWidgetDialog.getState().open;
+    return open ? `${open.name}:${open.args}` : null;
+  };
   let off: () => void;
   beforeEach(() => {
+    closeWidgetDialog();
     const offs = (['model', 'compact'] as const).map((name) =>
       registerSlashWidget(name, { title: name, component: ({ args }: { args: string }) => <p data-test-widget>{`${name}:${args}`}</p> }),
     );

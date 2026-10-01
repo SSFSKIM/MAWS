@@ -117,10 +117,20 @@ test.describe('interactive', () => {
         await expect(dialog).toBeHidden();
         continue;
       }
-      await expect(widget(page, name)).toBeVisible();
+      // W3 (C6, charter §5.4 as amended 2026-10-01): a floating dialog centred over the window, never in the composer's box
+      const dialog = page.locator(`[data-widget-dialog="${name}"]`);
+      await expect(dialog.locator(`[data-widget="${name}"]`)).toBeVisible();
+      await expect(page.locator('[data-composer]').locator('[data-widget]')).toHaveCount(0);
       await expect(widget(page, name).locator('footer')).toContainText('Read with');
+      if (name === NAMES.find((n) => !['model', 'effort', 'fast', 'rename'].includes(n))) {
+        const box = await dialog.boundingBox();
+        const view = page.viewportSize() ?? (await page.evaluate(() => ({ width: innerWidth, height: innerHeight })));
+        expect(Math.abs(box!.x + box!.width / 2 - view.width / 2)).toBeLessThanOrEqual(2); // centred
+        expect(Math.abs(box!.y + box!.height / 2 - view.height / 2)).toBeLessThanOrEqual(2);
+      }
       await page.keyboard.press('Escape'); // the frame took focus when it opened
       await expect(widget(page, name)).toBeHidden();
+      await expect(message).toBeFocused(); // the keyboard back in the composer
     }
     expect(backend.consoleErrors()).toEqual([]);
   });

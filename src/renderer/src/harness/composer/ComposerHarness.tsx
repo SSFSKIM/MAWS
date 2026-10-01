@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { Composer, ComposerAppKeys, connectComposer, DockedCardFrame, dockCard, editAndResubmitRow } from '../../composer';
+import { Composer, ComposerAppKeys, connectComposer, DockedCardFrame, dockCard, editAndResubmitRow, WidgetDialogHost } from '../../composer';
 import { setRewindWindow } from '../../composer/resubmit-seam';
 import { ipc } from '../../ipc/client';
 import { connectShell } from '../../ipc/events';
@@ -195,6 +195,7 @@ export function ComposerHarness() {
         })}
       </main>
       <ComposerAppKeys />
+      <WidgetDialogHost />
     </QueryClientProvider>
   );
 }

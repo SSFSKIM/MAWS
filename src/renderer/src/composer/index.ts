@@ -13,6 +13,7 @@ export { dockCard, useDockedCards, type DockedCard } from './docked/registry';
 export { insertComposerText, prefillComposer, useComposerStore, type Prefill } from '../stores/composer';
 export { renderInlineRequest, renderSessionRequest } from '../request-card/inline';
 export { registerSlashWidget, WIDGET_COMMANDS, type SlashWidget, type WidgetCommandName } from './mentions/widgets'; // M3
+export { closeWidgetDialog, openWidgetDialog, WidgetDialogHost } from './WidgetDialog'; // W3 (C6): the widgets' floating dialog
 export { editAndResubmitRow, editPromptRow, registerResubmitProvider, type ResubmitProvider } from './resubmit-seam'; // M4b; editPromptRow: W1
 export { registerSetupIntentHook, type SetupIntent, type SetupIntentHook, type SetupIntentPatch, type Location, type ModelInfo, type FirstMessage } from './setup-intent';
 

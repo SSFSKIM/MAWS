@@ -116,13 +116,17 @@ export function useDebounced<T>(value: T, ms: number): T {
   return settled;
 }
 
-export function Listbox({ label, activeId, children }: { label: string; activeId: string | undefined; children: ReactNode }) {
+// W3 (C6): the `/` list is sized as Claude Desktop's (240 to 512px wide, as its rows need, at most 384px tall); the `@`
+// menu keeps its own.
+const SIZE = { at: 'max-h-80 w-[min(28rem,80vw)]', slash: 'max-h-96 w-max max-w-[min(32rem,80vw)] min-w-60' } as const;
+
+export function Listbox({ label, activeId, size = 'at', children }: { label: string; activeId: string | undefined; size?: keyof typeof SIZE; children: ReactNode }) {
   return (
     <div
       role="listbox"
       aria-label={label}
       aria-activedescendant={activeId}
-      className="max-h-80 w-[min(28rem,80vw)] overflow-y-auto rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg"
+      className={`${SIZE[size]} overflow-y-auto rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg`}
       onMouseDown={(event) => event.preventDefault()} // keep focus (and the selection) in the editor
     >
       {children}

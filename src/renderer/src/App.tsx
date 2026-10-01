@@ -20,7 +20,7 @@ import { PanelHost } from './panel/PanelHost';
 import { adoptTerminals, terminalTool } from './tools/terminal';
 // C8a end
 // C7 start
-import { ComposerAppKeys, connectComposer, editAndResubmitRow, editPromptRow } from './composer';
+import { ComposerAppKeys, connectComposer, editAndResubmitRow, editPromptRow, WidgetDialogHost } from './composer';
 import { connectRequestCard } from './request-card';
 import { connectStatusLine } from './statusline';
 import { registerTranscriptActions } from './transcript';
@@ -156,6 +156,8 @@ export function App() {
       <Shell />
       {/* C7 start: the one app-level ⌘. and ⌘L, resolving the focused pane's session */}
       <ComposerAppKeys />
+      {/* W3 (C6): the slash widgets' floating dialog */}
+      <WidgetDialogHost />
       {/* C7 end */}
       {/* C10 start: the small sheets (rename, fork, archive, delete, cleanup, archived sessions) */}
       <SessionDialogs />

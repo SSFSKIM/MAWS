@@ -279,15 +279,17 @@ test('@ and / menus with the widget union', async ({ editor }) => {
     await page.keyboard.type('/');
   }
 
-  // once widgets are registered for them, the same names open the widget
+  // once widgets are registered for them, the same names open the widget (W3, C6: as the floating dialog, never in the box)
   await page.evaluate(() => ['model', 'permissions'].forEach((name) => (window as unknown as EditorWindow).__maws_editor.registerWidget(name)));
   for (const name of ['model', 'permissions']) {
     await page.keyboard.type(name);
     await expect(chosen).toContainText(`/${name}`); // C11: the chosen row
     await page.keyboard.press('Enter');
-    const widget = page.getByRole('region', { name: `/${name} widget` });
+    const widget = page.getByRole('dialog', { name: `/${name} widget` });
     await expect(widget).toBeVisible();
+    await expect(page.getByRole('region', { name: 'composer' }).getByRole('button', { name: 'Close' })).toHaveCount(0);
     await widget.getByRole('button', { name: 'Close' }).click();
+    await expect(widget).toBeHidden();
     await message(page).click();
     await clearEditor(page);
     await page.keyboard.type('/');

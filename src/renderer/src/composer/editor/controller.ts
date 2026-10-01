@@ -16,6 +16,7 @@ import { toast } from '../../stores/notices';
 import { useTranscriptStore } from '../../transcript';
 import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
+import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
 import { atomId, attachmentsOf, editingOfDoc, emptyDoc, isMultiline, mentionNode, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
 import { createDraftWriter, docOfDraft, isEmptyDoc, type DraftWriter } from './drafts';
@@ -76,7 +77,6 @@ export interface ControllerInputs {
 export interface ControllerView {
   setMode(mode: Serialized['mode']): void;
   setCommandEmpty(empty: boolean): void;
-  setWidget(widget: { name: string; args: string } | null): void;
   setBusy(busy: boolean): void;
 }
 
@@ -149,12 +149,13 @@ export class EditorController {
     };
   }
 
-  // A registered widget opened where it belongs (W3: the selector's names in the model chip's menu); false when none is.
+  // A registered widget opened where it belongs (W3): the selector's names in the model chip's menu, every other one as
+  // the app's floating dialog, never in the box; false when none is registered.
   private openWidget(name: string, args: string): boolean {
     const widget = slashWidget(name);
     if (!widget) return false;
     if (widget.placement === 'modelChip') requestChipWidget(this.inputs.appSessionId, name, args);
-    else this.view.setWidget({ name, args });
+    else openWidgetDialog(this.inputs.appSessionId, name, args);
     return true;
   }
 

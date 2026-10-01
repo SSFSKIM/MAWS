@@ -1,8 +1,9 @@
 // C11's chrome inside every widget (C11 execution document, Terms "Widget frame"; mockup 06 vignette 05): a head with
-// the title and the `/name`, a body that scrolls inside a 420 px cap, and a foot naming the read or control the widget
-// used and what it will not edit. The body gives way to the loading line, the error, or C7's not-running sentence for
-// a read that needs a ready process. C7 places the popover; the frame owns no position. It takes focus when it opens,
-// and Esc closes it and hands the keyboard back to the session's composer.
+// the title and the `/name`, a body that scrolls inside its cap (W3: the floating dialog's, up to 60% of the window), and
+// a foot naming the read or control the widget used and what it will not edit. The body gives way to the loading line,
+// the error, or C7's not-running sentence for a read that needs a ready process. C7 places it (W3: the app's floating
+// dialog); the frame owns no position. It takes focus when it opens, and Esc closes it and hands the keyboard back to
+// the session's composer.
 import { useEffect, useRef, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { NOT_RUNNING } from '../statusline/mode-menu';
@@ -88,7 +89,7 @@ export function WidgetFrame({ appSessionId, title, command, foot, state, error, 
           </button>
         </span>
       </header>
-      <div className="max-h-[420px] overflow-y-auto px-2 py-2">{body}</div>
+      <div className="max-h-[60vh] overflow-y-auto px-2 py-2">{body}</div>
       <footer className="border-t border-border px-2 pt-2 text-ui-sm text-fg-muted">
         {FRAME.readWith} <code className="font-mono text-ui-sm">{foot.readWith}</code>
         {foot.editedWhere !== null && (
