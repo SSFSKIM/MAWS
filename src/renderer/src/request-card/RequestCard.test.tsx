@@ -191,7 +191,7 @@ describe('edit prompt restores the initiating prompt', () => {
     await waitFor(() => expect(useComposerStore.getState().inlineEdits.get(APP)).toBeDefined());
     const edit = useComposerStore.getState().inlineEdits.get(APP)!;
     expect(edit.text).toMatch(/^fix the <pasted_content> build\[Pasted text #1 \+3 lines\]/); // as typed, as history recall has it
-    expect(edit.pasted).toEqual([{ name: 'Pasted text #1', text: body }]);
+    expect(edit.bodies).toEqual({ '[Pasted text #1 +3 lines]': body });
     expect(edit.images).toEqual([{ name: expect.any(String), mediaType: 'image/png', data: 'iVBORw0KGgo=' }]);
     expect(edit).toMatchObject({ messageUuid: 'u-1', seenCursor: 'u-1', kind: 'edit' });
     expect(useComposerStore.getState().prefills.get(APP)).toBeUndefined();

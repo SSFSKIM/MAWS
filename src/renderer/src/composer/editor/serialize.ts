@@ -15,6 +15,7 @@ import { atomPlaceholder, mentionText } from './schema';
 export interface SerializeContext {
   sessionId: SessionId | string | null;
   cwd: string;
+  literal?: boolean; // W3 (B6): a prompt as written (a bubble edited in place): a leading `!` or `#` is text, not a mode
 }
 
 export interface Serialized {
@@ -87,7 +88,7 @@ export function serializeDraft(doc: JSONContent, ctx: SerializeContext): Seriali
   const hasPasted = pieces.some((p) => p.kind === 'pasted');
   const typed = typedText(pieces);
 
-  const mode = modeOfPieces(pieces, paragraphs, attachments.length);
+  const mode = ctx.literal ? 'send' : modeOfPieces(pieces, paragraphs, attachments.length);
   if (mode !== 'send') {
     const text = typed.slice(1).trim();
     return { mode, text, content: text, display: typed, pastedContents: {}, omitted: 0, empty: text === '' };

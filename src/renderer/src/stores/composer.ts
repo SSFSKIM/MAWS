@@ -16,19 +16,23 @@ import type { ListModelsResponse } from '@shared/wire/control';
 export interface Prefill {
   text: string; // the row's text with `[Pasted text #n +L lines]` placeholders in place
   pasted?: Array<{ name: string; text: string }>; // placeholder order; each becomes a Pasted atom; a placeholder with no entry becomes an unavailable atom
+  // W3 (B6): instead of `pasted`, an edited text's bodies keyed by the placeholder that named each (`bodiesByPlaceholder`):
+  // a placeholder takes the body it names wherever the edit moved it; one it does not name is unavailable
+  bodies?: Readonly<Record<string, string>>;
   images?: Array<{ name: string; mediaType: string; data: string }>; // base64, re-attached
 }
 
 // W3 (B6; charter line 134 and §5.3 as amended 2026-10-01): a user bubble edited in place. Send rewinds the session to
 // `messageUuid` (with the seen cursor, the transcript's newest user uuid when the edit began) and resends the text; a
 // `blocked` prompt (a hook stopped it, so it never reached the model) is sent as a new message instead. The text keeps
-// the row's pasted placeholders, whose bodies (and the row's images) go with the send.
+// the row's pasted placeholders, whose bodies (keyed by the placeholder that named each when the edit began, so one the
+// human deletes or moves takes no other's body) and the row's images go with the send.
 export interface InlineEdit {
   messageUuid: MessageUuid;
   seenCursor: MessageUuid | null;
   kind: 'edit' | 'blocked';
   text: string;
-  pasted: NonNullable<Prefill['pasted']>;
+  bodies: NonNullable<Prefill['bodies']>;
   images: NonNullable<Prefill['images']>;
 }
 
@@ -46,14 +50,16 @@ export type ResubmitState = 'idle' | 'confirming' | 'rewinding' | 'rewind_uncert
 
 // The state with what its banner says: `exited` (idle after the engine exited mid-rewind), `sendFailed` (rewound, and
 // the send that followed failed), `autoSend` (rewound by the human's own confirm: the composer sends the edited text
-// as part of that decision; a rewind confirmed only later by the transcript waits for Send).
+// as part of that decision; a rewind confirmed only later by the transcript waits for Send), `sending` (the edit's one
+// send or fork is with the host, in whatever state it left: nothing else is taken until it answers).
 export interface Resubmit {
   state: ResubmitState;
   exited: boolean;
   sendFailed: boolean;
   autoSend: boolean;
+  sending: boolean;
 }
-export const IDLE_RESUBMIT: Resubmit = Object.freeze({ state: 'idle', exited: false, sendFailed: false, autoSend: false }) as Resubmit;
+export const IDLE_RESUBMIT: Resubmit = Object.freeze({ state: 'idle', exited: false, sendFailed: false, autoSend: false, sending: false }) as Resubmit;
 
 // Where `#` appends (C3's `session.memoryAppend` target): the memory dialog's project or user file, or a listed path.
 export interface MemoryTarget {
@@ -206,7 +212,7 @@ export function setResubmit(appSessionId: AppSessionId, next: ResubmitState | (P
   const record: Resubmit = { ...IDLE_RESUBMIT, ...(typeof next === 'string' ? { state: next } : next) };
   useComposerStore.setState((s) => {
     const resubmit = new Map(s.resubmit);
-    if (record.state === 'idle' && !record.exited) resubmit.delete(appSessionId);
+    if (record.state === 'idle' && !record.exited && !record.sending) resubmit.delete(appSessionId);
     else resubmit.set(appSessionId, record);
     return { resubmit };
   });

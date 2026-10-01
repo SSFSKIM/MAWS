@@ -1,12 +1,15 @@
 // The resubmit state machine over a bubble edited in place (W3, B6): Send rewinds once with the seen cursor and resends
 // the edited text; nothing ever repeats a rewind; an uncertain rewind is reconciled against the transcript.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PASTED_BLOCK } from '@shared/composer/pasted-content';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { inlineEditOf, resetComposerStore, resubmitRecordOf, setInlineEdit, useComposerStore, type InlineEdit } from '../stores/composer';
+import { inlineEditOf, resetComposerStore, resubmitRecordOf, setInlineEdit, setInlineText, setResubmit, useComposerStore, type InlineEdit } from '../stores/composer';
+import { prefillToDoc } from './editor/recall';
+import { serializeDraft } from './editor/serialize';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore, type TranscriptEntry } from '../stores/transcript';
@@ -32,14 +35,18 @@ import {
 const A = 'app-a' as AppSessionId;
 const u = (s: string) => s as MessageUuid;
 type RewindResult = CommandResult<'session.rewind'>;
+type SendResult = CommandResult<'session.send'>;
 
 let fake: FakeClient;
 let client: MawsBridge;
 let rewinds: { input: unknown; answer(result: RewindResult): void }[];
 let sendFails = false;
 let sent: unknown[] = [];
+let holdSends = false;
+let held: ((accepted: boolean) => void)[] = [];
 
-// session.rewind answered by the test, one call at a time; session.send by the flag; everything else by the fake.
+// session.rewind answered by the test, one call at a time; session.send by the flag, or, held, by the test; everything
+// else by the fake.
 beforeEach(() => {
   resetShellStores();
   resetComposerStore();
@@ -50,12 +57,16 @@ beforeEach(() => {
   rewinds = [];
   sendFails = false;
   sent = [];
+  holdSends = false;
+  held = [];
   client = {
     ...fake.client,
     invoke: ((name, input) => {
       if (name === 'session.send') {
         sent.push(input);
-        return Promise.resolve(sendFails ? { ok: false, error: { code: 'internal', message: 'write failed' } } : { ok: true, value: { messageUuid: null, disposition: 'sent', queueId: 'q' } });
+        const answer = (accepted: boolean): SendResult => (accepted ? { ok: true, value: { messageUuid: null, disposition: 'sent', queueId: 'q' } } : { ok: false, error: { code: 'internal', message: 'write failed' } });
+        if (holdSends) return new Promise<SendResult>((resolve) => held.push((accepted) => resolve(answer(accepted))));
+        return Promise.resolve(answer(!sendFails));
       }
       if (name !== 'session.rewind') return fake.client.invoke(name, input);
       return new Promise<RewindResult>((resolve) => rewinds.push({ input, answer: resolve }));
@@ -82,7 +93,7 @@ const listening = () => fake.calls.filter((c) => c === 'on session.eventBatch').
 
 // The bubble `u-1` edited in place with `u-2` the newest message seen: its text edited, the transcript showing `u-2`.
 function editing(over: Partial<InlineEdit> = {}): void {
-  setInlineEdit(A, { messageUuid: u('u-1'), seenCursor: u('u-2'), kind: 'edit', text: 'turn one edited', pasted: [], images: [], ...over });
+  setInlineEdit(A, { messageUuid: u('u-1'), seenCursor: u('u-2'), kind: 'edit', text: 'turn one edited', bodies: {}, images: [], ...over });
   const b = builder();
   b.turn('u-1');
   b.end(['u-1']);
@@ -282,6 +293,164 @@ describe('a bubble edited in place: Send rewinds once and resends', () => {
     expect(edit()).toMatchObject({ messageUuid: 'u-1' });
     rewinds[0].answer(rewound());
     await outcome;
+  });
+
+  it('an edit is a prompt as written: a leading # or ! is sent as text, never as a memory note or a shell command', async () => {
+    const forkFrom = vi.fn(async () => ({ appSessionId: 'app-fork' as AppSessionId }));
+    const off = registerResubmitProvider({ forkFrom });
+    try {
+      editing({ text: '# Requirements' });
+      const outcome = sending();
+      rewinds[0].answer(rewound());
+      await outcome;
+      await vi.waitFor(() => expect(edit()).toBeNull());
+      editing({ kind: 'blocked', seenCursor: null, text: '!ls -la' });
+      expect(await sendInlineEdit(client, A)).toBe('sent');
+      expect(sends()).toEqual([
+        { appSessionId: A, content: '# Requirements' },
+        { appSessionId: A, content: '!ls -la' },
+      ]);
+      editing({ text: '# Requirements' });
+      expect(await forkInlineEdit(client, A)).toBe(true);
+      expect(forkFrom).toHaveBeenCalledWith({ appSessionId: A, messageUuid: 'u-1', content: '# Requirements' });
+    } finally {
+      off();
+    }
+  });
+});
+
+describe('one submission at a time: the send or fork is with the host until it answers', () => {
+  const another = { kind: 'user', id: 'r-5', messageUuid: u('u-5'), text: 'another', attachments: [], placeholders: [] } as never;
+
+  it("the resend after the rewind holds the dock line's Send, Fork, Cancel and a new edit; its answer ends the edit it was sent for", async () => {
+    const forkFrom = vi.fn(async () => ({ appSessionId: 'app-fork' as AppSessionId }));
+    const off = registerResubmitProvider({ forkFrom });
+    try {
+      editing();
+      holdSends = true;
+      const outcome = sending();
+      rewinds[0].answer(rewound());
+      await outcome;
+      await vi.waitFor(() => expect(sends()).toHaveLength(1));
+      expect(record()).toMatchObject({ state: 'rewound_awaiting_send', sending: true });
+      const again = sendInlineEdit(client, A);
+      const fork = forkInlineEdit(client, A);
+      expect([sends().length, forkFrom.mock.calls.length]).toEqual([1, 0]);
+      expect(cancelInlineEdit(A)).toBe(false);
+      expect(startInlineEdit(A, another, 'edit')).toBe(false);
+      expect(toasts()).toEqual(['Your edited message is being sent']);
+      expect(edit()).toMatchObject({ messageUuid: 'u-1', text: 'turn one edited' });
+      held[0](true);
+      await vi.waitFor(() => expect(edit()).toBeNull());
+      expect(record()).toMatchObject({ state: 'idle', sending: false });
+      expect([await again, await fork]).toEqual(['stale', false]);
+      expect([sends().length, rewinds.length]).toEqual([1, 1]);
+    } finally {
+      off();
+    }
+  });
+
+  it("a blocked prompt's Send is held until the host answers; a failure puts the edit back for another Send", async () => {
+    editing({ kind: 'blocked', seenCursor: null });
+    holdSends = true;
+    const first = sendInlineEdit(client, A);
+    expect(record()).toMatchObject({ state: 'idle', sending: true });
+    const second = sendInlineEdit(client, A);
+    expect(cancelInlineEdit(A)).toBe(false);
+    expect(sends()).toHaveLength(1);
+    held[0](false);
+    expect([await first, await second]).toEqual(['stale', 'stale']);
+    expect(record()).toMatchObject({ state: 'idle', sending: false });
+    expect(edit()).not.toBeNull();
+    holdSends = false;
+    expect(await sendInlineEdit(client, A)).toBe('sent');
+    expect(sends()).toHaveLength(2);
+    expect(edit()).toBeNull();
+  });
+
+  it('a Fork with the host holds Send and another Fork; its answer ends the edit', async () => {
+    let answer: (opened: { appSessionId: AppSessionId }) => void = () => {};
+    const forkFrom = vi.fn(() => new Promise<{ appSessionId: AppSessionId }>((resolve) => (answer = resolve)));
+    const off = registerResubmitProvider({ forkFrom });
+    try {
+      editing();
+      const forked = forkInlineEdit(client, A);
+      expect(record().sending).toBe(true);
+      const again = forkInlineEdit(client, A);
+      const send = sendInlineEdit(client, A);
+      expect([forkFrom.mock.calls.length, rewinds.length, record().state]).toEqual([1, 0, 'idle']);
+      answer({ appSessionId: 'app-fork' as AppSessionId });
+      expect([await forked, await again, await send]).toEqual([true, false, 'stale']);
+      expect(edit()).toBeNull();
+      expect(record()).toMatchObject({ state: 'idle', sending: false });
+    } finally {
+      off();
+    }
+  });
+
+  it('Send without rewinding holds Rewind again and Keep editing and stops watching the transcript; its answer ends the edit', async () => {
+    vi.useFakeTimers();
+    editing();
+    const outcome = sending();
+    rewinds[0].answer(failed('internal'));
+    await outcome;
+    await vi.advanceTimersByTimeAsync(REWIND_WINDOW_MS);
+    holdSends = true;
+    const send = sendInlineEdit(client, A, 'without_rewinding');
+    expect(record()).toMatchObject({ state: 'rewind_unresolved', sending: true });
+    keepEditing(A);
+    const again = rewindAgain(client, A);
+    boundary('u-1'); // the human chose not to wait for it
+    expect(record()).toMatchObject({ state: 'rewind_unresolved', sending: true });
+    expect(rewinds).toHaveLength(1);
+    held[0](true);
+    expect([await send, await again]).toEqual(['sent', 'stale']);
+    expect(edit()).toBeNull();
+  });
+});
+
+describe('the pasted bodies an edit sends', () => {
+  // A row with two pasted blocks as C6 derives it: each placeholder in the text, its body a `text` attachment.
+  const ROW_TEXT = 'compare [Pasted text #1 +1 lines] with [Pasted text #2 +1 lines]';
+  const pastedRow = {
+    kind: 'user',
+    id: 'r-1',
+    messageUuid: u('u-1'),
+    text: ROW_TEXT,
+    attachments: [
+      { kind: 'text', name: 'Pasted text #1', bytes: 3, dataUrl: null, mediaType: 'text/plain', text: 'one' },
+      { kind: 'text', name: 'Pasted text #2', bytes: 3, dataUrl: null, mediaType: 'text/plain', text: 'two' },
+    ],
+    placeholders: [8, 39],
+  } as never;
+  const bodiesOf = (content: unknown) => [...String(content).matchAll(PASTED_BLOCK)].map((m) => m[2]);
+
+  it('each placeholder sends the body it named when the edit began, wherever the edit moved it; one it never named is unavailable', async () => {
+    const cases: [string, string[]][] = [
+      ['compare with [Pasted text #2 +1 lines]', ['two']], // #1 deleted
+      ['[Pasted text #2 +1 lines] before [Pasted text #1 +1 lines]', ['two', 'one']], // moved
+      ['[Pasted text #3 +1 lines] and [Pasted text #2 +1 lines]', ['two']], // #3 named nothing
+      [ROW_TEXT, ['one', 'two']], // untouched
+    ];
+    for (const [text, bodies] of cases) {
+      sent = [];
+      expect(startInlineEdit(A, pastedRow, 'blocked')).toBe(true);
+      setInlineText(A, text);
+      expect(await sendInlineEdit(client, A)).toBe('sent');
+      expect(bodiesOf((sends()[0] as { content: unknown }).content)).toEqual(bodies);
+    }
+    expect(toasts()).toEqual(['1 pasted segment was unavailable and was left out']);
+  });
+
+  it('the edited text handed to the composer keeps the same bindings', () => {
+    startInlineEdit(A, pastedRow, 'edit');
+    setInlineText(A, 'compare with [Pasted text #2 +1 lines]');
+    setResubmit(A, { state: 'rewound_awaiting_send', sendFailed: true }); // as a failed resend leaves it
+    expect(cancelInlineEdit(A)).toBe(true);
+    const prefill = useComposerStore.getState().prefills.get(A)!;
+    expect(prefill.text).toBe('compare with [Pasted text #2 +1 lines]');
+    const s = serializeDraft(prefillToDoc(prefill), { sessionId: 'eng-a', cwd: '/' });
+    expect([bodiesOf(s.content), s.omitted]).toEqual([['two'], 0]);
   });
 });
 

@@ -112,6 +112,29 @@ describe('Edit turns the bubble into an editor in its place', () => {
     expect(useComposerStore.getState().inlineEdits.size).toBe(0);
   });
 
+  it('while the resend is with the host, Cancel, Fork and Send are locked and neither Esc nor ⌘Enter acts', async () => {
+    const off = registerResubmitProvider({ forkFrom: vi.fn(async () => ({ appSessionId: 'app-fork' as AppSessionId })) });
+    try {
+      renderRow(rowOf('u-1'), { storeKey: A });
+      act(() => editAndResubmitRow(rowOf('u-1')));
+      fireEvent.click(within(editor()).getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(fake.pending('session.rewind')).toBe(1));
+      await act(() => fake.reply('session.rewind', rewound));
+      await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+      expect(within(editor()).getByRole('status').textContent).toBe('Rewound · sending your edited message…');
+      expect(['Cancel', 'Fork', 'Send'].map((name) => (within(editor()).getByRole('button', { name }) as HTMLButtonElement).disabled)).toEqual([true, true, true]);
+      expect(field().readOnly).toBe(true);
+      fireEvent.keyDown(field(), { key: 'Escape' });
+      fireEvent.keyDown(field(), { key: 'Enter', metaKey: true });
+      expect(fake.invoked('session.send')).toHaveLength(1);
+      expect(editor()).toBeTruthy();
+      await act(() => fake.reply('session.send', sent));
+      await waitFor(() => expect(useComposerStore.getState().inlineEdits.size).toBe(0));
+    } finally {
+      off();
+    }
+  });
+
   it('Send waits while a turn runs, and says why', async () => {
     useSessions.setState({ engine: new Map([[A, status(A, { engineState: 'running', turn: { origin: 'human', startedAt: '2026-09-28T10:00:00.000Z', userMessageUuids: [] } })]]) });
     renderRow(rowOf('u-1'), { storeKey: A });
@@ -171,5 +194,23 @@ describe('once the rewind hid the bubble, the composer’s dock carries the rese
     fireEvent.click(within(dock).getByRole('button', { name: 'Leave the edit' }));
     expect(useComposerStore.getState().inlineEdits.size).toBe(0);
     await waitFor(() => expect(screen.queryByText('Rewound · the message was not sent')).toBeNull());
+  });
+
+  it('its Send and × are locked while the send is with the host, so a second click sends nothing', async () => {
+    mountComposer();
+    act(() => editAndResubmitRow(rowOf('u-1')));
+    act(() => setResubmit(A, 'rewound_awaiting_send')); // a rewind the transcript confirmed late: Send is the human's
+    const line = await screen.findByText('Rewound · send your edited message');
+    const dock = line.closest('[data-edit-mode]') as HTMLElement;
+    fireEvent.click(within(dock).getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+    expect(within(dock).getByRole('status').textContent).toBe('Rewound · sending your edited message…');
+    const buttons = [within(dock).getByRole('button', { name: 'Send' }), within(dock).getByRole('button', { name: 'Leave the edit' })] as HTMLButtonElement[];
+    expect(buttons.map((b) => b.disabled)).toEqual([true, true]);
+    buttons.forEach((b) => fireEvent.click(b));
+    expect(fake.invoked('session.send')).toHaveLength(1);
+    expect(useComposerStore.getState().inlineEdits.size).toBe(1);
+    await act(() => fake.reply('session.send', sent));
+    await waitFor(() => expect(useComposerStore.getState().inlineEdits.size).toBe(0));
   });
 });

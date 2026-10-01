@@ -19,13 +19,14 @@
 //
 // The gate: `session.rewind` is issued once per human decision (a Send, a confirm, or Rewind again) and never repeated
 // here; a rewind whose outcome the host could not report is reconciled against the transcript's `boundary.rewind`
-// before any retry is offered; a send that fails after a rewind retries the send alone. Timers and subscriptions live
+// before any retry is offered; a send that fails after a rewind retries the send alone; one send or fork is with the
+// host at a time, and until it answers nothing else is taken (the record's `sending`). Timers and subscriptions live
 // here, per session, not in a component, so the flow outlives a tab switch and the bubble leaving the list (a rewind
 // hides the turn it edits); the session's event batches are subscribed only while the rewind is uncertain or unresolved.
 // An edit does not survive a reload (as Codex's does not): nothing in flight resumes on its own.
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { inlineEditOf, prefillComposer, resubmitRecordOf, setInlineEdit, setResubmit, useComposerStore, type InlineEdit, type Resubmit } from '../stores/composer';
+import { inlineEditOf, prefillComposer, resubmitRecordOf, setInlineEdit, setResubmit, useComposerStore, type InlineEdit, type Resubmit, type ResubmitState } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -33,7 +34,7 @@ import type { TranscriptEntry } from '../stores/transcript';
 import { useTranscriptStore } from '../transcript';
 import { focusedSession } from './ComposerAppKeys';
 import { newestUserUuid, rowPrefill, type UserRow } from './edit-prefill';
-import { prefillToDoc } from './editor/recall';
+import { bodiesByPlaceholder, prefillToDoc } from './editor/recall';
 import { serializeDraft } from './editor/serialize';
 import { submitSerialized, type Dispatch } from './editor/submit';
 import type { ContentBlock } from '@shared/graph/events';
@@ -58,19 +59,25 @@ export const resubmitProvider = (): ResubmitProvider | null => provider;
 // ---- C6's two actions (registered from App.tsx's C7 block) ------------------------------------------------------------
 
 const record = (appSessionId: AppSessionId): Resubmit => resubmitRecordOf(useComposerStore.getState(), appSessionId);
-const inFlight = (appSessionId: AppSessionId) => ['rewinding', 'rewind_uncertain'].includes(record(appSessionId).state);
+// A rewind in flight or unconfirmed, or the edit's send or fork with the host.
+const inFlight = (appSessionId: AppSessionId) => {
+  const { state, sending } = record(appSessionId);
+  return sending || state === 'rewinding' || state === 'rewind_uncertain';
+};
+// The record at `state` with nothing with the host.
+const at = (appSessionId: AppSessionId, state: ResubmitState) => record(appSessionId).state === state && !record(appSessionId).sending;
 
 // The bubble `row` of the session's transcript, in place: `edit` rewinds and resends, `blocked` sends anew. Refused
-// while the session's rewind is in flight or unconfirmed (what it resends is the edit that rewind is for).
+// while the session's rewind is in flight or unconfirmed, or its edit is being sent (what goes is the edit in hand).
 export function startInlineEdit(appSessionId: AppSessionId, row: UserRow & { messageUuid: MessageUuid }, kind: InlineEdit['kind']): boolean {
   if (inFlight(appSessionId)) {
-    toast({ level: 'info', text: 'A rewind is in progress', actions: [], dismissible: true });
+    toast({ level: 'info', text: record(appSessionId).sending ? 'Your edited message is being sent' : 'A rewind is in progress', actions: [], dismissible: true });
     return false;
   }
   const rows = useTranscriptStore.getState().rows(appSessionId);
   const prefill = rowPrefill(row);
   dispose(appSessionId);
-  setInlineEdit(appSessionId, { messageUuid: row.messageUuid, seenCursor: kind === 'edit' ? newestUserUuid(rows) : null, kind, text: prefill.text, pasted: prefill.pasted ?? [], images: prefill.images ?? [] });
+  setInlineEdit(appSessionId, { messageUuid: row.messageUuid, seenCursor: kind === 'edit' ? newestUserUuid(rows) : null, kind, text: prefill.text, bodies: bodiesByPlaceholder(prefill), images: prefill.images ?? [] });
   setResubmit(appSessionId, 'idle');
   return true;
 }
@@ -154,40 +161,56 @@ function end(appSessionId: AppSessionId): void {
   setResubmit(appSessionId, 'idle');
 }
 
-// Cancel, Keep editing's way out, or the dock line's ×. Refused while the rewind is in flight or unconfirmed. After a
-// rewind (the bubble is gone) the edited text goes into the composer rather than nowhere.
+// The edit's text as the composer takes it: each pasted placeholder with the body it named when the edit began.
+const editPrefill = (edit: InlineEdit) => ({ text: edit.text, bodies: edit.bodies, images: edit.images });
+
+// Cancel, Keep editing's way out, or the dock line's ×. Refused while the rewind is in flight or unconfirmed, or the
+// edit is being sent. After a rewind (the bubble is gone) the edited text goes into the composer rather than nowhere.
 export function cancelInlineEdit(appSessionId: AppSessionId): boolean {
   if (inFlight(appSessionId)) return false;
   const edit = editOf(appSessionId);
   const rewound = record(appSessionId).state === 'rewound_awaiting_send';
   end(appSessionId);
-  if (rewound && edit) prefillComposer(appSessionId, { text: edit.text, pasted: edit.pasted, images: edit.images });
+  if (rewound && edit) prefillComposer(appSessionId, editPrefill(edit));
   return true;
 }
 
-// What the edit sends: its text through the composer's serialiser (the pasted bodies framed as the terminal frames
-// them, the images re-attached), so a resend is the message as typed.
+// What the edit sends: its text through the composer's serialiser as a prompt as written (a leading `!` or `#` is
+// text, never the composer's bash or memory mode), the pasted bodies framed as the terminal frames them and the images
+// re-attached, so a resend is the message as typed.
 function serialized(appSessionId: AppSessionId, edit: InlineEdit) {
   const status = useSessions.getState().engine.get(appSessionId) ?? null;
   const sessionId = status?.engineSessionId ?? useSessions.getState().records.get(appSessionId)?.engineSessionId ?? null;
-  return serializeDraft(prefillToDoc({ text: edit.text, pasted: edit.pasted, images: edit.images }), { sessionId, cwd: status?.cwd ?? '' });
+  return serializeDraft(prefillToDoc(editPrefill(edit)), { sessionId, cwd: status?.cwd ?? '', literal: true });
+}
+
+// The edit's one send or fork (the old composer controller's guard): `sending` holds Send, Fork, Cancel and another edit
+// until the host answers. It takes the session's flight over, ending whatever the flow was waiting on (Send without
+// rewinding stops watching the transcript), and its answer acts only while that flight is current, so it never ends
+// or alters an edit other than the one it was sent for: accepted, the edit ends; refused, the record is `failed`.
+async function submitOnce(appSessionId: AppSessionId, go: () => Promise<boolean>, failed: Partial<Resubmit> & { state: ResubmitState }): Promise<boolean> {
+  const generation = dispose(appSessionId).generation;
+  setResubmit(appSessionId, { ...record(appSessionId), sending: true });
+  const accepted = await go();
+  if (flights.get(appSessionId)?.generation !== generation) return accepted;
+  if (accepted) end(appSessionId);
+  else setResubmit(appSessionId, failed);
+  return accepted;
 }
 
 // The edited text sent with `session.send` (after the rewind, without one by the human's choice, or a blocked prompt
-// sent anew); the edit ends when the host accepted it.
-async function sendEdited(client: MawsBridge, appSessionId: AppSessionId): Promise<boolean> {
+// sent anew); a send that fails after the rewind says so and waits for Retry.
+function sendEdited(client: MawsBridge, appSessionId: AppSessionId): Promise<boolean> {
   const edit = editOf(appSessionId);
-  if (!edit) return false;
+  if (!edit) return Promise.resolve(false);
   const s = serialized(appSessionId, edit);
-  const rewound = record(appSessionId).state === 'rewound_awaiting_send';
+  const before = record(appSessionId);
   const dispatch: Dispatch = async () => {
     const result = await client.invoke('session.send', { appSessionId, content: s.content });
     return result.ok ? null : result.error.message;
   };
-  const accepted = await submitSerialized(client, appSessionId, s, 'send', null, { dispatch });
-  if (accepted) end(appSessionId);
-  else if (rewound) setResubmit(appSessionId, { state: 'rewound_awaiting_send', sendFailed: true });
-  return accepted;
+  const failed = before.state === 'rewound_awaiting_send' ? { state: before.state, sendFailed: true } : before;
+  return submitOnce(appSessionId, () => submitSerialized(client, appSessionId, s, 'send', null, { dispatch }), failed);
 }
 
 // Whether a turn began after the edit did: the rewind would discard it too, so the human confirms first.
@@ -202,7 +225,7 @@ export function newerTurnSince(appSessionId: AppSessionId): MessageUuid | null {
 // once rewound, retries the send after a failed one, and from unresolved sends without rewinding by the human's choice.
 export function sendInlineEdit(client: MawsBridge, appSessionId: AppSessionId, how: 'send' | 'without_rewinding' = 'send'): Promise<RewindOutcome | 'sent' | 'stale'> {
   const edit = editOf(appSessionId);
-  if (!edit || !ready(appSessionId)) return Promise.resolve('stale');
+  if (!edit || !ready(appSessionId) || record(appSessionId).sending) return Promise.resolve('stale');
   const { state } = record(appSessionId);
   if (edit.kind === 'blocked' || state === 'rewound_awaiting_send' || (state === 'rewind_unresolved' && how === 'without_rewinding'))
     return sendEdited(client, appSessionId).then((accepted) => (accepted ? 'sent' : 'stale'));
@@ -215,13 +238,13 @@ export function sendInlineEdit(client: MawsBridge, appSessionId: AppSessionId, h
 }
 
 export function cancelRewind(appSessionId: AppSessionId): void {
-  if (record(appSessionId).state === 'confirming') setResubmit(appSessionId, 'idle');
+  if (at(appSessionId, 'confirming')) setResubmit(appSessionId, 'idle');
 }
 
 // The human's confirm of a rewind past a newer turn: the cursor advances to the newest message they saw.
 export function confirmRewind(client: MawsBridge, appSessionId: AppSessionId): Promise<RewindOutcome> {
   const edit = editOf(appSessionId);
-  if (record(appSessionId).state !== 'confirming' || !edit) return Promise.resolve('stale');
+  if (!at(appSessionId, 'confirming') || !edit) return Promise.resolve('stale');
   const newest = newerTurnSince(appSessionId);
   if (newest !== null) setInlineEdit(appSessionId, { ...edit, seenCursor: newest });
   return issueRewind(client, appSessionId);
@@ -230,21 +253,22 @@ export function confirmRewind(client: MawsBridge, appSessionId: AppSessionId): P
 // Rewind again, from unresolved: the engine answers `rewound: true` when the first attempt never applied and refuses
 // otherwise, so the transcript, not an inference, says what happened.
 export function rewindAgain(client: MawsBridge, appSessionId: AppSessionId): Promise<RewindOutcome> {
-  if (record(appSessionId).state !== 'rewind_unresolved') return Promise.resolve('stale');
+  if (!at(appSessionId, 'rewind_unresolved')) return Promise.resolve('stale');
   return issueRewind(client, appSessionId);
 }
 
 export function keepEditing(appSessionId: AppSessionId): void {
-  if (record(appSessionId).state !== 'rewind_unresolved') return;
+  if (!at(appSessionId, 'rewind_unresolved')) return;
   dispose(appSessionId);
   setResubmit(appSessionId, 'idle');
 }
 
 // The Fork: a forked session from that message, sent the edited text, in a tab of its own; this session is untouched.
+// Refused while a rewind or the edit's send is in flight.
 export async function forkInlineEdit(client: MawsBridge, appSessionId: AppSessionId): Promise<boolean> {
   const edit = editOf(appSessionId);
   const fork = provider;
-  if (!edit || !fork || edit.kind !== 'edit') return false;
+  if (!edit || !fork || edit.kind !== 'edit' || inFlight(appSessionId)) return false;
   const s = serialized(appSessionId, edit);
   let opened: AppSessionId | null = null;
   const dispatch: Dispatch = async () => {
@@ -255,11 +279,9 @@ export async function forkInlineEdit(client: MawsBridge, appSessionId: AppSessio
       return error instanceof Error ? error.message : String(error);
     }
   };
-  const accepted = await submitSerialized(client, appSessionId, s, 'send', null, { dispatch });
-  if (!accepted) return false;
-  end(appSessionId);
-  if (opened) useLayout.getState().openSession(opened);
-  return true;
+  const accepted = await submitOnce(appSessionId, () => submitSerialized(client, appSessionId, s, 'send', null, { dispatch }), record(appSessionId));
+  if (accepted && opened) useLayout.getState().openSession(opened);
+  return accepted;
 }
 
 async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Promise<RewindOutcome> {
@@ -293,7 +315,7 @@ async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Prom
   if (result.ok && result.value.reason === 'target_not_found') {
     // the target left the conversation (an earlier rewind applied): the edit cannot apply, and its text is not lost
     end(appSessionId);
-    prefillComposer(appSessionId, { text: edit.text, pasted: edit.pasted, images: edit.images });
+    prefillComposer(appSessionId, editPrefill(edit));
     toast({ level: 'info', text: REWOUND_COPY, actions: [], dismissible: true });
     return 'refused';
   }

@@ -4,7 +4,7 @@ import type { MessageUuid } from '@shared/graph/ids';
 import type { Row, TurnActivity } from '../../transcript';
 import { docOf, paragraph, textNode, type ComposerDoc } from './doc';
 import { historyNavigation, recallDoc, recallEntries, type HistoryNav } from './history';
-import { historyEntryToDoc, prefillToDoc } from './recall';
+import { bodiesByPlaceholder, historyEntryToDoc, prefillToDoc } from './recall';
 import { serializeDraft } from './serialize';
 
 const ctx = { sessionId: 's-1', cwd: '/repo' };
@@ -81,6 +81,16 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     expect(s.omitted).toBe(1);
     expect(s.pastedContents['1']?.content).toBe('a\nb\nc');
     expect(Array.isArray(s.content) && s.content[0]).toMatchObject({ type: 'image', source: { media_type: 'image/png', data: 'iVBO' } });
+  });
+
+  // W3 (B6): a bubble edited in place may lose or move a placeholder, so its bodies are bound to what each one names
+  it('rebuilds an edited text by what each placeholder names: a deleted or moved one takes no other’s body, an unknown one is unavailable', () => {
+    const bodies = bodiesByPlaceholder({ text: 'a [Pasted text #1 +1 lines] b [Pasted text #2 +2 lines]', pasted: [{ name: 'Pasted text #1', text: 'one' }, { name: 'Pasted text #2', text: 't\nwo' }] });
+    expect(bodies).toEqual({ '[Pasted text #1 +1 lines]': 'one', '[Pasted text #2 +2 lines]': 't\nwo' });
+    const s = serializeDraft(prefillToDoc({ text: '[Pasted text #9 +1 lines] b [Pasted text #2 +2 lines]', bodies }), ctx);
+    expect(s.display).toBe('[Pasted text #1 +1 lines] b [Pasted text #2 +2 lines]'); // renumbered as the composer numbers atoms
+    expect(s.omitted).toBe(1);
+    expect(Object.values(s.pastedContents).map((p) => p.content)).toEqual(['t\nwo']);
   });
 
   it("lists the session's human prompts newest last, then earlier history not already among them", () => {

@@ -22,7 +22,8 @@ const PRIMARY = 'rounded-sm bg-accent px-2.5 py-0.5 text-ui-sm text-bg outline-a
 export const BUSY_REASON = 'Wait for the turn to end, or stop it first';
 
 // What the resubmit's line says in each state; `warn` states read in the warning tone; null at rest.
-function lineCopy({ state, exited, sendFailed }: Resubmit): { text: string; warn: boolean } | null {
+function lineCopy({ state, exited, sendFailed, sending }: Resubmit): { text: string; warn: boolean } | null {
+  if (sending) return { text: state === 'rewound_awaiting_send' ? 'Rewound · sending your edited message…' : 'Sending your edited message…', warn: false };
   switch (state) {
     case 'rewinding':
       return { text: 'Rewinding this session to that message…', warn: false };
@@ -57,7 +58,7 @@ function InlineEditor({ appSessionId, edit, client }: { appSessionId: AppSession
   }, []);
 
   const busy = status !== null && (status.turn !== null || status.engineState === 'running');
-  const locked = resubmit.state === 'rewinding' || resubmit.state === 'rewind_uncertain';
+  const locked = resubmit.sending || resubmit.state === 'rewinding' || resubmit.state === 'rewind_uncertain';
   const why = status?.process !== 'ready' ? NOT_RUNNING : edit.kind === 'edit' && busy ? BUSY_REASON : null;
   const empty = edit.text.trim() === '' && edit.images.length === 0;
   const fork = edit.kind === 'edit' && resubmitProvider() !== null;
@@ -102,13 +103,13 @@ function InlineEditor({ appSessionId, edit, client }: { appSessionId: AppSession
       <div className="flex items-center justify-end gap-1">
         {resubmit.state === 'rewind_unresolved' ? (
           <>
-            <button type="button" className={BUTTON} onClick={() => void rewindAgain(client, appSessionId)}>
+            <button type="button" className={BUTTON} disabled={locked} onClick={() => void rewindAgain(client, appSessionId)}>
               Rewind again
             </button>
-            <button type="button" className={BUTTON} onClick={() => void sendInlineEdit(client, appSessionId, 'without_rewinding')}>
+            <button type="button" className={BUTTON} disabled={locked} onClick={() => void sendInlineEdit(client, appSessionId, 'without_rewinding')}>
               Send without rewinding
             </button>
-            <button type="button" className={BUTTON} onClick={() => keepEditing(appSessionId)}>
+            <button type="button" className={BUTTON} disabled={locked} onClick={() => keepEditing(appSessionId)}>
               Keep editing
             </button>
           </>
@@ -157,6 +158,7 @@ function RewindConfirm({ onConfirm, onCancel }: { onConfirm(): void; onCancel():
 
 // The composer dock's line once the rewind hid the edited bubble and the resend still waits: Send (a late-confirmed
 // rewind, the human's decision) or Retry (a failed send, never another rewind); × puts the text in the composer instead.
+// Both hold while the send is with the host.
 export function ResubmitLine({ resubmit, onSend, onLeave }: { resubmit: Resubmit; onSend(): void; onLeave(): void }) {
   const line = lineCopy(resubmit);
   return (
@@ -164,10 +166,10 @@ export function ResubmitLine({ resubmit, onSend, onLeave }: { resubmit: Resubmit
       <span role="status" className={`min-w-0 flex-1 truncate ${line?.warn ? 'text-warning' : 'text-fg-muted'}`}>
         {line?.text}
       </span>
-      <button type="button" className={BUTTON} onClick={onSend}>
+      <button type="button" className={BUTTON} disabled={resubmit.sending} onClick={onSend}>
         {resubmit.sendFailed ? 'Retry' : 'Send'}
       </button>
-      <button type="button" aria-label="Leave the edit" title="Leave the edit · your edited text goes into the composer" className={BUTTON} onClick={onLeave}>
+      <button type="button" aria-label="Leave the edit" title="Leave the edit · your edited text goes into the composer" className={BUTTON} disabled={resubmit.sending} onClick={onLeave}>
         ×
       </button>
     </div>

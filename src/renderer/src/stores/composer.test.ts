@@ -53,7 +53,7 @@ describe('composer store seam', () => {
     expect([isStarting(useComposerStore.getState(), A), isStarting(useComposerStore.getState(), B)]).toEqual([true, false]);
     setStarting(A, false);
     expect(isStarting(useComposerStore.getState(), A)).toBe(false);
-    setInlineEdit(A, { messageUuid: 'u-1' as MessageUuid, seenCursor: 'u-2' as MessageUuid, kind: 'edit', text: 'turn two', pasted: [], images: [] });
+    setInlineEdit(A, { messageUuid: 'u-1' as MessageUuid, seenCursor: 'u-2' as MessageUuid, kind: 'edit', text: 'turn two', bodies: {}, images: [] });
     setInlineText(A, 'turn two edited');
     expect(inlineEditOf(useComposerStore.getState(), A)).toMatchObject({ messageUuid: 'u-1', seenCursor: 'u-2', text: 'turn two edited' });
     expect(inlineEditOf(useComposerStore.getState(), B)).toBeNull();
@@ -62,7 +62,7 @@ describe('composer store seam', () => {
     expect(resubmitOf(useComposerStore.getState(), A)).toBe('idle');
     setResubmit(A, 'rewound_awaiting_send');
     expect(resubmitOf(useComposerStore.getState(), A)).toBe('rewound_awaiting_send');
-    expect(resubmitRecordOf(useComposerStore.getState(), A)).toEqual({ state: 'rewound_awaiting_send', exited: false, sendFailed: false, autoSend: false });
+    expect(resubmitRecordOf(useComposerStore.getState(), A)).toEqual({ state: 'rewound_awaiting_send', exited: false, sendFailed: false, autoSend: false, sending: false });
     setResubmit(A, { state: 'rewound_awaiting_send', sendFailed: true });
     expect(resubmitRecordOf(useComposerStore.getState(), A)).toMatchObject({ state: 'rewound_awaiting_send', sendFailed: true });
     setResubmit(A, { state: 'idle', exited: true }); // an idle state that still says something is kept

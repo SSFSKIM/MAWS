@@ -133,6 +133,14 @@ describe('serializeDraft maps docs to user content', () => {
     expect(serializeDraft(real(docOf([paragraph(textNode('!'))])), ctx)).toMatchObject({ mode: 'bash', empty: true });
   });
 
+  // W3 (B6): a bubble edited in place resends a prompt, so its leading `#` or `!` is text
+  it('reads a literal draft as a prompt as written, its leading # or ! kept', () => {
+    const literal = { ...ctx, literal: true };
+    expect(serializeDraft(real(docOf([paragraph(textNode('# Requirements'))])), literal)).toMatchObject({ mode: 'send', text: '# Requirements', content: '# Requirements', display: '# Requirements' });
+    expect(serializeDraft(real(docOf([paragraph(textNode('!ls -la'))])), literal)).toMatchObject({ mode: 'send', content: '!ls -la', display: '!ls -la' });
+    expect(serializeDraft(real(docOf([paragraph(textNode('!'))])), literal)).toMatchObject({ mode: 'send', content: '!', empty: false });
+  });
+
   it('puts images before the text block and omits an empty text block', () => {
     const s = serializeDraft(real(docOf([paragraph(textNode('what is this'))], [png, pdf])), ctx);
     expect(s.content).toEqual([
