@@ -274,16 +274,27 @@ test('usage: with ClaudeUsage’s control route (a stub), the actions enable, Ro
           version: 1,
           updatedAt: new Date().toISOString(),
           routing: { enabled: true, ready: true, port: 8641, drainTarget: uuidOf('3@example.test'), drainTargetIsManual: false },
-          accounts: accounts.map((a) => ({ uuid: a.uuid, email: a.email, status: 'ok', isRoutingHere: a.email === '3@example.test' })),
+          accounts: accounts.map((a) => ({
+            uuid: a.uuid,
+            email: a.email,
+            status: 'ready',
+            statusMessage: 'Ready',
+            isActive: false,
+            isRoutingHere: a.email === '3@example.test',
+            canRoute: a.email !== '3@example.test' && a.email !== '2@example.test', // ClaudeUsage's own word: 2@ may not take requests
+            needsReconnect: false,
+            canReconnect: false,
+            canRemove: true,
+          })),
           codex: [],
         });
       }
       if (key === 'POST /claudeusage/route') {
         if (body?.uuid === uuidOf('4@example.test')) return send(res, 409, { ok: false, reason: 'unusable', message: '4@example.test is at its limit until its five-hour window resets' });
-        return send(res, 200, { ok: true, drainTarget: body?.uuid });
+        return send(res, 200, { ok: true, drainTarget: body?.uuid, drainTargetIsManual: true });
       }
-      if (key === 'POST /claudeusage/panel') return send(res, 200, { ok: true });
-      send(res, 404, { type: 'error' });
+      if (key === 'POST /claudeusage/panel') return send(res, 200, { ok: true, shown: true });
+      send(res, 404, { error: 'not_found' });
     });
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -295,12 +306,14 @@ test('usage: with ClaudeUsage’s control route (a stub), the actions enable, Ro
     const popover = popoverOf(page);
     await expect(popover).toBeVisible();
 
-    // The actions enable once main has the state, under no hint.
+    // The actions enable once main has the state, under no hint, each account's as ClaudeUsage says: not 2@'s Route.
     for (const [name, count] of [['Route requests here', 4], ['Remove account…', 5], ['Add account…', 1]] as const) {
-      const buttons = popover.getByRole('button', { name, exact: true });
-      await expect(buttons).toHaveCount(count);
-      for (const button of await buttons.all()) await expect(button).toBeEnabled();
+      await expect(popover.getByRole('button', { name, exact: true })).toHaveCount(count);
     }
+    for (const email of ['1@example.test', '4@example.test', '5@example.test']) await expect(card(page, email).getByRole('button', { name: 'Route requests here' })).toBeEnabled();
+    await expect(card(page, '2@example.test').getByRole('button', { name: 'Route requests here' })).toBeDisabled();
+    for (const button of await popover.getByRole('button', { name: 'Remove account…', exact: true }).all()) await expect(button).toBeEnabled();
+    await expect(popover.getByRole('button', { name: 'Add account…', exact: true })).toBeEnabled();
     await expect(popover.locator('[data-controls-hint]')).toHaveCount(0);
     expect(seen.length).toBeGreaterThan(0);
     for (const s of seen) expect([s.method, s.path, s.authorization]).toEqual(['GET', '/claudeusage/state', 'Bearer e2e-control-token']);

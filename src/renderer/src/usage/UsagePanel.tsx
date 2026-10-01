@@ -59,16 +59,16 @@ export function UsagePanel() {
   const actionsOf = (row: AccountRow) => (
     <>
       {row.state === 'needs_reauth' && (
-        <button type="button" className={`${BUTTON} ml-1.5`} disabled={!controls.reconnect.available} aria-describedby={describedBy} onClick={() => controls.reconnect.run({ uuid: row.uuid, email: row.email })}>
+        <button type="button" className={`${BUTTON} ml-1.5`} disabled={!controls.reconnect.available({ uuid: row.uuid, email: row.email })} aria-describedby={describedBy} onClick={() => controls.reconnect.run({ uuid: row.uuid, email: row.email })}>
           {USAGE.reconnect}
         </button>
       )}
       {row.role !== 'routing' && row.state !== 'needs_reauth' && (
-        <button type="button" className={ACTION} disabled={!controls.route.available} aria-describedby={describedBy} onClick={() => controls.route.run({ uuid: row.uuid })}>
+        <button type="button" className={ACTION} disabled={!controls.route.available({ uuid: row.uuid })} aria-describedby={describedBy} onClick={() => controls.route.run({ uuid: row.uuid })}>
           {USAGE.route}
         </button>
       )}
-      <button type="button" className={ACTION} disabled={!controls.remove.available} aria-describedby={describedBy} onClick={() => controls.remove.run({ uuid: row.uuid, email: row.email })}>
+      <button type="button" className={ACTION} disabled={!controls.remove.available({ uuid: row.uuid, email: row.email })} aria-describedby={describedBy} onClick={() => controls.remove.run({ uuid: row.uuid, email: row.email })}>
         {USAGE.remove}
       </button>
     </>
@@ -127,7 +127,7 @@ export function UsagePanel() {
 
       {available && (
         <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-ui-sm">
-          <button type="button" className={BUTTON} disabled={!controls.add.available} aria-describedby={describedBy} onClick={() => controls.add.run({ email: null })}>
+          <button type="button" className={BUTTON} disabled={!controls.add.available({ email: null })} aria-describedby={describedBy} onClick={() => controls.add.run({ email: null })}>
             {USAGE.add}
           </button>
           <span className="text-fg-muted">{USAGE.addHint}</span>

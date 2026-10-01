@@ -178,13 +178,18 @@ export const UsageControlReasonSchema = z.enum([
   'no_route', // no token file, no port, a 404 or a refused connection: this ClaudeUsage has no control route
   'bad_token', // a 401, or a token file that cannot be read
   'timeout', // no answer within the client's limit
+  'starting', // a 503: the relay answers but ClaudeUsage's app is not wired to it yet
   'failed', // any other status, or an answer that is not the state
 ]);
 export type UsageControlReason = z.infer<typeof UsageControlReasonSchema>;
 export const UsageControlStateSchema = z.strictObject({
   updatedAt: z.string().nullable(),
   routing: z.strictObject({ enabled: z.boolean(), ready: z.boolean(), port: z.number().int().nullable(), drainTarget: z.string().nullable(), drainTargetIsManual: z.boolean() }),
-  accounts: z.array(z.strictObject({ uuid: z.string(), email: z.string(), status: z.string(), isRoutingHere: z.boolean() })),
+  // `status` is ClaudeUsage's own case name in snake_case; `canRoute`, `canReconnect` and `canRemove` are ClaudeUsage's
+  // own word on each account's actions, null when the state does not carry them
+  accounts: z.array(
+    z.strictObject({ uuid: z.string(), email: z.string(), status: z.string(), isRoutingHere: z.boolean(), canRoute: z.boolean().nullable(), canReconnect: z.boolean().nullable(), canRemove: z.boolean().nullable() }),
+  ),
   codex: z.array(z.strictObject({ id: z.string(), label: z.string(), isDrainTarget: z.boolean() })),
 });
 export type UsageControlState = z.infer<typeof UsageControlStateSchema>;
@@ -198,10 +203,12 @@ export const UsageActionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('panel') }), // POST /claudeusage/panel: toggles ClaudeUsage's own panel
 ]);
 export type UsageAction = z.infer<typeof UsageActionSchema>;
-// ok: `drainTarget` is the route's resulting drain target (null for the other actions). Not ok: a 409's `reason` and
-// `message` as ClaudeUsage wrote them, or a UsageControlReason with main's own message when ClaudeUsage was not reached.
+// ok: `drainTarget` and `drainTargetIsManual` are the route's result (null and false for the other actions), `shown`
+// whether the panel toggle left ClaudeUsage's panel on screen (null for the other actions). Not ok: a 409's `reason` and
+// `message` as ClaudeUsage wrote them (its panel's own wording), or a UsageControlReason with main's own message when
+// ClaudeUsage was not reached.
 export const UsageActionResultSchema = z.discriminatedUnion('ok', [
-  z.strictObject({ ok: z.literal(true), drainTarget: z.string().nullable() }),
+  z.strictObject({ ok: z.literal(true), drainTarget: z.string().nullable(), drainTargetIsManual: z.boolean(), shown: z.boolean().nullable() }),
   z.strictObject({ ok: z.literal(false), reason: z.string(), message: z.string() }),
 ]);
 export type UsageActionResult = z.infer<typeof UsageActionResultSchema>;

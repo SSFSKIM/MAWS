@@ -4,8 +4,9 @@
 // this ClaudeUsage has no control route, so nothing is sent. The port is `gateway.json`'s, as C7's reader last read it.
 // MAWS writes none of ClaudeUsage's files: an action is ClaudeUsage's to carry out, and its files (C7's reader) follow.
 // Every way of not reaching ClaudeUsage answers a reason instead of throwing: no token, no port, a 404 or a refused
-// connection is `no_route`; a 401 or an unreadable token `bad_token`; no answer in time `timeout`; anything else
-// `failed`. `MAWS_CLAUDE_USAGE_CONTROL_URL` (tests only, through `baseUrl`) replaces `http://127.0.0.1:<port>`.
+// connection is `no_route`; a 401 or an unreadable token `bad_token`; no answer in time `timeout`; a 503 (the relay is up,
+// ClaudeUsage's app is not wired to it yet) `starting`; anything else (a 400, a 405, a 5xx, an answer that is not the
+// state) `failed`. `MAWS_CLAUDE_USAGE_CONTROL_URL` (tests only, through `baseUrl`) replaces `http://127.0.0.1:<port>`.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { UsageAction, UsageActionResult, UsageControlReason, UsageControlsAnswer, UsageControlState } from '@shared/ipc/schema';
@@ -30,6 +31,7 @@ const MESSAGES: Record<UsageControlReason, string> = {
   no_route: "ClaudeUsage's control route is not there; use ClaudeUsage's own panel",
   bad_token: "ClaudeUsage's control token could not be read",
   timeout: 'ClaudeUsage did not answer in time',
+  starting: 'ClaudeUsage is still starting',
   failed: "ClaudeUsage's control route failed",
 };
 
@@ -53,7 +55,11 @@ export class ClaudeUsageControl {
     const answer = await this.request('POST', path, body, this.opts.actionTimeoutMs ?? ACTION_TIMEOUT_MS);
     if (!answer.reached) return { ok: false, reason: answer.reason, message: answer.message };
     if (answer.status >= 200 && answer.status < 300) {
-      return { ok: true, drainTarget: action.action === 'route' ? (str(field(answer.body, 'drainTarget')) ?? action.uuid) : null };
+      const manual = field(answer.body, 'drainTargetIsManual');
+      const shown = field(answer.body, 'shown');
+      return action.action === 'route'
+        ? { ok: true, drainTarget: str(field(answer.body, 'drainTarget')) ?? action.uuid, drainTargetIsManual: typeof manual === 'boolean' ? manual : true, shown: null } // a route ClaudeUsage was asked for is manual
+        : { ok: true, drainTarget: null, drainTargetIsManual: false, shown: action.action === 'panel' && typeof shown === 'boolean' ? shown : null };
     }
     if (answer.status === 409) {
       const reason = str(field(answer.body, 'reason')) ?? 'refused';
@@ -131,7 +137,7 @@ function requestOf(action: UsageAction): [path: string, body: unknown] {
   }
 }
 
-const reasonOf = (status: number): UsageControlReason => (status === 401 ? 'bad_token' : status === 404 ? 'no_route' : 'failed');
+const reasonOf = (status: number): UsageControlReason => (status === 401 ? 'bad_token' : status === 404 ? 'no_route' : status === 503 ? 'starting' : 'failed');
 
 // The state as MAWS uses it, read leniently: fields ClaudeUsage adds are ignored and a missing one takes its empty value;
 // only an answer without the version, the routing object and the accounts list is not the state.
@@ -147,13 +153,18 @@ export function parseState(value: unknown): UsageControlState | null {
       drainTarget: str(routing.drainTarget),
       drainTargetIsManual: routing.drainTargetIsManual === true,
     },
-    accounts: value.accounts.filter(isObject).flatMap((a) => (typeof a.uuid === 'string' ? [{ uuid: a.uuid, email: str(a.email) ?? '', status: str(a.status) ?? '', isRoutingHere: a.isRoutingHere === true }] : [])),
+    accounts: value.accounts.filter(isObject).flatMap((a) =>
+      typeof a.uuid === 'string'
+        ? [{ uuid: a.uuid, email: str(a.email) ?? '', status: str(a.status) ?? '', isRoutingHere: a.isRoutingHere === true, canRoute: bool(a.canRoute), canReconnect: bool(a.canReconnect), canRemove: bool(a.canRemove) }]
+        : [],
+    ),
     codex: (Array.isArray(value.codex) ? value.codex : []).filter(isObject).flatMap((c) => (typeof c.id === 'string' ? [{ id: c.id, label: str(c.label) ?? '', isDrainTarget: c.isDrainTarget === true }] : [])),
   };
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+const bool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null);
 const field = (body: unknown, key: string): unknown => (isObject(body) ? body[key] : undefined);
 
 function json(text: string): unknown {

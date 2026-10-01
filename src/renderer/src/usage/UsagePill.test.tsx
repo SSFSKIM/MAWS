@@ -294,6 +294,23 @@ describe('the usage popover’s actions through ClaudeUsage’s control route', 
     for (const button of within(panel).getAllByRole('button', { name: 'Remove account…' })) expect((button as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('enables each account’s actions as ClaudeUsage says, and says when ClaudeUsage is still starting', async () => {
+    const accounts = fixture.accounts.map((a) => ({ uuid: a.uuid, email: a.email, status: 'ready', isRoutingHere: false, canRoute: a.email !== '4@example.test', canReconnect: false, canRemove: a.email !== '2@example.test' }));
+    controls = { available: true, reason: null, state: { ...available().state!, accounts } };
+    let panel = await openPanel();
+    const button = (email: string, name: string) => within(card(panel, email)).getByRole('button', { name }) as HTMLButtonElement;
+    expect([button('4@example.test', 'Route requests here').disabled, button('1@example.test', 'Route requests here').disabled]).toEqual([true, false]);
+    expect([button('2@example.test', 'Remove account…').disabled, button('1@example.test', 'Remove account…').disabled]).toEqual([true, false]);
+    expect((within(panel).getByRole('button', { name: 'Add account…' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(hintOf(panel)).toBeNull();
+    closePanel();
+
+    controls = { available: false, reason: 'starting', state: null };
+    panel = await openPanel();
+    expect(hintOf(panel)).toBe('ClaudeUsage is still starting');
+    expect(button('1@example.test', 'Route requests here').disabled).toBe(true);
+  });
+
   it('keeps today’s hint while the route does not answer and names an unreadable token', async () => {
     controls = { available: false, reason: 'timeout', state: null };
     let panel = await openPanel();
@@ -307,7 +324,7 @@ describe('the usage popover’s actions through ClaudeUsage’s control route', 
 
   it('Route asks first with the panel’s warning, posts, and shows the new routing account at once', async () => {
     controls = available();
-    answerAction = (action) => ({ ok: true, drainTarget: action.action === 'route' ? action.uuid : null });
+    answerAction = (action) => ({ ok: true, drainTarget: action.action === 'route' ? action.uuid : null, drainTargetIsManual: action.action === 'route', shown: null });
     const panel = await openPanel();
     fireEvent.click(within(card(panel, '1@example.test')).getByRole('button', { name: 'Route requests here' }));
     await settle();
@@ -353,7 +370,7 @@ describe('the usage popover’s actions through ClaudeUsage’s control route', 
 
   it('Remove names the account on a destructive sheet and posts with confirm', async () => {
     controls = available();
-    answerAction = () => ({ ok: true, drainTarget: null });
+    answerAction = () => ({ ok: true, drainTarget: null, drainTargetIsManual: false, shown: null });
     const panel = await openPanel();
     fireEvent.click(within(card(panel, '4@example.test')).getByRole('button', { name: 'Remove account…' }));
     await settle();
@@ -369,7 +386,7 @@ describe('the usage popover’s actions through ClaudeUsage’s control route', 
 
   it('Add and Reconnect open ClaudeUsage’s sign-in sheet at once and say so', async () => {
     controls = available();
-    answerAction = () => ({ ok: true, drainTarget: null });
+    answerAction = () => ({ ok: true, drainTarget: null, drainTargetIsManual: false, shown: null });
     const reauth = { ...fixture, accounts: fixture.accounts.map((a) => (a.email === '5@example.test' ? { ...a, needsReauthentication: true } : a)) };
     const panel = await openPanel(reauth);
     fireEvent.click(within(panel).getByRole('button', { name: 'Add account…' }));
@@ -410,7 +427,7 @@ describe('the usage popover’s actions through ClaudeUsage’s control route', 
 
   it('Open ClaudeUsage opens ClaudeUsage’s panel through the route, and falls back to the activation when that fails', async () => {
     controls = available();
-    answerAction = () => ({ ok: true, drainTarget: null });
+    answerAction = () => ({ ok: true, drainTarget: null, drainTargetIsManual: false, shown: null });
     const panel = await openPanel();
     fireEvent.click(within(panel).getByRole('button', { name: 'Open ClaudeUsage ↗' }));
     await settle();
@@ -423,5 +440,16 @@ describe('the usage popover’s actions through ClaudeUsage’s control route', 
     fireEvent.click(within(panel).getByRole('button', { name: 'Open ClaudeUsage ↗' }));
     await settle();
     expect(calls.filter((c) => c.name === 'settings.claudeUsage.open').map((c) => c.input)).toEqual([{ intent: 'panel' }]);
+  });
+
+  it('Open ClaudeUsage asks once more when the toggle hid a panel that was already up', async () => {
+    controls = available();
+    const shown = [false, true];
+    answerAction = () => ({ ok: true, drainTarget: null, drainTargetIsManual: false, shown: shown.shift() ?? true });
+    const panel = await openPanel();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Open ClaudeUsage ↗' }));
+    await settle();
+    expect(posted()).toEqual([{ action: 'panel' }, { action: 'panel' }]);
+    expect(within(panel).getByRole('status').textContent).toBe('Waiting for ClaudeUsage…');
   });
 });

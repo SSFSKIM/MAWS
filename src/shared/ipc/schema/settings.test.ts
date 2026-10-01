@@ -74,7 +74,8 @@ describe('settings.usageControls and settings.usageAction', () => {
     expect(output.safeParse({ available: false, reason: 'no_route', state: null }).success).toBe(true);
     expect(output.safeParse({ available: false, reason: 'gone', state: null }).success).toBe(false);
     const result = commands['settings.usageAction'].output;
-    expect(result.safeParse({ ok: true, drainTarget: 'u' }).success).toBe(true);
+    expect(result.safeParse({ ok: true, drainTarget: 'u', drainTargetIsManual: true, shown: null }).success).toBe(true);
+    expect(result.safeParse({ ok: true, drainTarget: 'u' }).success).toBe(false);
     expect(result.safeParse({ ok: false, reason: 'not_ready', message: 'm' }).success).toBe(true);
     expect(result.safeParse({ ok: false }).success).toBe(false);
   });

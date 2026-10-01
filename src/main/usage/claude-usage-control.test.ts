@@ -16,8 +16,8 @@ const STATE = {
   updatedAt: '2026-10-01T12:00:00Z',
   routing: { enabled: true, ready: true, port: 8641, drainTarget: '2aca3c4b-1e77-4091-908b-d183f6b0f092', drainTargetIsManual: false, futureField: 1 },
   accounts: [
-    { uuid: ROUTED, email: '1@example.test', status: 'ok', isRoutingHere: false },
-    { uuid: '2aca3c4b-1e77-4091-908b-d183f6b0f092', email: '3@example.test', status: 'ok', isRoutingHere: true, plan: 'Max' },
+    { uuid: ROUTED, email: '1@example.test', status: 'ready', statusMessage: 'Ready', isActive: false, isRoutingHere: false, canRoute: true, needsReconnect: false, canReconnect: false, canRemove: true },
+    { uuid: '2aca3c4b-1e77-4091-908b-d183f6b0f092', email: '3@example.test', status: 'ready', isRoutingHere: true, canRoute: false, canReconnect: false, canRemove: true, plan: 'Max' },
   ],
   codex: [{ id: 'c0de0001', label: '6@example.test', isDrainTarget: true }],
 };
@@ -41,7 +41,8 @@ const send = (res: ServerResponse, status: number, body?: unknown) => {
   res.end(body === undefined ? '' : JSON.stringify(body));
 };
 
-// The contract as the parallel ClaudeUsage worker builds it, with a refusal for each 409 it names.
+// The contract as ClaudeUsage's `maws-control-route` branch built it: the token checked before the path, a 404 for an
+// unknown path, a 405 for a wrong method, and a refusal for each 409 it names.
 const contract: Handler = (req, res) => {
   if (req.authorization !== `Bearer ${TOKEN}`) return send(res, 401, { ok: false, reason: 'unauthorized', message: 'wrong token' });
   const body = (req.body ?? {}) as Record<string, unknown>;
@@ -51,16 +52,20 @@ const contract: Handler = (req, res) => {
     if (body.uuid === 'not-ready') return send(res, 409, { ok: false, reason: 'not_ready', message: 'Routing is off in ClaudeUsage' });
     if (body.uuid === 'nobody') return send(res, 409, { ok: false, reason: 'unknown_account', message: 'ClaudeUsage has no such account' });
     if (body.uuid === 'spent') return send(res, 409, { ok: false, reason: 'unusable', message: '4@example.test is at its limit' });
-    return send(res, 200, { ok: true, drainTarget: body.uuid });
+    if (body.uuid === 'switching') return send(res, 409, { ok: false, reason: 'busy', message: 'ClaudeUsage is switching accounts' });
+    return send(res, 200, { ok: true, drainTarget: body.uuid, drainTargetIsManual: true });
   }
   if (key === 'POST /claudeusage/accounts/add') return send(res, 202, { ok: true });
-  if (key === 'POST /claudeusage/accounts/reconnect') return send(res, 202, { ok: true });
+  if (key === 'POST /claudeusage/accounts/reconnect') {
+    if (body.uuid === ROUTED) return send(res, 409, { ok: false, reason: 'not_needed', message: '1@example.test does not need reconnecting' });
+    return send(res, 202, { ok: true });
+  }
   if (key === 'POST /claudeusage/accounts/remove') {
     if (body.confirm !== true) return send(res, 409, { ok: false, reason: 'confirm_required', message: 'Removing an account needs confirm' });
     return send(res, 200, { ok: true });
   }
-  if (key === 'POST /claudeusage/panel') return send(res, 200, { ok: true, open: true });
-  send(res, 404, { type: 'error' });
+  if (key === 'POST /claudeusage/panel') return send(res, 200, { ok: true, shown: true });
+  send(res, 404, { error: 'not_found' });
 };
 
 beforeEach(async () => {
@@ -101,8 +106,8 @@ describe('settings.usageControls', () => {
         updatedAt: '2026-10-01T12:00:00Z',
         routing: { enabled: true, ready: true, port: 8641, drainTarget: '2aca3c4b-1e77-4091-908b-d183f6b0f092', drainTargetIsManual: false },
         accounts: [
-          { uuid: ROUTED, email: '1@example.test', status: 'ok', isRoutingHere: false },
-          { uuid: '2aca3c4b-1e77-4091-908b-d183f6b0f092', email: '3@example.test', status: 'ok', isRoutingHere: true },
+          { uuid: ROUTED, email: '1@example.test', status: 'ready', isRoutingHere: false, canRoute: true, canReconnect: false, canRemove: true },
+          { uuid: '2aca3c4b-1e77-4091-908b-d183f6b0f092', email: '3@example.test', status: 'ready', isRoutingHere: true, canRoute: false, canReconnect: false, canRemove: true },
         ],
         codex: [{ id: 'c0de0001', label: '6@example.test', isDrainTarget: true }],
       },
@@ -165,8 +170,15 @@ describe('settings.usageControls', () => {
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
+  it('is starting on a 503: the relay answers before ClaudeUsage’s app is wired to it', async () => {
+    handler = (_req, res) => send(res, 503, { ok: false, reason: 'unavailable' });
+    expect(await client().controls()).toEqual({ available: false, reason: 'starting', state: null });
+  });
+
   it('is failed on another status or an answer that is not the state', async () => {
     handler = (_req, res) => send(res, 500, { ok: false });
+    expect((await client().controls()).reason).toBe('failed');
+    handler = (_req, res) => send(res, 405, { ok: false });
     expect((await client().controls()).reason).toBe('failed');
     handler = (_req, res) => send(res, 200, { hello: 'world' });
     expect((await client().controls()).reason).toBe('failed');
@@ -181,19 +193,20 @@ describe('settings.usageControls', () => {
 describe('settings.usageAction', () => {
   it('posts each action with its body and answers ClaudeUsage’s result', async () => {
     const control = client();
-    expect(await control.act({ action: 'route', uuid: ROUTED })).toEqual({ ok: true, drainTarget: ROUTED });
-    expect(await control.act({ action: 'add', email: null })).toEqual({ ok: true, drainTarget: null });
-    expect(await control.act({ action: 'add', email: 'new@example.test' })).toEqual({ ok: true, drainTarget: null });
-    expect(await control.act({ action: 'add' })).toEqual({ ok: true, drainTarget: null });
-    expect(await control.act({ action: 'reconnect', uuid: ROUTED })).toEqual({ ok: true, drainTarget: null });
-    expect(await control.act({ action: 'remove', uuid: ROUTED, confirm: true })).toEqual({ ok: true, drainTarget: null });
-    expect(await control.act({ action: 'panel' })).toEqual({ ok: true, drainTarget: null });
+    const done = { ok: true, drainTarget: null, drainTargetIsManual: false, shown: null };
+    expect(await control.act({ action: 'route', uuid: ROUTED })).toEqual({ ok: true, drainTarget: ROUTED, drainTargetIsManual: true, shown: null });
+    expect(await control.act({ action: 'add', email: null })).toEqual(done);
+    expect(await control.act({ action: 'add', email: 'new@example.test' })).toEqual(done);
+    expect(await control.act({ action: 'add' })).toEqual(done);
+    expect(await control.act({ action: 'reconnect', uuid: 'needs-reauth' })).toEqual(done);
+    expect(await control.act({ action: 'remove', uuid: ROUTED, confirm: true })).toEqual(done);
+    expect(await control.act({ action: 'panel' })).toEqual({ ...done, shown: true });
     expect(seen.map(({ method, path, body }) => [method, path, body])).toEqual([
       ['POST', '/claudeusage/route', { uuid: ROUTED }],
       ['POST', '/claudeusage/accounts/add', { email: null }],
       ['POST', '/claudeusage/accounts/add', { email: 'new@example.test' }],
       ['POST', '/claudeusage/accounts/add', { email: null }],
-      ['POST', '/claudeusage/accounts/reconnect', { uuid: ROUTED }],
+      ['POST', '/claudeusage/accounts/reconnect', { uuid: 'needs-reauth' }],
       ['POST', '/claudeusage/accounts/remove', { uuid: ROUTED, confirm: true }],
       ['POST', '/claudeusage/panel', {}],
     ]);
@@ -205,14 +218,20 @@ describe('settings.usageAction', () => {
     expect(await control.act({ action: 'route', uuid: 'not-ready' })).toEqual({ ok: false, reason: 'not_ready', message: 'Routing is off in ClaudeUsage' });
     expect(await control.act({ action: 'route', uuid: 'nobody' })).toEqual({ ok: false, reason: 'unknown_account', message: 'ClaudeUsage has no such account' });
     expect(await control.act({ action: 'route', uuid: 'spent' })).toEqual({ ok: false, reason: 'unusable', message: '4@example.test is at its limit' });
+    expect(await control.act({ action: 'route', uuid: 'switching' })).toEqual({ ok: false, reason: 'busy', message: 'ClaudeUsage is switching accounts' });
+    expect(await control.act({ action: 'reconnect', uuid: ROUTED })).toEqual({ ok: false, reason: 'not_needed', message: '1@example.test does not need reconnecting' });
     expect(await control.act({ action: 'remove', uuid: ROUTED })).toEqual({ ok: false, reason: 'confirm_required', message: 'Removing an account needs confirm' });
     handler = (_req, res) => send(res, 409, 'refused');
     expect(await control.act({ action: 'route', uuid: ROUTED })).toEqual({ ok: false, reason: 'refused', message: 'ClaudeUsage refused this (refused)' });
   });
 
-  it('answers a route’s drain target as ClaudeUsage named it, else the account asked for', async () => {
+  it('answers a route’s drain target as ClaudeUsage named it, else the account asked for, manual unless it says otherwise', async () => {
     handler = (_req, res) => send(res, 200, { ok: true });
-    expect(await client().act({ action: 'route', uuid: ROUTED })).toEqual({ ok: true, drainTarget: ROUTED });
+    expect(await client().act({ action: 'route', uuid: ROUTED })).toEqual({ ok: true, drainTarget: ROUTED, drainTargetIsManual: true, shown: null });
+    handler = (_req, res) => send(res, 200, { ok: true, drainTarget: 'other', drainTargetIsManual: false });
+    expect(await client().act({ action: 'route', uuid: ROUTED })).toEqual({ ok: true, drainTarget: 'other', drainTargetIsManual: false, shown: null });
+    handler = (_req, res) => send(res, 200, { ok: true, shown: false });
+    expect(await client().act({ action: 'panel' })).toMatchObject({ ok: true, shown: false });
   });
 
   it('answers the reason, not a throw, when ClaudeUsage is not reached', async () => {
@@ -224,7 +243,9 @@ describe('settings.usageAction', () => {
     handler = (_req, res) => send(res, 404);
     expect(await client().act({ action: 'add', email: null })).toMatchObject({ ok: false, reason: 'no_route' });
     handler = (_req, res) => send(res, 503);
-    expect(await client().act({ action: 'add', email: null })).toEqual({ ok: false, reason: 'failed', message: "ClaudeUsage's control route failed (HTTP 503)" });
+    expect(await client().act({ action: 'add', email: null })).toEqual({ ok: false, reason: 'starting', message: 'ClaudeUsage is still starting' });
+    handler = (_req, res) => send(res, 400, { ok: false, reason: 'bad_request' });
+    expect(await client().act({ action: 'add', email: null })).toEqual({ ok: false, reason: 'failed', message: "ClaudeUsage's control route failed (HTTP 400)" });
     handler = () => {};
     expect(await client({ actionTimeoutMs: 200 }).act({ action: 'route', uuid: ROUTED })).toMatchObject({ ok: false, reason: 'timeout' });
   });
@@ -239,7 +260,7 @@ describe('parseState', () => {
     expect(parseState({ version: 2, routing: {}, accounts: [{ email: 'no-uuid' }, 7, { uuid: 'u' }] })).toEqual({
       updatedAt: null,
       routing: { enabled: false, ready: false, port: null, drainTarget: null, drainTargetIsManual: false },
-      accounts: [{ uuid: 'u', email: '', status: '', isRoutingHere: false }],
+      accounts: [{ uuid: 'u', email: '', status: '', isRoutingHere: false, canRoute: null, canReconnect: null, canRemove: null }],
       codex: [],
     });
   });

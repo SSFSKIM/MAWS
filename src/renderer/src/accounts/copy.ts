@@ -64,6 +64,7 @@ export const USAGE = {
   routingToggleHint: "ClaudeUsage's own panel changes this",
   // W6 route executor start: the actions through ClaudeUsage's control route (`usage/controls.ts`)
   controlsBadToken: "ClaudeUsage's control token could not be read",
+  controlsStarting: 'ClaudeUsage is still starting',
   routeNotReady: "Route requests here needs ClaudeUsage's “Route Claude Code through this app”, which its own panel turns on",
   routeConfirm: { title: (email: string) => `Route requests to ${email}?`, body: 'Existing sessions move at their next request, which rebuilds their prompt cache.' },
   // ClaudeUsage's own confirm (PanelView.swift `confirmingRemoval`), naming ClaudeUsage where its panel says "this app"

@@ -18,7 +18,7 @@ import { useUsage } from '../stores/usage';
 import { useUsagePopover } from './popover';
 
 export interface UsageControl<A> {
-  available: boolean;
+  available(arg: A): boolean; // per account: ClaudeUsage's own `canRoute`, `canReconnect` and `canRemove`
   run(arg: A): void;
 }
 
@@ -30,7 +30,7 @@ export interface UsageControls {
   remove: UsageControl<{ uuid: string; email: string }>;
 }
 
-const UNAVAILABLE: UsageControl<never> = { available: false, run: () => {} };
+const UNAVAILABLE: UsageControl<never> = { available: () => false, run: () => {} };
 
 export const READ_ONLY_CONTROLS: UsageControls = { unavailable: USAGE.controlsUnavailable, route: UNAVAILABLE, add: UNAVAILABLE, reconnect: UNAVAILABLE, remove: UNAVAILABLE };
 
@@ -79,7 +79,7 @@ async function route({ uuid }: { uuid: string }): Promise<void> {
   const result = await perform({ action: 'route', uuid }, null);
   if (!result.ok) return;
   const { snapshot, applySnapshot } = useUsage.getState();
-  if (snapshot?.available) applySnapshot({ ...snapshot, drainTarget: result.drainTarget, drainTargetIsManual: result.drainTarget !== null }, 'merge');
+  if (snapshot?.available) applySnapshot({ ...snapshot, drainTarget: result.drainTarget, drainTargetIsManual: result.drainTargetIsManual }, 'merge');
 }
 
 async function remove({ uuid, email }: { uuid: string; email: string }): Promise<void> {
@@ -94,18 +94,22 @@ const RUN = {
   remove: (arg: { uuid: string; email: string }) => void remove(arg),
 };
 
+const WHY: Partial<Record<NonNullable<UsageControlsAnswer['reason']>, string>> = { bad_token: USAGE.controlsBadToken, starting: USAGE.controlsStarting };
+
 function controlsOf({ answer, notice, busy }: ControlState): UsageControls {
   if (answer === null || !answer.available) {
-    const why = answer === null ? null : answer.reason === 'bad_token' ? USAGE.controlsBadToken : USAGE.controlsUnavailable;
+    const why = answer === null ? null : (WHY[answer.reason ?? 'no_route'] ?? USAGE.controlsUnavailable);
     return { ...READ_ONLY_CONTROLS, unavailable: notice ?? why };
   }
   const ready = answer.state?.routing.ready === true; // ClaudeUsage offers Route only while it routes Claude Code
+  // ClaudeUsage's word on each account; an account its state does not name yet (the files ran ahead) is left to it
+  const account = (uuid: string) => answer.state?.accounts.find((a) => a.uuid === uuid);
   return {
     unavailable: notice ?? (ready ? null : USAGE.routeNotReady),
-    route: { available: ready && !busy, run: RUN.route },
-    add: { available: !busy, run: RUN.add },
-    reconnect: { available: !busy, run: RUN.reconnect },
-    remove: { available: !busy, run: RUN.remove },
+    route: { available: ({ uuid }) => ready && !busy && account(uuid)?.canRoute !== false, run: RUN.route },
+    add: { available: () => !busy, run: RUN.add },
+    reconnect: { available: ({ uuid }) => !busy && account(uuid)?.canReconnect !== false, run: RUN.reconnect },
+    remove: { available: ({ uuid }) => !busy && account(uuid)?.canRemove !== false, run: RUN.remove },
   };
 }
 
@@ -122,11 +126,15 @@ export function useUsageControls(): UsageControls {
   return controlsOf(state);
 }
 
-// Open ClaudeUsage: its own panel through the control route while that answers; false when it did not open it.
+// Open ClaudeUsage: its own panel through the control route while that answers; false when it did not open it. The
+// route toggles the panel, so a toggle that hid it (it was already up) is asked once more.
 export async function openClaudeUsagePanel(): Promise<boolean> {
   if (useUsageControlState.getState().answer?.available !== true) return false;
-  const result = await ipc.invoke('settings.usageAction', { action: 'panel' });
-  if (result.ok && result.value.ok) return true;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await ipc.invoke('settings.usageAction', { action: 'panel' });
+    if (!result.ok || !result.value.ok) break;
+    if (result.value.shown !== false) return true;
+  }
   void refreshUsageControls();
   return false;
 }
