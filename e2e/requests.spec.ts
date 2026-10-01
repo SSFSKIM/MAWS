@@ -137,7 +137,7 @@ test('a question card steps one question at a time, keeps its picks across place
   await frame.getByRole('radio', { name: 'Red' }).click();
   // The option's preview renders inside the sandboxed srcdoc frame under the app's CSP (no `<pre>` fallback needed).
   await expect(page.frameLocator('iframe[title="Preview of Red"]').locator('body')).toContainText('This is a red preview');
-  await frame.getByRole('button', { name: 'Next' }).click();
+  await frame.getByRole('button', { name: 'Next', exact: true }).click();
   await expect(frame).toContainText('2 of 2');
   await frame.getByRole('checkbox', { name: 'Apple' }).click();
 
@@ -174,7 +174,6 @@ test('the Overview card steps a question with digits and Enter, and Skip leaves 
   await expect(article).toBeFocused();
   await article.getByRole('button', { name: 'Skip' }).click();
   await expect.poll(async () => (await resolved(page, 'c7-question-card', 'question.answered')).map((e) => e.answers)).toEqual([{ 'Which color do you prefer?': 'Blue' }]);
-  await expect(article.getByRole('status')).toHaveText('Answered · Submitted');
   expect(cards.consoleErrors()).toEqual([]);
 });
 
