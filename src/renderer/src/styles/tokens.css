@@ -21,7 +21,8 @@
   /* W2 (charter §6 and D-4 as amended 2026-10-01): Codex's measured scale, 14px prose at 1.625 (a 22.75px pitch), 12px
      code, 13px chrome. --measure is the column the transcript's rows and the composer frame share, in px so it no longer
      follows the font; --measure-pad sits inside it (768 − 2 × 16 = 736px of text); a wide table or code block may
-     break out to --measure-wide. `appearance.transcriptWidth` overrides --measure on the root (settings-tab/column.ts). */
+     break out to --measure-wide. `appearance.transcriptWidth` overrides --measure on the root
+     (settings-tab/transcript-width.ts). */
   --text-ui: 13px; --text-ui-sm: 12px; --text-prose: 14px; --lh-prose: 1.625; --text-code: 12px;
   --measure: 768px; --measure-pad: 16px; --measure-wide: calc(var(--measure) + 128px);
   --radius-sm: 6px; --radius: 10px; --radius-lg: 14px; --space: 4px;
