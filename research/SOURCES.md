@@ -7,7 +7,7 @@ toolchain. This page says where everything is and how to cite it.
 
 | | location | current build | older builds kept |
 |---|---|---|---|
-| ChatGPT / Codex app | `~/codex-app-src/readable/<build>/` | `chatgpt-26.928` (2026-09-29, runtime 0.0.27, `@oai/cua` 0.2.5) | `chatgpt-26.924`, `chatgpt-26.917`, `codex-26.623`, `cua-node-0.0.24` |
+| ChatGPT / Codex app | `~/codex-app-src/readable/<build>/` | `chatgpt-26.928.40906` (published 2026-10-01, runtime 0.0.27, `@oai/cua` 0.2.5) | `chatgpt-26.928.31416`, `chatgpt-26.924`, `chatgpt-26.917`, `codex-26.623`, `cua-node-0.0.24` |
 | Claude Desktop | `~/claude-desktop-re/readable/<build>/` | `app-2.16120.0` (2026-09-29, Electron 44.4.3) | `app-2.9939.2` |
 | claude.ai web app | inside `app-2.16120.0/web/` (shipped with the app from 2.16120 on) | | `~/claude-desktop-re/readable/web-2026-09-25/` (cache capture) |
 | toolchain | `~/app-source-tools` (git) | | |
@@ -46,7 +46,7 @@ chunk prettified is `~/claude-desktop-re/readable/app-2.9939.2/main-process/<nam
 
 ```
 cd ~/app-source-tools
-node bin/ast.mjs acquire chatgpt            # or: acquire claude
+node bin/ast.mjs acquire chatgpt --latest   # newest build from the appcast into _dist/; or: acquire chatgpt / acquire claude for the installed app
 node bin/ast.mjs all chatgpt chatgpt-<v>    # prettify, index, catalogs, map (about 10 minutes)
 node bin/ast.mjs diff chatgpt chatgpt-<prev> chatgpt-<v>
 ```
