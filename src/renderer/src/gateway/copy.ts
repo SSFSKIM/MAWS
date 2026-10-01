@@ -1,5 +1,5 @@
-// The gateway's sentences from M4 (C11 execution document, Interfaces "Gateway": routing facts, the usage popover's
-// footer, the route switch and its sheet, the Direct model choice).
+// The gateway's sentences from M4 (C11 execution document, Interfaces "Gateway": routing facts, the route switch and its
+// sheet, the Direct model choice; W2: the usage popover's footer went with the status line, the switch is Session info's).
 
 export type Route = 'gateway' | 'direct';
 
@@ -18,17 +18,10 @@ export const ROUTE = {
   // an unstarted session (D-19's per-session Direct): the intent's route, chosen before the first send
   starts: { gateway: "Starts routed through ClaudeUsage's relay", direct: "Starts direct · engine's own login" } satisfies Record<Route, string>,
   choice: { gateway: 'ClaudeUsage relay', direct: 'Direct' } satisfies Record<Route, string>,
-  choiceLabel: 'Route for this session',
-  choiceNote: 'Applies at the first send · nothing restarts',
-  choiceStarting: 'The session is starting',
 };
 
 export const FOOTER = {
-  openClaudeUsage: 'Open ClaudeUsage ↗',
   openClaudeUsageAction: 'Open ClaudeUsage', // a toast's action (no arrow: it runs the hand-off)
-  accounts: 'Accounts',
-  sessionInfo: 'Session info',
-  label: 'Route',
 };
 
 export const PACE = {

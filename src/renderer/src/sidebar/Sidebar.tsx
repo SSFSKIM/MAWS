@@ -280,10 +280,10 @@ function EmptyProjects() {
     <div className="flex flex-col gap-2.5 px-2.5 py-2">
       <p className="m-0 text-ui-sm text-fg-muted">No projects yet</p>
       <div className="flex gap-2">
-        <button type="button" disabled={!canAdd} title={canAdd ? undefined : 'Arrives with C10'} onClick={runAddProject} className={TEXT_BUTTON}>
+        <button type="button" disabled={!canAdd} title={canAdd ? undefined : 'Not available here'} onClick={runAddProject} className={TEXT_BUTTON}>
           Add project
         </button>
-        <button type="button" disabled={!canCreate} title={canCreate ? undefined : 'Arrives with C10'} onClick={() => void createSession(null)} className={TEXT_BUTTON}>
+        <button type="button" disabled={!canCreate} title={canCreate ? undefined : 'Not available here'} onClick={() => void createSession(null)} className={TEXT_BUTTON}>
           New session
         </button>
       </div>
@@ -323,7 +323,7 @@ function Footer() {
         type="button"
         disabled={!settings}
         aria-label="Workspace settings"
-        title={settings ? `Settings${chord ? ` · ${chord}` : ''}` : 'Arrives with C11'}
+        title={settings ? `Settings${chord ? ` · ${chord}` : ''}` : 'Not available here'}
         onClick={() => runAction('settings.open')}
         className="ml-auto inline-flex size-7 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
       >

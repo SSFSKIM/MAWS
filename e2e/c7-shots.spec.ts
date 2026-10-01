@@ -148,15 +148,12 @@ test('the shell: the frame docked under a live transcript, the docked approvals,
     await page.keyboard.press('Meta+a');
     await page.keyboard.press('Backspace');
 
-    // 04 vignette 5: the usage and context popovers
-    const line = pane.getByRole('group', { name: 'Session status' });
-    await line.getByRole('button', { name: /^5h / }).click();
-    await expect(page.getByRole('dialog').first()).toBeVisible();
-    await shoot(page, 'usage-popover');
-    await page.keyboard.press('Escape');
+    // 04 vignette 5: the context popover, from the toolbar's context ring (W2: the status line and its usage popover are
+    // gone; the windows are Session info's until the top bar's usage pill, W6)
+    const ring = pane.getByRole('button', { name: /^Context window/ });
     for (const theme of THEMES) {
       await setTheme(page, theme, false);
-      await line.getByRole('button', { name: /^ctx / }).click();
+      await ring.click();
       await expect(page.getByRole('table', { name: 'Context token breakdown' })).toBeVisible();
       await page.screenshot({ path: join(SHOTS, `c7-context-popover-${theme}.png`) });
       await page.keyboard.press('Escape');

@@ -61,7 +61,7 @@ export function ProjectGroup({ section, expanded, showAll, onToggle, onShowMore 
           type="button"
           tabIndex={-1}
           aria-label={`New session in ${project.name}`}
-          title={canCreate ? `New session in ${project.name}` : 'Arrives with C10'}
+          title={canCreate ? `New session in ${project.name}` : 'Not available here'}
           disabled={!canCreate}
           onClick={(event) => {
             event.stopPropagation();

@@ -15,7 +15,7 @@ import { Shell } from './Shell';
 import { registerSlot, resetSlots } from './slots';
 import { toolbarTitle } from './Toolbar';
 import { scenarioFile } from '../test-support/shell-stores';
-import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -172,7 +172,7 @@ describe('toolbar', () => {
   });
 
   it('shows a rebound chord in the tooltip', () => {
-    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V4, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
+    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V5, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
     render(<Shell />);
     expect(screen.getByRole('button', { name: 'Toggle sidebar' }).getAttribute('title')).toBe('Toggle sidebar · ⌘⌥S');
     useSettings.setState({ state: null });
@@ -254,7 +254,7 @@ describe('shell actions', () => {
 describe('right panel', () => {
   it('renders the panel host fallback and its header controls', () => {
     render(<Shell />);
-    expect(within(region('panel')).getByText('No tools open · Tools arrive with C8')).toBeTruthy();
+    expect(within(region('panel')).getByText('No tools open')).toBeTruthy();
     expect(within(region('panel')).getByRole('button', { name: 'Maximize right panel' })).toBeTruthy();
   });
 

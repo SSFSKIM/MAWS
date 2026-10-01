@@ -11,7 +11,6 @@ import type { GetUsageResponse } from '@shared/wire/control';
 import * as z from 'zod';
 import { windowsFromGetUsage } from '../statusline/direct-fallback';
 import { resetsIn, windowShown } from '../statusline/format';
-import { USAGE_UNAVAILABLE } from '../statusline/UsagePopover';
 import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
 import { useSessions } from '../stores/sessions';
 import { useSessionWindows, useUsage, type Windows } from '../stores/usage';
@@ -81,7 +80,7 @@ function AccountWindows({ record, status, answer }: { record: SessionRecord; sta
       </Group>
     );
   }
-  const who = shown.account ? [shown.account.email, shown.account.planLabel].filter(Boolean).join(' · ') : snapshot?.available === false ? USAGE_UNAVAILABLE : USAGE.readingClaudeUsage;
+  const who = shown.account ? [shown.account.email, shown.account.planLabel].filter(Boolean).join(' · ') : snapshot?.available === false ? USAGE.unavailable : USAGE.readingClaudeUsage;
   return (
     <Group label={shown.source === 'pinned' ? USAGE.pinned : USAGE.routing}>
       <p className="m-0 mb-1 text-ui-sm">{who}</p>

@@ -1,6 +1,7 @@
-// One X3 row → its component, in the transcript's reading column. The wrapper carries the row's element id (the
-// divider's aria-controls names work-area rows by it), its kind and turn for tests and the harness, and is focusable
-// so a jump can land on it. A row of a rewound branch the reader revealed is muted and marked not in context.
+// One X3 row → its component, in the transcript's reading column (W2: the `.thread-column` the composer frame shares).
+// The wrapper carries the row's element id (the divider's aria-controls names work-area rows by it), its kind and turn
+// for tests and the harness, and is focusable so a jump can land on it. A row of a rewound branch the reader revealed
+// is muted and marked not in context.
 import { useTranscriptStore } from '../../../stores/transcript';
 import { NOT_IN_CONTEXT } from '../../model/copy';
 import type { Row } from '../../model/rows';
@@ -52,7 +53,7 @@ export function RowView({ row }: { row: Row }) {
   const { idPrefix, storeKey } = useTranscriptContext();
   const muted = useTranscriptStore((state) => row.turnId !== null && (state.entries[storeKey]?.state.hidden?.turns.includes(row.turnId) ?? false));
   return (
-    <div id={rowElementId(idPrefix, row.id)} className="transcript-row" data-kind={row.kind} data-turn-id={row.turnId ?? undefined} data-muted={muted ? '' : undefined} tabIndex={-1}>
+    <div id={rowElementId(idPrefix, row.id)} className="thread-column transcript-row" data-kind={row.kind} data-turn-id={row.turnId ?? undefined} data-muted={muted ? '' : undefined} tabIndex={-1}>
       {muted && opensTurn(row) && <div className="transcript-not-in-context">{NOT_IN_CONTEXT}</div>}
       {body(row)}
     </div>

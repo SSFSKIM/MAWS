@@ -1,5 +1,6 @@
 // The toolbar's permission mode (C7 execution document, "Composer frame" Mode): the engine's effective mode, a warning
-// glyph with the refusal in words when one is set, and the status line's own mode menu (M5's `ModeMenu`) in a popover.
+// glyph with the refusal in words when one is set, and M5's `ModeMenu` in a popover (W2: at the toolbar's left, so it
+// opens from its start).
 // ⇧Tab's cycle is the Composer's (`composer.cycleMode`, delivered inside the editor).
 import { Popover } from 'radix-ui';
 import { useState } from 'react';
@@ -27,7 +28,7 @@ export function ModeChip({ binding, onOpen }: { binding: ModeBinding; onOpen?():
         <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content aria-label="Permission mode" side="top" align="end" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-72`}>
+        <Popover.Content aria-label="Permission mode" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-72`}>
           <ModeMenu binding={binding} onDone={() => setOpen(false)} />
         </Popover.Content>
       </Popover.Portal>

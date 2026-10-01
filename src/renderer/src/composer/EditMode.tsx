@@ -37,7 +37,7 @@ export function EditModeLine({ resubmit, onLeave, onRetry, onRewindAgain, onSend
   const { text, warn } = lineCopy(resubmit);
   const leavable = resubmit.state !== 'rewinding' && resubmit.state !== 'rewind_uncertain';
   return (
-    <div data-edit-mode={resubmit.state} className={`mx-auto flex w-full max-w-[720px] min-w-0 items-center gap-1 rounded-md border-l-2 bg-bg-raised px-2.5 py-1 text-ui-sm ${warn ? 'border-warning' : 'border-accent'}`}>
+    <div data-edit-mode={resubmit.state} className={`flex w-full min-w-0 items-center gap-1 rounded-md border-l-2 bg-bg-raised px-2.5 py-1 text-ui-sm ${warn ? 'border-warning' : 'border-accent'}`}>
       <span role="status" className={`min-w-0 flex-1 truncate ${warn ? 'text-warning' : 'text-fg-muted'}`}>
         {text}
       </span>
@@ -83,7 +83,7 @@ export function RewindConfirm({ newerTurn, onConfirm, onCancel }: RewindConfirmP
         <AlertDialog.Content className="fixed top-[24%] left-1/2 z-50 flex w-[min(440px,90vw)] -translate-x-1/2 flex-col gap-3 rounded-lg border border-border-strong bg-bg-overlay p-4 text-ui text-fg">
           <AlertDialog.Title className="m-0 text-ui font-semibold">{newerTurn ? 'Rewind past a newer turn?' : 'Rewind and resend?'}</AlertDialog.Title>
           <AlertDialog.Description className="m-0 text-fg-muted">
-            {newerTurn ? 'A newer turn started after you began editing. Rewinding discards it too. Rewind anyway?' : 'Forking arrives with C10. Rewind this session to that message and resend instead?'}
+            {newerTurn ? 'A newer turn started after you began editing. Rewinding discards it too. Rewind anyway?' : 'Forking is not available here. Rewind this session to that message and resend instead?'}
           </AlertDialog.Description>
           <div className="flex justify-end gap-2">
             <AlertDialog.Cancel className="rounded-sm border border-border px-2 py-0.5 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">Cancel</AlertDialog.Cancel>

@@ -1,5 +1,6 @@
-// The context popover (§5.5; mockup 04 vignette 5): `session.getContextUsage { detail: 'full' }` read on open (fresh
-// for 10 s), the digest's percentage while it loads; `<used> of <max> · autocompact at <threshold>`, the tokens left
+// The context popover (§5.5; mockup 04 vignette 5; W2: the toolbar's context ring opens it, `ContextRing.tsx`, since the
+// status line is gone): `session.getContextUsage { detail: 'full' }` read on open (fresh for 10 s), the digest's
+// percentage while it loads; `<used> of <max> · autocompact at <threshold>`, the tokens left
 // until compaction, a segmented bar of what occupies the window with the threshold marked, the categories, and
 // `Compact now`, which sends `/compact` when the session's catalogue lists it as a headless command.
 import type { SessionRecord } from '@shared/graph/session';

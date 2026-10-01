@@ -441,17 +441,33 @@ test.describe('interactive', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
+  // W2 (C3; §5.4 and §5.5 as amended 2026-10-01): the status line's ctx field is gone; the toolbar's context ring opens
+  // the context window over the engine's full get_context_usage (reads.jsonl seq 57).
+  test('the toolbar’s context ring opens the context window with the engine’s full reading', async ({ backend }) => {
+    const { page } = backend;
+    await openPage(page, { appSessionId: READY, mode: 'interactive' });
+    const ring = page.getByRole('toolbar', { name: 'Composer tools' }).getByRole('button', { name: /^Context window/ });
+    await expect(ring).toBeVisible();
+    await ring.click();
+    const popover = page.getByRole('dialog', { name: 'Context window' });
+    await expect(popover).toContainText('of 200k · autocompact at 167k');
+    expect(await calls(backend)).toContainEqual({ subtype: 'get_context_usage', input: { appSessionId: READY, detail: 'full' } });
+    await page.keyboard.press('Escape');
+    await expect(popover).toBeHidden();
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
   // ---- M4: Session info and the route switch, beside the composer on the same page ------------------------------------
-  // Session info is C11's panel tool rendered for the shown session; the routing footer is C11's in C7's usage popover
-  // body. The restart is C10's `session.start`, which the widget backend answers in main: the process comes up ready on
-  // the route asked for, as C10's resume would launch it.
+  // Session info is C11's panel tool rendered for the shown session; W2: its Route row carries the switch, which the
+  // status line's usage popover footer carried before. The restart is C10's `session.start`, which the widget backend
+  // answers in main: the process comes up ready on the route asked for, as C10's resume would launch it.
 
   test('Session info renders the six sections and derives the lane from the status and the model', async ({ backend }) => {
     const { page, app } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     const info = page.locator(`[data-session-info="${READY}"]`);
     for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) await expect(info.getByRole('region', { name: title })).toBeVisible();
-    await expect(valueOf(info, 'Route')).toHaveText('Gateway · ClaudeUsage relay · http://127.0.0.1:8641');
+    await expect(valueOf(info, 'Route')).toHaveText('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…'); // W2: with its switch
     await expect(valueOf(info, 'Context')).toHaveText('21,508 of 200,000 · 11% · autocompact at 167,000');
     const lane = valueOf(info, 'Auto-mode lane');
     const SERVER = 'Server · reviews ride on the main request · no charge · model chosen server-side';
@@ -491,9 +507,9 @@ test.describe('interactive', () => {
     const { page } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await onAstraWithWork(backend);
-    const usage = page.getByRole('region', { name: 'Account usage' });
-    await expect(usage).toContainText("Routed through ClaudeUsage's relay");
-    await usage.getByRole('button', { name: 'Switch to Direct…' }).click();
+    const route = valueOf(page.locator(`[data-session-info="${READY}"]`), 'Route'); // W2: Session info's Route row
+    await expect(route).toContainText('Gateway · ClaudeUsage relay');
+    await route.getByRole('button', { name: 'Switch to Direct…' }).click();
 
     const sheet = page.getByRole('dialog', { name: 'Switch this session to Direct?' });
     const disclosure = sheet.getByRole('note'); // C10's BackgroundWorkDisclosure, in the archive dialog's words
@@ -515,9 +531,8 @@ test.describe('interactive', () => {
     const stop = lifecycle.indexOf('session.stop');
     expect(lifecycle.slice(stop - 1, stop + 2), 'the recheck, the stop, the restart, in one log').toEqual(['session.status', 'session.stop', 'session.start']);
     expect(lifecycle.filter((c) => c === 'session.stop' || c === 'session.start')).toEqual(['session.stop', 'session.start']);
-    await expect(usage.getByRole('button', { name: 'Switch to gateway…' })).toBeVisible();
-    await expect(usage).toContainText("Direct · engine's own login");
-    await expect(valueOf(page.locator(`[data-session-info="${READY}"]`), 'Route')).toHaveText(/^Direct · engine's own login/);
+    await expect(route.getByRole('button', { name: 'Switch to gateway…' })).toBeVisible();
+    await expect(route).toHaveText(/^Direct · engine's own login/);
     expect(backend.consoleErrors()).toEqual([]);
   });
 
@@ -525,7 +540,7 @@ test.describe('interactive', () => {
     const { page, app } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await onAstraWithWork(backend);
-    await page.getByRole('region', { name: 'Account usage' }).getByRole('button', { name: 'Switch to Direct…' }).click();
+    await valueOf(page.locator(`[data-session-info="${READY}"]`), 'Route').getByRole('button', { name: 'Switch to Direct…' }).click(); // W2: Session info's
     const sheet = page.getByRole('dialog', { name: 'Switch this session to Direct?' });
     await sheet.getByRole('radio', { name: /^Sonnet 5/ }).click();
     // a third task between the confirm and the stop: it starts as the switch re-reads the status after the answer

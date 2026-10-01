@@ -1,10 +1,11 @@
-// A session tab's content (§5.4; residue *Status line container*; C10's ask of C5). A session with a record reads as
-// the transcript slot over the composer zone: the docked request (the X4 slot, `placement: 'docked'`) above the
-// composer slot, then the status line. A foreign-live session gets the holder notice in place of the composer and
-// never a docked request (D-12). A session with no record yet is unstarted: the `newSession` slot (C10's heading and
-// setup) with the composer frame centred beneath it and nothing else; it swaps to the ordinary pane when the record
-// arrives. In both placements the composer frame is centred at about two thirds of the pane, capped near 720 px (owner
-// sizing note, 2026-09-28), a pane-level frame C7's composer inherits.
+// A session tab's content (§5.4; C10's ask of C5). A session with a record reads as the transcript slot over the
+// composer zone: the docked request (the X4 slot, `placement: 'docked'`) above the composer slot, and nothing under it
+// (W2: §5.5 as amended 2026-10-01, the status line is gone). A foreign-live session gets the holder notice in place of
+// the composer and never a docked request (D-12). A session with no record yet is unstarted: the `newSession` slot
+// (C10's heading and setup) with the composer frame centred beneath it and nothing else; it swaps to the ordinary pane
+// when the record arrives. In both placements the composer sits in the column the transcript's rows use
+// (`.thread-column`, W2: §5.4 as amended 2026-10-01, Codex's shared class), so the frame is exactly the transcript's
+// width.
 import { useEffect, type ReactNode } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -16,14 +17,13 @@ import { ipc } from '../ipc/client';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { HolderNotice } from './HolderNotice';
-import { StatusLine } from './StatusLine';
 import { SessionTabNotes } from '../sessions/SessionDialogs'; // C10
 
 type PaneIndex = 0 | 1;
 
-// The column the composer, and what docks with it, sit in.
-function ComposerColumn({ children }: { children: ReactNode }) {
-  return <div className="mx-auto flex w-2/3 max-w-[720px] min-w-[min(100%,420px)] flex-col gap-3">{children}</div>;
+// The column the composer, and what docks with it, sit in: the transcript's (W2).
+export function ComposerColumn({ children }: { children: ReactNode }) {
+  return <div className="thread-column flex flex-col gap-3">{children}</div>;
 }
 
 export function SessionPane({ appSessionId, paneIndex }: { appSessionId: AppSessionId; paneIndex: PaneIndex }) {
@@ -35,7 +35,7 @@ function UnstartedPane({ appSessionId, paneIndex }: { appSessionId: AppSessionId
   const NewSession = useSlot('newSession');
   const Composer = useSlot('composer');
   return (
-    <div className="flex h-full flex-col justify-center overflow-auto px-7 py-6">
+    <div className="flex h-full flex-col justify-center overflow-auto py-6">
       <ComposerColumn>
         {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
         <NewSession appSessionId={appSessionId} />
@@ -64,7 +64,7 @@ function StartedPane({ record, paneIndex }: { record: SessionRecord; paneIndex: 
         {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
         <Transcript appSessionId={id} agentId={null} paneIndex={paneIndex} />
       </div>
-      <div className="shrink-0 px-7 pt-4">
+      <div className="shrink-0 pt-4 pb-4">
         <ComposerColumn>
           {docked && <DockedRequest item={docked} paneIndex={paneIndex} />}
           {/* C10 start: an interrupted delete's Finish deleting or Keep, and the card a resume waits on */}
@@ -77,7 +77,6 @@ function StartedPane({ record, paneIndex }: { record: SessionRecord; paneIndex: 
             // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
             <Composer appSessionId={id} paneIndex={paneIndex} />
           )}
-          <StatusLine record={record} />
         </ComposerColumn>
       </div>
     </div>

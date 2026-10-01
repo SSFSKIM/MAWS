@@ -1,4 +1,4 @@
-// The chip row's location (C7 execution document, "Composer frame" Location): the directory's or worktree's name (the
+// The toolbar's location (C7 execution document, "Composer frame" Location; W2: in the toolbar, no chip row): the directory's or worktree's name (the
 // path in the popover and the tooltip), with its branch and a dirty marker. Its popover offers the project directory,
 // a new worktree with a name and the branch it starts from, each existing worktree with its branch and how many
 // sessions run there, and the branch picker (a search over the branches with a create action), and lists the
@@ -7,7 +7,6 @@
 import { Popover } from 'radix-ui';
 import { useMemo, useState } from 'react';
 import { useCommand } from '../../ipc/query';
-import { formatCwd } from '../../session/StatusLine';
 import { useSessions } from '../../stores/sessions';
 import { locationPath, type Location } from '../setup-intent';
 import type { ChipBinding } from './bindings';
@@ -23,6 +22,9 @@ export interface LocationChipProps {
 
 const sameLocation = (a: Location, b: Location) => a.kind === b.kind && locationPath(a) === locationPath(b);
 
+// macOS homes live under /Users/<name>; the renderer is told no home directory, and needs none for this (W2: moved here
+// from the status line, which is gone).
+export const formatCwd = (directory: string): string => directory.replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
 // The last segment of the home-abbreviated path: `~` for the home directory itself.
 export const directoryName = (path: string): string => formatCwd(path).split('/').filter(Boolean).at(-1) ?? path;
 

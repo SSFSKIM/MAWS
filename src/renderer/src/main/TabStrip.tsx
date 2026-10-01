@@ -188,7 +188,7 @@ function NewSessionButton({ pane }: { pane: Pane }) {
     <button
       type="button"
       aria-label="New session"
-      title={canCreate ? 'New session' : 'Arrives with C10'}
+      title={canCreate ? 'New session' : 'Not available here'}
       disabled={!canCreate}
       onClick={() => void createSession(projectId, { pane })}
       className="mx-1 inline-flex size-7 shrink-0 items-center justify-center self-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"

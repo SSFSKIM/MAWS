@@ -1,12 +1,14 @@
 // The Appearance section (C11 execution document, Interfaces "Settings tab" Appearance; ruled 2026-09-29): C1's theme,
 // and the monospace font the terminal and code blocks draw in (`appearance.monoFont`, the root `--font-mono` override).
-// The rest of typography stays C6's tokens.
-import type { Settings, ThemeSetting } from '@shared/ipc/schema';
+// W2: the transcript's width (`appearance.transcriptWidth`, the root `--measure`; Claude Desktop's three). The rest of
+// typography stays the tokens.
+import { TRANSCRIPT_WIDTHS, type Settings, type ThemeSetting, type TranscriptWidth } from '@shared/ipc/schema';
 import { APPEARANCE } from './copy';
 import { monoFontStack } from './mono-font';
 import { INPUT, Segment, Setting, useCommittedDraft, writeSettings } from './parts';
 
 const THEMES = (['light', 'dark', 'system'] as const satisfies readonly ThemeSetting[]).map((value) => ({ value, label: APPEARANCE.themes[value] }));
+const WIDTHS = TRANSCRIPT_WIDTHS.map((width) => ({ value: String(width) as `${TranscriptWidth}`, label: APPEARANCE.transcriptWidths[width] }));
 
 export function AppearanceSection({ settings }: { settings: Settings }) {
   const [draft, field] = useCommittedDraft(settings.appearance.monoFont, (next) => writeSettings({ appearance: { monoFont: next } }));
@@ -15,6 +17,14 @@ export function AppearanceSection({ settings }: { settings: Settings }) {
       <Setting label={APPEARANCE.theme}>
         <Segment label={APPEARANCE.theme} value={settings.theme} options={THEMES} onChange={(theme) => void writeSettings({ theme })} />
         <span className="text-ui-sm text-fg-muted">{APPEARANCE.themeHint}</span>
+      </Setting>
+      <Setting label={APPEARANCE.transcriptWidth} note={APPEARANCE.transcriptWidthNote}>
+        <Segment
+          label={APPEARANCE.transcriptWidth}
+          value={String(settings.appearance.transcriptWidth) as `${TranscriptWidth}`}
+          options={WIDTHS}
+          onChange={(width) => void writeSettings({ appearance: { transcriptWidth: Number(width) as TranscriptWidth } })}
+        />
       </Setting>
       <Setting label={APPEARANCE.monoFont} note={APPEARANCE.monoFontNote}>
         <input aria-label={APPEARANCE.monoFont} placeholder={APPEARANCE.monoFontPlaceholder} maxLength={200} spellCheck={false} {...field} className={`${INPUT} max-w-[260px]`} />

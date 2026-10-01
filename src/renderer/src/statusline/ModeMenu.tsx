@@ -1,13 +1,11 @@
-// The permission-mode menu: the status line's mode popover renders it, and so does the composer toolbar's Mode chip
-// (M4), each inside its own Radix Popover. A list of mode items (arrows move between them, Enter or a click chooses),
-// `bypassPermissions` behind an inline confirm, the refusal in words, and the engine's answer: while the change is in
-// flight nothing else can be chosen, a refusal or error stays in the menu, and success calls `onDone`.
-import { useMemo, useState, type KeyboardEvent } from 'react';
+// The permission-mode menu: the composer toolbar's Mode chip (M4) renders it inside its Radix Popover, and the
+// /permissions widget beside its rules (W2: the status line's mode popover went with the line). A list of mode items
+// (arrows move between them, Enter or a click chooses), `bypassPermissions` behind an inline confirm, the refusal in
+// words, and the engine's answer: while the change is in flight nothing else can be chosen, a refusal or error stays in
+// the menu, and success calls `onDone`.
+import { useState, type KeyboardEvent } from 'react';
 import type { PermissionMode } from '@shared/graph/enums';
-import type { SessionRecord } from '@shared/graph/session';
-import { useListModels } from '../composer/list-models';
-import { useSessions } from '../stores/sessions';
-import { BYPASS_CONFIRM, liveModeBinding, MODE_OPTIONS, MODE_REFUSAL_WORDS, type ModeBinding } from './mode-menu';
+import { BYPASS_CONFIRM, MODE_OPTIONS, MODE_REFUSAL_WORDS, type ModeBinding } from './mode-menu';
 
 const ITEM =
   'flex w-full flex-col items-start rounded-sm px-2 py-1 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent aria-checked:bg-bg-active';
@@ -102,12 +100,4 @@ export function ModeMenu({ binding, onDone }: { binding: ModeBinding; onDone?: (
       )}
     </div>
   );
-}
-
-// A started session's binding for the menu, with `session.listModels` read while its process is ready (auto's
-// availability). M4's Mode chip may build the same binding through `liveModeBinding`.
-export function useLiveModeBinding(record: SessionRecord): ModeBinding {
-  const status = useSessions((s) => s.engine.get(record.appId) ?? null);
-  const models = useListModels(record.appId, status?.process === 'ready');
-  return useMemo(() => liveModeBinding(record, status, models), [record, status, models]);
 }

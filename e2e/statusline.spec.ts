@@ -1,4 +1,6 @@
-// C7's status line end to end (C7 execution document, M5 and Acceptance item 2): the built app on C5's stub scenario
+// C7's status line end to end (C7 execution document, M5 and Acceptance item 2), and since W2 removed the line (§5.5 as
+// amended 2026-10-01) what stayed of it: a session's windows as Session info reads them, and the near-limit banner,
+// once per window. The built app on C5's stub scenario
 // (`nine-sessions.json`, manual clock, one session re-pinned) with MAWS_CLAUDE_USAGE_DIR on a temporary copy of the
 // committed ClaudeUsage fixture, every `recordedAt` and `resetsAt` moved by one offset so its newest reading is two
 // minutes old (percentages untouched). The fixture's drain target is `2aca3c4b…` (5h 53 %, 7d 63 %); account
@@ -41,42 +43,36 @@ test.afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const ENV = () => ({ MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_SCENARIO_CLOCK: 'manual', MAWS_CLAUDE_USAGE_DIR: usageDir });
 
+// W2: the session's tab, then Session info in its panel: the Usage row (no status line carries the windows).
 async function open(page: Page, title: string): Promise<Locator> {
   await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: title }).click();
-  return page.locator('[data-region="main"]').getByRole('tabpanel').getByRole('group', { name: 'Session status' });
+  await expect(page.locator('[data-region="main"]').getByRole('tabpanel').getByRole('group', { name: 'Session status' })).toHaveCount(0);
+  const tools = page.locator('[data-region="panel"]');
+  if (!(await tools.locator('[data-session-info]').isVisible())) {
+    // the panel's layout persists: after a reload the session's Session info tab is already there
+    await tools.getByRole('button', { name: 'Add a tool' }).click();
+    await page.getByRole('menuitem', { name: 'Session info' }).click();
+  }
+  return tools.locator('[data-session-info]').getByRole('term').filter({ hasText: /^Usage$/ }).locator('xpath=following-sibling::dd[1]');
 }
-const field = (line: Locator, prefix: string) => line.getByRole('button', { name: new RegExp(`^${prefix}`) });
 const nearLimitBanners = (page: Page) => page.locator('[data-banner-host] [role="status"]').filter({ hasText: 'window at' });
 
-test('status line: the session’s account windows, the usage popover, and one near-limit banner that stays dismissed', async () => {
+test('usage: the session’s account windows in Session info, and one near-limit banner that stays dismissed', async () => {
   test.setTimeout(90_000);
   const maws = await launchMaws({ env: ENV() });
   const { page } = maws;
   try {
     // An unpinned routed session reads the drain target's windows.
     const quota = await open(page, QUOTA);
-    await expect(field(quota, '5h')).toHaveText(/^5h 53% ↻\d+h\d+m$/);
-    await expect(field(quota, '7d')).toHaveText(/^7d 63% ↻\d+[dh]\d+[hm]$/);
-
-    // Its 5h popover: the drain target, marked routing, and the four other accounts.
-    await field(quota, '5h').click();
-    const popover = page.getByRole('dialog', { name: 'Account usage' });
-    await expect(popover.getByText('3@example.test · Max · routing')).toBeVisible();
-    await expect(popover.getByRole('meter', { name: 'Five-hour usage' })).toHaveAttribute('aria-valuenow', '53');
-    await popover.getByText('Other accounts').click();
-    await expect(popover.getByRole('list', { name: 'Other accounts' }).getByRole('listitem')).toHaveCount(4);
-    await expect(popover.getByText(/^Updated \dm ago$/)).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(popover).toHaveCount(0);
+    await expect(quota).toHaveText(/^5h 53% · resets in \d+h \d+m · Weekly 63% · resets in \d+[dh] \d+[hm] · from ClaudeUsage, shared by every session$/);
 
     // A session pinned to another account shows that account's windows.
     const probe = await open(page, PROBE);
-    await expect(field(probe, '5h')).toHaveText(/^5h 77% ↻/);
-    await expect(field(probe, '7d')).toHaveText(/^7d 44% ↻/);
+    await expect(probe).toHaveText(/^5h 77% · resets in .* · Weekly 44% · resets in /);
 
     // A direct session reads the engine's get_usage instead, which the stub does not answer.
     const charter = await open(page, CHARTER);
-    await expect(field(charter, '5h')).toHaveText('5h —');
+    await expect(charter).toHaveText('—');
 
     // One near-limit banner in the banner host, for the one window at 100 %; dismissed, it is kept in usage.banners.
     await expect(nearLimitBanners(page)).toHaveCount(1);
@@ -93,7 +89,7 @@ test('status line: the session’s account windows, the usage popover, and one n
     // read, and it judges every account in the same snapshot, so when that banner shows, the dismissed one would too.
     await page.reload();
     const again = await open(page, QUOTA);
-    await expect(field(again, '5h')).toHaveText(/^5h 53% /);
+    await expect(again).toHaveText(/^5h 53% /);
     const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z'); // ClaudeUsage's form, compared as text
     const row = { limitKey: 'session', percent: 95, recordedAt: iso(Date.now()), resetsAt: iso(Date.now() + 2 * 3_600_000) };
     appendFileSync(join(usageDir, 'history', '477e393c-5c1a-4413-a3e6-7f5d1ed72cc3.jsonl'), `${JSON.stringify(row)}\n`);
@@ -105,14 +101,10 @@ test('status line: the session’s account windows, the usage popover, and one n
   }
 });
 
-test('status line: without ClaudeUsage data both windows read — with the reason', async () => {
+test('usage: without ClaudeUsage data the windows read —, and no banner posts', async () => {
   const maws = await launchMaws({ env: { ...ENV(), MAWS_CLAUDE_USAGE_DIR: join(scratch, 'absent') } });
   try {
-    const line = await open(maws.page, QUOTA);
-    for (const prefix of ['5h', '7d']) {
-      await expect(field(line, prefix)).toHaveText(`${prefix} —`);
-      await expect(field(line, prefix)).toHaveAttribute('title', 'ClaudeUsage is not installed or has no data');
-    }
+    await expect(await open(maws.page, QUOTA)).toHaveText('—');
     await expect(nearLimitBanners(maws.page)).toHaveCount(0);
   } finally {
     await maws.cleanup();

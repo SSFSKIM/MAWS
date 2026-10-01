@@ -6,9 +6,9 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { SettingsSchema, type Settings, type SettingsPatch, type SettingsState, type ThemeSetting } from '@shared/ipc/schema';
-import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
+import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
 
-export const DEFAULT_SETTINGS: Settings = SETTINGS_DEFAULTS_V4;
+export const DEFAULT_SETTINGS: Settings = SETTINGS_DEFAULTS_V5;
 const defaults = (): Settings => structuredClone(DEFAULT_SETTINGS);
 
 // C11: every step (v1 → v2, C5's, and v2 → v3) is `migrateSettings`; the store rewrites the file when it moved a version.

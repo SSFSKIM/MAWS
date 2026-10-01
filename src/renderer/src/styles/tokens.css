@@ -9,6 +9,8 @@
   --bg: #faf9f6; --bg-raised: #ffffff; --bg-overlay: #ffffff; --bg-hover: rgba(20,18,14,0.05); --bg-active: rgba(20,18,14,0.08);
   --border: rgba(20,18,14,0.10); --border-strong: rgba(20,18,14,0.18);
   --fg: #1f1e1b; --fg-muted: rgba(31,30,27,0.62); --fg-faint: rgba(31,30,27,0.42);
+  /* W2 (B2): the user bubble's ground, Codex's: the text colour at 5 percent, so it follows the theme's --fg */
+  --bg-user-message: color-mix(in oklab, var(--fg) 5%, transparent);
   --accent: #c9663f; --accent-soft: rgba(201,102,63,0.14);
   --success: #1f8f55; --warning: #b86a1a; --danger: #c93b3b; --info: #3b6fd1;
   --diff-add-bg: rgba(31,143,85,0.14); --diff-del-bg: rgba(201,59,59,0.12);
@@ -16,8 +18,17 @@
   --font-ui: -apple-system, "SF Pro Text", Inter, system-ui, sans-serif;
   --font-prose: -apple-system, "SF Pro Text", Inter, system-ui, sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", Menlo, monospace;
-  --text-ui: 13px; --text-ui-sm: 12px; --text-prose: 15.5px; --lh-prose: 1.6; --measure: 72ch; --text-code: 13px;
+  /* W2 (charter §6 and D-4 as amended 2026-10-01): Codex's measured scale, 14px prose at 1.625 (a 22.75px pitch), 12px
+     code, 13px chrome. --measure is the column the transcript's rows and the composer frame share, in px so it no longer
+     follows the font; --measure-pad sits inside it (768 − 2 × 16 = 736px of text); a wide table or code block may
+     break out to --measure-wide. `appearance.transcriptWidth` overrides --measure on the root
+     (settings-tab/transcript-width.ts). */
+  --text-ui: 13px; --text-ui-sm: 12px; --text-prose: 14px; --lh-prose: 1.625; --text-code: 12px;
+  --measure: 768px; --measure-pad: 16px; --measure-wide: calc(var(--measure) + 128px);
   --radius-sm: 6px; --radius: 10px; --radius-lg: 14px; --space: 4px;
+  /* W2 (B2, C1): Codex's 22px corner, shared by the user bubble and the composer box; the box's faint shadow */
+  --radius-2xl: 22px;
+  --shadow-composer: 0 0 0 1px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.04), 0 4px 40px 8px rgba(0,0,0,0.024);
   --row-h: 30px; --toolbar-h: 44px; --sidebar-w: 300px; --panel-w: 380px;
 
   /* Terminal (C9, X7 extension; values advisory): a VS Code-light-derived readable set on a white ground. */
@@ -44,6 +55,8 @@
   --accent: #d97757; --accent-soft: rgba(217,119,87,0.16);
   --success: #4cc38a; --warning: #f0a35e; --danger: #f26d6d; --info: #7aa2f7;
   --diff-add-bg: rgba(76,195,138,0.16); --diff-del-bg: rgba(242,109,109,0.16);
+  /* W2 (C1): Codex's dark composer edge, a faint inner light instead of a shadow */
+  --shadow-composer: inset 0 0 1px rgba(255,255,255,0.2);
 
   /* Terminal (C9): the same family on the raised dark ground. */
   --term-bg: var(--bg-raised); --term-fg: var(--fg); --term-cursor: #d97757; --term-cursor-fg: #1a1a1a; --term-selection: rgba(217,119,87,0.30);

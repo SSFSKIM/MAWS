@@ -1,17 +1,24 @@
 // Session info (C11 execution document, Interfaces "Session info tool"; M4's pins): the six sections over a scenario
 // session answered by the fixture-backed widget backend, the pinned account named, a direct session's login, no reads
-// while the tab is hidden, and the empty state without a session.
+// while the tab is hidden, and the empty state without a session. W2: the Route row's switch (the status line's usage
+// popover footer carried it), a Direct session's get_usage poll while the tab is shown, and the pace line.
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { MawsBridge, Settings } from '@shared/ipc/schema';
+import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { loadScenario } from '../../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, type WidgetBackend } from '../../../../../test/support/widget-backend';
+import { useGateway } from '../../gateway/store';
+import { answerSwitch } from '../../gateway/switch-route';
 import { panelHost } from '../../panel/host';
+import { useSetup } from '../../sessions/store';
+import { useSettings } from '../../stores/settings';
+import { intent } from '../../test-support/setup-intents';
 import type { PanelToolContext } from '../../panel/tool';
 import { rememberListedModels, useComposerStore, type ListedModel } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
@@ -45,6 +52,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
+  useGateway.setState({ switching: new Map(), directLogin: new Map() }); // W2
+  useSetup.setState({ intents: new Map(), phases: new Map(), invoking: new Set() }); // W2
+  useSettings.setState({ state: null }); // W2
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -72,7 +82,7 @@ describe('session info renders the six sections', () => {
     expect(valueOf('Session id')).toBe(record.engineSessionId);
     expect(valueOf('Main')).toBe('claude-sonnet-5[1m]');
     expect(valueOf('Subagents')).toBe('engine default');
-    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641');
+    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…'); // W2: the switch
     expect(valueOf('Account')).toBe('1@example.test · pinned for this session');
     expect(valueOf('Tool search')).toBe('on · ENABLE_TOOL_SEARCH, needed behind a base URL');
     expect(valueOf('Mode')).toBe('auto · effective, from the init frame');
@@ -147,7 +157,7 @@ describe('session info renders the six sections', () => {
     useSessions.setState({ engine: new Map([[READY, direct]]) });
     backend.script('session.getStatus', () => fixtureLine(ROOT, 'pass2/routing-flag-override#12'));
     mount(ctxOf(READY));
-    await waitFor(() => expect(valueOf('Route')).toBe("Direct · engine's own login · Expired — log in again"));
+    await waitFor(() => expect(valueOf('Route')).toBe("Direct · engine's own login · Expired — log in againSwitch to gateway…")); // W2: the switch
     expect(valueOf('Email')).toBe('owner@redacted.invalid');
     expect(valueOf('Tool search')).toBe('off');
     expect(screen.queryByText('Account', { selector: 'dt' })).toBeNull();
@@ -157,9 +167,70 @@ describe('session info renders the six sections', () => {
     mount(ctxOf(READY, false));
     await new Promise((r) => setTimeout(r, 30));
     expect(backend.calls.filter((c) => c.command.startsWith('session.'))).toEqual([]);
-    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641'); // the stores render at once
+    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…'); // the stores render at once
     cleanup();
     mount(ctxOf(null));
     expect(screen.getByText('Open a session to see its details')).toBeTruthy();
+  });
+});
+
+// W2 (C3; §5.5 as amended 2026-10-01): the status line is gone, so what only its usage popover's footer offered lives here.
+describe('the route switch and the Direct poll, re-homed from the status line', () => {
+  const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V5, gateway: { ...SETTINGS_DEFAULTS_V5.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
+  const route = () => screen.getByText('Route', { selector: 'dt' }).nextElementSibling as HTMLElement;
+
+  it('a routed session’s Route offers Switch to Direct…, which opens the switch’s confirm', async () => {
+    mount(ctxOf(READY));
+    fireEvent.click(within(route()).getByRole('button', { name: 'Switch to Direct…' }));
+    await vi.waitFor(() => expect(useGateway.getState().switching.get(READY)).toMatchObject({ phase: 'confirming', confirm: expect.anything() }));
+    expect(answerSwitch(READY, null)).toBe(true);
+  });
+
+  it('offerDirect false hides Switch to Direct…; while the switch reads the status it says so and holds the button', () => {
+    settingsWith({ offerDirect: false });
+    mount(ctxOf(READY));
+    expect(within(route()).queryByRole('button')).toBeNull();
+    cleanup();
+    settingsWith({});
+    useGateway.setState({ switching: new Map([[READY, { target: 'direct', phase: 'confirming', confirm: null, error: null }]]) });
+    mount(ctxOf(READY));
+    expect(within(route()).getByRole('status').textContent).toBe('Checking the session…');
+    expect((within(route()).getByRole('button', { name: 'Switch to Direct…' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a failed switch says why and offers the retry; a session held elsewhere says where to switch it instead', () => {
+    useGateway.setState({ switching: new Map([[READY, { target: 'direct', phase: 'failed', confirm: null, error: 'The process could not be stopped · gone' }]]) });
+    mount(ctxOf(READY));
+    expect(within(route()).getByRole('alert').textContent).toBe('The process could not be stopped · gone');
+    expect(within(route()).getByRole('button', { name: 'Retry · Switch to Direct…' })).toBeTruthy();
+    cleanup();
+    useGateway.setState({ switching: new Map() });
+    useSessions.setState({ records: new Map([[READY, { ...record, holder: { kind: 'terminal', pid: 7 } as never }]]) });
+    mount(ctxOf(READY));
+    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641 · Held by a terminal · switch it there');
+    expect(within(route()).queryByRole('button')).toBeNull();
+  });
+
+  it('a session whose first launch is still under C10’s setup offers no restart: its route is the intent’s', () => {
+    useSessions.setState({ engine: new Map(), records: new Map([[READY, { ...record, gateway: { ...record.gateway, routed: null } }]]) });
+    useSetup.setState({ intents: new Map([[READY, intent({ appSessionId: READY })]]) });
+    mount(ctxOf(READY));
+    expect(within(route()).queryByRole('button')).toBeNull();
+    cleanup();
+    useSetup.setState({ intents: new Map() });
+    mount(ctxOf(READY)); // an exited session whose route was never recorded: both, as the footer offered them
+    expect(within(route()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Switch to gateway…', 'Switch to Direct…']);
+  });
+
+  it('a Direct session’s get_usage is read while the tab is shown, and not while it is hidden', async () => {
+    const direct: EngineSessionStatus = { ...backend.status(READY), gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null } };
+    useSessions.setState({ engine: new Map([[READY, direct]]) });
+    mount(ctxOf(READY, false));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(backend.calls.filter((c) => c.command === 'session.getUsage')).toEqual([]);
+    cleanup();
+    mount(ctxOf(READY));
+    await waitFor(() => expect(backend.calls.filter((c) => c.command === 'session.getUsage').length).toBeGreaterThan(0));
+    await waitFor(() => expect(useUsage.getState().direct.get(READY)).toBeTruthy());
   });
 });

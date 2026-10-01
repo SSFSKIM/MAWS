@@ -1,9 +1,12 @@
 // The user's message: a bubble with the text through the shared markdown pipeline, its attachments (images inline from
-// their data URLs, files as chips, pasted blocks as chips that expand to their text), a collapse past 20 lines, and
-// copy and edit affordances (residues *Images and attachments*, *Bounded surfaces and truncation*, *Copy and export*;
-// *Pasted content* under Derivation). A dropped prompt carries a quiet `Not sent`. W1: a message waiting for the engine
-// (a `next` steer, or one held in MAWS's queue) is dimmed with what it waits for, and a steer the engine took says it
-// was sent during the turn it sits in.
+// their data URLs, files as chips, pasted blocks as chips that expand to their text), a collapse past 19 rendered
+// lines, and copy and edit affordances (residues *Images and attachments*, *Bounded surfaces and truncation*, *Copy and
+// export*; *Pasted content* under Derivation). A dropped prompt carries a quiet `Not sent`. W1: a message waiting for
+// the engine (a `next` steer, or one held in MAWS's queue) is dimmed with what it waits for, and a steer the engine took
+// says it was sent during the turn it sits in. W2 (B2, Codex's bubble): the time, Copy and Edit overlay beside the
+// bubble on hover or focus instead of reserving a line under it, and the collapse follows the rendered height (a long
+// paragraph folds as a long list does), measured while folded and again whenever the content's size changes.
+import { useLayoutEffect, useRef, useState } from 'react';
 import { NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
 import type { Attachment, Row } from '../../model/rows';
 import { placeholdersOf, untaggedUserText } from '../../model/user-text';
@@ -14,7 +17,6 @@ import { Chevron, clockTime, copyText } from './parts';
 type UserRowData = Extract<Row, { kind: 'user' }>;
 type Segment = { kind: 'text'; text: string } | { kind: 'pasted'; n: number; lines: number; attachment: Attachment };
 
-const COLLAPSE_LINES = 20;
 
 // The text split at the placeholders the model put in place of pasted blocks (the places it recorded); a
 // placeholder-shaped string the human typed stays text.
@@ -33,51 +35,77 @@ function segmentsOf(row: UserRowData): Segment[] {
 export function UserRow({ row }: { row: UserRowData }) {
   const actions = useActions();
   const [open, toggle] = useDisclosure(`bubble:${row.id}`);
-  const long = row.lines > COLLAPSE_LINES;
+  const content = useRef<HTMLDivElement>(null);
+  const [overflows, setOverflows] = useState(false);
   const files = row.attachments.filter((a) => a.kind !== 'text');
+  const caption = row.pending ? PENDING_CAPTION[row.pending] : row.steer ? STEERED_CAPTION : null;
+
+  // Measured while folded only: an open bubble has no bound. Open stays in the transcript-wide disclosures while the
+  // measurement is this mount's, so an open bubble always offers Show less (a virtualiser remount resets the
+  // measurement), and folding measures again.
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (!element || open) return;
+    const measure = () => setOverflows(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined' || !element.firstElementChild) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element.firstElementChild);
+    return () => observer.disconnect();
+  }, [open, row.text, row.attachments]);
+
   return (
     <section className="transcript-user" aria-label="Your message" data-pending={row.pending} data-steer={row.steer ? '' : undefined}>
-      <div className="transcript-user-bubble" data-bubble="" data-collapsed={long && !open ? '' : undefined}>
-        {segmentsOf(row).map((segment, i) =>
-          segment.kind === 'text' ? (
-            <Markdown key={i} markdown={segment.text} live={false} />
-          ) : (
-            <PastedBlock key={i} rowId={row.id} n={segment.n} lines={segment.lines} attachment={segment.attachment} />
-          ),
-        )}
-        {files.length > 0 && (
-          <div className="transcript-attachments">
-            {files.map((file, i) =>
-              file.kind === 'image' && file.dataUrl ? (
-                <img key={i} className="transcript-attachment-image" src={file.dataUrl} alt={file.name} />
-              ) : (
-                <span key={i} className="transcript-chip" data-chip="file" title={file.mediaType ?? undefined}>
-                  {file.name}
-                </span>
-              ),
-            )}
+      <div className="transcript-user-body">
+        <div className="transcript-user-bubble" data-bubble="" data-open={open ? '' : undefined} data-collapsed={overflows && !open ? '' : undefined}>
+          <div ref={content} className="transcript-user-content" data-user-content="">
+            <div>
+              {segmentsOf(row).map((segment, i) =>
+                segment.kind === 'text' ? (
+                  <Markdown key={i} markdown={segment.text} live={false} />
+                ) : (
+                  <PastedBlock key={i} rowId={row.id} n={segment.n} lines={segment.lines} attachment={segment.attachment} />
+                ),
+              )}
+              {files.length > 0 && (
+                <div className="transcript-attachments">
+                  {files.map((file, i) =>
+                    file.kind === 'image' && file.dataUrl ? (
+                      <img key={i} className="transcript-attachment-image" src={file.dataUrl} alt={file.name} />
+                    ) : (
+                      <span key={i} className="transcript-chip" data-chip="file" title={file.mediaType ?? undefined}>
+                        {file.name}
+                      </span>
+                    ),
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-        )}
-      </div>
-      {long && (
-        <button type="button" className="transcript-quiet-button" onClick={toggle}>
-          {open ? 'Show less' : 'Show more'}
-        </button>
-      )}
-      <div className="transcript-user-actions">
-        {row.dropped && <span className="transcript-not-sent">{NOT_SENT}</span>}
-        {row.pending && <span className="transcript-user-caption">{PENDING_CAPTION[row.pending]}</span>}
-        {row.steer && !row.pending && <span className="transcript-user-caption">{STEERED_CAPTION}</span>}
-        <span>{clockTime(row.at)}</span>
-        <button type="button" onClick={() => copyText(untaggedUserText(row.text, row.attachments, row.placeholders))}>
-          Copy
-        </button>
-        {row.editable && !row.pending && (
-          <button type="button" title="Edit and resubmit forks history" onClick={() => actions.editAndResubmit(row)}>
-            Edit
+          {(open || overflows) && (
+            <button type="button" className="transcript-quiet-button" aria-expanded={open} onClick={toggle}>
+              {open ? 'Show less' : 'Show more'}
+            </button>
+          )}
+        </div>
+        <div className="transcript-user-actions">
+          <span>{clockTime(row.at)}</span>
+          <button type="button" onClick={() => copyText(untaggedUserText(row.text, row.attachments, row.placeholders))}>
+            Copy
           </button>
-        )}
+          {row.editable && !row.pending && (
+            <button type="button" title="Edit and resubmit forks history" onClick={() => actions.editAndResubmit(row)}>
+              Edit
+            </button>
+          )}
+        </div>
       </div>
+      {(row.dropped || caption !== null) && (
+        <div className="transcript-user-meta">
+          {row.dropped && <span className="transcript-not-sent">{NOT_SENT}</span>}
+          {caption !== null && <span className="transcript-user-caption">{caption}</span>}
+        </div>
+      )}
     </section>
   );
 }

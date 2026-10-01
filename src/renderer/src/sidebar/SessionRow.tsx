@@ -96,7 +96,7 @@ function RowActions({ actions, appSessionId, title, pinned }: { actions: HoverAc
           type="button"
           tabIndex={-1}
           aria-label={`${pinned ? 'Unpin' : 'Pin'} ${title}`}
-          title={canPin ? (pinned ? 'Unpin' : 'Pin') : 'Arrives with C10'}
+          title={canPin ? (pinned ? 'Unpin' : 'Pin') : 'Not available here'}
           disabled={!canPin}
           onClick={(event) => {
             event.stopPropagation();
@@ -112,7 +112,7 @@ function RowActions({ actions, appSessionId, title, pinned }: { actions: HoverAc
           type="button"
           tabIndex={-1}
           aria-label={`Archive ${title}`}
-          title={canArchive ? 'Archive' : 'Arrives with C10'}
+          title={canArchive ? 'Archive' : 'Not available here'}
           disabled={!canArchive}
           onClick={(event) => {
             event.stopPropagation();

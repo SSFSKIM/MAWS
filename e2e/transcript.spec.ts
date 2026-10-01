@@ -207,6 +207,12 @@ test('follow mode breaks on scroll-up and Jump to latest restores it', async ({ 
   await page.evaluate(() => document.querySelector<HTMLElement>('[data-transcript-scroller]')!.scrollBy(0, -200));
   await expect.poll(async () => (await metrics(page)).following, { message: 'a scroll up leaves follow mode' }).toBe(false);
   await expect(jump).toBeVisible();
+  // W2 (B3): Codex's round 32px button, right of the column, never over the prose of a pane with room for it
+  const button = (await jump.boundingBox())!;
+  const column = (await page.locator('.transcript-row').first().boundingBox())!;
+  expect([button.width, button.height]).toEqual([32, 32]);
+  await expect(jump).toHaveCSS('border-radius', '50%');
+  expect(button.x, 'the button sits right of the column').toBeGreaterThanOrEqual(column.x + column.width);
   const readingAt = await scrollerTop(page);
   await page.waitForTimeout(500);
   expect(await scrollerTop(page), 'the stream does not move a reader').toBe(readingAt);
@@ -387,6 +393,41 @@ test('a long token in prose wraps in a narrow transcript', async ({ harness }) =
   expect(overflow.width, 'the transcript is narrow').toBeLessThanOrEqual(280);
   expect(overflow.paragraphs, 'the fixture shows answer prose').toBeGreaterThan(0);
   expect(overflow.overflow, 'no horizontal overflow').toBeLessThanOrEqual(0);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// W2: in a completed answer a table or code block wider than the text breaks out to --measure-wide less its two pads
+// (896 − 32 = 864 px), centred on the column; a narrow table keeps the text's width and left edge. A completed answer
+// renders in Streamdown's static mode, whose blocks sit directly under the prose with no per-block [dir] wrapper.
+test('a completed answer\u2019s wide table and code break out to the wide measure, centred, and a narrow table keeps the text', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await loadAll(page, 'events/wide-blocks');
+  const prose = page.locator('[data-kind="assistant_text"] .transcript-prose');
+  await expect(prose).toHaveCount(1);
+  await expect(prose.locator('[data-streamdown="code-block"]')).toHaveCount(1);
+  const measured = await prose.evaluate((element) => {
+    const row = element.closest<HTMLElement>('.transcript-row')!;
+    const style = getComputedStyle(row);
+    const box = row.getBoundingClientRect();
+    const round = (value: number) => Math.round(value * 10) / 10;
+    const text = { left: round(box.left + parseFloat(style.paddingLeft)), width: round(box.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)) };
+    const blocks = [...Array.from(element.querySelectorAll<HTMLElement>('[data-streamdown="table-wrapper"]')), element.querySelector<HTMLElement>('[data-streamdown="code-block"]')!];
+    const [narrow, wide, code] = blocks.map((block) => {
+      const rect = block.getBoundingClientRect();
+      return { left: round(rect.left), width: round(rect.width), inProse: block.parentElement === element };
+    });
+    return { pads: [style.paddingLeft, style.paddingRight], text, narrow, wide, code };
+  });
+  console.log(`wide blocks: ${JSON.stringify(measured)}`);
+  expect(measured.pads, 'the row pads its text by --measure-pad').toEqual(['16px', '16px']);
+  expect(measured.text.width, 'the default column holds 736 px of text in a 1280 px or wider window').toBe(736);
+  for (const block of [measured.narrow, measured.wide, measured.code]) expect(block.inProse, 'static mode: the block is a direct child of the prose').toBe(true);
+  expect(measured.narrow, 'the narrow table is the text\u2019s width at its left edge').toEqual({ left: measured.text.left, width: measured.text.width, inProse: true });
+  for (const block of [measured.wide, measured.code]) {
+    expect(block.width, 'a wide block is --measure-wide less the pads').toBe(864);
+    expect(block.left, 'centred on the column: 64 px left of the text').toBe(measured.text.left - 64);
+  }
   expect(harness.consoleErrors()).toEqual([]);
 });
 

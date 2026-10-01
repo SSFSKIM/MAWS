@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanup, fireEvent, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { applyEvents, createState } from '../../model/reduce';
 import { rowsOf } from '../../model/derive';
 import { builder, uuid } from '../../model/test-events';
+import { Disclosures } from '../context';
 import { renderRow, rowOf } from './test-support';
 
 afterEach(cleanup);
@@ -36,20 +37,74 @@ describe('user row', () => {
     expect(writeText).toHaveBeenCalledWith(`${fixture.typed}\n${fixture.pasted[0].body}\nthanks`);
   });
 
-  it('collapses past 20 lines behind Show more, and Show less folds it again', () => {
-    const long = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n');
-    const { container } = renderRow(userRow(long));
+  // happy-dom has no layout: the bubble content's rendered height is stubbed (its folded box is 19 lines, 432 px).
+  function renderedBubbleHeight(height: number) {
+    const folded = 432;
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get(this: HTMLElement) { return this.hasAttribute('data-user-content') ? height : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get(this: HTMLElement) { return this.hasAttribute('data-user-content') ? (this.parentElement?.hasAttribute('data-open') ? height : Math.min(height, folded)) : 0; },
+    });
+    onTestFinished(() => {
+      // The stubs shadow happy-dom's own (on Element.prototype); removing them restores it.
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+      Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+    });
+  }
+
+  // W2 (B2): the fold follows the rendered height, as Codex's does, so one long paragraph folds too.
+  it('folds a message that renders past 19 lines behind Show more, one paragraph included, and Show less folds it again', () => {
+    renderedBubbleHeight(900);
+    const { container } = renderRow(userRow('one paragraph that wraps over many lines '.repeat(60)));
     const bubble = container.querySelector('[data-bubble]')!;
     expect(bubble.hasAttribute('data-collapsed')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
     expect(bubble.hasAttribute('data-collapsed')).toBe(false);
+    expect(bubble.hasAttribute('data-open')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: 'Show less' }));
     expect(bubble.hasAttribute('data-collapsed')).toBe(true);
+  });
+
+  // The open state lives in the transcript's disclosures and outlives the row; the measurement is the mount's own. A
+  // bubble the virtualiser unmounts while open and mounts again keeps its Show less, and folding measures again.
+  it('an open bubble remounted over the same disclosures still offers Show less, and folding it measures again', () => {
+    renderedBubbleHeight(900);
+    const row = userRow('one paragraph that wraps over many lines '.repeat(60));
+    const disclosures = new Disclosures();
+    renderRow(row, { disclosures });
+    fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    cleanup();
+    const { container } = renderRow(row, { disclosures });
+    const bubble = container.querySelector('[data-bubble]')!;
+    expect(bubble.hasAttribute('data-open')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Show less' }));
+    expect(bubble.hasAttribute('data-collapsed')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Show more' }).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('thirty short lines that render within the fold offer no Show more', () => {
+    renderedBubbleHeight(400);
+    const { container } = renderRow(userRow(Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n')));
+    expect(container.querySelector('[data-bubble]')!.hasAttribute('data-collapsed')).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
   });
 
   it('a short message has no collapse control', () => {
     renderRow(userRow('one line'));
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+  });
+
+  // W2 (B2): the time, Copy and Edit sit in one overlay beside the bubble, apart from the captions that always show.
+  it('keeps the hover actions in their overlay and the captions under the bubble', () => {
+    const { container } = renderRow({ ...userRow('later'), dropped: true });
+    const overlay = container.querySelector('.transcript-user-actions')!;
+    expect(overlay.contains(screen.getByRole('button', { name: 'Copy' }))).toBe(true);
+    expect(overlay.contains(screen.getByRole('button', { name: 'Edit' }))).toBe(true);
+    expect(overlay.contains(screen.getByText('Not sent'))).toBe(false);
+    expect(container.querySelector('.transcript-user-meta')?.textContent).toBe('Not sent');
+    cleanup();
+    expect(renderRow(userRow('plain')).container.querySelector('.transcript-user-meta')).toBeNull(); // nothing reserved
   });
 
   it('renders a pasted block as a chip inside the bubble that expands to its body as text, and keeps typed <\\pasted_content> intact', () => {

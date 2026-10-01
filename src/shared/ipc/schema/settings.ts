@@ -1,7 +1,8 @@
 // X2 `settings.*`: the persisted app settings and the theme resolved from them (charter §12 C1 *Theme switching*).
 // Version 2 (C5): the keymap overrides and the notification policy. Version 3 (C11): the engine binary, the gateway
-// policy, the near-limit threshold, the monospace font and the per-kind notification switches. Migrations live in
-// `src/shared/settings/defaults.ts`, run by main's store; the schema never defaults.
+// policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
+// memory budget. Version 5 (W2): the transcript's width. Migrations live in `src/shared/settings/defaults.ts`, run by
+// main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
 import { CHORD_PATTERN } from '../../keymap/chord';
@@ -41,12 +42,20 @@ const GatewaySettingsSchema = z.strictObject({
   offerDirect: z.boolean(), // the per-session Direct option; D-19's fallback stays when the relay is unreachable
 });
 const UsageSettingsSchema = z.strictObject({ nearLimitPercent: z.number().int().min(50).max(100) }); // C7's banner threshold
-const AppearanceSettingsSchema = z.strictObject({ monoFont: z.string().min(1).max(200).nullable() }); // prepended to --font-mono; null = the token stack
+// W2: Claude Desktop's three transcript widths (charter §6 as amended 2026-10-01): the column the transcript and the
+// composer share, set on the root as --measure.
+export const TRANSCRIPT_WIDTHS = [768, 960, 1280] as const;
+export const TranscriptWidthSchema = z.union([z.literal(768), z.literal(960), z.literal(1280)]);
+export type TranscriptWidth = z.infer<typeof TranscriptWidthSchema>;
+const AppearanceSettingsSchema = z.strictObject({
+  monoFont: z.string().min(1).max(200).nullable(), // prepended to --font-mono; null = the token stack
+  transcriptWidth: TranscriptWidthSchema, // W2, version 5
+});
 const NotificationSettingsSchema = z.strictObject({ enabled: z.boolean(), sound: z.boolean(), kinds: NotificationKindsSchema });
 // C11 end
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(4), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers)
+  version: z.literal(5), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.

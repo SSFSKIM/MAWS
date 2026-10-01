@@ -1,15 +1,13 @@
 /* Transcript component styles (C6). X7 tokens only; layout values after mockup 02 (advisory). */
 
+/* A row sits in the column it shares with the composer frame (`.thread-column`, app.css; W2) */
 .transcript-row {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: calc(var(--measure) + 48px);
-  margin: 0 auto;
-  padding: 0 24px;
   font-size: var(--text-prose);
   color: var(--fg);
   outline: none;
 }
+/* The scroller is the query container a wide block measures the pane by */
+[data-transcript-scroller] { container-type: inline-size; }
 .transcript-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .transcript-disclosure {
@@ -47,25 +45,24 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* Time separator */
 .transcript-time { display: flex; justify-content: center; padding: 24px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 
-/* User bubble */
-.transcript-user { display: flex; flex-direction: column; align-items: flex-end; padding-bottom: 12px; }
+/* User bubble (W2, B2: Codex's): right-aligned, at most 70 percent of the column, 22px corners, 10 by 16px inside, the
+   text colour at 5 percent, the prose's size; past 19 rendered lines it is bounded behind Show more */
+.transcript-user { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding-bottom: 16px; }
+.transcript-user-body { position: relative; min-width: 0; max-width: 70%; }
 .transcript-user-bubble {
   box-sizing: border-box;
-  max-width: min(590px, 85%);
-  padding: 12px 16px;
-  border-radius: 16px 16px 4px 16px;
-  background: var(--bg-overlay);
-  border: 1px solid var(--border);
+  max-width: 100%;
+  padding: 10px 16px;
+  border-radius: var(--radius-2xl);
+  background: var(--bg-user-message);
   line-height: var(--lh-prose);
   overflow-wrap: anywhere;
 }
 .transcript-user-bubble p { white-space: pre-wrap; } /* the user's line breaks are theirs */
-.transcript-user-bubble[data-collapsed] {
-  max-height: calc(20 * var(--lh-prose) * var(--text-prose));
-  overflow: hidden;
-  mask-image: linear-gradient(to bottom, var(--fg) 80%, transparent);
-}
-.transcript-user-bubble > * + * { margin-top: 8px; }
+.transcript-user-bubble:not([data-open]) > .transcript-user-content { max-height: calc(19 * var(--lh-prose) * var(--text-prose)); overflow: hidden; }
+.transcript-user-bubble[data-collapsed] > .transcript-user-content { mask-image: linear-gradient(to bottom, var(--fg) 80%, transparent); }
+.transcript-user-content > div > * + * { margin-top: 8px; }
+.transcript-user-bubble > .transcript-quiet-button { display: block; margin-top: 6px; }
 .transcript-attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .transcript-attachment-image { max-width: 240px; max-height: 180px; border-radius: var(--radius-sm); border: 1px solid var(--border); object-fit: contain; }
 .transcript-pasted-text {
@@ -81,10 +78,26 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 }
 .transcript-quiet-button { margin-top: 4px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-quiet-button:hover { color: var(--fg); }
-.transcript-user-actions { display: flex; align-items: center; gap: 8px; min-height: 26px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
-.transcript-user-actions > :not(.transcript-not-sent, .transcript-user-caption) { opacity: 0; transition: opacity 0.12s; }
-.transcript-user:hover .transcript-user-actions > *, .transcript-user:focus-within .transcript-user-actions > * { opacity: 1; }
+/* Time, Copy and Edit overlay beside the bubble's foot on hover or focus, reserving no line under it (W2) */
+.transcript-user-actions {
+  position: absolute;
+  right: 100%;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  margin-right: 8px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.transcript-user:hover .transcript-user-actions, .transcript-user:focus-within .transcript-user-actions { opacity: 1; }
 .transcript-user-actions button:hover { color: var(--fg); }
+/* What a message waits for, or that it was not sent: always shown, under the bubble */
+.transcript-user-meta { display: flex; align-items: center; gap: 8px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-not-sent { color: var(--warning); }
 /* W1: a message waiting for the engine (Claude Desktop's dimmed tail bubble), and its caption, always shown */
 .transcript-user[data-pending] .transcript-user-bubble { opacity: 0.55; }
@@ -109,9 +122,26 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-mermaid-failed { margin-top: -8px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-mermaid:not([data-drawn]) > .transcript-mermaid-diagram { position: absolute; inset: 0 0 auto 0; visibility: hidden; pointer-events: none; }
 .transcript-prose :not(pre) > code { padding: 1px 5px; border-radius: 4px; background: var(--bg-active); font-family: var(--font-mono); font-size: 0.9em; }
-.transcript-prose h1 { font-size: calc(var(--text-prose) * 1.3); }
-.transcript-prose h2 { font-size: calc(var(--text-prose) * 1.2); }
-.transcript-prose h3 { font-size: calc(var(--text-prose) * 1.1); }
+/* W2: Codex's heading scale (1.5, 1.25, 1.125 and 1 of the prose; 28, 24.5, 24.5 and 21px lines at 14px) */
+.transcript-prose h1 { font-size: calc(var(--text-prose) * 1.5); line-height: calc(var(--text-prose) * 2); }
+.transcript-prose h2 { font-size: calc(var(--text-prose) * 1.25); line-height: calc(var(--text-prose) * 1.75); }
+.transcript-prose h3 { font-size: calc(var(--text-prose) * 1.125); line-height: calc(var(--text-prose) * 1.75); }
+.transcript-prose :is(h4, h5, h6) { font-size: var(--text-prose); line-height: calc(var(--text-prose) * 1.5); }
+/* A fence draws at the code size (Streamdown's body is text-sm, the chrome size) */
+.transcript-prose [data-streamdown="code-block-body"] { font-size: var(--text-code); }
+.transcript-prose pre code { font-size: inherit; }
+/* W2: an answer's wide table or code block may break out of the text to --measure-wide, centred on the column and never
+   past the pane; one no wider than the text keeps the text's width. A completed answer (static mode) holds its blocks
+   directly; a streaming one wraps each in a `display: contents` [dir] div. */
+:is(.transcript-answer, .transcript-commentary) > .transcript-prose > :is([data-streamdown="table-wrapper"], [data-streamdown="code-block"]),
+:is(.transcript-answer, .transcript-commentary) > .transcript-prose > [dir] > :is([data-streamdown="table-wrapper"], [data-streamdown="code-block"]) {
+  position: relative;
+  left: 50%;
+  transform: translateX(-50%);
+  width: fit-content;
+  min-width: 100%;
+  max-width: min(calc(var(--measure-wide) - 2 * var(--measure-pad)), calc(100cqi - 2 * var(--measure-pad)));
+}
 .transcript-prose a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .transcript-image { max-width: 100%; border-radius: var(--radius-sm); }
 
@@ -367,23 +397,27 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
   font-size: var(--text-ui);
 }
 
-/* Jump to latest: positioned by the transcript root, never a measured row */
+/* Jump to latest (W2, B3: Codex's scroll-to-bottom button): a 32px round button positioned by the transcript root, never a
+   measured row; right of the column with a 12px gap where the pane has room, else 12px in from the pane's edge, so it
+   never sits over the prose of a wide pane. While the turn works, its dots replace the arrow. */
 .transcript-jump {
   position: absolute;
   bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: max(12px, calc((100% - var(--measure)) / 2 - 44px));
+  z-index: 1;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: 50%;
   background: var(--bg-overlay);
-  color: var(--fg);
-  font-size: var(--text-ui);
+  background-clip: padding-box;
+  color: var(--fg-muted);
 }
-.transcript-jump:hover { background: var(--bg-hover); }
+.transcript-jump:hover { background-color: var(--bg-hover); color: var(--fg); }
+.transcript-jump svg { width: 14px; height: 14px; }
 .transcript-working-dots { display: inline-flex; gap: 2px; }
 .transcript-working-dots span { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); animation: transcript-dot 1.2s infinite ease-in-out; }
 .transcript-working-dots span:nth-child(2) { animation-delay: 0.15s; }

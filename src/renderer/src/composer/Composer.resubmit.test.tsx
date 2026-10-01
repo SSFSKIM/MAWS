@@ -170,7 +170,7 @@ describe('edit-and-resubmit in the composer', () => {
     act(() => void editor().editor.commands.insertContent(', edited'));
     await key(editor(), { key: 'Enter' });
     const dialog = await screen.findByRole('alertdialog');
-    expect(dialog.textContent).toContain('Forking arrives with C10. Rewind this session to that message and resend instead?');
+    expect(dialog.textContent).toContain('Forking is not available here. Rewind this session to that message and resend instead?');
     await userEvent.setup().click(within(dialog).getByRole('button', { name: 'Rewind and resend' }));
     await waitFor(() => expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A, targetMessageUuid: 'u-1', lastSeenMessageUuid: 'u-2', files: false }]));
     expect(editor().editor.isEditable).toBe(false); // read-only while rewinding

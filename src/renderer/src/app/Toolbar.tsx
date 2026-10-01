@@ -116,7 +116,7 @@ function SessionMenuItem({ id, appSessionId, label }: { id: SessionActionId; app
     <DropdownMenu.Item
       disabled={!enabled}
       onSelect={() => runSessionAction(id, appSessionId)}
-      title={enabled ? undefined : 'Arrives with C10'}
+      title={enabled ? undefined : 'Not available here'}
       className="flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover"
     >
       {label}

@@ -66,7 +66,7 @@ describe('the transcript slot', () => {
     await waitFor(() => expect(screen.getByRole('region', { name: 'Your message' })).toBeTruthy());
     expect(fake.invoked('session.events')).toEqual([{ appSessionId: APP, afterSeq: null, limit: null }]);
     expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('See the file');
-    expect(screen.queryByText('Transcript arrives with C6')).toBeNull();
+    expect(screen.queryByText('Transcript unavailable')).toBeNull();
   });
 
   it('tells the store whether the session’s process is live, from C5’s digest (the read model’s liveness rule)', () => {

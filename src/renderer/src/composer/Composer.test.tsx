@@ -14,14 +14,13 @@ import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
 import { useAttention } from '../stores/attention';
-import { insertComposerText, isStarting, prefillComposer, resetComposerStore, setupPhaseOf, useComposerStore } from '../stores/composer';
+import { insertComposerText, isStarting, prefillComposer, resetComposerStore, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { resetQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { resetCatalogStore } from '../stores/catalog';
-import { StatusLine } from '../session/StatusLine';
 import { Composer } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
 import { DockedCardFrame } from './docked/DockedCardFrame';
@@ -263,10 +262,7 @@ describe("composer DOM under C5's dispatcher", () => {
     act(() => useAttention.setState({ bySession: new Map([[A, [item]]]), requests: new Map([[item.id, event]]), version: 1 }));
     const frame = await within(composerOf(0)).findByRole('group', { name: 'Approval needed' });
     expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(true); // the box and the toolbar
-    const chips = within(composerOf(0)).getByRole('button', { name: /^Location/ });
-    expect(chips.closest('[hidden]')).toBeNull(); // the chip row stays, above the card (mockup 04)
-    expect(chips.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools', hidden: true }).closest('[hidden]')).not.toBeNull();
+    expect(within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools', hidden: true }).closest('[hidden]')).not.toBeNull(); // W2: the location and `+ dir` with it
     expect(editorOf().editor.getText()).toBe('a draft kept aside'); // mounted, hidden
     await waitFor(() => expect(document.activeElement).toBe(frame)); // the pane held focus
     expect(useComposerStore.getState().docked.get(A)?.has('req-a' as never)).toBe(true);
@@ -629,26 +625,25 @@ describe('unstarted send holds a starting state', () => {
     await waitFor(() => expect(primary().title).toBe('Your first message is with the setup above'));
   });
 
-  it('the setup phase is the status line’s activity: alone under the frame before the record exists, then the status line’s first field', async () => {
+  // W2 (C3): with no status line, the setup's phase shows in the composer's dock above the frame, before the record
+  // exists and after (the record exists from the launch, before C3's first status), and only while it runs.
+  it('the setup phase shows in the composer’s dock above the frame while it runs, before and after the record exists', async () => {
     const stub = stubIntent();
     const view = mount([{ index: 0, id: A }]);
     const setup = () => within(composerOf(0)).queryByRole('status', { name: 'Setup' });
     expect(setup()).toBeNull(); // nothing at rest: the unstarted tab is the heading and the frame
     act(() => stub.setPhase('Creating worktree one…'));
     await waitFor(() => expect(setup()?.textContent).toBe('Creating worktree one…'));
+    expect(setup()!.compareDocumentPosition(composerOf(0).querySelector('[data-composer-frame]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     act(() => stub.setPhase(null));
     await waitFor(() => expect(setup()).toBeNull());
     view.unmount();
-    // the record exists from the launch, before C3's first status: the status line carries the phase, the frame does not
     useSessions.setState({ records: new Map([[A, record(A)]]), engine: new Map() });
-    mount([{ index: 0, id: A }], <StatusLine record={record(A)} />);
+    mount([{ index: 0, id: A }]);
     act(() => stub.setPhase('Starting…'));
-    const line = () => screen.getByRole('group', { name: 'Session status' });
-    await waitFor(() => expect(within(line()).getByRole('status', { name: 'Setup' }).textContent).toBe('Starting…'));
-    expect(setup()).toBeNull();
+    await waitFor(() => expect(setup()?.textContent).toBe('Starting…'));
     act(() => stub.setPhase(null));
-    await waitFor(() => expect(within(line()).queryByRole('status', { name: 'Setup' })).toBeNull());
-    expect(setupPhaseOf(useComposerStore.getState(), A)).toBeNull();
+    await waitFor(() => expect(setup()).toBeNull());
   });
 
   // C10's M6 finding: a failed setup keeps its tab and its intent, and C3 keeps the failed launch's exited status for

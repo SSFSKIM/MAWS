@@ -92,7 +92,7 @@ export function Editor(props: EditorProps) {
     content: emptyDoc(),
     immediatelyRender: true,
     editorProps: {
-      attributes: { 'aria-label': 'Message', 'aria-multiline': 'true', role: 'textbox', class: 'min-h-6 px-1 py-0.5 outline-none' },
+      attributes: { 'aria-label': 'Message', 'aria-multiline': 'true', role: 'textbox', class: 'min-h-5 px-1 outline-none' }, // W2: one 20px line at rest
       handleKeyDown: (view: EditorView, event: KeyboardEvent) => controller.keyDown(view, event),
     },
   }));
@@ -140,7 +140,8 @@ export function Editor(props: EditorProps) {
         }}
       >
         <ModeChrome appSessionId={appSessionId} mode={mode} empty={commandEmpty} />
-        <EditorContent editor={editor} className={`max-h-44 overflow-y-auto text-ui text-fg ${mode === 'bash' ? 'font-mono' : ''} ${PLACEHOLDER}`} />
+        {/* W2 (C1, Codex's): the prose's size on a 20px line, growing to a quarter of the window before it scrolls */}
+        <EditorContent editor={editor} className={`max-h-[25vh] overflow-y-auto text-prose leading-5 text-fg ${mode === 'bash' ? 'font-mono' : ''} ${PLACEHOLDER}`} />
       </div>
     </>
   );

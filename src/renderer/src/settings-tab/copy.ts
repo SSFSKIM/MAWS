@@ -72,12 +72,12 @@ export const GATEWAY = {
   hint: 'D-19',
   defaultRoute: 'Default route',
   routes: { gateway: 'ClaudeUsage relay', direct: 'Direct' },
-  defaultRouteNote: 'New sessions start on this route; a session can be switched from its status line.',
+  defaultRouteNote: 'New sessions start on this route; a session can be switched from its Session info.', // W2: no status line
   policy: 'Relay unreachable at launch',
   policies: { ask: 'Ask each time', wait: 'Wait for the relay', direct: 'Run direct' },
   policyDirectNote: 'A session on a gateway model (claude/…) is asked instead: Direct cannot serve it.',
   offerDirect: 'Per-session Direct',
-  offerDirectLabel: 'Offer "Switch to Direct…" in the status line',
+  offerDirectLabel: 'Offer "Switch to Direct…" in Session info', // W2: no status line
   offerDirectNote: "The relay card's Run direct stays either way: Direct is the fallback when the relay is unreachable.",
   directLogin: 'Direct login',
   directLoginKnown: (login: string, email: string | null) => ["engine's own", login, email].filter(Boolean).join(' · '),
@@ -115,6 +115,10 @@ export const APPEARANCE = {
   monoFont: 'Monospace font',
   monoFontPlaceholder: 'the default stack (SF Mono)',
   monoFontNote: 'Name a Nerd Font to draw prompt glyphs in the terminal',
+  // W2: Claude Desktop's setting, in its words
+  transcriptWidth: 'Transcript width',
+  transcriptWidths: { 768: 'Narrow', 960: 'Medium', 1280: 'Wide' },
+  transcriptWidthNote: 'Maximum width of the transcript and composer columns',
   // U+E0A0 (branch) and U+E0B0 (right arrow): the powerline glyphs a prompt draws
   preview: 'main  ~/project  $',
 };

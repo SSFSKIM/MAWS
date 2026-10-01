@@ -1,14 +1,18 @@
 // Session info's body (C11 execution document, Interfaces "Session info tool"; M4 decisions and refresh task "Session
 // info on C8a's host"): the stores' values at once, so the panel is never blank, and four reads plus the context
 // summary on open and every 30 s while the tab is shown (none while hidden), counts only; the widgets hold the detail.
+// W2 (§5.5 as amended 2026-10-01): with the status line gone, the Route row offers the Direct⇄gateway switch, and a
+// Direct session's `get_usage` poll runs from here while the tab is shown.
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
 import { routingFacts } from '../../gateway/routing-facts';
 import { useGateway } from '../../gateway/store';
 import { useCommand } from '../../ipc/query';
 import type { PanelToolContext } from '../../panel/tool';
+import { useSetup } from '../../sessions/store';
+import { useDirectFallback } from '../../statusline/direct-fallback';
 import { POPOVER_TICK_MS, useNow } from '../../statusline/use-now';
 import { listedModelsOf, openComposerWidget, useComposerStore } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
@@ -21,6 +25,7 @@ import { useEngineRead } from '../../widgets/read';
 import { INFO } from './copy';
 import { autoModeLane, reviewsOf } from './lane';
 import { sessionInfoSections, type InfoRow } from './model';
+import { RouteSwitch } from './RouteSwitch';
 import { useBudget } from '../../budget/store'; // C12
 
 export type SessionInfoState = { openedAt: string }; // no per-tab state beyond bookkeeping; every value is read live
@@ -56,7 +61,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   // only while no sample has arrived (a session C3 has not sampled yet, or one whose digest predates the sampling).
   const context = useEngineRead('session.getContextUsage', { appSessionId, detail: 'summary' }, { ...read, enabled: visible && !digest?.context });
   const binary = useCommand('engine.binaryInfo', undefined, { enabled: visible, staleTime: 60_000 });
-  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V4;
+  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V5;
   const snapshot = useUsage((s) => s.snapshot);
   const directLogin = useGateway((s) => s.directLogin.get(appSessionId) ?? null);
   // the model's catalogue entry, when C7 listed the session's models (the lane reads only its value, which the status
@@ -67,8 +72,13 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   const now = useNow(POPOVER_TICK_MS);
   const windows = useSessionWindows(record, status);
   const budget = useBudget((s) => s.state); // C12
+  useDirectFallback(appSessionId, visible ? status : null); // W2: a Direct session's windows, read while the tab is shown
 
-  const facts = routingFacts(record, status, snapshot, settings, directLogin);
+  // W2: a session whose first launch C10 still runs (its intent, no status) chooses its route on the intent (the model
+  // widget's Route segment), never by a restart from here, as the usage popover's footer branched before routingFacts
+  const firstLaunch = useSetup((s) => s.intents.has(appSessionId)) && status === null;
+  const routed = routingFacts(record, status, snapshot, settings, directLogin);
+  const facts = firstLaunch ? { ...routed, targets: [], canSwitch: false, switchLabel: '' } : routed;
   let lane = null;
   if (status) {
     const server = status.gateway.autoModeServer === 'unknown' ? serverRow(statusRead.data?.sections) : null;
@@ -119,6 +129,7 @@ function Value({ appSessionId, row }: { appSessionId: AppSessionId; row: InfoRow
           {INFO.openPermissions}
         </button>
       )}
+      {row.action === 'route' && row.targets && <RouteSwitch appSessionId={appSessionId} targets={row.targets} />}
     </>
   );
 }

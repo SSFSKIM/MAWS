@@ -66,6 +66,7 @@ export {
 } from './schema/settings';
 export { EngineBinaryConfigSchema, type EngineBinaryConfig } from './schema/engine';
 // C11 end
+export { TRANSCRIPT_WIDTHS, TranscriptWidthSchema, type TranscriptWidth } from './schema/settings'; // W2: settings v5
 
 export const commands = {
   ...session.commands,

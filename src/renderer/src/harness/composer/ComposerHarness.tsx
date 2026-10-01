@@ -8,7 +8,8 @@
 // layout store's panes (so the one app-level ⌘. and ⌘L resolve the focused pane as they do in the shell), with C10's
 // setup intent stubbed (`intent-stub.ts`) and a stub card docked through `dockCard`. M4b shows a composer pane's
 // transcript above it on request (C6's slot, with the composer's edit-and-resubmit registered as the app registers it),
-// and can fail a composer's next `session.send` before it reaches main.
+// and can fail a composer's next `session.send` before it reaches main. W2: that composer sits in C5's own composer
+// column, as a started session pane holds it, and `wide` spans the page so the column reaches its cap.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -22,7 +23,7 @@ import { queryClient } from '../../ipc/query';
 import { connectKeys } from '../../keymap/dispatcher';
 import { useKeyChord } from '../../keymap/useKeyChord';
 import { RequestCard } from '../../request-card';
-import { SessionPane } from '../../session/SessionPane';
+import { ComposerColumn, SessionPane } from '../../session/SessionPane';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
 import { registerTranscriptActions, TranscriptSlot } from '../../transcript';
@@ -164,7 +165,7 @@ export function ComposerHarness() {
               data-pane={index}
               aria-label={`pane ${index}`}
               onFocusCapture={() => useLayout.getState().focusPane(index)}
-              className={`flex min-w-0 flex-col gap-3 ${pane !== null && 'shell' in pane && pane.shell ? 'col-span-2' : ''}`}
+              className={`flex min-w-0 flex-col gap-3 ${pane !== null && (('shell' in pane && pane.shell) || ('wide' in pane && pane.wide)) ? 'col-span-2' : ''}`}
             >
               <button type="button" className="self-start rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted">
                 pane {index}
@@ -178,7 +179,13 @@ export function ComposerHarness() {
               ) : 'composer' in pane ? (
                 <div className="mt-auto flex min-w-0 flex-col gap-3">
                   {pane.transcript && <TranscriptSlot key={`transcript:${pane.composer}`} appSessionId={pane.composer as AppSessionId} className="h-72" />}
-                  <Composer key={pane.composer} appSessionId={pane.composer as AppSessionId} paneIndex={index} client={composerClient} />
+                  {pane.transcript ? (
+                    <ComposerColumn>
+                      <Composer key={pane.composer} appSessionId={pane.composer as AppSessionId} paneIndex={index} client={composerClient} />
+                    </ComposerColumn>
+                  ) : (
+                    <Composer key={pane.composer} appSessionId={pane.composer as AppSessionId} paneIndex={index} client={composerClient} />
+                  )}
                 </div>
               ) : (
                 <RequestPane appSessionId={pane.appSessionId as AppSessionId} placement={pane.placement} index={index} />

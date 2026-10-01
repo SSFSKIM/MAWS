@@ -262,13 +262,15 @@ test('@ and / menus with the widget union', async ({ editor }) => {
     await page.keyboard.type('/');
   }
   // terminal-only and widget-only names are listed, disabled, and Enter leaves them be
-  for (const [name, origin] of [['doctor', 'engine'], ['permissions', 'widget']]) {
+  // W2: the engine's terminal-only command reads Terminal only, a widget this page did not register Not available here
+  for (const [name, origin, hint] of [['doctor', 'engine', 'Terminal only'], ['permissions', 'widget', 'Not available here']]) {
     await page.keyboard.type(name);
     const row = chosen; // C11: the chosen row (a skill may be shown above it)
     await expect(row).toContainText(`/${name}`);
     await expect(row).toHaveAttribute('data-origin', origin);
     await expect(row).toHaveAttribute('aria-disabled', 'true');
-    await expect(row).toContainText('Opens a widget · arrives with C11');
+    await expect(row).toContainText(hint);
+    await expect(row).not.toContainText('arrives with');
     await page.keyboard.press('Enter');
     await expect(commands).toBeVisible();
     await page.keyboard.press('Escape');
@@ -546,7 +548,7 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   await expect(frame).toBeFocused();
   await expect(messageIn(page, 0)).toBeHidden();
   await expect(p.getByRole('toolbar', { name: 'Composer tools' })).toBeHidden(); // the card takes the box's and the toolbar's place
-  await expect(p.getByRole('button', { name: `Location ${repo}` })).toBeVisible(); // under the same chip row (mockup 04)
+  await expect(p.getByRole('button', { name: `Location ${repo}` })).toBeHidden(); // W2: the location is the toolbar's, no chip row stays above the card
   await page.keyboard.press('Enter');
   await expect.poll(() => cards(page, 'stubAccepts')).toBe(1);
   await cards(page, 'undockStub');
@@ -602,7 +604,7 @@ async function confirmResubmit(page: Page, beforeConfirm: () => Promise<unknown>
   await messageIn(page, 0).click();
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('alertdialog');
-  await expect(dialog).toContainText('Forking arrives with C10. Rewind this session to that message and resend instead?');
+  await expect(dialog).toContainText('Forking is not available here. Rewind this session to that message and resend instead?');
   await beforeConfirm();
   await dialog.getByRole('button', { name: 'Rewind and resend' }).click();
 }
@@ -725,5 +727,113 @@ test('edit-and-resubmit across a reload during an unconfirmed rewind: edit mode 
   await page.keyboard.press('Enter'); // an ordinary send now
   await expect.poll(() => sent(page, id!)).toEqual(['turn two edited']);
   expect(await written(page, id!)).toEqual({ rewinds: 1, cancels: 1, users: 3 });
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// ---- W2: proportions -----------------------------------------------------------------------------------------------
+
+// The rendered box of an element, and its padding, read in the page.
+const geometry = (locator: ReturnType<Page['locator']>) =>
+  locator.evaluate((el) => {
+    const style = getComputedStyle(el);
+    const box = el.getBoundingClientRect();
+    return { left: box.left, width: box.width, height: box.height, padLeft: parseFloat(style.paddingLeft), padRight: parseFloat(style.paddingRight), fontSize: style.fontSize, lineHeight: style.lineHeight };
+  });
+
+// B1 (charter §6 as amended 2026-10-01): the transcript's rows and the composer frame share one column, Codex's. In a pane
+// wider than the column both sit at its 768px cap with 16px inside, so the frame is exactly the 736px of text; the prose
+// is 14px at a 22.75px pitch.
+test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s composer box', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'w2-column';
+  await openComposerPage(page);
+  await launchReady(page, id, turnsJournal(scratch, id, 1));
+  await showPanes(page, [{ composer: id, transcript: true, wide: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type('turn one');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  const p = pane(page, 0);
+  const userRow = p.locator('.transcript-row[data-kind="user"]').first();
+  await expect(userRow).toBeVisible();
+
+  const row = await geometry(userRow);
+  const column = await geometry(p.locator('[data-composer]').locator('xpath=..'));
+  const frame = await geometry(p.locator('[data-composer-frame]'));
+  expect(row.width).toBe(768); // the column's cap, in px
+  expect([row.padLeft, row.padRight]).toEqual([16, 16]);
+  expect(column.width).toBe(row.width); // the composer's column is the transcript's
+  expect(column.left).toBe(row.left);
+  expect(frame.width).toBe(row.width - row.padLeft - row.padRight); // 736: the frame is exactly the text's width
+  expect(frame.left).toBe(row.left + row.padLeft);
+  expect(row.fontSize).toBe('14px');
+  expect(await geometry(userRow.locator('.transcript-user-bubble p').first())).toMatchObject({ fontSize: '14px', lineHeight: '22.75px' });
+
+  // B2: Codex's bubble. At most 70 percent of the column, 22px corners, 10 by 16px inside, the text colour at 5 percent
+  // (the token), the prose's size; Time, Copy and Edit overlay beside it on hover and reserve no line under it.
+  const bubble = userRow.locator('[data-bubble]');
+  const look = await bubble.evaluate((el) => {
+    const style = getComputedStyle(el);
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = 'color-mix(in oklab, var(--fg) 5%, transparent)';
+    document.body.append(probe);
+    const tint = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return {
+      radius: style.borderTopLeftRadius,
+      padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
+      fontSize: style.fontSize,
+      border: style.borderTopWidth,
+      tinted: style.backgroundColor === tint,
+      maxWidth: getComputedStyle(el.parentElement!).maxWidth,
+    };
+  });
+  expect(look).toEqual({ radius: '22px', padding: ['10px', '16px', '10px', '16px'], fontSize: '14px', border: '0px', tinted: true, maxWidth: '70%' });
+  const restRow = (await userRow.boundingBox())!.height;
+  const bubbleHeight = (await bubble.boundingBox())!.height;
+  expect(restRow - bubbleHeight).toBe(16); // the row's own gap, nothing reserved for the actions
+  const overlay = userRow.locator('.transcript-user-actions');
+  await expect(overlay).toHaveCSS('opacity', '0');
+  await overlay.getByRole('button', { name: 'Copy' }).focus(); // as a hover does (a hover here scrolls the short harness transcript under the pointer)
+  await expect(overlay).toHaveCSS('opacity', '1');
+  expect((await userRow.boundingBox())!.height).toBe(restRow);
+  const actionsBox = (await overlay.boundingBox())!;
+  const bubbleBox = (await bubble.boundingBox())!;
+  expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(bubbleBox.x); // beside the bubble, not over it
+
+  // C1: Codex's box. 44px at rest with 22px corners and the faint shadow; the editor grows to a quarter of the window,
+  // then scrolls inside it.
+  const box = p.locator('[data-composer-box]');
+  expect((await box.boundingBox())!.height).toBe(44);
+  await expect(box).toHaveCSS('border-top-left-radius', '22px');
+  expect(await box.evaluate((el) => getComputedStyle(el).boxShadow)).not.toBe('none');
+  await messageIn(page, 0).click();
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.type(`line ${i + 1}`);
+    await page.keyboard.press('Shift+Enter');
+  }
+  const grown = await messageIn(page, 0).evaluate((el) => {
+    const scroller = el.parentElement!;
+    return { height: scroller.getBoundingClientRect().height, quarter: window.innerHeight / 4, scrolls: scroller.scrollHeight > scroller.clientHeight };
+  });
+  expect(grown.height).toBeCloseTo(grown.quarter, 0);
+  expect(grown.scrolls).toBe(true);
+  await page.keyboard.press('Meta+A');
+  await page.keyboard.press('Backspace');
+  await expect.poll(async () => (await box.boundingBox())!.height).toBe(44);
+
+  // C2: nothing above the box at rest, one toolbar row below it: + · location · + dir · mode … model (no @, no mic)
+  const frameBox = (await p.locator('[data-composer-frame]').boundingBox())!;
+  const boxAtRest = (await box.boundingBox())!;
+  const toolbar = p.getByRole('toolbar', { name: 'Composer tools' });
+  const tools = (await toolbar.boundingBox())!;
+  expect(boxAtRest.y).toBe(frameBox.y);
+  expect(tools.y).toBeGreaterThanOrEqual(boxAtRest.y + boxAtRest.height);
+  expect(frameBox.y + frameBox.height).toBe(tools.y + tools.height);
+  console.log(`W2 composer at rest: box ${boxAtRest.height}px, toolbar ${tools.height}px, frame ${frameBox.height}px, ${frameBox.width}px wide`);
+  const labels = await toolbar.getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label') ?? ''));
+  expect(labels).toEqual(['Add files, photos or commands', expect.stringMatching(/^Location /), 'Add a directory', expect.stringMatching(/^Permission mode /), expect.stringMatching(/^Model /)]);
+  await expect(toolbar.getByRole('button', { name: 'Mention a file or agent' })).toHaveCount(0);
+  await expect(toolbar.getByRole('button', { name: 'Voice input' })).toHaveCount(0);
   expect(editor.consoleErrors()).toEqual([]);
 });

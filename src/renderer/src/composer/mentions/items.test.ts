@@ -42,8 +42,8 @@ describe('slash items union the catalogue, the widget catalogue and MAWS actions
     const items = slashItems(autoRouted(), registeredWidgetNames(), mawsItems(() => true));
     expect(byName(items, 'compact')).toMatchObject({ origin: 'engine', action: { kind: 'text' } });
     expect(byName(items, 'model')).toMatchObject({ origin: 'engine', action: { kind: 'text' } });
-    expect(byName(items, 'doctor')).toMatchObject({ origin: 'engine', action: { kind: 'unavailable', hint: 'Opens a widget · arrives with C11' } });
-    expect(byName(items, 'permissions')).toMatchObject({ origin: 'widget', action: { kind: 'unavailable', hint: 'Opens a widget · arrives with C11' } });
+    expect(byName(items, 'doctor')).toMatchObject({ origin: 'engine', action: { kind: 'unavailable', hint: 'Terminal only' } }); // W2: the engine runs it only in its terminal
+    expect(byName(items, 'permissions')).toMatchObject({ origin: 'widget', action: { kind: 'unavailable', hint: 'Not available here' } }); // W2: no host registered the widget
     // every declared widget name is an item, whether or not the engine lists it
     for (const w of WIDGET_COMMANDS) expect(items.some((i) => i.name === w.name)).toBe(true);
     expect(items.filter((i) => i.origin === 'widget').map((i) => i.name).sort()).toEqual(['diff', 'export', 'hooks', 'memory', 'permissions', 'plugins', 'resume', 'sandbox', 'skills', 'status']);

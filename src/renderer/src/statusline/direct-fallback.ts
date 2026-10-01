@@ -1,8 +1,8 @@
 // The direct session's usage windows (D-19's engine fallback; §5.5): a session launched direct never passes through
-// ClaudeUsage's relay, so its windows come from the engine's own `get_usage`, read every 60 s while its status line
-// is on screen and the page is visible, and after each turn ends. `rate_limits` (pinned binary: `{ five_hour,
-// seven_day, model_scoped[] }`, each `{ utilization, resets_at }`; null when plan limits do not apply) maps to the
-// same window shape ClaudeUsage's files give.
+// ClaudeUsage's relay, so its windows come from the engine's own `get_usage`, read every 60 s while its Session info
+// tab is shown (W2: the status line that ran it is gone) and the page is visible, and after each turn ends.
+// `rate_limits` (pinned binary: `{ five_hour, seven_day, model_scoped[] }`, each `{ utilization, resets_at }`; null when
+// plan limits do not apply) maps to the same window shape ClaudeUsage's files give.
 import { useEffect, useState } from 'react';
 import * as z from 'zod';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -38,8 +38,8 @@ export function windowsFromGetUsage(response: GetUsageResponse, readAt: string):
   };
 }
 
-// Polls while mounted (the status line is mounted exactly while its session's tab is shown in a pane) for a direct
-// session with a ready process, and reads once more whenever a turn ends; a failed read leaves the last reading.
+// Polls while given a status (Session info passes one only while its tab is shown) for a direct session with a ready
+// process, and reads once more whenever a turn ends; a failed read leaves the last reading.
 export function useDirectFallback(appSessionId: AppSessionId, status: EngineSessionStatus | null): void {
   const polling = status !== null && status.gateway.mode === 'direct' && status.process === 'ready';
   const turnOpen = status !== null && status.turn !== null;

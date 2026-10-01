@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'; // C12: afterEach, beforeEach
 import type { CommandResult, HostState, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
 import { CONFIGURE_WAIT_MS, startEngineConfigure, type EngineConfigureDeps } from './engine-configure'; // C12: CONFIGURE_WAIT_MS
 import { REQUEST_TIMEOUT_MS, RESTART_BACKOFF_MS } from '../hosts/supervisor'; // C12
 import type { Custody } from '../engine/custody'; // C12
@@ -13,7 +13,7 @@ const TOTAL_MEM = 32 * 1024 ** 3;
 const DEFAULT_LIMIT_KIB = 8 * 1024 * 1024;
 
 function harness(initial: HostState['state'] = 'starting', dispatch?: EngineConfigureDeps['dispatch'], custody?: EngineConfigureDeps['custody'] /* C12 */) {
-  let settings: Settings = SETTINGS_DEFAULTS_V4;
+  let settings: Settings = SETTINGS_DEFAULTS_V5;
   const settingsListeners = new Set<(s: Settings) => void>();
   const stateListeners = new Set<(s: HostState) => void>();
   let current = host(initial);
@@ -65,12 +65,12 @@ describe('engine.configure is sent after the settings load and on every change o
 
   it('sends on a change of the binary path or the pin, and not on any other change', async () => { // C12: async, one push at a time
     const h = harness('ready');
-    h.change({ ...SETTINGS_DEFAULTS_V4, theme: 'dark', gateway: { ...SETTINGS_DEFAULTS_V4.gateway, relayUnreachable: 'wait' } });
-    h.change({ ...SETTINGS_DEFAULTS_V4, engine: { ...SETTINGS_DEFAULTS_V4.engine, subagentModel: 'haiku' } }); // C10's launch reads it, not the host
+    h.change({ ...SETTINGS_DEFAULTS_V5, theme: 'dark', gateway: { ...SETTINGS_DEFAULTS_V5.gateway, relayUnreachable: 'wait' } });
+    h.change({ ...SETTINGS_DEFAULTS_V5, engine: { ...SETTINGS_DEFAULTS_V5.engine, subagentModel: 'haiku' } }); // C10's launch reads it, not the host
     expect(h.dispatch).toHaveBeenCalledOnce();
-    h.change({ ...SETTINGS_DEFAULTS_V4, engine: { ...SETTINGS_DEFAULTS_V4.engine /* C12 */, binaryPath: '/opt/claude', pinnedVersion: '2.1.283', subagentModel: null } });
+    h.change({ ...SETTINGS_DEFAULTS_V5, engine: { ...SETTINGS_DEFAULTS_V5.engine /* C12 */, binaryPath: '/opt/claude', pinnedVersion: '2.1.283', subagentModel: null } });
     await h.configure.applied(); // C12
-    h.change({ ...SETTINGS_DEFAULTS_V4, engine: { ...SETTINGS_DEFAULTS_V4.engine /* C12 */, binaryPath: '/opt/claude', pinnedVersion: '2.1.290', subagentModel: null } });
+    h.change({ ...SETTINGS_DEFAULTS_V5, engine: { ...SETTINGS_DEFAULTS_V5.engine /* C12 */, binaryPath: '/opt/claude', pinnedVersion: '2.1.290', subagentModel: null } });
     await h.configure.applied(); // C12
     expect(h.dispatch.mock.calls).toEqual([
       [{ binaryPath: null, expectedVersion: '2.1.283' }],
@@ -96,7 +96,7 @@ describe('engine.configure is sent after the settings load and on every change o
 // C12 start: the memory budget's policy (C12 execution document, Interfaces "Settings, version 4"): pushed whenever the
 // host is ready and whenever the budget or the stateful list changes; the default is 25% of physical memory.
 describe('engine.policy.set follows settings.engine’s budget and stateful servers', () => {
-  const engine = (over: Partial<Settings['engine']>): Settings => ({ ...SETTINGS_DEFAULTS_V4, engine: { ...SETTINGS_DEFAULTS_V4.engine, ...over } });
+  const engine = (over: Partial<Settings['engine']>): Settings => ({ ...SETTINGS_DEFAULTS_V5, engine: { ...SETTINGS_DEFAULTS_V5.engine, ...over } });
 
   it('pushes the default (25% of physical memory, no stateful servers) once the host is ready, and again after a restart', () => {
     const h = harness('starting');
@@ -114,7 +114,7 @@ describe('engine.policy.set follows settings.engine’s budget and stateful serv
 
   it('pushes on a change of the budget or the stateful list, in KiB, and on nothing else', () => {
     const h = harness('ready');
-    h.change({ ...SETTINGS_DEFAULTS_V4, theme: 'dark' });
+    h.change({ ...SETTINGS_DEFAULTS_V5, theme: 'dark' });
     h.change(engine({ subagentModel: 'haiku' }));
     h.change(engine({ binaryPath: '/opt/claude' })); // the binary's own push, not the policy's
     expect(h.policy).toHaveBeenCalledOnce();
@@ -152,7 +152,7 @@ describe('custody: main configures the host with the copy MAWS keeps', () => {
   const PATH = (version: string) => `/u/engine/${version}/claude`;
   const ok = (version: string): Custody => ({ state: 'ok', path: PATH(version), manifest: { version, sha256: 'd8cb1e5c', size: 1, source: `/src/${version}`, copiedAt: 't' } });
   const missing = (version: string): Custody => ({ state: 'missing', path: PATH(version), message: `Claude Code ${version} is missing from MAWS's copy` });
-  const engine = (over: Partial<Settings['engine']>): Settings => ({ ...SETTINGS_DEFAULTS_V4, engine: { ...SETTINGS_DEFAULTS_V4.engine, ...over } });
+  const engine = (over: Partial<Settings['engine']>): Settings => ({ ...SETTINGS_DEFAULTS_V5, engine: { ...SETTINGS_DEFAULTS_V5.engine, ...over } });
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   // custody answers when the test says, per version

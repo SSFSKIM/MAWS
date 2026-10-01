@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_DEFAULTS_V4 } from '../../settings/defaults';
+import { SETTINGS_DEFAULTS_V5 } from '../../settings/defaults';
 import { commands, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands
 
-const base = SETTINGS_DEFAULTS_V4;
+const base = SETTINGS_DEFAULTS_V5;
 const issueCodes = (value: unknown) => {
   const parsed = SettingsSchema.safeParse(value);
   return parsed.success ? [] : parsed.error.issues.map((issue) => issue.code);

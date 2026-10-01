@@ -62,7 +62,7 @@ describe('command palette', () => {
     }
     const newSession = actions.find((o) => o.dataset.value === 'action:session.new')!;
     expect(newSession.getAttribute('aria-disabled')).toBe('true');
-    expect(newSession.textContent).toContain('Arrives with C10');
+    expect(newSession.textContent).toContain('Not available here');
     expect(actions.find((o) => o.dataset.value === 'action:composer.send')!.textContent).toContain('Keyboard only, in the composer');
     expect(actions.find((o) => o.dataset.value === 'action:tab.close')!.getAttribute('aria-disabled')).toBe('false');
   });
