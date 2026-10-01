@@ -54,4 +54,3 @@ export function skip(draft: QuestionDraft, question: Question, count: number): Q
   const cleared = { ...draft, selected: { ...draft.selected, [question.question]: [] }, other: withoutOther(draft.other, question.question) };
   return advance(cleared, count);
 }
-
