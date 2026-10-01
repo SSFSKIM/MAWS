@@ -31,7 +31,7 @@ test.afterEach(async () => {
 });
 
 async function openWorktrees(page: Page, projectId: string, name: string): Promise<Locator> {
-  await page.locator(`[data-menu="project:${projectId}"] > div`).first().click({ button: 'right' }); // the project line, not a session row inside it
+  await page.locator(`[data-menu="project:${projectId}"]`).first().click({ button: 'right' }); // W5: the project list's row is the menu target itself
   await page.getByRole('menuitem', { name: 'Worktrees…', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: `Worktrees · ${name}` });
   await expect(dialog.getByRole('list', { name: 'Worktrees' })).toBeVisible();
