@@ -167,6 +167,50 @@ const c12Commands = {
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C12 end
 
+// W6 route executor start: ClaudeUsage's loopback control API, which the usage popover's actions run through (charter
+// §19, W6 route executor; the C11 execution document's popover). Main is its only caller: on every use it reads the
+// token from `<ClaudeUsage data dir>/control-token` and the port from `gateway.json`; an absent token file means the
+// route does not exist yet. `settings.usageControls` answers whether the API answers (`GET /claudeusage/state`) and the
+// state it answered, read leniently; `settings.usageAction` runs one action and answers ClaudeUsage's result, a refusal
+// (409) with ClaudeUsage's own reason and message. While the API cannot be reached, `reason` says why, and the actions
+// stay as they were before it existed: disabled, with ClaudeUsage's own panel as the way.
+export const UsageControlReasonSchema = z.enum([
+  'no_route', // no token file, no port, a 404 or a refused connection: this ClaudeUsage has no control route
+  'bad_token', // a 401, or a token file that cannot be read
+  'timeout', // no answer within the client's limit
+  'failed', // any other status, or an answer that is not the state
+]);
+export type UsageControlReason = z.infer<typeof UsageControlReasonSchema>;
+export const UsageControlStateSchema = z.strictObject({
+  updatedAt: z.string().nullable(),
+  routing: z.strictObject({ enabled: z.boolean(), ready: z.boolean(), port: z.number().int().nullable(), drainTarget: z.string().nullable(), drainTargetIsManual: z.boolean() }),
+  accounts: z.array(z.strictObject({ uuid: z.string(), email: z.string(), status: z.string(), isRoutingHere: z.boolean() })),
+  codex: z.array(z.strictObject({ id: z.string(), label: z.string(), isDrainTarget: z.boolean() })),
+});
+export type UsageControlState = z.infer<typeof UsageControlStateSchema>;
+export const UsageControlsAnswerSchema = z.strictObject({ available: z.boolean(), reason: UsageControlReasonSchema.nullable(), state: UsageControlStateSchema.nullable() });
+export type UsageControlsAnswer = z.infer<typeof UsageControlsAnswerSchema>;
+export const UsageActionSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('route'), uuid: z.string().min(1) }), // POST /claudeusage/route
+  z.strictObject({ action: z.literal('add'), email: z.string().min(1).nullable().optional() }), // POST /claudeusage/accounts/add: ClaudeUsage's sign-in sheet
+  z.strictObject({ action: z.literal('reconnect'), uuid: z.string().min(1) }), // POST /claudeusage/accounts/reconnect: the same sheet
+  z.strictObject({ action: z.literal('remove'), uuid: z.string().min(1), confirm: z.boolean().optional() }), // POST /claudeusage/accounts/remove: refused without confirm
+  z.strictObject({ action: z.literal('panel') }), // POST /claudeusage/panel: toggles ClaudeUsage's own panel
+]);
+export type UsageAction = z.infer<typeof UsageActionSchema>;
+// ok: `drainTarget` is the route's resulting drain target (null for the other actions). Not ok: a 409's `reason` and
+// `message` as ClaudeUsage wrote them, or a UsageControlReason with main's own message when ClaudeUsage was not reached.
+export const UsageActionResultSchema = z.discriminatedUnion('ok', [
+  z.strictObject({ ok: z.literal(true), drainTarget: z.string().nullable() }),
+  z.strictObject({ ok: z.literal(false), reason: z.string(), message: z.string() }),
+]);
+export type UsageActionResult = z.infer<typeof UsageActionResultSchema>;
+const w6RouteCommands = {
+  'settings.usageControls': { input: z.void(), output: UsageControlsAnswerSchema, owner: 'main' },
+  'settings.usageAction': { input: UsageActionSchema, output: UsageActionResultSchema, owner: 'main' },
+} as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// W6 route executor end
+
 export const commands = {
   'settings.get': { input: z.void(), output: SettingsStateSchema, owner: 'main' },
   'settings.set': { input: SettingsPatchSchema, output: SettingsStateSchema, owner: 'main' },
@@ -174,6 +218,7 @@ export const commands = {
   ...c11Commands, // C11
   ...c12Commands, // C12
   ...w3Commands, // W3
+  ...w6RouteCommands, // W6 route executor
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

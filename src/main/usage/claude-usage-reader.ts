@@ -106,6 +106,12 @@ export class ClaudeUsageReader {
   }
   // C11 end
 
+  // W6 route executor: the relay's port from gateway.json as last read (ClaudeUsage's control API listens on it); like
+  // `available`, never a caller of settings.usage
+  async gatewayPort(): Promise<number | null> {
+    return (this.last ?? (await this.read())).gateway?.port ?? null;
+  }
+
   // Re-reads the files and emits when the snapshot differs from the last one published (the read time aside).
   async refresh(): Promise<void> {
     const snapshot = this.compose(await this.read());

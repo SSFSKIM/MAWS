@@ -67,6 +67,8 @@ export {
 export { EngineBinaryConfigSchema, type EngineBinaryConfig } from './schema/engine';
 // C11 end
 export { TRANSCRIPT_WIDTHS, TranscriptWidthSchema, type TranscriptWidth } from './schema/settings'; // W2: settings v5
+// W6 route executor: ClaudeUsage's control API as main answers it
+export type { UsageAction, UsageActionResult, UsageControlReason, UsageControlsAnswer, UsageControlState } from './schema/settings';
 
 export const commands = {
   ...session.commands,

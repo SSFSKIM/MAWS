@@ -6,6 +6,7 @@ export const commands = [
   'settings.reveal',
   'settings.engineCustody', 'settings.engineApplied', // C12
   'settings.userEngineDefaults', // W3
+  'settings.usageControls', 'settings.usageAction', // W6 route executor
 ] as const;
 
 export const events = [

@@ -40,6 +40,7 @@ import { claudeConfigDir, PromptHistory } from './history/prompt-history';
 import { readUserEngineDefaults } from './settings/user-engine-defaults'; // W3
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
 // C7 end
+import { ClaudeUsageControl } from './usage/claude-usage-control'; // W6 route executor
 // C8c start (emit comes with C3's imports)
 import { shell } from 'electron';
 import { registerFilesHandlers } from './files/register';
@@ -277,6 +278,17 @@ app.whenReady().then(() => {
   });
   registerMainHandler('settings.claudeUsage.status', () => claudeUsage.status());
   registerMainHandler('settings.claudeUsage.open', (intent) => claudeUsage.open(intent));
+  // W6 route executor: ClaudeUsage's control API for the usage popover's actions, asked when the popover opens and on
+  // each usage change while it is open. Under the end-to-end harness only a stub named by MAWS_CLAUDE_USAGE_CONTROL_URL
+  // is ever reached: without it there is no port, so the owner's relay is never called.
+  const controlUrl = process.env.MAWS_CLAUDE_USAGE_CONTROL_URL || null;
+  const usageControl = new ClaudeUsageControl({
+    dir: claudeUsageDir(process.env, home),
+    port: () => (e2e && controlUrl === null ? Promise.resolve(null) : usage.gatewayPort()),
+    baseUrl: controlUrl,
+  });
+  registerMainHandler('settings.usageControls', () => usageControl.controls());
+  registerMainHandler('settings.usageAction', (action) => usageControl.act(action));
   registerMainHandler('settings.userEngineDefaults', () => readUserEngineDefaults(claudeConfigDir(process.env, home))); // W3: read only
   const sessionDirectories = () => knownSessionDirectories(sessions.model, index);
   registerMainHandler('settings.reveal', ({ path }) =>
