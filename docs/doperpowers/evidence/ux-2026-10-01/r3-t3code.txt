@@ -1,0 +1,299 @@
+T3 CODE REFERENCE STUDY FOR MAWS (r3)
+Source: https://github.com/pingdotgg/t3code, shallow clone at /Users/new/t3code-src, HEAD 148e6dee (2026-10-01).
+Read-only study; nothing was run or installed. All paths below are relative to /Users/new/t3code-src.
+Abbreviations: CA = apps/server/src/provider/Layers/ClaudeAdapter.ts, SB = apps/web/src/components/Sidebar.tsx,
+CC = apps/web/src/components/chat/ChatComposer.tsx, MT = apps/web/src/components/chat/MessagesTimeline.tsx.
+
+== 1. ARCHITECTURE ==
+- Three processes. Electron main spawns a bundled Node server as a child process
+  (apps/desktop/src/backend/DesktopBackendManager.ts:476), and the window loads the web UI from that
+  server's URL (apps/desktop/src/window/DesktopWindow.ts:706). The same server also serves the hosted web
+  app and a React Native mobile app over an authenticated WebSocket RPC (AGENTS.md:3, AGENTS.md:29,
+  docs/internals/overview.md "Ownership boundaries").
+- Server core is event-sourced: WS request -> command -> pure decider -> persisted events -> projector read
+  model; side effects run in reactors; each turn ends with a checkpoint stored as a hidden git ref
+  (AGENTS.md:145; docs/internals/overview.md "Durable intent", "Turn completion and checkpoints").
+- How it drives Claude Code: through the Claude Agent SDK `query()`, not raw stream-json and not ACP
+  (CA:1-27, CA:4986-5040). The SDK is pinned to @anthropic-ai/claude-agent-sdk 0.3.276
+  (apps/server/package.json:26, pnpm-workspace.yaml:88). The SDK's bundled native binaries are removed so
+  the SDK always spawns the user's own installed `claude` through `pathToClaudeCodeExecutable`
+  (pnpm-workspace.yaml:108-116, apps/server/src/provider/Drivers/ClaudeExecutable.ts:45-60, CA:4989).
+  The engine is unpatched, so this setup is D-1 compatible.
+- Query options: settingSources user+project+local (CA:1558, :4996); `claude_code` preset system prompt
+  + appended T3 instructions (CA:4990-4995); includePartialMessages; canUseTool; onUserDialog with
+  supportedDialogKinds ["resume_return"] (CA:5019-5022); its own HTTP MCP server "t3-code" (CA:5027-5038).
+- Provider abstraction: a generic ProviderAdapter contract (startSession/sendTurn/interruptTurn/
+  respondToRequest/respondToUserInput/rollbackThread/capabilities;
+  apps/server/src/provider/Services/ProviderAdapter.ts:72-137). Adapters exist for Codex (app-server
+  JSON-RPC, apps/server/src/provider/Layers/CodexSessionRuntime.ts:35-37), Cursor (`agent acp`,
+  CursorAdapter.ts header), Grok (ACP, GrokAdapter.ts:38), OpenCode and Antigravity. Routing is per
+  instance, so several accounts per driver are supported (docs/internals/providers.md "A driver kind...").
+- Thread persistence: T3's own SQLite event store at <T3 home>/userdata/state.sqlite
+  (apps/server/src/config.ts:140). Messages and activities are projected from normalized runtime events.
+  The Claude JSONL is not the transcript source of truth. A per-thread provider binding stores the resume
+  cursor `{resume: <sessionId>, resumeSessionAt, turnCount, turnStartMessageIds}` (CA:982-1019,
+  CA:5140-5150). Idle provider processes are reaped after 30 min (sweep every 5 min) and resume lazily
+  from that cursor (apps/server/src/provider/Layers/ProviderSessionReaper.ts:5-6).
+MAWS could copy: keep the durable thread record separate from the live engine; persist a resume cursor
+per thread, reap idle engines and resume on the next send, so the UI never depends on a live process.
+
+== 2. EXISTING-SESSION HANDLING (foreign Claude Code sessions) ==
+- Discovery reads Claude's on-disk transcripts directly. There is no SDK listSessions call. The
+  AgentSessionScanner walks <CLAUDE_CONFIG_DIR or ~/.claude>/projects/*/*.jsonl and Codex
+  rollout-*.jsonl, and takes each transcript's `cwd` to propose projects
+  (apps/server/src/project/AgentSessionScanner.ts:1-15, :926-950, :1014). Config-dir precedence is
+  instance homePath > env CLAUDE_CONFIG_DIR > ~/.claude (:906-921). 5000 transcripts per source (:73).
+- It is reachable only from the first-run Welcome wizard. The RPCs are agentSessionsScan and
+  agentSessionsImport (apps/server/src/ws.ts:3446-3470). The only UI caller is
+  apps/web/src/components/onboarding/WelcomeWizard.tsx:1153 via routes/welcome.tsx, and the wizard is
+  gated by FirstRunGate.tsx:186. "Existing workspaces skip this flow" (docs/user/welcome-wizard.md:3-4).
+- Import is a one-shot snapshot. For each selected project it takes transcripts active in the last 30
+  days (Scanner :85) and copies only visible user and assistant text: the first prompt plus the newest
+  messages, 200 in total. Tool activity and attachments are dropped (docs/user/welcome-wizard.md:60-76;
+  Scanner :92, :376, :494). Each import creates a T3 thread with the deterministic id
+  `import:<instanceId>:<sessionId>` (apps/server/src/project/AgentSessionImporter.ts:168-170), dispatches
+  `thread.history.import` (:261-272; contract packages/contracts/src/orchestration.ts:1540-1552), and
+  installs a stopped binding whose resumeCursor is `{threadId, resume: <claude session uuid>}`
+  (Importer :223-242). Non-UUID Claude session ids are rejected as unresumable (Importer :32-45, :177-185).
+- Resume: the first send on an imported thread starts the SDK with `resume: <sessionId>` (CA:4490-4494,
+  CA:5017). A new thread gets a fresh `sessionId: <uuid>` that T3 generates (CA:4492, CA:5018).
+  The resume_return dialog (Claude asks whether to compact an old session) is surfaced to the user as an
+  AskUserQuestion with the options "Compact and continue / Keep full history / never ask"
+  (CA:4666-4734).
+- No live sync and no attach. Re-import never appends new terminal turns. The file identity
+  (size/mtime/inode) is recorded, and an already-imported thread is just re-marked
+  (Importer :195-205; Scanner :1395-1412). Once the thread has any T3 activity, import refuses with
+  ThreadModifiedError (Importer :73-99, :207-221).
+- No concept of a session currently running in a terminal: no lock files, pid/holder checks or "in use"
+  state (nothing in CA). Resuming an imported thread while the same session is live in a terminal would
+  start a second CLI on the same JSONL, unguarded.
+- "Same session opened twice" in T3 means one server-owned engine per thread. The adapter keys sessions
+  by threadId, and a second startSession for the same thread stops and replaces the existing one with a
+  warning "claude.session.replacing" (CA:4477-4487). Every client (desktop, web, phone) is a view
+  subscribed to the same server thread, so no client-side holder logic exists. Import dedupes by
+  sessionId ("Duplicate", Scanner :1472) and rejects importing the same session into a different
+  project (Importer :47-58, :187-193).
+MAWS could copy: scan ~/.claude/projects/*.jsonl by cwd for discovery, and use a deterministic thread id
+derived from the Claude sessionId so re-import is idempotent. MAWS must build the live-holder and attach
+logic itself, because T3 has none and is no reference for it.
+
+== 3. SIDEBAR ==
+- The default sidebar is a flat cross-project list, not a project tree. The per-project tree survives
+  only as "Legacy sidebar", which is off by default (packages/contracts/src/settings.ts:458-462;
+  apps/web/src/components/AppSidebarLayout.tsx:219). Project scoping is a dropdown filter at the top
+  ("All projects" by default, with project search; SB:2405, SB:4509).
+- Sections, in order: Pinned, Active, Snoozed shelf, Settled shelf (SB:2580-2625). Precedence is
+  snoozed > settled > pinned > active (SB:2619). Snoozed is sorted soonest-wake first. Both shelves
+  collapse, and their expanded state persists (SB:259-260). Settled pages show 10 rows, then
+  "Show N more" adds 25. The open thread is always kept visible even if it falls past the page
+  (SB:254-257, SB:2734-2760, SB:4962).
+- Order is manual. Activity never reorders rows: new threads land on top of Active, and dragging moves
+  rows between sections, which pins, settles, unpins or wakes them (docs/user/thread-sidebar.md "Pin and
+  reorder"). Auto-settle runs after 3 days idle or when the PR merges (same doc, "Settle finished work").
+- Row anatomy. Pinned and Active use a "card" row, 78px tall (4.875rem) with three lines (SB:4720,
+  SB:1787):
+  L1: project favicon + project name (xs, secondary) ... pin marker ... status-or-time slot.
+  L2: title (text-sm, medium; truncated).
+  L3: worktree glyph + branch (middle-truncated, faint) + terminal-running icon + PR badge
+  (+ a diff-stat seam that currently returns null, SB:2013-2019).
+  There is no message-preview line. Snoozed and Settled use a 36px "slim" row (h-9) with favicon,
+  title, pin, PR and time (SB:1622).
+- Status slot (SB:1140-1190; resolver apps/web/src/components/Sidebar.logic.ts:819-843), with priority
+  approval > input > running/starting > error > background liveness:
+  Approval (amber, ShieldQuestion), Input (indigo, MessageCircleQuestion), Working (sky, plus a
+  self-ticking duration and no shimmer), Monitoring, Failed (red), Woke, Done (emerald, unread).
+  Otherwise the slot shows a compact relative time based on the latest user message ("5m", "now";
+  SB:262-270). Background-working rows "recede" to 70% opacity so rows that need a human stand out
+  (SB:1130, SB:1422).
+- Hover: the status/time slot is swapped for actions: Discard draft, Snooze (preset popover),
+  "Settle" (SB:1895-1945). A slim row shows Un-settle or Wake. A rich glass tooltip on the right lists
+  title, project, environment, branch, a branch-mismatch warning, model + provider, terminal processes,
+  error and PR list (SB:319-440). Also: double-click renames, drag files onto a row to open it with the
+  files attached, and holding the modifier shows jump-key badges (SB:280-296).
+- Worktrees are per thread, chosen at draft time ("Local" vs "New worktree", or reuse a previous
+  worktree; apps/web/src/components/BranchToolbarEnvModeSelector.tsx:50-53). They are stored under
+  <T3 home>/worktrees (apps/server/src/config.ts:152). The sidebar shows a worktree glyph whose tooltip
+  reads "Worktree: <path> (<branch>)"; it does not group by worktree
+  (apps/web/src/components/ThreadStatusIndicators.tsx:411-436).
+- Legacy tree: 6 threads per project (configurable 1-15), then Show more/less (packages/contracts/src/
+  settings.ts:72-81; LegacySidebar.tsx:1098-1126). Width 256px default, 208px min, main content >= 640px
+  (threadSidebarWidth.ts:1-4). Live git/PR queries are leased only for visible rows (SB:1059).
+MAWS could copy: a status-first flat list with a project filter; a lifecycle model of
+Pinned/Active/Snoozed/Settled where activity never reorders rows; 3-line cards that recede background
+work; hover that swaps time for actions. Skip the message preview, which T3 deliberately omits.
+
+== 4. COMPOSER ==
+- Column: the composer and timeline share --chat-max-width. It is 48rem by default ("comfortable"),
+  72rem for "wide" and 100% for "full" (apps/web/src/index.css:1997-2008;
+  packages/contracts/src/settings.ts:306). The form is centered with mx-auto (CC:6178).
+- Above the editor: a banner dock (CC:6198-6365) stacks one blocking "top drawer" at a time. In order:
+  the approval banner (warning variant), the AskUserQuestion card, the plan follow-up banner, a tasks
+  badge/drawer, and an activity strip (sync/worktree phase). The prompt-stash badge sits beside them.
+- Editor: Tiptap with inline chips (files, terminal excerpts, review comments, PRs, citations, images);
+  min-h-19.5, max-h-52 then scrolls (apps/web/src/components/ComposerPromptEditorTiptap.tsx:758). Fonts:
+  prompt 14px, interface 16px root, code 13px (packages/contracts/src/settings.ts:125-148). Image shelf
+  above the text; pastes of 32 KiB or more become file attachments (docs/user/composer.md:6-14).
+- Footer, left to right (CC:4973-5100, CC:6976-7060): [Model picker] | [Traits: effort / fast / context
+  window] | [Build/Plan toggle] | [Permission-mode select] ... [paperclip Attach] [context-window ring]
+  [Send/Stop]. When space runs out, trailing blocks collapse into an overflow menu
+  (CompactComposerControlsMenu, CC:5100).
+- "Resting": scrolling the timeline of an existing thread collapses the composer to one line and moves
+  its controls into the strip beside the BranchToolbar; blur never does (CC:4742-4759;
+  apps/web/src/components/composerFooterLayout.ts:26-48).
+- Triggers (apps/web/src/composer-logic.ts:218-264): "/" (slash command, only at line start), "@" (path
+  mention), "$" (skill; any currency symbol), "#" (pull request). The slash menu includes T3 commands
+  (/model, /plan, /compact, /usage-limits), provider commands and skills (docs/user/composer.md
+  "Commands and skills").
+- The slash/mention menu renders as a portal drawer docked to the composer surface's top edge: the
+  composer's width minus the drawer inset, overlapping by 1rem+1px, growing upward to the viewport top
+  (min 96px) (CC:857-896). It is not a cursor-anchored popover.
+- Extras: ArrowUp prompt recall, Cmd+S stash, "Edit from here" rewind (docs/user/composer.md).
+MAWS could copy: a single banner dock above the editor that shows one blocking item at a time
+(approval, then question, then plan); a footer order of model | effort | mode | permission ... attach,
+context ring, send; and slash/mention menus as a full-width drawer rising from the composer's top edge.
+
+== 5. MODEL / EFFORT SELECTOR ==
+- The model picker never shows a "Default" pseudo-model. It always shows a concrete model's short name
+  (apps/web/src/components/chat/providerIconUtils.ts:47-58). The popover has a provider rail with
+  Favorites first, search, and model rows (ModelPickerContent.tsx:118-124, :193-260). On a new draft,
+  Shift-click multi-selects models, sending the same prompt as N threads in N worktrees
+  (CC:5030-5060; docs/user/thread-sidebar.md "Start in the background").
+- Default model claude-fable-5-1 (packages/contracts/src/model.ts:171; model-manifest.json defaults.chat).
+  New threads remember the last provider/model/options; a project default overrides (docs/user/composer.md).
+- Traits come from the manifest (model-manifest.json, profile optionDescriptors). The effort descriptor is
+  labelled "Reasoning" with options Low / Medium / High / Extra High / Max / Ultracode ("xhigh effort
+  plus multi-agent workflow orchestration") / Ultrathink. Ultrathink is prompt-injected and maps to a
+  null API effort; Ultracode maps to xhigh plus settings.ultracode (CA:4966-4972). Other descriptors:
+  Fast Mode (boolean) and Context Window (200k / 1M; 1M appends "[1m]").
+- How the default is pre-selected: manifest options carry isDefault. Medium is the default for
+  fable-5 and opus-5-5; High for opus-5 and opus-4-8. When nothing is chosen, the current value falls
+  back to the isDefault option (packages/shared/src/model.ts:156-169). The trigger then shows that
+  option's label (e.g. "Medium"), not "Default", and the menu marks it with a small outline "Default"
+  badge (apps/web/src/components/chat/TraitsPicker.tsx:95-101, :420-427). The trigger joins trait
+  labels with " · " (TraitsPicker.tsx:486-537).
+- The server also resolves an unset effort to the manifest default and sends it as `effort`
+  (apps/server/src/provider/ClaudeModelCatalog.ts:187-200; CA:4930-4931, CA:4997-5001). This
+  contradicts the user doc, which says unset "uses the provider's own configuration"
+  (docs/user/composer.md "Model defaults").
+- Typing "ultrathink" in the prompt locks the selector to "Ultrathink" (TraitsPicker.tsx:170-182).
+MAWS could copy: show the effective value with a "Default" badge in the list, never a bare "default"
+label, and keep effort levels catalog-driven per model profile. Do not copy the silent forcing of a
+default effort if MAWS wants "unset" to mean the engine's own setting.
+
+== 6. ASKUSERQUESTION RENDERING ==
+- Server: canUseTool intercepts AskUserQuestion in every permission mode (CA:4749-4754). It emits
+  `user-input.requested` with the questions (CA:4526-4580) and waits on a Deferred. Answers return as
+  `{behavior:"allow", updatedInput:{questions, answers:{questionText: label}}}` (CA:4626-4664).
+- UI: shown in the composer's banner dock, not in the transcript. Only the first pending request is
+  shown (ComposerPendingUserInputPanel.tsx:33). Questions within it are paged one at a time: the
+  header shows "header" plus an "i/N" counter, and the card collapses to a one-line summary (:181-228).
+  Options are full-width rows with a label, an optional description and a 1-9 key hint (:238-290).
+  Picking a single-select option checkmarks it and auto-advances after 200ms; multi-select toggles
+  (:120-133). Number keys 1-9 select options when focus is outside editable fields (:146-170).
+- Custom answers are typed in the main composer editor, which acts as the answer field. There is no
+  inline textbox (CC:3348-3365). After the last question, every answer is sent in one response
+  (apps/web/src/components/ChatView.tsx:8843-8858). Dismiss is offered when the prompt is dismissible
+  (:205-226). Custom answers can carry file attachments (docs/user/question-attachments.md).
+- Answered state in the transcript: the requested, resolved and answer-submitted activities fold into
+  one work-log row at the tool call's original position, and the duplicate AskUserQuestion tool row is
+  removed (packages/client-runtime/src/work-log/userInput.ts:75-160). The row has a message-circle icon
+  and a summary of "User input submitted", "User input dismissed" or "User input requested", plus a
+  preview of answers joined with " · " (userInput.ts:160-175; MT:4460-4467). These rows stay visible
+  after the turn folds (apps/web/src/components/chat/MessagesTimeline.logic.ts:760-766).
+MAWS could copy: one question at a time in a dock above the composer, with numeric hotkeys,
+auto-advance on single-select, the composer as the custom-answer field, and a single folded
+"question → answer" receipt row left at the tool's place in the transcript.
+
+== 7. TRANSCRIPT ==
+- The user message is a right-aligned bubble with max-w 80%, rounded-2xl, bg-message and p-3
+  (MT:2113). The assistant message has no bubble: full-width markdown at text-sm (14px at the
+  default root) with leading-relaxed (apps/web/src/components/ChatMarkdown.tsx:3354). Headings run
+  1.25 / 1.125 / 1 / 0.875rem (apps/web/src/index.css:1741-1756). The author heading is sr-only (MT:1951).
+  The measure equals the composer column: 48rem by default.
+- Final message vs tool activity: while a turn is live, everything is shown. Once it settles, all work
+  before the terminal assistant message (tools and thinking) folds behind one "Worked for <duration>"
+  row (MessagesTimeline.logic.ts:643-830, label :813). The final answer stays visible. A single
+  trailing activity joins the fold; larger trailing groups and failures stay visible. Question receipts
+  and subagent batches never fold (:760-766). Adjacent tools inside the fold collapse into sentence
+  summaries such as "Read 3 files and ran 2 commands" (packages/client-runtime/src/work-log/
+  presentation.ts:598-635). Expanded tool bodies are mono at code size with max-h-64 (MT:4459).
+- Thinking: a reasoning row with a brain icon labelled "Thinking" while streaming and "Thought" or
+  "Thought (×N)" after. Collapsed, it shows a markdown preview of the first line; expanded, the body is
+  capped at max-h-96 and scrolls (MT:2620-2645, MT:2741-2830). Summarized thinking is requested via
+  `thinking:{type:"adaptive",display:"summarized"}` (CA:4942-4946, CA:5004-5011).
+- Hooks: the adapter maps hook_started/progress/response to hook.* runtime events (CA:3734-3765), but
+  orchestration never ingests them, so hooks are not displayed. Only a CLI "informational" message at
+  warning level (e.g. a Stop hook that refused) becomes a warning row (CA:4031-4039).
+- Queued/steered messages: by default (followUpBehavior=queue,
+  packages/contracts/src/settings.ts:453-455) a message sent mid-turn becomes a dashed bubble at the end
+  of the conversation. Its status reads "Sends after the next tool call or when the turn ends". Arrow
+  sends it now, X returns it to the composer, Stop returns all queued messages (MT:1785-1830;
+  docs/user/composer.md "Send while the agent is working"). On delivery the server treats a sendTurn
+  during a live turn as a steer into the same SDK loop, with no new turn boundary (CA:5228-5237).
+- ExitPlanMode becomes a proposed-plan card. The tool is denied with "The client captured your proposed
+  plan..." and the composer shows a plan follow-up banner (CA:4756-4774).
+MAWS could copy: "Worked for X" folding of settled turns, which keeps the final answer and the question
+receipts visible; sentence-style tool-group summaries; a collapsible Thought row; and the dashed queued
+bubble at the transcript tail with an explicit "sends after next tool call" status.
+
+== 8. FILE-CHANGE RECEIPTS AND THE DIFF PANEL ==
+- Receipt: under each terminal assistant message sits a ChangedFilesCard: "N changed files +a -d",
+  expand/collapse-all folders, an "Open diff" button, and a file tree with per-file stats
+  (MT:2407-2412; apps/web/src/components/chat/ChangedFilesTree.tsx:29-131). The data comes from per-turn
+  checkpoints (hidden git refs). It is not parsed from Edit tool payloads.
+- Clicking a file selects that turn and file in the diff store and opens the right-panel "diff" tab.
+  It is not a modal (ChangedFilesTree.tsx:231; apps/web/src/components/ChatView.tsx:9416-9425). Right
+  click opens a file context menu. There is no hover preview on file rows: only folder chevrons and
+  hover tint (ChangedFilesTree.tsx:195-255).
+- The right panel is a tabbed dock (diff, files, preview/browser, terminal, pull-requests, agents,
+  device; apps/web/src/rightPanelStore.ts:23-88). At 980px or narrower it becomes an inline sheet
+  (apps/web/src/rightPanelLayout.ts:1).
+- Diff panel (apps/web/src/components/DiffPanel.tsx): a scope dropdown with Working tree, Branch changes,
+  Latest turn, and a Turn N submenu (:232-238, :680-719). Branch scope adds a head → base ref combobox
+  (:723-790). Further controls: stacked/split toggle (:899-907), hide-whitespace toggle (:936-950), a file
+  tree, and @pierre/diffs rendering (:1158). Lines are annotatable, so review comments become composer
+  chips (apps/web/src/components/diffs/AnnotatableCodeView.tsx).
+MAWS could copy: a per-turn changed-files card under the final answer, where clicking a file opens a
+docked diff tab pre-scoped to that turn and file, plus a scope switch (turn / working tree / branch).
+
+== 9. STATUS AND USAGE ==
+- Per-thread context: a 20px ring in the composer footer next to Send. It turns red above 90%. Hovering
+  opens a popover with "Context Window  X% · used/max", a bar, "Total processed", an auto-compaction
+  note and a Compact action (apps/web/src/components/chat/ContextWindowMeter.tsx:18-160; placed at
+  CC:1224). /compact also works as a command.
+- Per-thread cost is not displayed. The adapter captures total_cost_usd (CA:2862-2863), but no web or
+  client-runtime code reads totalCostUsd. Cost exists only on the global Usage page as estimated
+  API-equivalent cost from scanned history (docs/user/usage.md "Understand your usage").
+- Rate limits: SDK rate_limit_event becomes account.rate-limits.updated (CA:4153-4166). A rejected window
+  with no overage writes a transcript row "Claude usage limit reached. This turn is paused until the
+  5-hour limit resets in 2h 10m", because otherwise the thread would spin silently (CA:633-680,
+  CA:4167-4200). Usage → Limits pools accounts per provider with per-window bars; /usage-limits opens a
+  snapshot above the composer (docs/user/usage.md "Track subscription limits").
+MAWS could copy: a context ring with a hover popover and a Compact action in the composer footer, and
+an explicit transcript row when a rate-limit rejection parks a turn.
+
+== 10. PERMISSION HANDLING ==
+- Four modes, labelled in apps/web/src/components/chat/runtimeModeConfig.ts:5-27: Supervised
+  (approval-required), Auto-accept edits, Auto, Full access. The default for new threads is Full access
+  (packages/contracts/src/orchestration.ts:135; docs/user/permission-modes.md). Settings and project
+  overrides can change it.
+- Claude mapping: auto-accept-edits → acceptEdits, auto → auto, full-access → bypassPermissions with
+  allowDangerouslySkipPermissions. Supervised passes no permissionMode, so the CLI default applies. A
+  --permission-mode launch arg wins (CA:4952-4965, CA:4997-5000). In full-access, canUseTool
+  short-circuits to allow (CA:4778-4783).
+- Approval UI: a warning banner in the composer dock (CC:6215-6248). It shows a kind label ("Command
+  approval", "File change approval", etc.), the app name, an "1/N" counter, and the detail in mono with
+  max-h-20 and scroll (apps/web/src/components/chat/ComposerPendingApprovalPanel.tsx:10-60). Buttons are
+  Decline (outline) and Approve (primary). An ellipsis menu holds "Always allow this session" and Cancel
+  (ComposerPendingApprovalActions.tsx:16-21, :28-90). acceptForSession reuses Claude's permission
+  suggestions, rescoped to the session (CA:303-330, CA:4875-4885).
+MAWS could copy: approvals as a compact warning banner above the composer showing one request at a
+time with an i/N counter, two primary buttons and secondary options in a menu, with "always allow" scoped
+to the session rather than persisted.
+
+== 11. OTHER PATTERNS WORTH NOTING FOR MAWS ==
+- Rollback = SDK forkSession(upToMessageId) + resume of the fork, with turn-boundary UUIDs kept in the
+  cursor; refused when boundaries are unknown, e.g. after compaction (CA:5400-5590).
+- Interrupt calls query.interrupt() before killing, so a first turn is persisted and resumable (CA:5374-5391).
+- Every one-way action has a reverse (Settle/Un-settle, Snooze/Wake, 5s Undo toasts) (AGENTS.md "Hit every
+  surface"; docs/user/thread-sidebar.md).

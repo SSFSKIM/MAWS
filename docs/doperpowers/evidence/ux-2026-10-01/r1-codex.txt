@@ -1,0 +1,284 @@
+R1 — CODEX DESKTOP (ChatGPT/Codex build 26.924) READABLE-SOURCE STUDY FOR MAWS
+Static source reading only; app not run. Electron values are given wherever window-type branches differ
+(browser/extension branches are ChatGPT-web or VS Code and are NOT what screenshot 07 shows).
+
+CITATION KEYS (all under /Users/new/codex-app-src/readable/chatgpt-26.924/renderer/)
+ P=app/app-primary-cca0c1a58f0f.js  I=app/app-initial-d817715f10a0.js  S=app/app-shared-36eae88777f2.js
+ C=app/conversation-blocks-1768e325fd75.js  LT=app/local-conversation-turn-1168b77e6f00.js
+ SL=app/thread-scroll-layout-b0a473da34bb.js  U=app/user-message-b53f167a4396.js
+ UC=app/collapsible-user-message-content-d5ef21e6496c.js  CT=app/collapsed-turn-disclosure-74330d6188b4.js
+ DPT=app/diff-preview-tooltip-51b7104b4b7f.js  DPC=app/diff-preview-content-1d626788f5c2.js
+ Q=app/queued-message-list-10ddd40e50db.js  PM=app/permissions-mode-dropdown-d9457bb8a063.js
+ CS=css/app-shared-fa3f1d5d5942.css  CI=css/app-initial-5ba553174940.css  CP=css/app-primary-75218b12d1d9.css
+ CU=css/user-message-101e92976aee.css  CB=css/conversation-blocks-262e49adb568.css
+Screenshot scale: 07 is 2790x1498 px = 2x of a 1395x749 CSS-px window (row pitch, line pitch and
+column widths below all reconcile with the CSS at exactly 2x).
+
+================================================================================================
+1. THREAD MEASURE AND PANE USE
+Facts
+- Thread column is CENTRED, capped, not fill-the-pane. Class n9 = "[--thread-content-max-width:var(
+  --thread-content-responsive-max-width,inherit)] [--thread-body-max-width:calc(var(--thread-content-
+  max-width)+var(--thread-body-inline-padding,0px)*2)] mx-auto w-full max-w-(--thread-body-max-width)
+  px-toolbar" (P:188319-188325). Used for the transcript (SL:1290-1293, plus "pb-8") AND the composer
+  footer (SL:1185 Pt=[ve,...], SL:1223) -> composer frame width == thread column width.
+- Electron: --thread-content-max-width: 48rem = 768px (CS:47699; theme default "none" CS:3449);
+  --thread-body-inline-padding is set only for browser (CS:47722) so it is 0 in Electron;
+  --padding-toolbar = spacing*4 = 16px (CS:47941). Net text/composer width = 768 - 2x16 = 736px.
+- Wide markdown blocks (tables etc.) may break out to --markdown-wide-block-max-width: 56rem = 896px
+  (CS:47705; table container width calc CP:487-500).
+- Scroll container: "electron:[scrollbar-gutter:stable_both-edges]", flex-col-reverse, overflow-anchor:none
+  (SL:1274); footer wrapper "pb-4" bottom-0 (SL:1207-1209).
+- Screenshot 07 reconciles: column x=325..1063 CSS = 738px (~736); main area between sidebar edge (291px)
+  and summary card (~1092px) = ~801px, so the 768px column "nearly fills" it only because the pane is
+  narrow; it is centred in the space LEFT of the docked summary (centre 694 vs pane mid 691).
+- Sidebar: default 340px, clamp max(240, min(w, 520, available-240)); persisted key "sidebar-width"
+  (I:44376-44402). Screenshot sidebar = ~291px (user-resized).
+- Right tool panel: min 320px; default for nominal 600 = max(320, min(shellHeight*1.6, mainW-500),
+  min(640, mainW-352)); persisted ratio "app-shell:right-panel-width:v3" (I:42966-42972, I:43000-43036).
+- Summary card (Outputs/Sources in 07): default width 300 (I:300410); "docked" variant reserves space
+  ("w-max max-w-[50cqw]" I:300582, width animates 0<->auto); "floating" variant overlays at top-right
+  with "pe-1.5" (6px) (I:300503-300590). No gutter token between panes; separation is surface colour.
+- Item rhythm: --conversation-item-gap 16px, grouped 4px (CS:47971-47972).
+MAWS should copy: a 48rem centred column with 16px inline padding shared by transcript and composer,
+  56rem breakout for wide blocks, 340px sidebar (240-520), docked 300px summary that re-centres the column.
+
+================================================================================================
+2. TYPOGRAPHY (Electron defaults)
+Facts
+- UI sans: --font-sans-default: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif (CS:3348-3349);
+  prose uses --font-content = var(--codex-content-font-family, var(--font-sans)) (CS:3350; CP:188-193).
+  Electron UI weight 430 (CS:47683). Mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas,
+  "Liberation Mono", monospace (CS:47709-47711).
+- Scale: settings sansFontSize default 14, codeFontSize default 12 (S:134689-134702); runtime sets
+  --text-base=14, --text-sm=13, --text-xs=12, --text-lg 16, heading-lg 24/md 20/sm 18 (I:399672-399686,
+  applied I:399434-399451). Electron static fallback also --text-sm 13px/--text-xs 12px (CS:47680-47681).
+- Assistant prose: ._MarkdownRoot_qhsrt_2 font-size = --codex-chat-font-size (= --font-ui-size = 14px),
+  line-height = 14 x 1.625 = 22.75px (CP:386-415; CS:47963-47966). Screenshot line pitch 23px = match.
+  Paragraph+paragraph gap = 4 x (14/4) = 14px (CP:250-253); list indent = 1 line-height (CP:232-236).
+- Headings (CP:203-230): h1 1.5x=21px/28px lh, h2 1.25x=17.5px/24.5px, h3 1.125x=15.75px/24.5px,
+  h4 14px/21px, all semibold; top margin 14px.
+- User message text: "text-size-chat leading-relaxed" = 14px/22.75px (UC:255), same as assistant.
+- Code: blocks "block text-size-code" = --codex-chat-code-font-size = 12px default, padding "p-4 md:px-5"
+  (S:362086-362096); block margin-block 17.5px (CP:667-669). Inline code ".inline-markdown": mono,
+  0.92em, padding 1px 6px, radius 6px, bg ghost-hover mix (CS:9872-9894). Diffs 12px, line-height x1.8
+  (CS:47974-47975). Tables use --markdown-small-font-size = max(12, 14x0.875) (CP:394-397, 469-472).
+- Muted/meta: text-size-chat-sm = 13px (CS:22408); activity summaries chat size at text-text/60, detail
+  text/40 (C:25452-25461); timestamp separators text-sm(13px) leading-5 text-tertiary (research map
+  SEP:160-172); model-menu sub-text 12px tertiary (CP:1540-1544).
+- Sidebar rows: "text-sm" = 13px (I:313863-313866) inside .sidebar-navigation (CS:26303-26313).
+MAWS should copy: 14px/1.625 content, 13px chrome/sidebar, 12px code, one size for user+assistant text.
+
+================================================================================================
+3. USER MESSAGE BUBBLE
+Facts
+- Right-aligned: wrapper "group/user-message flex w-full flex-col items-end justify-end gap-1" (U:2031).
+- Bubble classes: "bg-user-message text-user-message min-w-0 max-w-(--user-chat-width) overflow-hidden
+  break-words px-(--thread-content-margin)" + "py-2.5" (compact "py-2") + "rounded-2xl" (U:1462-1468).
+- ._bubble_12emf_1 sets --user-chat-width: 70%, --radius-2xl: 22px, --thread-content-margin: 16px (CU:2-6).
+  => padding 10px x 16px, radius 22px, max 70% of column (515px at 736; screenshot measures 515).
+- Background: --color-background-user-message = color-mix(in oklab, var(--color-text) 5%, transparent)
+  (CS:6063-6067); text = --color-text.
+- Long messages: collapsed to max-height (20-1)=19 lines + "..." line; "Show more"/"Show less" ghost
+  button "mt-1.5 self-start text-size-chat text-codex-description" with rotating chevron (UC:200-207,
+  UC:271-293, constant w=20 at UC:363).
+- Hover/focus reveals copy + edit + timestamp row (U:1795-1796 opacity-0 -> group-hover:opacity-100).
+- Attachments render OUTSIDE and ABOVE the bubble, right-aligned: images in a horizontally scrolling
+  row "hide-scrollbar flex max-w-full flex-row-reverse self-end overflow-x-auto" gap-2 (C:22577-22590);
+  uploaded files as stacked cards; context chips (files, "Previous context", PR refs) in a second
+  scrolling row (C:22600-22660); order images -> files -> chips -> bubble (C:22818-22830).
+MAWS should copy: 70% / 22px / 10x16 bubble at 5% text tint, 20-line collapse, attachments above bubble.
+
+================================================================================================
+4. COMPOSER
+Facts
+- Width: identical to the thread column (section 1); centred, 736px usable in Electron.
+- Frame: --composer-radius = spacing*5.5 = 22px, --composer-corner-shape: round (CS:5606-5607);
+  background --color-surface-elevated-secondary, border 0, shadow --elevation-composer
+  "0 0 0 1px #0000000a, 0 2px 8px #0000000a, 0 4px 40px 8px #00000006" (CI:2907-2912, CS:47920-47922).
+- Editor (ProseMirror): line-height 20px, min-height 44px, inline padding 0 12px, placeholder opacity 0.5
+  (CS:47946-47954); grows with content up to max-h min(25dvh, --composer-editor-max-height) then scrolls
+  internally (I:480486-480493). At-rest total frame height in 07 = ~96px (editor 44 + footer row).
+- Placeholder "Do anything" (P:94518).
+- Toolbar (07 left->right): "+" context menu | permissions chip "Custom" (= "Custom (config.toml)";
+  others "Ask for approval", "Approve for me", "Full access", "Managed"; PM:1540-1632) ......
+  [optional context-usage donut] | model+effort chip | mic (dictation, P:154273-154300) | round primary
+  button. Footer assembly P:154400-154410, P:154562-154632; expanding controls _Component434 (P:155383)
+  hide label/controls by available width.
+- Round primary button: with nothing to send it is "Start voice chat" (realtime voice, waveform icon)
+  (P:99676-99720; visibility bt requires no draft P:153945); morphs to Send; during a run it is Stop,
+  "Queue"/"Steer" for follow-ups, "Resume" after interruption (P:153870-153934). Buttons 28px
+  (--spacing-token-button-composer spacing*7, CS:3418).
+- Above the box: nothing at rest (07). Transient occupants: scroll-to-bottom (SL:245-283), queue list,
+  "Step X / Y" pill (C:18882), /status panel, approvals/question forms that replace the composer.
+- Attachments: inside the frame, strip ABOVE the editor in the Body slot (P:93807, P:93921-93923;
+  ._ComposerLayoutAttachments_1086j_2 max-height = composer-expanded-height/2, CI:3143-3145).
+- Long paste: editor emits "pasted-text" when max(plain, markdown) length >= 5000 chars (I:478447-478453;
+  HTML >100,000 chars skips rich parse I:478421). Codex handler turns it into a "Pasted text.txt"
+  attachment (file written on host), chip shows preview + "Adding pasted text..." + "Show in text field"
+  to inline it back; markdown pastes whose plain text <5000 are NOT converted (P:182836-182900,
+  P:145390-145413). (The ChatGPT-only bigPaste path P:116045 is gated f==="chatgpt".)
+MAWS should copy: same-width 22px frame, 44px editor growing to 25dvh, 5000-char paste->attachment
+  with "Show in text field", toolbar order + / mode chip ... model chip / mic / primary.
+
+================================================================================================
+5. MODEL PICKER (05) AND EFFORT POPOVER (06)
+Facts
+- Portal dropdown anchored to the chip, not in the editor: Radix DropdownMenu wrapper (S:323177), props
+  align="end", alignOffset computed to centre the 254px menu over the chip, sideOffset 8px
+  (P:109820-109835, P:109906-109907 aOt=254 oOt=8); CSS width spacing*63.5 = 254px (CP:2048-2050);
+  opens above the chip in the composer (05/06), enter anim 0.32s cubic-bezier(.23,1,.32,1) 30ms
+  scale .98->1 (CP:2054-2068).
+- ONE menu, TWO views on a sliding track (o1.ViewTrack/ViewPanel P:106647-106675; height transition
+  0.32s cubic-bezier(.19,1,.22,1), opacity .2s, CP:1413-1421):
+  a) "simple" view = effort slider (06): top row ViewControls min-h 36px (CP:1565-1572); centre button
+     ViewToggle (14px, weight 500, radius 8px, CP:1661-1672) shows effort label in accent
+     --color-chart-blue (data-accent) or purple for max/ultra (CP:1715-1720) and, for an explicit model,
+     the model name below at 12px secondary with a chevron (grid, CP:1581-1611). Clicking it switches to
+     the model list. Left: FastModeToggle (lightning, 32x32, blue when on); right: ResetToDefault
+     (32x32, inset-inline:auto 0) (CP:1748-1760, 1830-1831). Slider steps = available power
+     selections; a11y "Power", "{value}, {position} of {total}.", arrow keys (P:106676-106850).
+     Effort labels: None, Minimal, Light, Medium, High, Extra High, Max, Ultra, Persistent (P:70118-70165);
+     06's six dots = Light..Ultra with thumb on Extra High.
+  b) model list (05): heading "Select model" (P:108547), then "Default" menuitemradio with sub-text
+     "Recommended set of models" (12px tertiary) (P:108583-108612), then models with RightIcon check on
+     the selected one (P:108620-108645); list max-h min(316px, available) scrolls (CP:1530-1539).
+     Choosing a row returns to the slider view (h("simple")).
+- Chip label: ALWAYS model + effort, never "Default": trigger renders PW model name (GPT prefix
+  stripped) + HDt effort label (P:109335-109363); effort in tertiary (CP:1943-1945). In "Default" mode
+  the slider walks (model, effort) pairs from a recommended set (e.g. 5.6 Sol low..ultra, 5.6 Terra ...,
+  I:155995-156060) and the chip shows the resolved pair. While the popover is open on an explicit model
+  the chip text is replaced by "Select effort" (P:152590-152597; placeholder span P:109331).
+  Tooltip "Select model" (P:152133). Mid-conversation model change warns "will degrade performance"
+  (P:152253).
+MAWS should copy: one anchored 254px menu with slider view + model-list view, chip always naming
+  model + effort, "Default" as a list entry not a chip label, accent-coloured effort title.
+
+================================================================================================
+6. FILE-CHANGE RECEIPT / DIFF
+Facts
+- Turn order: user -> activity group -> final assistant -> ... -> "turn-diff" receipt LAST (LT:6551).
+- Receipt card header title "Edited {filename}" or "Edited # files" (C:20195-20212); subtitle shows
+  +/- line counts, swapped on hover/focus for "Review changes" + icon (C:20466-20485, wrapper classes
+  "hover:[&_.turn-diff-default-subtitle]:hidden hover:[&_.turn-diff-hover-subtitle]:inline-flex"
+  C:20598). Trailing "Undo"/"Reapply" with pending spinner; toasts "Changes reverted"/"Changes
+  reapplied"/"Failed to revert changes" (C:20511-20530, C:20295-20330). No "Changes applied" state:
+  edits are already on disk.
+- File rows: first 3 (Ww=3, C:21268), then "Show N more files"/"Collapse files" (C:20682-20699); each row
+  "flex h-9 (36px) ... text-size-chat" button with path + counts (C:21081-21083); offscreen rows
+  content-visibility with 36px intrinsic size (C:20651).
+- Click file or header -> opens the "Review" diff tab in the task side panel with that path selected
+  (C:20373-20380 -> I:460815-460839 N9a/"thread.sidePanel.diffTab"). Cmd/Ctrl-click -> opens the file
+  in the side panel (openInSidePanel:true, C:20383-20402).
+- HOVER DIFF PREVIEW confirmed: DiffPreviewTooltip wraps the receipt header and every file row
+  (C:20757-20770, C:21122). Radix tooltip side="top" align="center" sideOffset 0, delay 800ms,
+  interactive, height min(420px, available, 100vh-16px), width = row width - 64px (DPT:79-95, DPT:171-173).
+  Card: "rounded-lg border border-default bg-surface-elevated-secondary shadow-xl" (DPC:122-124);
+  header h-9 path + counts (DPC:62); diff body max-h-96 (384px) scroll (DPC:88); clicking card = open.
+MAWS should copy: receipt after the answer, 3 rows + "Show N more", hover-800ms diff popover above the
+  row, click -> right-panel Review tab at that file, Undo/Reapply with explicit toasts.
+
+================================================================================================
+7. SIDEBAR
+Facts
+- Sections: Pinned (I:379106), Projects (project groups) and Recents (I:379120); organize "By project /
+  By connection / In one list", sort "Priority (Needs input and unread chats first) / Last updated /
+  Created / Manual order" (I:323605-323669).
+- Flat tree, NO drill-in: Electron list uses projectRowBehavior="expand" (inline expand/collapse with
+  chevron, shouldAnimateGroups) (I:376466-376486); the alternative "open-project-page" exists but is
+  not used here (I:373235). Children indented "ps-7" (28px) per depth (I:358616-358618).
+- Limits: 5 projects then "Show more" (maxGroups 5 / maxItems 5, I:376476, I:379501); 5 threads per
+  project (dra=5, I:375876, I:374171); Recents 10 then button/infinite scroll (I:379340-379343).
+  "Show more" row "py-1" listitem, secondary ghost w/ tertiary text (I:372676-372686).
+- Row geometry: .sidebar-navigation sets --height-token-nav-row/row 30px, --padding-row-x 8px,
+  --radius-token-row 10px (CS:26303-26313); row base "group relative cursor-interaction text-sm
+  hover:bg-primary-ghost-hover h-[var(--height-token-row)]" + "sidebar-item" (radius-lg = 10px with
+  superellipse) (I:313858-313876, CS:15945-15948); list "flex flex-col gap-px" (I:372698) => 31px
+  pitch (07 measures 31px). Electron hides inline timestamps (hideThreadTimestamps, I:376474).
+- Hover/focus reveals: trailing status indicator is swapped for an action (archive "Archive chat" ->
+  second-click "Confirm"; pin on hover) and a "..." menu expands from width 0 (I:332395-332470,
+  I:351398-351409, showPinActionOnHover I:376479). Hover card w-[min(20rem,100vw-16px)] min-w-56 with
+  title/status, project, repository rows (I:342720-342770) and "Runs on your computer"/"Runs in the
+  cloud" (I:350226-350248). Branch is NOT in the hover card.
+- States on rows: "Awaiting approval" vs "Needs input" (I:351057, I:351086), unread dot.
+- Worktrees: no separate section; the row gets an environment icon by kind
+  worktree/remote/remote-worktree/cloud (I:349614-349645); worktree tooltip "This conversation is
+  running in a local git worktree." (I:314663). (07's branch-like and globe icons on Recents rows.)
+- Default sort/grouping and Pinned existence confirmed; Recents is the unified flat list.
+MAWS should copy: flat expand-in-place tree, 30px/13px rows with 1px gap, 5-per-project + Show more,
+  hover-swap indicator->actions, env icon for worktree sessions, Priority sort.
+
+================================================================================================
+8. FINAL ANSWER VS ACTIVITY
+Facts
+- Turn sections (LT:6357-6440): "agent-activity" (collapsible group incl. commentary, tools, reasoning)
+  then "assistant-item" (the final answer) as a SEPARATE sibling: final answer is outside the group,
+  full-contrast markdown, never collapsed.
+- Collapse allowed only when final answer started, turn not cancelled, renderable activity exists;
+  persisted per turn; force/prevent flags (C:26341-26359, C:26361-26420).
+- Header row "Worked for {time}" (CT:60) "text-size-chat text-secondary" ghostTertiary inline button
+  (CT:208-215), chevron icon-2xs text-text/40 rotating 0->90deg (CT:144-150); a border-t divider under
+  it separates work from answer (CT:236-237); optional "N denied actions" at the right (CT:178-195).
+  Expand/collapse animates height/opacity with translateY(-8px), 150ms exit (C:26630-26680).
+- Reasoning: own disclosure "Thinking" / "Thought for {elapsed}" / "Thought" (C:18167-18186); expanded
+  body capped at 8.75rem (140px) with 1rem edge fade, auto-follows while streaming (C:18093-18101).
+MAWS should copy: final answer as its own block after a "Worked for Xs" divider row; work collapsed
+  above it; reasoning as a 140px-capped "Thought for" disclosure.
+
+================================================================================================
+9. MID-TURN USER MESSAGES AND QUEUE
+Facts
+- Steered messages are user-message items inside the running turn's activity stream, at their
+  chronological delivery position; they are "persistent units" that stay visible even when the
+  activity group collapses (C:26205-26226, check at C:26225 steeringStatus != null; status "pending"
+  I:207353). Queued (not steered) messages wait and become the next turn.
+- Queue UI sits above the composer (mounted via composer props P:187913-187924): list
+  "vertical-scroll-fade-mask hide-scrollbar flex max-h-[30dvh] flex-col gap-px" (Q:375); each row
+  drag handle (reorder, Q:462), one-line clamp text (Q:612), image thumbs 24px (Q:591), actions Steer
+  ("Submit without interrupting the model", Q:698), delete, menu: Edit message / Open in side chat /
+  Turn off(on) queueing (Q:826-896). Paused state "Queue paused because you interrupted" + Resume
+  (Q:185-207); failure "This queued message could not be sent ... Retry, edit, or delete it to
+  continue the queue" (Q:552-567).
+MAWS should copy: steered text inline in the turn at delivery time and immune to collapse; queue as an
+  editable, reorderable 30dvh list docked on top of the composer.
+
+================================================================================================
+10. REQUEST_USER_INPUT / QUESTIONS
+Facts
+- Renders in the composer's place (pending-request surface replaces composer, research P:157557-157670).
+- ONE QUESTION AT A TIME: pager "{n} of {N}" with Previous/Next icon buttons (text-xs), shown only when
+  N>1; Next enabled only once the current question is answered (P:126157-126161, P:126945-126990).
+- Options: numbered radio/checkbox rows, "Recommended" badge (P:125574), free-text "Type here"
+  (P:126305); footer Skip / Next / Submit / Continue (P:125000-125055, P:125979-126004); Dismiss ESC.
+- Afterwards in the thread: a compact activity row "Asking questions" (live) -> "Asked N questions"
+  (label text-tertiary/90, count text/40), expandable to Q/A pairs; multi answers joined ", ",
+  skipped = "No answer provided" (C:21300-21378). (Separate mid-turn "Answer question" flow shows the
+  question+answer inside the user bubble, question truncated at opacity-70: C:8377, C:8457-8490.)
+MAWS should copy: composer-replacing form, one question per page with "n of N", answered state
+  collapsed to "Asked N questions" with expandable Q/A.
+
+================================================================================================
+11. STATUS / USAGE
+Facts
+- No per-thread usage strip in the thread view by default. Optional composer context donut (icon-xs,
+  tooltip "Context window: {usage}% full", "{used}k / {window}k tokens used") behind setting
+  show-context-window-usage, default false (P:150486-150700, P:155523-155527, S:135172-135177).
+- /status slash command ("Show chat ID, context usage, and rate limits", P:167561) opens a closable
+  "Status" panel above the composer: font-mono text-xs 2-3 column grid; rows "Rate limit: {remaining}%
+  left ... resets {time}", "{N}h limit"/weekly (P:166854-166870, P:167100-167320).
+- Limit hit: banner copy "You've hit your usage limit... try again at {resetDate}" (P:137936-138058).
+- Account usage: Settings > Usage page (5h/weekly/daily/monthly windows, % remaining, resets; research
+  page-4079288cf98a.js); low-usage dismissible sidebar card "{remaining}% usage remaining" (I:288051);
+  usage-center chip in sidebar footer gated by flag 2304191375 + plan type (I:301333-301360, I:303522,
+  I:384964), incl. approximate per-task spend (I:301780-301790).
+MAWS should copy: keep usage out of the transcript; on-demand status panel above composer + settings
+  page; optional context meter in the composer toolbar (off by default).
+
+================================================================================================
+12. HOOKS
+Facts
+- No Claude-style hooks surface. Nearest analogues: user-message annotations "Hook blocked this
+  message" / "Hook feedback" and hookStats on undelivered messages (C:22428-22512, C:22773), and
+  hook-feedback user messages kept persistent in collapsed turns (C:26225 hookFeedback===true).
+MAWS should copy: render hook outcomes as small annotations on the affected message, kept visible
+  when the turn collapses.

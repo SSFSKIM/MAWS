@@ -1,0 +1,233 @@
+MAWS UX study A1: composer, chips, status line, model/effort, permission mode, settings writers, C11 visibility
+Repo /Users/new/Developer/GitHub/MAWS @ a2dca3a0 (paths below are relative to it). Engine 2.1.283. Read-only study.
+Px values: Tailwind spacing token is 4px (src/renderer/src/styles/app.css:18), so max-h-44 = 176px, max-h-80 = 320px, min-h-6 = 24px.
+
+1. COMPOSER FRAME GEOMETRY
+Facts
+- Width is set twice. C5's column: `mx-auto flex w-2/3 max-w-[720px] min-w-[min(100%,420px)]` (src/renderer/src/session/SessionPane.tsx:25-27). C7's frame inside it: `mx-auto flex w-full max-w-[720px]
+  min-w-0` (src/renderer/src/composer/frame/Frame.tsx:33). Edit-mode line uses the same cap (src/renderer/src/composer/EditMode.tsx:40). The effective width is therefore 66.7% of the pane minus 2x28px
+  padding (`px-7`, SessionPane.tsx:38 unstarted, :67 started), capped at 720px, floored at 420px.
+- Placement: started pane = transcript `min-h-0 flex-1 overflow-auto` over a `shrink-0 px-7 pt-4` composer zone, horizontally centred (SessionPane.tsx:62-81). Unstarted pane = whole column vertically
+  centred (`flex h-full flex-col justify-center`, SessionPane.tsx:38-45). The docked request, SessionTabNotes, composer and StatusLine all share that one column (SessionPane.tsx:68-81).
+- Spec: §5.4 "the frame is about two thirds of the pane's width, capped near 720 px" (docs/charter.md:198); owner sizing ruling of 2026-09-28 (docs/charter.md:686; mockups at eb480c2: 44px input line,
+  720px cap). Widening it is a §5.4 change that needs a dated §19 entry.
+- For comparison, transcript rows: `max-width: calc(var(--measure) + 48px)` with `--measure: 72ch` at `--text-prose: 15.5px` (src/renderer/src/transcript/view/transcript.css:6;
+  src/renderer/src/styles/tokens.css:19). User bubble `max-width: min(590px, 85%)` (transcript.css:54).
+- Box: `flex items-end gap-2 rounded-xl border ... py-1.5 pr-1.5 pl-2.5`, editor `flex-1` plus the submit control at the right (Frame.tsx:38-41).
+- Editor growth: 24px minimum line (`min-h-6`, src/renderer/src/composer/editor/Editor.tsx:95), grows to `max-h-44` (176px), then scrolls (`overflow-y-auto`, Editor.tsx:143). A paste over 1,024 chars or 10
+  lines becomes an atom chip instead (src/renderer/src/composer/editor/paste.ts:7-8,16).
+- Other parts that grow the zone above the box: QueueList (Composer.tsx:389), EditModeLine/RewindConfirm (Composer.tsx:390-402), a slash widget INSIDE the box above the editor (Editor.tsx:117-121) whose
+  body is capped at 420px plus head and foot (src/renderer/src/widgets/WidgetFrame.tsx:91), and the status line under the frame, which wraps (`flex-wrap`; cwd is `basis-full`, so at least two lines;
+  src/renderer/src/session/StatusLine.tsx:80-82).
+- Long user prompts: the composer owns no collapse. The transcript bubble collapses past 20 lines (`COLLAPSE_LINES = 20`, src/renderer/src/transcript/view/rows/User.tsx:15,34) with Show more / Show less
+  (User.tsx:62); collapsed height is `calc(20 * var(--lh-prose) * var(--text-prose))` = 496px with a fade mask (transcript.css:63-67). §5.3 "collapse beyond twenty lines" (docs/charter.md:184).
+Likely cause / what a fix touches
+- "Too short horizontally": the `w-2/3` term in ComposerColumn (SessionPane.tsx:26) is the binding constraint below ~1164px pane width; above it, the 720px cap in both SessionPane.tsx:26 and Frame.tsx:33
+  (and EditMode.tsx:40). The status line shares the column.
+- "Disrupts the main chat": every pixel the composer zone grows (editor to 176px, a widget up to ~420px+, queue, wrapped status line) comes out of the transcript's flex-1 viewport (SessionPane.tsx:62-67).
+  Transcript re-pins the end only when its row list changes (`useLayoutEffect(..., [rows])`, src/renderer/src/transcript/view/Transcript.tsx:84-87); whether TanStack's `anchorTo: 'end'` (Transcript.tsx:68)
+  holds the end through a viewport shrink is NOT verified here; check in the app.
+Open questions for the owner
+- Target width: full pane minus padding, or the transcript measure (~72ch), or a larger cap (for example 900px)? Should the transcript measure widen with it so the two edges line up?
+
+2. CHIP ROW AND TOOLBAR
+Facts
+- Above the box (ChipRow, src/renderer/src/composer/frame/ChipRow.tsx:8-14): LocationChip shows `<dir name> · ⎇ <branch>` (or `—`), a warning dot when dirty, and a caret
+  (src/renderer/src/composer/frame/LocationChip.tsx:172-181). Its popover lists project dir, new or existing worktree, branch picker and additional dirs. `+ dir` / `+ dir · N`
+  (src/renderer/src/composer/frame/AddDirChip.tsx:28-30) opens main's directory picker (AddDirChip.tsx:16). A live session applies it through `session.applyFlagSettings { permissions: {
+  additionalDirectories } }` (src/renderer/src/composer/frame/bindings.ts:145-155); an unstarted one patches the intent (bindings.ts:82). There is no project chip (ChipRow.tsx:1-3).
+- Below the box (Toolbar, src/renderer/src/composer/frame/Toolbar.tsx:19-36), in order: `+` (PlusMenu, :22); `@` button (:23-25); mic, disabled, title "Voice input arrives later" (:26-31); spacer (:32);
+  ModeChip (:33); ModelChip (:34). Send/Stop/Steer is NOT in the toolbar: SubmitControl sits inside the box at the right (Frame.tsx:38-41; Composer.tsx:447).
+- `@`: `openMention` inserts `@` (with a leading space when needed) at the caret (src/renderer/src/composer/editor/controller.ts:434-439). That fires the same Tiptap `@` suggestion that typing does
+  (src/renderer/src/composer/editor/extensions.ts:90-97): files from `git.lsFiles`, agents and skills (src/renderer/src/composer/mentions/items.ts:79-97). Removing the button loses nothing; typing `@`
+  still works.
+- `+` is a Radix DropdownMenu with these rows: Files and folders…, Photos… (main's picker, attachPicked); Slash commands (inserts `/` at the doc start, controller.ts:433); separator; Connectors (`/mcp`
+  widget); Plugins (`/plugins` widget) (src/renderer/src/composer/plus-menu/PlusMenu.tsx:35-46).
+- Slash popup: Tiptap suggestion with `char: '/'`, `startOfLine: true` (extensions.ts:99-106). MAWS passes no placement or container, so Tiptap's defaults apply: `placement = "bottom-start"`, `flip =
+  true`, mounted into `document.body`, `position:absolute`, anchored to the caret's rect (node_modules/@tiptap/suggestion/dist/index.js:582, 343-355, 364-400). It is mounted at z-index 50
+  (src/renderer/src/composer/mentions/popup.tsx:51-56). The listbox is `max-h-80 w-[min(28rem,80vw)]` (popup.tsx:125), groups by origin, max 40 rows
+  (src/renderer/src/composer/mentions/SlashPalette.tsx:13,84-107). So the popup floats over the transcript at the caret and flips above it.
+- Slash widgets: choosing a widget row deletes the `/query` and calls `openWidget(name)` (SlashPalette.tsx:26-35). A typed `/name args` also opens it, or applies directly (controller.ts:227-262). The host
+  is the Editor: `setWidget` → `<section className="mb-2 rounded-md border ...">` rendered ABOVE the editor INSIDE the composer box (Editor.tsx:113-121; Frame.tsx:39). It is not a popover, sheet or panel
+  tab. WidgetFrame: "C7 places the popover; the frame owns no position", body max 420px, Esc closes and refocuses the composer (WidgetFrame.tsx:1-5,91). Charter says "open a widget over the transcript"
+  (docs/charter.md:200, :544). The ModelChip also opens the `model` widget there whenever it is registered (ModelChip.tsx:41; Toolbar.tsx:34).
+- The 20 widget names are listed in src/renderer/src/composer/mentions/widgets.ts:8-29. The component contract is `{ appSessionId, args, close() }` (widgets.ts:33-41). All 20 are registered unconditionally
+  at app start (src/renderer/src/widgets/index.ts:26-52; src/renderer/src/App.tsx:130).
+- X5 panel tools: `PanelTool<S,P>` = `{ id, title, icon, pinnable, multiInstance, menu?, createState(init), open?(state, params), beforeClose, dispose, render({state, ctx}), summary? }`
+  (src/renderer/src/panel/tool.ts:32-45). `ctx` gives `appSessionId`, `status`, `visible`, `close()`, `openTool` (tool.ts:18-30). Open with `panelHost.addTool(toolId, { appSessionId, params, pin, activate
+  })` (src/renderer/src/panel/host.ts:24-29, 324-344, 472-473). Register with `registerPanelTool` (host.ts:449-470). Precedent for an off-menu, multi-instance, param-driven tab: the Log tool, `menu: false`
+  (src/renderer/src/tools/agents/log/LogTool.tsx:235), opened with params (LogTool.tsx:110). Session info is another C11 panel tool (src/renderer/src/App.tsx:136-138). addTool does not un-collapse a hidden
+  panel; only `panel.toggle` and `panel.maximize` set `collapsed:false` (src/renderer/src/app/shell-actions.ts:20-24).
+Likely cause / what a fix touches
+- Remove `@`: delete Toolbar.tsx:23-25. `openMention` can stay for other callers.
+- "Widget as a panel tab": the widget signature maps directly onto a `render` (appSessionId=ctx.appSessionId, args from params, close=ctx.close). Add one `menu:false`, multiInstance (or one per name) tool,
+  and make `EditorHandle.openWidget` (controller.ts:440-443) and `ComposerFocusTarget.openWidget` (Composer.tsx:248) call `panelHost.addTool` plus un-collapse the panel. Caveats: the Esc→composer focus
+  hand-back in WidgetFrame; unstarted-session widgets bind to the intent (ModelWidget.tsx:110-144), so the tab needs the unstarted session's id to be "known" to the panel host (host.ts:356-358). The
+  palette list itself would stay a caret popup unless it is also moved.
+Open questions for the owner
+- "Open a window on the panel": the palette LIST too (a panel tab with search), or only the widget a command opens?
+
+3. STATUS LINE UNDER THE COMPOSER
+Facts
+- Component: src/renderer/src/session/StatusLine.tsx, mounted per started session pane under the composer (SessionPane.tsx:80). Not mounted on unstarted tabs; those show only SetupStatusLine while a setup
+  phase runs (Composer.tsx:450).
+- Segments (statusFields, StatusLine.tsx:45-63; render :79-129):
+  1 cwd `~/…`: record.directory with /Users/<n>→~ (:24, :55), full-width row (`basis-full`, :82). Popover: path, worktree, branch, added dirs, Copy path (src/renderer/src/statusline/popovers.tsx:32-64).
+  (setup phase, while a started tab's first launch is under C10, :86-92)
+  2 `ctx N% of M` (⚠ near the autocompact threshold) from the main read model's digest `context` (:46-52). Digest context is sampled with `get_context_usage {detail:'summary'}`
+    (src/engine-host/session.ts:798). `ctx —` when null. Per session. Popover reads `session.getContextUsage full` and offers Compact now (src/renderer/src/statusline/ContextPopover.tsx:1-4).
+  3/4 `5h N% ↻…`, `7d N% ↻…`; `5h 0%` once the reset passed with no new reading (:26-32). Source: ClaudeUsage's own FILES in ~/Library/Application Support/ClaudeUsage (accounts.json, pins.json, history/),
+      read by main (src/main/usage/claude-usage-reader.ts:1-8,19-21; src/main/index.ts:157-159), not the relay. Per session they pick the pinned account, else the drain target, else for a Direct session
+      the engine's `get_usage`, polled every 60s by `useDirectFallback`, which is called only from this component (src/renderer/src/stores/usage.ts:84-95; StatusLine.tsx:73;
+      src/renderer/src/statusline/direct-fallback.ts:15,43-73). The values are account-wide and the choice of account is per session.
+  5 `$N.NN` from digest.cost (:59). `$—` when null. Popover reads `get_session_cost` (popovers.tsx:66-89).
+  6 mode = record.permissionMode.effective with ⚠ and refusal words (:53,60-61,118-126). Popover is the same ModeMenu as the ModeChip (popovers.tsx:91-98).
+- Usage popover footer = C11's UsageFooter: route sentence, pace, Open ClaudeUsage, Accounts, Session info, and the route switch buttons (src/renderer/src/gateway/UsageFooter.tsx:1-6,85-100; registered
+  App.tsx:132).
+- Bindings: §5.4 "routing and mode facts live in the status line" (docs/charter.md:198); §5.5 defines the line (docs/charter.md:204); D-17 "Account-wide usage windows stay in every session's status line"
+  (docs/charter.md:42). C11's footer cites §5.4: "the route is stated here and in Session info, never around the composer" (UsageFooter.tsx:4).
+- Independent of the component: the near-limit banner and the usage store connect app-wide (src/renderer/src/statusline/index.ts:14-17; App.tsx:98; src/renderer/src/statusline/near-limit.ts:1-4,
+  ClaudeUsage snapshot only, near-limit.ts:70-76).
+What loses its home if the line is removed
+- (a) The ONLY entry to switch a live session's route Direct↔gateway: `switchRoute` is called only from UsageFooter.tsx:98.
+- (b) Direct sessions' usage polling (direct-fallback.ts is called only at StatusLine.tsx:73), which feeds Session info and /usage readings.
+- (c) The setup-phase activity for a started tab (StatusLine.tsx:86-92).
+- (d) The usage popover (accounts, model-scoped weekly meters, Other accounts, Updated ago). Partly covered by the /usage widget, the Accounts tab and Session info's "Context, usage, cost" section
+  (src/renderer/src/tools/session-info/copy.ts:19).
+- (e) Context popover's Compact now (also /compact and /context widgets) and per-model cost (Session info covers some).
+- Mode and refusal words stay on the ModeChip (src/renderer/src/composer/frame/ModeChip.tsx:11,21-26). The near-limit banner stays (app-wide).
+- `formatCwd` is exported from StatusLine.tsx:24 and imported by LocationChip.tsx:10. e2e specs that assert on it: e2e/statusline.spec.ts, composer-live, shell, c7-shots, c11-live, accounts (grep "Session
+  status").
+Likely cause / what a fix touches
+- Delete `<StatusLine>` at SessionPane.tsx:80. Keep connectStatusLine (App.tsx:98). Move useDirectFallback and the route switch somewhere (Session info panel tool or the ModelChip/route chip). Record a
+  dated §19 entry amending §5.4/§5.5/D-17.
+Open questions for the owner
+- Where should the live route switch and the 5h/7d glance go: Session info panel only, the sidebar/titlebar, or nowhere?
+
+4. MODEL AND EFFORT CHIP
+Facts
+- Label: `displayOf(options, model)` gives 'Default model' when the model is null, else the first catalogue row whose value OR resolvedModel matches, else the raw id; then ` · effort` only when effort is
+  non-null (src/renderer/src/composer/frame/ModelChip.tsx:17,36; match rule bindings.ts:48).
+  - Unstarted: intent.model/effort default to null (src/main/sessions/service.ts:201-202), so the chip reads "Default model" with no effort.
+  - Live: model = status.model.resolved ?? requested (bindings.ts:112). For opus the resolved id `claude-opus-5-5[1m]` is also the `default` row's resolvedModel and that row comes first (reads.jsonl seq
+    3), so with the route's cached catalogue (loose rows keep resolvedModel, models.ts:7-12) the chip reads "Default (recommended)"; with only the built-in list it shows the raw id. Effort = status.effort, which is the REQUESTED effort (launch spec or setEffort; src/engine-host/session.ts:153,169,367,410), null unless set, so no
+    effort is shown.
+  - The ModelWidget shows the same: current = requested ?? resolved → rowOf matches value, then resolvedModel → `default` row (src/renderer/src/widgets/model.ts:65-66,76-80). Effort buttons end with
+    "Engine default" = null (ModelWidget.tsx:357-368; src/renderer/src/widgets/copy.ts:289). Footnote "Sets with set_model … for this session only" (copy.ts:36).
+- Catalogue shape (`list_models`, the initialize `models[]`, and `engine.models` cache at <userData>/engine-host/models.json, keyed `<version>/<route>`; src/engine-host/models-cache.ts:1-9,26-28,90-91;
+  schema src/shared/sessions/models.ts:7-20) per row: `{ value, resolvedModel, displayName, description, supportsEffort?, supportedEffortLevels?, supportsAdaptiveThinking?, supportsFastMode?,
+  supportsAutoMode? }`. Routed list, 12 rows (spikes/protocol-probe/fixtures/reads.jsonl seq 3; pass2/auto-routed.jsonl seq 4): default→claude-opus-5-5[1m] "Default (recommended)"; opus "Opus 5.5 (1M
+  context)"; fable "Fable 5.1"; sonnet "Sonnet 5"; haiku "Haiku" (no effort or auto keys); claude/astra|sol|luna|terra displayName "astra|sol|luna|terra", description "From gateway"; three
+  claude/<vendor>/… OpenRouter rows. All effort-capable rows list low, medium, high, xhigh, max. The built-in fallback has 5 rows without resolvedModel (src/shared/sessions/models.ts:24-30).
+- What carries the effective model and effort:
+  - initialize response: `current_permission_mode`, `models`, `fast_mode_state`; NO current model or effort (reads.jsonl seq 3 keys).
+  - system/init: `model` (resolved id, e.g. "claude-sonnet-5[1m]"), `permissionMode`, `fast_mode_state`, `per_turn_effort_active:false`; NO effort (reads.jsonl seq 7; pass2/real-settings.jsonl seq 15).
+  - Only `get_settings` → `applied: { model, effort, advisor, ultracode }` carries the effective effort, model default included: pass2/dialogs.jsonl seq 58 `effort:"high"` for sonnet with
+    `--setting-sources ''` and no effort flag (spawn args seq 1), and reads.jsonl seq 60 `effort:null` for haiku. Only ConfigWidget reads it (src/renderer/src/widgets/ConfigWidget.tsx:29-38).
+  - Per-model defaults in the pinned SPEC: opus-5-5 medium, sonnet-5 high, fable-5-1 high, haiku none (~/claude-code-bundle/2.1.283/SPEC/06-models-and-selection.md:277-326). These are not in list_models
+    rows.
+- Mapping: `session.setModel` → `set_model {model}` (src/engine-host/ipc.ts:298-310; src/engine-host/controls.ts:70). `session.setEffort` → `apply_flag_settings {settings:{effortLevel}}`; null clears it
+  (ipc.ts:312-318). At launch: `--model` and `--settings {"effortLevel":…}` (src/engine-host/launch.ts:137,202,212). With effortLevel null, effort falls back to the user's setting (owner's: xhigh,
+  docs/doperpowers/plans/2026-09-28-c3-engine-host.md:778).
+- Persistence: `set_model` is session-only; the "saved as your default" write belongs to the interactive picker's `persist` flag (C11 audit,
+  docs/doperpowers/plans/2026-09-28-c11-palette-settings-gateway-usage.md:235,578). Spot check: the SDK handler ends in `n.applyModel(h)` (~/claude-code-bundle/2.1.283/cli.pretty.js:222386), and print-mode
+  applyModel sets in-memory `_r` and `mainLoopModelForSession` (cli.pretty.js:727896-727897). The fixtures show only the echo `<local-command-stdout>Set model to …` (pass2/auto-routed.jsonl seq 151-187);
+  no fixture snapshots settings files. This is consistent with the owner's `/model astra` write coming from the terminal's interactive picker, not from MAWS.
+- Gateway names: ClaudeUsage's bare aliases astra/sol/luna/terra are Codex (GPT) models; vendor ids are OpenRouter (C11 plan :541). isGatewayModel = value starts with `claude/`
+  (src/shared/sessions/models.ts:33-35).
+- C11 model widget: Claude and Gateway groups, 1M mark, "Cannot hold auto mode · runs in default", gateway local-lane note in auto, effort segment plus "Engine default", one Apply, fast switch with lane
+  warning; unstarted adds a Route segment (src/renderer/src/widgets/ModelWidget.tsx:1-12, 223-424). Typed `/model haiku`, `/effort high`, `/effort auto` (=null) (ModelWidget.tsx:201-218).
+Likely cause / what a fix touches
+- Display rule: the alias of the matching row, minus `claude/`, preferring a non-`default` row when several share a resolvedModel (opus, sonnet, fable, haiku, astra, sol…), plus the EFFECTIVE effort. The
+  only wire source for that is `get_settings.applied.effort` (a control read, so the composer's no-read-per-mount rule in bindings.ts:90-93 applies; read once at ready or after a change), or a client-side
+  per-model default table. Selector: check the effective level and drop the "Engine default" button (ModelWidget.tsx:357; copy.ts:289).
+- Unstarted: null model/effort means the user's settings; showing a real name needs the user's settings default (not read today) or the catalogue's `default` row's resolvedModel (opus).
+Open questions for the owner
+- Unstarted tab: show what the engine WILL use (your settings: e.g. "astra xhigh"), or have MAWS pick an explicit default model and effort per new session?
+
+5. PERMISSION MODE
+Facts
+- Defaults: a new intent has `permissionMode: null` (src/main/sessions/service.ts:203). MAWS settings v4 have no permission-mode or model default (src/shared/settings/defaults.ts:8-17). With null, no
+  `--permission-mode` flag is passed (src/engine-host/launch.ts:203), so the engine uses the user's settings (D-18 "inherited from the owner's settings", docs/charter.md:43;
+  src/shared/engine/launch-spec.ts:17).
+- The UNSTARTED chip renders null as the literal "default" (`binding.value ?? 'default'`, src/renderer/src/composer/frame/ModeChip.tsx:20,26). ⇧Tab from null goes to 'default'
+  (src/renderer/src/statusline/mode-menu.ts:44-47). At launch the record is written with requested=effective='default' (src/main/sessions/setup.ts:201-209) until the status arrives. The host takes the
+  init's current_permission_mode when spec mode is null (src/engine-host/session-status.ts:64-65,84-85).
+- Gating: unstarted: auto is disabled in the menu when the chosen catalogue row has `supportsAutoMode === false` (bindings.ts:79; src/renderer/src/statusline/ModeMenu.tsx:81-93). Note: haiku's key is
+  ABSENT, not false (reads.jsonl seq 3), so this never fires for a live-catalogue haiku (only the built-in list sets false, src/shared/sessions/models.ts:29). Live: `autoUnavailableReason` uses the same rule (mode-menu.ts:52-56). Refusal codes: auto_mode_settings, circuit_breaker, fast_mode,
+  model, unavailable (mode-menu.ts:32-38; X6 docs/charter.md:581).
+- Live refusal today: `set_permission_mode` error → `{effective, refusal, error}` (src/engine-host/ipc.ts:281-296). The menu shows the words and the mode stays put (mode-menu.ts:81-88). The chip and status
+  line show ⚠ plus words (ModeChip.tsx:11,21-26; StatusLine.tsx:119-125). Fixture: set_model haiku then set_permission_mode auto → `error_code:"auto_mode_model"` (pass2/auto-routed.jsonl seq 151-157).
+- Launch-time "refusal" is silent: `--permission-mode auto` on haiku yields `current_permission_mode:"default"` with no code (pass2/auto-haiku.jsonl seq 1 args, seq 4;
+  spikes/protocol-probe/findings-pass2.md:136). The host keeps requested 'auto' vs effective 'default' with refusal null (session-status.ts:88-96). The record patch then collapses it to requested=effective
+  (src/shared/engine/status.ts:76-82), so no warning is ever shown. A breaker or plan-mode move mid-session arrives as `system/status.permissionMode` (session-status.ts:145,169), also without a code.
+- `options.autoModeNote` (cannot-hold-auto, gateway local lane) is computed (src/renderer/src/sessions/useSetupIntent.ts:90,183; src/shared/sessions/models.ts:37-46) but rendered nowhere in the composer
+  (only consumer is the type, setup-intent.ts:46).
+What a "default = auto, fall back to X when refused" rule needs
+- A seed: intent.permissionMode='auto' at service.ts:203 (forks copy the source's at src/main/sessions/record-actions.ts:176), or a MAWS settings field. The chip should show the resolved mode, not
+  "default" (ModeChip.tsx:26).
+- Fallback: the engine gives no code at launch, so decide before launch from the catalogue (`supportsAutoMode !== true`, not `=== false`), or detect requested≠effective after initialize (TrackedStatus,
+  session-status.ts:72) before status.ts:82 collapses it. Then set X explicitly and show why. Resume re-passes record.requested (src/main/sessions/launch-mapping.ts:120).
+Open questions for the owner
+- Fallback mode X when auto is unavailable (Haiku, settings-disabled, breaker): `default` or `acceptEdits`? Pin auto explicitly even when your settings say something else?
+
+6. SETTINGS-FILE WRITERS
+(a)=explicit user action with visible consequence, (b)=silent/implicit, (c)=MAWS's own userData. MAWS code never writes
+~/.claude/settings.json, ~/.claude/settings.local.json, <project>/.claude/settings*.json, ~/.claude.json or .mcp.json directly. The only
+direct write into the user's Claude config space is the `#` memory append; everything else is userData, git metadata, the Trash, or the
+engine persisting a control MAWS sent.
+Every filesystem writer in src/main, src/engine-host (src/preload and src/pty-host have none; grep writeFile|appendFile|rename|mkdir|rm|trashItem):
+- (c) <userData>/settings.json, MAWS settings v4 (src/main/index.ts:93; src/main/settings/store.ts:71-73). Same filename as Claude's, different folder.
+- (c) <userData>/index.sqlite (src/main/index.ts:103; db.ts:139 renames a corrupt db aside); attention.json (file-attention-store.ts:41-56); layout.json (src/main/layout/store.ts:77-79);
+  prompt-history.jsonl (src/main/history/prompt-history.ts:66-77; the terminal's <CLAUDE_CONFIG_DIR>/history.jsonl and paste-cache are read only, :1-11,68-69); sessions/{intents,bootstraps,deletions}
+  (src/main/sessions/json-files.ts:17-23; intents.ts:63,86; delete-manifest.ts:79; service.ts:57); engine-host/{models.json,state,journal} (src/engine-host/models-cache.ts:91,136-139;
+  store/file-session-state-store.ts:32-33,120-141; journal.ts:41-73,170); the custody copy of the engine binary (src/main/engine/custody.ts:120-137).
+- (a) `#` memory append: MAWS writes the file itself (no wire mechanism). The target is from `get_memory_dialog` (project CLAUDE.md by default, src/renderer/src/stores/composer.ts:57; user
+  ~/.claude/CLAUDE.md or a listed file). It creates missing files or folders only inside listed folders and appends `\n- text\n` (src/engine-host/memory-append.ts:1-13,69-135). Toast "Saved to <path>"
+  (src/renderer/src/composer/editor/submit.ts:47).
+- (a) Delete conversation: moves <config>/projects/<proj>/<id>{.jsonl,dir,.precompact.json,.ccr-tip.json,-*.cast} to the macOS Trash (src/main/sessions/delete-manifest.ts:24-36; record-actions.ts:56-90;
+  src/main/index.ts:230).
+- (a)+(b) New worktree: `<repo>/.claude/worktrees/<name>` (src/main/sessions/intent-rules.ts:26). It also appends the engine's `# claude-code-runtime` block once to `<git common dir>/info/exclude`, which is
+  git metadata, not settings, and silent beyond the worktree itself (src/main/git/worktrees.ts:42-100).
+- (a) Export Save as… to a user-chosen path (src/main/files/save-text.ts:1-28). (e2e only: files/service.ts:258, e2e-trash.ts, window.ts:29.)
+Controls and flags the engine persists itself:
+- (a) Trust: `initialize.workspaceTrust` (src/engine-host/session.ts:522), sent only after "Trust and start" (src/renderer/src/sessions/SetupCard.tsx:64; card says "Trust is recorded for the repository at
+  <key>", src/renderer/src/sessions/TrustCard.tsx:42). The engine writes ~/.claude.json projects[key] (findings-pass2.md:95; pass3/trust-bootstrap-recorded.jsonl seq 4-7). Home dir is session-only
+  (TrustCard.tsx:14). `set_cwd` with trust also persists (c3 plan :778), but has no renderer caller.
+- (a) `mcp_toggle` (/mcp Enable/Disable) → ~/.claude.json projects[cwd].enabled|disabledMcpServers, not atomic (C11 plan :235,578). The widget foot says so (src/renderer/src/widgets/copy.ts:51,338).
+- (a) Permission "Always allow <rule> in <project>" → `updatedPermissions` with destination localSettings, which the engine writes to <project>/.claude/settings.local.json
+  (src/engine-host/broker.ts:347-349,377-382; src/engine-host/grants.ts:21-22). Offered only when the engine suggested localSettings and the request was not downgraded
+  (src/renderer/src/request-card/scope.ts:45-64; suggestion e.g. pass2/grant-reapply-start.jsonl seq 30). The default selection is Allow once (src/renderer/src/request-card/variants/Permission.tsx:26). The
+  card names the project, not the file.
+- (a) `rename_session` (Rename dialog or /rename) and `generate_session_title {persist:true}` on Regenerate (src/main/sessions/record-actions.ts:121-130; src/renderer/src/sessions/RenameDialog.tsx:69)
+  persist the title in the engine's session store, as designed.
+- Not persisted: `set_model` (above); `apply_flag_settings` (effort, fastMode, additionalDirectories, grant re-apply at src/engine-host/grants.ts:42) is the in-memory flagSettings layer;
+  `set_permission_mode` is app state (C11 plan :235). `--settings` JSON is the "Startup settings (--settings option)" source (pass2/hooks.jsonl seq 46). `--add-dir` is "not persisted by the engine"
+  (launch-mapping.ts:105-106). MAWS never sends `/add-dir` (bindings.ts:7). extraSettings is always null (launch-mapping.ts:59).
+- Subagent default model: MAWS setting `engine.subagentModel` (Settings tab, src/renderer/src/settings-tab/EngineSection.tsx:118-119; userData) → env `CLAUDE_CODE_SUBAGENT_MODEL` per launch
+  (src/main/settings/session-settings.ts:11; src/main/sessions/launch-mapping.ts:54; src/engine-host/launch.ts:117). Never written to Claude's settings. Class (c) plus an explicit setting.
+- (b) Engine-intrinsic, same as the terminal, not MAWS-initiated: transcripts and file checkpoints under ~/.claude/projects (checkpointing env, launch.ts:114); ~/.claude.json bookkeeping. SPEC 03:6135-6145
+  documents one-time startup migrations that can copy keys into userSettings (gated by migrationVersion 14). Whether a `-p` launch runs them is not verified here.
+Likely cause / what a fix touches
+- Nothing in MAWS writes the user's settings.json silently. The closest to "unnoticed": the local-settings grant (card does not name settings.local.json), the mcp toggle (persisted even when the enable
+  fails), and the info/exclude append.
+Open questions for the owner
+- Should the "Always allow in project" scope stay (it writes .claude/settings.local.json), or be removed so cards offer once and session only?
+
+7. C11 VISIBILITY
+Facts
+- C11 is active: widgets, gateway actions, relay monitor, usage footer, Session info, Accounts and Settings tabs are all registered unconditionally (src/renderer/src/App.tsx:126-144). Charter: landed
+  2026-09-29 at b93ef742 (docs/charter.md:550).
+- Visible strings that suggest otherwise:
+  - Slash palette rows for terminal-only engine commands (/doctor, /color, /focus, /reload-plugins per pass2/real-settings.jsonl seq 15 terminal_slash_commands, all also in initialize.commands) are listed
+    DISABLED with "Opens a widget · arrives with C11" (src/renderer/src/composer/mentions/items.ts:16,69-71; SlashPalette.tsx:102). These names are not among the 20 widgets.
+  - ModelChip "Default model" (ModelChip.tsx:17), the live "Default (recommended)" mislabel (§4), ModelWidget "Engine default" (copy.ts:289), Session info subagents "engine default"
+    (src/renderer/src/tools/session-info/copy.ts:32; model.ts:93), Settings subagent placeholder "engine default" (src/renderer/src/settings-tab/copy.ts:41).
+  - The model chip opens the C11 widget inline inside the composer box, not a recognisable sheet (§2), so the C11 surface may read as "the old chip".
+  - Mic title "Voice input arrives later" (Toolbar.tsx:26).
+- Conditional hints, hidden in normal `index` launch mode: "Arrives with C10" (sidebar, tab strip, toolbar, Overview, ⌘K session.new: src/renderer/src/sidebar/Sidebar.tsx:283,286;
+  src/renderer/src/main/TabStrip.tsx:191; src/renderer/src/palette/CommandPalette.tsx:50). C10's registrations happen only when `session.launchMode` is 'index' (src/renderer/src/sessions/connect.ts:63-75).
+  "Arrives with C11" gear title (Sidebar.tsx:326) shows only while settings.open is unregistered. Slot fallbacks "Settings/Accounts arrive with C11" (src/renderer/src/app/slot-fallbacks.tsx:36-37) are
+  replaced at App.tsx:139-142. RewindConfirm "Forking arrives with C10" (EditMode.tsx:86) shows only without a resubmit provider. PlusMenu's hint (PlusMenu.tsx:25) shows only for unregistered widgets.
+Likely cause / what a fix touches
+- Reword UNAVAILABLE_HINT (items.ts:16), e.g. "Terminal only", or hide those rows. Fix the model labels (§4). Sweep leftover "arrives with Cn" strings (list above).

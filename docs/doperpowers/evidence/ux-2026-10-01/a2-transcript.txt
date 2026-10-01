@@ -1,0 +1,300 @@
+MAWS UX study A2: transcript (C6) items 1-8
+Repo /Users/new/Developer/GitHub/MAWS at a2dca3a0. Paths are repo-relative unless absolute. "fx:" = spikes/protocol-probe/fixtures/.
+"JRNL" = the owner's MAWS journal for screenshot 11: ~/Library/Application Support/MAWS/engine-host/journal/f34024b3-5ed8-45df-8354-4b2e040c4793/gk7vnljs.jsonl (read-only).
+Experiments: the repo's real Markdown component (src/renderer/src/transcript/view/markdown/Markdown.tsx), bundled with esbuild into a temp
+file and rendered with react-dom/server (scripts in /tmp/maws-ux-study/md/; the temp bundle was deleted from node_modules afterwards). No app, test or GUI run.
+Charter correction: the typography numbers live in charter §6 (docs/charter.md:228), not §5.5 (that is the Status line).
+
+1. Measure, spacing, typography
+Facts
+- Tokens (src/renderer/src/styles/tokens.css:19): --text-ui 13px, --text-ui-sm 12px, --text-prose 15.5px, --lh-prose 1.6, --measure 72ch,
+  --text-code 13px. The dark theme overrides colours only (tokens.css:39-61). Values are advisory per tokens.css:2.
+- Column (transcript.css:3-12): every row is .transcript-row { max-width: calc(var(--measure) + 48px); margin: 0 auto; padding: 0 24px;
+  font-size: var(--text-prose) }. `ch` resolves at the row's own 15.5px font, so the measure is tied to the font size. Measured in
+  screenshot 11 (2x: line pitch 49 px = 24.8 css px): text column 58..1462 px = 702 css px, i.e. 72ch ≈ 9.75 px per ch. Screenshot 03
+  (≈1.49x): column 691 css px in a pane of at least 1052 css px, so about 165 css px of empty margin on each side plus the 24px padding.
+- Composer frame cap: max-w-[720px] (src/renderer/src/composer/frame/Frame.tsx:33; EditMode.tsx:40). Transcript text is 702 px.
+- Prose: .transcript-answer padding 4px 0 12px, lh 1.6, colour --fg; .transcript-commentary padding 2px 0 6px, colour --fg-muted
+  (transcript.css:91-92). Headings 1.3/1.2/1.1 × prose (109-111). Inline code 0.9em on --bg-active (108); `.transcript :where(code)`
+  0.92em (195). Streamdown's paragraph spacing comes from its root class `space-y-4` (verified in the render output). Streamdown's
+  `text-sm`/`text-xs` utilities are bridged to --text-ui/--text-ui-sm (styles/app.css:58-68).
+- Code: --text-code 13px for cell output, the diff, pasted text and local-command output (transcript.css:80,149,240,262); fences in
+  Streamdown use text-sm, which maps to 13px.
+- Chrome rows: divider 12px, padding 2px 0 14px (128); group header 13px, line-height 24px (176); cell line 12px, min-height 26px (199);
+  cell detail 12px (222); thinking label 12px, thinking text 13px (15-23, 116-125); time separator 12px, padding 24px 0 (48); receipt 13/12px (270-282);
+  question card 13px (302).
+- Binding text: charter §6 (docs/charter.md:228): "15 to 16px prose, 1.6 line height, 68 to 72 character measure … code at 13px
+  monospace". D-4 (charter.md:29): "Claude-style transcript typography (generous measure and line height)". §5.4 (charter.md:198):
+  the composer frame is "about two thirds of the pane's width, capped near 720 px", and "the same proportion rule governs … bubbles,
+  cards, receipts, queue rows … relative to the transcript measure". D-20 (charter.md:45): start from the reference apps' values.
+- Reference app, measured from the owner's Codex screenshot 07 (2790 px original; I assumed it is 2x retina): line pitch ≈23 css px;
+  glyph advance ≈6.75 css px per character against MAWS's 7.14 at 15.5px (screenshot 11). That puts Codex body text at about 14 to 14.5px
+  in MAWS's font. Content column 736 css px (prose left edge to the composer's right edge) out of an 801 px main area, so the gutters are
+  about 32 px each side. The research files hold no exact Codex or Claude Desktop pixel values (research/codex-shell-ux.md:351 has only
+  the token scale 18/16/14/12; research/claude-desktop-ux-and-engine.md:162 has only token names).
+Likely cause / what a fix touches
+- The owner's two notes pull in opposite directions under the current coupling: lowering --text-prose also narrows the column, because
+  --measure is 72ch at the row's font. Decouple them: set --measure in px or rem (for example near 760 px), or raise the ch count when
+  the font shrinks. Then lower --text-prose and --lh-prose (tokens.css:19), and lower the 24px row padding (transcript.css:6-8) if needed.
+- To keep §5.4's proportion rule, move the composer cap with the column (Frame.tsx:33 and EditMode.tsx:40 are literal 720px values in
+  component classes).
+- Charter §6's 15-16px and 68-72ch are charter text. Moving to Codex or Claude Desktop sizes needs a dated §19 Decision Log entry
+  (project rule in CLAUDE.md), citing D-20 and the owner's note.
+Open questions for the owner
+- Which reference wins: Codex (≈14px, ≈23px line pitch, column ≈740px) or Claude Desktop (not measured; no screenshot in the shots folder)?
+  Should the column stay capped on very wide panes, or keep filling the pane?
+
+2. User message rendering
+Facts
+- Component: src/renderer/src/transcript/view/rows/User.tsx. Layout: .transcript-user is a column with align-items: flex-end and
+  padding-bottom 12px (transcript.css:51). Bubble (52-61): max-width min(590px, 85%); padding 12px 16px; radius 16 16 4 16;
+  --bg-overlay; 1px border; line-height 1.6. Font size is the inherited row size, 15.5px (transcript.css:9). Paragraphs are pre-wrap (62).
+  Mockup 02 had 14/18 padding (mockups/02-transcript.html:42).
+- Every bubble is followed by an action row (time, Copy, Edit) with min-height 26px that is always laid out and only hidden by
+  opacity 0 (transcript.css:84-86; User.tsx:65-76). Each user row therefore carries at least 38px below the bubble.
+- Collapse: COLLAPSE_LINES = 20, compared with row.lines (User.tsx:15,34). row.lines counts hard newlines only
+  (model/user-text.ts:95), so one long paragraph that wraps to 40 visual lines never collapses. Codex measures the rendered content
+  instead (research/codex-thread-ux.md:86). Collapsed height is calc(20 × 1.6 × 15.5px) = 496px with a fade mask (transcript.css:63-67);
+  the Show more/Show less button is at User.tsx:60-64.
+- Attachments: images render inline at up to 240×180 (transcript.css:70); file chips are .transcript-chip (mono, 12px); pasted blocks
+  are chips that expand to a <pre> capped at 144px (User.tsx:81-93; transcript.css:71-81).
+- The text goes through the shared Markdown pipeline (User.tsx:41). Raw HTML tags are deleted there (sanitize.ts:18-20), so a
+  slash-command record <command-name>/compact</command-name>\n<command-message>compact</command-message><command-args></command-args>
+  renders as "/compact\ncompact" over two pre-wrap lines. I verified this by rendering that exact string. It explains screenshot 03's
+  two-line "/compact compact" bubble.
+- Reference: Codex's bubble in screenshot 07 uses the body text size (about 14px, 23px line pitch), padding about 10px top/bottom and
+  16px left/right, and rounded-2xl.
+Likely cause / what a fix touches
+- "Too big" is mostly the 15.5px/24.8px type inherited from the row, plus the 26px action row that is always reserved. Touch: the bubble's
+  own font-size and line-height (transcript.css:52-61; it has no font-size of its own today), the action row (84-86: overlay it or
+  collapse its height until hover), and padding-bottom (51).
+- Slash commands: turn the engine's command-name/command-args record into one line such as "/compact <args>" in
+  model/user-text.ts, before the markdown stage, the same way pasted content is already extracted there (user-text.ts:1-3).
+- Collapse: measure the rendered height instead of counting newline lines, if the owner wants long single-paragraph prompts folded.
+Open questions for the owner
+- Should the bubble use the same size as the prose (Codex) or a smaller UI size?
+
+3. Final assistant text reads as a thought (bug level)
+Facts (a) the answer/commentary rule
+- C6 plan definition (docs/doperpowers/plans/2026-09-28-c6-transcript.md:43): the answer is "the assistant text blocks after the last
+  tool use of a turn"; only the answer stays outside the work area.
+- Implementation (src/renderer/src/transcript/model/derive.ts:483-494):
+    const WORK_ROWS = new Set(['subagent','agent_message','question','plan','request_slot','error']);
+    const lastWork = resolved.map((item) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind))).lastIndexOf(true);
+    ... text with i > lastWork → answer (outside the work area); otherwise → commentary inside the work area.
+  Hook executions resolve to items of kind 'cell' (derive.ts:416-427, 462-464; cells.ts:254-268). Notice rows are kind 'error'
+  (derive.ts:443-444, 763-765). Both therefore count as "work".
+- Wire order: under the owner's settings, every assistant text is followed by hook events. fx:pass3/steer-next.jsonl has a MessageDisplay
+  hook at seq 230/231 after the answer's deltas (226-229), the assistant frame at 232, the Stop hook at 236/237, and the result at 239.
+  JRNL shows the same: text deltas, MessageDisplay 61/62, assistant 63, Stop 67/68, result 69.
+- The text row sits at its first delta's position (derive.ts:268-274), which is before both hooks. lastWork is the last hook, so the final
+  answer is classified as commentary: muted and inside the work area. This is the defect.
+- Disk-backed history has no hook events: C4's backfill maps none (no "hook" in src/engine-host/fs/backfill.ts). The same turn therefore
+  renders correctly after a reload from disk and wrongly live. No test pins answer placement for a turn that ends in hooks;
+  journals.test.ts:178-188 checks user rows only.
+Facts (b) styling
+- AssistantText.tsx:13 chooses .transcript-answer (--fg) or .transcript-commentary (--fg-muted, 62% alpha; transcript.css:91-92). Both
+  render at prose size, so commentary reads as greyed-out narration.
+- The thinking row is a 12px disclosure; its text is 13px muted, capped at 140px (Thinking.tsx; transcript.css:116-125).
+- In screenshot 11 the answer is grey (commentary), placed between "Thought for 1s" and "Ran 2 hooks".
+Facts (c) why "to human" and "<to-human>"
+- Live: the owner's MessageDisplay hook rewrites the message. JRNL seq 62 hook_response carries hookSpecificOutput.displayContent =
+  "\n\u001b[1;36mto human\u001b[0m\n\n…", and the engine's assistant frame (seq 63) carries that transformed text. The streamed deltas
+  carry the raw model text "<to-human>Doing fine…</to-human>" (concatenated text_deltas in JRNL). The engine has no to-human logic
+  (0 hits in ~/claude-code-bundle/2.1.283/cli.pretty.js).
+- MAWS strips ANSI in the reducer (model/ansi.ts:1-3,9-19; reduce.ts:170,470,474), so the completed block is a bare "to human"
+  paragraph. During streaming the raw tags are deleted as HTML instead (next bullet).
+- Unknown tags in markdown: src/renderer/src/transcript/view/markdown/sanitize.ts:18-20 deletes every mdast `html` node (block and
+  inline); rehype-raw is not used (44-48). Text outside the tags survives. Text inside survives only when a blank line separates it
+  from the tag, or when the tag is inline in a paragraph.
+- Data-loss defect, verified by rendering through the real Markdown component (static and live):
+  "<to-human>\nPara1\n\nPara2\n</to-human>" renders only Para2. "<to-human>\nOne paragraph\n</to-human>" renders nothing.
+  "<to-human>\n\nPara\n\n</to-human>" and "<to-human>Inline…</to-human>" render correctly. Cause: CommonMark HTML block rule 7 makes a
+  tag alone on a line swallow the following lines up to the next blank line, and the whole block is then deleted.
+- Sidebar and Overview use a different path: plain first lines, no markdown. Disk-seeded sessions take the first line of the
+  transcript's last assistant text (src/main/index/source.ts:245-250; engine-host/fs/summarize.ts:212-217), which is the raw
+  "<to-human>" in the owner's older sessions (screenshot 10). Live sessions take firstLine of the completed block
+  (src/main/sessions/digest.ts:56-59,133-136), which strips no ANSI; a live row would show the escape-coded label (not seen in a
+  screenshot). The tracker row is docs/tech-debt-tracker.md:35.
+Facts (d) the collapse
+- Row order (derive.ts:503-516): user, divider, then the work rows only when expanded, then the answer rows, then the receipt. A finished
+  turn collapses when the reader is following (stores/transcript.ts:138-149). So an answer misread as commentary disappears behind
+  "Worked for Ns" with nothing visible below the divider. "Expand all old work" exists only in the harness
+  (stores/transcript.ts:61,384; harness/Harness.tsx:84-85).
+- The "Thought for 1s" row: thinking before lastWork goes through the group machine, and a group with no tool cell flushes as thinking
+  rows (groups.ts:41-44). In JRNL the thinking block is empty: seq 32 has thinking "" with a signature only. The row still opens to
+  empty text (Thinking.tsx:19).
+Likely cause / what a fix touches
+- derive.ts:484-485: exclude hook cells (cell.toolName === 'hook') and notice rows from lastWork, or key the answer to the turn's last
+  assistant message by apiMessageId once turn.ended arrives (X1 turn.ended carries resultText: src/shared/graph/events.ts:105-107).
+  Add a gate over fx:pass3/steer-next.jsonl ("COUNTED" must be an answer) and over a JRNL-shaped synthetic fixture.
+- Tag handling (whatever the owner rules on reading through it): extract or unwrap unknown wrapper tags before the remark stage,
+  as user-text.ts does for pasted content, so their bodies are never deleted.
+- Use the same rule for the digest's first line (digest.ts:56-59, source.ts:250), and strip ANSI there too.
+- Hide or disable a thinking disclosure whose text is empty (Thinking.tsx; derive.ts:219-221).
+Open questions for the owner
+- Read through <to-human> (show only the body, drop the label) now, or leave it for the plugin (tracker row 35)?
+- The live text is the MessageDisplay hook's display form, which differs from the model text that is streamed and stored on disk. Should
+  MAWS show the display form or the raw model text?
+
+4. Hook rows ("Ran 2 hooks", "Ran 2 commands, ran 4 hooks")
+Facts
+- Wire: launch passes --include-hook-events (src/engine-host/launch.ts:57). The engine emits `system` frames of subtype hook_started
+  and hook_response (fx:pass2/hooks.jsonl seq 32-33; fx:pass3/steer-next.jsonl seq 4-9 SessionStart, 39/41 PreToolUse:Bash,
+  85-86 and 230-231 MessageDisplay, 236-237 Stop); hook_progress is dropped (normalizer-system.ts:148). They are normalised to
+  hook.started and hook.finished (normalizer-system.ts:89-96; schema src/shared/graph/events.ts:140-144).
+- The engine host needs these frames: hook_started extends the initialize wait for SessionStart hooks (src/engine-host/session.ts:52,
+  467,830-833). The flag must stay; hiding them is a renderer change.
+- Reducer: hook.started routes to the current turn, and hooks outside any turn are dropped (reduce.ts:538-548). Host callback hooks
+  are ignored (571-573).
+- Cell: hookCell (model/cells.ts:254-268) has category 'commands'. It is groupable when the outcome is success or running, and a
+  standalone cell for error or cancelled (263). Its label is "Hook <event> · <name>" (copy.ts:183).
+- Phrase: phrasesOf counts hooks (groups.ts:105), and groupSummary appends "ran N hooks" after commands (copy.ts:108). That is how
+  "Ran 2 commands, ran 4 hooks" arises: two PreToolUse:Bash hooks plus two MessageDisplay hooks. Hooks are excluded from the divider's
+  tool-call count (derive.ts:694).
+- Spec: C6 plan classification row (plan:233) and copy row "ran {n} hooks" (plan:317). Charter §5.3 says nothing about hooks; §5.6
+  lists "hooks and MCP status" under Session info (charter.md:216).
+Likely cause / what a fix touches
+- Hiding successful hooks: skip them in derive.ts:416-427 (or filter at 462-464) so they create no items. That removes them from groups,
+  phrases and lastWork in one change, and with item 3's fix keeps any trailing hook from demoting the answer.
+- Failed or cancelled hooks are already standalone cells (cells.ts:263); keep them visible as trouble rows or hide them too.
+- The engine journal keeps every hook frame. The Log tool shows files only (tools/agents/log/LogTool.tsx:1-5), so nothing in the UI
+  would list hook runs after this change. Amend the C6 plan rows plan:233 and :317 with a dated note.
+Open questions for the owner
+- Hide failed hooks too, or keep a failed or blocking hook (for example a Stop hook that blocked) as a visible row?
+
+5. Mid-turn message placement (bug level)
+Facts: the three paths
+- Enter while busy is Queue: "Sends when this turn ends" (composer/submit/submit-state.ts:54-58,89-92). The queue is MAWS-owned and
+  releases the head only at a main-lane turn.ended (src/engine-host/queue.ts:1-13; charter §4.2 "Queue ownership", charter.md:130).
+  A queued message genuinely reaches the engine after the turn, so its own next turn after that turn is correct for MAWS's semantics.
+- ⌥Enter is Steer with priority 'next' (composer/editor/submit.ts:50-53; submit-state.ts:102-107), and so is the queue row's Steer
+  (composer/queue/QueueList.tsx:1-7,62,178). The engine folds the message into the running turn at the next tool boundary. In
+  fx:pass3/steer-next.jsonl: the out user frame at seq 46; the engine's replay of it at seq 70, right after the 2nd tool result (69);
+  command_lifecycle started at seq 71; six more Bash calls (seq 72-222); then the answer "COUNTED" (232) and the result (239).
+- "Interrupt and send" is priority 'now' (submit-state.ts:57,104-107). The engine aborts the running turn (aborted_streaming) and runs
+  the message as its own next turn (charter.md:130; journals.test.ts:190-195: 3 turns, stopped, completed, completed). Rendering it
+  after the stopped turn matches run order.
+Facts: how a steer is placed
+- C3 emits user.message at the write (normalizer.ts:501) and dedupes the engine's replay of it (normalizer.ts:341-344). The reducer
+  opens a pending turn for it (reduce.ts:451-457). At command_lifecycle started inside the running turn, fold() pushes the message onto
+  the running turn's events at that moment (reduce.ts:260-271,411-422). The event therefore sits at the right place in event order:
+  after tool #2.
+- derive then moves it to the end. A non-opener user.message becomes an item of kind 'steer' (derive.ts:263-264), and
+  `if (item.kind === 'steer') answer.push(item.row)` (derive.ts:489) puts every folded prompt into the answer list, which is emitted
+  after all work rows (derive.ts:514-516). Expanded, the steer bubble renders after the last tool call, just above the answer, and each
+  new work row inserts above it. Collapsed, it renders right under "Worked for …".
+- This is the defect: the bubble is keyed to the answer list instead of its event position. The row's `steer: true` flag (derive.ts:212)
+  is not used by User.tsx, so nothing marks the bubble as steered.
+- The divider's aria-controls stops at the first user row (Divider.tsx:36-45), which reflects the same assumption.
+Facts: disk divergence (code read; not verified on data)
+- C4's backfill emits turn.started for every non-meta user record (fs/backfill.ts:124-131). A turn.started with no pending turn closes
+  the open turn as completed and opens a new one (reduce.ts:388-399). If the engine writes the steer as an ordinary user record (the live
+  replay at steer-next seq 70 is a `user` frame with the uuid and a timestamp), a reloaded session splits the turn at the injection point.
+  Live and reload then disagree. No fixture shows a main-transcript JSONL with a steer.
+- Prompts the terminal itself queues mid-turn are written as attachment {type:'queued_command', origin} records
+  (~/claude-code-bundle/2.1.283/cli.pretty.js:940986-941007), and the engine treats a human-origin one as a prompt (cli.pretty.js:43772-
+  43774). C4 drops every attachment in a main transcript (backfill.ts:96-97,109-118), so such prompts from terminal-started sessions
+  never render in MAWS.
+Likely cause / what a fix touches
+- derive.ts:488-494: keep a steer at its event position among the work items. Make it visible even when the turn is collapsed, for
+  example by splitting the work area at the steer (work before it under the divider, the bubble, then the work after it under its own
+  fold), and render the `steer` flag (User.tsx). Pin it with fx:pass3/steer-next.jsonl: the bubble must come between the 2nd and 3rd
+  Bash calls.
+- Probe what a 'next' steer and a terminal queued prompt write to the main JSONL, then make backfill match the live placement.
+Open questions for the owner
+- Did the reported case use Enter (Queue, delivered at turn end by design), or Steer/⌥Enter? If Enter should behave like the terminal's
+  queue (injected at the next tool boundary), that changes charter §4.2 and the §5.4 labels: a product decision.
+- When collapsed, should a steer split the turn into two folds, or show the bubble inline with the work around it collapsed?
+
+6. AskUserQuestion
+Facts
+- Wire (fx:question-roundtrip.jsonl): the tool_use input is questions[] of {question, header, multiSelect, options[{label, description,
+  preview?}]} (seq 136). Then control_request can_use_tool AskUserQuestion with requires_user_interaction (137). The answer is one
+  control_response: behavior allow, updatedInput {…questions, answers: {"<question text>": "Red", "<q2>": "Apple, Pear"}} (138). The
+  tool_result echoes it (140). There is a single response per request, so partial answers cannot be sent to the engine.
+- Answer shape: RequestAnswer {kind:'question', answers: Record<questionText, string>}, multi-select joined with ", "
+  (src/shared/engine/answers.ts:17). The broker maps it to updatedInput.answers (src/engine-host/broker.ts:319).
+- Live card: request-card/variants/Question.tsx QuestionBody (119-166) renders all questions at once (138-154). Submit stays disabled
+  until every question is answered (questionAnswers returns null otherwise: request-card/answers.ts:24-31). Selections live only in
+  component state (useState, 120-121). The card is keyed by item (RequestCard.tsx:160-162), so a remount or a placement change (docked
+  vs inline) loses partial answers; nothing persists them. Skip and Esc send a plain deny (130).
+- Delivery: one path, RequestCard useDelivery → ipc 'session.answer' (RequestCard.tsx:77). After delivery the card collapses to
+  "Answered · Submitted" (232, 254; what='Submitted' at Question.tsx:129).
+- Shared component: the same RequestCard and QuestionBody serve docked (composer/Composer.tsx:411), inline in the transcript slot
+  (request-card/inline.tsx:35), the Overview card (overview/SessionCard.tsx:100, placement 'card') and hover (a HoverPreview only,
+  RequestCard.tsx:256-258). A stepper inside QuestionBody changes the Overview, which works today, as well.
+- History row (screenshot 04): transcript/view/rows/Question.tsx shows every question with its header, text, all options, descriptions
+  through Markdown and a "Chosen" badge (20-52; copy QUESTION at model/copy.ts:243; css transcript.css:300-320). The answers come from
+  question.answered or tool.result.structured.answers (derive.ts:315-318,403-406; row built at 725-735). 'question' is a WORK_ROW
+  (derive.ts:484), so the history row sits in the work area and folds away when the turn collapses.
+- Spec: §5.3 says "inline form with numbered options … keyboard navigable; submit answers all questions" (charter.md:191). D-9
+  (charter.md:34) keeps P0 on the existing schema. A one-at-a-time stepper is a presentation change that still submits all answers
+  once; the card binds no digit keys for questions (no `digit` in bindKeys at Question.tsx:132-134).
+Likely cause / what a fix touches
+- Stepper: QuestionBody gains a step index. Show one question at a time and advance on a single-select pick (and on Next for
+  multi-select or Other); keep the answers in its state; Submit on the last step. Enter and Esc still go through bindKeys. The pure
+  answers.ts and the wire need no change. RequestCard.test.tsx and inline.test.tsx cover the current layout and will need updating.
+- Compact history: rewrite QuestionRow as one line per question, "header or question → answer", with Skipped and Not answered kept
+  (Question.tsx:16-18,49). Decide whether it stays in the work area (derive.ts:484) or sits outside it like the answer.
+Open questions for the owner
+- After answering, should the compact widget stay visible when the turn folds (outside the work area), or fold with the work?
+- For multi-select, does picking advance, or is an explicit Next needed?
+
+7. Files-changed receipt
+Facts
+- Component: transcript/view/rows/Receipt.tsx. The heading "N files changed · +a −r" (27); "Review changes" calls
+  actions.reviewChanges(turnId) (29). Each file row is a button calling actions.reviewChanges(turnId, file.path) (36); it shows the
+  absolute path as recorded (37). Show more appears beyond 3 files (15,43-47). The footer has the state text and Undo (55-119).
+- The action is a no-op by default (view/context.tsx:12,27). C8c supplies it (tools/code/open-file.ts:55-60): it resolves the session as
+  sessionOfFocusedPane() ?? sessionOfTurn(turnId), returns silently when null, then calls panelHost.addTool('review', {appSessionId,
+  params:{scope:'turn', turnId, path?}}). It is registered at App.tsx:109 (registerTranscriptActions aliased at App.tsx:31); no later
+  registration overrides it (tools/agents/actions.ts:62).
+- The Review tool supports opening at a file: params {scope:'turn', turnId, path} select the turn and the path
+  (tools/code/review/view-state.ts:47-56). The turn's files come from the receipt row in the store; when the store key cannot be found
+  the tool shows "unavailable … turn not loaded" (review/review-store.ts:304-316). e2e covers the click in the harness
+  (e2e/code-tools.spec.ts:126) and live (e2e/code-tools-live.spec.ts:7).
+- Silent-failure gap: addTool never opens a collapsed right panel. applyAdd and activateIn write the refs, open the session and call
+  requestFocus (panel/host.ts:242-251,290-304,323-343); nothing calls setPanel({collapsed:false}). C10's attach does it explicitly
+  (sessions/attach.ts:168-171). With the panel closed (⌘⇧B, shell-actions.ts:21), "Review changes" and a file-row click add an invisible
+  tab. The owner's persisted layout now reads panel collapsed:false, and one session holds an active review tab
+  (~/Library/Application Support/MAWS/layout.json). So that click did succeed once; the reported failure is not proven to be this path.
+- Other silent exits: session not resolved (open-file.ts:58); a pre-hydration add is queued (host.ts:331-341).
+- Undo: canUndo is a dry run of session.rewindFiles keyed to the turn's prompt uuid (transcript/source/ipc.ts:344-361). The button stays
+  disabled while the check is pending or refused; a refusal shows its reason in a tooltip (Receipt.tsx:60-111). Reapply is null live (359).
+- Hover: none. The only hover affordance is the native title={file.path} (Receipt.tsx:36). The data exists: ChangedFile.cellId points
+  at the edit cell with hunks (derive.ts:645-651), and EditDetail renders hunks. byPath keeps only the first cell of a file edited
+  several times (derive.ts:672-686); the Review tool's turn scope has the per-edit detail via TurnWork.files (derive.ts:574-595).
+- Spec: §5.3 "Review changes into the Review tool" (charter.md:187); §5.6 Review scopes (charter.md:211).
+Likely cause / what a fix touches
+- Make reviewChanges reveal the panel: un-collapse in open-file.ts:56-60, or have addTool un-collapse when activate is true.
+- If the panel was open when it failed, reproduce in the harness (harness/code/CodeHarnessBlock.tsx:68 mounts the transcript with
+  codeTranscriptActions) and check sessionOfFocusedPane in a split.
+- Hover preview: a popover on .transcript-receipt-file showing that file's hunks, reusing EditDetail. Also show paths relative to the
+  session's directory.
+Open questions for the owner
+- When it failed, was the right panel closed, or did it open to an empty or "turn not loaded" Review? Should a file click open the diff
+  as a main-area diff tab rather than in the panel?
+
+8. Other: Jump to latest, "Worked for 0s" on /compact, "Thought for 1s"
+Facts
+- Jump to latest: rendered when following is false (Transcript.tsx:248-259). Following comes from TanStack's onChange: isAtEnd within
+  80px enters it, and only a backward scroll leaves it (Transcript.tsx:23,73-78). Styled as a pill, absolute at bottom 16px, centred, on
+  --bg-overlay (transcript.css:366-381), so it overlaps prose (screenshot 03); working dots show while a turn runs (382-386).
+- Divider rule: a divider exists when the turn has work rows, is not human-origin, or is open and accepted (derive.ts:507). Duration is
+  summary.durationMs from result.duration_ms, else endedAt − startedAt (Divider.tsx:17). Copy "Worked for {t}" omits the count when it
+  is 0 (copy.ts:33-49). Boundary rows (compaction) that arrive inside a turn are work items (derive.ts:428-432,493), so they fold away
+  with it.
+- The repo has no /compact fixture (no compact frames under fixtures/), and the owner's journals contain no /compact. Screenshot 03's
+  sequence (long bubble, "Worked for 0s", then the "/compact compact" bubble after the divider) fits a second user.message landing in an
+  already-open turn as a steer (derive.ts:263-264,489). The long "Show more" bubble may be the engine's compact-summary user record
+  rendered as a human prompt; backfill has no isCompactSummary handling (none in fs/backfill.ts). Unverified.
+- "Thought for {t}": thinkingLabel (copy.ts:213). The duration is the block's completedAt minus its first delta, only for streamed
+  blocks (derive.ts:219-221); a disk block reads "Thought". An empty, signature-only thinking block (JRNL seq 32) still renders the
+  disclosure (Thinking.tsx:15-19).
+Likely cause / what a fix touches
+- Run a /compact probe (live and from disk) and record it as a fixture before changing derive. Then: no divider for a local-command
+  turn with no tool or thinking work; keep the compaction boundary outside the work area (charter.md:192: boundary rows keep the
+  visible transcript true to the model's context); never render a compact summary as a human bubble.
+Open questions for the owner
+- Jump control: keep the centred pill, or use Codex's small round arrow button?

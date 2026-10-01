@@ -1,0 +1,295 @@
+R2 - Claude Desktop (Code / Cowork surface) reference study for MAWS
+Source: static read of Claude Desktop 2.9939.2 (2026-09-24) + claude.ai web bundle captured 2026-09-25. Nothing was run.
+Roots: W = /Users/new/claude-desktop-re/web-bundle/v2/ ; M = /Users/new/claude-desktop-re/app-2.9939.2/.vite/build/
+Citations are file:line (minified chunks; most code sits on a few long lines). "CL" = in-app changelog chunk
+W/cb63ed069-BniKTbP9.js, extracted to /tmp/maws-ux-study/_changelog.txt (1.x) and _changelog2.txt (2.x).
+Token scale: CDS base -> comfortable (.cds-root[data-density=comfortable]) in W/c6a992d55-DRT6pRFV.css:1.
+  pad-md .5rem->.75rem, pad-lg .75rem->1rem, gap-xs .375->.5rem, radius .375->.5rem, radius-composer .75->.875rem,
+  h-control 1.5->2rem, body 13/19px->14/20px, code 12/17px->13/19px, footnote 12/15->13/17px, prose 14/20->16/24px.
+Code "epitaxy" surfaces pin their own transcript size (see 4), so density mostly affects chrome.
+
+1. MODEL AND EFFORT SELECTOR
+Facts
+- Component: epitaxy-cds-model-selector (W/c360a9e1c-CPGBhuJc.js:2) wraps the shared CDS selector (W/shared-9-CtVPc8gf.js:2,
+  export S=Ny) with triggerVariant:"pill", config {shortcuts:true, thinkingStyle:"separate"}. Placement "composer" ->
+  popup side:"top", align:"end"; placement "rail" -> side:"bottom", align:"start", popup width = anchor width.
+- The model menu is a Menu.Root/Trigger/Popup layer anchored to the pill (sideOffset 4, collision padding), so it is not
+  inside the editor DOM. Popup max-w-[min(26rem,var(--available-width))] (shared-9:2, ey).
+- Trigger = ghost button labelled with the resolved model name. aria-label "Model: {name}". Tooltip and shortcut: "Open model
+  menu" Cmd+Shift+I (W/shared-21-C9ZCBX9N.js:4). While loading: spinner + "Loading models…". "Default model" is only the
+  EMPTY label, used when the catalog has 0 models (shared-9:2, Se=i??_e when B=models.length===0). The trigger never says "Default" for a real model.
+- Menu rows (shared-9:2, ay): Item checkedRole radio, accent Check on the current model. Digits 1–9 shown as muted
+  footnote trailing hints (data-number-key, aria-keyshortcuts). Each row carries its capability description, badges and a
+  tooltip/disabled reason. Sections: "main" (headline models, top level), "overflow" under a "More models" submenu with
+  "Search models"/"No matches", and "deprecated" (shown only if it is the current model) (shared-9:2, _y).
+  CL 2.x: "three headline models at the top level, older models and context-size variants under More models, each model
+  shows a capability description, unavailable models appear disabled". A supports_1m_context model gets a name suffix (gs.millionContextSuffix).
+- Default pre-selection (c360a9e1c:2; W/cc43287c9-Dhm1ErF1.js): hostDefaultModel = settingsDefaultModel (Claude Code
+  settings.json model) gets a neutral "Default" badge on its row; presetModelId gets a "Preset" badge.
+  CL: "Your project's settings.json model is used by default for new sessions", "model-picker memory - the picker now
+  remembers your last model choice", "reflect your organization's allowed default model".
+- Effort is a SEPARATE trigger next to the model pill (thinkingStyle "separate" drops effort from the model label;
+  data-cds="ModelSelectorEffort"), lazy chunk W/c8e04f916-Bey9kAvj.js:1 (EffortControl).
+  - Trigger: ghost button showing the level name. aria "Effort: {name}". Shortcut "Open effort selector" Cmd+Shift+E.
+  - Popover w-[220px], gap-lg. Header "Effort" (muted) + current level, with a "?" Help popover ("About effort", 220px).
+    "Faster" … "Smarter" end labels above a stepped slider (min 0, max n-1, step 1, showStops).
+  - Warning row for Max: "Claude thinks longer with Max effort and uses your limits faster than High." Badge "High usage".
+  CL 1.10628: "Choose effort with a slider next to the model picker".
+- Effort levels come from the catalog per model (thinking.effort_options), not a fixed list. Label set
+  (W/c1c1ec7b9-DVuWiUSs.js): low "Low", medium "Medium", high "High", xhigh "Extra-high", max "Max"; "{effort} · Fast".
+  An optional extra stop "Ultracode" (c360a9e1c:1) selects the highest effort plus dynamic workflows (CL).
+- Mid-session change dialog: "Change effort?" / "This session is cached with effort set to {current}. Changing it to
+  {next} means Claude re-reads the whole session on your next message, which uses more of your limit." (cc43287c9).
+  Slash commands /model and /effort; fast mode toggle inside the picker.
+MAWS should copy: a model pill anchored above-right of the composer in a portal menu (headline models + "More models"
+submenu, a "Default" badge on the settings default, digit keys), plus a separate effort pill with a 220px stepped slider.
+Labels come from the engine's catalog; the trigger always names the real model.
+
+2. ASKUSERQUESTION
+Facts
+- Live card: epitaxy-question-card max-w-[480px], role=group (c1c1ec7b9:3). ONE question at a time.
+  - With several questions the header pager reads "{position} of {count}" between ghost arrows ("Show previous
+    question" / "Show next question"). Header row bg-alpha-1 px-lg py-md.
+  - Options are full-width rows (epitaxy-answer-option flex gap-md px-lg py-lg) with 1px --cds-border separators.
+    The mark is a radio (epitaxy-radio-mark, var(--cds-checkbox,1rem), accent fill), or a checkbox when multiSelect.
+  - "Other" is always the last row. Selecting it opens an auto-growing text box with placeholder "Type your own answer
+    here" (c1c1ec7b9:3), 1→~4 lines, Cmd/Ctrl+Enter submits.
+  - Footer epitaxy-approval-actions justify-end gap-sm px-lg pb-lg pt-md: secondary "Skip", then a primary button that
+    reads "Next" and becomes "Submit" on the last question (Cmd+Enter). Disabled reasons: "Choose an option or skip this
+    question" / "Question {n} is unanswered".
+  - Number keys pick options (CL 1.10628).
+  - All answers are sent as ONE reply (CL 2.x: "pick an option and step through each question before your choices are sent as a single reply").
+- Placement while pending: the approval/question dock at the transcript tail (modes card-at-tail /
+  card-and-queue-at-tail / card-below-turn-box), not inside a tool row (c1c1ec7b9:61).
+- After answering: a compact receipt replaces the card. epitaxy-question-receipt epitaxy-card-outline max-w-[480px]
+  rounded-lg (c1c1ec7b9:61). Each pair is px-lg py-md: question in text-body font-medium, answer in text-body
+  text-secondary, 1px dividers. Unanswered pairs read "Not answered" (c1c1ec7b9:86).
+MAWS should copy: a 480px stepper card (pager, radio/checkbox rows, "Other" free text, Skip + Next→Submit, one combined
+reply), replaced in history by a bordered question→answer receipt.
+
+3. COMPOSER ANATOMY AND SIZES
+Facts
+- Column: the composer shares the transcript column (max --max-content-width 768px, +32px gutters) and overhangs it by
+  --composer-span-overhang .5rem on each side. So the box is about 784px wide at default width
+  (W/shared-7-CQvmPZlR.js, wl; ps-[max(0px,calc(gutter-.5rem))]).
+- Box (epitaxy chrome, shared-7, kl/Al): relative isolate min-h-11 (44px) rounded-[10px], bg-surface-3, ring shadow
+  0 0 0 1px var(--cds-fill-secondary-ring), 0 2px 8px (4% shadow). On focus: 25% neutral ring, 0 6px 16px
+  (W/shared-styles-qrvzrNza.css:1, .epitaxy-prompt>[data-surface]). CDS shell radius token --cds-radius-composer 12px base / 14px comfortable.
+- Editor: Tiptap. Max height min(24rem, 40svh) for the CDS shell (W/c099c328d-FfAWgLl9.js), min(218px,40svh) for the
+  legacy prompt. 16px font only on pointer:coarse.
+- Placeholders (cc43287c9:48):
+  - in a running session: "Type / for commands"
+  - new session: "Describe a task or ask a question" (variant: "Describe something to build, change, or fix")
+  - bash mode ("!"): "Enter a shell command", with "Bash mode. Press Escape to return to chat." Draft history: "History
+    {index}/{total}", "<kbd>↓</kbd> to restore your draft".
+- Chin = the row BELOW the box: ChatComposerChin "flex min-h-control items-center gap-0 text-footnote font-normal
+  text-secondary", mt-1.5 (comfortable mt-2) (W/shared-5-Bb7HPNRN.js). Code fills it from Ml (W/cc70f2bdf-BuHVM8pi.js:8):
+  - leading: "+" plus menu (opens side:"top"), dictation mic ("Dictate"; a chevron switches dictation/voice), then the
+    permission Mode picker (header "Mode", Cmd+Shift+M)
+  - trailing: footer indicator pill ("Set by Claude Code's server configuration"), model pill + effort pill, then the context/usage ring
+  Cowork CL confirms the same row: "the row under the composer (Add folder, permission mode, model)".
+- Send/Stop/queue sits inside the box (ChatComposerActions/PrimaryAction). "More send options": Send, "Queue for later",
+  "Send in a forked session" (Cmd+Alt+Enter), "Fork with this prompt" (c099c328d).
+- "+" menu (c099c328d): "Add files or photos" (Cmd+U), "Add folder", "Slash commands", Connectors (Add/Manage/Browse),
+  Plugins (Add/Manage/Browse), "Import GitHub issue", "Import Linear issue". "@" is a typed mention (files, agents, sessions), not a button.
+- Above the box, a dock (ChatComposerDock, shared-1) stacks:
+  - notices (ChatComposerNotices)
+  - the queued-message stack
+  - the approval/question dock (floor 144px, shared-7)
+  - the PR/branch row: min-h-[40px] p-[8px] rounded-[10px], bg-alpha-1 / git-merged / git-queued / accent-muted (shared-7, Il/Ll)
+  - banners such as "Resume" for paused projects
+- New-session setup: environment pill ("Where Claude runs"), folder ("Choose folder…/Add folder…/Change folder…"),
+  "Branch to start from" (Search branches…) and a Worktree checkbox. These are draft controls outside the text box
+  (epitaxy-origin-*, cc70f2bdf; cc43287c9). /add-dir and /cd also exist.
+MAWS should copy: a ~44px-min, 10px-radius box on the transcript column (+8px overhang), growing to min(24rem,40svh). A
+footnote-size chin under it ([+][mic][Mode] … [model][effort][context ring]). Status/queue/approvals stacked above.
+
+4. TYPOGRAPHY AND MEASURE (Code transcript)
+Facts
+- Transcript text: .epitaxy-transcript-typography --chat-body .875rem (14px), --chat-leading 1.42857 (20px). Setting
+  data-chat-text-size: s 13px, l 16px. Turn gap = 14*1.42857*.75 = 15px; item gap 10px (c6a992d55:1). Prose is NOT the
+  16px chat-prose size; Code prose is body-size.
+- Measure: --max-content-width 768px by default; data-transcript-width m = 960px, l = 1280px; gutters
+  --chat-gutter 32px each side; column = mx-auto max-w-[calc(measure+64px)] (shared-7, $c/al). Session rail when
+  shown: --session-rail-w 17.5rem (280px) (W/shared-23-COOUG4Ka.js). CL 2.x: the default width changed to "a narrower,
+  more readable column" (Settings → Appearance).
+- User message: wrapper epitaxy-user-turn "flex w-full flex-col gap-sm min-w-0 ms-auto items-end" (right-aligned).
+  Bubble "relative flex flex-col gap-1.25 py-md px-lg rounded-card bg-neutral text-primary select-text"
+  (W/c95649efe-DHh0wceb.js Ua/Wa; W/c63275c0a-CWNVmm4G.js), max-w-[85%] (uw).
+  - bg-neutral = --cds-alpha-1
+  - rounded-card = radius + .25rem (10px base / 12px comfortable)
+  - py-md/px-lg = 8/12px base, 12/16px comfortable
+  - inner prose class epitaxy-bubble-prose
+- Assistant text: no bubble, full column width, body size (the prose uses ps-[var(--cds-assistant-message-text-inset)]).
+- Code: .text-code = --cds-font-size-code (12px base / 13px comfortable), mono. Composer code .928571em (13px at 14px),
+  leading 1.53846 (20px); code-block pre padding var(--cds-pad-md), radius 5px, bg alpha-1 (shared-styles:1). Code font
+  and theme are user-pickable (CL: Settings → Claude Code → Appearance).
+MAWS should copy: 14/20 body in a 768px (+2×32px) column with 960/1280 options. Right-aligned alpha-1 user bubble at
+max 85% with ~10–12px radius. Unboxed assistant prose; 13px mono code.
+
+5. FINAL ANSWER VS THINKING VS TOOL GROUPS
+Facts
+- A turn is a flat item list (c1c1ec7b9:95): text, tool groups, thinking. Tool groups are one-line summaries
+  ("ran …, edited …") with expandable ~40px rows (c1c1ec7b9:115). Text renders as prose at the same level.
+- Thinking is hidden in the default "Normal" view. Transcript view menu offers Normal / Thinking / Verbose (CL 2.x
+  default-view setting; Summary removed). In Thinking/Verbose, thinking appears as a "Thought process" step
+  (c1c1ec7b9:83) or a left-rule block (border-l-2 border-alpha-2 pl-md, text-muted italic). In thinking view a one-line
+  recap appears above each tool group (CL 1.2581).
+- "Thought for {seconds}s" exists in Code only in the live turn-status line at the tail (TurnStatus, c1c1ec7b9:95).
+  That line shows elapsed seconds, tokens and "# running tasks". While thinking it cycles "Thinking…" → "Still
+  thinking…" → … It is NOT a collapsible transcript header. The chat/Cowork timeline has its own "Thought for" with
+  "# steps / Hide steps" (W/shared-11-CETOUHfJ.js:37; W/shared-14-DNjmCwiw.js:7).
+- The final answer is never inside a collapsible group. Only short narration followed by a tool call can fold into
+  the neighbouring group (c1c1ec7b9:65). The closing text has no following tool, so it always renders as standalone prose after the last group.
+MAWS should copy: tool runs as collapsible summary groups and the final answer as plain prose outside them. Thinking
+stays hidden by default behind a Normal/Thinking/Verbose view switch. Elapsed "Thought for" lives in a live status line.
+
+6. HOOKS
+Facts
+- No per-hook execution rows in the transcript. Hook progress output is read only by a code-review feature (W/c5c5aca8d:1).
+- Hooks surface only as:
+  - hook messages at warning/notice level → notices "{plugin}: {message}" / "Claude Code notice" (W/c06cf64bb:73);
+    plain feedback rolls into the tool-group summary as "received hook feedback" (c63275c0a:27); info level is dropped
+  - blocked prompt card "A hook blocked your prompt" / "Prompt blocked by a hook", with the reason or "A
+    UserPromptSubmit hook stopped this prompt before it reached Claude.", and "Edit prompt" refilling the composer (c1c1ec7b9:82)
+  - a "Hook re-prompted Claude" row when a Stop hook continues the turn (c63275c0a:13)
+  - Cowork CL: "the reason the message was blocked is now shown"
+- Desktop also does NOT render the user's Claude Code statusLine. In the main process, statusLine/hooks are only
+  checked as executable settings (M/index.chunk-DzZc-q0x.js, Uur).
+MAWS should copy: no hook timeline. Show hook output only as notices, a blocked-prompt card with "Edit prompt", and a
+re-prompt marker.
+
+7. SIDEBAR / SESSION LIST; CHAT-BAR "+" PATTERN
+Facts
+- Sections Pinned / Projects / Recents (W/shared-25-BZtm97sd.js:2). Group-by date/project/state/custom/none; sort
+  recency/alpha/created; filter active/archived/all (shared-25:8). Pinned shows 20, then "Show more".
+  Empty state: "Sessions you start will show up here." (W/shared-24-Dwl0T1gH.js:2).
+  CL: "Every folder you've worked in appears under Recent - click the + next to one to start a session there"; "Project
+  rows in the Recents sidebar expand with a click, and a hover-revealed View project button".
+- Row sizes (.dframe-root, shared-styles:1):
+  - compact: --df-row-h 26px, font 13px, group font 12px, icon 16px, row-ctl 20px, radius-pill 6px, sidebar width 288px, header 48px
+  - comfortable: 32px / 14px / 13px / 20px / 24px / 8px
+  - desktop comfortable: row-h 30px, group padding-top 14px
+- Group header (shared-24:2): truncated name, "· {unread}" in accent, "· {working}" muted. A "+" button reads "New
+  session in {group|folder}". The draft says "This session will be added to {name} in the sidebar when you start it."
+- Code row: one line by default (status mark + title). Optional two-line metadata (.df-described-row, 12–13px/16px):
+  word (blocked/PR state) · repo/branch · tail (task summary / blocked reason / post-turn summary / relative time) · place.
+  - Hover reveals a ⋮ ghost button ("More options for {label}", W/shared-20-DV2FnfUp.js:7). Menu: Pin, Rename, Archive,
+    Mark read/unread, Open in split view, Copy session ID, "Mark as completed" (clears the yellow needs-input dot).
+  - Status priority: needs-attention > running (pulse) > unread.
+- Cowork under-the-composer:
+  - The new-task home shows SUGGESTIONS, not past sessions (W/c62135ccf-BXgGkCup.js:2): "Let's knock something off your
+    list.", placeholder "Describe a task, from a quick fix to a multi-step job.", category rows with shuffle and "Hide
+    suggestions", then "Get to work with" skills and "Customize with plugins".
+  - The pattern the owner describes is the Cowork PROJECT page (W/c71dee58b-BOE8bx1C.js:30), column max-w-3xl gap-8:
+    header → composer ("What would you like to work on in this project?") → outputs grid → the project's sessions list
+    (Chats/Activity tabs, "Search this project", "Last message {relativeTime}", "Load older").
+MAWS should copy: per-project "+" opening a draft whose composer has that project's previous sessions listed beneath
+(Cowork project page). Rows 30px / 14px title with a hover ⋮ and attention > running > unread dots.
+
+8. SIDE CHAT / /btw
+Facts
+- Entry points:
+  - "/btw [question]" (host-intercepted, neverReachesCli; "Ask a quick side question without adding to the session"; W/cc183b3ab-bmsGeXUe.js:1)
+  - Cmd+; "Toggle side chat" (shared-21:4)
+  - pane toggle "Show side chat"
+  - context menu "Start a side chat / Send to side chat"
+  CL 1.5354: "/btw or cmd+; opens a side chat with Claude without interrupting your main session".
+  Unavailable states: "only available in the primary pane", "available once this session starts".
+- Path A, preferred for local sessions: startBtwChild(parent, …, "question"|"selection"|"bare") → main process
+  forkSession(parent, {userFork:true, btw:true}) (M/index.chunk-BURbyyNT.js:1). The child is a real forked session
+  shown in the session side pane, with the question as its first message and the selection prefilled as a quote. Its
+  injected prompt says nothing is reported back automatically (M/index.chunk-9hgN2KD3.js:1). closeBtwChild archives
+  it. If the fork takes >20s or fails, it falls back to Path B.
+- Path B: startSideChat → spawnReadOnlyFork({kind:"side_chat"}) (9hgN2KD3:1). It resumes parent context with restricted
+  tools and the default permission mode, persistSession false. The panel (W/cccc2cf0a-CVUXWHS7.js:5):
+  - floating, draggable and resizable; 320×340px default; 16px edge margin; remembers its rect; can dock or pop out
+  - header "Side chat" ("Forking…"), Clear, Close
+  - empty state "Chat about this session without touching the main thread. Claude sees the full context, and nothing here is added to the session."
+  - compact composer "Ask a quick question…" → "Follow up…"; answers render as small prose; shared user bubble
+- epitaxy-aside ("Claude replied:") is the responsive quick reply to a mid-turn message, not side chat
+  (c63275c0a:13). "Attach message/selection as context" carries content back by hand (Cmd+Shift+L).
+MAWS should copy: "/btw" means a session-scoped side panel (Cmd+;) running a forked or read-only child that never
+writes into the parent. Results go back only via explicit "Attach as context".
+
+9. STATUS LINE / USAGE
+Facts
+- No cwd/cost status line under the composer. The chin's trailing context ring (Pc, cc70f2bdf:8) is the per-session meter.
+  - aria "Usage: {parts}"; summaries "Context {summary}", "{pct}% of 5-hour limit", "{limit}: {pct}%"
+  - amber when near the limit; it can instead render as a session-rail card (surface "rail_card" vs "ring_popover")
+  - popover (W/c2d611398-CajM5sXx.js): "Context window" "{percent} used" / "{used} of {limit}" with 4px bars; Plan usage
+    limits; "Extra usage"/"Usage credits"; "Compact session"; "See detailed breakdown"; "View usage in Settings";
+    "Last updated {time}. Send a message to refresh."
+  - "{tokens} until auto-compact" / "Auto-compacts soon" (W/cf6ae6197-C8E8xVRa.js:7)
+- Other usage surfaces:
+  - /usage (aliases stats, cost) inline card; /context, /status ("version, model, environment, and account"); /usage-credits (cc183b3ab:1)
+  - session rail cards Context / Usage / "Weekly" / "Usage settings" (W/c73f45bc3-_0jbq9Ko.js)
+  - the macOS menu-bar usage menu (native trayUsage; usage-menu-banner-v1)
+  - Settings → Usage
+  - limit banners naming the limit and reset time, with "Auto-continue when limits reset" (c1c1ec7b9)
+- The footer-indicator pill (epitaxy-footer-indicator): "Set by Claude Code's server configuration."
+MAWS should copy: a small context/usage ring in the composer chin with a popover (context %, 5h/weekly bars, Compact),
+plus /usage and /status inline cards. Do not invent a statusLine row.
+
+10. PERMISSION MODE
+Facts
+- Labels for Code (W/shared-10-k9pvhYPa.js, zm):
+  - default "Manual" ("Always ask before making changes", Hand)
+  - acceptEdits "Accept edits" ("Automatically accept all file edits", Code; compact "Accept")
+  - plan "Plan" ("Create a plan before making changes", Scroll)
+  - auto "Auto" ("Claude handles permission decisions", Lightning)
+  - bypassPermissions "Bypass permissions" ("Accepts all permissions", Warning, isWarning; compact "Bypass")
+  - dontAsk "Don't ask" ("Deny actions that aren't pre-approved, without prompting")
+  Cowork variants: "Manually approve"/"Automatically approve"/"Skip all approvals". Danger subtitle for bypass/auto:
+  "Claude can modify or delete files without asking". Bypass and auto need consent dialogs ("Bypass all permissions?",
+  "Enable auto mode?", c73f45bc3).
+- Picker sits in the chin's leading group (header "Mode", "Open mode menu" Cmd+Shift+M; /permissions).
+- Default for a new session:
+  - Claude Code settings permissions.defaultMode for the folder: getDefaultPermissionMode(cwd) ignores invalid values
+    and ignores "auto" when MDM disables it (9hgN2KD3:1)
+  - else the per-folder last pick (CL: "permission-mode picks … apply to the folder where you made them")
+  - else Manual
+  - auto-default cohort: notice "Auto mode is now Claude Code's default permission mode" plus a nudge "Make auto mode your
+    default permission mode?" (cc43287c9; cf6ae6197)
+  - fallback "Auto mode isn't available for this session. Asking for permissions instead."
+- Auto-mode refusal: classifier-denied tools carry policyDenied + policyDenialReasonType "classifier"
+  (c1c1ec7b9, gZ→"auto_mode"). The row shows a denied state ("Denied"); a side session shows "Blocked by auto mode",
+  policy denials "Blocked by permissions", user denials "You declined". A per-session counter bumps on new classifier
+  denials. The approval card offers "Allow and switch to Auto" / "Accept and auto mode".
+MAWS should copy: Manual/Accept edits/Plan/Auto/Bypass labels with icons in a chin picker. The default comes from
+settings.defaultMode, then the per-folder pick, then Manual. Classifier denials are an inline denied tool state labelled
+as auto mode.
+
+11. SLASH COMMANDS
+Facts
+- Typing "/" triggers a Tiptap suggestion ("slash-command-suggestion", allowSpaces, ≤51 chars; W/shared-5:… Ix/Rx).
+  The menu element is appended to document.body (a portal), anchored to the "/" decoration with native CSS anchor or
+  floating fallback, disableFlip, maxHeightCap 384. Container "popover flex flex-col min-w-60 max-w-lg max-h-96"
+  (240–512px wide, max 384px). Keys: Up/Down/Enter/Tab, Esc dismisses. CL: "slash-command menu opening behind the side chat panel" (fixed).
+- Contents (W/c5cd1b4dc-C9nedKJN.js), one flat list:
+  - host commands (HOST_SLASH_COMMANDS, cc183b3ab:1): btw, fork, rewind, mcp, plugin, skills, model, effort, fast, plan,
+    permissions, output-style, rename, export, add-dir, cd, diff, tasks, workflows, status, usage, context, autocompact,
+    memory, config, resume, advisor, schedule, ultrareview …
+  - then the CLI's commands, skills and plugin commands, each with description, argumentHint, aliases, scope/source and a
+    kind icon. Subtitle "Custom command" when it shadows a host name.
+  - Section headers only for "More commands available once the session is running" (draft) and "Some commands didn't load. Type / again to retry."
+  - Also reachable via "+" → "Slash commands".
+MAWS should copy: a caret-anchored portal popover (240–512px, ≤384px) listing app commands then engine commands/skills
+from the init payload, with argument hints and source.
+
+12. QUEUE / STEER PLACEMENT
+Facts
+- A message sent mid-turn appears immediately at the transcript tail as a user bubble, dimmed (opacity-50, or 60 while
+  sending) (W/c95649efe:3; c63275c0a:25).
+  - Detail text: "Unread until the current turn ends." (queued), "Unread until the current step finishes." / "Unread
+    until Claude's next step." (steered), or held (c63275c0a:13)
+  - The first waiting message offers "Send now", which stops the current reply and sends next; Cmd/Ctrl+Enter
+    interrupts at once (W/ccc7a6bb9:6; CL 2.x)
+- Stack above the composer (W/cf74bc599-B0BzDDpt.js:2):
+  - collapsed: "{n} messages queued · Next: {preview}" (min-h-10 px-lg rounded-card bg-alpha-1)
+  - expanded: per-row Steer/Send now, "Edit in composer", "Remove from queue", drag-to-reorder
+  - usage-limit queue waits above the composer
+- A user message always starts a new turn (c06cf64bb:71). A steered message closes the running assistant block and
+  later activity renders under it. The responsive "aside" reply ("Claude replied:") can attach under it (8).
+MAWS should copy: show mid-turn input at once as a dimmed tail bubble with an unread/read caption and "Send now"; keep a
+reorderable queue stack in the composer dock; begin a new turn when the engine picks it up.

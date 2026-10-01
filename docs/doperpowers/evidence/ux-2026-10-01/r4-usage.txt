@@ -1,0 +1,228 @@
+R4 · USAGE: "copy the ClaudeUsage menu-bar pattern; drop 5h/7d/reset and `auto` from the status line"
+Study only. MAWS master a2dca3a0. Nothing modified or restarted. One `curl /api/hello` -> 200 in 7 ms (relay up).
+Abbreviations: CU = /Users/new/Developer/GitHub/claude-usage-menubar (git 1abd89a)   CUS = CU/Sources/ClaudeUsage   CUG = CU/Sources/ClaudeUsageGateway
+  CUD = ~/Library/Application Support/ClaudeUsage   M = /Users/new/Developer/GitHub/MAWS   R = M/src/renderer/src
+
+0. BOTTOM LINE
+- ClaudeUsage's menu-bar item already is "one easy universal usage control": a dot and one number, and a panel listing every account with its
+  limits. Each account has "Route requests here", the one control that changes where MAWS's gateway sessions draw quota from (every D-19
+  session goes through ClaudeUsage's relay).
+- ClaudeUsage has no external control channel: no URL scheme, CLI, AppleScript, XPC or HTTP control route (2.6). A MAWS copy of the panel can
+  show everything and control nothing: every button would be today's hand-off (`open -b` plus a toast telling the user to click the menu bar).
+  Writing pins.json does not work (4.3).
+- Recommendation: make ClaudeUsage's own item the single usage surface. In MAWS: remove `5h`, `7d` and `auto` from the status line; keep ctx and
+  $ (or move them, Q3); re-home the per-session route switch that lives in the usage popover today; retire or narrow the duplicates
+  (near-limit banner, Accounts tab). Add about five lines to ClaudeUsage (a reopen handler) so MAWS's existing "Open ClaudeUsage" drops its
+  panel down. Build a MAWS-side copy (toolbar pill or Electron Tray) only if the owner needs control from inside MAWS; that also needs a
+  control API in ClaudeUsage (4.4).
+
+1. WHERE CLAUDEUSAGE IS, AND WHAT IT IS
+- Source: CU, the owner's repo SSFSKIM/claude-usage-menubar (R accounts/copy.ts:47). A Swift Package of about 23.4k lines: ClaudeUsage (the
+  app), ClaudeUsageCore, ClaudeUsageGateway (the relay on 127.0.0.1:8641), ClaudeUsageToolDeadline (C) and test support. Bundle:
+  CU/ClaudeUsage.app. Not Electron.
+- Native AppKit plus SwiftUI: an NSStatusItem hosting SwiftUI views, and an NSPopover. MenuBarExtra was tried and drew nothing in an SPM
+  bundle (CUS/ClaudeUsageApp.swift:4-21, CUS/StatusItemController.swift:5-13). An agent app with no Dock icon (LSUIElement=true,
+  CU/Resources/Info.plist), bundle id com.haegi.ClaudeUsage, supervised by launchd (~/Library/LaunchAgents/com.haegi.ClaudeUsage.plist).
+- Data in CUD: accounts.json, pins.json, history/<uuid>.jsonl, gateway.json, codex-*.json, openrouter.json, remotes.json,
+  gateway-requests.*.jsonl (about 20 MB/day of telemetry), debug.log. Owner's live config (CUD/gateway.json, keys and flags only):
+  routingEnabled=true, port 8641, holdUnattended=true, pinIdleExpirySeconds=86400. CUD has 4 accounts and 2,641 pins; drainTargetIsManual=false.
+
+2. CLAUDEUSAGE'S MENU-BAR PRODUCT (facts)
+2.1 Status item (always visible)
+- A coloured dot and a bare number with no % sign: "● 83" (CUS/MenuBarLabelView.swift:16-42). The number is the most binding limit, the highest
+  percent across one account's limits (Core Models/LimitReading.swift:151). Which account (AppModel.swift:2569-2577): while routing is in
+  force, the relay's drain (routing) target; otherwise the account Claude Code is signed into; when logged out, the worst account.
+- Dot green/orange/red from Anthropic's own severity; unknown counts as orange (CUS/SeverityColor.swift:11-17). A stale reading is dimmed to
+  50%; "--" before the first reading. Width is re-measured whenever the number changes; the first position is seeded at 70% of the screen
+  width so the item does not land behind the notch (StatusItemController.swift:123-159).
+2.2 Panel (an NSPopover)
+- A click toggles it (StatusItemController.swift:242-263). Transient: closes on focus loss (:68); pinned open while a sign-in runs (:185-202).
+- 380 pt with one column; at three or more accounts, 2 columns at 680 pt and up to 700 pt tall (CUS/PanelLayout.swift:9-44,
+  CU/docs/panel-layout.md). Countdowns tick every 30 s (CUS/PanelView.swift:29). Polling: 120 s while closed; opening the panel refreshes at
+  once and switches to 15 s (AppModel.swift:344, :468-479).
+2.3 Panel anatomy, top to bottom (CUS/PanelView.swift)
+- Header "Claude Usage", with "just now / Nm ago" on the right (:394-403). Note "Usage includes all machines. Activity below is from this
+  Mac." (:45-51).
+- Errors: routing-selection and account-removal errors in orange (:53-67). Keychain "Restore access" notice for locked or foreign credentials,
+  with a button (:73-77, :216-312).
+- Account grid (:121-168), ordered by the signed-in account first, then most-binding percent descending, then email (AppModel.swift:2533-2543).
+- Each account row (AccountRowView :468-683):
+  - Dot filled for the signed-in ("active") account, coloured by worst severity; email semibold when active (:521-528). The filled dot marks
+    the sign-in, not the routing target.
+  - Chips: machines ("This Mac" or remote names read over SSH, :533-539); "N saved sessions" from the pins (:541-560, :686-707); serving
+    "N requests · X% cached · 2m ago" for the last 10 min, with bolt.fill on the account that served the latest request (:717-752).
+  - Limit bars (:562-566, CUS/LimitBarView.swift:11-55): label 52 pt (5h, Weekly, or a model name such as "Fable"), a 96x6 capsule, percent
+    34 pt, time to reset "2h 37m" 52 pt. Names and display rules: LimitReading.swift:104-127 (headline and scoped limits always show; others
+    only when active).
+  - Orange projection, e.g. "At this rate, Weekly runs out around Friday 3 PM" (:568-573). State line: recovery, problem, or "Reading usage…"
+    (:575-589).
+  - Buttons: Reconnect… (:591-605); Restore access (:607-616); "Route requests here" / "Routing here ✓", only while routing is ready
+    (:618-630); "Switch this Mac to this account" with a confirm (:632-655); "Remove account…" with a confirm (:657-676).
+- Remote-machine notes (:85-95). Add-account row: optional email field, "Add account…", hint "Signs in without changing what this Mac is
+  using." (:176-200).
+- Codex accounts section, used by the GPT aliases: Connect, Reconnect, Restore, per-account route (CUS/CodexAccountSectionView.swift:14-263).
+  OpenRouter section: Add / Change / Remove key (CUS/OpenRouterSectionView.swift:15-90). Notification-permission warning (:317-323).
+- Footer (:411-463):
+  - [ ] "Route Claude Code through this app" (:340-346), with help text (:348), a foreign ANTHROPIC_BASE_URL warning (:353-357), "Gateway
+    listening on 127.0.0.1:8641" (:365-379), and the health line "Last 10 min: N requests · response start median/p95 ·
+    stalls/errors/refused/held", orange when degraded (:381-390, :759-785).
+  - [ ] "Open at login", forced on while routing is on (:425-444). Refresh and Quit buttons (:446-461).
+2.4 What each control does to routing and pins
+- Route requests here: AppModel.routeRequests (AppModel.swift:1690-1726) → Gateway.selectAccount (CUG/Gateway.swift:424-428) →
+  Router.selectAccount (CUG/Router.swift:105-125). Sets a manual drain target, persisted to pins.json as drainTarget and
+  drainTargetIsManual=true (CUG/SessionPins.swift:3-40, :170-203).
+  - Overrides the weekly-resets-soonest election (Router.swift:24-36, :252-270). Existing sessions move at their next request, which costs a
+    prompt-cache rebuild (PanelView.swift:629; README.md:241-256).
+  - Survives a restart; ends only when the account becomes unusable or is removed (Router.swift:138-147). The panel has no "back to
+    automatic" button. Offered only when `isRoutingReady`: the routing preference is on and settings.json points at this port
+    (AppModel.swift:1670-1688).
+- Route toggle: setRoutingEnabled (AppModel.swift:1728-1766) edits three keys in ~/.claude/settings.json and needs launchd supervision. MAWS
+  sessions do not depend on it; each launch carries its own env (charter D-19, line 44). But while it is off, the panel hides Route-here and
+  the menu-bar number follows the signed-in account (:2569-2577).
+- Switch this Mac: beginSwitch (:908) runs Claude Code's own `claude auth login`. It signs out running sessions; the confirm says so
+  (PanelView.swift:653). Add account (:948) and Reconnect (:974): isolated sign-ins in a Chrome profile (sheet: CUS/SwitchSheetView.swift).
+  Remove (:834) drops the saved sign-in and its pins (Router.swift:138-147).
+- Quit: suspendRoutingForQuit removes the routing keys so sessions are not stranded (CUS/AppDelegate.swift:38-48, AppModel.swift:1768-1777).
+2.5 Keyboard: no shortcuts and no global hotkey (grep for keyboardShortcut/keyEquivalent: none); standard focus traversal only (panel-layout.md
+  asks it to "preserve keyboard access").
+2.6 External interfaces (this decides what MAWS can control)
+- Info.plist has no CFBundleURLTypes. No AppleScript, XPC or distributed notification (grep: none). AppDelegate has no
+  applicationShouldHandleReopen (grep: none), so `open -b` activates the agent but opens no panel (also observed in the C11 plan, :566).
+- Relay: GET /api/hello answers an empty 200 (CUG/RequestPipeline.swift:201-205). GET /v1/models is served only while OpenRouter is configured
+  (:175-179). Any other non-/v1 path is forwarded verbatim upstream (:213-220). No endpoint exposes usage, accounts or routing state, or
+  accepts a selection.
+- Notifications: alerts on severity rises, at a hard 95% (Core Logic/ThresholdTracker.swift:46), and on window resets (README.md:578-586).
+
+3. MAWS TODAY (facts)
+3.1 Status line `ctx — · 5h 0% · 7d 36% ↻4d23h · $— · auto` (R session/StatusLine.tsx:1-130; owner's shot
+    M/docs/doperpowers/plans/shots/2026-10-01-ux-notes/02-statusline-cwd-usage.png)
+- cwd: its own row (:81-85). ctx, PER SESSION: digest.context from get_context_usage, "ctx N% of 200k" with ⚠ near autocompact (:46-52).
+- 5h and 7d, PER ACCOUNT: windowField gives `5h 53% ↻3h46m`, `5h 0%` once the reset passed with no new row, and `5h —` (:26-32, :57-58;
+  formatting R statusline/format.ts:22-38). Account: the session's pinned account (pins.json pins[engineSessionId]), else the drain target.
+  A direct session uses the engine's get_usage every 60 s (R stores/usage.ts:81-96, R statusline/direct-fallback.ts).
+- $, PER SESSION: digest.cost.totalUsd (:59). Through the subscription relay this is the engine's notional API-equivalent price.
+- auto: record.permissionMode.effective (:60, :118-127). It duplicates the composer's Mode chip (R composer/frame/ModeChip.tsx:1-3), which opens
+  the same ModeMenu; hence "redundant".
+3.2 Data path. Main reads only files, never the relay.
+- M/src/main/usage/claude-usage-reader.ts:1-241 reads CUD/accounts.json (:164; parseAccounts :206-220); pins.json (:173; parsePins :222-233:
+  drainTarget, drainTargetIsManual, pins → accountUUID); and history/<uuid>.jsonl, the newest row per limitKey in the last 64 KiB (session =
+  5h, weekly_all = 7d, weekly_scoped#<Model>; :184-203).
+- fs.watch with a 500 ms debounce and a 60 s floor (:59-77, :110-130). Wired at M/src/main/index.ts:157-159 (`settings.usage`,
+  `settings.usageChanged`); shape in M/src/shared/usage/types.ts:6-34.
+- Staleness: history rows are written only when a percent changes (CU Core Store/HistoryStore.swift:68-70), so `recordedAt` is "last change",
+  not "last read", and MAWS's "Updated Nh ago" (R statusline/UsagePopover.tsx:103) can look stale. Rows carry no severity, so MAWS cannot
+  reproduce ClaudeUsage's dot colours. Freshness follows ClaudeUsage's poll: 120 s, or 15 s only while its own panel is open.
+- Relay endpoints MAWS uses: only GET /api/hello, for health (M/src/engine-host/relay-health.ts:1-40; M/src/shared/engine/relay-health.ts:7;
+  RelayCard.tsx:47). /v1/models is not read directly; models come from the engine's list_models (engine.models).
+3.3 Renderer
+- Store R stores/usage.ts:42-157: applySnapshot takes the drain target's windows; connectUsage asks `settings.usage` for the open tabs' engine
+  ids (up to 64). Mounted from R statusline/index.ts:14-17.
+- Usage popover (R statusline/UsagePopover.tsx:45-107, hosted in popovers.tsx:115-118): account and plan; meters for 5h, Weekly and each
+  model; collapsed "Other accounts · 7d N%" with a `routing` mark; a footer seam (R statusline/footer.ts:1-20).
+- C11's R gateway/UsageFooter.tsx fills that seam (registered at App.tsx:132): route sentence and pace lines (:54-68), "Open ClaudeUsage ↗"
+  (:81-85), Accounts and Session info (:86-91), and the per-session "Switch to Direct…/gateway" (:92-101, R gateway/switch-route.ts).
+  That footer is the ONLY home of the started-session route switch: Session info shows the route but has no action
+  (R tools/session-info/model.ts:27, :103-106).
+- Near-limit banner (R statusline/near-limit.ts:1-198): one per (account, window, reset) at ≥90%, threshold setting `usage.nearLimitPercent`
+  50–100 (:15, :57-60), mounted at statusline/index.ts:15. Duplicates ClaudeUsage's own notifications.
+- Accounts tab (C11; R accounts/AccountsView.tsx:1-132, AccountCard.tsx:1-66, model.ts, copy.ts): a read-only copy of ClaudeUsage's grid.
+  - Same 2-column rule and 52/96/34/52 limit rows. The routing account gets the filled dot, diverging from ClaudeUsage, which fills the
+    signed-in account. A "Routing here · why" line: manual / weekly resets soonest / chosen by the relay (model.ts:9, :115-139).
+  - Plan and tier, saved sessions; hand-offs for add, reconnect and remove; relay line; Refresh (re-checks the relay only). No Route-here
+    button, and it cannot have one (2.6).
+- Commands (M/src/shared/ipc/schema/settings.ts:91-112, M/src/main/gateway/claude-usage-app.ts:35-90, M/src/main/index.ts:272-273):
+  - `settings.claudeUsage.status` reports installed (mdfind, 60 s TTL), running (relay hello) and dataDirPresent.
+  - `settings.claudeUsage.open {intent: panel|addAccount|reconnect|remove}` runs `/usr/bin/open -b com.haegi.ClaudeUsage` and returns the
+    instruction "ClaudeUsage is in the menu bar · click its icon[, then <control>]", shown as an 8 s toast (R gateway/actions.ts:17-34).
+  - Action `gateway.openClaudeUsage` (M/src/shared/keymap/actions.ts:52; registered at R gateway/actions.ts:40) sends {intent:'panel'}:
+    ClaudeUsage is activated, its panel is NOT opened, and the toast says to click the icon. Used by GatewaySection.tsx:92, UsageFooter,
+    the relay card and switch-route.ts:181.
+- Session info (R tools/session-info, model.ts:134-153) already has a "Context, usage, cost" section: Context ("used of max · % · autocompact
+  at"), Usage ("5h … · Weekly …", noted as from ClaudeUsage or from the engine), Cost ("$X this session · $Y since you last looked"). The
+  `/usage` widget (R widgets/UsageWidget.tsx) also shows the windows and get_usage accounting. So ctx and $ already have a home off the line.
+3.4 Charter bindings this touches
+- D-17 (line 42): "Account-wide usage windows stay in every session's status line … Owner's stated design". §5.5 (line 204): the six fields,
+  including 5h and 7d. §3 bullet (line 66). C5 residue (line 401: "six fields of §5.5", binding). C7 residue (line 466: binding on the
+  sources D-17, D-19, §5.5).
+- C11 acceptance (line 545): "usage windows match ClaudeUsage's panel". C11 route-facts placement (line 555): "routing facts live in the
+  status line's usage popover footer and in Session info".
+- The owner's note reverses D-17, so it needs a dated Decision Log entry amending D-17, §5.5, and those residue lines. Charter line 655
+  already names "folding the relay or its accounts into MAWS" as a next-phase candidate.
+
+4. WHAT "COPY THE WHOLE CLAUDEUSAGE MENUBAR PATTERN INTO MAWS" CAN MEAN
+4.1 Three readings. Lead pick: A; B is the upgrade if Q1 says so.
+- A. "The top usage menubar" is ClaudeUsage's own macOS menu-bar item. MAWS stops showing usage per session and points to that item. Fits
+  "the user only has to look at the top usage menubar"; zero duplication. Gap: MAWS cannot open that panel today.
+- B. A MAWS-internal "top menu": a pill in MAWS's own toolbar, which is the title bar (R app/Toolbar.tsx:1-4, :73-80; the right cluster
+  beside "Session actions" and "Toggle right panel"). It shows "● 83" for the drain target and opens a Radix popover in ClaudeUsage's panel
+  geometry, reusing accountsViewModel. Still works when MAWS is fullscreen, where the macOS menu bar hides. Controls are hand-offs only
+  unless ClaudeUsage gains an API (4.4).
+- C. An Electron Tray, i.e. a second macOS status item. Electron 44.4.5 (M/package.json:87) offers Tray.setTitle(text,
+  {fontType:'monospacedDigit'}) for "83" plus a template or colour dot image. On click: a frameless `type:'panel'` BrowserWindow placed under
+  tray.getBounds() and hidden on blur (the NSPopover analogue), or setContextMenu(Menu) as a native NSMenu with radio items per account (no
+  bars). While ClaudeUsage runs, this puts the same number twice in the menu bar. Not recommended unless MAWS absorbs ClaudeUsage (line 655).
+4.2 Data MAWS already has to fill a copy
+- accounts.json: email, displayName, planLabel, rateLimitTier, needsReauthentication, credentialOwnership, lastSeenActive (organizationUUID
+  present but unread). pins.json: drain target, manual flag, per-session pins, giving saved-session counts and each open session's account.
+  history: percent and resetsAt per window, so the most-binding % = max over windows. Plus relay up or down.
+- Missing versus ClaudeUsage's panel: severity colours; the signed-in ("active") account (Keychain); machine chips (SSH remotes); serving
+  chips and the health line (in-memory telemetry; gateway-requests.jsonl exists but is ClaudeUsage's private log, about 20 MB/day);
+  projections (in-memory BurnRateEstimator; MAWS has its own paceLine in R gateway/routing-facts.ts); Codex and OpenRouter sections
+  (codex-accounts.json and openrouter.json unread); locked-credential notices; the routing-toggle state (gateway.json plus settings.json); a
+  way to force a refresh.
+4.3 Writes: FLAG
+- pins.json belongs to ClaudeUsage. It is loaded only at SessionPins init (CUG/SessionPins.swift:65-71), and the live actor rewrites it from
+  memory atomically on a 1 s coalesce (:170-203). A MAWS write would be ignored by the running router and overwritten at the next flush.
+- Taking effect would need a ClaudeUsage restart, which MAWS must not trigger on its own (the spirit of D-16) and which would cut routed
+  sessions. gateway.json and settings.json are the same story, and D-19 puts accounts in ClaudeUsage. So MAWS has no file-level control path.
+4.4 Ways to give MAWS real control. Each is a change in the owner's ClaudeUsage repo, not the engine, so D-1 is untouched; it is still the
+    owner's call.
+- (i) Smallest: add applicationShouldHandleReopen in AppDelegate that calls statusItemController.togglePanel. The existing `open -b`
+  (claude-usage-app.ts:78) then opens the panel, so every MAWS "Open ClaudeUsage" drops the real panel down and the toast becomes optional.
+  About 5 lines; no MAWS change. Assumption to verify by probe: a running LSUIElement app receives the reopen event from `open -b`.
+- (ii) A URL scheme `claudeusage://panel` and `claudeusage://route?account=<uuid>` (CFBundleURLTypes plus a handler calling routeRequests).
+  Any local process could then select an account; non-destructive, but it should still be confirmed in ClaudeUsage.
+- (iii) A loopback control API on the relay, intercepted before the verbatim forward (RequestPipeline.swift:213-220) the way /api/hello is.
+  Example: GET /claudeusage/state (accounts, severity, drain/manual, serving, health, routingReady) and POST /claudeusage/route {uuid},
+  guarded by a token file in CUD. This is what B or C need to "control things", and it would replace MAWS's file reading. Route-here would
+  still be the only routing control; "back to automatic" does not exist in ClaudeUsage either.
+
+WHAT A FIX TOUCHES
+- MAWS only, reading A (doable now; no ClaudeUsage change needed):
+  - R session/StatusLine.tsx: drop fiveHour, sevenDay and mode from StatusFields and from the line (:26-32, :35-43, :57-60, :99-127); keep
+    cwd · ctx · $, or see Q3. R statusline/popovers.tsx:115-130: UsagePopover and ModePopover lose their triggers.
+  - Re-home the started-session route switch and route facts from R gateway/UsageFooter.tsx:47-106 into Session info: InfoRow `action` gains
+    'route' (R tools/session-info/model.ts:27, :103-106). Alternatively, extend the model widget's Route segment (charter line 805) to
+    started sessions.
+  - Decide on the near-limit banner (R statusline/near-limit.ts; statusline/index.ts:15; setting usage.nearLimitPercent) and on the Accounts
+    tab: keep as a read-only mirror, or drop (Q4). The usage store and reader stay (Session info, `/usage` widget, Accounts tab, pace lines).
+  - Tests: R statusline/popovers.test.tsx, session/SessionPane.test.tsx, main/MainArea.test.tsx, composer/Composer.test.tsx,
+    tools/session-info/*.test*, gateway/UsageFooter.test.tsx, statusline/near-limit.test.ts. E2e: M/e2e/statusline.spec.ts, c7-shots,
+    composer-live, shell, c11-live, accounts, widgets.
+  - Charter: a Decision Log entry amending D-17, §5.5, §3 line 66 and residue lines 401, 466, 545 and 555.
+- Plus ClaudeUsage change (i), with owner approval: CUS/AppDelegate.swift gains the reopen handler; built into CU and handed over by launchd,
+  which briefly restarts the relay. MAWS's toast copy (claude-usage-app.ts:49-55) can then drop "click its icon".
+- Reading B (if Q1 = inside MAWS): a UsagePill at R app/Toolbar.tsx:73, its popover reusing R accounts/model.ts accountsViewModel,
+  AccountCard and LimitRow. "Route requests here" needs ClaudeUsage change (iii); without it the pill is a viewer plus hand-offs, which the
+  Accounts tab already is.
+- Reading C (Tray): a new M/src/main/tray.ts (Tray; a popover BrowserWindow with its own preload and renderer entry, hidden on blur,
+  positioned by getBounds), fed from ClaudeUsageReader in main. Needs (iii) for any control, and duplicates ClaudeUsage's item.
+
+5. OPEN QUESTIONS FOR THE OWNER (the code cannot answer these)
+Q1. Where is "the top menu"? (a) ClaudeUsage's macOS menu-bar item, with MAWS deferring to it (recommended); (b) MAWS's own toolbar; (c) a
+    second macOS menu-bar item owned by MAWS. With (c), should MAWS's item replace or hide ClaudeUsage's? ClaudeUsage cannot hide its own
+    item today.
+Q2. Does "no 5h/7d/reset needed here" mean only the status line, or the top panel too? ClaudeUsage's panel is built on exactly those bars and
+    countdowns (README.md:13-26). If the top surface should show only "overall account status", is that one number (the routing account's
+    most-binding %, like ClaudeUsage's item) or one line per account?
+Q3. Do ctx and $ stay in the status line, or move into Session info only (which already shows both, R tools/session-info/model.ts:151-153)?
+    Through a subscription relay, $ is a notional price; keep it?
+Q4. Are MAWS's near-limit banner and the Accounts tab still wanted? The banner duplicates ClaudeUsage's macOS notifications (95% and severity
+    rises); the Accounts tab is a read-only mirror of ClaudeUsage's panel.
+Q5. May this work include changes to ClaudeUsage itself: (i) the reopen handler, (ii) a URL scheme, (iii) a control API? Without one, no MAWS
+    surface can "control things". With (i) alone, every MAWS "Open ClaudeUsage" reaches the real panel.
+Q6. Which account-level actions must be reachable from MAWS's surface: Route requests here (the only routing control); a "back to automatic"
+    choice (ClaudeUsage lacks one); add, reconnect or remove; Switch this Mac (signs out running sessions); the routing toggle; Codex and
+    OpenRouter?
+Q7. Should the per-session route switch (Direct ⇄ gateway) survive once the usage popover is gone, and where? Proposal: Session info.
+Q8. Is MAWS often fullscreen? The macOS menu bar auto-hides there, which argues for (b) over (a).

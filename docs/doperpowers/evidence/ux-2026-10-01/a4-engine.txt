@@ -1,0 +1,250 @@
+MAWS UX study, A4: engine host and main (sessions, budget, collisions, config writers)
+Repo /Users/new/Developer/GitHub/MAWS @ a2dca3a0. Paths relative to the repo unless absolute. "SPEC" = the owner's
+reverse-engineered engine spec at /Users/new/claude-code-bundle/2.1.283/SPEC (what MAWS cites as "SPEC n.m").
+Known = read in code, fixtures or SPEC. Inferred = follows from code reading, not run. Nothing was executed.
+
+======================================================================================================================
+A. How MAWS launches a session; is --bg used?
+----------------------------------------------------------------------------------------------------------------------
+Facts
+- Process model: main forks two Electron utility processes with utilityProcess.fork, engine-host and pty-host
+  (src/main/hosts/index.ts:12-15, src/main/hosts/supervisor.ts:107). The engine host owns every engine process, the
+  process table and the C4 filesystem service (src/engine-host/index.ts:1-3, :26-35; charter §4.1, docs/charter.md:93-97).
+- One plain `claude` child per live session, spawned by the engine host with node child_process.spawn, stdio
+  ['pipe','pipe','pipe'], not detached (src/engine-host/transport.ts:166-167). The wire is stream-json on stdin/stdout.
+  The table is keyed by appSessionId, one reservation per session, released only at the OS exit
+  (src/engine-host/process-table.ts:1-7, :103-117; launcher src/engine-host/launcher.ts:54-99).
+- argv (buildLaunch, src/engine-host/launch.ts:192-225): pinned absolute binary (ENGINE_BIN :11, or custody copy /
+  Settings path, :28-42) + ENGINE_FLAGS (:48-59) = -p --input-format stream-json --output-format stream-json --verbose
+  --permission-prompt-tool stdio --include-partial-messages --forward-subagent-text --replay-user-messages
+  --include-hook-events --setting-sources user,project,local; then optional --model, --permission-mode, --add-dir...,
+  --resume <id> [--fork-session], --session-id <uuid> (new or fork only), --mcp-config, --max-budget-usd, and always
+  --settings '<json>' with dialogExpiry:'never', effortLevel and the gateway env override (:135-175).
+- Env is constructed (allowlist :85-107), plus CLAUDE_CODE_ENTRYPOINT=sdk-ts, CLAUDE_CODE_FORK_SUBAGENT=true,
+  CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=1, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1, TERM=dumb, gateway vars (:109-126).
+- No `--bg`, no daemon, no `claude agents` anywhere in src. Grep for `--bg` hits only CSS vars and one comment
+  (src/renderer/src/attention/derive.ts:54). `daemon` appears only as a registry `kind` MAWS reads and classifies
+  (src/engine-host/fs/holders.ts:254-258, src/shared/wire/store.ts:18, :125, src/engine-host/fs/summarize.ts:13) and in
+  the engine's own runtime-exclude pattern list (src/main/git/worktrees.ts:51). No `agents --json` call exists.
+- `bg · <short>` chip: names a FOREIGN holder, i.e. a `claude --bg` job the user started outside MAWS, read from the
+  engine's live registry `sessions/<pid>.json` (kind 'bg') plus `jobs/<short>/state.json`
+  (src/engine-host/fs/holders.ts:1-6, :249-258; label src/renderer/src/attention/derive.ts:52-62). Its Attach action
+  writes `'<pinned binary>' attach <short>` into a C9 terminal tab (src/shared/sessions/attach.ts:13-15;
+  src/main/sessions/start-guards.ts:124-128; C10 plan docs/doperpowers/plans/2026-09-28-c10-sessions-worktrees-trust.md:672).
+- "Background work" tool = the session's own in-engine background tasks (workflows, background Bash shells, Monitors,
+  task lists) from wire events (src/renderer/src/tools/agents/background/BackgroundTool.tsx:1-6). Unrelated to --bg.
+- Engine-binary "custody" (C12) copies the pinned binary into userData and launches from the copy
+  (src/main/engine/custody.ts:1-9). It is custody of the binary, not of background jobs.
+- The only --bg launches in the repo are probes: pass3/bg-daemon-binary.jsonl (seq 4-7: `claude --bg` spawns
+  `claude daemon run` + bg-pty-host spares, on the launcher's 2.1.285, not the pin; C12 plan
+  docs/doperpowers/plans/2026-09-29-c12-finish.md:893; charter :837 "accepted MAWS_E2E exposure").
+- Memory per MAWS session (findings-pass2.md:24-40): idle tree 270-420 MB, ~550 MB peak; stdio MCP servers ~40%.
+Likely cause / what a fix touches
+- MAWS never uses --bg. The owner most plausibly saw: the `bg · <short>` holder chip and Attach (C10), the C12
+  "custody" name, the bg-daemon probe in the debt wave, or D-16's "detachable supervisor is P1" (charter :41, :606).
+  The per-session cost the owner associates with --bg is MAWS's own one-process-per-session model plus each
+  session's stdio MCP servers. Nothing to remove; at most, clarify copy.
+Open questions (owner)
+- Which surface suggested a daemon to you (the chip, Attach, Settings › Engine custody, or the docs)?
+
+======================================================================================================================
+B. C12 memory budget: what it measures, what it does, toggle?
+----------------------------------------------------------------------------------------------------------------------
+Facts
+- Measures: the sum of whole-process-tree RSS (`ps -axo pid,ppid,rss`, MCP servers included) of MAWS's live engine
+  processes (starting/initializing/ready, not exiting), sampled every 10 s (src/engine-host/process-table.ts:25,
+  :29-61, :156-174; src/engine-host/budget.ts:55-57, :66-82). No per-tree limit; the per-tree figures feed the sum and
+  Session info.
+- Limit: default 25% of os.totalmem() (budget.ts:10, :34-36; process-table.ts:93), 8 GB on the owner's 32 GB Mac
+  (charter §4.4 docs/charter.md:152). Setting `settings.engine.memoryBudgetMiB` (int >= 512 MiB, null = default) and
+  `statefulMcpServers` live in settings VERSION 4, not 3 (src/shared/ipc/schema/settings.ts:30-35, :48; defaults and
+  v3->v4 migration src/shared/settings/defaults.ts:13, :56). Main pushes `engine.policy.set` at host ready and on
+  change (src/main/settings/engine-configure.ts:50-57, :180-213; src/main/index.ts:251-252; schema
+  src/shared/ipc/schema/engine.ts:53-69). UI: Settings › Engine rows (src/renderer/src/settings-tab/BudgetSettings.tsx:1-50).
+- When over: releases ONE least-recently-used candidate per evaluation, none while one is exiting. A candidate is
+  ready, not engine-running/requires_action, measured, quiet for a sample, with no hard reason (turn or busy, non-ambient
+  background tasks, pending request/plan, queued messages, held peer message, a listed stateful MCP server)
+  (budget.ts:43-53, :74-89). Release = session.stop('budget') in the same synchronous step (process-table.ts:212-235):
+  end_session{reason:'stop'} then the 3 s / SIGTERM / 3 s / SIGKILL ladder (src/engine-host/session.ts:202; ladder
+  charter :344). Exit reason `budget` (src/engine-host/session-ladder.ts:10); the row reads idle with a "released" mark,
+  Send resumes (src/main/sessions/digest.ts:167-168, :221; src/main/sessions/read-model.ts:257-259; charter :572).
+  Over with no candidate on two samples -> one banner + Review/Stop sheets; nothing stopped unasked
+  (src/renderer/src/budget/BudgetSheets.tsx:1-5).
+- "Ring cap" is separate memory hygiene: an exited stream keeps 500 events (EXITED_RING, budget.ts:11;
+  src/engine-host/session-stream.ts:9, :68) and the host keeps 24 exited rows (EXITED_ROWS_MAX budget.ts:12;
+  process-table.ts:267-299); older ranges are read back from the journal or disk.
+- No toggle exists. The only near-off today is a very large GB value (schema has a minimum, no maximum).
+Likely cause / what a fix touches
+- An `enabled` switch (settings v5 + migration in settings.ts/defaults.ts; `budgetPolicyOf` engine-configure.ts:53-56;
+  BudgetPolicyInputSchema engine.ts:58 needs a disabled form since limitKiB is `positive`; process-table.ts:226-233 skips
+  the release, still publishes totals; budget.ts:83 `over` false when off; renderer banner/sheets/Settings row hidden).
+  Off = the pre-C12 rule "engine processes never exit on their own; only archive, quit or an explicit stop"
+  (charter :152 last sentence). Keep sampling (Session info), keepAlive in the status (session.ts:419-425; quit guard
+  src/main/lifecycle/quit-guard.ts:82 reads the same notion) and the ring/row caps, which bound host memory either way.
+  Released-mark paths (record-actions.ts:37-49, digest, read-model) go inert, no removal needed.
+Open questions (owner)
+- Default on or off for new installs? Should "off" still show the total in Session info / a soft warning?
+
+======================================================================================================================
+C. "User opens the same session in a terminal, everything dies"
+----------------------------------------------------------------------------------------------------------------------
+Facts: the engine (known)
+- No lock file for a session. `~/.claude/sessions/<pid>.json` is a liveness registry, one per process, unlinked on
+  exit (SPEC 35-session-persistence.md:8107-8350). `.precompact.json` / `.ccr-tip.json` are only conversation siblings
+  MAWS trashes on delete (src/main/sessions/delete-manifest.ts:1-6, :35); nothing treats them as locks.
+- The engine's resume guard (`Jre`) refuses only when a live record for the same id has a kind that is NOT
+  `interactive` (bg/daemon); interactive holders are skipped (SPEC 35:8112-8128). MAWS's own `-p` processes ARE
+  registered, as kind "interactive", entrypoint "sdk-ts" (C10 plan :732 observation; src/main/sessions/holders.ts:66-69).
+  So `claude --resume S` in a terminal is NOT refused while MAWS holds S. (The comment at src/engine-host/fs/holders.ts:2-3,
+  "-p processes write none", is stale.)
+- Two writers on one id: "both processes write the same session id into one JSONL as sibling branches"
+  (findings-pass2.md:108-114 item 10, measured -p vs -p; charter :125). Each process keeps its own in-memory chain and
+  never re-reads the other's turns. On resume the terminal also re-appends metadata (SPEC 35:4940-4942, step 6).
+- The pinned 2.1.283 SPEC shows no takeover, eviction or kill of a peer holding the same id. The owner's terminal
+  `claude` is 2.1.285 (pass3/bg-daemon-binary.jsonl seq 1 launcherTarget); its behaviour is unverified, and no
+  fixture or e2e covers MAWS-live + terminal-resume at the same time (§10.5 archives first: e2e/c12-prerun.spec.ts:842).
+Facts: MAWS (known)
+- MAWS never becomes the second writer: every resume reads holders fresh and refuses `held` (start-guards.ts:100-111;
+  resume.ts:47-50 re-checks after the trust bootstrap; main/sessions/holders.ts:29-40).
+- MAWS does not react to a terminal joining a session it holds. C4's registry emits fs.holderChanged(S, terminal) (2 s
+  poll + watcher, src/engine-host/fs/holders.ts:22, :211-247), but the index ignores holders on a `self` record
+  (src/main/index/sessions.ts:275-284). No code stops, warns or switches the pane. A live MAWS session reads the wire
+  stream, not disk (main unfollows on go-live, src/main/index/source.ts:151-161; resume.ts:53-58).
+- When MAWS's process later exits, the index writes holder `none` (src/main/index/source.ts:93-97). The terminal's
+  holder, already emitted and ignored, is not re-emitted (registry emits only on change, holders.ts:230-237;
+  re-fold only at host start, source.ts:174-203). Result (inferred): the row shows idle, not foreign-live, while the
+  terminal holds it; Resume / Send-to-resume then fails `held`.
+- After that exit the pane keeps answering from the exited in-memory stream, not the disk: session.events uses the
+  stream whenever one exists (src/engine-host/ipc.ts:214-219). Streams go only on archive, delete/forget or the
+  24-row cap (ipc.ts:186-195, :221-244, :440-450). Inferred: the terminal's new turns never appear in MAWS.
+- If a disk follower is (later) on S, each turn of the other writer flips the branch: retraction of the old branch +
+  warning "Another process wrote a sibling branch into this transcript" (src/engine-host/fs/chain-follower.ts:292-297);
+  parts of the visible transcript disappear and reappear.
+- An engine-host crash would kill every session at once (children lose their pipes; main forgets them,
+  src/main/sessions/index.ts:30-33, src/main/index/source.ts:100-103). No process-level uncaughtException handler
+  exists in src. But no code path tied to a foreign holder was found that throws: holder refresh errors are caught
+  (holders.ts:134-146) and invalid events are dropped, not thrown (src/shared/host/runtime.ts:74-79).
+Most plausible chain (ranked; nothing reproduced)
+1. Nothing crashes, but the session is ruined: MAWS and the terminal write diverging branches into S.jsonl. Each shows
+   only its own turns. When MAWS's process ends (stop, quit, or a budget release while idle; process-table.ts:212-233),
+   MAWS shows a stale idle row and stale transcript, and Send/Resume is refused `held`. The next resume anywhere loads
+   one leaf, so the other branch's turns drop out of the model's context. That reads as "everything died".
+2. 2.1.285's interactive resume does something to the live `sdk-ts` holder (unknown; would show as a MAWS
+   process.exited with reason crash/unknown).
+3. An engine-host crash (all MAWS sessions exit together, host restarts). No trigger identified in code.
+Evidence to collect (one scratch-home reproduction separates the three)
+- Repro: MAWS session S idle and live; in Terminal `claude --resume S` with the installed 2.1.285, then with the pin
+  2.1.283; send one turn in each; let MAWS's process exit; then press Send in MAWS.
+- MAWS journal <userData>/engine-host/journal/<appSessionId>/<launchId>.jsonl: stderr rows and the meta `exit` row
+  (code, signal, reason) (src/engine-host/session.ts:664-672, :883). Main log lines: `[hosts] engine-host exited
+  unexpectedly` (supervisor.ts:150), `[fs] holder refresh failed`, `[host] refused to emit`. Both sessions/<pid>.json
+  (kind, entrypoint). S.jsonl tail (count the parentUuid branches). The terminal's `--debug-file` log.
+- An e2e beside e2e/c12-prerun.spec.ts:842 that runs the terminal resume concurrently through a PTY.
+What a fix touches
+- Tell MAWS's own registry record from a foreign one: entrypoint 'sdk-ts' plus pid in the process table (status pid,
+  src/shared/engine/status.ts:19). Then surface a "contested" state for a self session (index setHolder,
+  src/main/index/sessions.ts:275-284; source.ts:86-98).
+- When a foreign holder takes S, re-apply the remembered holder at MAWS's exit (source.ts:93-97 plus the `holders`
+  map, :167-170), and drop or bypass the exited stream so the pane tails disk (ipc.ts:214-219).
+- Policy choice: yield (stop MAWS's process gracefully, switch to read-only follow) vs warn and keep both.
+Open questions (owner)
+- What died exactly: the MAWS session (error or exit row), the terminal TUI, or the whole app? Which order (MAWS first,
+  then terminal)? Was the MAWS session mid-turn? Terminal `claude` version?
+- When a terminal takes a session MAWS holds, should MAWS yield automatically, or ask?
+
+======================================================================================================================
+D. Opening a session that is live in a terminal
+----------------------------------------------------------------------------------------------------------------------
+Facts (today)
+- Foreign-live = holder terminal or background_job from the registry (C10 plan :31). Product promise: transcript
+  tailed read-only, holder shown, composer and approvals disabled, "attach in a terminal tab" for --bg jobs (charter
+  :53, D-12 :37). Row menu: Open only for a terminal holder; Open + Attach for a job (src/renderer/src/app/session-actions.ts:38-50).
+- Resume/start is refused `held` with the holder (start-guards.ts:110), the engine's own --bg refusal is mapped to
+  the same outcome (src/main/sessions/attach.ts:5-12; setup-steps.ts:110-121; fixture pass2/resume-live-bg.jsonl
+  seq 5). "Fork a copy" is the escape hatch for any holder (C10 plan :672).
+- The read-only view comes from C4's chain follower over S.jsonl (session.events -> diskEvents when no stream,
+  src/engine-host/ipc.ts:214-219; src/engine-host/fs/service.ts:1-6). Caveat from C: not for a session MAWS ran
+  earlier in this host run (stale stream).
+- The engine offers attach only for daemon-hosted jobs: `claude attach <short>` streams the TUI's PTY, not
+  stream-json (SPEC 38-daemon-and-messaging.md:93-112, 38.13; bg-daemon-binary seq 4). Interactive sessions expose
+  only a peer-messaging socket for SendMessage-style messages (SPEC 38:105-110), not control. The refusal text names
+  `claude stop <short>` as the way to resume a job elsewhere (SPEC 35:4413-4416, :8132-8142). `/background` forks the session into
+  a job with its own id (SPEC 20-tasks-and-background-work.md:4778-4800).
+What is possible without patching the engine
+(1) Read-only live view by tailing the transcript: yes, built (C4 + C10). Limits: record granularity (no streaming
+    text or tool progress), approvals pending in the terminal cannot be answered, plus the stale-stream gap above.
+(2) Take over (stop the terminal one, resume in MAWS): yes, with consent. --bg job: run `claude stop <short>` (engine
+    CLI), then MAWS's normal resume. Interactive terminal: there is no engine command. MAWS could send SIGTERM/SIGINT
+    to the holder pid it already verifies (pid + procStart, holders.ts:211-221, :280-308), or ask the user to /exit,
+    then `--resume S` (same id; grants re-applied, src/engine-host/grants.ts:42). Killing mid-turn loses that turn.
+(3) True attach to a running interactive process: no. Its I/O is its own PTY; no local attach protocol exists for
+    interactive sessions. For jobs, "attach" is the TUI in a terminal tab, which MAWS already offers. Remote Control
+    is relayed through Anthropic's cloud (SPEC 36) and is not a local attach.
+Likely next step
+- Add a "Take over here" action on the foreign-live pane: confirm, signal or `claude stop`, wait for the registry to
+  clear (holderAuthority), then resume. Also fix the stale-stream and stale-holder gaps from C so (1) holds after a
+  MAWS exit.
+Open questions (owner)
+- Is signalling the user's terminal process acceptable, or must take-over always be "please /exit in the terminal"?
+- Would a MAWS-side "open in MAWS" entry point (shell alias or URL scheme) instead of `claude --resume` meet the need?
+
+======================================================================================================================
+E. Side chat (/btw)
+----------------------------------------------------------------------------------------------------------------------
+Facts
+- P1 in the charter (docs/charter.md:68, :75). The wire half exists from C3: `session.sideQuestion` is an operation
+  over control subtype `side_question {question}` -> `{text}` (src/engine-host/ipc.ts:368-371;
+  src/shared/ipc/schema/session.ts:116; src/shared/wire/control.ts:150, :201-202; src/shared/engine/operations.ts:10;
+  120 s timeout, src/engine-host/operations.test.ts:57).
+- Typed from the SPEC lower bound only; no fixture ever answered it (control.ts:99). No caller in main or renderer.
+- research/sdk-wire-gap.md:253, :449: `/btw` is local-jsx and unavailable headless; use the RPC (cancellable,
+  `control_request_progress`), and it does not alter the main conversation.
+Likely next step
+- A renderer surface (popover or drawer) over the existing command, plus one probe fixture of a real `side_question`.
+Open questions (owner)
+- Should side-chat answers persist anywhere (MAWS-only, since the engine keeps them out of the transcript)?
+
+======================================================================================================================
+F. Writers of the user's Claude config and project files (src/main, src/engine-host)
+----------------------------------------------------------------------------------------------------------------------
+Stance: "MAWS itself writes nothing under ~/.claude or ~/.claude.json; a control the engine persists on MAWS's request
+is allowed and disclosed" (charter :700). Exception: `#` memory, below.
+1. Trust: initialize `workspaceTrust` (src/engine-host/session.ts:522; result normalizer.ts:423). The ENGINE writes
+   projects[<key>].hasTrustDialogAccepted to ~/.claude.json (findings-pass2.md §8; charter :123). It runs through a
+   separate bootstrap launch (src/main/sessions/setup.ts:55-66; launch-mapping.ts:147) or on resume (resume.ts:34-37).
+   EXPLICIT: only when the trust card's decision is `accepted` (start-guards.ts:111-115). Home dir: session-only,
+   never persisted. MAWS's reader never writes (src/main/sessions/trust.ts:1-6). `session.setCwd` with
+   trust_accepted exists (ipc.ts:345-347) but nothing calls it.
+2. mcp_toggle: ipc.ts:364-367. The ENGINE writes enabledMcpServers/disabledMcpServers under projects[cwd] in
+   ~/.claude.json, and the write is not atomic (charter :700). EXPLICIT (MCP widget toggle, foot discloses it).
+3. memoryAppend (`#`): ipc.ts:274-278 -> src/engine-host/memory-append.ts:1-4, :37-66. MAWS ITSELF opens with
+   O_APPEND|O_NOFOLLOW (:24) and appends "\n- <text>\n" to the CLAUDE.md that get_memory_dialog lists for the target
+   (user ~/.claude/CLAUDE.md, the project's, or a listed path), creating it if missing. EXPLICIT (`#` submit). This is
+   the one direct MAWS write under ~/.claude, sanctioned by §4.2 (charter :132).
+4. applyFlagSettings: ipc.ts:327-339; also effort at :312-318 and grant re-application (grants.ts:42, IMPLICIT at
+   every resume). apply_flag_settings changes the in-memory flagSettings layer only; it is never written to disk (SPEC
+   03-settings-and-configuration.md:139-140, §3.3). Callers: add-dir, fast mode, effort. NOT persisted.
+5. Permission answers with updatedPermissions: MAWS does send them (src/engine-host/broker.ts:333-351).
+   - scope 'session' -> destination 'session': in-memory in the engine. MAWS snapshots it into its own userData
+     state file (grants.ts:21-30).
+   - scope 'local_settings' -> destination 'localSettings' (broker.ts:376-382): the ENGINE writes
+     <project>/.claude/settings.local.json (SPEC 03:137-138). EXPLICIT: offered only when the engine itself suggested
+     a localSettings rule ("Always allow ... in <project>", src/renderer/src/request-card/scope.ts:2, :63; enum
+     src/shared/engine/answers.ts:11). No userSettings or projectSettings destination is ever sent.
+6. set_model: ipc.ts:298-310 -> set_model. Session-only (charter :700 audit). MAWS keeps the model in its own index
+   (record.model.requested) and passes --model again on resume (src/main/sessions/launch-mapping.ts:118).
+   MAWS never sends `update_settings` (grep), the one SDK request that persists effortLevel/outputStyle.
+7. Delete conversation -> Trash: src/main/sessions/record-actions.ts:55-92 via shell.trashItem (src/main/index.ts:230).
+   Moves <sid>-*.cast, <sid>.precompact.json, <sid>.ccr-tip.json, <sid>/ and <sid>.jsonl last
+   (delete-manifest.ts:24-39). The manifest is persisted in userData first. EXPLICIT. Refused for a foreign holder; a
+   MAWS-live session is stopped only if the caller asked (record-actions.ts:63-71).
+Other writes found
+- Rename of a live session: the ENGINE persists the title (control rename_session, record-actions.ts:121-130,
+  ipc.ts:348). A non-live session gets a MAWS index override only. EXPLICIT.
+- Worktree creation appends the engine's runtime-exclude block to the repo's <commonDir>/info/exclude, once
+  (src/main/git/worktrees.ts:43-53, :86-97). IMPLICIT, as a side effect of a MAWS-created worktree.
+- Engine-side IMPLICIT writes from any launch, the same as the terminal: transcript, sessions/<pid>.json, and
+  file-history checkpoints (enabled by launch.ts:114).
+Open questions (owner)
+- Is the implicit info/exclude append acceptable? Should the `#` write to ~/.claude/CLAUDE.md be disclosed the way the
+  MCP toggle is?

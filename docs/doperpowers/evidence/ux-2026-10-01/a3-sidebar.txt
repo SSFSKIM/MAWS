@@ -1,0 +1,250 @@
+A3 · MAWS sidebar, Overview tab, summary line, worktrees — study for the owner's 2026-10-01 UX notes
+Repo /Users/new/Developer/GitHub/MAWS @ a2dca3a0 (master). Paths below are repo-relative; R = src/renderer/src/.
+Read-only (no app run, no tests); "by reading" = inferred from code, not observed.
+
+KEY FINDINGS (one line each)
+- A session row is 49 CSS px tall (7+17+3+15+7), confirmed by the screenshot's ~98 px pitch at 2x; a single-line row at the
+  existing --row-h token (30 px) would be 61%, inside the owner's "half or 2/3" and about Codex's ~31 px rows (shot 07).
+- Every project starts EXPANDED (layout stores a list of *collapsed* ids, default []); each shows up to 20 sessions, and
+  "Show N more" then reveals all inline with no inner scroll. Over the owner's 276 projects and 3,279 sessions
+  (docs/charter.md:841) the tree is very long. This is the root of the "expand is unbounded" complaint.
+- "<to-human>" is literal because both summary paths take the FIRST line of the last assistant text block, and the
+  owner's output style puts the tag on that line. The bug is already logged, waiting on the owner's ruling (docs/tech-debt-tracker.md:35).
+- Worktree sessions are NOT grouped: they sit in the project's flat list with a "⎇ branch" chip. A "Main / Worktree N"
+  grouping is a pure derivation for managed worktrees (<project>/.claude/worktrees/<name>). The owner's own sibling
+  worktrees (his /worktree skill makes siblings) become SEPARATE projects today, because membership is path-convention only.
+- Removing the Needs-you section loses only three things: the cross-project wait-ordered list, the hover-card read-only
+  approve, and the sidebar→Overview-card deep link. Notifications, dock badge, ⌘⇧J, glyphs and the Overview group all read the attention
+  table directly and are untouched.
+- The Overview tab is a hard-coded permanent singleton (no close button, no menu, no drag, closeTab is a no-op, hydration re-inserts it).
+  Charter §5.2 plus the C5 residue make that binding, so changing it needs a §19 Decision Log entry.
+
+1. SIDEBAR ANATOMY TODAY
+Layout (R/sidebar/Sidebar.tsx). The scroller has px-2.5 py-2.5 with a thin scrollbar (:168). Top to bottom:
+  Search (:170), Needs you (:171), Pinned (:173-184), Projects heading + sort + add (:186-205),
+  Other sessions (:207-218), footer "Local workspace" + gear, min-h 43 px (:314-335).
+  Region: width default 300 (src/shared/ipc/schema/layout.ts:75; R/styles/tokens.css:21 --sidebar-w), bounds 200-480
+  (R/app/regions.ts:8); ⌘B/toolbar toggle collapses it to 0, mounted+inert (Shell.tsx:42-56; Toolbar.tsx:63). No icon rail.
+  Tokens: text-ui-sm 12 px, text-ui 13 px, --row-h 30 px, --radius-sm 6 px (R/styles/tokens.css:19-21).
+Search: h-8 (32 px), mb-3.5, border, filters title/directory/project name, case-insensitive (R/sidebar/Search.tsx:8;
+  R/sidebar/derive.ts:43-52). While searching, every section and project opens (Sidebar.tsx:82-88) and projects with no
+  match hide (derive.ts:88). The query is not persisted (Sidebar.tsx:71).
+Section heading: h 22 px, mt 6/mb 2, 12 px semibold uppercase .08em (SectionHeading.tsx:15-17); Pinned/Other collapse, Needs you never (NeedsYou.tsx:1-3).
+Needs-you section (R/sidebar/NeedsYou.tsx:8-22): "Needs you · N" is always shown, or "Nothing needs you right now" (:13).
+  Row (R/sidebar/NeedsYouRow.tsx:31-53) is a button with py-2 px-2.5 gap 7 px and two 12 px lines: "project · title [count]" and
+  "glyph · oldest item summary · wait age". Click opens Overview and focuses that card (:25-29); double-click opens
+  the session (:38). It is wrapped in a HoverCard (R/sidebar/HoverCard.tsx:16-31): 300 ms open, 150 ms close, also on focus, side
+  right, w 342 px, rendering the requestCard slot (C7) or C5's RequestPreview. Approve/Deny appear only for read-only tools, and only
+  on an explicit click (R/sidebar/RequestPreview.tsx:1-8).
+  Order: tier 1 (actionable) before tier 2 (held peer msgs), then longest wait, then title (R/attention/derive.ts:30-45).
+Pinned: pinned live sessions, sorted, removed from their project's list (derive.ts:73, :87).
+Project row (R/sidebar/ProjectGroup.tsx:43-74): h --row-h 30 px, px 7, gap 5, chevron 13 px (rotates -90 when collapsed),
+  folder icon, name 12 px truncate. While COLLAPSED it shows roll-ups "◐N" (needs you, warning) and "●N" (working, accent)
+  (:50-59; derive.ts:74-77). A "+" (22 px) appears at opacity 0 and shows on hover or focus (:60-73). Clicking the row toggles
+  expansion (:44). The group body is indented by ml-2.5 + border-l + pl-[5px] = 16 px (:76).
+Session row (R/sidebar/SessionRow.tsx:35-79), every element:
+  - grid columns 14px | 1fr | auto, gap-x 7 px, px 9 px, py 7 px, min-h 47 px, radius 6, hover bg-hover, selected bg-active (:52)
+  - status glyph, leading 17 px (:54). Glyph table (R/attention/glyph.ts:19-41): ⌁ foreign, ? question, ◇ plan, ! error,
+    ◐ approval, ● working (pulses), ✕ failed, ✓ done (exited), ● faint unread, ○ idle.
+  - title, 12 px, leading 17, truncated; gets pr-12 on hover/focus to make room for the buttons (:56-57)
+  - branch chip "⎇ <branch>", only for a worktree session, 12 px, leading 15 + border, max-w 55%, title attr (:58-66; rule in
+    derive.ts:108-113: record.worktree.branch ?? record.branch; null when there is no worktree)
+  - C12 "released" mark (:67)
+  - secondary line, 12 px, leading 15, mt 3, muted (fg on row hover), truncated (:69-71)
+  - right column: age (now / Nm / Nh / Nd / Nw, derive.ts:120-132; "now" while working), tabular-nums, 12 px; unread dot
+    5 px info blue under the age (:73-76)
+  - hover/focus-within: pin + archive buttons, 23 px each, absolute top-1 right-7 on bg-overlay (:87-127). Shown only when
+    sessionActionsFor offers them, so a foreign row gets none (R/app/session-actions.ts:38-50).
+  Height = 7 + 17 + (3 + 15) + 7 = 49 px with a secondary line; 47 px without one. Screenshot 10 (dark theme) matches: ✓ Done,
+  title, "<to-human>" line, ages 23h/2d, pin + archive showing on the hovered row.
+  Click opens the tab (:51). The row drags as application/x-maws-session to the tab strip (:45-49). There is NO hover card on
+  session rows; branch is visible only on worktree rows, and the only hover text is the chip's title attribute.
+Sort (Projects heading dropdown, Sidebar.tsx:227-261; default 'priority', schema layout.ts:75):
+  priority = Needs-you rows first in row order, then unread by last turn end, then working by turn start, then the rest by
+  recency, ties by title. 'recency' = last activity (R/overview/derive.ts:104-141). Projects are ordered by
+  ProjectRecord.order then name (overview/derive.ts:15-17; src/main/index/projects.ts:73). There is no project drag-reorder UI.
+Expansion and cap: PROJECT_PAGE = 20 (derive.ts:11-12). "Show N more" is a tree item that reveals ALL the rest inline
+  (ProjectGroup.tsx:25-27, 80-95; Sidebar.tsx:126-130). There is no inner scroller and no max-height. showAll is transient
+  React state (Sidebar.tsx:72). Collapsed projects render nothing. Scale was argued as "bounded by disclosure"
+  (C5 residue, docs/charter.md:393).
+Persistence: regions.sidebar = {width, collapsed, sort, collapsedProjects[], collapsedSections['pinned'|'other']}
+  (src/shared/ipc/schema/layout.ts:55-56). It is written 250 ms after a change via layout.set (R/stores/layout.ts:213, 262-316). A
+  strict schema: an invalid stored value falls back to the defaults on hydrate (layout.ts:137-139). Because the list
+  holds COLLAPSED ids, a newly discovered project appears expanded.
+Keyboard: one roving tab stop across the three trees. ↑↓ move, → expands or steps in, ← collapses or steps out, Enter opens or toggles,
+  Space toggles, Home/End jump (R/sidebar/tree.ts:24-53; Sidebar.tsx:43-57, 132-152). The palette reveals a project by clearing the
+  search, expanding the project (persisted) and focusing its row (R/sidebar/reveal.ts:18-22; Sidebar.tsx:108-115).
+Context menus: one Radix ContextMenu for the whole sidebar, targeted by data-menu (Sidebar.tsx:159-167; R/sidebar/menus.tsx).
+  Session: Open, Resume, Open in split, Pin/Unpin, Rename…, Fork, Fork to a new worktree…, Archive, Delete conversation…,
+  Remove worktree… (only when the session has a worktree), Attach in a terminal tab (bg job only). A foreign row gets Open only
+  (R/app/session-actions.ts:9-50).
+  Project: New session, Mark all read | Archive sessions…, Remove project…, Reveal in Finder, Archived sessions…,
+  Worktrees… (menus.tsx:62-80; R/sidebar/project-actions.ts:9-19; handlers in R/sessions/actions.ts:99-121).
+"+" flow: the project row "+" calls createSession(projectId) (ProjectGroup.tsx:66-69). C10's creator returns an app id
+  with a setup intent and no process (R/sessions/connect.ts:67); then addUnstarted + openTab (R/keymap/actions-runtime.ts:38-52).
+  The tab shows NewSessionEmptyState: one heading naming the project, with the composer centred (R/sessions/NewSessionEmptyState.tsx:1-7).
+  Unstarted sessions have NO sidebar row: the sidebar reads records only (derive.ts:60), and charter §5.1 says so (docs/charter.md:172).
+  ⌘N (session.new) uses the focused session's project, else the first project (R/sessions/actions.ts:22-35, 101). The Projects
+  heading "+" is "Add project", not "New session" (Sidebar.tsx:188, 263-270).
+Worktree sessions in the tree: grouping is by projectId only (derive.ts:60-79), so a worktree session is a peer row in its
+  project's flat list. The only marker is the ⎇ chip (debt wave 4B, commit 2b32d4f8). There is no worktree name label and no sub-grouping.
+"bg · <short>" is NOT a chip. It is the secondary LINE for a background-job holder: holderLine →
+  "bg · <jobId>" | "bg · pid N" | "Background job", and "Terminal · pid N" for a terminal holder (R/attention/derive.ts:53-62).
+  It takes precedence over every other secondary-line source (R/sidebar/derive.ts:99-101).
+Archived: hidden from the tree (derive.ts:60). Per project: "Archived sessions…" opens a dialog listing that project's
+  archived sessions, newest first, with Unarchive / Delete / Remove worktree… (R/sessions/ArchivedSessionsDialog.tsx:1-3, 21-31).
+Loading/empty: 3 skeleton rows of 47 px per section (Sidebar.tsx:294-312); "No projects yet" + Add project / New session (:275-292).
+
+2. WHAT THE CHARTER BINDS (changes need a dated §19 Decision Log entry, per CLAUDE.md. Note docs/charter.md:258 says
+   "D-1 to D-17 ... binding everywhere" while CLAUDE.md says D-1..D-20.)
+D-2 (docs/charter.md:27): "Left panel is a collapsible project tree with sessions inside, plus a pinned "Needs you"
+  section on top listing every session blocked on the human across all projects." Its stated reason: "Cross-project
+  attention is the point of Scene A; drill-down hides it." The owner's drill-in plus no-Needs-you direction reverses
+  D-2 and its rationale outright.
+§5.1 (docs/charter.md:170). Sentences that would change:
+  - "Top to bottom: search; **Needs you · N** (every session blocked on the human, across projects, ordered by wait time,
+    each row showing project, title, the reason...; hover card previews the request ... approve or deny by explicit click
+    only for read-only tools ...); **Pinned**; **Projects** as collapsible groups, each with a status roll-up and a "+";"
+  - "sessions inside with status glyph (...), title, secondary line (current activity while working, last assistant line
+    when idle), age, unread dot;" (row height and the second line move to hover)
+  - "**Other sessions** for sessions without a project." (needs a home under drill-in)
+  - "Session actions: open, open in split, pin, ..." (pin's meaning changes if Pinned goes)
+  - "Sort: priority (needs input and unread first) or recency." (still workable inside a project)
+  - "Unstarted sessions do not appear in the sidebar." and "... the ordinary composer frame centred beneath it and
+    nothing else in the pane." (docs/charter.md:172) The Cowork option breaks the latter.
+§3 P0 scope (docs/charter.md:52): "Sidebar: Needs-you section, pinned sessions, project tree with sessions, "Other
+  sessions" ..., hover card, priority and recency sort, search." §3 Overview (:54): "... the sidebar section is its index."
+C5 §12 (docs/charter.md:380-381): the purpose lists "Needs-you, pinned, project tree ... hover cards". The acceptance includes "every
+  mockup 01 state renders". The C5 residue *Sidebar scale* (:393; plan docs/doperpowers/plans/2026-09-28-c5-shell.md:697):
+  "a project renders at most 20 sessions ... plus "Show N more" ... Needs you is never collapsible. ... Advisory".
+  *Hover card* (:394; plan :698) is binding on the §5.1 safety rule. D-20 (docs/charter.md:45) says to start from Codex/Claude
+  Desktop "unless my idea notes override it". The owner's notes are such an override.
+Attention machinery that does NOT depend on the sidebar section (it survives removal as-is):
+  - OS notification "<project> · <session>" + dock badge = count of tier-1 Needs-you sessions, both in main from the read model
+    (src/main/attention/notifier.ts:1-11, 95-114); the fallback toast (R/attention/navigation.ts:32-47).
+  - ⌘⇧J attention.next: Go menu, Cmd+Shift+J (src/shared/keymap/actions.ts:35). It opens the oldest Needs-you session in the
+    focused pane from selectNeedsYou, not from the sidebar (R/attention/navigation.ts:17-25, 51).
+  - The Overview's Needs-you group (R/overview/derive.ts:42-44), row and tab glyphs (R/attention/glyph.ts; R/main/Tab.tsx:117),
+    priority sort tier 0 inside each project (R/overview/derive.ts:126-129), and the collapsed project roll-up ◐N (ProjectGroup.tsx:50-59).
+  What needs a new home or a ruling: (a) the always-visible cross-project wait-ordered list (Overview's group is the
+  candidate); (b) the hover-card read-only approve (HoverCard.tsx + RequestPreview.tsx hover placement). Without it,
+  approval happens only in the docked card or an Overview card; (c) the sidebar→card deep link (NeedsYouRow.tsx:25-29). (d) The
+  roll-up hides when a project is expanded (ProjectGroup.tsx:50). In a drill-in design the project-list row would carry it always.
+
+3. OVERVIEW TAB
+Singleton: fixed id 'overview' with pinned: z.literal(true) (src/shared/ipc/schema/layout.ts:11, 27-28, 70). openTab always
+  maps to the same ref (R/stores/layout-model.ts:11-16).
+Permanent and not closable: closeTab('overview') is a no-op (layout-model.ts:149); requestCloseTab returns early (R/keymap/actions-runtime.ts:69);
+  the Tab has no × button, no context menu, and is not draggable; middle-click is ignored (R/main/Tab.tsx:88-93, 104, 123, 142); Delete/
+  Backspace does nothing (R/main/TabStrip.tsx:85); it is unpinnable (schema layout.ts:47). It is forced to index 0 (layout-model.ts:69-77) and
+  re-inserted on hydrate if missing (:233-246). Emptying every pane falls back to the defaults, which hold Overview (:55; schema :78).
+  Plan table: "closeTab('overview') | | no-op (the Overview tab is permanent, §5.2)" (c5-shell.md:318). Residue *Tab strip*:
+  "binding on "Overview first and permanent" (§5.2)" (docs/charter.md:395; plan :699).
+Reopen: there is nothing to reopen. Activation paths: tab.overview, ⌘0, View menu (src/shared/keymap/actions.ts:22;
+  R/app/shell-actions.ts:36); slash/palette "overview" (R/composer/mentions/items.ts:35); a Needs-you row click (NeedsYouRow.tsx:27).
+State held: none of its own beyond the tab ref. The board is derived from the sessions and attention stores on each render
+  (R/overview/Overview.tsx:25-31). Transient state: the card tab stop (:34) and the focusedCardAppId deep-link request
+  (R/stores/layout.ts:38, 252; Overview.tsx:38-46). Content: cards for live or unread sessions, grouped Needs you → projects → Other
+  (R/overview/derive.ts:32-60). The card is SessionCard (R/overview/SessionCard.tsx).
+Launch: main.tabs is persisted and hydrated, including the active tab (layout.ts:148-162). The app reopens on whatever tab was
+  active at quit. Overview is active only on first launch (defaults, schema layout.ts:78) or if it was last active. I found no code that
+  activates Overview at launch, despite §5.2 "(⌘0, the default when the app opens)" (docs/charter.md:176).
+Acceptance it serves: §10.1 "MAWS opens to the Overview showing the owner's existing terminal-started sessions under their
+  projects..." (docs/charter.md:264); §10.3 "From an Overview card, the owner approves a command and answers an
+  AskUserQuestion ... ⌘⇧J lands on it" (:266). Both remain satisfiable by a closable singleton reopened with ⌘0.
+
+4. SECONDARY ("SUMMARY") LINE AND TITLE
+Row second line (R/sidebar/derive.ts:96-106), first match wins: holder line (bg/terminal) → the oldest waiting item's
+  summary (waitingItem, R/attention/derive.ts:22-28) → digest.activity while working/starting → digest.lastAssistantLine → none.
+lastAssistantLine has two producers:
+  - Live MAWS session: main's digest fold. On every assistant.block.complete it takes the first NON-BLANK line of the text
+    block, trimmed, ≤160 chars (src/main/sessions/digest.ts:16, 56-59, 133-136).
+  - Discovered or foreign session (most of the owner's store): the index seeds the digest from the transcript tail summary.
+    lastAssistantText is the first text block of the last assistant record, ≤200 chars (src/engine-host/fs/summarize.ts:33, 212-218).
+    The line is text.split('\n',1)[0].slice(0,160), the literal first line without skipping blanks (src/main/index/source.ts:33, 241-257).
+  Why "<to-human>" shows: the owner's output style opens the reply with a "<to-human>" line, both paths keep that first line, and
+  React renders it as text (SessionRow.tsx:70). The Overview card's answer line shows the same (SessionCard.tsx:73-76). Logged in
+  docs/tech-debt-tracker.md:35: "Whether P0 should read through the tag is the owner's call at the sitting". A native to-human lane is P1
+  (docs/charter.md:80). The fix is small and main-side: skip a line that is only a tag and take the first content line (or the
+  text inside <to-human>…</to-human>) in both digest.ts:56 and source.ts:250.
+Title (src/main/index/sessions.ts:7-11, 116-123), first match wins: MAWS rename override → engine custom-title ('user') →
+  engine ai-title ('generated') → first prompt ('none') with slash-command wrappers stripped (promptTitle, :95-114) → ''.
+  Sources (summarize.ts:35-36, 51-55): custom-title from the tail record, else the custom-title.json sidecar, else the head; ai-title from tail or head;
+  firstPrompt is the first non-meta user text in the head, ≤200 chars ("! cmd" for bash mode), else the earliest last-prompt.
+  A terminal /rename after a MAWS rename clears the override (sessions.ts:249-253). Engine "summary" records are not read.
+
+5. WORKTREES (C10 + C4 index)
+Record (X1, src/shared/graph/session.ts:29-30): worktree: {path, branch|null} | null, and branch: string|null. There is NO
+  managed/unmanaged flag on the record. "Managed" is derived elsewhere: path includes '/.claude/worktrees/' (R/sessions/ArchiveDialog.tsx:16),
+  or WorktreeInfo.managed from git.
+Membership (src/main/index/projects.ts:30-51): locate() matches /^(.+)\/\.claude\/worktrees\/([^/]+)/. For a match,
+  projectDirectory is the main checkout and worktreePath is the worktree root; otherwise the directory IS the project directory and
+  worktreePath is null.
+  Discovery (sessions.ts:210-231): project_id = projectAt(location, create = hasMessages); worktree_path = location.worktreePath;
+  worktree_branch = the transcript's gitBranch. This is rewritten on every summary.
+  Launch (C10, src/main/sessions/setup.ts:151-178, 202-210): newWorktree and existingWorktree record {path, branch}; the project comes from
+  resolveMembership(cwd) (sessions.ts:307; projects.ts:134-137), the same path rule.
+  Consequence (by reading): managed worktree sessions land under their parent project with record.worktree set. A hand-made
+  worktree elsewhere (a sibling dir, which the owner's /worktree skill makes) gets its own discovered project
+  (projects.ts:140-145). A MAWS launch into such a checkout may start with worktree set, but discovery later overwrites
+  worktree_path to null (sessions.ts:218). Unverified at runtime.
+Project worktree list: git.worktree.list {repoRoot} → {repoRoot, commonDir, worktrees: WorktreeInfo[]}. Each WorktreeInfo is
+  {repoRoot, path, branch|null (detached), head, isMain, locked, prunable, managed} (src/shared/ipc/schema/git.ts:106, 130;
+  src/shared/sessions/worktree.ts:9-19). It is cacheable through useCommand (in QUERY_COMMANDS, R/ipc/query.ts:35). No store holds it; it is read on demand by
+  the Worktrees… dialog (R/sessions/WorktreesDialog.tsx:29-37), the location chip (R/composer/frame/LocationChip.tsx:40) and
+  useSetupIntent (R/sessions/useSetupIntent.ts:126). The dialog's row model already orders main first, then git order, and labels by
+  basename(path) and branch or 'detached', listing sessions per checkout from main's occupancy (R/sessions/worktree-rows.ts:60-84).
+Deriving "Main / Worktree 1 / Worktree 2" without new data:
+  - Sessions by group: key = record.worktree?.path ?? MAIN within a project's records. This is pure, from the sessions store, for managed worktrees.
+  - Labels: basename(worktree.path) (name) or worktree.branch (as worktree-rows.ts:73-74). A main-checkout session's branch is record.branch.
+  - Empty worktrees and git order: one useCommand('git.worktree.list', {repoRoot: project.directory}). This is cheap under drill-in,
+    since only the open project needs it.
+  - Folding sibling (unmanaged) worktrees under their main project NEEDS a change: index membership by git commonDir
+    (main-side, C4's locate/projectAt), or a renderer join that matches a project's directory against another project's
+    git.worktree.list paths. The second option costs one git call per project, about 276 for the owner.
+
+6. OWNER NOTES → WHAT A CHANGE TOUCHES / QUESTIONS ONLY THE OWNER CAN ANSWER
+6a "click leftmost → project list; click project → slide left → its sessions, with all worktrees grouped"
+  Touches: Sidebar.tsx body (sections, visibleNodes :43-57) splits into a project-list level and a project-page level, plus
+  a back affordance and a slide transition that honours motion-reduce. ProjectGroup.tsx becomes a list row; tree.ts keys change
+  (→ or Enter drills in, ← or Esc goes back). regions.sidebar gains e.g. openProject (strict schema layout.ts:55-56, so a shape change
+  needs care). reveal.ts drills into the project. derive.ts gains worktree grouping (§5). An optional git.worktree.list via useCommand.
+  "Leftmost part": today that is only the toolbar's sidebar toggle / ⌘B on a 300 px column. A rail would be new chrome (Shell.tsx:17-40).
+  Ask: Is "leftmost" a permanent narrow icon rail or the existing toggle? Does the project page REPLACE the list (stack +
+  "‹ Projects"), or push it into a narrow strip that stays visible? Is the open project remembered across launches? Worktree
+  labels: folder name or branch? Show worktrees that have no sessions? Order (Main first, then git order, or by recency)? Should
+  sibling worktrees made outside .claude/worktrees fold under the main project? (This needs the §5 membership change.) Where do
+  "Other sessions" go (no project)? Does search search projects, sessions, or both at each level?
+6b "No Pinned / Needs you on top; just projects"
+  Touches: delete NeedsYou.tsx and NeedsYouRow.tsx; the sidebar's use of HoverCard and RequestPreview's hover placement; Sidebar.tsx:171-184, 299;
+  derive.ts needsYou/pinned/hasPinned; collapsedSections 'pinned'; the pin hover button and menu entry (SessionRow.tsx:82-127;
+  session-actions.ts:15). Tests. Charter D-2, §5.1, §3:52, the C5 residue, all via a §19 entry. The notifier, badge, ⌘⇧J, glyphs and Overview are untouched (§2).
+  Ask: Does pin survive as "pin to top inside its project" (Codex-style), or go entirely? Should a project row always show a waiting
+  count (◐N), since nothing else is cross-project in the sidebar? Should the read-only quick-approve hover card move elsewhere
+  (e.g. the Overview only), or be dropped?
+6c "Rows much shorter (1/2–2/3); hover shows recent message / branch (Codex)"
+  Touches: SessionRow.tsx:52-76. Make it a single line at --row-h 30 px (61% of 49): drop the secondary line, move the unread dot inline
+  beside the age. RowActions at top-1 with 23 px buttons still fits. Update the skeleton h-[47px] (Sidebar.tsx:303) and the tests. Add a HoverCard
+  on session rows using the existing pattern (HoverCard.tsx:16: 300 ms, also on focus). Everything a card could show is already in
+  the stores: branch (record.branch / worktree.branch), worktree name, last assistant line, activity, waiting-item summary, age, cost
+  and context (cardFooter, R/overview/derive.ts:93-100), holder. Codex's thread hover card shows title, status, unread, relative time, and
+  project/environment, at min(20rem) width (research/codex-shell-ux.md:133).
+  Ask: Strictly one line, or a title plus a tiny meta glyph? What exactly goes in the hover: branch only (Codex), the last message, both,
+  or also the pending request? Keep the age at the right? Strip "<to-human>" (tracker row) as part of this?
+6d "Cap the expansion and scroll inside it" / "or Cowork: '+' shows previous sessions below the chat bar"
+  Today: a 20-row page, then "Show N more" expands everything inline. Projects default to expanded, and there is no inner scroll (§1).
+  Tree-with-cap touches derive.ts:12, ProjectGroup.tsx:25-27 and 75-96 (a max-height scroll box), Sidebar.tsx:51-53, 72, 126-130, roving focus
+  inside a nested scroller (focus() scrolls the nearest box), and possibly inverting collapsedProjects→expandedProjects so new projects
+  start collapsed (a schema migration). Under drill-in the cap is mostly moot: the project page is the whole column and scrolls.
+  The Cowork variant touches NewSessionEmptyState.tsx (C10 slot, "nothing else is chrome", :1-7) and §5.1's "nothing else in the pane"
+  (docs/charter.md:172). Its data is already available (records filtered by projectId; the unused selector selectSortedSessions in
+  R/stores/sessions.ts:243-253).
+  Ask: Pick one: drill-in, tree-with-cap, or Cowork. Cowork can also complement drill-in. How many rows before the cap (Codex shows ~4 then "Show more",
+  shot 07)? Should the cap be in rows or px? Does "Show more" grow the box, or open the project page? Should projects start collapsed?
+6e "Sittings: overview shows the sessions well, but I don't need to keep this tab every time"
+  (I read "Sittings" as notes from the acceptance sitting, not the Settings tab.)
+  Touches: R/stores/layout-model.ts:11-16, 69-77, 149, 233-246; actions-runtime.ts:69; Tab.tsx:88-142; TabStrip.tsx:85; the schema literal
+  pinned:true (layout.ts:11) and the defaults (:78), with the Accounts/Settings singletons as precedent; layout-model tests. The charter's §5.2 and
+  Tab-strip residue binding need a §19 entry. §10.1 and §10.3 stay reachable through ⌘0.
+  Ask: Closable singleton that ⌘0 reopens? Should the app open to the Overview or the last session (today it restores the last tab)?
+  Or should the Overview stop being a tab altogether and become the drill-in's top level (the project list as the board)?
