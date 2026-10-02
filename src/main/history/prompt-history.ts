@@ -71,9 +71,13 @@ export class PromptHistory {
     const record = this.opts.session(appSessionId);
     const line = `${JSON.stringify({ display, pastedContents, timestamp: (this.opts.now ?? Date.now)(), project: record?.directory ?? project, sessionId: record?.engineSessionId ?? null })}\n`;
     await mkdir(dirname(this.opts.file), { recursive: true });
-    const handle = await this.open(this.opts.file, 'a');
+    const handle = await this.open(this.opts.file, 'a+');
     try {
-      await handle.write(line);
+      const { size } = await handle.stat();
+      const last = Buffer.alloc(1);
+      if (size > 0) await handle.read(last, 0, 1, size - 1);
+      // Keep a torn record separate from this one, in the same append. Readers skip the broken line.
+      await handle.write(`${size > 0 && last[0] !== 10 ? '\n' : ''}${line}`);
     } finally {
       await handle.close();
     }

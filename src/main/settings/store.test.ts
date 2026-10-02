@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -31,6 +31,50 @@ const before6 = (theme: string) => {
 };
 const v3Json = (theme: string) => JSON.stringify(v3(theme));
 const FIXTURES = join(__dirname, '../../../test/fixtures/settings');
+
+describe('settings persistence regressions', () => {
+  it('keeps migrated dark settings when the rewrite fails and retries on a later patch', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const original = '{"version":1,"theme":"dark"}';
+    writeFileSync(file, original);
+    chmodSync(dir, 0o500);
+    let store: ReturnType<typeof openSettingsStore>;
+    try {
+      store = openSettingsStore(file);
+      expect(store.settings.theme).toBe('dark');
+      expect(readFileSync(file, 'utf8')).toBe(original);
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+    store.update({ notifications: { enabled: false } });
+    expect(openSettingsStore(file).settings).toMatchObject({ theme: 'dark', notifications: { enabled: false } });
+  });
+
+  it('refuses a patch when the disk file is unreadable or invalid instead of persisting defaults', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const original = '{"version":1,"theme":"dark"';
+    writeFileSync(file, original);
+    const store = openSettingsStore(file);
+    expect(() => store.update({ notifications: { sound: true } })).toThrow();
+    expect(readFileSync(file, 'utf8')).toBe(original);
+    writeFileSync(file, v3Json('dark'));
+    chmodSync(file, 0o000);
+    try {
+      expect(() => store.update({ notifications: { sound: true } })).toThrow();
+    } finally {
+      chmodSync(file, 0o600);
+    }
+    expect(readFileSync(file, 'utf8')).toBe(v3Json('dark'));
+  });
+
+  it('merges an unrelated patch against the latest disk settings, not a stale snapshot', () => {
+    const first = openSettingsStore(file);
+    const second = openSettingsStore(file);
+    first.update({ engine: { binaryPath: '/opt/custom/claude' } });
+    second.update({ notifications: { sound: true } });
+    expect(openSettingsStore(file).settings).toMatchObject({ engine: { binaryPath: '/opt/custom/claude' }, notifications: { sound: true } });
+  });
+});
 
 describe('settings store', () => {
   it('defaults to light when there is no file yet, silently and without writing one', () => {

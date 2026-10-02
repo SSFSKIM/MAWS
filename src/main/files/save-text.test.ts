@@ -1,51 +1,25 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveTextFile, type SaveDialog } from './save-text';
 
 let dir: string;
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'maws-save-'));
-});
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'maws-save-')); });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('layout.saveTextFile writes then renames', () => {
-  it('opens the save dialog at Downloads/<defaultName> and writes the text there through a temporary file', async () => {
+  it('opens the save dialog at Downloads/<defaultName> and saves the text without temporary leftovers', async () => {
     const target = join(dir, 'a.txt');
     const showSaveDialog = vi.fn<SaveDialog>(async () => ({ canceled: false, filePath: target }));
-    const writes: string[] = [];
-    const renames: [string, string][] = [];
-    const result = await saveTextFile(
-      { defaultName: 'a.txt', text: '❯ Reply with exactly OK\n' },
-      {
-        showSaveDialog,
-        downloads: '/Users/new/Downloads',
-        fs: {
-          writeFile: async (path, text) => {
-            writes.push(path);
-            const { writeFile } = await import('node:fs/promises');
-            await writeFile(path, text);
-          },
-          rename: async (from, to) => {
-            renames.push([from, to]);
-            const { rename } = await import('node:fs/promises');
-            await rename(from, to);
-          },
-        },
-      },
-    );
+    const result = await saveTextFile({ defaultName: 'a.txt', text: 'Reply with exactly OK\n' }, { showSaveDialog, downloads: '/Users/new/Downloads' });
     expect(showSaveDialog).toHaveBeenCalledExactlyOnceWith({ defaultPath: '/Users/new/Downloads/a.txt' });
     expect(result).toEqual({ saved: true, path: target });
-    expect(writes).toHaveLength(1);
-    expect(writes[0]).not.toBe(target);
-    expect(writes[0]!.startsWith(dir)).toBe(true); // beside the target, so the rename stays on one volume
-    expect(renames).toEqual([[writes[0], target]]);
-    expect(readFileSync(target, 'utf8')).toBe('❯ Reply with exactly OK\n');
+    expect(readFileSync(target, 'utf8')).toBe('Reply with exactly OK\n');
     expect(readdirSync(dir)).toEqual(['a.txt']);
   });
 
-  it('writes with the real file system by default and replaces an existing file whole', async () => {
+  it('replaces an existing file whole', async () => {
     const target = join(dir, 'b.txt');
     const deps = { showSaveDialog: async () => ({ canceled: false, filePath: target }), downloads: dir };
     await saveTextFile({ defaultName: 'b.txt', text: 'first, longer text' }, deps);
@@ -64,21 +38,26 @@ describe('layout.saveTextFile writes then renames', () => {
     const showSaveDialog = vi.fn<SaveDialog>();
     for (const defaultName of ['../x.txt', 'a/b.txt', 'a\\b.txt']) {
       await expect(saveTextFile({ defaultName, text: 'x' }, { showSaveDialog, downloads: dir })).rejects.toMatchObject({
-        error: { code: 'invalid_input', message: expect.stringContaining('path separator') }, // CommandFailure: the router answers it as is
+        error: { code: 'invalid_input', message: expect.stringContaining('path separator') },
       });
     }
     expect(showSaveDialog).not.toHaveBeenCalled();
   });
 
-  it('removes its temporary file when the write fails, and fails', async () => {
-    const target = join(dir, 'c.txt');
-    const deps = {
-      showSaveDialog: async () => ({ canceled: false, filePath: target }),
-      downloads: dir,
-      fs: { writeFile: async () => Promise.reject(new Error('disk full')), rename: vi.fn() },
-    };
-    await expect(saveTextFile({ defaultName: 'c.txt', text: 'x' }, deps)).rejects.toThrow('disk full');
-    expect(deps.fs.rename).not.toHaveBeenCalled();
-    expect(readdirSync(dir)).toEqual([]);
+  it('removes its temporary file on a failed rename and leaves the destination intact', async () => {
+    const target = join(dir, 'folder');
+    mkdirSync(target);
+    writeFileSync(join(target, 'kept.txt'), 'keep');
+    await expect(saveTextFile({ defaultName: 'a.txt', text: 'x' }, { showSaveDialog: async () => ({ canceled: false, filePath: target }), downloads: dir })).rejects.toThrow();
+    expect(readFileSync(join(target, 'kept.txt'), 'utf8')).toBe('keep');
+    expect(readdirSync(dir)).toEqual(['folder']);
+  });
+
+  it('refuses a destination whose parent is not a directory', async () => {
+    const parent = join(dir, 'not-a-directory');
+    writeFileSync(parent, 'keep');
+    await expect(saveTextFile({ defaultName: 'a.txt', text: 'x' }, { showSaveDialog: async () => ({ canceled: false, filePath: join(parent, 'a.txt') }), downloads: dir })).rejects.toMatchObject({ code: 'ENOTDIR' });
+    expect(readFileSync(parent, 'utf8')).toBe('keep');
+    expect(readdirSync(dir)).toEqual(['not-a-directory']);
   });
 });

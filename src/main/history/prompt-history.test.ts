@@ -40,6 +40,14 @@ const maws = (rows: object[]) => {
 };
 const at = (iso: string) => Date.parse(iso);
 
+it('recalls a newly appended prompt after an incomplete JSON tail', async () => {
+  mkdirSync(join(dir, 'userData'), { recursive: true });
+  writeFileSync(file, '{"display":"torn');
+  await history().append(APP, 'saved after the crash', {});
+  const own = (await history().list(APP, 200)).filter((entry) => entry.source === 'maws');
+  expect(own.map((entry) => entry.display)).toEqual(['saved after the crash']);
+});
+
 describe('prompt history merges MAWS and terminal sources with bodies', () => {
   it("answers the terminal's rows of this project with their bodies: inline, resolved from the paste cache, or null", async () => {
     const entries = await history().list(APP, 200);
