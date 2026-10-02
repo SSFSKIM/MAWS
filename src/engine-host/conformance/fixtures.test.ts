@@ -8,7 +8,8 @@ import { replayFixture, type ConformanceRun } from './harness';
 
 // A `system` subtype or frame type the fixtures may carry without an X1 mapping. Empty: every fixture frame maps to
 // an event or to a "none" row of the table, and a new subtype in a future recording fails here, never silently.
-const UNKNOWN_ALLOWLIST: ReadonlySet<string> = new Set();
+// R0 (2026-10-01, the mods probe on 2.1.287): the engine's remote-surface pushes, unmapped until R1 decodes them.
+const UNKNOWN_ALLOWLIST: ReadonlySet<string> = new Set(['system/ui_log', 'system/ui_status', 'system/ui_toast', 'system/ui_invalidate']);
 
 // Outbound requests the probe issued that the engine refused, or that the recording ended before answering.
 const EXPECTED_REQUEST_FAILURES: Record<string, { subtype: string; code: string }[]> = {
@@ -16,6 +17,7 @@ const EXPECTED_REQUEST_FAILURES: Record<string, { subtype: string; code: string 
   'pass2/auto-routed': [{ subtype: 'set_permission_mode', code: 'auto_mode_model' }],
   'pass2/auto-unrouted': [{ subtype: 'set_permission_mode', code: 'auto_mode_model' }],
   'pass2/resume-live-bg': [{ subtype: 'initialize', code: 'exited' }], // the engine refused the resume on stderr and exited 1 before answering
+  'pass3/mods-gate-served-off': [{ subtype: 'ui_render', code: 'unknown' }], // R0: with the rollout served off, 2.1.287 answers "Unsupported control request subtype: ui_render" with no error code
 };
 
 const runs = new Map<string, Promise<ConformanceRun>>();
@@ -59,8 +61,9 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const w3 = ['w3-auto-fallback']; // W3: the host's fallback after a refused auto (set_permission_mode acceptEdits, get_settings on Haiku)
     const w4 = ['w4-question-none', 'w4-question-partial']; // W4: a two-question AskUserQuestion answered with one question, then none, left out (the stepper's Skip)
     const w7 = ['w7-collision', 'w7-take-over']; // W7: a terminal resuming a session MAWS holds (the transcript and registry records beside it), and "Take over here" against one (meta rows only)
+    const r0 = ['mods-attach', 'mods-consent', 'mods-gate-off', 'mods-gate-served-off', 'mods-gate-unset', 'mods-pushes']; // R0: the mods probe on the installed 2.1.287 (init capability, pushes without attach, attach and render, the rollout gate, the consent dialog)
     const wave7 = ['hooks-flipped']; // debt wave 7: W1's blocking hooks with the forms flipped (an exit-2 Stop block, JSON prompt blocks), for the disk records beside it
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7].sort());
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -573,6 +576,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'session_state_changed', // C12: pass3/launch-env-state-events, under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1
       'informational', 'notification', // W1: pass3/hooks-blocking (a blocked prompt's informational, the stop-hook-error notification)
       'compact_boundary', // W1: pass3/compact
+      'ui_log', 'ui_status', 'ui_toast', 'ui_invalidate', // R0: pass3/mods-* on 2.1.287, the remote-surface pushes (allowlisted as unknown until R1)
     ].sort());
   });
 
@@ -591,6 +595,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'context.sample', // debt wave 3: a get_context_usage answer (pass1/reads seq 57, pass3/context-sample)
       'session.state', // C12: pass3/launch-env-state-events (running, requires_action, running, idle)
       'boundary.compaction', // W1: pass3/compact seq 43
+      'frame.unknown', // R0: pass3/mods-* carry the ui_* pushes the table does not map yet (UNKNOWN_ALLOWLIST)
     ].sort());
     void kinds;
   });
