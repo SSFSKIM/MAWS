@@ -604,7 +604,7 @@ describe('⌃Tab follows DOM focus', () => {
 // named at the strip's left edge.
 describe('tab sets per project', () => {
   beforeEach(() => fileTabsByProject());
-  const label = () => within(main()).queryByRole('button', { name: /^Project / });
+  const label = () => within(main()).queryByRole('button', { name: /^Tabs of / });
   const projectRow = (name: string) => {
     act(() => useLayout.getState().setSidebar({ openProject: null }));
     return within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).getByRole('treeitem', { name });

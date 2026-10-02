@@ -189,8 +189,8 @@ function ProjectLabel() {
     <button
       type="button"
       data-strip-project={project.id}
-      aria-label={`Project ${project.name}`}
-      title="Reveal in the sidebar"
+      aria-label={`Tabs of ${project.name}`}
+      title={`Reveal ${project.name} in the sidebar`}
       onClick={() => revealProject(project.id)}
       className="flex max-w-48 shrink-0 items-center gap-1.5 border-r border-border px-2.5 text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2"
     >
