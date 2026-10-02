@@ -29,6 +29,9 @@ export const TokenUsageSchema = z.strictObject({
 });
 export type TokenUsage = z.infer<typeof TokenUsageSchema>;
 
+export const TaskUsageSchema = z.strictObject({ totalTokens: z.number(), toolUses: z.number(), durationMs: z.number() });
+export type TaskUsage = z.infer<typeof TaskUsageSchema>;
+
 export const QuestionSchema = z.strictObject({
   question: z.string(),
   header: z.string(),
@@ -135,7 +138,7 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     ]).nullable(),
   }),
   event('tool.use', { toolUseId: ToolUseIdSchema, toolName: z.string(), input: z.unknown(), apiMessageId: ApiMessageIdSchema.nullable(), messageUuid: MessageUuidSchema.nullable() }),
-  event('tool.safeguard', { toolUseId: ToolUseIdSchema, verdict: z.enum(['not_flagged', 'flagged']), lane: z.literal('server') }), // one per tool use named in a message_delta.safeguard_results entry
+  event('tool.safeguard', { toolUseId: ToolUseIdSchema, verdict: z.enum(['skipped', 'not_flagged', 'flagged']), lane: z.literal('server') }), // one per tool use named in a message_delta.safeguard_results entry
   event('tool.result', {
     toolUseId: ToolUseIdSchema, content: z.union([z.string(), z.array(ContentBlockSchema)]), isError: z.boolean(), structured: z.unknown(),
     spillPath: nullableString(), denial: DenialKindSchema.nullable(), safeguard: SafeguardVerdictSchema, messageUuid: MessageUuidSchema.nullable(),
@@ -178,10 +181,10 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     isBackground: z.boolean(), spawnDepth: z.number(), prompt: nullableString(),
   }),
   event('subagent.progress', {
-    taskId: TaskIdSchema, description: z.string(), usage: z.strictObject({ totalTokens: z.number(), toolUses: z.number(), durationMs: z.number() }),
+    taskId: TaskIdSchema, description: z.string(), usage: TaskUsageSchema,
     lastToolName: nullableString(), summary: nullableString(),
   }),
-  event('subagent.finished', { taskId: TaskIdSchema, status: TaskOutcomeSchema, summary: nullableString(), outputFile: nullableString(), reason: nullableString() }),
+  event('subagent.finished', { taskId: TaskIdSchema, status: TaskOutcomeSchema, summary: nullableString(), outputFile: nullableString(), reason: nullableString(), usage: TaskUsageSchema.optional() }),
   event('subagent.message', { direction: z.enum(['to_child', 'from_child', 'between']), fromAgentId: AgentIdSchema.nullable(), toAgentId: AgentIdSchema.nullable(), text: z.string() }),
   event('task.started', { taskId: TaskIdSchema, toolUseId: ToolUseIdSchema.nullable(), taskType: z.string(), description: z.string(), isBackground: z.boolean(), workflowName: nullableString() }),
   event('task.updated', {

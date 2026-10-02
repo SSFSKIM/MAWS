@@ -10,7 +10,7 @@ import type { AgentId, AppSessionId, RequestId, TaskId, ToolUseId } from '@share
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import { digest, item, record, status } from '../../../../../../test/support/builders';
-import { event, sidecarsOf, workflowRunsOf } from '../../../../../../test/support/agents-events';
+import { event, replayed, sidecarsOf, workflowRunsOf } from '../../../../../../test/support/agents-events';
 import { connectKeys } from '../../../keymap/dispatcher';
 import { instanceOf, panelHost } from '../../../panel/host';
 import type { PanelToolContext } from '../../../panel/tool';
@@ -405,6 +405,15 @@ describe('drill-in', () => {
     fireEvent.click(screen.getByRole('button', { name: '‹ Subagents' }));
     expect(handle.snapshot().view).toEqual({ kind: 'lists' });
     expect(document.querySelector<HTMLElement>('[data-view="lists"]')!.scrollTop).toBe(120);
+  });
+
+  it('uses the recorded subagent completion totals in the completed-agent drill-in', async () => {
+    installBridge([]);
+    const [one] = sidecarsOf('subagent-sidecars');
+    const events = replayed('pass1', 'subagent');
+    await mount({ events: events.filter((e) => e.seq !== null && e.seq < 335), sidecars: [one], params: { agentId: one.agentId } });
+    push(events.filter((e) => e.seq !== null && e.seq >= 335));
+    expect(document.querySelector('[data-part="agent-meta"]')?.textContent).toBe('haiku · 2s · 11.5k tokens');
   });
 
   it('heads the agent with model · elapsed · tokens, the unavailable words, no effort cell, and Dispatched by', async () => {

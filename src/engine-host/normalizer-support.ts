@@ -1,7 +1,7 @@
 // Pure helpers the normaliser's mapping uses: token usage, the spill path, the `!` bash tags, denial kinds. Each is a
 // wire-to-X1 projection with its evidence named (C3 execution document, Interfaces "Normaliser").
 import { DENIAL_KINDS, type DenialKind } from '@shared/graph/enums';
-import type { ContentBlock, EventPayload, TokenUsage } from '@shared/graph/events';
+import type { ContentBlock, EventPayload, TaskUsage, TokenUsage } from '@shared/graph/events';
 import type { AgentId, ParentToolUseId } from '@shared/graph/ids';
 
 // `result.usage` and `message_delta.usage` share this shape; absent counters read as 0, thinking as null.
@@ -18,9 +18,18 @@ export function tokenUsageOf(usage: unknown): TokenUsage {
   };
 }
 
+// task_notification.usage is optional and loose on the wire; only a complete usage report replaces progress.
+export function taskUsageOf(usage: unknown): TaskUsage | undefined {
+  if (!usage || typeof usage !== 'object') return undefined;
+  const u = usage as Record<string, unknown>;
+  if (typeof u.total_tokens !== 'number' || typeof u.tool_uses !== 'number' || typeof u.duration_ms !== 'number') return undefined;
+  return { totalTokens: u.total_tokens, toolUses: u.tool_uses, durationMs: u.duration_ms };
+}
+
 // The absolute path the engine reports for a spilled result (§4.3): Bash's `tool_use_result.persistedOutputPath`
 // (SPEC 16 §16.13), else the notice every other tool's result opens with (SPEC 12 §12.12), else null.
-const SPILL_NOTICE = /^Output too large \([^)]*\)\. Full output saved to: (\S+)/;
+// CLI 2.1.283 Lme (cli.pretty.js:316303): the path ends at the newline, not at a space; the notice may be wrapped.
+const SPILL_NOTICE = /^Output too large \([^)]*\)\. Full output saved to: (\/[^\r\n]+)/m;
 export function spillPathOf(toolUseResult: unknown, content: string | ContentBlock[]): string | null {
   const structured = toolUseResult as { persistedOutputPath?: unknown } | null;
   if (structured && typeof structured === 'object' && typeof structured.persistedOutputPath === 'string') return structured.persistedOutputPath;

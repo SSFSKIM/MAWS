@@ -271,9 +271,10 @@ export class Normalizer {
       case 'message_delta': {
         const delta = event.delta as { safeguard_results?: unknown } | undefined;
         if (!Array.isArray(delta?.safeguard_results)) return;
-        for (const result of delta.safeguard_results as { status?: { tool_uses?: Record<string, { outcome?: string }> } }[]) {
+        for (const result of delta.safeguard_results as { status?: { tool_uses?: Record<string, { type?: string; outcome?: string }> } }[]) {
           for (const [id, entry] of Object.entries(result.status?.tool_uses ?? {})) {
-            const verdict = entry.outcome === 'flagged' ? 'flagged' : 'not_flagged';
+            const verdict = entry.type === 'skipped' ? 'skipped' : entry.type === 'evaluated' && (entry.outcome === 'flagged' || entry.outcome === 'not_flagged') ? entry.outcome : null;
+            if (verdict === null) continue; // an unknown or incomplete entry is not evidence of a review
             this.state.safeguards.set(id as ToolUseId, verdict);
             out.emit({ kind: 'tool.safeguard', toolUseId: id as ToolUseId, verdict, lane: 'server' }, attribution);
           }

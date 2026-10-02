@@ -226,7 +226,7 @@ export const liveThinkingLabel = (elapsedMs: number, effort: string | null) => `
 // eighths, :655065-655068, through `Do` at :521347 and the colour at :521357).
 export const thinkingWarmth = (elapsedMs: number) => Math.round(Math.min(Math.max((elapsedMs - 10_000) / 10_000, 0), 1) * 8) / 8;
 
-export const SAFEGUARD_LINE = { not_flagged: 'Auto mode · reviewed · not flagged', flagged: 'Auto mode · flagged', not_evaluated: 'Auto mode · not reviewed' } as const;
+export const SAFEGUARD_LINE = { skipped: 'Auto mode · review skipped', not_flagged: 'Auto mode · reviewed · not flagged', flagged: 'Auto mode · flagged', not_evaluated: 'Auto mode · not reviewed' } as const;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Subagents, agent messages, plans, questions, slots, boundaries, errors

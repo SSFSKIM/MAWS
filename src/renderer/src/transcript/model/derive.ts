@@ -749,7 +749,7 @@ function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], m
     toolCalls += count;
     byCategory[cell.category] += count;
     if (cell.classification.denial) denials.push({ kind: cell.classification.denial.kind, cellId: cell.id, disposition: cell.classification.denial.disposition, interruption: cell.classification.denial.interruption });
-    if (cell.classification.safeguard === 'not_evaluated') safeguard.notEvaluated += 1;
+    if (cell.classification.safeguard === 'not_evaluated' || cell.classification.safeguard === 'skipped') safeguard.notEvaluated += 1;
     else {
       safeguard.reviewed += 1;
       if (cell.classification.safeguard === 'flagged') safeguard.flagged += 1;
