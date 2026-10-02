@@ -56,6 +56,7 @@ vi.mock('./git/register', () => ({ registerGitHandlers: () => void (git.register
 // end C4
 // C5 start: the layout store, the external-link command and the read side
 vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} }, registerLayoutHandlers: vi.fn(), dropPanelKeysOfRemovedSessions: vi.fn() }));
+vi.mock('./sessions/panel-lifetime', () => ({ registerChatPanels: () => () => {} }));
 vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
 // The read model starts C4's index source and stops it with the sessions, at will-quit.
 vi.mock('./sessions', () => ({

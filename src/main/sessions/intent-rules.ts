@@ -41,6 +41,28 @@ export async function retainedMatches(deps: RuleDeps, intent: SetupIntent): Prom
   return target !== null && (await canonicalPath(target.path)) === (await canonicalPath(w.path)) && w.branch === target.branch;
 }
 
+// `head === ''` journals intent, not ownership: matching resources after a crash may belong to another actor.
+// Recovery preserves that uncertainty; only a witnessed partial add can confirm ownership. No resources clears
+// the journal, while changed or unknown resources fail closed.
+export async function reconcileWorktree(deps: RuleDeps, intent: SetupIntent, opts: { confirmOwnership: boolean } = { confirmOwnership: false }): Promise<SetupIntent['progress']['worktree']> {
+  const w = intent.progress.worktree;
+  if (w === null || w.head !== '' || !w.createdHere || intent.location?.kind !== 'newWorktree') return w;
+  const listed = await deps.worktrees.list(intent.location.repoRoot);
+  const path = await canonicalPath(w.path);
+  const entry = listed.worktrees.find((entry) => entry.path === path);
+  if (entry) {
+    if (entry.branch !== w.branch) throw new Error(`unconfirmed worktree changed: ${w.path}`);
+    if (!(await isDirectory(path))) throw new Error(`unconfirmed worktree is missing: ${w.path}`);
+    return opts.confirmOwnership ? { ...w, path: entry.path, head: entry.head } : w;
+  }
+  if (await pathExists(path)) throw new Error(`unconfirmed path is not a worktree: ${w.path}`);
+  if (intent.location.branch.kind === 'new') {
+    const branch = await deps.worktrees.branch(listed.repoRoot, intent.location.branch.name);
+    if (branch) return opts.confirmOwnership ? { ...w, head: branch.head } : w;
+  }
+  return null;
+}
+
 // A location as `session.intent.patch` and a start's guards check it. `forStart` turns a missing session directory
 // into `missing_directory` (the start's outcome); a patch names it as the location field's error. A New chat with no
 // project chosen has no location yet, which no start passes.

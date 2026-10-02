@@ -14,6 +14,7 @@ import {
   type CommandResult,
   type Owner,
 } from '@shared/ipc/schema';
+import { isBridgedCommandName } from '@shared/ipc/names';
 import { validateCommandInput } from '@shared/ipc/validate';
 
 export { emit } from './events';
@@ -92,6 +93,9 @@ async function route(
   if (!isAppSender(event, appUrl)) {
     console.warn(`[ipc] refused ${name} from ${event.senderFrame?.url ?? 'a detached frame'}`);
     return { ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by the app window`) };
+  }
+  if (!isBridgedCommandName(name)) {
+    return { ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by main`) };
   }
   const input = validateCommandInput(name, rawInput);
   if (!input.ok) return input;
