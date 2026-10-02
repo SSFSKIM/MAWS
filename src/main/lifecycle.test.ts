@@ -12,6 +12,8 @@ const fake = vi.hoisted(() => {
       return app;
     },
     whenReady: () => Promise.resolve(),
+    requestSingleInstanceLock: () => true,
+    hasSingleInstanceLock: () => true,
     getPath: () => '/tmp/maws-lifecycle-test',
     isPackaged: false,
     setPath: vi.fn(),

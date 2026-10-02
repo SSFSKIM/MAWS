@@ -42,3 +42,15 @@ it.each(['async', 'sync'])('%s refuses replacement if flushing the descriptor fa
   expect(readFileSync(file, 'utf8')).toBe('replacement');
   expect(readdirSync(dir)).toEqual(['saved.txt']);
 });
+
+it.each(['async', 'sync'])('%s creates and replaces files with 229–255-byte basenames without leaving temporary files', async (mode) => {
+  for (let length = 229; length <= 255; length += 1) {
+    const file = join(dir, 'a'.repeat(length));
+    const write = (text: string) => mode === 'async' ? atomicWriteFile(file, text) : atomicWriteFileSync(file, text);
+    await write('first');
+    expect(readFileSync(file, 'utf8')).toBe('first');
+    await write('replacement');
+    expect(readFileSync(file, 'utf8')).toBe('replacement');
+  }
+  expect(readdirSync(dir)).toHaveLength(27);
+});

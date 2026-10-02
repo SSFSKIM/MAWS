@@ -3,10 +3,10 @@
 import { randomUUID } from 'node:crypto';
 import { closeSync, constants, fsyncSync, openSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { open, rename, stat, unlink } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
-const temporaryFor = (file: string) => join(dirname(file), `.${basename(file)}.${randomUUID()}.tmp`);
+const temporaryFor = (file: string) => join(dirname(file), `.${randomUUID()}.tmp`);
 function requireDirectory(directory: string, isDirectory: boolean): void {
   if (!isDirectory) throw Object.assign(new Error(`not a directory: ${directory}`), { code: 'ENOTDIR' });
 }
