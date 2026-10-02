@@ -273,7 +273,7 @@ Direction: the live thinking row and the work area's active label read "{Thinkin
 **T2. Intermediate messages fold with the work (shot: "Working for 2m 36s").**
 Owner: "message in between still shows like a thought and only final message is displayed like actual message: is this because of claude mods or our problem?"
 Answer: ours, by design, copied from Codex. The C6 rule (plan line 43, charter §5.3 "answer first"): the answer is the assistant text after the last tool use; text between tool uses is commentary, rendered inside the work area and folded with it. Codex does the same: its "agent-activity" group holds commentary, tools and reasoning, and only the final "assistant-item" sits outside, full contrast, never collapsed (`r1-codex.txt` §8, LT:6357-6440). Claude Desktop renders every assistant text as a message. The engine does not mark text blocks as intermediate; the classification is MAWS's.
-Open (owner's call): keep Codex's rule as is; or keep the fold but render commentary at the answer's weight inside it; or Claude Desktop's reading, every text block a message outside the fold with only tool rows folded.
+Decided 2026-10-01 (owner): keep Codex's rule as is; commentary stays inside the work area and folds with it. No change.
 
 **T3. Smooth expand and collapse.**
 Owner: "when expanding tool use summary, working summary, let the expansion be smooth animation instead of discrete open and close."
@@ -294,7 +294,7 @@ Each wave is one worker in an isolated worktree off master, one commit per item,
 | **W5 Sidebar, top bar and Overview** (landed 2026-10-01, d6ddf6d6; ran in parallel with W4) | D1, D2, D4, the top bar above the tabs (Overview button; the usage pill slot that W6 fills) | The largest structural change; the charter D-2/§5.1/§5.2 entries; the index change for sibling worktrees sits in main | W2 (row type scale); the D1/D2/D4 decisions |
 | **W6 Usage** (landed 2026-10-01, dc639473, read-only half; ran in parallel with W7) | E1, retiring the Accounts tab | Half of it is in the ClaudeUsage repo; the top-bar usage pill and popover are built against the new API and read files until it lands | the ClaudeUsage control route; the E1 decisions |
 | **W7 Sessions and custody** (landed 2026-10-01, 8768e5bf; ran in parallel with W5 and W6) | F1, F2, F3 | Needs the F1 reproduction first; the take-over action and the budget toggle are independent | the F1/F2 decisions; the budget default |
-| **W8 Motion and thinking** | T1, T3, and T2 as the owner rules | Owner's notes after the first look; all in the transcript's view layer, so it waits for debt 7A to land | 7A; the T2 ruling |
+| **W8 Motion and thinking** | T1, T3 (T2 ruled: no change) | Owner's notes after the first look; all in the transcript's view layer, so it waits for debt 7A to land | 7A; the T2 ruling |
 | Record only | F4, F5 (card copy), F6 (P1), F7 | Rulings and inventory; F5's card copy can ride W4 | |
 
 Acceptance for the whole initiative (the parent's own, beyond the items): the owner sits with the app beside Codex desktop and Claude Desktop on the same session and reports no proportion, type, bubble, composer or selector difference they want changed; a turn under the owner's hooks renders its answer as the answer, live and after reload; a steer sits where it was delivered; AskUserQuestion steps and leaves a one-widget receipt; the sidebar reaches any session of the owner's 276 projects in two clicks; the menu bar routes.
@@ -340,6 +340,7 @@ To be written by the architect as dated §19 entries when the corresponding wave
 - 2026-10-01 (owner, after r5): the question card always waits for Next, no auto-advance on single-select (B4; Claude Desktop's behaviour). Architect: one central permission-mode label map for every user-facing mode.
 - 2026-10-01 (owner, after the sitting's first look): the Overview button and the usage pill live in the title-bar toolbar, not in a second row under it (D4, E1); W5's bar is removed.
 - 2026-10-01 (owner): New chat, as the Codex app's: a general unstarted tab, the project (and worktree or not) chosen in the composer's location chip, with Open folder…; offered at the top of both sidebar levels, the tab strip's "+", ⌘N and the palette. Owner (confirmed): preselect the project in view.
+- 2026-10-01 (owner): intermediate assistant text keeps Codex's rule, commentary inside the work area folded with it (T2); no change.
 - Closed (B5): whether the panel was closed when Review failed no longer matters; opening Review now un-collapses a hidden panel either way.
 
 ## 7. Outcomes
