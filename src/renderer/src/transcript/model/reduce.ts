@@ -106,13 +106,19 @@ export interface MemoEntry {
   overlay?: { receipts: TranscriptUi['receipts']; spills: TranscriptUi['spills']; rows: Row[] }; // the reader state laid over `rows` (derive.ts)
 }
 
+export interface HiddenBranch {
+  fromTurn: TurnId;
+  rows: number;
+  turns: TurnId[];
+}
+
 export interface TranscriptState {
   sessionId: SessionId | null;
   agentId: AgentId | null; // set for a child transcript
   turns: Map<TurnId, TurnState>;
   order: TurnId[];
   loose: SessionEvent[]; // events outside any turn (boundaries between turns, process exit, reconnects)
-  hidden: { fromTurn: TurnId; rows: number; turns: TurnId[] } | null; // the branch a rewind hid (`turns` additive: the hidden ids in order)
+  hidden: (HiddenBranch & { branches: Map<RowId, HiddenBranch> }) | null; // all hidden turns (for row muting), with each rewind boundary’s own branch; fromTurn is the latest target
   pending: Map<RequestId, SessionEvent>; // unresolved requests → request_slot rows
   seen: Set<EventId>; // every applied event id
   echoUuids: Set<MessageUuid>; // uuids of bash_echo messages, so a turn.started naming one is dropped
@@ -188,6 +194,7 @@ const liveRowId = (type: LiveBlock['blockType'], api: ApiMessageId, index: numbe
 class Batch {
   readonly state: TranscriptState;
   private touched = new Set<TurnId>();
+  private childLists = new Set<SessionEvent[]>();
   private owned = { order: false, loose: false, pending: false };
 
   constructor(previous: TranscriptState) {
@@ -221,6 +228,18 @@ class Batch {
     this.state.turns.set(id, clone);
     this.touched.add(id);
     return clone;
+  }
+
+  // Clone a child's list on its first append in this batch, then append behind that immutable boundary.
+  pushChild(turn: TurnState, parent: ToolUseId, event: SessionEvent): void {
+    let list = turn.children.get(parent);
+    if (!list || !this.childLists.has(list)) {
+      list = list ? [...list] : [];
+      turn.children.set(parent, list);
+      this.childLists.add(list);
+    }
+    list.push(event);
+    turn.version += 1;
   }
 
   current(): TurnState | null {
@@ -260,6 +279,7 @@ class Batch {
     turn.state = 'closed';
     turn.ended = ended;
     turn.endedAt = ended.at;
+    this.closeBlocks(turn, ended.at);
     if (originOf(ended.origin) !== 'human') turn.origin = originOf(ended.origin);
     this.push(turn, ended);
     this.advance(turn.id);
@@ -320,8 +340,15 @@ class Batch {
     turn.state = 'closed';
     turn.closedBy = outcome;
     turn.endedAt = at;
+    this.closeBlocks(turn, at);
     turn.version += 1;
     this.advance(turn.id);
+  }
+
+  private closeBlocks(turn: TurnState, at: string): void {
+    for (const [id, block] of turn.live) {
+      if (!block.completed) turn.live.set(id, { ...block, completed: true, completedAt: at });
+    }
   }
 
   // After a turn closes, the next accepted open turn in order becomes current; a pending prompt waits for its own
@@ -366,9 +393,7 @@ function applyChild(batch: Batch, event: SessionEvent): void {
   const owner = batch.state.index.toolUses.get(parent) ?? batch.state.current;
   if (owner === null || owner === undefined) return batch.loose(event, false);
   const turn = batch.touch(owner);
-  const list = turn.children.get(parent) ?? [];
-  turn.children.set(parent, [...list, event]);
-  turn.version += 1;
+  batch.pushChild(turn, parent, event);
 }
 
 function apply(batch: Batch, event: SessionEvent): void {
@@ -600,8 +625,13 @@ function apply(batch: Batch, event: SessionEvent): void {
     case 'hook.callback_resolved':
       return; // requests to the host, C7's; nothing in the transcript
     case 'boundary.retraction': {
-      const owner = event.retractedMessageUuids.map((uuid) => index.messages.get(uuid)).find((id) => id !== undefined);
-      if (!pushRouted(owner)) batch.loose(event);
+      const owners = new Set(event.retractedMessageUuids.map((uuid) => index.messages.get(uuid)).filter((id): id is TurnId => id !== undefined));
+      if (owners.size === 0) {
+        if (!pushRouted(null)) batch.loose(event);
+      } else {
+        // Retain the revision on every affected turn; flatten deduplicates its one boundary row by event id.
+        for (const owner of owners) pushRouted(owner);
+      }
       return;
     }
     case 'boundary.rewind':
@@ -696,7 +726,7 @@ function completeBlock(turn: TurnState, event: Event<'assistant.block.complete'>
 // after the last visible turn, and `hidden.rows` counts the messages the reader can reveal.
 function rewind(batch: Batch, event: Event<'boundary.rewind'>): void {
   const { state } = batch;
-  const target = turnIdOf.ofMessage(event.targetMessageUuid);
+  const target = state.index.messages.get(event.targetMessageUuid) ?? turnIdOf.ofMessage(event.targetMessageUuid);
   const at = state.order.indexOf(target);
   if (at < 0) return batch.loose(event);
   const hiddenTurns = batch.order().splice(at);
@@ -704,7 +734,10 @@ function rewind(batch: Batch, event: Event<'boundary.rewind'>): void {
     const turn = state.turns.get(id)!;
     return n + turn.events.filter((e) => (e.kind === 'user.message' && e.bash === null) || (e.kind === 'assistant.block.complete' && e.block.type === 'text')).length;
   }, 0);
-  state.hidden = { fromTurn: target, rows, turns: hiddenTurns };
+  const branch = { fromTurn: target, rows, turns: hiddenTurns };
+  const branches = new Map(state.hidden?.branches);
+  branches.set(rowId.boundary(event.id), branch);
+  state.hidden = { fromTurn: target, rows: (state.hidden?.rows ?? 0) + rows, turns: [...(state.hidden?.turns ?? []), ...hiddenTurns], branches };
   if (state.current !== null && hiddenTurns.includes(state.current)) state.current = null;
   batch.loose(event);
 }

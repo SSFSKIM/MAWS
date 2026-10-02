@@ -79,10 +79,11 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
   const emitLoose = (after: TurnId | null) => {
     for (const row of looseRows(state, looseAfter.get(after) ?? [])) {
       emit([row], 'loose', rowId.timeOfRow(row.id));
-      if (row.kind === 'boundary' && row.boundaryKind === 'rewind' && row.revealed && state.hidden) {
-        for (const id of state.hidden.turns) {
+      if (row.kind === 'boundary' && row.boundaryKind === 'rewind' && row.revealed) {
+        for (const id of state.hidden?.branches.get(row.id)?.turns ?? []) {
           const turn = state.turns.get(id)!;
           emit(rowsOfTurn(state, turn), turn.origin, rowId.time(turn.id));
+          emitLoose(id);
         }
       }
     }
@@ -143,7 +144,7 @@ export function expandedTurnRows(state: TranscriptState, id: TurnId): Row[] {
 // A state whose every turn, group and cell is expanded and every rewound branch revealed: the snapshot suite's view.
 export function withAllExpanded(state: TranscriptState): TranscriptState {
   const turns = [...state.order, ...(state.hidden?.turns ?? [])];
-  const ui: TranscriptUi = { ...state.ui, expandedTurns: new Set(turns), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), global: state.ui.global + 1, version: state.ui.version + 1 };
+  const ui: TranscriptUi = { ...state.ui, expandedTurns: new Set(turns), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(state.hidden?.branches.keys()), global: state.ui.global + 1, version: state.ui.version + 1 };
   const first = rowsOf({ ...state, ui });
   for (const row of first) {
     if (row.kind === 'group') {
@@ -321,6 +322,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       }
       case 'tool.use': {
+        if (dropped(event.messageUuid)) break;
         const presentation = presentationOf(event.toolName);
         if (presentation === 'cell') {
           tools.set(event.toolUseId, { use: event, result: null, safeguard: 'not_evaluated', elapsedSeconds: 0, humanDecision: false, backgroundTaskId: null, backgroundDone: false });
@@ -868,7 +870,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
       case 'boundary.rewind': {
         const id = rowId.boundary(event.id);
         const revealed = state.ui.revealedBoundaries.has(id);
-        const hiddenRows = state.hidden?.rows ?? 0;
+        const hiddenRows = state.hidden?.branches.get(id)?.rows ?? 0;
         rows.push({ id, turnId: null, at: event.at, kind: 'boundary', boundaryKind: 'rewind', text: boundaryCopy({ kind: 'rewind', hiddenRows, revealed }), detail: event.prefillText, hiddenRows, revealed });
         break;
       }
