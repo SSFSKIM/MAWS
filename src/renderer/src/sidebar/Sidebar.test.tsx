@@ -7,10 +7,14 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerSessionAction } from '../app/session-actions';
 import { registerSessionCreator } from '../keymap/actions-runtime';
-import { useDialogs } from '../sessions/dialogs';
+import { closeDialog, useDialogs } from '../sessions/dialogs';
+import { SessionDialogs } from '../sessions/SessionDialogs';
+import { TabStrip } from '../main/TabStrip';
+import { record } from '../../../../test/support/builders';
 import { registerAction } from '../keymap/actions-runtime'; // C11
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
+import { useNotices } from '../stores/notices';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { fileTabsByProject, fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
@@ -40,9 +44,80 @@ const toggle = (user: ReturnType<typeof userEvent.setup>, name: string) => user.
 beforeEach(() => resetShellStores());
 afterEach(() => {
   cleanup();
+  closeDialog();
   useResumePicker.setState({ projectId: null });
   offs.splice(0).forEach((off) => off());
   delete (window as { maws?: MawsBridge }).maws;
+});
+
+describe('sidebar recovery routes', () => {
+  it('recovers a project-less archive from Other sessions after a fresh empty snapshot', async () => {
+    fillStores(scenarioFile('empty'));
+    const archived = record('archived-other', { projectId: null, archived: true, title: { text: 'Recovered notes', source: 'user' } });
+    const elsewhere = record('archived-project', { projectId: 'project-a' as ProjectId, archived: true, title: { text: 'Project notes', source: 'user' } });
+    const fake = fakeClient({
+      'session.list': () => ({ sessions: [archived, elsewhere], revision: 1 }),
+      'session.update': () => {
+        archived.archived = false;
+        useSessions.getState().applyChanged({ record: archived, cause: 'update', revision: 2 });
+        return archived;
+      },
+    });
+    window.maws = fake.client;
+    render(<><Sidebar /><SessionDialogs /></>);
+    fireEvent.contextMenu(row('Other sessions'));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Archived sessions…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Archived sessions · Other sessions' });
+    await within(dialog).findByText('Recovered notes');
+    expect(within(dialog).queryByText('Project notes')).toBeNull();
+    expect(fake.invoked('session.list')).toEqual([{ includeArchived: true }]);
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Unarchive' }));
+    await within(dialog).findByText('No archived sessions.');
+    expect(fake.invoked('session.update')).toEqual([{ appSessionId: archived.appId, patch: { archived: false } }]);
+    act(() => closeDialog());
+    await toggle(userEvent.setup(), 'Other sessions');
+    expect(sessionRows(row('Other sessions'))).toEqual(['Recovered notes']);
+  });
+
+  it('reports a failed hidden-project restore without revealing a row that remains hidden', async () => {
+    const project = nine.projects.find((p) => p.name === 'MAWS')!;
+    fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, hidden: p.id === project.id })) });
+    useLayout.getState().setSidebar({ collapsed: true });
+    const fake = fakeClient();
+    window.maws = fake.client;
+    render(<Sidebar />);
+    act(() => revealProject(project.id));
+    await act(() => fake.fail('session.projects.add', 'Directory no longer exists'));
+    expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
+    expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
+    expect(expanded()).not.toContain(project.id);
+    expect(useNotices.getState().notices.at(-1)).toMatchObject({ level: 'danger', text: 'Directory no longer exists' });
+  });
+
+  it('the hidden project tab label restores it before revealing and focusing its sidebar row', async () => {
+    const project = nine.projects.find((p) => p.name === 'MAWS')!;
+    fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, hidden: p.id === project.id })) });
+    useLayout.getState().setCurrentProject(project.id);
+    useLayout.getState().setSidebar({ collapsed: true });
+    const fake = fakeClient();
+    window.maws = fake.client;
+    render(<><Sidebar /><TabStrip pane={0} split={false} idPrefix="test" /></>);
+    const button = screen.getByRole('button', { name: 'Tabs of MAWS' });
+    expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
+    await userEvent.click(button);
+    expect(fake.invoked('session.projects.add')).toEqual([{ directory: project.directory }]);
+    expect(button.title).toBe('Show in sidebar');
+    expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
+    await act(() => fake.reply('session.projects.add', { ...project, hidden: false }));
+    // Main's project event may arrive after its command response.
+    act(() => useSessions.getState().applyProjects({ projects: nine.projects, revision: 10 }));
+    await waitFor(() => expect(document.activeElement).toBe(row('MAWS')));
+    expect(row('MAWS').getAttribute('aria-expanded')).toBe('true');
+    expect(useLayout.getState().regions.sidebar.collapsed).toBe(false);
+    expect(button.title).toBe('Reveal MAWS in the sidebar');
+    await userEvent.click(button);
+    expect(fake.invoked('session.projects.add')).toHaveLength(1);
+  });
 });
 
 describe('the project list', () => {
@@ -105,11 +180,11 @@ describe('the project list', () => {
     expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'MAWS', 'Other sessions']);
   });
 
-  it('Other sessions expands like a project, without a "+" or a context menu', async () => {
+  it('Other sessions expands like a project, without a "+" but with archive recovery', async () => {
     const user = userEvent.setup();
     render(<Sidebar />);
     expect(within(row('Other sessions')).queryByRole('button')).toBeNull();
-    expect(row('Other sessions').hasAttribute('data-menu')).toBe(false);
+    expect(row('Other sessions').getAttribute('data-menu')).toBe('other');
     await toggle(user, 'Other sessions');
     expect(expanded()).toEqual(['other']);
     expect(sessionRows(row('Other sessions'))).toEqual(['Terminal workflow notes']);
@@ -581,7 +656,7 @@ describe('sidebar at scale', () => {
     let elapsed = performance.now() - started;
     if (elapsed > 200) console.info(`[sidebar] many-sessions list mounted in ${Math.round(elapsed)} ms`);
     expect(elapsed).toBeLessThan(1000);
-    expect(projectRows()).toHaveLength(3);
+    expect(projectRows()).toHaveLength(4);
     started = performance.now();
     await toggle(userEvent.setup(), 'MAWS');
     elapsed = performance.now() - started;

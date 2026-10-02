@@ -4,6 +4,9 @@
 // focuses it. A reveal made while no sidebar body is mounted (it still shows its skeleton) waits for the body to
 // register; only the latest one is kept.
 import type { ProjectId } from '@shared/graph/ids';
+import { ipc } from '../ipc/client';
+import { toast } from '../stores/notices';
+import { useSessions } from '../stores/sessions';
 import { useLayout } from '../stores/layout';
 
 let revealer: ((projectId: ProjectId) => void) | null = null;
@@ -24,6 +27,23 @@ export function registerProjectRevealer(fn: (projectId: ProjectId) => void): () 
 }
 
 export function revealProject(projectId: ProjectId): void {
+  const project = useSessions.getState().projects.get(projectId);
+  if (project?.hidden) {
+    // The same restore as Hidden projects: main persists visibility and publishes the project list.
+    // A response arriving before that event is safe: the sidebar keeps its pending focus until the row mounts.
+    void ipc.invoke('session.projects.add', { directory: project.directory }).then((result) => {
+      if (!result.ok) {
+        toast({ level: 'danger', text: result.error.message, actions: [], dismissible: true });
+        return;
+      }
+      revealVisibleProject(projectId);
+    });
+    return;
+  }
+  revealVisibleProject(projectId);
+}
+
+function revealVisibleProject(projectId: ProjectId): void {
   useLayout.getState().setSidebar(({ expandedProjects }) => ({
     collapsed: false,
     expandedProjects: expandedProjects.includes(projectId) ? expandedProjects : [...expandedProjects, projectId],
