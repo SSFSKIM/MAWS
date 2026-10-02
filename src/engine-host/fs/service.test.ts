@@ -9,6 +9,8 @@ import { validateEventPayload } from '@shared/ipc/validate';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { Discovery, type ListedTranscript } from './discovery';
 import { FsService, READ_LISTS_CAP, START_SCAN_FALLBACK_MS } from './service';
+import { SubagentReader } from './subagents';
+import { WorkflowReader } from './workflows';
 import { DEBOUNCE_MS, SETTLE_MS, type WatchFn } from './watcher';
 
 const S1 = '11111111-1111-4111-8111-111111111111' as SessionId;
@@ -89,6 +91,55 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     fire();
     await expect.poll(() => events('fs.workflowChanged').some((e) => e.runId === 'wf-missed'), { timeout: 2_000 }).toBe(true);
     expect((await fs.workflows(A1)).runs).toEqual([]);
+  });
+
+  it.each(['rescan', 'timer'] as const)('keeps bound but unopened history lazy during %s sidecar reconciliation', async (trigger) => {
+    const bindings = [S1, S2, S3].map((sessionId, i) => ({ sessionId, appSessionId: `app-${i + 1}` as AppSessionId }));
+    for (const { sessionId } of bindings) await fixture.addTranscript('/work/a', sessionId, [user('u1', null, '/work/a', 'first')]);
+    const listeners = new Map<string, (event: string, filename: string | null) => void>();
+    const watch: WatchFn = (path, _options, listener) => {
+      listeners.set(path, listener);
+      return Object.assign(new EventEmitter(), { close: vi.fn() });
+    };
+    // Pass through to the real readers: these calls enumerate/parse sidecars and populate their caches.
+    const agents = vi.spyOn(SubagentReader.prototype, 'list');
+    const workflows = vi.spyOn(WorkflowReader.prototype, 'list');
+    const runs = vi.spyOn(WorkflowReader.prototype, 'read');
+    try {
+      const fs = await start(watch, undefined, trigger === 'timer' ? 100 : 30_000);
+      await fs.bind(bindings);
+      await fs.workflows(A1); // requested but not followed, initially empty
+      await fs.eventsSnapshot(bindings[1].appSessionId, null); // followed without an explicit sidecar request
+      await settled(); // includes the startup settle rescan with the whole index bound
+      const historyDir = fixture.transcriptPath(S3).slice(0, -'.jsonl'.length);
+      expect(agents.mock.calls.flat()).not.toContain(historyDir);
+      expect(workflows.mock.calls.flat()).not.toContain(historyDir);
+
+      clear();
+      agents.mockClear();
+      workflows.mockClear();
+      runs.mockClear();
+      for (const { sessionId } of bindings) {
+        await fixture.addSidecar(sessionId, 'subagents/agent-child.jsonl', user('child', null, '/work/a', 'child'));
+        await fixture.addSidecar(sessionId, 'workflows/wf-missed.json', { runId: 'wf-missed', status: 'running', workflowProgress: [] });
+        await fixture.addSidecar(sessionId, 'subagents/workflows/wf-missed/journal.jsonl', '');
+      }
+      if (trigger === 'rescan') listeners.get(fixture.paths.projects)!('rename', null);
+      for (const { appSessionId } of bindings.slice(0, 2)) {
+        await expect.poll(() => events('fs.subagentsChanged').some((e) => e.appSessionId === appSessionId && e.agents.length === 1)).toBe(true);
+        await expect.poll(() => events('fs.workflowChanged').some((e) => e.appSessionId === appSessionId && e.runId === 'wf-missed')).toBe(true);
+      }
+      await expect.poll(() => events('session.eventBatch').some((b) => b.appSessionId === bindings[1].appSessionId && b.events.some((e) => e.kind === 'workflow.progress'))).toBe(true);
+      await settled(); // let the complete rescan/timer pass finish, including any historical work
+      expect(agents.mock.calls.flat()).not.toContain(historyDir);
+      expect(workflows.mock.calls.flat()).not.toContain(historyDir);
+      expect(runs.mock.calls.map(([dir]) => dir)).not.toContain(historyDir);
+    } finally {
+      service?.stop();
+      agents.mockRestore();
+      workflows.mockRestore();
+      runs.mockRestore();
+    }
   });
 
   async function threeSessions() {

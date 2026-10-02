@@ -564,11 +564,12 @@ export class FsService {
     void this.reconcileSidecars();
   }
 
-  // A nameless/dropped watch event carries no sidecar paths. Re-list bound or previously read sessions, invalidate
+  // A nameless/dropped watch event carries no sidecar paths. Re-list only previously read/followed sessions, invalidate
   // both present and removed workflow runs, and advance followed progress. Coalesce overlapping timer/rescan passes.
   private reconcileSidecars(): Promise<void> {
     if (this.sidecarReconcile !== null) return this.sidecarReconcile;
-    const sessions = new Set([...this.listed.keys(), ...this.agents.keys(), ...this.workflowRuns.keys()]);
+    // Binding the stored index is not a request to load every historical session's sidecars.
+    const sessions = new Set([...this.agents.keys(), ...this.workflowRuns.keys(), ...[...this.follows.values()].map((entry) => entry.sessionId)]);
     const work = (async () => {
       for (const sessionId of sessions) {
         if (this.stopped) break;
