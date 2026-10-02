@@ -6,13 +6,14 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { BannerHost } from '../app/BannerHost';
 import { useLayout } from '../stores/layout';
+import { currentSet } from '../stores/layout-model';
 import { DropEdge } from './DropEdge';
 import { Pane } from './Pane';
 import { SplitDivider } from './SplitDivider';
 
 export function MainArea() {
-  const split = useLayout((s) => s.main.panes.length === 2);
-  const ratio = useLayout((s) => s.main.splitRatio);
+  const split = useLayout((s) => currentSet(s.main).panes.length === 2);
+  const ratio = useLayout((s) => currentSet(s.main).splitRatio);
   const dragging = useLayout((s) => s.dragging !== null);
   const region = useRef<HTMLDivElement>(null);
   const width = useWidth(region);

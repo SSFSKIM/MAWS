@@ -7,6 +7,7 @@ import { useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
 import { connectKeys } from './dispatcher';
 import { useKeyChord } from './useKeyChord';
+import { currentSet } from '../stores/layout-model';
 
 // The shell's own `useKeyChord`, bound the way C7's docked card and Overview cards will bind it: to the element that
 // holds focus. No C7 code: each binding here is a focusable element with a spy.
@@ -94,7 +95,7 @@ describe('key dispatch follows DOM focus', () => {
 
   it('Enter on pane 1’s docked element fires pane 1’s only, even while the remembered focused pane is 0', async () => {
     act(() => useLayout.getState().focusPane(0));
-    expect(useLayout.getState().main.focusedPane).toBe(0);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(0);
     await enterOn('dock 1');
     expect(fired()).toEqual(['dock1×1']);
   });

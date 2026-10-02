@@ -1,13 +1,15 @@
-// The session actions of §5.1 (open, open in split, pin, rename, fork, archive, delete conversation, remove worktree):
-// one list for the toolbar's session menu and the sidebar's context menus, each entry enabled only while a handler is
-// registered. C5 registers open, open in split and pin; C10 registers the rest (residue *Slots*: unregistered actions
-// render disabled).
+// The session actions of §5.1 (open, open in new tab, open in split, pin, rename, fork, archive, delete conversation,
+// remove worktree): one list for the toolbar's session menu and the sidebar's context menus, each entry enabled only
+// while a handler is registered. C5 registers open, open in new tab, open in split and pin; C10 registers the rest
+// (residue *Slots*: unregistered actions render disabled).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { createHandlerRegistry } from '../keymap/registry';
 
 export const SESSION_ACTIONS = {
   open: 'Open',
+  // I2: Open replaces the focused pane's session; this keeps it and opens a tab of its own (Chrome's item)
+  openInNewTab: 'Open in new tab',
   // C10 start: resume a session with no process (a foreign-live row never offers it; a MAWS-live one has nothing to resume)
   resume: 'Resume',
   // C10 end
@@ -34,12 +36,12 @@ function isForeign(record: SessionRecord): boolean {
 }
 
 // The actions a session's menus offer, whoever renders them (the sidebar's context menu and hover actions, the
-// toolbar's session menu): a foreign-live session only Open, and "Remove worktree…" only with a worktree.
+// toolbar's session menu): a foreign-live session only the two opens, and "Remove worktree…" only with a worktree.
 export function sessionActionsFor(record: SessionRecord): SessionActionId[] {
-  // C10 start: a background job with a known id is attached beside Open; nothing else holds a job to attach to
-  if (record.holder.kind === 'background_job' && record.holder.jobId !== null) return ['open', 'attach'];
+  // C10 start: a background job with a known id is attached beside the opens; nothing else holds a job to attach to
+  if (record.holder.kind === 'background_job' && record.holder.jobId !== null) return ['open', 'openInNewTab', 'attach'];
   // C10 end
-  if (isForeign(record)) return ['open'];
+  if (isForeign(record)) return ['open', 'openInNewTab'];
   const offered = SESSION_ACTION_IDS.filter((id) => id !== 'removeWorktree' || record.worktree !== null);
   // C10 start: Attach is a job holder's alone (above); Resume only for a session no process holds (a MAWS-live one has
   // nothing to resume)

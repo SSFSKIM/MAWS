@@ -13,6 +13,7 @@ import type { AccountUsage, UsageSnapshot } from '@shared/usage/types';
 import { ipc } from '../ipc/client';
 import { createFreshness } from './freshness';
 import { useLayout } from './layout';
+import { allTabs } from './layout-model';
 import { useSessions } from './sessions';
 // C7 end
 
@@ -150,11 +151,9 @@ export function connectUsage(client: MawsBridge = ipc, stores: UsageStores = { u
   const openEngineIds = () => {
     const records = stores.sessions.getState().records;
     const ids = new Set<string>();
-    for (const pane of stores.layout.getState().main.panes) {
-      for (const tab of pane.tabs) {
-        const id = tab.kind === 'session' ? records.get(tab.appSessionId)?.engineSessionId : null;
-        if (id) ids.add(id);
-      }
+    for (const tab of allTabs(stores.layout.getState().main)) { // W12: every project's tab set
+      const id = tab.kind === 'session' ? records.get(tab.appSessionId)?.engineSessionId : null;
+      if (id) ids.add(id);
     }
     return [...ids].sort().slice(0, MAX_ASKED_SESSIONS);
   };

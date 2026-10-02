@@ -6,7 +6,7 @@ import { formatChord } from '@shared/keymap/chord';
 import { registerShellActions } from '../app/shell-actions';
 import { registerAction, runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { Sidebar } from '../sidebar/Sidebar';
 import { projectNodeId } from '../sidebar/tree';
@@ -88,7 +88,7 @@ describe('command palette', () => {
     const user = await openAndType('quota');
     await user.keyboard('{Enter}');
     expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${idOf('Quota reset recovery')}`);
-    expect(useLayout.getState().main.panes).toHaveLength(1);
+    expect(currentSet(useLayout.getState().main).panes).toHaveLength(1);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
@@ -96,8 +96,8 @@ describe('command palette', () => {
     useLayout.getState().openSession(idOf('Charter + research')); // a tab beside which to split (an empty pane takes the session itself)
     const user = await openAndType('quota');
     await user.keyboard('{Meta>}{Enter}{/Meta}');
-    expect(useLayout.getState().main.panes).toHaveLength(2);
-    expect(useLayout.getState().main.panes[1]?.activeTabId).toBe(`session:${idOf('Quota reset recovery')}`);
+    expect(currentSet(useLayout.getState().main).panes).toHaveLength(2);
+    expect(currentSet(useLayout.getState().main).panes[1]?.activeTabId).toBe(`session:${idOf('Quota reset recovery')}`);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout } from './layout';
+import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout, type ProjectOf } from './layout';
+import { currentSet } from './layout-model';
 
 const A = 'app-a' as AppSessionId;
 
@@ -18,8 +19,8 @@ function setup(given: Record<string, unknown> = {}) {
   const store = createLayoutStore();
   const stop = persistLayout(fake.client, store);
   running.push(stop);
-  const hydrate = async (known: (id: AppSessionId) => boolean = () => true) => {
-    const hydrating = store.getState().hydrate(fake.client, known);
+  const hydrate = async (known: (id: AppSessionId) => boolean = () => true, projectOf?: ProjectOf) => {
+    const hydrating = store.getState().hydrate(fake.client, known, { projectOf });
     await vi.runAllTimersAsync();
     await hydrating;
   };
@@ -51,15 +52,53 @@ describe('layout persistence', () => {
   });
 
   it('writes tabs opened before hydration over an existing main.tabs, before any later change and on beforeunload', async () => {
-    const saved = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [{ id: 'diagnostics', kind: 'diagnostics', pinned: false }, { id: 'settings', kind: 'settings', section: null, pinned: false }], activeTabId: 'diagnostics' }] };
+    const tabs: TabRef[] = [{ id: 'diagnostics', kind: 'diagnostics', pinned: false }, { id: 'settings', kind: 'settings', section: null, pinned: false }];
+    const saved: LayoutMain = { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs, activeTabId: 'diagnostics' }] } } };
     const { store, hydrate, sets } = setup({ 'main.tabs': saved });
     store.getState().openSession(A); // a sidebar click or a notification navigation racing the first layout.get
     await hydrate((id) => id === A);
     window.dispatchEvent(new Event('beforeunload'));
     const written = sets().filter((s) => s.key === 'main.tabs');
     expect(written).toHaveLength(1);
-    expect((written[0].value as typeof saved).panes[0].tabs.map((t) => t.id)).toEqual(['diagnostics', `session:${A}`, 'settings']); // opened after the saved active tab, over the saved tabs
+    expect(currentSet(written[0].value as LayoutMain).panes[0].tabs.map((t) => t.id)).toEqual(['diagnostics', `session:${A}`, 'settings']); // opened after the saved active tab, over the saved tabs
     expect(written[0].value).toBe(store.getState().main);
+  });
+
+  // W12: a version-1 main.tabs is filed by project at hydration (`projectOf`: the record's project, else the unstarted
+  // intent's) and written back as version 2 at once; an unknown session's tab is dropped.
+  it('reads a version-1 main.tabs into a tab set per project and writes version 2 back', async () => {
+    const X = 'proj-x' as ProjectId;
+    const Y = 'proj-y' as ProjectId;
+    const tab = (id: string): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id as AppSessionId, pinned: false });
+    const diagnostics: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
+    const v1 = {
+      version: 1,
+      panes: [
+        { tabs: [tab('x1'), tab('y1'), diagnostics, tab('gone')], activeTabId: 'session:y1' },
+        { tabs: [tab('new'), tab('x2')], activeTabId: 'session:new' },
+      ],
+      focusedPane: 0,
+      splitRatio: 0.4,
+      closedTabs: [tab('x3')],
+    };
+    // x1, x2, x3 in X and y1 in Y have records; `new` is an unstarted chat whose intent chose Y; `gone` is unknown
+    const projects: Record<string, ProjectId | null> = { x1: X, x2: X, x3: X, y1: Y, new: Y };
+    const { store, hydrate, sets } = setup({ 'main.tabs': v1 });
+    await hydrate((id) => id in projects, (id) => projects[id] ?? null);
+    const main = store.getState().main;
+    expect(main.current).toBe(Y); // the shown tab's project
+    expect(main.sets).toEqual({
+      [Y]: { panes: [{ tabs: [tab('y1'), diagnostics], activeTabId: 'session:y1' }, { tabs: [tab('new')], activeTabId: 'session:new' }], focusedPane: 0, splitRatio: 0.4 },
+      [X]: { panes: [{ tabs: [tab('x1')], activeTabId: 'session:x1' }, { tabs: [tab('x2')], activeTabId: 'session:x2' }], focusedPane: 0, splitRatio: 0.4 },
+    });
+    expect(main.closedTabs).toEqual([tab('x3')]);
+    expect(sets()).toEqual([{ key: 'main.tabs', value: main }]);
+    // the next launch reads version 2 as it is and writes nothing
+    const again = setup({ 'main.tabs': main });
+    await again.hydrate((id) => id in projects, (id) => projects[id] ?? null);
+    expect(again.store.getState().main).toEqual(main);
+    vi.advanceTimersByTime(1000);
+    expect(again.sets()).toEqual([]);
   });
 
   it('writes nothing for hydration alone when layout.json holds every key', async () => {

@@ -350,9 +350,9 @@ describe('held outcomes and the attach command', () => {
   });
 
   it('the row menu offers Open and Attach for a job holder with an id, and Attach attaches', async () => {
-    expect(sessionActionsFor(held(JOB))).toEqual(['open', 'attach']);
-    expect(sessionActionsFor(held({ kind: 'background_job', pid: 1, jobId: null }))).toEqual(['open']);
-    expect(sessionActionsFor(held({ kind: 'terminal', pid: 1 }))).toEqual(['open']);
+    expect(sessionActionsFor(held(JOB))).toEqual(['open', 'openInNewTab', 'attach']);
+    expect(sessionActionsFor(held({ kind: 'background_job', pid: 1, jobId: null }))).toEqual(['open', 'openInNewTab']);
+    expect(sessionActionsFor(held({ kind: 'terminal', pid: 1 }))).toEqual(['open', 'openInNewTab']);
     expect(sessionActionsFor(held({ kind: 'none' }))).not.toContain('attach');
     expect(sessionActionsFor(held({ kind: 'self' }))).not.toContain('attach');
     held(JOB);

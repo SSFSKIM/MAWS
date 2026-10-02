@@ -43,6 +43,7 @@ import {
   turnScopeFiles,
   type ChangedFile,
 } from './review-model';
+import { currentSet } from '../../../stores/layout-model';
 
 // The highlighter would load shiki's grammars; the diff paints plain until it is ready, which here is never.
 vi.mock('@git-diff-view/shiki', () => ({ getDiffViewHighlighter: () => new Promise(() => {}) }));
@@ -619,7 +620,7 @@ describe('review tool', () => {
     await waitFor(() => expect(document.querySelector('[data-review-too-large]')?.textContent).toBe('Diff too large to display. Open the file'));
     expect(document.querySelector('[data-review-body]')).toBeNull();
     fireEvent.click(screen.getByText('Open the file'));
-    expect(useLayout.getState().main.panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/big.ts', line: 4 }));
+    expect(currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/big.ts', line: 4 }));
   });
 
   it('selects the first file when the selected one leaves the list', async () => {
@@ -640,7 +641,7 @@ describe('review tool', () => {
     await waitFor(() => expect(document.querySelector('[data-review-hunk]')?.textContent).toBe('Showing hunk 1 of 2'));
     expect(screen.getByLabelText('Previous hunk')).toHaveProperty('disabled', true);
     fireEvent.click(screen.getByText('Open file ↗'));
-    const fileTabs = () => useLayout.getState().main.panes.flatMap((p) => p.tabs).filter((t) => t.kind === 'file');
+    const fileTabs = () => currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs).filter((t) => t.kind === 'file');
     expect(fileTabs()).toEqual([expect.objectContaining({ path: '/repo/src/app.ts', line: 5, appSessionId: A })]);
     fireEvent.click(screen.getByLabelText('Next hunk'));
     expect(document.querySelector('[data-review-hunk]')?.textContent).toBe('Showing hunk 2 of 2');
@@ -683,7 +684,7 @@ describe('review tool', () => {
       expect(hunkLabel()).toBe('Showing hunk 2 of 2');
       expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
       fireEvent.click(screen.getByText('Open file ↗'));
-      expect(useLayout.getState().main.panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/src/app.ts', line: 14 }));
+      expect(currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/src/app.ts', line: 14 }));
       act(() => void ((body as HTMLElement).scrollTop = 0)); // scrolling by hand still moves the counter
       expect(hunkLabel()).toBe('Showing hunk 1 of 2');
     } finally {
@@ -870,7 +871,7 @@ describe('review tool', () => {
     expect(rows()).toEqual([['/repo/child.ts', 'modified', 'child.ts/repo+1 −1']]);
     expect(bodyText()).toContain('alpha');
     fireEvent.click(screen.getByText('Open file ↗'));
-    expect(useLayout.getState().main.panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/child.ts', line: 3 }));
+    expect(currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/child.ts', line: 3 }));
   });
 
   it('draws each edit of a file as its own block: a Write, an overlapping Edit, and a later edit above', async () => {
@@ -901,7 +902,7 @@ describe('review tool', () => {
     fireEvent.click(screen.getByLabelText('Next hunk'));
     expect(hunkLabel()).toBe('Showing hunk 3 of 3');
     fireEvent.click(screen.getByText('Open file ↗'));
-    expect(useLayout.getState().main.panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: file, line: 4 })); // the third block's own numbers
+    expect(currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: file, line: 4 })); // the third block's own numbers
     // No warning from the diff view, save the store library's own timing note, which a loaded machine triggers.
     const warned = warn.mock.calls.filter(([first]) => !(typeof first === 'string' && first.startsWith('[reactivity-store]')));
     expect(warned).toEqual([]);
@@ -991,7 +992,7 @@ describe('review diff tab', () => {
   it('forgets a closed tab’s view: reopened, it starts again from its ref', async () => {
     const ref = 'uncommitted @ src/staged.ts';
     act(() => useLayout.getState().openTab({ kind: 'diff', appSessionId: A, ref }));
-    const tab = useLayout.getState().main.panes[0].tabs.find((t) => t.kind === 'diff')!;
+    const tab = currentSet(useLayout.getState().main).panes[0].tabs.find((t) => t.kind === 'diff')!;
     const { unmount } = render(<DiffTab tab={tab as ReturnType<typeof diffTab>} />);
     await waitFor(() => expect(selectedPath()).toBe('src/staged.ts'));
     fireEvent.click(row('src/app.ts'));

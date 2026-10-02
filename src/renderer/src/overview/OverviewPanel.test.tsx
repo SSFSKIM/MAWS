@@ -9,8 +9,8 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { Toolbar } from '../app/Toolbar';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
-import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { registerReplaceGuard, useLayout } from '../stores/layout';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { OverviewLayer, placeRect } from './OverviewPanel';
 
@@ -143,14 +143,16 @@ describe('the floating Overview', () => {
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
   });
 
-  it('a card opens its session tab and closes the panel; the session behind it was never touched', async () => {
+  // I2: a card shows its session in place of the focused pane's, which ⌘⇧T brings back.
+  it('a card shows its session in place of the active session tab and closes the panel', async () => {
     const user = userEvent.setup();
     useLayout.getState().openSession(idOf('Settings idle probe'));
     render(<World />);
     act(() => useLayout.getState().setOverviewOpen(true));
     await user.click(within(panel()).getByText('Charter + research'));
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Charter + research') });
-    expect(useLayout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Settings idle probe')}`, `session:${idOf('Charter + research')}`]);
+    expect(currentSet(useLayout.getState().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Charter + research')}`]);
+    expect(useLayout.getState().main.closedTabs.map((t) => t.id)).toEqual([`session:${idOf('Settings idle probe')}`]);
     expect(useLayout.getState().overviewOpen).toBe(false);
   });
 
@@ -235,6 +237,27 @@ describe('the floating Overview', () => {
     expect(activeTab(useLayout.getState().main)).toBeNull();
   });
 
+  // The review's F4: with an unstarted draft shown, the card's session opens beside it at once (its guard asks after), so
+  // the click's own layout change closes the panel.
+  it('a card clicked over an unstarted draft opens its session and closes the panel; the draft goes once its guard agrees', async () => {
+    const user = userEvent.setup();
+    const DRAFT = 'app-new-1' as AppSessionId;
+    let release!: (discard: boolean) => void;
+    const off = registerReplaceGuard({ unstarted: (id) => id === DRAFT, discard: () => new Promise<boolean>((resolve) => (release = resolve)) });
+    try {
+      useLayout.getState().openSession(DRAFT, { how: 'tab' });
+      render(<World />);
+      act(() => useLayout.getState().setOverviewOpen(true));
+      await user.click(within(panel()).getByText('Charter + research'));
+      expect(useLayout.getState().overviewOpen).toBe(false);
+      expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Charter + research') });
+      await act(async () => release(true));
+      expect(currentSet(useLayout.getState().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Charter + research')}`]);
+    } finally {
+      off();
+    }
+  });
+
   // Opening changes the layout even when the active tab stays the same (the tab is activated again, or moves pane).
   it('a card of the session already active closes it, by click or Enter', async () => {
     const user = userEvent.setup();
@@ -252,11 +275,11 @@ describe('the floating Overview', () => {
 
   it('a ⌘-click on the active session’s card moves it into the split and closes it', () => {
     useLayout.getState().openSession(idOf('Settings idle probe'));
-    useLayout.getState().openSession(idOf('Charter + research'));
+    useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
     render(<World />);
     act(() => useLayout.getState().setOverviewOpen(true));
     fireEvent.click(within(panel()).getByText('Charter + research'), { metaKey: true });
-    expect(useLayout.getState().main.panes.map((p) => p.tabs.map((t) => t.id))).toEqual([[`session:${idOf('Settings idle probe')}`], [`session:${idOf('Charter + research')}`]]);
+    expect(currentSet(useLayout.getState().main).panes.map((p) => p.tabs.map((t) => t.id))).toEqual([[`session:${idOf('Settings idle probe')}`], [`session:${idOf('Charter + research')}`]]);
     expect(useLayout.getState().overviewOpen).toBe(false);
   });
 

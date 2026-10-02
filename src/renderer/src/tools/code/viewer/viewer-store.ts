@@ -19,6 +19,7 @@ import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { FILES_READ_DEFAULT_LENGTH, type FilesChanged, type FilesReadOutput } from '@shared/ipc/schema/files';
 import { ipc } from '../../../ipc/client';
 import { useLayout } from '../../../stores/layout';
+import { allTabs } from '../../../stores/layout-model';
 import { useFiles, type WatchHold } from '../files/store';
 import { dirname, sameFile } from '../files/tree';
 import { CODE_CAP, kindOf, type ViewerKind } from './kinds';
@@ -123,7 +124,7 @@ export function createViewerStore(client: MawsBridge) {
 
     // Entries of tabs the layout no longer holds go; past the bound, the least recently used unmounted ones go.
     const prune = () => {
-      const open = new Set(useLayout.getState().main.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id)));
+      const open = new Set(allTabs(useLayout.getState().main).map((tab) => tab.id)); // W12: every project's tab set
       for (const tabId of get().entries.keys()) if (!open.has(tabId) && !mounted.get(tabId)) remove(tabId);
       const idle = [...get().entries.keys()].filter((tabId) => !mounted.get(tabId)).sort((a, b) => (used.get(a) ?? 0) - (used.get(b) ?? 0));
       while (get().entries.size > VIEWER_ENTRIES_MAX && idle.length > 0) remove(idle.shift()!);

@@ -11,6 +11,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as Reac
 import type { OverviewRect } from '@shared/ipc/schema/layout';
 import { focusPaneElement } from '../main/pane-dom';
 import { useLayout } from '../stores/layout';
+import { currentSet } from '../stores/layout-model';
 import { Overview } from './Overview';
 
 const MIN = { width: 360, height: 240 };
@@ -70,7 +71,7 @@ type Gesture = { kind: 'move' | 'resize'; pointerX: number; pointerY: number; st
 
 function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }) {
   const stored = useLayout((s) => s.regions.overview);
-  const paneIndex = useLayout((s) => s.main.focusedPane);
+  const paneIndex = useLayout((s) => currentSet(s.main).focusedPane);
   const panel = useRef<HTMLDivElement>(null);
   const [live, setLive] = useState<OverviewRect | null>(null); // the rect while a drag or resize moves it
   const gesture = useRef<Gesture | null>(null);
@@ -86,7 +87,7 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
       if (!restoreFocus.current) return;
       const back = opener.current;
       if (back instanceof HTMLElement && back.isConnected && back !== document.body) back.focus();
-      else focusPaneElement(useLayout.getState().main.focusedPane);
+      else focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
     };
   }, []);
 
@@ -111,7 +112,7 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
         if (!acting.current || !state.overviewOpen || state.main === previous.main) return;
         restoreFocus.current = false;
         state.setOverviewOpen(false);
-        requestAnimationFrame(() => focusPaneElement(useLayout.getState().main.focusedPane));
+        requestAnimationFrame(() => focusPaneElement(currentSet(useLayout.getState().main).focusedPane));
       }),
     [],
   );

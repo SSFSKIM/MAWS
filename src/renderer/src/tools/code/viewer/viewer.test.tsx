@@ -21,6 +21,7 @@ import { FLASH_CLASS } from './CodeView';
 import { FileViewer } from './FileViewer';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
 import { useViewer, VIEWER_ENTRIES_MAX } from './viewer-store';
+import { currentSet } from '../../../stores/layout-model';
 
 const text = { encoding: 'utf8' as const };
 const binary = { encoding: 'base64' as const };
@@ -444,7 +445,7 @@ describe('viewer', () => {
   it('a tab with no session, or one main does not know, says so and reads nothing', async () => {
     const main = serve({ '/r/a.ts': { refusal: 'unknown app session: app-z' } });
     openFile(null, '/r/../r/./a.ts', 3);
-    const tab = useLayout.getState().main.panes[0].tabs.find((t) => t.kind === 'file') as Extract<TabRef, { kind: 'file' }>;
+    const tab = currentSet(useLayout.getState().main).panes[0].tabs.find((t) => t.kind === 'file') as Extract<TabRef, { kind: 'file' }>;
     expect(tab).toMatchObject({ path: '/r/a.ts', line: 3, appSessionId: null });
     const { unmount } = render(<FileViewer tab={tab} />);
     expect(screen.getByText('No session grants access to this file')).toBeTruthy();
@@ -481,7 +482,7 @@ describe('open file', () => {
   it("codeTranscriptActions.openFile opens the tab for the focused pane's session", () => {
     useLayout.getState().openTab({ kind: 'session', appSessionId: B });
     codeTranscriptActions.openFile('/w/x.ts', 7);
-    expect(useLayout.getState().main.panes[0].tabs.find((t) => t.kind === 'file')).toMatchObject({ path: '/w/x.ts', line: 7, appSessionId: B });
+    expect(currentSet(useLayout.getState().main).panes[0].tabs.find((t) => t.kind === 'file')).toMatchObject({ path: '/w/x.ts', line: 7, appSessionId: B });
   });
 
   it("finds a turn's session by its transcript key, a child agent's key naming the session before its ':'", () => {

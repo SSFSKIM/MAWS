@@ -1,15 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS, type LayoutMain } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMainV1 } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { createLayoutStore } from './layout';
+import { createLayoutStore, registerReplaceGuard } from './layout';
+import { currentSet } from './layout-model';
 
 const A = 'app-a' as AppSessionId;
 const session = (id: string) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
-const persistedMain: LayoutMain = {
-  ...LAYOUT_DEFAULTS.main,
+// Saved before W12: version 1, one pane layout.
+const persistedMain: LayoutMainV1 = {
+  version: 1,
+  ...EMPTY_TAB_SET,
   panes: [{ tabs: [session('app-a') as never, session('gone') as never], activeTabId: 'session:gone' }],
+  closedTabs: [],
 };
+const shown = (store: ReturnType<typeof createLayoutStore>) => currentSet(store.getState().main);
 
 async function hydrate(values: Record<string, unknown>, known = (id: AppSessionId) => id === A) {
   const fake = fakeClient({
@@ -25,8 +30,8 @@ describe('layout and settings migrate', () => {
   it('hydrating a persisted layout whose session tab names an unknown appSessionId drops the tab', async () => {
     const { store } = await hydrate({ 'main.tabs': persistedMain });
     expect(store.getState().hydrated).toBe(true);
-    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a']);
-    expect(store.getState().main.panes[0].activeTabId).toBe('session:app-a');
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a']);
+    expect(shown(store).panes[0].activeTabId).toBe('session:app-a');
   });
 
   // W5: every layout saved before the floating Overview holds the Overview's tab, usually first and active. Reading it must
@@ -34,9 +39,9 @@ describe('layout and settings migrate', () => {
   it('hydrating a layout saved with the Overview tab drops that tab, its pane activating the first remaining tab', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const overview = { id: 'overview', kind: 'overview', pinned: true };
-    const saved = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [overview, session('app-a'), session('b')], activeTabId: 'overview' }], closedTabs: [overview] };
+    const saved = { ...persistedMain, panes: [{ tabs: [overview, session('app-a'), session('b')], activeTabId: 'overview' }], closedTabs: [overview] };
     const { store } = await hydrate({ 'main.tabs': saved }, () => true);
-    expect(store.getState().main).toEqual({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [session('app-a'), session('b')], activeTabId: 'session:app-a' }] });
+    expect(store.getState().main).toEqual({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [session('app-a'), session('b')], activeTabId: 'session:app-a' }] } } });
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -61,7 +66,7 @@ describe('layout and settings migrate', () => {
 
   it('falls back to the default for a malformed main.tabs (a null pane or tab) and still hydrates', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { store } = await hydrate({ 'main.tabs': { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [null], activeTabId: 'x' }, null] } });
+    const { store } = await hydrate({ 'main.tabs': { ...persistedMain, panes: [{ tabs: [null], activeTabId: 'x' }, null] } });
     expect(store.getState().hydrated).toBe(true);
     expect(store.getState().main).toEqual(LAYOUT_DEFAULTS.main);
     expect(warn.mock.calls.map(([line]) => line)).toEqual(['[layout] main.tabs is not a valid value; using the default']);
@@ -74,15 +79,15 @@ describe('layout store actions', () => {
     const store = createLayoutStore();
     const s = () => store.getState();
     s().openSession(A);
-    s().openSession('b' as AppSessionId);
-    s().openSession('c' as AppSessionId);
+    s().openSession('b' as AppSessionId, { how: 'tab' });
+    s().openSession('c' as AppSessionId, { how: 'tab' });
     s().activateTab('session:b');
     s().closeTab('session:b');
-    expect(s().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:c']);
+    expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:c']);
     s().reopenClosed();
-    expect(s().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:b', 'session:c']);
+    expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:b', 'session:c']);
     s().dropSession(A);
-    expect(s().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:b', 'session:c']);
+    expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual(['session:b', 'session:c']);
   });
 
   it('moves a panel tab between the global pins and the session’s own tabs (D-10)', () => {
@@ -146,21 +151,227 @@ describe('layout store actions', () => {
   });
 });
 
+// I2: a replace that would take an unstarted tab's place asks C10's close guard first (registered by the shell).
+describe('replacing an unstarted tab', () => {
+  const NEW = 'new-1' as AppSessionId;
+  const B = 'b' as AppSessionId;
+  const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  function unstartedShown(answer: boolean) {
+    const store = createLayoutStore();
+    const discard = vi.fn(async () => answer);
+    const off = registerReplaceGuard({ unstarted: (id) => id === NEW, discard });
+    store.getState().openSession(A);
+    store.getState().openSession(NEW, { how: 'tab' });
+    const tabs = () => shown(store).panes[0].tabs.map((t) => t.id);
+    return { store, discard, off, tabs };
+  }
+
+  it('the session opens beside it at once; discarded, the unstarted tab goes, leaving the session in its place and no ⌘⇧T entry', async () => {
+    const { store, discard, off, tabs } = unstartedShown(true);
+    try {
+      store.getState().openSession(B);
+      expect(tabs()).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']); // shown while the guard decides
+      expect(shown(store).panes[0].activeTabId).toBe('session:b');
+      expect(discard).toHaveBeenCalledWith(expect.objectContaining({ id: `session:${NEW}` }));
+      await settled();
+      expect(tabs()).toEqual([`session:${A}`, 'session:b']);
+      expect(shown(store).panes[0].activeTabId).toBe('session:b');
+      expect(store.getState().main.closedTabs).toEqual([]);
+    } finally {
+      off();
+    }
+  });
+
+  it('a draft that started while its guard decided is left alone: its tab, its agent tab and its panel survive', async () => {
+    const store = createLayoutStore();
+    let started = false;
+    let answer!: (discarded: boolean) => void;
+    const off = registerReplaceGuard({ unstarted: (id) => id === NEW && !started, discard: () => new Promise<boolean>((resolve) => (answer = resolve)) });
+    try {
+      store.getState().openSession(A);
+      store.getState().openSession(NEW, { how: 'tab' });
+      store.getState().openSession(B);
+      started = true; // its record arrived
+      store.getState().openTab({ kind: 'agent', appSessionId: NEW, agentId: 'agent-1' as never }, { activate: false });
+      store.getState().setPanelTabs(NEW, { tabs: [{ id: 'files-1', toolId: 'files', pinned: false }], activeTabId: 'files-1' });
+      answer(true);
+      await settled();
+      const ids = shown(store).panes[0].tabs.map((t) => t.id);
+      expect(ids).toContain(`session:${NEW}`);
+      expect(ids).toContain(`agent:${NEW}:agent-1`);
+      expect(store.getState().panelBySession.has(NEW)).toBe(true);
+    } finally {
+      off();
+    }
+  });
+
+  it('declined, the unstarted tab stays and the session opens in a tab of its own', async () => {
+    const { store, off, tabs } = unstartedShown(false);
+    try {
+      store.getState().openSession(B);
+      await settled();
+      expect(tabs()).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']);
+    } finally {
+      off();
+    }
+  });
+
+  // A change replayed over the hydrated tabs meets what the person never saw: a draft in the way there is kept and not
+  // asked about, and the session opens beside it.
+  it('an open made before hydration, replayed over a saved draft that is shown, keeps the draft and asks nothing', async () => {
+    const discard = vi.fn(async () => true);
+    const off = registerReplaceGuard({ unstarted: (id) => id === NEW, discard });
+    try {
+      const saved = { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [session(A), session(NEW)], activeTabId: `session:${NEW}` }] } } };
+      const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } });
+      const store = createLayoutStore();
+      const hydrating = store.getState().hydrate(fake.client, () => true);
+      store.getState().openSession(B); // a click before layout.get answers
+      await settled();
+      for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'main.tabs' ? saved : null });
+      await hydrating;
+      await settled();
+      expect(discard).not.toHaveBeenCalled();
+      expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']);
+      expect(store.getState().main.closedTabs).toEqual([]);
+    } finally {
+      off();
+    }
+  });
+
+  it('asks nothing for a session already open, a new tab or a split', async () => {
+    const { store, discard, off, tabs } = unstartedShown(true);
+    try {
+      store.getState().openSession(A);
+      store.getState().openSession(NEW);
+      store.getState().openSession(B, { how: 'tab' });
+      expect(discard).not.toHaveBeenCalled();
+      expect(tabs()).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']);
+    } finally {
+      off();
+    }
+  });
+});
+
+// W12 (I3): the store files a session's tabs under the project hydration's `projectOf` answers.
+describe('tab sets per project', () => {
+  const X = 'proj-x' as ProjectId;
+  const Y = 'proj-y' as ProjectId;
+  const projects: Record<string, ProjectId | null> = { [A]: X, b: X, y1: Y, new: Y };
+  const projectOf = (id: AppSessionId) => projects[id] ?? null;
+  async function hydrated(values: Record<string, unknown> = {}) {
+    const fake = fakeClient({ 'layout.list': { keys: Object.keys(values) }, 'layout.get': ({ key }: { key: string }) => ({ value: values[key] ?? null }) });
+    const store = createLayoutStore();
+    await store.getState().hydrate(fake.client, () => true, { projectOf });
+    return store;
+  }
+
+  it('every open of a session shows its project’s set first; setCurrentProject switches; ⌘⇧T reopens into the tab’s set', async () => {
+    const store = await hydrated();
+    const s = () => store.getState();
+    s().openSession(A);
+    s().openTab({ kind: 'session', appSessionId: 'b' as AppSessionId }); // a notification's or a fork's open
+    expect(s().main.current).toBe(X);
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, 'session:b']);
+    s().openSession('y1' as AppSessionId);
+    expect(s().main.current).toBe(Y);
+    s().setCurrentProject(X);
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, 'session:b']);
+    s().closeTab('session:b');
+    s().setCurrentProject(null);
+    expect(s().main.current).toBe(NO_PROJECT);
+    s().reopenClosed();
+    expect(s().main.current).toBe(X);
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, 'session:b']);
+  });
+
+  it('refileTabs moves an unstarted tab whose intent got a project, and the strip follows it', async () => {
+    const store = await hydrated();
+    projects.new = null;
+    try {
+      store.getState().openSession('new' as AppSessionId, { how: 'tab' });
+      expect(store.getState().main.current).toBe(NO_PROJECT);
+    } finally {
+      projects.new = Y;
+    }
+    store.getState().refileTabs();
+    expect(store.getState().main.current).toBe(Y);
+    expect(Object.keys(store.getState().main.sets)).toEqual([Y]);
+  });
+
+  it('an unstarted tab in the session’s project’s set is asked about once the strip shows the session there', async () => {
+    const store = await hydrated();
+    const discard = vi.fn(async () => true);
+    const off = registerReplaceGuard({ unstarted: (id) => id === 'new', discard });
+    try {
+      store.getState().openSession('new' as AppSessionId, { how: 'tab' }); // in Y
+      store.getState().openSession(A); // X
+      store.getState().openSession('y1' as AppSessionId);
+      expect(store.getState().main.current).toBe(Y); // switched, and the session shown, before the guard answers
+      expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:new', 'session:y1']);
+      expect(discard).toHaveBeenCalledTimes(1);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:y1']);
+    } finally {
+      off();
+    }
+  });
+
+  // The review's F1: discarding the draft's intent refiles it (to the no-project set) before the guard answers; the
+  // session already stands in its own project's set, and the strip stays there.
+  it('a draft refiled while its guard decides leaves the session in its project’s set and the strip on it', async () => {
+    const store = await hydrated();
+    const off = registerReplaceGuard({
+      unstarted: (id) => id === 'new',
+      discard: async () => {
+        projects.new = null; // the intent went: the draft falls back to the project it was created with, none
+        store.getState().refileTabs(); // as the intents subscription does
+        return true;
+      },
+    });
+    try {
+      store.getState().openSession('new' as AppSessionId, { how: 'tab' }); // in Y
+      store.getState().openSession('y1' as AppSessionId);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(store.getState().main.current).toBe(Y);
+      expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:y1']);
+      expect(Object.keys(store.getState().main.sets)).toEqual([Y]); // the draft's brief none set went with it
+      expect(store.getState().main.closedTabs).toEqual([]);
+    } finally {
+      projects.new = Y;
+      off();
+    }
+  });
+
+  it('a change made before hydration is replayed with the project hydration answers', async () => {
+    const fake = fakeClient({ 'layout.list': { keys: [] } });
+    const store = createLayoutStore();
+    const hydrating = store.getState().hydrate(fake.client, () => true, { projectOf });
+    store.getState().openSession('y1' as AppSessionId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (let i = 0; i < 3; i += 1) await fake.reply('layout.get', { value: null });
+    await hydrating;
+    expect(store.getState().main.current).toBe(Y);
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:y1']);
+  });
+});
+
 describe('tab changes before hydration', () => {
   it('a tab opened while the layout snapshot is outstanding is replayed over the hydrated tabs', async () => {
     const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } });
     const store = createLayoutStore();
     const hydrating = store.getState().hydrate(fake.client, (id) => id === A || id === ('b' as AppSessionId));
-    store.getState().openSession('b' as AppSessionId); // a click before layout.get answers
-    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:b']); // shown at once
+    store.getState().openSession('b' as AppSessionId, { how: 'tab' }); // a ⌘-click before layout.get answers
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:b']); // shown at once
     await new Promise((resolve) => setTimeout(resolve, 0)); // layout.list answered; the three reads are outstanding
     expect(fake.pending('layout.get')).toBe(3);
     for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'main.tabs' ? persistedMain : null });
     await hydrating;
-    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:b']); // after the hydrated active tab
-    expect(store.getState().main.panes[0].activeTabId).toBe('session:b');
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:b']); // after the hydrated active tab
+    expect(shown(store).panes[0].activeTabId).toBe('session:b');
     store.getState().openSession(A); // after hydration a change applies once, as before
-    expect(store.getState().main.panes[0].activeTabId).toBe('session:app-a');
+    expect(shown(store).panes[0].activeTabId).toBe('session:app-a');
   });
 });
 

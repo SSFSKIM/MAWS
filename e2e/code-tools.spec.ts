@@ -535,13 +535,16 @@ function numstat(scratch: CodeScratch): { files: number; added: number; removed:
 }
 
 // A tab written into layout.json's focused pane beside the session's, then the window reloaded (C5's restore path).
+// W12: `main.tabs` holds a tab set per project; the strip's is `current`.
 async function restoreWithTab(p: Product, tabs: Record<string, unknown>[]): Promise<void> {
+  type Set = { panes: { tabs: { id: string }[]; activeTabId: string }[]; focusedPane: number };
   const main = await p.page.evaluate(async () => {
     const result = await window.maws.invoke('layout.get', { key: 'main.tabs' });
-    return result.ok ? (result.value.value as { panes: { tabs: { id: string }[]; activeTabId: string }[]; focusedPane: number }) : null;
+    return result.ok ? (result.value.value as { current: string; sets: Record<string, Set> }) : null;
   });
   expect(main, 'the session tab reached layout.json').not.toBeNull();
-  const pane = main!.panes[main!.focusedPane];
+  const shown = main!.sets[main!.current];
+  const pane = shown.panes[shown.focusedPane];
   pane.tabs.push(...(tabs as never[]));
   pane.activeTabId = String(tabs.at(-1)!.id);
   await p.page.evaluate(async (value) => {
@@ -573,7 +576,9 @@ test.describe('the product in stub mode over a scratch repository', () => {
         .poll(async () =>
           p.page.evaluate(async () => {
             const result = await window.maws.invoke('layout.get', { key: 'main.tabs' });
-            return result.ok ? (result.value.value as { panes: { activeTabId: string }[]; focusedPane: number }).panes.map((pane) => pane.activeTabId) : [];
+            // W12: every tab set's panes
+            type Sets = { sets: Record<string, { panes: { activeTabId: string }[] }> };
+            return result.ok ? Object.values((result.value.value as Sets).sets).flatMap((set) => set.panes.map((pane) => pane.activeTabId)) : [];
           }),
         )
         .toContain(`file:${p.scratch.path('src/app.ts')}`);
@@ -786,7 +791,8 @@ test.describe('the product in stub mode over a scratch repository', () => {
       await expect(p.page.locator('[data-file-viewer]')).toHaveCount(1);
       const fileTabs = await p.page.evaluate(async () => {
         const result = await window.maws.invoke('layout.get', { key: 'main.tabs' });
-        return result.ok ? (result.value.value as { panes: { tabs: { id: string; kind: string; line?: number }[] }[] }).panes.flatMap((pane) => pane.tabs.filter((t) => t.kind === 'file')) : [];
+        type Sets = { sets: Record<string, { panes: { tabs: { id: string; kind: string; line?: number }[] }[] }> }; // W12: every tab set
+        return result.ok ? Object.values((result.value.value as Sets).sets).flatMap((set) => set.panes.flatMap((pane) => pane.tabs.filter((t) => t.kind === 'file'))) : [];
       });
       expect(fileTabs.map((t) => t.id), 'one file tab').toEqual([`file:${p.scratch.path('src/app.ts')}`]);
     });

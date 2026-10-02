@@ -1,6 +1,7 @@
 // The sidebar's context menus (§5.1 session and project actions), one Radix ContextMenu for the whole sidebar whose
 // items follow the row under the pointer (or the focused row, for the keyboard's context-menu key). Actions another
-// child answers render disabled until its handler registers. A foreign-live session offers Open only (D-12).
+// child answers render disabled until its handler registers. A foreign-live session offers only the opens (D-12); I2:
+// Open replaces the focused pane's session, Open in new tab keeps it.
 import { ContextMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';

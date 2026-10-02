@@ -15,6 +15,7 @@ import { closeDialog, openDialog, useDialogs } from './dialogs';
 import { SessionDialogs } from './SessionDialogs';
 import { runProjectAction } from '../sidebar/project-actions';
 import { registerSessionActions } from './actions';
+import { currentSet } from '../stores/layout-model';
 
 const P = 'p1' as ProjectId;
 const HEAD = 'a'.repeat(40);
@@ -98,7 +99,7 @@ describe('Worktrees… dialog', () => {
       await userEvent.click(within(row).getByRole('button', { name: 'New chat here' }));
       await waitFor(() => expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: NEW, patch: { location: { kind: 'existingWorktree', repoRoot: REPO, path: at('orphan') } } }]));
       await waitFor(() => expect(useDialogs.getState().open).toBeNull());
-      expect(useLayout.getState().main.panes.flatMap((p) => p.tabs).some((t) => t.kind === 'session' && t.appSessionId === NEW)).toBe(true);
+      expect(currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs).some((t) => t.kind === 'session' && t.appSessionId === NEW)).toBe(true);
     } finally {
       offCreator();
     }

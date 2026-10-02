@@ -3,12 +3,17 @@
 // focused tab and Delete closes it. Overflow scrolls horizontally with the active tab kept in view. Drops: a tab
 // (`application/x-maws-tab`) moves to the pointer's position, computed against the tabs' midpoints, and a sidebar row
 // (`application/x-maws-session`) opens its session there. Under a split the focused pane's strip carries an accent
-// inset.
+// inset. W12 (I3): the strips show the current project's tab set, whose name labels the left one.
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { NO_PROJECT } from '@shared/ipc/schema/layout';
+import { FolderIcon } from '../app/IconButton';
 import { createSession, focusedProject, NEW_CHAT, requestCloseTab, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { revealProject } from '../sidebar/reveal';
 import { SESSION_DRAG_TYPE } from '../sidebar/SessionRow';
 import { useLayout } from '../stores/layout';
+import { currentSet, isOpen } from '../stores/layout-model';
+import { useSessions } from '../stores/sessions';
 import { focusPaneElement } from './pane-dom';
 import { Tab, TAB_DRAG_TYPE } from './Tab';
 
@@ -35,13 +40,13 @@ const accepts = (event: DragEvent) => event.dataTransfer.types.includes(TAB_DRAG
 // still in it.
 function dropTab(id: string, pane: Pane, index: number) {
   const layout = useLayout.getState();
-  const from = layout.main.panes[pane]?.tabs.findIndex((t) => t.id === id) ?? -1;
+  const from = currentSet(layout.main).panes[pane]?.tabs.findIndex((t) => t.id === id) ?? -1;
   layout.moveTab(id, pane, from !== -1 && from < index ? index - 1 : index);
 }
 
 export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean; idPrefix: string }) {
-  const state = useLayout((s) => s.main.panes[pane]);
-  const focused = useLayout((s) => s.main.focusedPane === pane);
+  const state = useLayout((s) => currentSet(s.main).panes[pane]);
+  const focused = useLayout((s) => currentSet(s.main).focusedPane === pane);
   const strip = useRef<HTMLDivElement>(null);
   const [marker, setMarker] = useState<number | null>(null); // the insertion line's x while a drag hovers
   const activeTabId = state?.activeTabId;
@@ -88,8 +93,8 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
         refocus.current = { id: tab.id, index };
         void requestCloseTab(tab.id).then(() => {
           const main = useLayout.getState().main;
-          if (main.panes.some((p) => p.tabs.some((t) => t.id === tab.id))) refocus.current = null; // kept
-          else if (!main.panes[pane]) focusPaneElement(0); // the pane collapsed with its last tab
+          if (isOpen(main, tab.id)) refocus.current = null; // kept
+          else if (!currentSet(main).panes[pane]) focusPaneElement(0); // the pane collapsed with its last tab
         });
         break;
       default:
@@ -120,15 +125,16 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
     const appSessionId = event.dataTransfer.getData(SESSION_DRAG_TYPE) as AppSessionId;
     if (!appSessionId) return;
     const id = `session:${appSessionId}`;
-    const open = layout.main.panes.some((p) => p.tabs.some((t) => t.id === id));
-    if (open) {
+    const shown = layout.main.current;
+    if (currentSet(layout.main).panes.some((p) => p.tabs.some((t) => t.id === id))) {
       dropTab(id, pane, index);
       return;
     }
     // Opened after the active tab, then moved to the drop point; the index stays right because the new tab was not in
-    // the strip the pointer saw.
+    // the strip the pointer saw. W12: a session of another project opens in its own project's set, which the strips
+    // then show, so the drop point no longer applies.
     layout.openTab({ kind: 'session', appSessionId }, { pane });
-    useLayout.getState().moveTab(id, pane, index);
+    if (useLayout.getState().main.current === shown) useLayout.getState().moveTab(id, pane, index);
   };
 
   const label = split ? (pane === 0 ? 'Left pane tabs' : 'Right pane tabs') : 'Open tabs';
@@ -136,6 +142,7 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
 
   return (
     <div className="relative flex h-10 shrink-0 items-stretch border-b border-border">
+      {pane === 0 && <ProjectLabel />}
       <div
         ref={strip}
         role="tablist"
@@ -171,9 +178,31 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   );
 }
 
-// §5.2's "+" at the strip's end: a New chat in this pane (2026-10-01), in the project of the session the pane shows,
-// else of the sidebar's open project page, else in none. Disabled until a session creator is registered (C10; the
-// stub's in launch mode scenario), like the sidebar's "+".
+// W12 (§5.2 as amended 2026-10-01): the name of the project whose tab set the strips show, at the left strip's edge, so a
+// strip that changed with a project is never a surprise; a click reveals the project in the sidebar. The no-project set
+// (and a project the index no longer lists) shows none.
+function ProjectLabel() {
+  const current = useLayout((s) => s.main.current);
+  const project = useSessions((s) => (current === NO_PROJECT ? undefined : s.projects.get(current)));
+  if (!project) return null;
+  return (
+    <button
+      type="button"
+      data-strip-project={project.id}
+      aria-label={`Tabs of ${project.name}`}
+      title={`Reveal ${project.name} in the sidebar`}
+      onClick={() => revealProject(project.id)}
+      className="flex max-w-48 shrink-0 items-center gap-1.5 border-r border-border px-2.5 text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2"
+    >
+      <FolderIcon className="size-[12px] shrink-0" />
+      <span className="truncate">{project.name}</span>
+    </button>
+  );
+}
+
+// §5.2's "+" at the strip's end: a New chat in this pane (2026-10-01), in the project whose tab set the strips show
+// (W12), else in none. Disabled until a session creator is registered (C10; the stub's in launch mode scenario), like
+// the sidebar's "+".
 function NewSessionButton({ pane }: { pane: Pane }) {
   const canCreate = useSessionCreatorRegistered();
   return (
@@ -182,7 +211,7 @@ function NewSessionButton({ pane }: { pane: Pane }) {
       aria-label={NEW_CHAT}
       title={canCreate ? NEW_CHAT : 'Not available here'}
       disabled={!canCreate}
-      onClick={() => void createSession(focusedProject({ pane }), { pane })}
+      onClick={() => void createSession(focusedProject(), { pane })}
       className="mx-1 inline-flex size-7 shrink-0 items-center justify-center self-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
     >
       <span aria-hidden className="text-ui leading-none">

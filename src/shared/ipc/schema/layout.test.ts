@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commands, events, LAYOUT_DEFAULTS, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -10,8 +10,21 @@ describe('layout value shapes', () => {
     expect(LAYOUT_DEFAULTS.regions.panel.width).toBe(380);
     // W5: the Overview floats over the main area rather than being a tab, so a fresh layout opens on one empty pane and
     // the panel in its default place.
-    expect(LAYOUT_DEFAULTS.main.panes).toEqual([{ tabs: [], activeTabId: '' }]);
+    // W12: one tab set per project; nothing open is the no-project set's one empty pane.
+    expect(LAYOUT_DEFAULTS.main).toEqual({ version: 2, current: 'none', sets: { none: { panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] });
     expect(LAYOUT_DEFAULTS.regions.overview).toBeNull();
+  });
+
+  // W12: `main.tabs` version 2 holds a set per project; version 1 is still read (the store files it by project).
+  it('reads main.tabs version 2 as it is and version 1 as version 1; a set keyed by a project or none', () => {
+    const set = { panes: [{ tabs: [{ id: 'session:a', kind: 'session', appSessionId: 'a', pinned: false }], activeTabId: 'session:a' }], focusedPane: 0, splitRatio: 0.5 };
+    const v2 = { version: 2, current: 'proj-x', sets: { 'proj-x': set, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs: [] };
+    expect(StoredMainSchema.parse(v2)).toEqual(v2);
+    const v1 = { version: 1, ...set, closedTabs: [] };
+    expect(StoredMainSchema.parse(v1)).toEqual(v1);
+    expect(LayoutMainSchema.safeParse(v1).success).toBe(false);
+    expect(StoredMainSchema.safeParse({ ...v2, sets: { 'proj-x': { ...set, extra: 1 } } }).success).toBe(false);
+    expect(StoredMainSchema.safeParse({ ...v2, current: '' }).success).toBe(false);
   });
 
   // W11: version 3's expanded projects replace version 2's open page and version 1's collapsed lists; an earlier value
@@ -55,8 +68,9 @@ describe('layout value shapes', () => {
     const tab = { id: 'diagnostics', kind: 'diagnostics', pinned: false } as const;
     const pane = { tabs: [tab], activeTabId: 'diagnostics' };
     expect(LayoutMainSchema.safeParse({ ...LAYOUT_DEFAULTS.main, closedTabs: Array(11).fill(tab) }).success).toBe(false);
-    expect(LayoutMainSchema.safeParse({ ...LAYOUT_DEFAULTS.main, panes: [pane, pane, pane] }).success).toBe(false);
-    expect(LayoutMainSchema.safeParse({ ...LAYOUT_DEFAULTS.main, panes: [pane, pane] }).success).toBe(true);
+    const withPanes = (panes: unknown[]) => ({ ...LAYOUT_DEFAULTS.main, sets: { none: { ...LAYOUT_DEFAULTS.main.sets.none, panes } } });
+    expect(LayoutMainSchema.safeParse(withPanes([pane, pane, pane])).success).toBe(false);
+    expect(LayoutMainSchema.safeParse(withPanes([pane, pane])).success).toBe(true);
   });
 
   // W5: every layout saved before the floating Overview holds its tab, first and pinned, in one of its panes (and in the
@@ -73,7 +87,7 @@ describe('layout value shapes', () => {
       expect(StoredMainSchema.parse(main)).toEqual(stored({ panes: [{ tabs: [session(1), session(2)], activeTabId: 'session:a1' }] }));
       // a pane whose active tab was another keeps it
       const other = stored({ panes: [{ tabs: [overview, session(1), session(2)], activeTabId: 'session:a2' }] });
-      expect(StoredMainSchema.parse(other).panes).toEqual([{ tabs: [session(1), session(2)], activeTabId: 'session:a2' }]);
+      expect((StoredMainSchema.parse(other) as LayoutMainV1).panes).toEqual([{ tabs: [session(1), session(2)], activeTabId: 'session:a2' }]);
     });
 
     it('drops a pane the Overview was the only tab of, focusing pane 0', () => {

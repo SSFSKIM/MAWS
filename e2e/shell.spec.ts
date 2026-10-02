@@ -12,7 +12,7 @@ import { expect, test, type ElectronApplication, type Locator, type Page, type T
 import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
 import { formatChord } from '../src/shared/keymap/chord';
 import { launchMaws, type MawsLaunch } from './support/launch';
-import { closeProject, openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
+import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const SHELL_ENV = {
   MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json',
@@ -25,6 +25,7 @@ const CHARTER = 'app-9a1d4262';
 const FIX = 'Fix sidebar drag';
 const SIP = 'Sidebar interaction pass';
 const QUOTA = 'Quota reset recovery';
+const NORTH = 'Workstation north star';
 const USAGE_PROJECT = 'claude-usage-menubar';
 
 interface Captured {
@@ -57,6 +58,76 @@ test('shell: sidebar, overview, hover approve, tabs and split, persistence, them
     }
   } finally {
     await first.cleanup(); // removes the profile both launches used
+  }
+});
+
+// W12 (I2, I3; §5.2 as amended 2026-10-01): each project has its own tab set, which the strip shows under the project's
+// name; a project click and an open of another project's session switch it; a click replaces the shown session and
+// ⌘-click keeps a tab of its own; ⌘1–9 count in the set; the label reveals the project in the sidebar. W11's tree: a
+// click on a project's row toggles it in place and shows its set, whether it was expanded or not.
+test('tab sets per project: the strip switches with the project, ⌘1 counts in the set, the label names it', async () => {
+  const maws = await launchMaws({ env: SHELL_ENV });
+  try {
+    const { app, page } = maws;
+    const main = page.locator('[data-region="main"]');
+    const label = main.locator('[data-strip-project]');
+    const clickProject = async (name: string) => {
+      await showProjectList(page);
+      await projectLine(projectRow(page, name)).click();
+    };
+    await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+
+    await clickProject('MAWS');
+    await expect(label).toHaveText('MAWS');
+    await expect(main.getByRole('button', { name: 'Tabs of MAWS' })).toBeVisible();
+    await (await sidebarRow(page, FIX)).click();
+    await (await sidebarRow(page, SIP)).click({ modifiers: ['Meta'] });
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${FIX} · MAWS`, `${SIP} · MAWS`]);
+
+    await clickProject('codex_somersault');
+    await expect(label).toHaveText('codex_somersault');
+    await expect(main.getByRole('button', { name: 'Tabs of codex_somersault' })).toBeVisible();
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'another project, another (empty) set' }).toEqual([]);
+    await (await sidebarRow(page, QUOTA)).click();
+    await (await sidebarRow(page, 'Trace stream reconnects')).click(); // a click replaces the shown session
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects · codex_somersault']);
+    await menu(app, 'tab.reopen'); // the replaced one comes back
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects · codex_somersault', `${QUOTA} · codex_somersault`]);
+    await menu(app, 'tab.select:1');
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects · codex_somersault');
+    await menu(app, 'tab.select:3'); // no third tab in this set
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects · codex_somersault');
+
+    await clickProject('MAWS'); // expanded already: the click folds it and still shows its set
+    await expect(projectRow(page, 'MAWS')).toHaveAttribute('aria-expanded', 'false');
+    await expect(label).toHaveText('MAWS');
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'MAWS’s set as it was left' }).toEqual([`${FIX} · MAWS`, `${SIP} · MAWS`]);
+    await menu(app, 'tab.select:1');
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(`${FIX} · MAWS`);
+
+    // an open from elsewhere (the palette) of another project's session switches the strip to its set
+    await menu(app, 'palette.open');
+    await page.keyboard.type('quota');
+    await page.keyboard.press('Enter');
+    await expect(label).toHaveText('codex_somersault');
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(`${QUOTA} · codex_somersault`);
+
+    // the label reveals its project in the sidebar: its row expanded in place, and focused
+    await closeProject(page, 'codex_somersault');
+    await label.click();
+    await expect(projectRow(page, 'codex_somersault')).toHaveAttribute('aria-expanded', 'true');
+    await expect(projectRow(page, 'codex_somersault')).toBeFocused();
+
+    // Other sessions is the no-project set: no label
+    await clickProject('Other sessions');
+    await expect(label).toHaveCount(0);
+    await expect.poll(async () => {
+      const value = (await layoutGet(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, unknown> };
+      return [value.version, value.current, Object.keys(value.sets).sort()];
+    }, { message: 'version 2, one set per project with tabs' }).toEqual([2, 'none', ['none', 'proj-codex-somersault', 'proj-maws']]);
+    expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    await maws.cleanup();
   }
 });
 
@@ -146,7 +217,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
   const usageCard = board.getByRole('article', { name: 'Usage reset countdown' });
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   const badge = () => app.evaluate(({ app }) => app.dock?.getBadge());
-  const three = [`${FIX} · MAWS`, `${SIP} · MAWS`, `${QUOTA} · codex_somersault`];
+  // W12: one project's sessions, since each project has its own tab set
+  const three = [`${FIX} · MAWS`, `${SIP} · MAWS`, `${NORTH} · MAWS`];
 
   for (const name of ['sidebar', 'main', 'panel']) await expect(page.locator(`[data-region="${name}"]`)).toBeVisible({ timeout: 10_000 });
   const tokens = await themeTokens(page); // once the stylesheet is in
@@ -207,7 +279,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     expect((await foreign.boundingBox())!.height, 'a 30px row').toBe(30);
     await foreign.click({ button: 'right' });
     await expect(page.getByRole('menu')).toBeVisible();
-    expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers Open only').toEqual(['Open']);
+    expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers only the opens (I2)').toEqual(['Open', 'Open in new tab']);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('menu')).toHaveCount(0);
     expect(await noLeftovers(page, tokens.dark), 'no dark colour in the light theme').toEqual([]);
@@ -385,8 +457,9 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
   });
 
   await test.step('Item 5: tabs, the split, drags', async () => {
-    await (await sidebarRow(page, SIP)).click();
-    await (await sidebarRow(page, QUOTA)).click();
+    // I2: a plain click replaces the focused pane's session; ⌘-click opens a tab of its own
+    await (await sidebarRow(page, SIP)).click({ modifiers: ['Meta'] });
+    await (await sidebarRow(page, NORTH)).click({ modifiers: ['Meta'] });
     expect(await tabLabels(page, 'Open tabs')).toEqual(three);
     for (const n of [1, 2, 3]) {
       await menu(app, `tab.select:${n}`);
@@ -466,9 +539,9 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect.poll(() => regionBackground(page)).toBe(tokens.light['--bg-raised']);
     expect(await noLeftovers(page, tokens.dark), 'no dark colour after switching back to light').toEqual([]);
 
-    await page.keyboard.type('quota');
+    await page.keyboard.type('north');
     await expect(palette.getByRole('group', { name: 'Sessions' }).getByRole('option')).toHaveCount(1);
-    await expect(palette.getByRole('group', { name: 'Sessions' }).getByRole('option')).toContainText(QUOTA);
+    await expect(palette.getByRole('group', { name: 'Sessions' }).getByRole('option')).toContainText(NORTH);
     await page.keyboard.press('Enter');
     await expect(palette).toHaveCount(0);
     await expect.poll(() => selectedTab(page, 'Open tabs'), { message: '⏎ opens it' }).toBe(three[2]);
@@ -481,7 +554,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(palette).toHaveCount(0);
 
     await menu(app, 'palette.open');
-    await page.keyboard.type('quota');
+    await page.keyboard.type('north');
     await expect(palette.getByRole('group', { name: 'Sessions' }).getByRole('option')).toHaveCount(1);
     await page.keyboard.press('Meta+Enter');
     await expect.poll(() => tabLabels(page, 'Right pane tabs'), { message: '⌘⏎ opens it in the split' }).toEqual([three[2]]);
@@ -496,7 +569,17 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(panelResizer).toHaveAttribute('aria-valuenow', '320');
     await showProjectList(page);
     const usageProjectId = await projectRow(page, USAGE_PROJECT).getAttribute('data-menu').then((menuId) => menuId!.slice('project:'.length));
+    await closeProject(page, USAGE_PROJECT); // the 8 s entry left it expanded: the click below is the one that opens it
     await openProject(page, USAGE_PROJECT);
+    // W12: the strip shows that project's tab set (nothing open, under its name); opening a MAWS session from the
+    // palette brings MAWS's set and its split back while the sidebar stays on the project.
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the clicked project’s empty set' }).toEqual([]);
+    await expect(main.getByRole('button', { name: `Tabs of ${USAGE_PROJECT}` })).toBeVisible();
+    await menu(app, 'palette.open');
+    await page.keyboard.type('charter');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research · MAWS']);
+    await expect(main.getByRole('button', { name: 'Tabs of MAWS' })).toBeVisible();
     await menu(app, 'panel.toggle');
     await expect(panelResizer).toHaveCount(0);
     await expect.poll(async () => (await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0).toBe(0);
@@ -504,10 +587,10 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect
       .poll(async () => {
         const regions = (await layoutGet(page, 'regions')) as { sidebar: { width: number; expandedProjects: string[] }; panel: { width: number; collapsed: boolean } };
-        const main = (await layoutGet(page, 'main.tabs')) as { panes: unknown[] };
-        return [regions.sidebar.width, regions.panel.width, regions.panel.collapsed, regions.sidebar.expandedProjects.includes(usageProjectId), main.panes.length];
+        const main = (await layoutGet(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, { panes: unknown[] }> };
+        return [regions.sidebar.width, regions.panel.width, regions.panel.collapsed, regions.sidebar.expandedProjects.includes(usageProjectId), main.version, main.current, main.sets[main.current]?.panes.length];
       }, { message: 'the layout is written back' })
-      .toEqual([240, 320, true, true, 2]);
+      .toEqual([240, 320, true, true, 2, 'proj-maws', 2]);
     expect((await layoutList(page)).sort()).toEqual(['main.tabs', 'panel.pinned', 'regions', 'window.main']);
   });
 

@@ -15,6 +15,7 @@ import { useViewer } from '../viewer/viewer-store';
 import { filesTool, type FilesState } from './FilesTool';
 import { useFiles, WATCH_GRACE_MS } from './store';
 import { dirname, expandTo, hidden, joinPath, roleOf, rootsFor, rowsOf, sameFile, type Listing } from './tree';
+import { currentSet } from '../../../stores/layout-model';
 
 const S = 'app-a' as AppSessionId;
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -342,7 +343,7 @@ const REPO: Record<string, FilesEntry[] | string> = {
 
 const items = () => screen.queryAllByRole('treeitem').map((item) => item.textContent);
 const item = (name: string) => screen.getAllByRole('treeitem').find((i) => i.querySelector('span.truncate')?.textContent === name)!;
-const fileTabs = () => useLayout.getState().main.panes.flatMap((pane) => pane.tabs).filter((tab) => tab.kind === 'file');
+const fileTabs = () => currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs).filter((tab) => tab.kind === 'file');
 
 describe('files tool', () => {
   const offs: (() => void)[] = [];

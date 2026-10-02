@@ -2,8 +2,10 @@
 // rows): one line of 13px text, the status glyph, the title, a worktree session's ⎇ branch (Codex marks those rows with
 // an environment icon; MAWS names the branch, the flat list having no worktree groups), a pin mark when pinned, the
 // unread dot and the age, with pin and archive taking the age's place on hover and on keyboard focus. Everything else
-// (the worktree's folder, holder or activity, the last answer, the pending request, context) is in the hover card. A click opens its tab; dragging carries its id to a
-// tab strip (`application/x-maws-session`, residue *Tab strip*). A foreign-live session shows no actions (D-12).
+// (the worktree's folder, holder or activity, the last answer, the pending request, context) is in the hover card. A
+// click shows it in place of the focused pane's session, ⌘-click or a middle-click in a new tab (I2); dragging carries
+// its id to a tab strip (`application/x-maws-session`, residue *Tab strip*). A foreign-live session shows no actions
+// (D-12).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { ArchiveIcon, PinIcon } from '../app/IconButton';
@@ -55,7 +57,9 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: 1 
           event.dataTransfer.effectAllowed = 'copyMove';
         }}
         onFocus={(event) => event.target === event.currentTarget && tree.onFocusItem(nodeId)} // the card's shell guards a pointer's focus
-        onClick={() => useLayout.getState().openSession(id)}
+        // I2: a click replaces the focused pane's session; ⌘-click and a middle-click open a tab of its own (Chrome's rule)
+        onClick={(event) => useLayout.getState().openSession(id, event.metaKey ? { how: 'tab' } : {})}
+        onAuxClick={(event) => event.button === 1 && useLayout.getState().openSession(id, { how: 'tab' })}
         className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[7px] rounded-sm px-[9px] outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
       >
         <GlyphMark glyph={glyph} className="w-[14px] shrink-0" />

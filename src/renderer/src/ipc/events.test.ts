@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import { EMPTY_TAB_SET } from '@shared/ipc/schema/layout';
 import { digest, item, project, record, status } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerTabRetention } from '../keymap/actions-runtime';
 import { createAttentionStore } from '../stores/attention';
 import { createLayoutStore } from '../stores/layout';
+import { allTabs } from '../stores/layout-model';
 import { createSessionsStore } from '../stores/sessions';
 import { connectShell } from './events';
 
@@ -14,13 +15,16 @@ const A = 'a' as AppSessionId;
 function setup(batchMs = 0) {
   const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } , 'layout.get': ({ key }: { key: string }) => ({
     value: key === 'main.tabs'
-      ? { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [{ id: 'session:a', kind: 'session', appSessionId: 'a', pinned: false }, { id: 'session:gone', kind: 'session', appSessionId: 'gone', pinned: false }], activeTabId: 'session:a' }] }
+      ? { version: 1, ...EMPTY_TAB_SET, panes: [{ tabs: [{ id: 'session:a', kind: 'session', appSessionId: 'a', pinned: false }, { id: 'session:gone', kind: 'session', appSessionId: 'gone', pinned: false }], activeTabId: 'session:a' }], closedTabs: [] }
       : null,
   }) });
   const stores = { sessions: createSessionsStore(), attention: createAttentionStore(), layout: createLayoutStore() };
   const disconnect = connectShell(fake.client, stores, { batchMs });
   return { fake, stores, disconnect };
 }
+
+// The ids of every open tab, the strip's set first (W12: one tab set per project).
+const tabIds = (stores: ReturnType<typeof setup>['stores']) => allTabs(stores.layout.getState().main).map((t) => t.id);
 
 async function answerSnapshots(fake: ReturnType<typeof fakeClient>) {
   await fake.reply('session.list', { sessions: [record('a')], revision: 1 });
@@ -50,7 +54,7 @@ describe('shell event subscription', () => {
     expect(stores.sessions.getState().records.has(A)).toBe(true);
     expect(stores.attention.getState().loaded).toBe(true);
     await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-    expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
+    expect(tabIds(stores)).toEqual(['session:a']);
   });
 
   it('feeds events to the stores, buffering attention changes until its snapshot lands', async () => {
@@ -67,8 +71,40 @@ describe('shell event subscription', () => {
     await answerSnapshots(fake);
     await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
     fake.event('session.removed', { appSessionId: 'a', revision: 2 });
-    expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([]);
+    expect(tabIds(stores)).toEqual([]);
     expect(stores.sessions.getState().records.has(A)).toBe(false);
+  });
+
+  // W12: a session's tab lives in its project's set; a record moved to another project (a refold) moves its tab, and
+  // the strip follows the tab it shows.
+  it('files the tabs by project at hydration and moves a tab whose record changes project', async () => {
+    const { fake, stores } = setup();
+    await fake.reply('session.list', { sessions: [record('a', { projectId: 'p1' as ProjectId })], revision: 1 });
+    await fake.reply('session.projects.list', { projects: [project('p1', 0), project('p2', 1)], revision: 1 });
+    await fake.reply('session.digests', { digests: [digest('a')] });
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    expect(stores.layout.getState().main.current).toBe('p1');
+    expect(Object.keys(stores.layout.getState().main.sets)).toEqual(['p1']);
+    fake.event('session.changed', { record: record('a', { projectId: 'p2' as ProjectId }), cause: 'update', revision: 2 });
+    expect(stores.layout.getState().main.current).toBe('p2');
+    expect(Object.keys(stores.layout.getState().main.sets)).toEqual(['p2']);
+    expect(tabIds(stores)).toEqual(['session:a']);
+  });
+
+  // The review's F3: the records change of a removal reaches the layout before the removal closes the tab; a session no
+  // longer known is not refiled, so its tab closes in its own set and the strip keeps showing that project.
+  it('removing the shown session of a project closes its tab there and shows the project’s next tab', async () => {
+    const { fake, stores } = setup();
+    await fake.reply('session.list', { sessions: [record('a', { projectId: 'p1' as ProjectId }), record('c', { projectId: 'p1' as ProjectId })], revision: 1 });
+    await fake.reply('session.projects.list', { projects: [project('p1', 0)], revision: 1 });
+    await fake.reply('session.digests', { digests: [] });
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    stores.layout.getState().openSession('c' as AppSessionId, { how: 'tab' });
+    stores.layout.getState().activateTab('session:a');
+    fake.event('session.removed', { appSessionId: 'a', revision: 2 });
+    expect(stores.layout.getState().main.current).toBe('p1');
+    expect(Object.keys(stores.layout.getState().main.sets)).toEqual(['p1']);
+    expect(tabIds(stores)).toEqual(['session:c']);
   });
 
   it('keeps a session’s tabs when its removal is older than what the store knows', async () => {
@@ -78,7 +114,7 @@ describe('shell event subscription', () => {
     fake.event('session.changed', { record: record('a'), cause: 'update', revision: 4 });
     fake.event('session.removed', { appSessionId: 'a', revision: 3 });
     expect(stores.sessions.getState().records.has(A)).toBe(true);
-    expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
+    expect(tabIds(stores)).toEqual(['session:a']);
   });
 
   describe('tab retention (C10’s seventh ask)', () => {
@@ -89,9 +125,9 @@ describe('shell event subscription', () => {
       const { fake, stores } = setup();
       await answerSnapshots(fake);
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
+      expect(tabIds(stores)).toEqual(['session:a']);
       fake.event('session.removed', { appSessionId: 'a', revision: 2 });
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([]);
+      expect(tabIds(stores)).toEqual([]);
     });
 
     it('hydration waits for ready, then keeps a record-less tab the retention retains', async () => {
@@ -104,7 +140,7 @@ describe('shell event subscription', () => {
       expect(stores.layout.getState().hydrated).toBe(false); // still waiting on the intent snapshot
       ready();
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a', 'session:gone']);
+      expect(tabIds(stores)).toEqual(['session:a', 'session:gone']);
     });
 
     it('a removal leaves a retained session’s tab open, and closes one it does not retain', async () => {
@@ -114,12 +150,12 @@ describe('shell event subscription', () => {
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
       fake.event('session.removed', { appSessionId: 'a', revision: 2 });
       expect(stores.sessions.getState().records.has(A)).toBe(false);
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
+      expect(tabIds(stores)).toEqual(['session:a']);
       retentions.splice(0).forEach((off) => off());
       retentions.push(registerTabRetention({ ready: Promise.resolve(), retains: () => false }));
       fake.event('session.changed', { record: record('a'), cause: 'update', revision: 3 });
       fake.event('session.removed', { appSessionId: 'a', revision: 4 });
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([]);
+      expect(tabIds(stores)).toEqual([]);
     });
   });
 
@@ -206,7 +242,7 @@ describe('shell event subscription', () => {
       await fake.reply('attention.list', []);
       const answerLayout = async (tabs: string[]) => {
         await fake.reply('layout.list', { keys: ['main.tabs'] });
-        const main = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: tabs.map((id) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false })), activeTabId: tabs[0] ? `session:${tabs[0]}` : '' }] };
+        const main = { version: 1, ...EMPTY_TAB_SET, closedTabs: [], panes: [{ tabs: tabs.map((id) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false })), activeTabId: tabs[0] ? `session:${tabs[0]}` : '' }] };
         for (const value of [null, main, null]) await fake.reply('layout.get', { value }); // regions, main.tabs, panel.pinned
       };
       return { fake, stores, answerLayout };
@@ -217,7 +253,7 @@ describe('shell event subscription', () => {
       fake.event('session.changed', { record: record('a'), cause: 'discovered', revision: 2 });
       await answerLayout(['a']);
       expect(stores.layout.getState().hydrated).toBe(true);
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
+      expect(tabIds(stores)).toEqual(['session:a']);
     });
 
     it('a removal drained by hydration is replayed with the early changes: a session opened during hydration and then removed has no tab', async () => {
@@ -227,7 +263,7 @@ describe('shell event subscription', () => {
       await answerLayout([]);
       expect(stores.layout.getState().hydrated).toBe(true);
       expect(stores.sessions.getState().records.has(A)).toBe(false);
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([]);
+      expect(tabIds(stores)).toEqual([]);
     });
 
     it('a snapshot reply applies after the window’s events that preceded it', async () => {
@@ -238,7 +274,7 @@ describe('shell event subscription', () => {
       await fake.reply('session.digests', { digests: [] });
       await fake.reply('attention.list', []);
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
+      expect(tabIds(stores)).toEqual(['session:a']);
       expect(stores.sessions.getState().records.has(A)).toBe(true);
     });
 

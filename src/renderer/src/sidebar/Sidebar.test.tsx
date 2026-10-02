@@ -11,9 +11,9 @@ import { useDialogs } from '../sessions/dialogs';
 import { registerAction } from '../keymap/actions-runtime'; // C11
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
-import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fileTabsByProject, fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import type { ProjectKey } from './derive';
 import { registerProjectAction } from './project-actions';
 import { useResumePicker } from './ResumePicker';
@@ -232,14 +232,14 @@ describe('an expanded project', () => {
     expect(fake.invoked('git.worktree.list')).toEqual([]);
   });
 
-  it('offers a foreign-live session Open only in its context menu, and no hover actions', async () => {
+  it('offers a foreign-live session only the opens in its context menu, and no hover actions', async () => {
     expand('proj-codex-somersault');
     render(<Sidebar />);
     const foreign = row('Somersault terminal run');
     expect(within(foreign).queryByRole('button')).toBeNull();
     fireEvent.contextMenu(foreign);
     const menu = await screen.findByRole('menu');
-    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open']);
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab']);
   });
 
   it('offers §5.1’s session actions in a session’s context menu, disabled until a handler registers', async () => {
@@ -250,8 +250,8 @@ describe('an expanded project', () => {
     const menu = await screen.findByRole('menu');
     const items = within(menu).getAllByRole('menuitem');
     // C10: a live session offers no Resume; "Fork to a new worktree…" sits beside the fork in place
-    expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in split', 'Pin', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…']);
-    expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, true, true, true, true]);
+    expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…']);
+    expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, true, true, true, true, true]);
   });
 
   it('a session row’s hover actions pin, and archive stays disabled until C10', async () => {
@@ -364,7 +364,7 @@ describe('the Resume… picker', () => {
     expect(options()).toContain('Quota reset recovery');
     expect(options()).toContain('Terminal workflow notes');
     await user.keyboard('quota{Meta>}{Enter}{/Meta}');
-    const panes = useLayout.getState().main.panes;
+    const panes = currentSet(useLayout.getState().main).panes; // W12: the strip's tab set (one here: no projectOf given)
     expect(panes[0].tabs.map((t) => (t.kind === 'session' ? t.appSessionId : t.id))).toEqual([idOf('Charter + research'), idOf('Quota reset recovery')]);
     expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: idOf('Quota reset recovery') });
     await user.click(within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' }));
@@ -440,6 +440,7 @@ describe('sidebar keyboard', () => {
     expect(document.activeElement).toBe(row('Other sessions'));
     await user.keyboard('{ArrowUp}{Enter}');
     expect(expanded()).toEqual(['proj-maws']);
+    expect(useLayout.getState().main.current, 'W12: Enter shows the project’s tab set, as a click does').toBe('proj-maws');
     expect(document.activeElement).toBe(row('MAWS'));
     await user.keyboard('{ArrowRight}');
     expect(document.activeElement).toBe(row('Workstation north star'));
@@ -450,8 +451,11 @@ describe('sidebar keyboard', () => {
     expand('proj-maws');
     render(<Sidebar />);
     row('MAWS').focus();
-    await user.keyboard('{ArrowRight}{ArrowDown}{ArrowDown}{Enter}');
+    await user.keyboard('{ArrowRight}{ArrowDown}{Enter}');
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Fix sidebar drag') });
+    await user.keyboard('{ArrowDown}{Enter}'); // I2: Enter replaces the shown session, as a click does
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Sidebar interaction pass') });
+    expect(currentSet(useLayout.getState().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Sidebar interaction pass')}`]);
     expect(row('Sidebar interaction pass').getAttribute('aria-selected')).toBe('true');
     await user.keyboard('{ArrowLeft}');
     expect(document.activeElement).toBe(row('MAWS'));
@@ -459,6 +463,32 @@ describe('sidebar keyboard', () => {
     expect(expanded()).toEqual([]);
     await user.keyboard(' ');
     expect(expanded()).toEqual(['proj-maws']);
+  });
+
+  // W12 (I3) on W11's tree: a project's activation is one path for the pointer and the keys, and it shows the project's
+  // tab set, so a project reached by keyboard switches the strip as a click does.
+  it('a click, Enter, ArrowRight or Space on a project row shows its tab set; Other sessions shows the no-project set', async () => {
+    const user = userEvent.setup();
+    fileTabsByProject();
+    act(() => useLayout.getState().openSession(idOf('Fix sidebar drag')));
+    const current = () => useLayout.getState().main.current;
+    const shown = () => activeTab(useLayout.getState().main);
+    expect(current()).toBe('proj-maws');
+    render(<Sidebar />);
+    await toggle(user, 'codex_somersault');
+    expect(current()).toBe('proj-codex-somersault');
+    expect(shown(), 'the other project’s set is empty').toBeNull();
+    row('MAWS').focus();
+    await user.keyboard('{Enter}');
+    expect(current()).toBe('proj-maws');
+    expect(shown()).toMatchObject({ kind: 'session', appSessionId: idOf('Fix sidebar drag') });
+    row('claude-usage-menubar').focus();
+    await user.keyboard('{ArrowRight}');
+    expect(current()).toBe('proj-claude-usage-menubar');
+    expect(expanded()).toEqual(['proj-codex-somersault', 'proj-maws', 'proj-claude-usage-menubar']);
+    row('Other sessions').focus();
+    await user.keyboard(' ');
+    expect(current()).toBe('none');
   });
 
   it('the selected session is the tree’s stop when it is on screen', () => {

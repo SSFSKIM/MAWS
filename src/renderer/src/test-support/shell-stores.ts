@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { SessionDigest } from '@shared/ipc/schema';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { useAttention } from '../stores/attention';
-import { useLayout } from '../stores/layout';
+import { NO_PROJECT_OF, useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario, type Scenario } from '../../../../test/support/scenario';
@@ -50,5 +50,12 @@ export function resetShellStores(): void {
     panelActiveNoSession: null,
     hydrated: true,
     overviewOpen: false,
+    projectOf: NO_PROJECT_OF,
   });
+}
+
+// W12: the layout files each session's tabs under its record's project, as the shell's hydration has it do (until this,
+// a component test keeps every tab in the no-project set).
+export function fileTabsByProject(): void {
+  useLayout.setState({ projectOf: (id) => useSessions.getState().records.get(id)?.projectId ?? null });
 }

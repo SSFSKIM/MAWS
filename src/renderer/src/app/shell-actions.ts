@@ -1,14 +1,15 @@
 // The frame's own action handlers: the region toggles, panel maximize and the appearance (M2), the tab and pane
-// actions and Help › Diagnostics (M4), and the session actions the shell answers itself (open, open in split, pin).
+// actions and Help › Diagnostics (M4), and the session actions the shell answers itself (open, open in new tab, open in
+// split, pin).
 // The ⌘K palette's toggle is here too (M5); ⌘⇧J is registered with the attention wiring (`attention/navigation.ts`).
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
-import { registerAction, requestCloseTab } from '../keymap/actions-runtime';
+import { discardForReplace, isUnstarted, registerAction, requestCloseTab } from '../keymap/actions-runtime';
 import { focusPaneElement } from '../main/pane-dom';
 import { focusOverview } from '../overview/OverviewPanel';
 import { togglePalette } from '../palette/CommandPalette';
-import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { registerReplaceGuard, useLayout } from '../stores/layout';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { registerSessionAction } from './session-actions';
@@ -52,8 +53,9 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     registerAction('pane.split', () => layout().splitWithActive()),
     // DOM focus moves too, so a pane-scoped chord (bound to the element that holds focus) follows the pane.
     registerAction('pane.focusOther', () => {
-      if (layout().main.panes.length < 2) return;
-      const other = layout().main.focusedPane === 0 ? 1 : 0;
+      const shown = currentSet(layout().main);
+      if (shown.panes.length < 2) return;
+      const other = shown.focusedPane === 0 ? 1 : 0;
       layout().focusPane(other);
       focusPaneElement(other);
     }),
@@ -61,7 +63,10 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     registerAction('palette.open', togglePalette),
 
     registerSessionAction('open', (appSessionId) => layout().openSession(appSessionId)),
+    registerSessionAction('openInNewTab', (appSessionId) => layout().openSession(appSessionId, { how: 'tab' })),
     registerSessionAction('openInSplit', (appSessionId) => layout().openSession(appSessionId, { split: true })),
+    // I2: an unstarted tab a replace would take the place of passes its close guard first
+    registerReplaceGuard({ unstarted: isUnstarted, discard: discardForReplace }),
     registerSessionAction('pin', async (appSessionId) => {
       const current = useSessions.getState().records.get(appSessionId);
       if (!current) return;

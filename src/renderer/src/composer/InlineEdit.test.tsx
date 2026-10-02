@@ -54,7 +54,7 @@ beforeEach(async () => {
   // the shell's pane 0 shows A's tab, focused: where a bubble's Edit is clicked
   const other = { tabs: [{ id: 'diagnostics' as const, kind: 'diagnostics' as const, pinned: false }], activeTabId: 'diagnostics' };
   const session = { tabs: [{ id: `session:${A}`, kind: 'session' as const, appSessionId: A, pinned: false }], activeTabId: `session:${A}` };
-  useLayout.setState((s) => ({ main: { ...s.main, panes: [session, other], focusedPane: 0 } }));
+  useLayout.setState((s) => ({ main: { ...s.main, current: 'none', sets: { none: { panes: [session, other], focusedPane: 0, splitRatio: 0.5 } } } }));
 });
 afterEach(() => {
   offEditor();

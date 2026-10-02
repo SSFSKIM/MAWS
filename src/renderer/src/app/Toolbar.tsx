@@ -117,11 +117,11 @@ const BoardIcon = () => (
 );
 
 // §5.1's session actions for the session on screen, as its sidebar menus offer them (`sessionActionsFor`: a
-// foreign-live session has none here); "Open" is left out because it is the open tab. A session with no record (an
-// unstarted one) offers nothing yet, and with nothing to offer the menu is disabled.
+// foreign-live session has none here); "Open" and "Open in new tab" are left out because it is the open tab. A session
+// with no record (an unstarted one) offers nothing yet, and with nothing to offer the menu is disabled.
 function SessionMenu({ appSessionId }: { appSessionId: AppSessionId | null }) {
   const record = useSessions((s) => (appSessionId ? s.records.get(appSessionId) : undefined));
-  const ids = record ? sessionActionsFor(record).filter((id) => id !== 'open') : [];
+  const ids = record ? sessionActionsFor(record).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild disabled={ids.length === 0}>

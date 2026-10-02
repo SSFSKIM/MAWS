@@ -174,10 +174,12 @@ class PanelPage {
     }, key);
   }
   panelOf = (id: 'A' | 'B') => this.layout<PanelSession>(`panel.${id}`);
-  // The session the relaunch will show: the focused pane's active tab in layout.json's main.tabs.
+  // The session the relaunch will show: the focused pane's active tab in layout.json's main.tabs (W12: in the strip's
+  // tab set, `current`).
   async shownOnDisk(): Promise<string | null> {
-    const main = await this.layout<{ panes: { activeTabId: string | null }[]; focusedPane: number }>('main.tabs');
-    return main?.panes[main.focusedPane]?.activeTabId ?? null;
+    const main = await this.layout<{ current: string; sets: Record<string, { panes: { activeTabId: string | null }[]; focusedPane: number }> }>('main.tabs');
+    const shown = main?.sets[main.current];
+    return shown?.panes[shown.focusedPane]?.activeTabId ?? null;
   }
 
   expectQuietConsole(): void {
@@ -631,7 +633,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
 
         await panel.section('Sources').getByRole('button', { name: /src\/util\/rows\.ts/ }).click();
         await expect
-          .poll(async () => (await panel.layout<{ panes: { tabs: Record<string, unknown>[] }[] }>('main.tabs'))?.panes.flatMap((pane) => pane.tabs), {
+          .poll(async () => Object.values((await panel.layout<{ sets: Record<string, { panes: { tabs: Record<string, unknown>[] }[] }> }>('main.tabs'))?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs)), {
             message: 'a file row opens a file tab for A through C5’s openTab',
           })
           .toContainEqual(expect.objectContaining({ kind: 'file', path: EDIT_SOURCES[0], appSessionId: 'A' }));
@@ -961,7 +963,8 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await expect(summary.getByRole('region', { name: 'Subagents' })).toContainText('2 working · 1 done'); // the fixture's digest
 
       // Fix sidebar drag in a split, focused: the summary follows; its probe directory does not exist on this machine.
-      await (await sidebarRow(page, SIDEBAR_DRAG)).click();
+      // I2: ⌘-click opens it in a tab of its own (a plain click would replace Charter's).
+      await (await sidebarRow(page, SIDEBAR_DRAG)).click({ modifiers: ['Meta'] });
       await menu(app, 'pane.split');
       await expect(page.getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab', { name: tabNamed(SIDEBAR_DRAG) })).toBeVisible();
       await expect(title).toContainText(SIDEBAR_DRAG);

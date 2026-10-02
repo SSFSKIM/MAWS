@@ -15,6 +15,7 @@ import { registerReleasedResume } from '../composer/resume-seam'; // C12
 import { ipc } from '../ipc/client';
 import { NEW_CHAT, registerCloseGuard, registerSessionCreator, registerTabRetention, registerUnstartedTitle, unstartedTitlesChanged, type UnstartedTitleAnswer } from '../keymap/actions-runtime';
 import { prefillComposer } from '../stores/composer';
+import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { registerSessionActions } from './actions';
 import { heldToast } from './attach';
@@ -43,7 +44,8 @@ export function unstartedTitle(appSessionId: AppSessionId): UnstartedTitleAnswer
 }
 
 // The strip and the toolbar call `unstartedTitle` during render without subscribing to the intents, so a change of what
-// it answers (a project chosen, changed, renamed or dropped) is announced to C5 (New chat, 2026-10-01).
+// it answers (a project chosen, changed, renamed or dropped) is announced to C5 (New chat, 2026-10-01). W12: a project
+// chosen or changed also moves the unstarted tab to that project's tab set.
 function watchUnstartedTitles(): () => void {
   const signature = (intents: ReadonlyMap<AppSessionId, { projectId: ProjectId | null }>) => [...intents].map(([id, i]) => `${id}:${i.projectId}`).join('|');
   let last = signature(useSetup.getState().intents);
@@ -52,6 +54,7 @@ function watchUnstartedTitles(): () => void {
     if (next === last) return;
     last = next;
     unstartedTitlesChanged();
+    useLayout.getState().refileTabs();
   });
   const offProjects = useSessions.subscribe((state, previous) => {
     if (state.projects !== previous.projects) unstartedTitlesChanged();

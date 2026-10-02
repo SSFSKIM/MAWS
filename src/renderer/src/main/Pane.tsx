@@ -11,6 +11,7 @@ import { createSession, focusedProject, NEW_CHAT, runAction, useActionEnabled, u
 import { useKeyChord } from '../keymap/useKeyChord';
 import { SessionPane } from '../session/SessionPane';
 import { useLayout } from '../stores/layout';
+import { currentSet } from '../stores/layout-model';
 import { focusPaneElement, paneDomId } from './pane-dom';
 import { TabStrip } from './TabStrip';
 
@@ -18,7 +19,7 @@ type PaneIndex = 0 | 1;
 
 // `column` is the pane's column in the main region's grid (MainArea), where its strip and its content are placed.
 export function Pane({ index, split, column }: { index: PaneIndex; split: boolean; column: number }) {
-  const pane = useLayout((s) => s.main.panes[index]);
+  const pane = useLayout((s) => currentSet(s.main).panes[index]);
   const idPrefix = useId();
   const element = useRef<HTMLElement>(null);
   // ⌃Tab and ⌃⇧Tab cycle the pane that owns the focused element (renderer sink, pane scope: a tab or a card may take
@@ -36,7 +37,7 @@ export function Pane({ index, split, column }: { index: PaneIndex; split: boolea
   const active = pane.tabs[activeIndex] ?? null;
 
   const focus = () => {
-    if (useLayout.getState().main.focusedPane !== index) useLayout.getState().focusPane(index);
+    if (currentSet(useLayout.getState().main).focusedPane !== index) useLayout.getState().focusPane(index);
   };
 
   return (

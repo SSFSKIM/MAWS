@@ -4,12 +4,13 @@
 // handler renders disabled everywhere: in the page through `useActionEnabled`, in the application menu through the
 // enabled set the dispatcher reports to main.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { LayoutMain, TabRef } from '@shared/ipc/schema/layout';
+import { NO_PROJECT, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import type { ActionId } from '@shared/keymap/actions';
 import type { Location } from '@shared/sessions/intent';
 import { markFocusOnMount } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { NEW_CHAT } from '../sessions/title';
+import { allTabs } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { create } from 'zustand';
 import { createHandlerRegistry } from './registry';
@@ -75,30 +76,41 @@ const closeGuards = createHandlerRegistry<TabRef['kind'], [TabRef]>('close guard
 
 export const registerCloseGuard = (kind: TabRef['kind'], guard: CloseGuard): (() => void) => closeGuards.register(kind, guard);
 
-const findTab = (main: LayoutMain, id: string): TabRef | null => main.panes.flatMap((p) => p.tabs).find((t) => t.id === id) ?? null;
+const findTab = (main: LayoutMain, id: string): TabRef | null => allTabs(main).find((t) => t.id === id) ?? null;
+
+async function guardAllows(ref: TabRef): Promise<boolean> {
+  const guard = closeGuards.get(ref.kind) as CloseGuard | undefined;
+  if (!guard) return true;
+  try {
+    return await guard(ref);
+  } catch (error) {
+    console.error(`[actions] close guard for ${ref.kind} failed; keeping the tab`, error);
+    return false;
+  }
+}
+
+// A session with no record yet: an unstarted tab, which leaves nothing to reopen.
+export const isUnstarted = (appSessionId: AppSessionId): boolean => !useSessions.getState().records.has(appSessionId);
 
 export async function requestCloseTab(id: string): Promise<void> {
   const ref = findTab(useLayout.getState().main, id);
-  if (!ref) return;
-  const guard = closeGuards.get(ref.kind) as CloseGuard | undefined;
-  if (guard) {
-    let close: boolean;
-    try {
-      close = await guard(ref);
-    } catch (error) {
-      console.error(`[actions] close guard for ${ref.kind} failed; keeping the tab`, error);
-      return;
-    }
-    if (!close) return;
-  }
-  // An unstarted session (no record yet) leaves nothing to reopen: its tab goes without a ⌘⇧T entry, and its intent
-  // goes with it. Every other tab closes the ordinary way.
-  if (ref.kind === 'session' && !useSessions.getState().records.has(ref.appSessionId)) {
+  if (!ref || !(await guardAllows(ref))) return;
+  // An unstarted session's tab goes without a ⌘⇧T entry, and its intent goes with it. Every other tab closes the
+  // ordinary way.
+  if (ref.kind === 'session' && isUnstarted(ref.appSessionId)) {
     useLayout.getState().dropSession(ref.appSessionId);
     useSessions.getState().dropUnstarted(ref.appSessionId);
     return;
   }
   useLayout.getState().closeTab(id);
+}
+
+// I2: an unstarted tab a session opened beside in its place (the layout store's `ReplaceGuard`): its guard as for a
+// close, then its intent goes; the store drops the tab itself, so it leaves no ⌘⇧T entry either.
+export async function discardForReplace(ref: TabRef): Promise<boolean> {
+  if (ref.kind !== 'session' || !(await guardAllows(ref))) return false;
+  useSessions.getState().dropUnstarted(ref.appSessionId);
+  return true;
 }
 
 // ---- unstarted titles ---------------------------------------------------------------------------------------------------
@@ -146,25 +158,19 @@ export function useUnstartedTitle(appSessionId: AppSessionId): UnstartedTitleAns
   return answerOf(appSessionId, registered, { projectId, project }, revision);
 }
 
+// W12: the project an unstarted session's tab belongs with until its record exists (the shell's `projectOf` for the
+// layout): C10's registered answer, else C5's own.
+export const unstartedProjectOf = (appSessionId: AppSessionId): ProjectId | null => unstartedTitleOf(appSessionId).projectId;
+
 // ---- New chat's preselection (2026-10-01) -------------------------------------------------------------------------------
-// The project a New chat starts in when a project is focused, so the common case is one step: the session's project in
-// the active tab (of `pane`, else the focused pane; an unstarted tab's chosen one included), else the first project
-// expanded in the sidebar (W11: the flat tree has no open page; W12 replaces this with the current project), else none:
-// the chat then starts with "Choose a project".
-export function focusedProject(opts: { pane?: 0 | 1 } = {}): ProjectId | null {
-  const { main, regions } = useLayout.getState();
-  const { records, projects } = useSessions.getState();
-  const fromTab = (): ProjectId | null => {
-    const shown = main.panes[opts.pane ?? main.focusedPane] ?? main.panes[0];
-    const tab = shown?.tabs.find((t) => t.id === shown.activeTabId);
-    if (tab?.kind !== 'session' && tab?.kind !== 'agent') return null;
-    const record = records.get(tab.appSessionId);
-    return record ? record.projectId : unstartedTitleOf(tab.appSessionId).projectId;
-  };
-  const listed = (id: ProjectId | null): id is ProjectId => id !== null && projects.has(id) && !projects.get(id)!.hidden;
-  const tabProject = fromTab();
-  if (listed(tabProject)) return tabProject;
-  return (regions.sidebar.expandedProjects.find((key) => key !== 'other' && listed(key as ProjectId)) as ProjectId | undefined) ?? null;
+// The project a New chat starts in when a project is focused, so the common case is one step: the project whose tab set
+// the strip shows (W12; every session tab in it is that project's, and a click or Enter on a project row in the sidebar
+// switches to it), unless it is gone or hidden from the sidebar (W11). None from the no-project set: the chat then
+// starts with "Choose a project".
+export function focusedProject(): ProjectId | null {
+  const { current } = useLayout.getState().main;
+  const project = current === NO_PROJECT ? undefined : useSessions.getState().projects.get(current);
+  return project && !project.hidden ? project.id : null;
 }
 
 // ---- tab retention ------------------------------------------------------------------------------------------------------

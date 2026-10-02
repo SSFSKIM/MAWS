@@ -20,7 +20,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
 import { openDialog } from '../sessions/dialogs';
-import { filterProjectList, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, type ProjectEntry, type ProjectKey } from './derive';
+import { filterProjectList, OTHER_SESSIONS, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, type ProjectEntry, type ProjectKey } from './derive';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
 import { ProjectRow, ShowMoreRow } from './ProjectRow';
 import { ResumePickerHost } from './ResumePicker';
@@ -153,7 +153,10 @@ function SidebarBody() {
     [],
   );
 
+  // A project's activation, one path for a click on its row and its keys (Enter, Space, ArrowRight, ArrowLeft): the strip
+  // shows the project's tab set (W12; Other sessions: the no-project set), and the row opens or closes.
   const toggleProject = (key: ProjectKey) => {
+    useLayout.getState().setCurrentProject(key === OTHER_SESSIONS ? null : key);
     if (searching) return; // a search shows its matches open without changing what is expanded
     const open = sidebar.expandedProjects.includes(key);
     if (open && more.has(key)) {
@@ -303,7 +306,7 @@ function SortMenu({ sort }: { sort: SidebarSort }) {
 
 // New chat (2026-10-01): the sidebar's first row, above the search and the tree, as Codex's first nav row sits above its
 // projects (readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:519957-519987, 520284-520293). It
-// starts in the active session's project, else the first expanded one, else in none ("Choose a project").
+// starts in the project whose tab set the strip shows (`focusedProject`), else in none ("Choose a project").
 function NewChatRow() {
   const canCreate = useSessionCreatorRegistered();
   const chord = useChordHint('session.new');

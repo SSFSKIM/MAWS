@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { LAYOUT_DEFAULTS, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
 import { registerAction, runAction } from '../keymap/actions-runtime';
 import type { PanelHostProps } from '../panel/host-slot';
@@ -21,7 +21,7 @@ vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagno
 
 const A = 'app-a' as AppSessionId;
 const sessionTab = (id: string): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id as AppSessionId, pinned: false });
-const withActive = (tab: TabRef): LayoutMain => ({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [tab], activeTabId: tab.id }] });
+const withActive = (tab: TabRef): LayoutMain => ({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [tab], activeTabId: tab.id }] } } });
 
 const region = (name: string) => document.querySelector<HTMLElement>(`[data-region="${name}"]`)!;
 const grid = () => region('main').parentElement!;

@@ -84,22 +84,35 @@ export const StoredRegionsSchema = z.union([
   })),
   RegionsV1Schema.transform(({ sidebar: { width, collapsed, sort }, panel }): LayoutRegions => ({ version: 3, sidebar: { width, collapsed, sort, expandedProjects: [] }, panel, overview: null })),
 ]);
-export const LayoutMainSchema = z.strictObject({ version: z.literal(1),                                          // key `main.tabs`
-  panes: z.tuple([PaneStateSchema]).or(z.tuple([PaneStateSchema, PaneStateSchema])), focusedPane: z.union([z.literal(0), z.literal(1)]), splitRatio: z.number(),
-  closedTabs: z.array(TabRefSchema).max(10) });                                                                    // ⌘⇧T history, newest last
+// W12 (§5.2 as amended 2026-10-01, I3): a tab set per project. `sets` holds one pane layout per project with open tabs
+// ('none': the tabs of sessions without a project, a New chat's before its project is chosen, and those of no session
+// opened there); `current` is the set the strip shows, present in `sets` and possibly one empty pane; a tab id exists
+// once across every set; the closed-tab history (⌘⇧T, newest last) is shared. Version 1, one pane layout, is read
+// through `StoredMainSchema` and filed by project at hydration (the layout model's `fromV1`).
+export const NO_PROJECT = 'none';
+export const TabSetKeySchema = z.union([z.literal(NO_PROJECT), ProjectIdSchema]);
+export type TabSetKey = z.infer<typeof TabSetKeySchema>;
+export const TabSetSchema = z.strictObject({
+  panes: z.tuple([PaneStateSchema]).or(z.tuple([PaneStateSchema, PaneStateSchema])), focusedPane: z.union([z.literal(0), z.literal(1)]), splitRatio: z.number() });
+export type TabSet = z.infer<typeof TabSetSchema>;
+const ClosedTabsSchema = z.array(TabRefSchema).max(10);
+export const LayoutMainSchema = z.strictObject({ version: z.literal(2), current: TabSetKeySchema,                // key `main.tabs`
+  sets: z.partialRecord(TabSetKeySchema, TabSetSchema), closedTabs: ClosedTabsSchema });
 export type LayoutMain = z.infer<typeof LayoutMainSchema>;
-// What hydration reads from `main.tabs`: the retired tab kinds, the Overview's (every layout before W5 held it) and the
-// Accounts tab's (W6), are dropped from the panes and the closed-tab history (a pane it leaves empty goes; a pane whose
-// active tab it was activates its first tab). The rewrite is total: a pane or tab that is not an object passes through
-// untouched for the schema to reject, because a throw here would fail hydration's reads as a whole instead of falling
-// back to the default.
+export const LayoutMainV1Schema = z.strictObject({ version: z.literal(1), ...TabSetSchema.shape, closedTabs: ClosedTabsSchema });
+export type LayoutMainV1 = z.infer<typeof LayoutMainV1Schema>;
+// What hydration reads from version 1 of `main.tabs`: the retired tab kinds, the Overview's (every layout before W5
+// held it) and the Accounts tab's (W6), are dropped from the panes and the closed-tab history (a pane it leaves empty
+// goes; a pane whose active tab it was activates its first tab). The rewrite is total: a pane or tab that is not an
+// object passes through untouched for the schema to reject, because a throw here would fail hydration's reads as a
+// whole instead of falling back to the default.
 type Entries = { tabs: unknown[]; activeTabId?: unknown };
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 const RETIRED_KINDS: ReadonlySet<unknown> = new Set(['overview', 'accounts']);
 const isRetiredRef = (tab: unknown) => isRecord(tab) && RETIRED_KINDS.has(tab.kind);
 const hasTabs = (pane: unknown): pane is Entries => isRecord(pane) && Array.isArray(pane.tabs);
 const idOf = (tab: unknown) => (isRecord(tab) ? tab.id : undefined);
-export const StoredMainSchema = z.preprocess((value) => {
+const StoredMainV1Schema = z.preprocess((value) => {
   if (!isRecord(value) || !Array.isArray(value.panes)) return value;
   const panes = (value.panes as unknown[]).map((pane) => {
     if (!hasTabs(pane)) return pane;
@@ -110,13 +123,17 @@ export const StoredMainSchema = z.preprocess((value) => {
   const kept = panes.filter((pane) => !hasTabs(pane) || pane.tabs.length > 0);
   const closedTabs = Array.isArray(value.closedTabs) ? (value.closedTabs as unknown[]).filter((t) => !isRetiredRef(t)) : value.closedTabs;
   return { ...value, panes: kept.length > 0 ? kept : [{ tabs: [], activeTabId: '' }], focusedPane: kept.length < panes.length ? 0 : value.focusedPane, closedTabs };
-}, LayoutMainSchema);
+}, LayoutMainV1Schema);
+export const StoredMainSchema = z.union([LayoutMainSchema, StoredMainV1Schema]);
 export const PanelPinnedSchema = z.array(PanelTabRefSchema);                                                      // key `panel.pinned`: the global pins (D-10)
 export const PanelSessionStateSchema = z.strictObject({ tabs: z.array(PanelTabRefSchema), activeTabId: z.string().nullable() });   // key `panel.<appSessionId>`
 export type PanelSessionState = z.infer<typeof PanelSessionStateSchema>;
 export const WindowStateSchema = z.strictObject({ bounds: z.strictObject({ x: z.number().int(), y: z.number().int(), width: z.number().int(), height: z.number().int() }),
                                                   maximized: z.boolean(), fullscreen: z.boolean() });              // key `window.main`, main only, never crosses IPC
 export type WindowState = z.infer<typeof WindowStateSchema>;
+
+// A set with nothing open: one empty pane (W5), which is also what a set's last tab closing leaves.
+export const EMPTY_TAB_SET: TabSet = { panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5 };
 
 // Widths are the X7 tokens `--sidebar-w` and `--panel-w`.
 export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelPinned: PanelTabRef[] } = {
@@ -126,7 +143,7 @@ export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelP
     panel: { width: 380, collapsed: false, maximized: false },
     overview: null,
   },
-  main: { version: 1, panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [] },
+  main: { version: 2, current: NO_PROJECT, sets: { [NO_PROJECT]: EMPTY_TAB_SET }, closedTabs: [] },
   panelPinned: [],
 };
 
