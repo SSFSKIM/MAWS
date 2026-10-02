@@ -389,7 +389,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     test.info().annotations.push({ type: 'notification delivery', description: `${notified.delivery} (${maws.packaged ? 'packaged' : 'dev build'})` });
     console.log(`[shell] attention.notified delivery: ${notified.delivery} (${maws.packaged ? 'packaged' : 'dev build'})`);
     if (notified.delivery === 'fallback') {
-      await expect(main.getByText('Charter + research needs you · Read: docs/charter.md')).toBeVisible();
+      await expect(page.getByText('Charter + research needs you · Read: docs/charter.md')).toBeVisible();
     }
     expect(await badge()).toBe('4');
     await closeProject(page, 'MAWS'); // W11: a project's counts show while it is collapsed

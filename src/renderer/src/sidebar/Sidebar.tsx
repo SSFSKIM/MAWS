@@ -257,6 +257,15 @@ function SidebarBody() {
                 Hidden projects…
               </button>
             )}
+            {!searching && (
+              <button
+                type="button"
+                onClick={() => openDialog({ kind: 'archived', projectId: null })}
+                className="mt-1 flex h-(--row-h) w-full cursor-default items-center rounded-sm pr-[9px] pl-[30px] text-left text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
+              >
+                Archived sessions…
+              </button>
+            )}
           </div>
         </ContextMenu.Trigger>
         <SidebarMenuContent target={menuTarget} />

@@ -51,22 +51,28 @@ afterEach(() => {
 });
 
 describe('sidebar recovery routes', () => {
-  it('recovers a project-less archive from Other sessions after a fresh empty snapshot', async () => {
-    fillStores(scenarioFile('empty'));
+  it.each(['footer', 'context menu'] as const)('recovers a project-less archive through the %s', async (route) => {
+    const empty = scenarioFile('empty');
+    fillStores(route === 'footer' ? empty : { ...empty, sessions: [record('listed-other', { projectId: null })] });
     const archived = record('archived-other', { projectId: null, archived: true, title: { text: 'Recovered notes', source: 'user' } });
     const elsewhere = record('archived-project', { projectId: 'project-a' as ProjectId, archived: true, title: { text: 'Project notes', source: 'user' } });
     const fake = fakeClient({
       'session.list': () => ({ sessions: [archived, elsewhere], revision: 1 }),
       'session.update': () => {
         archived.archived = false;
-        useSessions.getState().applyChanged({ record: archived, cause: 'update', revision: 2 });
+        useSessions.getState().applyChanged({ record: archived, cause: 'update', revision: useSessions.getState().revision + 1 });
         return archived;
       },
     });
     window.maws = fake.client;
     render(<><Sidebar /><SessionDialogs /></>);
-    fireEvent.contextMenu(row('Other sessions'));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Archived sessions…' }));
+    if (route === 'footer') {
+      expect(screen.queryByRole('treeitem', { name: 'Other sessions' })).toBeNull();
+      await userEvent.click(screen.getByRole('button', { name: 'Archived sessions…' }));
+    } else {
+      fireEvent.contextMenu(row('Other sessions'));
+      await userEvent.click(await screen.findByRole('menuitem', { name: 'Archived sessions…' }));
+    }
     const dialog = await screen.findByRole('dialog', { name: 'Archived sessions · Other sessions' });
     await within(dialog).findByText('Recovered notes');
     expect(within(dialog).queryByText('Project notes')).toBeNull();
@@ -76,7 +82,7 @@ describe('sidebar recovery routes', () => {
     expect(fake.invoked('session.update')).toEqual([{ appSessionId: archived.appId, patch: { archived: false } }]);
     act(() => closeDialog());
     await toggle(userEvent.setup(), 'Other sessions');
-    expect(sessionRows(row('Other sessions'))).toEqual(['Recovered notes']);
+    expect(sessionRows(row('Other sessions'))).toContain('Recovered notes');
   });
 
   it('reports a failed hidden-project restore without revealing a row that remains hidden', async () => {
@@ -656,7 +662,7 @@ describe('sidebar at scale', () => {
     let elapsed = performance.now() - started;
     if (elapsed > 200) console.info(`[sidebar] many-sessions list mounted in ${Math.round(elapsed)} ms`);
     expect(elapsed).toBeLessThan(1000);
-    expect(projectRows()).toHaveLength(4);
+    expect(projectRows()).toHaveLength(3);
     started = performance.now();
     await toggle(userEvent.setup(), 'MAWS');
     elapsed = performance.now() - started;
