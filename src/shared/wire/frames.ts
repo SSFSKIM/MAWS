@@ -11,7 +11,7 @@
 import * as z from 'zod';
 import { COMMAND_LIFECYCLE_STATES } from '../graph/enums';
 import { ContentBlockSchema } from '../graph/events';
-import { ControlErrorResponseSchema } from './control';
+import { ControlErrorResponseSchema, UiPaneWireSchema } from './control';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Loose fallbacks
@@ -247,6 +247,26 @@ export type SystemUiLogFrame = z.infer<typeof SystemUiLogFrameSchema>;
 export const SystemUiInvalidateFrameSchema = systemFrame('ui_invalidate', { event: z.string().optional() });
 export type SystemUiInvalidateFrame = z.infer<typeof SystemUiInvalidateFrameSchema>;
 
+// R2: the pushes a remote surface gets once attached (pass3/mods-surface-*, 2.1.287): the pane roster whenever it
+// changes (a plugin opened, retitled or closed a pane, the person showed, focused or closed one, a placing client
+// attached), and a plugin's own moves of a site's window (`$.ui.scroll`) and focus ring (`$.ui.focus`); the person's
+// own moves are never pushed back.
+export const SystemUiPanesFrameSchema = systemFrame('ui_panes', {
+  panes: z.array(UiPaneWireSchema),
+  shown_id: z.string().nullish(), focused_id: z.string().nullish(), focus_requested_id: z.string().nullish(),
+});
+export type SystemUiPanesFrame = z.infer<typeof SystemUiPanesFrameSchema>;
+
+// `{client_id, component, instance_id, offset}`, and the same with `follow_end: true` while the window follows its end
+// (pass3/mods-surface-panes seq 53, 54)
+export const SystemUiScrollFrameSchema = systemFrame('ui_scroll', { client_id: z.string().optional(), component: z.string(), instance_id: z.string(), offset: z.number().int(), follow_end: z.boolean().optional() });
+export type SystemUiScrollFrame = z.infer<typeof SystemUiScrollFrameSchema>;
+
+// `{client_id, component, instance_id, plugin, key}`: the element (a Button, Input or Select by its `press.plugin` and
+// `props.key`) to take the ring (pass3/mods-surface-panes seq 44)
+export const SystemUiFocusFrameSchema = systemFrame('ui_focus', { client_id: z.string().optional(), component: z.string(), instance_id: z.string(), plugin: z.string(), key: z.string() });
+export type SystemUiFocusFrame = z.infer<typeof SystemUiFocusFrameSchema>;
+
 // The validator for every `system` frame: one entry per typed subtype; a subtype absent here parses as UnknownSystemFrame.
 export const SYSTEM_SUBTYPE_SCHEMAS: Readonly<Record<string, z.ZodType>> = Object.freeze({
   init: SystemInitFrameSchema,
@@ -275,6 +295,9 @@ export const SYSTEM_SUBTYPE_SCHEMAS: Readonly<Record<string, z.ZodType>> = Objec
   ui_status: SystemUiStatusFrameSchema, // R1
   ui_log: SystemUiLogFrameSchema, // R1
   ui_invalidate: SystemUiInvalidateFrameSchema, // R1
+  ui_panes: SystemUiPanesFrameSchema, // R2
+  ui_scroll: SystemUiScrollFrameSchema, // R2
+  ui_focus: SystemUiFocusFrameSchema, // R2
 });
 
 export type SystemFrame =
@@ -285,6 +308,7 @@ export type SystemFrame =
   | SystemModelRefusalFallbackFrame | SystemModelRefusalNoFallbackFrame | SystemNotificationFrame | SystemPermissionDeniedFrame
   | SystemPeerMessageHoldFrame | SystemElicitationCompleteFrame
   | SystemUiToastFrame | SystemUiStatusFrame | SystemUiLogFrame | SystemUiInvalidateFrame // R1
+  | SystemUiPanesFrame | SystemUiScrollFrame | SystemUiFocusFrame // R2
   | UnknownSystemFrame;
 
 // Table lookup that ignores inherited keys, so a frame typed `constructor` or `toString` is unknown, not a prototype method.

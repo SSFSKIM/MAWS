@@ -12,7 +12,8 @@ import * as z from 'zod';
 import { PERMISSION_MODES, type PermissionMode } from '@shared/graph/enums';
 import type { EventPayload, SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, AppSessionId, EventId, MessageUuid, ParentToolUseId, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { contextTotal, GetContextUsageResponseSchema, RewindConversationResponseSchema } from '@shared/wire/control';
+import { contextTotal, GetContextUsageResponseSchema, RewindConversationResponseSchema, UiPanesResponseSchema } from '@shared/wire/control';
+import { rosterOf } from './surface-wire'; // R2
 import {
   ControlRequestFrameSchema,
   parseStdinFrame,
@@ -435,6 +436,12 @@ export class Normalizer {
     // C10 end
     if (sent.subtype === 'get_context_usage') {
       this.contextSample(frame, out, attribution);
+      return;
+    }
+    // R2: the host's roster read (on attach, and the renderer's on mount) says what the push would have
+    if (sent.subtype === 'ui_panes') {
+      const parsed = frame.response.subtype === 'success' ? UiPanesResponseSchema.safeParse(frame.response.response ?? {}) : null;
+      if (parsed?.success) out.emit({ kind: 'plugin.panes', ...rosterOf(parsed.data) }, attribution);
       return;
     }
     if (sent.subtype !== 'rewind_conversation' || frame.response.subtype !== 'success') return;

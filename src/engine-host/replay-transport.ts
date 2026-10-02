@@ -9,12 +9,20 @@
 // (debt wave 3); any other unrecorded write is a replay mismatch that ends the stream (`exited` `{ null, null }`), so a
 // test cannot pass by advancing past a frame the probe never saw. `stderr` rows replay; `meta exit` ends the stream with
 // the row's code and signal; `kill` ends a journal that has no exit row. Nothing here journals (the harness does).
+// R2: with `surfaceReads` (the app's replays under MAWS_ENGINE_REPLAY, never the conformance harness), the surface's
+// attach, detach, roster reads and renders, and the renderer's reports of where the keyboard, a window and the shown
+// pane are (focus, scroll, pane shown or focused, a prompt edit) are never held: the renderer sends them as its sites
+// mount and its DOM moves, in an order and number no recording can fix, so each is answered at once with the fixture's
+// recorded answer for the same ask (a render's by its component and instance) as of the cursor (the latest at or before
+// it, else the next after it), or an empty success when the fixture has none, and their recorded rows are passed over.
+// What the person does to a plugin's drawing (presses, inputs, picks, a pane closed) is still held and matched in order.
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { requestClassOf } from './controls';
 import { TransportClosed, type EngineTransport, type TransportItem } from './transport';
 
 export const PRELUDE_SUBTYPES: ReadonlySet<string> = new Set(['initialize', 'get_status']);
+export const SURFACE_READ_SUBTYPES: ReadonlySet<string> = new Set(['ui_attach', 'ui_detach', 'ui_render', 'ui_panes', 'ui_focus', 'ui_scroll', 'ui_pane_show', 'ui_pane_focus', 'ui_prompt_edit']); // R2
 
 export interface ReplayTransport extends EngineTransport {
   readonly holding: JournalRow | null; // the `out` row the replay waits on, or null while `in` rows remain or the stream ended
@@ -69,8 +77,28 @@ function preludeResponse(prelude: JournalRow[], subtype: string): Frame | null {
   return response ? (response.frame as Frame) : null;
 }
 
-export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[]; onHold?: (row: JournalRow) => void }): ReplayTransport {
+// R2: the ask a surface read answers: its subtype, and a render's component and instance.
+function surfaceKey(request: Frame): string {
+  return request.subtype === 'ui_render' ? `ui_render\u0000${String(request.component)}\u0000${String(request.instance_id)}` : String(request.subtype);
+}
+
+export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[]; onHold?: (row: JournalRow) => void; surfaceReads?: boolean }): ReplayTransport {
   const rows = journal;
+  // R2: the recorded surface reads (their out row's index, key and the engine's answer), and the rows the cursor passes over
+  const surfaceReads: { index: number; key: string; response: Frame }[] = [];
+  const passedOver = new Set<number>();
+  if (opts.surfaceReads) {
+    rows.forEach((row, index) => {
+      const f = row.frame as Frame;
+      if (row.direction !== 'out' || f.type !== 'control_request' || !SURFACE_READ_SUBTYPES.has((f as ControlRequest).request.subtype)) return;
+      const id = (f as ControlRequest).request_id;
+      const answer = rows.findIndex((r, i) => i > index && r.direction === 'in' && (r.frame as Frame).type === 'control_response' && (r.frame as ControlResponse).response.request_id === id);
+      passedOver.add(index);
+      if (answer === -1) return;
+      passedOver.add(answer);
+      surfaceReads.push({ index, key: surfaceKey((f as ControlRequest).request as unknown as Frame), response: rows[answer]!.frame as Frame });
+    });
+  }
   let cursor = 0; // index of the next row to consider
   let ended = false;
   const idMap = new Map<string, string>(); // recorded id → minted id
@@ -118,6 +146,10 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
   const settleCursor = (): JournalRow | null => {
     while (cursor < rows.length) {
       const row = rows[cursor]!;
+      if (passedOver.has(cursor)) {
+        cursor += 1; // R2: a surface read, answered by lookup
+        continue;
+      }
       if (row.direction === 'in' || row.direction === 'out') return row;
       if (row.direction === 'meta' && (row.frame as Frame).event === 'exit') return row;
       if (row.direction === 'stderr') pushStderr(String((row.frame as { text?: unknown }).text ?? ''));
@@ -134,6 +166,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
     let skip = waiters.length;
     for (let i = cursor; i < rows.length; i += 1) {
       const row = rows[i]!;
+      if (passedOver.has(i)) continue; // R2
       if (row.direction === 'out' && skip-- === 0) return row;
       if (row.direction === 'meta' && (row.frame as Frame).event === 'exit') return null;
     }
@@ -249,6 +282,23 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
     write(frame) {
       if (ended) return Promise.reject(new TransportClosed('the replay ended'));
       const f = frame as unknown as Frame;
+      // R2: a surface read, answered from the fixture as of the cursor, never held
+      if (opts.surfaceReads && f.type === 'control_request' && SURFACE_READ_SUBTYPES.has((f as ControlRequest).request.subtype)) {
+        const { request_id: requestId, request } = f as ControlRequest;
+        const key = surfaceKey(request as unknown as Frame);
+        const same = surfaceReads.filter((r) => r.key === key);
+        const recorded = same.filter((r) => r.index < cursor).at(-1) ?? same.find((r) => r.index >= cursor);
+        if (recorded) {
+          const response = { ...(recorded.response as ControlResponse).response, request_id: requestId };
+          injected.push({ frame: { ...recorded.response, response }, raw: '', error: null });
+        } else {
+          const message = `replay: ${request.subtype} was not recorded; answered with an empty success`;
+          injected.push({ frame: null, raw: '', error: { kind: 'replay_unrecorded_read', message, length: 0, typeGuess: null, read: { subtype: request.subtype, requestId } } });
+          injected.push({ frame: { type: 'control_response', response: { subtype: 'success', request_id: requestId, response: {} } }, raw: '', error: null });
+        }
+        wake?.();
+        return Promise.resolve();
+      }
       if (f.type === 'control_request' && (f as ControlRequest).request.subtype === 'end_session') {
         const upcoming = nextOut();
         if (!upcoming || !matches(upcoming.frame as Frame, f)) {

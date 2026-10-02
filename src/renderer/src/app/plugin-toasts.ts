@@ -11,7 +11,8 @@ import { currentSet } from '../stores/layout-model';
 import { toast } from '../stores/notices';
 import { PLUGIN } from '../transcript';
 
-function shownHere(appSessionId: AppSessionId): boolean {
+// Whether a pane of this window shows the session as its active tab (R2's prompt requests read it too).
+export function shownHere(appSessionId: AppSessionId): boolean {
   return currentSet(useLayout.getState().main).panes.some((pane) => pane.tabs.some((tab) => tab.id === pane.activeTabId && tab.kind === 'session' && tab.appSessionId === appSessionId));
 }
 

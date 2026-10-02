@@ -518,3 +518,85 @@ it.each([
   expect(onPrefill).toHaveBeenCalledExactlyOnceWith(prefill);
   expect(useComposerStore.getState().prefills.has(APP)).toBe(false);
 });
+// R2: the engine's prompt requests on a plugin's behalf read and fill the box through the handle, and a plugin's
+// suggestion is the empty box's placeholder until Tab takes it
+// R2/F11 seam: prompt access obeys the session-owned lock and edit revisions.
+it.each(['replace', 'append', 'insert'] as const)('refuses a plugin %s during submission, including after remount', async (mode) => {
+  let answer!: (accepted: boolean) => void;
+  const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+  const handle = createRef<EditorHandle>();
+  const { port } = drafts(null);
+  const view = () => <Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} />;
+  const first = render(view());
+  await act(async () => handle.current!.insertText('locked submission'));
+  act(() => handle.current!.submit());
+  let filled: unknown;
+  act(() => { filled = handle.current!.fill('plugin edit', mode); });
+  const pendingText = handle.current!.promptBox().text;
+  first.unmount();
+  render(view());
+  let remountedFill: unknown;
+  act(() => { remountedFill = handle.current!.fill('plugin edit', mode); });
+  const remountedText = handle.current!.promptBox().text;
+  await act(async () => answer(false));
+  expect(pendingText).toBe('locked submission');
+  expect(remountedText).toBe('locked submission');
+  expect(filled).toBe(false);
+  expect(remountedFill).toBe(false);
+  expect(handle.current!.promptBox().text).toBe('locked submission');
+  act(() => { filled = handle.current!.fill('allowed edit', mode); });
+  expect(filled).toBe(true);
+  expect(handle.current!.promptBox().text).toContain('allowed edit');
+});
+
+it('treats a plugin fill to empty as an edit that invalidates pending restoration', async () => {
+  let loaded!: (draft: Draft | null) => void;
+  const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn() };
+  const handle = createRef<EditorHandle>();
+  render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} />);
+  act(() => handle.current!.fill('', 'replace'));
+  await act(async () => loaded({ doc: docOf([paragraph(textNode('old draft'))]), attachments: [], updatedAt: '2026-10-02T00:00:00.000Z' }));
+  expect(handle.current!.serialize().empty).toBe(true);
+});
+
+it('clears a plugin suggestion when a send is accepted', async () => {
+  const handle = createRef<EditorHandle>();
+  const taken = vi.fn();
+  render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={drafts(null).port} client={client} handle={handle} suggestion="try this next" onSuggestionTaken={taken} onSubmit={async () => true} />);
+  await act(async () => handle.current!.insertText('actual message'));
+  await act(async () => handle.current!.submit());
+  expect(handle.current!.serialize().empty).toBe(true);
+  expect(taken).toHaveBeenCalledOnce();
+});
+
+describe('the editor answers a plugin’s prompt read, fill and suggestion (R2)', () => {
+  it('reads the box as sent, the caret at its end; replace, append and insert place the text', async () => {
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} />);
+    await waitFor(() => expect(handle.current).not.toBeNull());
+    expect(handle.current!.promptBox()).toEqual({ text: '', cursor: 0 });
+    act(() => handle.current!.fill('MODS_PROBE_FILL', 'replace'));
+    expect(contentOf(container).textContent).toBe('MODS_PROBE_FILL');
+    expect(handle.current!.promptBox()).toEqual({ text: 'MODS_PROBE_FILL', cursor: 15 });
+    act(() => handle.current!.fill(' and more', 'append'));
+    expect(handle.current!.promptBox().text).toBe('MODS_PROBE_FILL and more');
+    act(() => handle.current!.fill('two\nlines', 'replace'));
+    expect(handle.current!.serialize().display).toBe('two\nlines');
+  });
+
+  it('shows a suggestion as the empty box’s placeholder and Tab takes it', async () => {
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const taken = vi.fn();
+    const view = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} />);
+    await waitFor(() => expect(handle.current).not.toBeNull());
+    view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} suggestion="MODS_PROBE_SUGGEST" onSuggestionTaken={taken} />);
+    act(() => handle.current!.refreshPlaceholder());
+    const content = contentOf(view.container);
+    await waitFor(() => expect(content.querySelector('[data-placeholder]')?.getAttribute('data-placeholder')).toBe('MODS_PROBE_SUGGEST'));
+    await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
+    expect(content.textContent).toBe('MODS_PROBE_SUGGEST');
+    expect(taken).toHaveBeenCalledTimes(1);
+  });
+});

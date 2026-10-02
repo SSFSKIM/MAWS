@@ -64,6 +64,10 @@ export const EngineSessionStatusSchema = z.strictObject({
   // the record by toSessionRecordPatch (the trust notice is the session's evidence).
   trust: z.strictObject({ attested: z.boolean(), recorded: z.boolean().nullable() }),
   // C10 end
+  // R2 (additive X6): present while MAWS is attached to the engine as the remote surface "desktop" (`ui_attach`
+  // answered, until `ui_detach` or the exit), naming the client it attached as; absent otherwise, and on an engine
+  // without `ui_surface_v1`. The renderer asks the render sites only while it is present.
+  uiSurface: z.strictObject({ clientId: z.string() }).optional(),
 });
 export type EngineSessionStatus = z.infer<typeof EngineSessionStatusSchema>;
 

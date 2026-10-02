@@ -186,6 +186,26 @@ describe('panel host registry and instances', () => {
     expect(screen.getByTestId(`body:${first}`).textContent).toMatch(/visible · focus 3$/);
   });
 
+  it('passive selection keeps a collapsed panel and keyboard focus; user selection reveals it', () => {
+    connect();
+    register(probeTool('t').tool);
+    render(<TestHost />);
+    let first = '';
+    act(() => void (first = panelHost.addTool('t', { appSessionId: A })));
+    act(() => void panelHost.addTool('t', { appSessionId: A }));
+    act(() => useLayout.getState().setPanel({ collapsed: true }));
+    const keyboard = document.body.appendChild(document.createElement('textarea'));
+    keyboard.focus();
+    act(() => panelHost.selectTab(first, { focus: false }));
+    expect(useLayout.getState().regions.panel.collapsed).toBe(true);
+    expect(screen.getByTestId(`body:${first}`).textContent).toMatch(/hidden · focus 1$/);
+    expect(document.activeElement).toBe(keyboard);
+    act(() => panelHost.selectTab(first));
+    expect(useLayout.getState().regions.panel.collapsed).toBe(false);
+    expect(screen.getByTestId(`body:${first}`).textContent).toMatch(/visible · focus [23]$/);
+    keyboard.remove();
+  });
+
   // W4: the receipt's Review changes added an invisible tab while the panel was hidden (⌘⇧B).
   it('a tool added with activate opens a hidden panel, focused on the new tab; one added without it leaves the panel hidden', () => {
     connect();

@@ -1,0 +1,79 @@
+[
+  {
+    "at": "2026-10-02T06:45:28.231Z",
+    "id": "time:error:replay:journal:20:0",
+    "kind": "time",
+    "label": "Oct 2, 2026 6:45 AM",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:28.231Z",
+    "attempt": null,
+    "id": "error:replay:journal:20:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_OPEN press {\"isPlaced\":true}",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:28.243Z",
+    "attempt": null,
+    "id": "error:replay:journal:45:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_FOCUS {}",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:28.246Z",
+    "attempt": null,
+    "id": "error:replay:journal:55:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_SCROLL {}",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:28.249Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:cd246cfd-e6c9-4b91-968c-675518189c91",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "cd246cfd-e6c9-4b91-968c-675518189c91",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply with exactly MODS_PROBE_OK",
+    "turnId": "turn:cd246cfd-e6c9-4b91-968c-675518189c91"
+  },
+  {
+    "at": "2026-10-02T06:45:29.623Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfcxcQfgRcWgXGLz1qmau:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "MODS_PROBE_OK",
+    "messageUuid": "205bcbdc-9ad8-4394-889a-7d3052de4398",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:cd246cfd-e6c9-4b91-968c-675518189c91"
+  },
+  {
+    "at": "2026-10-02T06:45:34.111Z",
+    "attempt": null,
+    "id": "error:replay:journal:102:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

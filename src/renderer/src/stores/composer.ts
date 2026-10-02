@@ -41,6 +41,14 @@ export interface FocusTarget {
   focusFrame(): void;
   insertText(text: string): void; // at the editor's caret, at the end when it is not focused (C11's insertComposerText)
   openWidget?(name: string, args: string): boolean; // C11: a registered widget over the composer, with its argument (openComposerWidget)
+  // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts): the box as it stands, a fill taken
+  // or refused (a card holds the box, the editor is read-only), a suggestion shown or refused (the box holds text, a
+  // turn runs)
+  prompt?: {
+    read(): { text: string; cursor: number };
+    fill(text: string, mode: 'replace' | 'append' | 'insert'): boolean;
+    suggest(text: string): boolean;
+  };
 }
 
 // Where edit-and-resubmit stands (C7 execution document, "Edit-and-resubmit and the fork seam"); M4b drives it from

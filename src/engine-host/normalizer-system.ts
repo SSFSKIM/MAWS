@@ -3,6 +3,7 @@
 // state), status, thinking_tokens, background_tasks_changed, task_started, task_progress, task_updated,
 // task_notification, hook_started, hook_response, commands_changed; the rest follow C1's typed frames and the table.
 // R1: the remote-surface pushes (ui_toast, ui_status, ui_log, ui_invalidate; pass3/mods-*) map to `plugin.*`, and
+// R2 adds the attached surface's pushes (ui_panes, ui_scroll, ui_focus; pass3/mods-surface-*);
 // init's plugin load errors and warnings to `plugin.load_issue` (`pluginLoadIssues`, called by the class's init).
 // C1's `SystemFrame` union carries the loose `UnknownSystemFrame` (`subtype: string`), so a switch on `subtype` does
 // not narrow; each case names its frame type explicitly (the frame was parsed with that schema by `parseStdoutFrame`).
@@ -31,8 +32,12 @@ import type {
   SystemUiLogFrame,
   SystemUiStatusFrame,
   SystemUiToastFrame,
+  SystemUiFocusFrame,
+  SystemUiPanesFrame,
+  SystemUiScrollFrame,
 } from '@shared/wire/frames';
 import { taskUsageOf, boolOr, compact, stringOrNull } from './normalizer-support';
+import { rosterOf } from './surface-wire'; // R2
 
 // What the task frames share across a session: the type each task was started with (a `task_notification` carries
 // none), the workflow name, and the tool use → agent map child frames are attributed through.
@@ -175,6 +180,17 @@ export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemM
     case 'ui_invalidate': { // R1: carried for R2's surface, which re-asks the trees it drew
       const f = frame as SystemUiInvalidateFrame;
       return one({ kind: 'plugin.invalidate', event: f.event ?? null });
+    }
+    case 'ui_panes': { // R2: the roster changed
+      return one({ kind: 'plugin.panes', ...rosterOf(frame as SystemUiPanesFrame) });
+    }
+    case 'ui_scroll': { // R2: a plugin moved a site's window
+      const f = frame as SystemUiScrollFrame;
+      return one({ kind: 'plugin.scroll', component: f.component, instanceId: f.instance_id, offset: f.offset, followEnd: f.follow_end === true });
+    }
+    case 'ui_focus': { // R2: a plugin moved a site's focus ring
+      const f = frame as SystemUiFocusFrame;
+      return one({ kind: 'plugin.focus', component: f.component, instanceId: f.instance_id, plugin: f.plugin, key: f.key });
     }
     // Journaled, no event, no consumer in P0 (the process table reads status and peer holds from the frames themselves).
     case 'status':

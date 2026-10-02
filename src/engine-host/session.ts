@@ -17,6 +17,7 @@ import type { Effort, LaunchSpec } from '@shared/engine/launch-spec';
 import type { QueueEntry, QueueState, SendContent, SessionStateStore } from '@shared/engine/session-state-store';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { EngineSessionStatus } from '@shared/engine/status';
+import type { SurfaceAnswer } from '@shared/engine/surface'; // R2
 import { HookCallbackRequestSchema, type GetStatusResponse, type InitializeRequest, type InterruptResponse } from '@shared/wire/control';
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
@@ -39,6 +40,7 @@ import { LADDER_MS, TerminationLadder, type ExitReason, type ExitSummary, type S
 import { isPermissionMode, SessionStatusTracker, type Catalog } from './session-status';
 import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
+import { SessionSurface } from './surface'; // R2
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
 
 export { HostHookRegistry } from './host-hooks';
@@ -120,6 +122,7 @@ export class EngineSession {
   private readonly ladder: TerminationLadder;
   private readonly clearAndImplement: ClearAndImplementSequence;
   private readonly compat = new EngineCompatWatch(); // W13: one notice per session process
+  readonly surface: SessionSurface; // R2: the remote surface MAWS attaches as
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
   private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */ };
@@ -174,6 +177,7 @@ export class EngineSession {
     this.exited = new Promise((resolve) => (this.resolveExited = resolve));
     this.lastUsedAt = this.launchedAt; // C12
     this.tracker = new SessionStatusTracker(opts.spec, () => this.touch());
+    this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     this.normalizer = new Normalizer({ appSessionId: opts.spec.appSessionId, launchId: opts.plan.launchId, sessionId: opts.plan.sessionId, warn: (w) => this.pendingWarnings.push(w) });
     this.broker = new PermissionBroker({
       appSessionId: opts.spec.appSessionId,
@@ -200,6 +204,7 @@ export class EngineSession {
       markExiting: () => this.setProcess('exiting'),
       endSession: () => {
         if (!this.handshakeDone || !this.client) return false;
+        this.surface.detach(this.client); // R2: off the roster first, on the same pipe
         // C12: `budget` is MAWS's own reason and never goes to the engine; a release ends the process as a stop does
         endSession(this.client, { reason: this.stopReason === 'budget' || this.stopReason === null ? 'stop' : this.stopReason }).catch(() => {}); // the exit is the answer that matters
         return true;
@@ -313,6 +318,13 @@ export class EngineSession {
     if (answer.kind !== 'plan' || answer.outcome !== 'clear_and_implement' || item?.kind !== 'plan' || item.attention.state !== 'pending') return this.broker.answer(requestId, answer);
     return this.clearAndImplement.stage((item.request.request.input as { plan?: unknown } | undefined)?.plan, () => this.broker.answer(requestId, answer));
   }
+
+  // R2: the renderer's answer to one of the engine's requests to the surface (`session.ui.answer`).
+  answerSurface(requestId: RequestId, answer: SurfaceAnswer): Promise<'delivered' | 'not_pending'> {
+    return this.surface.answer(requestId, answer, this.respond);
+  }
+
+  private readonly respond = (requestId: RequestId, response: unknown): Promise<void> => (this.client ? this.client.respond(requestId, response) : Promise.reject(new Error('no engine process')));
 
   // Ends the process through the termination ladder; `graceMs` (the end_session wait) is capped at 3 s. Before the
   // process is spawned there is nothing to ladder: the reason is recorded, `run()` sees it and ends the session with no
@@ -438,6 +450,7 @@ export class EngineSession {
       memory: tracked.memory,
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
       trust: { attested: this.spec.trust !== null, recorded: this.trustRecorded }, // C10
+      ...(this.surface.attached && { uiSurface: { clientId: this.surface.clientId } }), // R2
     };
     // C12: what an exit would lose, by the budget policy's rules (an exited process holds nothing)
     if (status.process !== 'exited') status.keepAlive = hardReasons(status, this.opts.statefulMcpServers?.() ?? NO_SERVERS);
@@ -567,6 +580,7 @@ export class EngineSession {
     this.trustRecorded = init.workspace_trust_recorded ?? null;
     if (Array.isArray(init.models)) this.emit('models', init.models);
     // C10 end
+    await this.surface.attach(client, init.capabilities); // R2: as the desktop surface, when the engine speaks ui_surface_v1
 
     await this.verifyGateway();
     await this.fallBackFromAuto(client, init); // W3
@@ -692,6 +706,8 @@ export class EngineSession {
       if (!this.handshakeDone) this.hookBeforeAnswer(frame);
       this.tracker.observe(frame, typeof frame.timestamp === 'string' ? frame.timestamp : row.at);
       if (frame.type === 'system') this.publishCatalog(); // C7: only system/init and system/commands_changed move the catalogue
+      // R2: an init that advertises the surface after an initialize answer that did not
+      if (this.handshakeDone && this.client && frame.type === 'system' && frame.subtype === 'init' && Array.isArray(frame.capabilities)) void this.surface.attach(this.client, frame.capabilities as string[]);
       this.broker.observe(item.frame);
       this.bashMode.observe(item.frame);
       this.client?.observe(item.frame);
@@ -764,6 +780,13 @@ export class EngineSession {
       case 'elicitation':
       case 'request_user_dialog':
         this.broker.accept(req);
+        return;
+      // R2: the engine's requests to the attached surface, for the renderer to answer
+      case 'ui_copy':
+      case 'ui_prompt_read':
+      case 'ui_prompt_fill':
+      case 'ui_prompt_suggest':
+        this.surface.accept(req, this.respond);
         return;
       default:
         this.log(`inbound ${req.request.subtype} request ${req.request_id} is not handled; answering an error`);
@@ -942,6 +965,7 @@ export class EngineSession {
     this.client?.close('the process exited');
     this.clearAndImplement.processExited();
     this.bashMode.processExited();
+    this.surface.processExited(); // R2
     this.tracker.dispose();
     // A process that never became ready never loaded the queue: nothing of this launch is in it to retire.
     const queueSettled = this.handshakeDone ? this.queue.onProcessExited(reason) : Promise.resolve();

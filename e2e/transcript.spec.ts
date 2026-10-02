@@ -782,3 +782,74 @@ test('a mod’s toast, log lines and status line show in the session (R1, pass3/
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// R2 (charter D-9 as amended 2026-10-01; the waves plan's R2 rulings): MAWS attached as the engine's desktop surface,
+// from the sites R2 recorded on the installed 2.1.287 (pass3/mods-surface-*) replayed through the replay transport into
+// the product app's session tab. The replay answers the surface's renders from the fixture by site and instance; the
+// person's presses are held and matched in order. A scratch config home holds one transcript for a scratch directory,
+// so C4 indexes a record the sidebar shows; no engine runs.
+async function surfaceReplay(fixture: string, body: (ctx: { page: Page; id: string; pane: ReturnType<Page['locator']> }) => Promise<void>) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-r2-surface-')));
+  const repo = join(root, 'repo');
+  const config = join(root, 'claude-config');
+  mkdirSync(repo);
+  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  const engineId = randomUUID();
+  const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'a session with a mod that draws' }, uuid: randomUUID(), timestamp: '2026-10-02T06:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.287' };
+  writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(first)}\n`);
+  const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
+  try {
+    const { page } = maws;
+    let id = '';
+    await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '')).not.toBe('');
+    await (await sidebarRow(page, { appSessionId: id })).click();
+    const pane = page.locator('[data-region="main"] [data-pane="0"]');
+    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await launchReady(page, id, `spikes/protocol-probe/fixtures/pass3/${fixture}.jsonl`, { cwd: repo });
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).uiSurface).toEqual({ clientId: 'maws-main' });
+    await body({ page, id, pane });
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test('a mod’s band, mode slot, hint and pane draw in the session (R2, pass3/mods-surface-render-sites)', async () => {
+  test.setTimeout(120_000);
+  await surfaceReplay('mods-surface-render-sites', async ({ page, id, pane }) => {
+    // the band above the composer frame, its Button and Input drawn in MAWS's own controls
+    const band = pane.getByRole('region', { name: 'From plugins' });
+    await expect(band).toContainText('MODS_PROBE_BAND presses=0 typed= submitted= working=false', { timeout: 20_000 });
+    await expect(band.getByRole('button', { name: 'Press' })).toBeVisible();
+    await expect(band.getByRole('textbox', { name: 'Reply' })).toHaveAttribute('placeholder', 'Type here');
+    const frame = pane.locator('[data-composer-frame]');
+    expect(await band.evaluate((el, f) => !!f && (el.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0, await frame.elementHandle())).toBe(true); // above the frame
+    // the mode slot after the permission mode in the toolbar, and the hint under the frame
+    const toolbar = pane.getByRole('toolbar', { name: 'Composer tools' });
+    await expect(toolbar.getByLabel('Plugin modes')).toHaveText('MODS_PROBE_MODE modes=0');
+    await expect(pane.getByLabel('Plugin hint')).toHaveText('MODS_PROBE_HINT draft=false working=false');
+    // the turn as recorded: the mod opens its pane when the turn completes, and the panel shows it as a plugin pane tab
+    value(await invoke(page, 'session.send', { appSessionId: id as never, content: 'Reply with exactly MODS_PROBE_OK' }));
+    const panel = page.locator('[data-region="panel"]');
+    await expect(panel.getByRole('tab', { name: /Plugin pane · Probe pane/ })).toBeVisible({ timeout: 20_000 });
+    await expect(panel.locator('[data-plugin-pane="mods-probe-pane"]')).toContainText('MODS_PROBE_PANE picked=one');
+    await expect(panel.getByRole('combobox', { name: 'Pick' })).toHaveValue('one');
+    await expect(panel.getByRole('link', { name: 'Probe link' })).toHaveAttribute('href', 'https://example.com/mods-probe');
+  });
+});
+
+test('a press on a mod’s button reaches the mod and its band redraws (R2, pass3/mods-surface-invalidate)', async () => {
+  test.setTimeout(120_000);
+  await surfaceReplay('mods-surface-invalidate', async ({ page, pane }) => {
+    const band = pane.getByRole('region', { name: 'From plugins' });
+    await expect(band).toContainText('MODS_PROBE_BAND presses=0', { timeout: 20_000 });
+    // the recorded press (seq 24): the replay holds at it until the app writes it; its answer, the mod's log line and the
+    // engine's invalidate follow, and the app asks the band again
+    await band.getByRole('button', { name: 'Press' }).click();
+    await expect(band).toContainText('MODS_PROBE_BAND presses=1', { timeout: 20_000 });
+    await expect(pane.locator('.transcript-error[data-scope="plugin"]')).toContainText(['mods-probe: MODS_PROBE_PRESS 1']);
+    void page;
+  });
+});

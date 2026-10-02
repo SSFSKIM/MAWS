@@ -16,7 +16,8 @@ import { HostCommandError, type HostEmit, type HostOn } from '@shared/host/runti
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS } from '@shared/ipc/schema/engine';
-import type { C3_SESSION_COMMANDS } from '@shared/ipc/schema/session';
+import type { C3_SESSION_COMMANDS, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
+import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import * as controls from './controls';
@@ -37,6 +38,7 @@ import { SessionStream } from './session-stream';
 import { FileSessionStateStore } from './store/file-session-state-store';
 import { queueTransaction } from './store/queue-transaction';
 import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from './transport';
+import { renderAnswerOf, rosterOf } from './surface-wire'; // R2
 // C4 start
 import type { SessionEvent } from '@shared/graph/events';
 // C4 end
@@ -67,6 +69,13 @@ export const DEADLINE_SHAPES: Record<C3Command, DeadlineShape> = {
 // C10 start: C10's engine-host commands (C10 execution document, X2 additions); each handler names its deadline shape
 type C10Command = 'engine.models' | 'session.forget';
 // C10 end
+// R2: the remote surface's commands, bounded except `session.ui.answer` (immediate)
+type R2Command = (typeof R2_SESSION_COMMANDS)[number];
+export const R2_DEADLINE_SHAPES: Record<R2Command, DeadlineShape> = {
+  'session.ui.render': 'bounded', 'session.ui.press': 'bounded', 'session.ui.input': 'bounded', 'session.ui.select': 'bounded', 'session.ui.focus': 'bounded',
+  'session.ui.scroll': 'bounded', 'session.ui.panes': 'bounded', 'session.ui.paneShow': 'bounded', 'session.ui.paneFocus': 'bounded', 'session.ui.close': 'bounded',
+  'session.ui.promptEdit': 'bounded', 'session.ui.answer': 'immediate',
+};
 
 // The longest wait before a live launch spawns: its three checks run in parallel, each under its own bound (W13: the
 // binary probe's covers a PATH lookup that waits for the capture before `--version`).
@@ -505,6 +514,95 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     emit('session.forgotten', { appSessionId: id });
   });
   // C10 end -------------------------------------------------------------------------------------------------------------
+
+  // R2 start: the renderer's asks of the engine's remote surface (shared/ipc/schema/session.ts, the R2 block). Bounded:
+  // one control round trip each on the session's attached client, the host adding the surface and the client id;
+  // `session.ui.answer` is immediate (the answer's flushed write).
+  const handleR2 = <N extends R2Command>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
+  const attached = (id: string): { session: EngineSession; client: ControlClient; address: { surface: 'desktop'; client_id: string } } => {
+    const { session, client } = ready(id);
+    if (!session.surface.attached) throw new HostCommandError({ code: 'internal', message: `session ${id} has no engine surface (the engine did not advertise ui_surface_v1)` });
+    return { session, client, address: session.surface.address };
+  };
+  handleR2('session.ui.render', async ({ appSessionId, component, instanceId, props, viewport, contentRows, keyed }) =>
+    bounded(async () => {
+      const { client, address } = attached(appSessionId);
+      const answer = await controls.uiRender(client, { ...address, component, instance_id: instanceId, props, ...(viewport && { viewport }), ...(contentRows !== undefined && { content_rows: contentRows }), ...(keyed && { keyed }) });
+      return renderAnswerOf(answer, props);
+    }),
+  );
+  handleR2('session.ui.press', async ({ appSessionId, plugin, handle, key, href }) =>
+    bounded(async () => {
+      const { session, client, address } = attached(appSessionId);
+      session.markUsed(); // C12: a press is the human's use
+      const answer = await controls.uiPress(client, { plugin, handle, ...(key !== undefined && { key }), ...(href !== undefined && { href }), ...address });
+      return { handled: answer.handled, element: answer.element ?? null };
+    }),
+  );
+  handleR2('session.ui.input', async ({ appSessionId, plugin, handle, kind, value, key, component, instanceId }) =>
+    bounded(async () => {
+      const { session, client, address } = attached(appSessionId);
+      session.markUsed();
+      const answer = await controls.uiInput(client, { plugin, handle, kind, value, ...(key !== undefined && { key }), ...(component !== undefined && { component }), ...(instanceId !== undefined && { instance_id: instanceId }), ...address });
+      return { handled: answer.handled, element: answer.element ?? null, value: answer.value ?? null };
+    }),
+  );
+  handleR2('session.ui.select', async ({ appSessionId, plugin, handle, value, key, component, instanceId }) =>
+    bounded(async () => {
+      const { session, client, address } = attached(appSessionId);
+      session.markUsed();
+      const answer = await controls.uiSelect(client, { plugin, handle, value, ...(key !== undefined && { key }), ...(component !== undefined && { component }), ...(instanceId !== undefined && { instance_id: instanceId }), ...address });
+      return { handled: answer.handled, element: answer.element ?? null, value: answer.value ?? null };
+    }),
+  );
+  handleR2('session.ui.focus', async ({ appSessionId, component, instanceId, isHeld, element, by }) =>
+    bounded(async () => {
+      const { client, address } = attached(appSessionId);
+      const answer = await controls.uiFocus(client, { component, instance_id: instanceId, is_held: isHeld, element, by, ...address });
+      return { moved: answer.moved, element: answer.element ? { plugin: answer.element.plugin, key: answer.element.key } : null, deny: answer.deny ?? null };
+    }),
+  );
+  handleR2('session.ui.scroll', async ({ appSessionId, component, instanceId, offset, by, bodyRows, contentRows, keyed }) =>
+    bounded(async () => {
+      const { client, address } = attached(appSessionId);
+      const answer = await controls.uiScroll(client, { component, instance_id: instanceId, offset, by, body_rows: bodyRows, content_rows: contentRows, ...(keyed && { keyed }), ...address });
+      return { moved: answer.moved, offset: answer.offset ?? null, deny: answer.deny ?? null, followEnd: answer.follow_end === true };
+    }),
+  );
+  handleR2('session.ui.panes', async ({ appSessionId }) => bounded(async () => rosterOf(await controls.uiPanes(attached(appSessionId).client, { client_id: SURFACE_CLIENT_ID }))));
+  handleR2('session.ui.paneShow', async ({ appSessionId, id }) =>
+    bounded(async () => {
+      const { client, address } = attached(appSessionId);
+      return { shownId: (await controls.uiPaneShow(client, { id, ...address })).shown_id ?? null };
+    }),
+  );
+  handleR2('session.ui.paneFocus', async ({ appSessionId, id }) =>
+    bounded(async () => {
+      const { client, address } = attached(appSessionId);
+      return { focusedId: (await controls.uiPaneFocus(client, { id, ...address })).focused_id ?? null };
+    }),
+  );
+  handleR2('session.ui.close', async ({ appSessionId, id }) =>
+    bounded(async () => {
+      const { session, client, address } = attached(appSessionId);
+      session.markUsed();
+      return { closed: (await controls.uiClose(client, { id, ...address })).closed };
+    }),
+  );
+  handleR2('session.ui.promptEdit', async ({ appSessionId, text, cursor, key, by }) =>
+    bounded(async () => {
+      const { client, address } = attached(appSessionId);
+      await controls.uiPromptEdit(client, { text, cursor, ...(key && { key }), by, ...address });
+    }),
+  );
+  handleR2('session.ui.answer', async ({ appSessionId, requestId, answer }) => {
+    try {
+      return { outcome: await sessionOf(appSessionId).answerSurface(requestId as RequestId, answer) };
+    } catch (error) {
+      throw new HostCommandError({ code: 'invalid_input', message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  // R2 end
 
   return { table };
 }

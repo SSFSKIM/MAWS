@@ -62,8 +62,9 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const w4 = ['w4-question-none', 'w4-question-partial']; // W4: a two-question AskUserQuestion answered with one question, then none, left out (the stepper's Skip)
     const w7 = ['w7-collision', 'w7-take-over']; // W7: a terminal resuming a session MAWS holds (the transcript and registry records beside it), and "Take over here" against one (meta rows only)
     const r0 = ['mods-attach', 'mods-consent', 'mods-gate-off', 'mods-gate-served-off', 'mods-gate-unset', 'mods-pushes']; // R0: the mods probe on the installed 2.1.287 (init capability, pushes without attach, attach and render, the rollout gate, the consent dialog)
+    const r2 = ['mods-surface-copy', 'mods-surface-invalidate', 'mods-surface-panes', 'mods-surface-press-input-select', 'mods-surface-prompt-access', 'mods-surface-render-sites']; // R2: the attached desktop surface (sites, presses, inputs and picks, panes, invalidate, prompt access, copy)
     const wave7 = ['hooks-flipped']; // debt wave 7: W1's blocking hooks with the forms flipped (an exit-2 Stop block, JSON prompt blocks), for the disk records beside it
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0].sort());
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -577,6 +578,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'informational', 'notification', // W1: pass3/hooks-blocking (a blocked prompt's informational, the stop-hook-error notification)
       'compact_boundary', // W1: pass3/compact
       'ui_log', 'ui_status', 'ui_toast', 'ui_invalidate', // R0: pass3/mods-* on 2.1.287, the remote-surface pushes (R1 maps them to plugin.*)
+      'ui_panes', 'ui_scroll', 'ui_focus', // R2: pass3/mods-surface-*, the attached surface's pushes
     ].sort());
   });
 
@@ -596,7 +598,49 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'session.state', // C12: pass3/launch-env-state-events (running, requires_action, running, idle)
       'boundary.compaction', // W1: pass3/compact seq 43
       'plugin.log', 'plugin.status', 'plugin.toast', 'plugin.invalidate', // R1: pass3/mods-* (no fixture carries a plugin load error or warning)
+      'plugin.panes', 'plugin.scroll', 'plugin.focus', 'plugin.ask', // R2: pass3/mods-surface-*
     ].sort());
     void kinds;
+  });
+});
+
+// R2 (charter D-9 as amended 2026-10-01): the attached desktop surface on the installed 2.1.287 (pass3/mods-surface-*,
+// findings-pass3-agent-work.md, R2 section): the pushes and the engine's requests as X1, every ui_* answer typed.
+describe('normaliser: the attached surface (R2, pass3/mods-surface-*)', () => {
+  it('render-sites: the roster on attach (push and read) is empty, the pane opened at turn.complete arrives after the result, and every render answer parses', async () => {
+    const { events, requests } = await run('pass3', 'mods-surface-render-sites');
+    const panes = ofKind(events, 'plugin.panes');
+    expect(panes.map((e) => e.panes.map((p) => p.id))).toEqual([[], [], ['mods-probe-pane']]);
+    expect(panes.at(-1)).toMatchObject({ shownId: 'mods-probe-pane', focusedId: null, focusRequestedId: null, panes: [{ title: 'Probe pane', plugin: 'mods-probe', closeOnEscape: false, holdToasts: false }] });
+    expect(seq(panes.at(-1))).toBeGreaterThan(seq(ofKind(events, 'turn.ended')[0]));
+    const renders = requests.filter((r) => r.subtype === 'ui_render');
+    expect(renders.map((r) => (r.response as { hooked?: boolean }).hooked)).toEqual([true, true, true, true, true]);
+    expect(requests.filter((r) => r.subtype.startsWith('ui_')).every((r) => r.ok)).toBe(true);
+  });
+
+  it('press-input-select: presses, inputs and picks change nothing in the graph but the plugin lines and the invalidates they cause', async () => {
+    const { events, requests } = await run('pass3', 'mods-surface-press-input-select');
+    expect(ofKind(events, 'plugin.invalidate')).toHaveLength(3);
+    expect(ofKind(events, 'plugin.log').map((e) => e.text)).toEqual(expect.arrayContaining(['MODS_PROBE_PRESS 1', 'MODS_PROBE_INPUT hel', 'MODS_PROBE_SUBMIT hello', 'MODS_PROBE_SELECT two']));
+    expect(requests.filter((r) => r.subtype === 'ui_select').map((r) => r.response)).toMatchObject([{ handled: true, element: 'pick', value: 'two' }, { handled: false }]);
+  });
+
+  it('panes: the focus ring and the window moves a plugin made, and the roster through show, focus and close', async () => {
+    const { events } = await run('pass3', 'mods-surface-panes');
+    expect(ofKind(events, 'plugin.focus').map(({ component, instanceId, plugin, key }) => ({ component, instanceId, plugin, key }))).toEqual([{ component: 'Pane', instanceId: 'mods-probe-pane', plugin: 'mods-probe', key: 'pick' }]);
+    expect(ofKind(events, 'plugin.scroll').map(({ offset, followEnd }) => ({ offset, followEnd }))).toEqual([{ offset: 16, followEnd: false }, { offset: 16, followEnd: true }]);
+    expect(ofKind(events, 'plugin.panes').map((e) => [e.panes.length, e.focusedId])).toEqual([[0, null], [0, null], [1, null], [1, null], [1, 'mods-probe-pane'], [1, null], [0, null]]);
+  });
+
+  it('prompt-access and copy: each request the engine sent the surface is one plugin.ask, in order, with what it carries', async () => {
+    const prompt = await run('pass3', 'mods-surface-prompt-access');
+    expect(ofKind(prompt.events, 'plugin.ask').map(({ ask, text, mode, plugin }) => ({ ask, text, mode, plugin }))).toEqual([
+      { ask: 'prompt_read', text: null, mode: null, plugin: null },
+      { ask: 'prompt_fill', text: 'MODS_PROBE_FILL', mode: 'replace', plugin: null },
+      { ask: 'prompt_read', text: null, mode: null, plugin: null }, // the read that completes the fill
+      { ask: 'prompt_suggest', text: 'MODS_PROBE_SUGGEST', mode: null, plugin: null },
+    ]);
+    const copy = await run('pass3', 'mods-surface-copy');
+    expect(ofKind(copy.events, 'plugin.ask').map(({ ask, text, plugin }) => ({ ask, text, plugin }))).toEqual([{ ask: 'copy', text: 'MODS_PROBE_COPY', plugin: 'mods-probe' }]);
   });
 });

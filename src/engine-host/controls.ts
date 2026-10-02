@@ -33,6 +33,18 @@ import {
   SetCwdResponseSchema,
   SetPermissionModeResponseSchema,
   SideQuestionResponseSchema,
+  UiAttachResponseSchema,
+  UiCloseResponseSchema,
+  UiDetachResponseSchema,
+  UiFocusResponseSchema,
+  UiInputResponseSchema,
+  UiPaneFocusResponseSchema,
+  UiPaneShowResponseSchema,
+  UiPanesResponseSchema,
+  UiPressResponseSchema,
+  UiPromptEditResponseSchema,
+  UiRenderResponseSchema,
+  UiScrollResponseSchema,
   VoidResponseSchema,
 } from '@shared/wire/control';
 import type { ControlClient } from './rpc';
@@ -88,6 +100,21 @@ export const CONTROLS = {
   reload_plugins: control<C.EmptyRequest, typeof ReloadPluginsResponseSchema>(ReloadPluginsResponseSchema, 'long'),
   mcp_reconnect: control<C.McpReconnectRequest, typeof VoidResponseSchema>(VoidResponseSchema, 'long'),
   mcp_toggle: control<C.McpToggleRequest, typeof VoidResponseSchema>(VoidResponseSchema, 'long'),
+  // R2: the remote surface. A render and a roster read mutate nothing the engine keeps (a render runs the plugins'
+  // render hooks, which may not write), so they are reads; everything the person does is a mutation.
+  ui_attach: control<C.UiAttachRequest, typeof UiAttachResponseSchema>(UiAttachResponseSchema, 'mutate'),
+  ui_detach: control<C.UiDetachRequest, typeof UiDetachResponseSchema>(UiDetachResponseSchema, 'mutate'),
+  ui_render: control<C.UiRenderRequest, typeof UiRenderResponseSchema>(UiRenderResponseSchema, 'read'),
+  ui_panes: control<C.UiPanesRequest, typeof UiPanesResponseSchema>(UiPanesResponseSchema, 'read'),
+  ui_press: control<C.UiPressRequest, typeof UiPressResponseSchema>(UiPressResponseSchema, 'mutate'),
+  ui_input: control<C.UiInputRequest, typeof UiInputResponseSchema>(UiInputResponseSchema, 'mutate'),
+  ui_select: control<C.UiSelectRequest, typeof UiInputResponseSchema>(UiInputResponseSchema, 'mutate'),
+  ui_pane_show: control<C.UiPaneShowRequest, typeof UiPaneShowResponseSchema>(UiPaneShowResponseSchema, 'mutate'),
+  ui_pane_focus: control<C.UiPaneFocusRequest, typeof UiPaneFocusResponseSchema>(UiPaneFocusResponseSchema, 'mutate'),
+  ui_close: control<C.UiCloseRequest, typeof UiCloseResponseSchema>(UiCloseResponseSchema, 'mutate'),
+  ui_scroll: control<C.UiScrollRequest, typeof UiScrollResponseSchema>(UiScrollResponseSchema, 'mutate'),
+  ui_focus: control<C.UiFocusRequest, typeof UiFocusResponseSchema>(UiFocusResponseSchema, 'mutate'),
+  ui_prompt_edit: control<C.UiPromptEditRequest, typeof UiPromptEditResponseSchema>(UiPromptEditResponseSchema, 'mutate'),
 } as const;
 
 export type OutboundSubtype = keyof typeof CONTROLS;
@@ -149,3 +176,17 @@ export const sideQuestion = fn('side_question');
 export const reloadPlugins = fn('reload_plugins');
 export const mcpReconnect = fn('mcp_reconnect');
 export const mcpToggle = fn('mcp_toggle');
+// R2
+export const uiAttach = fn('ui_attach');
+export const uiDetach = fn('ui_detach');
+export const uiRender = fn('ui_render');
+export const uiPanes = fn('ui_panes');
+export const uiPress = fn('ui_press');
+export const uiInput = fn('ui_input');
+export const uiSelect = fn('ui_select');
+export const uiPaneShow = fn('ui_pane_show');
+export const uiPaneFocus = fn('ui_pane_focus');
+export const uiClose = fn('ui_close');
+export const uiScroll = fn('ui_scroll');
+export const uiFocus = fn('ui_focus');
+export const uiPromptEdit = fn('ui_prompt_edit');

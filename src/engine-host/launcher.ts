@@ -88,7 +88,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
     }
 
     const replay = journal;
-    const spawn = replay !== null ? () => replayEngine(replay, { prelude: prelude! }) : deps.spawn;
+    const spawn = replay !== null ? () => replayEngine(replay, { prelude: prelude!, surfaceReads: true /* R2 */ }) : deps.spawn;
     const outcome = deps.table.reserve(spec.appSessionId, () => {
       const session = new EngineSession({
         spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
