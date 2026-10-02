@@ -1010,6 +1010,29 @@ describe('holdAll, the plain stop’s hold (W1)', () => {
 
 
 describe('F2 paused queue admission', () => {
+  it('turn completion and another Resume cannot release an ordinary head before Resume is durable', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.send('ordinary prompt');
+    await t.queue.pause('interrupt');
+    t.h.turn = false;
+    let failResume!: () => void;
+    const held = new Promise<void>((resolve) => { failResume = resolve; });
+    vi.spyOn(t.store, 'saveQueue').mockImplementationOnce(async () => {
+      await held;
+      throw new Error('EIO');
+    });
+    const resuming = t.queue.setPaused(false).catch((error: unknown) => error);
+    await t.queue.onTurnEnded(turnEnded());
+    await t.queue.setPaused(false);
+    expect(t.writes).toEqual([]);
+    failResume();
+    expect(await resuming).toMatchObject({ message: 'EIO' });
+    expect(t.queue.isPaused).toBe(true);
+    await t.queue.setPaused(false);
+    expect(t.writes.map((w) => w.message.content)).toEqual(['ordinary prompt']);
+  });
+
   it('a send into an empty interrupted queue stays persisted until Resume', async () => {
     const t = await harness();
     await t.queue.pause('interrupt');

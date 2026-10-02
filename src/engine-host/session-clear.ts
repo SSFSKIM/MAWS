@@ -25,6 +25,7 @@ export interface ClearAndImplementHost {
   write(frame: UserInputFrame): Promise<void>; // the process's one writer; throws when there is no process
   notice(key: string, text: string): void;
   touch(): void;
+  released(): void; // reconsider the queue after the sequence gives up its hold
   log(message: string): void;
 }
 
@@ -114,7 +115,10 @@ export class ClearAndImplementSequence {
       void this.writeUser(`Implement this plan:\n\n${clear.plan}`)
         .catch((error: unknown) => this.host.log(`plan prompt not written: ${messageOf(error)}`))
         .finally(() => {
-          if (this.clear === clear) this.clear = null;
+          if (this.clear === clear) {
+            this.clear = null;
+            this.host.released();
+          }
           this.host.touch();
         });
     }

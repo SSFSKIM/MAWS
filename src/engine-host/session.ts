@@ -217,6 +217,9 @@ export class EngineSession {
       },
       notice: (key, text) => this.notice(key, text),
       touch: () => this.touch(),
+      released: () => {
+        void this.queue.onSequenceEnded().catch((error: unknown) => this.log(`queue release after sequence failed: ${messageOf(error)}`));
+      },
       log: this.log,
     });
     const writeFrame = (frame: Parameters<OutboundWriter['write']>[0]) => (this.writer ? this.writer.write(frame) : Promise.reject(new Error('no engine process')));
@@ -230,9 +233,8 @@ export class EngineSession {
       turnOpen: () => this.processState !== 'exited' && (this.normalizer.state.currentTurn !== null || this.normalizer.state.unstartedPrompts.size > 0 || this.clearAndImplement.holding),
       canWrite: () => this.processState === 'ready',
       cancel: async (messageUuid) => (await cancelAsyncMessage(this.readyClient(), { message_uuid: messageUuid })).cancelled === true, // W1
+      onPauseChange: (paused) => this.clearAndImplement.setPaused(paused),
       onChange: (queue) => {
-        // Save announcements carry historical snapshots; only the current queue may release a continuation.
-        this.clearAndImplement.setPaused(this.queue.isPaused);
         this.emit('queue', queue);
         this.touch();
       },
@@ -288,7 +290,6 @@ export class EngineSession {
   async interrupt(opts: { cancelEngineQueued: boolean; holdEngineQueued?: boolean }): Promise<{ stillQueued: string[]; cancelled: string[] }> {
     const client = this.readyClient();
     this.markUsed(); // C12
-    this.clearAndImplement.setPaused(true);
     await this.queue.pause('interrupt');
     if (opts.holdEngineQueued) await this.queue.holdAll();
     const response: InterruptResponse = await interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued });

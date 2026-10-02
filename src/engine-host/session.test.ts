@@ -1594,6 +1594,119 @@ describe('F2 session lifecycle regressions', () => {
     await session.exited;
   });
 
+  it.each(['idle', 'paused', 'unsolicited turn'] as const)('a result held behind the implementation write rechecks queue release when %s', async (gate) => {
+    let finishWrite!: () => void;
+    const held = new Promise<void>((resolve) => { finishWrite = resolve; });
+    const { session, transport } = await staged();
+    const write = transport.write.bind(transport);
+    transport.write = async (frame) => {
+      await write(frame); // the engine received the prompt before the pipe's completion callback
+      if (frame.type === 'user' && frame.message.content === 'Implement this plan:\n\nBuild it') await held;
+    };
+    const planPrompt = transport.writes.find((w) => w.type === 'user')!;
+    transport.push({ ...result, user_message_uuids: ['uuid' in planPrompt ? planPrompt.uuid : ''] });
+    await flush();
+    const clear = transport.writes.find((w) => w.type === 'user' && w.message.content === '/clear')!;
+    await session.interrupt({ cancelEngineQueued: true });
+    await session.send('ordinary prompt');
+    transport.push({ type: 'command_lifecycle', command_uuid: 'uuid' in clear ? clear.uuid : '', state: 'completed', uuid: 'clear-done', session_id: 's' });
+    await flush();
+    await session.queue.setPaused(false);
+    const implementation = transport.writes.find((w) => w.type === 'user' && w.message.content === 'Implement this plan:\n\nBuild it')!;
+    const uuid = 'uuid' in implementation ? implementation.uuid : '';
+    transport.push({ type: 'command_lifecycle', command_uuid: uuid, state: 'started', uuid: 'impl-started', session_id: 's' });
+    transport.push({ ...result, user_message_uuids: [uuid] });
+    if (gate === 'paused') await session.queue.pause('user');
+    // pass2/workflow seq 97 opens the unsolicited turn, seq 108 ends it (also covered by queue conformance).
+    if (gate === 'unsolicited turn') transport.push(loadJournal('pass2', 'workflow').find((r) => r.seq === 97)!.frame);
+    await flush();
+    finishWrite();
+    await flush();
+    const throughImplementation = ['plan it', '/clear', 'Implement this plan:\n\nBuild it'];
+    if (gate !== 'idle') {
+      expect(prompts(transport)).toEqual(throughImplementation);
+      if (gate === 'paused') await session.queue.setPaused(false);
+      else {
+        expect(session.status().turn).not.toBeNull();
+        transport.push(loadJournal('pass2', 'workflow').find((r) => r.seq === 108)!.frame);
+      }
+      await flush();
+    }
+    expect(prompts(transport)).toEqual([...throughImplementation, 'ordinary prompt']);
+    transport.exit(0);
+    await session.exited;
+  });
+
+  it('a stale paused save cannot start implementation before a failed Resume commits', async () => {
+    const store = new MemorySessionStateStore();
+    const { session, transport } = await staged({}, { session: { store } });
+    const planPrompt = transport.writes.find((w) => w.type === 'user')!;
+    transport.push({ ...result, user_message_uuids: ['uuid' in planPrompt ? planPrompt.uuid : ''] });
+    await flush();
+    const clear = transport.writes.find((w) => w.type === 'user' && w.message.content === '/clear')!;
+    await session.interrupt({ cancelEngineQueued: true });
+    const entry = await session.send('ordinary prompt');
+    transport.push({ type: 'command_lifecycle', command_uuid: 'uuid' in clear ? clear.uuid : '', state: 'completed', uuid: 'clear-done', session_id: 's' });
+    await flush();
+    let finishOldSave!: () => void;
+    const oldSave = new Promise<void>((resolve) => { finishOldSave = resolve; });
+    let failResume!: () => void;
+    const resumeSave = new Promise<void>((resolve) => { failResume = resolve; });
+    const save = store.saveQueue.bind(store);
+    vi.spyOn(store, 'saveQueue')
+      .mockImplementationOnce(async (id, queue) => { await oldSave; await save(id, queue); })
+      .mockImplementationOnce(async () => { await resumeSave; throw new Error('EIO'); });
+    const editing = session.queue.edit(entry.queueId, 'revised ordinary prompt');
+    const resuming = session.queue.setPaused(false).catch((error: unknown) => error);
+    finishOldSave();
+    await editing;
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    failResume();
+    expect(await resuming).toMatchObject({ message: 'EIO' });
+    expect(session.queue.isPaused).toBe(true);
+    expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    await session.queue.setPaused(false);
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear', 'Implement this plan:\n\nBuild it']);
+    transport.exit(0);
+    await session.exited;
+  });
+
+  it('an older Resume commit cannot reopen the continuation after a newer Stop and pending Resume', async () => {
+    const store = new MemorySessionStateStore();
+    const { session, transport } = await staged({}, { session: { store } });
+    await session.interrupt({ cancelEngineQueued: true });
+    transport.push(result);
+    await flush(); // mode restored, /clear still held
+    let finishFirst!: () => void;
+    const firstSave = new Promise<void>((resolve) => { finishFirst = resolve; });
+    let finishSecond!: () => void;
+    const secondSave = new Promise<void>((resolve) => { finishSecond = resolve; });
+    const save = store.saveQueue.bind(store);
+    vi.spyOn(store, 'saveQueue').mockImplementationOnce(async (id, queue) => {
+      await save(id, queue);
+      await firstSave;
+    });
+    const firstResume = session.queue.setPaused(false);
+    await session.interrupt({ cancelEngineQueued: true });
+    vi.spyOn(store, 'saveQueue').mockImplementationOnce(async (id, queue) => {
+      await secondSave;
+      await save(id, queue);
+    });
+    const secondResume = session.queue.setPaused(false);
+    finishFirst();
+    await firstResume;
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it']);
+    finishSecond();
+    await secondResume;
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    transport.exit(0);
+    await session.exited;
+  });
+
   it('Stop after /clear holds a successful completion until Resume', async () => {
     const { session, transport } = await staged();
     transport.push(result);

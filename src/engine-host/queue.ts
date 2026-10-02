@@ -27,7 +27,7 @@ export const ACK_TIMEOUT_MS = 5_000;
 export const HOLD_ALL_DEADLINE_MS = 2_000;
 const DROPPED_BEFORE_START: ReadonlySet<string> = new Set(['cancelled', 'discarded', 'refused']);
 
-export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume' | 'dropped' | 'hold'; // W1: `hold`, a held steer whose turn ended during the withdrawal
+export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume' | 'dropped' | 'hold'; // `hold`: a host sequence or steer withdrawal stopped holding the queue
 export type SteerPriority = 'now' | 'next';
 export type PauseReason = QueuePauseReason; // C7: the whole closed set the queue journals (QUEUE_PAUSE_REASONS)
 export type ExitKind = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget'; // C12: a release pauses nothing, like `stop`
@@ -41,6 +41,7 @@ export interface MessageQueueDeps {
   canWrite: () => boolean; // the process is ready
   cancel: (messageUuid: MessageUuid) => Promise<boolean>; // W1: `cancel_async_message`; true when the engine withdrew the message from its queue
   onChange: (queue: QueueState) => void;
+  onPauseChange?: (paused: boolean) => void; // immediate pause, committed resume/recovery; never a save snapshot
   log?: (message: string) => void;
   ackTimeoutMs?: number;
   holdAllDeadlineMs?: number; // W1: HOLD_ALL_DEADLINE_MS by default
@@ -56,6 +57,8 @@ export class QueueEntryError extends Error {
 export class MessageQueue {
   private entries: QueueEntry[] = [];
   private paused = false;
+  private releasePaused = false; // a requested Resume is persisted as unpaused, but cannot release until committed
+  private pauseVersion = 0; // a later Stop/Resume supersedes an earlier in-flight Resume
   private pauseReason: PauseReason | null = null; // C7: set with every pause, cleared on resume; null for a paused queue loaded from a state file older than the field
   private loaded = false; // recover() ran: before it the queue owns nothing and must never overwrite the stored one
   private readonly ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -100,6 +103,7 @@ export class MessageQueue {
       const loaded = await this.deps.store.loadQueue(this.deps.appSessionId);
       this.entries = loaded.entries;
       this.paused = loaded.paused;
+      this.releasePaused = this.paused;
       this.pauseReason = loaded.paused ? (loaded.pauseReason ?? null) : null; // C7
       this.steers = []; // W1: a pending steer lived in the engine process that is gone
       this.withdrawn = loaded.withdrawn ?? [];
@@ -111,6 +115,7 @@ export class MessageQueue {
       }
       this.settleAfterExit();
       await this.persist(); // rejects: a recovery that cannot be saved is an initialization failure
+      this.deps.onPauseChange?.(this.releasePaused);
     });
   }
 
@@ -118,7 +123,7 @@ export class MessageQueue {
     this.checkContent(content);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
     const entry: QueueEntry = { queueId: randomUUID(), appSessionId: this.deps.appSessionId, content, createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
-    const submitNow = !this.paused && !this.busy && this.queuedCount === 0; // FIFO: a send never overtakes an entry already waiting
+    const submitNow = !this.releasePaused && !this.busy && this.queuedCount === 0; // FIFO: a send never overtakes an entry already waiting
     this.entries.push(entry);
     if (!submitNow) {
       try {
@@ -166,16 +171,22 @@ export class MessageQueue {
     if (paused) return this.pause('user');
     if (this.paused) {
       const reason = this.pauseReason; // C7
+      const version = ++this.pauseVersion;
       this.paused = false;
       this.pauseReason = null; // C7
       try {
         await this.persist();
       } catch (error) {
-        this.paused = true; // still paused on disk: stay paused, release nothing
-        this.pauseReason = reason; // C7
+        if (version === this.pauseVersion) {
+          this.paused = true; // the Resume failed; keep the release gate closed
+          this.pauseReason = reason; // C7
+        }
         throw error;
       }
+      if (version !== this.pauseVersion) return; // a later pause/resume owns the gate
+      this.releasePaused = false;
       this.journal({ event: 'queue', action: 'resume', reason: 'user' });
+      this.deps.onPauseChange?.(false);
     }
     await this.releaseHead('resume');
   }
@@ -433,13 +444,19 @@ export class MessageQueue {
     else await this.releaseAfterEngineTurn();
   }
 
+  // A sequence can outlive the turn-ended callback (the writer drains inbound frames before resolving its write).
+  // Reconsider the head once the hold drops, through the same paused/busy/ready checks as every ordinary release.
+  onSequenceEnded(): Promise<void> {
+    return this.releaseHead('hold');
+  }
+
   // Concern 1, as ruled (the coordinator's reading of "no release at an engine turn"): nothing is released into an
   // engine-initiated turn, but when one ends and leaves the session idle with entries waiting, the head goes exactly as
   // after a human turn. Only when it cannot go at that moment (the process is not ready, or the write fails) does the
   // queue pause (`engine_turn`) with an info notice naming the head, so nothing waits silently.
   private async releaseAfterEngineTurn(): Promise<void> {
     const head = this.entries.find((e) => e.state === 'queued');
-    if (!head || this.paused || this.busy) return;
+    if (!head || this.releasePaused || this.busy) return;
     if (this.deps.canWrite()) {
       await this.submit(head, 'turn_ended', 'engine_turn');
       return;
@@ -501,7 +518,7 @@ export class MessageQueue {
   }
 
   private async releaseHead(trigger: ReleaseTrigger): Promise<void> {
-    if (this.paused || this.busy || !this.deps.canWrite()) return;
+    if (this.releasePaused || this.busy || !this.deps.canWrite()) return;
     const head = this.entries.find((e) => e.state === 'queued');
     if (head) await this.submit(head, trigger);
   }
@@ -548,7 +565,10 @@ export class MessageQueue {
 
   // C7 start: the one place a pause happens, so the reason the state carries is always the one the journal names.
   private pauseFor(reason: PauseReason): void {
+    ++this.pauseVersion;
     this.paused = true;
+    this.releasePaused = true;
+    this.deps.onPauseChange?.(true);
     this.pauseReason = reason;
     this.journal({ event: 'queue', action: 'pause', reason });
   }
