@@ -13,7 +13,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
-import { createBackfillContext, endsTurn, eventBase, recordToEvents, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, eventBase, recordToEvents, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 export interface Skeleton {
   uuid: MessageUuid;
@@ -21,7 +21,7 @@ export interface Skeleton {
   type: string;
   isProgress: boolean;
   startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
-  endsTurn: boolean; // a record that ends a turn (backfill's `endsTurn`: `system/turn_duration`, a blocked prompt's record)
+  endsTurn: boolean; // a `system/turn_duration` record (backfill's `turn.ended`); not a blocked prompt's record, also written for a steer dropped mid-turn
   own: boolean; // W7: written by an SDK-entrypoint process, MAWS's (`entrypoint: 'sdk-ts'`, pass3/w7-collision)
   timestamp: string | null;
   offset: number; // byte position of the line (leading NULs included); re-reading [offset, offset + length) yields the record
@@ -159,7 +159,7 @@ class FollowerCore {
       type: record.type,
       isProgress: record.type === 'progress',
       startsTurn: startsTurn(record),
-      endsTurn: endsTurn(record),
+      endsTurn: record.type === 'system' && record.subtype === 'turn_duration',
       own: record.entrypoint === OWN_ENTRYPOINT,
       timestamp: typeof record.timestamp === 'string' ? record.timestamp : null,
       offset,

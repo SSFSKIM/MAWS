@@ -6,7 +6,7 @@ import type { AgentId, MessageUuid, ParentToolUseId, SessionId } from '@shared/g
 import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
 import { FIXTURE_DIR, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
 import { recordedReceiptRecord } from '../../../test/support/agents-events';
-import { createBackfillContext, endsTurn, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 const SESSION = 'S' as SessionId;
 const SIDECAR_DIR = join(FIXTURE_DIR, 'subagent-sidecars');
@@ -277,8 +277,6 @@ describe('a hook that got in the way, from disk', () => {
     expect(blockedTurn(events, BLOCKED)).toEqual(['turn.started', 'user.message', 'hook.started', 'hook.finished', 'turn.ended']);
     expect(only(events, 'user.message').find((e) => e.messageUuid === BLOCKED)).toMatchObject({ content: 'BLOCKME please reply TWO', isSynthetic: false, origin: null });
     expect(only(events, 'turn.ended').find((e) => e.userMessageUuids.includes(BLOCKED as MessageUuid))).toMatchObject({ numTurns: 0, terminalReason: null, isError: false });
-    // the blocked prompt's record ends its turn, so a follow of this holder-less transcript synthesises no exit
-    expect(records.filter((record) => endsTurn(record)).map((record) => record.uuid)).toEqual([BLOCKED]);
     expect(records.filter((record) => startsTurn(record)).map((record) => record.uuid)).not.toContain(BLOCKED);
   });
 
@@ -304,7 +302,36 @@ describe('a hook that got in the way, from disk', () => {
     expect(kinds(mapAll([user('Some other reminder', true)]))).toEqual(['user.message']);
     expect(kinds(mapAll([info('Operation stopped by hook: no')]))).toEqual(['frame.unknown']);
     expect(kinds(mapAll([info('UserPromptExpansion operation blocked by hook:\n[x]: no\n\nOriginal prompt: /cmd')]))).toEqual(['frame.unknown']);
-    expect(endsTurn(info('Operation stopped by hook: no'))).toBe(false);
+  });
+
+  // The engine writes the same informational record for a queued `next` steer the hook rejects at the mid-turn fold,
+  // after the tool results and before the model call, and the turn runs on (2.1.283, from the bundle; not recorded).
+  const prompt = rec({ type: 'user', uuid: 'p1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'Count to 1' } });
+  const toolUse = rec({ type: 'assistant', uuid: 'a1', parentUuid: 'p1', timestamp: at(1), message: { id: 'msg_1', model: 'x', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'echo 1' } }] } });
+  const toolResult = (extra: unknown[] = []) => rec({ type: 'user', uuid: 'r1', parentUuid: 'a1', timestamp: at(2), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: '1' }, ...extra] } });
+  const blocked = (uuid: string, parentUuid: string, content: string) => rec({ type: 'system', subtype: 'informational', uuid, parentUuid, timestamp: at(3), content, level: 'warning' });
+  const STEER = 'UserPromptSubmit operation blocked by hook:\nNO_STEERS\n\nOriginal prompt: Reply STEER';
+  const answer = rec({ type: 'assistant', uuid: 'a2', parentUuid: 'b2', timestamp: at(4), message: { id: 'msg_2', model: 'x', content: [{ type: 'text', text: 'COUNTED' }] } });
+
+  it('a steer the hook rejected at the mid-turn fold joins the running turn, which it neither starts nor ends', () => {
+    const events = mapAll([prompt, toolUse, toolResult(), blocked('b1', 'r1', STEER), blocked('b2', 'b1', 'UserPromptSubmit operation blocked by hook:\nQUIET'), answer]);
+    expect(blockedTurn(events, 'b1')).toEqual(['user.message', 'command.lifecycle', 'hook.started', 'hook.finished']); // steeredPrompt's shape, then the hook
+    expect(blockedTurn(events, 'b2')).toEqual(['command.lifecycle', 'hook.started', 'hook.finished']); // suppressed: no bubble
+    expect(only(events, 'user.message').find((e) => e.messageUuid === 'b1')).toMatchObject({ content: 'Reply STEER', isSynthetic: false, origin: null });
+    expect(only(events, 'command.lifecycle').map((e) => [e.commandUuid, e.state])).toEqual([['b1', 'started'], ['b2', 'started']]);
+    expect(only(events, 'hook.finished').map((e) => [e.hookId, e.hookEvent, e.stderr])).toEqual([['b1', 'UserPromptSubmit', 'NO_STEERS'], ['b2', 'UserPromptSubmit', 'QUIET']]);
+    expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual(['p1']);
+    expect(only(events, 'turn.ended')).toEqual([]);
+  });
+
+  it('a blocked prompt after an interrupted tool loop is a turn of its own: the marker ends the loop', () => {
+    const MARKER = { type: 'text', text: '[Request interrupted by user for tool use]' };
+    const standalone = ['turn.started', 'user.message', 'hook.started', 'hook.finished', 'turn.ended'];
+    // the marker carried with the tool result
+    expect(blockedTurn(mapAll([prompt, toolUse, toolResult([MARKER]), blocked('b1', 'r1', STEER)]), 'b1')).toEqual(standalone);
+    // the marker in a record of its own after the rejected tool's result, as 2.1.283 writes it (w1-steer-next-interrupted.jsonl lines 23 and 25)
+    const marker = rec({ type: 'user', uuid: 'm1', parentUuid: 'r1', timestamp: at(3), message: { role: 'user', content: [MARKER] } });
+    expect(blockedTurn(mapAll([prompt, toolUse, toolResult(), marker, blocked('b1', 'm1', STEER)]), 'b1')).toEqual(standalone);
   });
 });
 

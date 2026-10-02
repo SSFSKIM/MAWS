@@ -33,6 +33,11 @@ export interface BackfillContext {
   lastAt: string; // the previous event's `at`, inherited by records without a timestamp
   started: boolean; // session.started emitted (once per follow)
   lastTurnUserUuid: MessageUuid | null; // the last turn.started, for turn.ended.userMessageUuids
+  // Inside a tool loop: the last word was a tool result, so the engine owes a model call, and the mid-turn fold that
+  // takes or drops queued steers runs before it. Set by a tool result that is not an interrupt marker; cleared by an
+  // assistant record, an interrupt marker, a prompt that opens a turn and `system/turn_duration`. It tells a blocked
+  // steer (blockedPrompt, below) from a blocked prompt of its own.
+  inToolLoop: boolean;
 }
 
 export function createBackfillContext(init: {
@@ -50,6 +55,7 @@ export function createBackfillContext(init: {
     lastAt: EPOCH,
     started: false,
     lastTurnUserUuid: null,
+    inToolLoop: false,
   };
 }
 
@@ -149,8 +155,10 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
   const turn = (origin: string | null): void => {
     if (isMeta || marker || local) return; // the marker belongs to the turn it interrupted, a command's output to the command's turn (W1)
     ctx.lastTurnUserUuid = uuid;
+    ctx.inToolLoop = false;
     events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
   };
+  if (marker) ctx.inToolLoop = false; // an interrupt ends the loop: no model call follows
   if (typeof content === 'string' && marker) {
     events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: isMeta, origin: 'interrupt-marker', bash: null });
     return;
@@ -193,6 +201,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
   // A background agent's tool_result is its launch acknowledgement, not its outcome (`isAsync: true`); the outcome
   // arrives later as a <task-notification> user record.
   const asyncLaunched = (structured as { status?: unknown } | null)?.status === 'async_launched';
+  if (results.length > 0 && !marker) ctx.inToolLoop = true;
   for (const block of results) {
     const toolUseId = block.tool_use_id;
     if (typeof toolUseId !== 'string' || toolUseId.length === 0) continue;
@@ -235,6 +244,7 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
   const apiMessageId = (typeof message?.id === 'string' && message.id.length > 0 ? message.id : uuid) as ApiMessageId;
   const model = typeof message?.model === 'string' ? message.model : '';
   const apiBlockIndex = typeof record.apiBlockIndex === 'number' ? record.apiBlockIndex : null;
+  ctx.inToolLoop = false;
   content.forEach((block, i) => {
     events.push({
       ...base(),
@@ -304,6 +314,7 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
     }
     case 'turn_duration':
       // Accounting is not on disk per turn; `seq: null` marks the event synthesised and C6 shows duration, not cost.
+      ctx.inToolLoop = false;
       events.push({
         ...base(),
         kind: 'turn.ended',
@@ -329,13 +340,27 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
     case 'informational': {
       const blocked = blockedPrompt(record);
       if (blocked === null) break;
-      // The blocked prompt's turn as the live stream has it: the prompt (from the record's "Original prompt:"; none when
-      // the hook suppressed it, though a queue operation before the record may still hold its text, left unread as the
-      // hook asked), the hook that blocked it, and the end of a turn that ran nothing (num_turns 0).
+      // The prompt, from the record's "Original prompt:"; none when the hook suppressed it, though a queue operation
+      // before the record may still hold its text, left unread as the hook asked.
       const uuid = record.uuid as MessageUuid;
+      const prompt = (): void => {
+        if (blocked.prompt !== null) events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: blocked.prompt, isReplay: false, isSynthetic: false, origin: null, bash: null });
+      };
+      // Inside a tool loop it is a queued `next` steer the hook rejected at the mid-turn fold, and the turn runs on
+      // (2.1.283 cli.pretty.js 806590-806624, the fold's dropped prompts and their notices; 810567-810575, yielded inside
+      // the running turn; from the bundle, not recorded): read as steeredPrompt reads a delivered steer, its bubble
+      // folded into the running turn here (the record's uuid standing in for the steer's), then the hook that blocked it.
+      if (ctx.inToolLoop) {
+        prompt();
+        events.push({ ...base(), kind: 'command.lifecycle', commandUuid: uuid, state: 'started' });
+        blockingHook(uuid, 'UserPromptSubmit', blocked.blockingError, base, events);
+        return;
+      }
+      // Otherwise a turn of its own as the live stream has it: the prompt, the hook that blocked it, and the end of a
+      // turn that ran nothing (num_turns 0).
       ctx.lastTurnUserUuid = uuid;
       events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin: null });
-      if (blocked.prompt !== null) events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: blocked.prompt, isReplay: false, isSynthetic: false, origin: null, bash: null });
+      prompt();
       blockingHook(uuid, 'UserPromptSubmit', blocked.blockingError, base, events);
       events.push({
         ...base(),
@@ -391,7 +416,9 @@ function hookFeedback(content: string, uuid: MessageUuid, base: Base, events: Se
 
 // A prompt a UserPromptSubmit hook blocked leaves no user record, only a system `informational` record:
 // `UserPromptSubmit operation blocked by hook:\n<blockingError>` and, unless the hook suppressed it, `\n\nOriginal
-// prompt: <prompt>` (2.1.283 cli.pretty.js 525245-525248). The first such separator splits them.
+// prompt: <prompt>` (2.1.283 cli.pretty.js 525245-525248). The first such separator splits them. The same record is
+// written for a prompt submitted on its own and for a steer dropped at the mid-turn fold (systemEvents tells them apart
+// by `inToolLoop`), so the follower does not count it as a turn end.
 const BLOCKED_PROMPT = 'UserPromptSubmit operation blocked by hook:\n';
 const ORIGINAL_PROMPT = '\n\nOriginal prompt: ';
 function blockedPrompt(record: TranscriptRecord): { text: string; blockingError: string; prompt: string | null } | null {
@@ -400,12 +427,6 @@ function blockedPrompt(record: TranscriptRecord): { text: string; blockingError:
   const rest = text.slice(BLOCKED_PROMPT.length);
   const at = rest.indexOf(ORIGINAL_PROMPT);
   return at < 0 ? { text, blockingError: rest, prompt: null } : { text, blockingError: rest.slice(0, at), prompt: rest.slice(at + ORIGINAL_PROMPT.length) };
-}
-
-// A record that ends a turn: `system/turn_duration`, and a blocked prompt's record, whose turn ran nothing. The
-// follower's unended-turn rule reads turn ends by it.
-export function endsTurn(record: TranscriptRecord): boolean {
-  return (record.type === 'system' && record.subtype === 'turn_duration') || blockedPrompt(record) !== null;
 }
 
 // A prompt that opens a turn: a `user` record, not `isMeta`, not an interrupt marker, whose content is text or blocks
