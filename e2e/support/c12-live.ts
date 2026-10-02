@@ -10,7 +10,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { ENGINE_BIN, ENGINE_VERSION, RELAY_URL } from '../../src/engine-host/launch';
+import { RELAY_URL } from '../../src/engine-host/launch';
+import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13: the fixtures' engine
 import { assertConfigHomeSafe } from '../../test/live/support/live';
 import { journal, processCost } from './c7-live';
 import { REPO_ROOT } from './launch';

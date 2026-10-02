@@ -140,7 +140,7 @@ export class FakeEngineHost {
       case 'engine.sessions':
         return [...this.table.values()];
       case 'engine.binaryInfo':
-        return { path: this.binaryPath, expectedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
+        return { path: this.binaryPath, testedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
       case 'engine.relayHealth':
         if (this.relayError !== null) throw new Error(this.relayError);
         return this.relay;

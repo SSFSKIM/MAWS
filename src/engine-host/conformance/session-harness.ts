@@ -7,7 +7,8 @@ import { SessionEventSchema } from '@shared/graph/events';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadEngineJournal, loadJournal, type FixturePass } from '../../../test/support/fixtures';
-import { buildLaunch, ENGINE_VERSION, RELAY_URL } from '../launch';
+import { buildLaunch, RELAY_URL } from '../launch';
+import { ENGINE_BIN, ENGINE_VERSION } from '../../../test/support/engine-pin'; // W13: the fixtures' engine
 import { Normalizer } from '../normalizer';
 import { replayEngine, type ReplayTransport } from '../replay-transport';
 import { EngineSession, type EngineSessionOptions } from '../session';
@@ -57,7 +58,7 @@ function observe(session: EngineSession, journal: MemoryJournal, spec: LaunchSpe
 
 export function scriptedSession(opts: { spec?: Partial<LaunchSpec>; responder?: Responder; session?: Partial<EngineSessionOptions>; transport?: Omit<Parameters<typeof scriptedTransport>[0] & object, 'onWrite'> } = {}): Observed & { transport: ScriptedTransport; logs: string[] } {
   const spec = launchSpec(opts.spec);
-  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, engineVersion: ENGINE_VERSION });
+  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
   const transport = scriptedTransport({ ...opts.transport, onWrite: autoResponder(opts.responder ?? handshakeResponder()) });
   const journal = new MemoryJournal();
   const logs: string[] = [];
@@ -77,7 +78,7 @@ export async function replayedSession(
 ): Promise<Observed & { fixture: JournalRow[]; transport: () => ReplayTransport }> {
   const fixture = (opts.edit ?? ((rows: JournalRow[]) => rows))(loadJournal(pass, name)); // `edit`: a test that extends a recording says so in its name
   const spec = launchSpec({ appSessionId: `replay-${name}` as LaunchSpec['appSessionId'], sessionId: null, model: null, replay: `${pass}/${name}`, ...opts.spec });
-  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, engineVersion: ENGINE_VERSION });
+  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
   const journal = new MemoryJournal();
   let transport!: ReplayTransport;
   const session: EngineSession = new EngineSession({

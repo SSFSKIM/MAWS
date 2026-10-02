@@ -14,7 +14,8 @@ import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
 import type { JournalRow } from '@shared/wire/journal';
-import { ENGINE_BIN, ENGINE_VERSION, GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
+import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
+import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13: the fixtures' engine
 import { resumeSpec, type ResumeFields } from '../../src/renderer/src/composer/dev/resume-spec';
 import { assertConfigHomeSafe, scratchConfigHome } from '../../test/live/support/live';
 import { invoke, value } from './c7-replay';

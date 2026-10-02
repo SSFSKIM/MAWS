@@ -11,7 +11,8 @@ import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadJournal, type FixturePass } from '../../../test/support/fixtures';
-import { buildLaunch, ENGINE_VERSION, RELAY_URL } from '../launch';
+import { buildLaunch, RELAY_URL } from '../launch';
+import { ENGINE_BIN, ENGINE_VERSION } from '../../../test/support/engine-pin'; // W13
 import { Normalizer } from '../normalizer';
 import { replayEngine, type ReplayTransport } from '../replay-transport';
 import { EngineSession } from '../session';
@@ -36,7 +37,7 @@ async function replaySession(pass: FixturePass, name: string, opts: { human?: (i
     appSessionId: `replay-${name}`, cwd: '/tmp/maws-replay', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
     resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null /* C10 */, replay: `${pass}/${name}`,
   });
-  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, engineVersion: ENGINE_VERSION });
+  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
   const journal = new MemoryJournal();
   let transport!: ReplayTransport;
   const session: EngineSession = new EngineSession({

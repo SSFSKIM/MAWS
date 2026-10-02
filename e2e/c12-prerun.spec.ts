@@ -23,7 +23,7 @@ import { _electron, expect, test, type ElectronApplication, type Locator, type P
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { ENGINE_BIN as ENGINE_BIN_PATH } from '../src/engine-host/launch';
+import { ENGINE_BIN as ENGINE_BIN_PATH } from '../test/support/engine-pin'; // W13: the fixtures' engine
 import { writeScratchShellHome } from '../test/support/shell-home';
 import { synthesise } from '../test/support/synth-transcript';
 import { invoke, value } from './support/c7-replay';

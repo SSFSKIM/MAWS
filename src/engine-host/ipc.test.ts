@@ -1,7 +1,7 @@
-import { existsSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -19,7 +19,9 @@ import { handshakeResponder, INIT_RESPONSE } from './conformance/session-harness
 import { REQUEST_TIMEOUT_MS } from './controls';
 import { bounded, DEADLINE_SHAPES, PRE_SPAWN_BOUND_MS, registerEngineIpc, type EngineIpcDeps } from './ipc';
 import { MemoryAppendBudgetSpent } from './memory-append';
-import { ENGINE_BIN, ENGINE_VERSION, RELAY_URL } from './launch';
+import { RELAY_URL } from './launch';
+import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13
+import { TESTED_ENGINE_VERSION } from './engine-compat';
 // C11 start
 import { createBinaryProbe } from './binary-info';
 import { getBinaryConfig, setBinaryConfig, type LaunchPlan } from './launch';
@@ -34,7 +36,7 @@ import { MemorySessionStateStore } from './store/memory-session-state-store';
 
 const REPO_ROOT = resolve(__dirname, '../..');
 const ROUTER_TIMEOUT_MS = 10_000; // C1's supervisor (src/main/hosts/supervisor.ts REQUEST_TIMEOUT_MS), which imports electron
-const OK_BINARY: BinaryCheck = { path: ENGINE_BIN, expectedVersion: ENGINE_VERSION, version: ENGINE_VERSION, ok: true, error: null, problem: null };
+const OK_BINARY: BinaryCheck = { path: ENGINE_BIN, testedVersion: TESTED_ENGINE_VERSION, version: ENGINE_VERSION, ok: true, error: null };
 const OK_RELAY = { url: RELAY_URL, ok: true, status: 200, latencyMs: 2, checkedAt: '2026-09-28T10:00:00.000Z', error: null };
 
 let userData: string;
@@ -64,7 +66,7 @@ function engineHost(deps: Partial<EngineIpcDeps> = {}) {
     if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues).slice(0, 400)}`);
     emitted.push({ name, payload });
   };
-  const ipc = registerEngineIpc(on, emit, { userData, replayEnabled: true, cwd: REPO_ROOT, ...deps });
+  const ipc = registerEngineIpc(on, emit, { userData, replayEnabled: true, cwd: REPO_ROOT, binaryProbe: async () => OK_BINARY /* W13: never the machine's install */, ...deps });
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const value = await handlers.get(name)!(input);
     const checked = validateCommandOutput(name, value);
@@ -181,13 +183,14 @@ describe('engine host X2 surface', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('session.launch refuses a missing binary and a wrong version, and answers relay_unreachable for a gateway launch, without spawning', async () => {
+  it('session.launch refuses a missing binary and one with no version, and answers relay_unreachable for a gateway launch, without spawning', async () => {
     const spawn = vi.fn();
     const base = { spawn, captureEnv: async () => ({ PATH: '/usr/bin' }), checkRelay: async () => OK_RELAY };
-    const missing = engineHost({ ...base, binaryProbe: async () => ({ ...OK_BINARY, ok: false, version: null, error: `no executable engine binary at ${ENGINE_BIN}`, problem: 'missing' }) });
+    const missing = engineHost({ ...base, binaryProbe: async () => ({ ...OK_BINARY, ok: false, version: null, error: `no executable engine binary at ${ENGINE_BIN}` }) });
     expect(await missing.call('session.launch', { spec: spec() })).toEqual({ status: 'refused', reason: 'binary_missing', message: `no executable engine binary at ${ENGINE_BIN}` });
-    const old = engineHost({ ...base, binaryProbe: async () => ({ ...OK_BINARY, ok: false, version: '2.1.200', error: 'wrong', problem: 'version' }) });
-    expect(await old.call('session.launch', { spec: spec() })).toMatchObject({ status: 'refused', reason: 'binary_version' });
+    // W13: a binary that printed no version is refused the same way (no version refusal of its own any more)
+    const silent = engineHost({ ...base, binaryProbe: async () => ({ ...OK_BINARY, ok: false, version: null, error: `${ENGINE_BIN} --version failed: --version printed no version` }) });
+    expect(await silent.call('session.launch', { spec: spec() })).toMatchObject({ status: 'refused', reason: 'binary_missing', message: expect.stringContaining('printed no version') });
     const down = { ...OK_RELAY, ok: false, status: null, latencyMs: null, error: 'connect ECONNREFUSED 127.0.0.1:8641' };
     const relay = engineHost({ ...base, binaryProbe: async () => OK_BINARY, checkRelay: async () => down });
     expect(await relay.call('session.launch', { spec: spec() })).toEqual({ status: 'relay_unreachable', health: down });
@@ -505,38 +508,50 @@ describe('catalog answers and publishes from handshake state through the host (C
 });
 // C7 end
 
-// C11 start: the host's binary configuration through `engine.configure` (C11 execution document, M1; C3's BinaryConfig)
-describe('engine.configure answers binaryInfo and buildLaunch uses the configured path', () => {
-  const CONFIGURED = '/opt/maws-test/claude-2.1.283';
-  // The real probe over a fake file system: only ENGINE_BIN and CONFIGURED exist, and both print the pinned version.
-  const probe = () =>
-    createBinaryProbe({
-      access: async (path) => {
-        if (path !== ENGINE_BIN && path !== CONFIGURED) throw new Error('ENOENT');
-      },
-      run: async () => `${ENGINE_VERSION} (Claude Code)\n`,
-    });
-  afterEach(() => setBinaryConfig({ binaryPath: null, expectedVersion: ENGINE_VERSION })); // the host's configuration is module state
+// C11 start: the host's binary configuration through `engine.configure` (C11 execution document, M1; C3's BinaryConfig).
+// W13: the real probe over a scratch home whose ~/.local/bin/claude links to an installed version, and a chosen binary
+// elsewhere; each prints its own version, and the plan carries the real path and the version the probe answered.
+describe('engine.configure answers binaryInfo and buildLaunch uses the resolved binary', () => {
+  let root: string;
+  let INSTALLED: string;
+  let CONFIGURED: string;
+  const script = (path: string, version: string) => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `#!/bin/sh\necho "${version} (Claude Code)"\n`);
+    chmodSync(path, 0o755);
+    return path;
+  };
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-ipc-binary-')));
+    INSTALLED = script(join(root, 'home/.local/share/claude/versions/2.1.287'), '2.1.287');
+    mkdirSync(join(root, 'home/.local/bin'), { recursive: true });
+    symlinkSync(INSTALLED, join(root, 'home/.local/bin/claude'));
+    CONFIGURED = script(join(root, 'opt/claude-2.1.290'), '2.1.290');
+  });
+  const probe = () => createBinaryProbe({ home: join(root, 'home'), env: {}, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+  afterEach(() => {
+    setBinaryConfig({ binaryPath: null }); // the host's configuration is module state
+    rmSync(root, { recursive: true, force: true });
+  });
 
   it('a missing path answers ok: false with the missing-binary error, and the next launch is refused binary_missing', async () => {
     const spawn = vi.fn();
     const host = engineHost({ spawn, binaryProbe: probe(), checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
-    const info = await host.call('engine.configure', { binaryPath: '/nonexistent', expectedVersion: ENGINE_VERSION });
-    expect(info).toEqual({ path: '/nonexistent', expectedVersion: ENGINE_VERSION, version: null, ok: false, error: expect.stringContaining('no executable engine binary at /nonexistent') });
+    const info = await host.call('engine.configure', { binaryPath: '/nonexistent' });
+    expect(info).toEqual({ path: '/nonexistent', testedVersion: TESTED_ENGINE_VERSION, version: null, ok: false, error: expect.stringContaining('no executable engine binary at /nonexistent') });
     expect(await host.call('engine.binaryInfo', undefined)).toEqual(info);
     expect(await host.call('session.launch', { spec: spec() })).toEqual({ status: 'refused', reason: 'binary_missing', message: expect.stringContaining('/nonexistent') });
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('null restores the default binary and answers its version; a version other than the pin is binary_version', async () => {
+  it('null restores the installed binary and answers its real path and version, whatever the tested version', async () => {
     const host = engineHost({ binaryProbe: probe() });
-    await host.call('engine.configure', { binaryPath: '/nonexistent', expectedVersion: ENGINE_VERSION });
-    expect(await host.call('engine.configure', { binaryPath: null, expectedVersion: ENGINE_VERSION })).toEqual({ path: ENGINE_BIN, expectedVersion: ENGINE_VERSION, version: ENGINE_VERSION, ok: true, error: null });
-    expect(await host.call('engine.configure', { binaryPath: null, expectedVersion: '2.1.300' })).toMatchObject({ path: ENGINE_BIN, version: ENGINE_VERSION, ok: false, error: expect.stringContaining('MAWS expects 2.1.300') });
-    expect(getBinaryConfig()).toEqual({ binaryPath: null, expectedVersion: '2.1.300' });
+    await host.call('engine.configure', { binaryPath: '/nonexistent' });
+    expect(await host.call('engine.configure', { binaryPath: null })).toEqual({ path: INSTALLED, testedVersion: TESTED_ENGINE_VERSION, version: '2.1.287', ok: true, error: null });
+    expect(getBinaryConfig()).toEqual({ binaryPath: null });
   });
 
-  it('a configured path is the bin of the next launch plan; an unconfigured host launches ENGINE_BIN as before', async () => {
+  it('a configured path is the bin of the next launch plan; an unconfigured host launches the installed binary by its real path', async () => {
     const plans: LaunchPlan[] = [];
     let transport: ScriptedTransport;
     const spawn = (plan: LaunchPlan) => {
@@ -551,15 +566,15 @@ describe('engine.configure answers binaryInfo and buildLaunch uses the configure
       await host.ipc.table.get(appSessionId as AppSessionId)!.exited;
     };
     await run('app-default');
-    expect(await host.call('engine.configure', { binaryPath: CONFIGURED, expectedVersion: ENGINE_VERSION })).toMatchObject({ path: CONFIGURED, ok: true });
+    expect(await host.call('engine.configure', { binaryPath: CONFIGURED })).toMatchObject({ path: CONFIGURED, ok: true });
     await run('app-configured');
-    expect(plans.map((p) => [p.bin, p.engineVersion])).toEqual([[ENGINE_BIN, ENGINE_VERSION], [CONFIGURED, ENGINE_VERSION]]);
+    expect(plans.map((p) => [p.bin, p.engineVersion])).toEqual([[INSTALLED, '2.1.287'], [CONFIGURED, '2.1.290']]);
   });
 
   it('refuses a relative path as invalid_input (the validator refuses it first) before touching the configuration', async () => {
     const host = engineHost({ binaryProbe: probe() });
-    await expect(host.handlers.get('engine.configure')!({ binaryPath: 'claude', expectedVersion: ENGINE_VERSION })).rejects.toMatchObject({ ipcError: { code: 'invalid_input' } });
-    expect(getBinaryConfig()).toEqual({ binaryPath: null, expectedVersion: ENGINE_VERSION });
+    await expect(host.handlers.get('engine.configure')!({ binaryPath: 'claude' })).rejects.toMatchObject({ ipcError: { code: 'invalid_input' } });
+    expect(getBinaryConfig()).toEqual({ binaryPath: null });
   });
 });
 // C11 end

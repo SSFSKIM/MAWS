@@ -18,11 +18,14 @@ import { AbsolutePathSchema } from './settings';
 
 // C3 start: the engine host level (C3 execution document, Interfaces "X2 — commands and events"): the binary, the
 // relay, the process table and shutdown. Owner engine-host.
-export const BinaryInfoSchema = z.strictObject({ path: z.string(), expectedVersion: z.string(), version: z.string().nullable(), ok: z.boolean(), error: z.string().nullable() });
+// W13 (charter D-1 as amended 2026-10-01): `path` is the real path the next launch spawns (the installed Claude Code
+// unless Settings names a binary), `version` its `--version`, `testedVersion` the version MAWS's fixtures were recorded
+// on (information, never a refusal); `ok` false only for a missing binary or one that prints no version.
+export const BinaryInfoSchema = z.strictObject({ path: z.string(), testedVersion: z.string(), version: z.string().nullable(), ok: z.boolean(), error: z.string().nullable() });
 export type BinaryInfo = z.infer<typeof BinaryInfoSchema>;
 
 const c3Commands = {
-  'engine.binaryInfo': { input: z.void(), output: BinaryInfoSchema, owner: 'engine-host' }, // runs `--version` once, cached
+  'engine.binaryInfo': { input: z.void(), output: BinaryInfoSchema, owner: 'engine-host' }, // resolved per call; `--version` cached by file (W13)
   'engine.relayHealth': { input: z.strictObject({ force: z.boolean() }), output: RelayHealthSchema, owner: 'engine-host' },
   'engine.sessions': { input: z.void(), output: z.array(EngineSessionStatusSchema), owner: 'engine-host' },
   'engine.shutdown': { input: z.strictObject({ graceMs: z.number().int().nonnegative() }), output: z.strictObject({ stopped: z.number().int(), forced: z.number().int() }), owner: 'engine-host' }, // C5's quit path
@@ -43,7 +46,8 @@ const c10Commands = {
 // C11 start: the host's binary configuration (C11 execution document, Interfaces "X2 additions"; C3's BinaryConfig in
 // src/engine-host/launch.ts). Sent by main after the settings load, on every change of settings.engine and whenever the
 // engine host is ready again; answers engine.binaryInfo's shape for the configured path. A live process keeps its binary.
-export const EngineBinaryConfigSchema = z.strictObject({ binaryPath: AbsolutePathSchema.nullable(), expectedVersion: z.string() });
+// W13: the path only (null, the installed Claude Code); the expected version is gone, since no version refuses.
+export const EngineBinaryConfigSchema = z.strictObject({ binaryPath: AbsolutePathSchema.nullable() });
 export type EngineBinaryConfig = z.infer<typeof EngineBinaryConfigSchema>;
 const c11Commands = {
   'engine.configure': { input: EngineBinaryConfigSchema, output: BinaryInfoSchema, owner: 'engine-host' },

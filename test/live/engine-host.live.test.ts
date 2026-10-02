@@ -14,7 +14,8 @@ import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { getHooksListing } from '../../src/engine-host/controls';
 import { HostHookRegistry } from '../../src/engine-host/host-hooks';
-import { ENGINE_BIN, ENGINE_VERSION, GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
+import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
+import { ENGINE_BIN, ENGINE_VERSION } from '../support/engine-pin'; // W13: the live suite runs the fixtures' engine
 import * as nodePty from 'node-pty'; // W7: the terminal-style second writer
 import { holderAuthority } from '../../src/main/sessions/holders'; // W7: main's resume guard, over this host
 import { releaseHolder } from '../../src/main/sessions/take-over'; // W7: "Take over here", over this host

@@ -162,7 +162,7 @@ export function startEngineConfigure(deps: EngineConfigureDeps): EngineConfigure
         }
         let pushError: string | null = null;
         try {
-          const result = await deps.dispatch({ binaryPath: binaryPath ?? custody?.path ?? null, expectedVersion: pinnedVersion });
+          const result = await deps.dispatch({ binaryPath: binaryPath ?? custody?.path ?? null });
           if (!result.ok) {
             console.warn('[settings] engine.configure failed', result.error);
             pushError = result.error.message;

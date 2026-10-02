@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
-import { ENGINE_BIN, ENGINE_VERSION } from '../../src/engine-host/launch';
+import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13: the fixtures' engine
 
 export const RELAY = 'http://127.0.0.1:8641'; // ClaudeUsage's relay, whatever MAWS_RELAY_URL this process may carry
 export const FORWARDER_PORT = 18641;

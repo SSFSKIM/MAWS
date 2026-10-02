@@ -21,7 +21,7 @@ function usePinnedVersion(wanted: boolean): string | null {
     if (!wanted) return;
     let live = true;
     void ipc.invoke('engine.binaryInfo', undefined).then((result) => {
-      if (live && result.ok) setVersion(result.value.expectedVersion);
+      if (live && result.ok) setVersion(result.value.version);
     });
     return () => {
       live = false;

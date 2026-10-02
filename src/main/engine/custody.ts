@@ -15,7 +15,8 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import type { LaunchResult } from '@shared/ipc/schema/session';
 import { CustodyManifestSchema, type Custody, type CustodyManifest } from '@shared/ipc/schema/settings';
-import { ENGINE_BIN } from '../../engine-host/launch';
+
+const INSTALLER_VERSIONS = join(homedir(), '.local/share/claude/versions'); // the native installer's directory
 
 export type { Custody, CustodyManifest };
 
@@ -40,7 +41,7 @@ export function custodySourceDir(env: Record<string, string | undefined>, packag
   const override = packaged ? undefined : env.MAWS_ENGINE_SOURCE_DIR;
   if (override !== undefined && isAbsolute(override)) return override;
   if (env.MAWS_E2E === '1' || env.MAWS_ENGINE_REPLAY === '1') return null;
-  return dirname(ENGINE_BIN);
+  return INSTALLER_VERSIONS;
 }
 
 export async function ensureCustody(o: { userData: string; version: string; sourceDir: string }, deps: CustodyDeps = {}): Promise<Custody> {

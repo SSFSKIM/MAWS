@@ -82,7 +82,7 @@ describe('settings tab writes one field per row', () => {
     // C12: main configures the host; the tab awaits settings.engineApplied and re-reads the binary as the host now holds it
     b.answers['engine.binaryInfo'] = () => {
       const { binaryPath, pinnedVersion } = settings().engine;
-      return binaryPath === null ? BINARY : { ...BINARY, path: binaryPath, expectedVersion: pinnedVersion, version: '2.1.290', ok: pinnedVersion === '2.1.290', error: pinnedVersion === '2.1.290' ? null : 'binary reports 2.1.290, expected 2.1.283' };
+      return binaryPath === null ? BINARY : { ...BINARY, path: binaryPath, testedVersion: '2.1.283', version: '2.1.290', ok: pinnedVersion === '2.1.290', error: pinnedVersion === '2.1.290' ? null : 'binary reports 2.1.290, expected 2.1.283' };
     };
     fireEvent.click(await within(row('Binary')).findByRole('button', { name: 'Change…' }));
     await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { binaryPath: '/opt/claude/2.1.290/claude' } }]));

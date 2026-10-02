@@ -21,7 +21,7 @@ const COPY = CUSTODY.state === 'ok' ? CUSTODY.path : '';
 // The host as main configures it: the chosen path, else MAWS's copy.
 function renderSection(initial: Settings = SETTINGS_DEFAULTS_V7, answers: SettingsBridge['answers'] = {}) {
   b = settingsBridge(initial);
-  b.answers['engine.binaryInfo'] = () => ({ ...BINARY, path: settings().engine.binaryPath ?? COPY, expectedVersion: settings().engine.pinnedVersion });
+  b.answers['engine.binaryInfo'] = () => ({ ...BINARY, path: settings().engine.binaryPath ?? COPY, testedVersion: '2.1.283' });
   Object.assign(b.answers, answers);
   window.maws = b.bridge;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -71,7 +71,7 @@ describe('Settings › Engine writes settings; main configures the host', () => 
   it('the re-pin confirm writes the pin alone and waits for main (custody for the new version runs there)', async () => {
     renderSection(
       { ...SETTINGS_DEFAULTS_V7, engine: { ...SETTINGS_DEFAULTS_V7.engine, binaryPath: '/opt/claude/2.1.290/claude' } },
-      { 'engine.binaryInfo': () => ({ ...BINARY, path: '/opt/claude/2.1.290/claude', version: '2.1.290', expectedVersion: settings().engine.pinnedVersion, ok: settings().engine.pinnedVersion === '2.1.290', error: null }) },
+      { 'engine.binaryInfo': () => ({ ...BINARY, path: '/opt/claude/2.1.290/claude', version: '2.1.290', testedVersion: '2.1.283', ok: settings().engine.pinnedVersion === '2.1.290', error: null }) },
     );
     expect(await within(row('Pinned version')).findByText('binary reports 2.1.290')).toBeTruthy();
     fireEvent.click(within(row('Pinned version')).getByRole('button', { name: 'Re-pin…' }));

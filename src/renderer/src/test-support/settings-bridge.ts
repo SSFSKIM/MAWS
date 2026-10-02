@@ -9,7 +9,7 @@ import type { CommandName, MawsBridge, Settings, SettingsPatch } from '@shared/i
 import { applySettingsPatch, SETTINGS_DEFAULTS_V7 } from '@shared/settings/defaults';
 import { useSettings } from '../stores/settings';
 
-export const BINARY: BinaryInfo = { path: '/Users/owner/.local/share/claude/versions/2.1.283', expectedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
+export const BINARY: BinaryInfo = { path: '/Users/owner/.local/share/claude/versions/2.1.283', testedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
 // C12 start: MAWS's copy of the pinned engine, as main's `settings.engineCustody` answers it
 export const CUSTODY: Custody = {
   state: 'ok',

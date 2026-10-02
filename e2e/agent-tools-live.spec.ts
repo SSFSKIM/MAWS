@@ -20,7 +20,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { ENGINE_BIN, ENGINE_VERSION, GATEWAY_AUTH_TOKEN, RELAY_URL } from '../src/engine-host/launch';
+import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../src/engine-host/launch';
+import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin'; // W13: the fixtures' engine
 import { scratchConfigHome } from '../test/live/support/live';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';

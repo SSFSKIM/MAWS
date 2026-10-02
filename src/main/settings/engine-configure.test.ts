@@ -5,7 +5,7 @@ import { CONFIGURE_WAIT_MS, startEngineConfigure, type EngineConfigureDeps } fro
 import { REQUEST_TIMEOUT_MS, RESTART_BACKOFF_MS } from '../hosts/supervisor'; // C12
 import type { Custody } from '../engine/custody'; // C12
 
-const INFO = { path: '/Users/new/.local/share/claude/versions/2.1.283', expectedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
+const INFO = { path: '/Users/new/.local/share/claude/versions/2.1.283', testedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
 const host = (state: HostState['state']): HostState => ({ state, pid: state === 'ready' ? 1 : null, restarts: 0, revision: 0 });
 
 // C12: the owner's Mac, 32 GiB: 25% is 8 GiB
@@ -52,7 +52,7 @@ describe('engine.configure is sent after the settings load and on every change o
     const h = harness('starting');
     expect(h.dispatch).not.toHaveBeenCalled();
     h.moveHost('ready');
-    expect(h.dispatch).toHaveBeenCalledExactlyOnceWith({ binaryPath: null, expectedVersion: '2.1.283' });
+    expect(h.dispatch).toHaveBeenCalledExactlyOnceWith({ binaryPath: null });
     h.moveHost('crashed');
     h.moveHost('restarting');
     h.moveHost('ready');
@@ -73,9 +73,9 @@ describe('engine.configure is sent after the settings load and on every change o
     h.change({ ...SETTINGS_DEFAULTS_V7, engine: { ...SETTINGS_DEFAULTS_V7.engine /* C12 */, binaryPath: '/opt/claude', pinnedVersion: '2.1.290', subagentModel: null } });
     await h.configure.applied(); // C12
     expect(h.dispatch.mock.calls).toEqual([
-      [{ binaryPath: null, expectedVersion: '2.1.283' }],
-      [{ binaryPath: '/opt/claude', expectedVersion: '2.1.283' }],
-      [{ binaryPath: '/opt/claude', expectedVersion: '2.1.290' }],
+      [{ binaryPath: null }],
+      [{ binaryPath: '/opt/claude' }],
+      [{ binaryPath: '/opt/claude' }],
     ]);
   });
 
@@ -192,7 +192,7 @@ describe('custody: main configures the host with the copy MAWS keeps', () => {
     await flush();
     expect(h.dispatch).not.toHaveBeenCalled();
     c.answer('2.1.283');
-    await vi.waitFor(() => expect(h.dispatch).toHaveBeenCalledExactlyOnceWith({ binaryPath: PATH('2.1.283'), expectedVersion: '2.1.283' }));
+    await vi.waitFor(() => expect(h.dispatch).toHaveBeenCalledExactlyOnceWith({ binaryPath: PATH('2.1.283') }));
     await expect(h.configure.custody()).resolves.toEqual(ok('2.1.283'));
   });
 
@@ -220,12 +220,12 @@ describe('custody: main configures the host with the copy MAWS keeps', () => {
     const applied = h.configure.applied();
     c.answer('2.1.290');
     await applied;
-    expect(h.dispatch).toHaveBeenLastCalledWith({ binaryPath: PATH('2.1.290'), expectedVersion: '2.1.290' });
+    expect(h.dispatch).toHaveBeenLastCalledWith({ binaryPath: PATH('2.1.290') });
   });
 
   it('pushes one at a time, the latest settings winning', async () => {
     let answer!: () => void;
-    const dispatch = vi.fn((config: { binaryPath: string | null; expectedVersion: string }) => new Promise<CommandResult<'engine.configure'>>((resolve) => (answer = () => resolve({ ok: true, value: { ...INFO, path: config.binaryPath ?? INFO.path } }))));
+    const dispatch = vi.fn((config: { binaryPath: string | null }) => new Promise<CommandResult<'engine.configure'>>((resolve) => (answer = () => resolve({ ok: true, value: { ...INFO, path: config.binaryPath ?? INFO.path } }))));
     const h = harness('ready', dispatch, async (version) => ok(version));
     await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
     h.change(engine({ binaryPath: '/opt/a' }));
@@ -234,7 +234,7 @@ describe('custody: main configures the host with the copy MAWS keeps', () => {
     expect(dispatch).toHaveBeenCalledOnce(); // the first is still in flight
     answer();
     await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2));
-    expect(dispatch).toHaveBeenLastCalledWith({ binaryPath: '/opt/b', expectedVersion: '2.1.283' });
+    expect(dispatch).toHaveBeenLastCalledWith({ binaryPath: '/opt/b' });
     answer();
     await h.configure.applied();
     expect(dispatch).toHaveBeenCalledTimes(2);
@@ -267,7 +267,7 @@ describe('custody: main configures the host with the copy MAWS keeps', () => {
     const refused = h.configure.applied();
     c.answer('2.1.290', missing('2.1.290'));
     await expect(refused).rejects.toThrow("Claude Code 2.1.290 is missing from MAWS's copy");
-    expect(dispatch).toHaveBeenLastCalledWith({ binaryPath: PATH('2.1.290'), expectedVersion: '2.1.290' }); // the host still follows the pin
+    expect(dispatch).toHaveBeenLastCalledWith({ binaryPath: PATH('2.1.290') }); // the host still follows the pin
     h.change(engine({ pinnedVersion: '2.1.290', binaryPath: '/opt/refused' }));
     await expect(h.configure.applied()).rejects.toThrow('the host refused it');
     warn.mockRestore();
@@ -334,7 +334,7 @@ describe('custody: main configures the host with the copy MAWS keeps', () => {
       expect(h.dispatch).not.toHaveBeenCalled(); // never binaryPath null: the host would fall back to the installer's file
       h.change(engine({ binaryPath: '/opt/claude' }));
       await h.configure.applied(); // a chosen path goes as chosen
-      expect(h.dispatch).toHaveBeenCalledExactlyOnceWith({ binaryPath: '/opt/claude', expectedVersion: '2.1.283' });
+      expect(h.dispatch).toHaveBeenCalledExactlyOnceWith({ binaryPath: '/opt/claude' });
       await expect(h.configure.launchGate()).resolves.toBeNull();
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(unhandled).not.toHaveBeenCalled();
@@ -349,7 +349,7 @@ describe('custody: main configures the host with the copy MAWS keeps', () => {
     await expect(h.configure.launchGate()).resolves.toBeNull();
     await expect(h.configure.custody()).resolves.toBeNull();
     h.moveHost('ready');
-    expect(h.dispatch).toHaveBeenCalledExactlyOnceWith({ binaryPath: null, expectedVersion: '2.1.283' });
+    expect(h.dispatch).toHaveBeenCalledExactlyOnceWith({ binaryPath: null });
     await h.configure.applied();
   });
 });

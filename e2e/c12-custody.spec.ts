@@ -23,7 +23,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
-import { ENGINE_BIN, ENGINE_VERSION } from '../src/engine-host/launch';
+import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin'; // W13: the fixtures' engine
 import { assertConfigHomeSafe } from '../test/live/support/live';
 import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';

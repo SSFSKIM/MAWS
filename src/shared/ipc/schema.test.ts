@@ -560,11 +560,11 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('engine.configure takes an absolute path or null and answers binaryInfo', () => {
-      expect(validateCommandInput('engine.configure', { binaryPath: null, expectedVersion: '2.1.283' }).ok).toBe(true);
-      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude', expectedVersion: '2.1.283' }).ok).toBe(true);
-      expect(validateCommandInput('engine.configure', { binaryPath: 'claude', expectedVersion: '2.1.283' }).ok).toBe(false);
-      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude' }).ok).toBe(false);
-      const info = { path: '/opt/claude', expectedVersion: '2.1.283', version: null, ok: false, error: 'no executable engine binary at /opt/claude' };
+      expect(validateCommandInput('engine.configure', { binaryPath: null }).ok).toBe(true);
+      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude' }).ok).toBe(true);
+      expect(validateCommandInput('engine.configure', { binaryPath: 'claude' }).ok).toBe(false);
+      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude', expectedVersion: '2.1.283' }).ok).toBe(false); // W13: no expected version
+      const info = { path: '/opt/claude', testedVersion: '2.1.283', version: null, ok: false, error: 'no executable engine binary at /opt/claude' };
       expect(validateCommandOutput('engine.configure', info)).toEqual({ ok: true, value: info });
     });
 

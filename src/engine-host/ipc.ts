@@ -17,10 +17,11 @@ import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS } from '@shared/ipc/schema/engine';
 import type { C3_SESSION_COMMANDS } from '@shared/ipc/schema/session';
-import { createBinaryProbe, VERSION_TIMEOUT_MS, type BinaryCheck } from './binary-info';
+import { createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
+import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import * as controls from './controls';
 import { createLauncher } from './launcher';
-import { getBinaryConfig, LaunchSpecConflict, mergeFlagSettings, RELAY_URL, type LaunchPlan } from './launch';
+import { LaunchSpecConflict, mergeFlagSettings, RELAY_URL, type LaunchPlan } from './launch';
 // C11 start
 import { setBinaryConfig } from './launch';
 // C11 end
@@ -65,8 +66,9 @@ export const DEADLINE_SHAPES: Record<C3Command, DeadlineShape> = {
 type C10Command = 'engine.models' | 'session.forget';
 // C10 end
 
-// The longest wait before a live launch spawns: its three checks run in parallel, each under its own timeout.
-export const PRE_SPAWN_BOUND_MS = Math.max(SHELL_CAPTURE_TIMEOUT_MS + SHELL_CAPTURE_GRACE_MS, VERSION_TIMEOUT_MS, RELAY_HEALTH_TIMEOUT_MS);
+// The longest wait before a live launch spawns: its three checks run in parallel, each under its own bound (W13: the
+// binary probe's covers a PATH lookup that waits for the capture before `--version`).
+export const PRE_SPAWN_BOUND_MS = Math.max(SHELL_CAPTURE_TIMEOUT_MS + SHELL_CAPTURE_GRACE_MS, PROBE_BOUND_MS, RELAY_HEALTH_TIMEOUT_MS);
 const BOUNDED_BUDGET_S = 8;
 
 export interface EngineIpcDeps {
@@ -119,9 +121,9 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   const streams = new Map<AppSessionId, SessionStream>();
   const specs = new Map<AppSessionId, LaunchSpec>();
   const operations = new OperationTable((event) => emit('session.operation', event));
-  const binaryProbe = deps.binaryProbe ?? createBinaryProbe();
   const relayCheck = deps.checkRelay ?? ((force: boolean) => checkRelayHealth(RELAY_URL, undefined, { force }));
   const captureEnv = deps.captureEnv ?? (() => captureShellEnvironment());
+  const binaryProbe = deps.binaryProbe ?? createBinaryProbe({ captureEnv }); // W13: the installed binary, per call
   // C10 start: the model catalogue, updated from every initialize response and every list_models answer, each under
   // its launch's key (binary version and route: debt wave 3; and the model environment its settings set: debt wave 5)
   const models = new ModelsCache(deps.userData, { warn: log });
@@ -176,10 +178,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     bounded(() => ready(input.appSessionId).client.request(subtype, {} as controls.OutboundRequest<S>));
 
   // -- engine.* ------------------------------------------------------------------------------------------------------
-  handle('engine.binaryInfo', async () => {
-    const { path, expectedVersion, version, ok, error } = await binaryProbe(); // `problem` is the launcher's, not X2's
-    return { path, expectedVersion, version, ok, error };
-  });
+  handle('engine.binaryInfo', async () => binaryProbe()); // W13: resolved and probed per call, the version cached by file
   handle('engine.relayHealth', async ({ force }) => relayCheck(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
   handle('engine.shutdown', async ({ graceMs }) => table.shutdown({ graceMs }));
@@ -200,15 +199,15 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // C12 end
   // C11 start: the binary configuration main sends from settings.engine (C11 execution document, M1). The next launch
   // and engine.binaryInfo read it; a process already spawned keeps the path its plan carries. C3's setter refuses a
-  // relative path (the validator already has), which reaches the renderer as invalid_input.
-  on('engine.configure', async ({ binaryPath, expectedVersion }) => {
+  // relative path (the validator already has), which reaches the renderer as invalid_input. W13: the path only; null
+  // is the installed Claude Code.
+  on('engine.configure', async ({ binaryPath }) => {
     try {
-      setBinaryConfig({ binaryPath, expectedVersion });
+      setBinaryConfig({ binaryPath });
     } catch (error) {
       throw new HostCommandError({ code: 'invalid_input', message: error instanceof Error ? error.message : String(error) });
     }
-    const { path, version, ok, error } = await binaryProbe(); // `problem` is the launcher's, not X2's
-    return { path, expectedVersion, version, ok, error };
+    return binaryProbe();
   });
   // C11 end
 
@@ -418,8 +417,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // `bounded`.
   handleC10('engine.models', async ({ refresh, gateway, cwd }): Promise<ModelCatalogue> => {
     await modelsLoaded;
-    const route = gateway === undefined ? undefined : modelsKey(getBinaryConfig().expectedVersion, gateway);
-    const key = gateway === undefined || cwd === undefined ? route : await catalogueKey(getBinaryConfig().expectedVersion, gateway, { env: await captureEnv(), cwd });
+    // W13: the version the next launch would run, as the binary probe answers it (the tested one while none answers)
+    const version = gateway === undefined ? TESTED_ENGINE_VERSION : ((await binaryProbe()).version ?? TESTED_ENGINE_VERSION);
+    const route = gateway === undefined ? undefined : modelsKey(version, gateway);
+    const key = gateway === undefined || cwd === undefined ? route : await catalogueKey(version, gateway, { env: await captureEnv(), cwd });
     const ready = await Promise.all(
       table
         .list()
