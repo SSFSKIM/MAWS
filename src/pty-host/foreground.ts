@@ -1,8 +1,5 @@
-// Whether a program other than the shell holds the terminal (C9 Residue *Lifecycle and close*: closing a busy
-// terminal asks first). The name is node-pty's `process` (the foreground process's name on macOS). Busy is decided
-// by process group, not by comparing that name with the shell's: macOS's `/bin/sh` re-executes bash, so node-pty
-// names an idle `sh` prompt "bash". The shell leads its own process group (node-pty starts it in a new session), so
-// the terminal is busy exactly when its foreground process group is not the shell's pid.
+// Foreground groups identify jobs, but an exec-replaced shell keeps its pid and group.
+// Recognize shell names as well (macOS /bin/sh re-executes bash).
 import { execFile } from 'node:child_process';
 import { basename } from 'node:path';
 
@@ -31,8 +28,8 @@ const SHELL_NAME = /^-?(ba|z|da|k|tc|fi)?sh$/;
 export async function foregroundOf(target: ForegroundTarget, run: ProbeRunner = runProbe): Promise<Foreground> {
   const process = target.process || null;
   const group = await foregroundGroup(target.pid, run);
-  if (group !== null) return { process, busy: group !== target.pid };
   const shellNamed = process !== null && (process === basename(target.shell) || SHELL_NAME.test(process));
+  if (group !== null) return { process, busy: group !== target.pid || !shellNamed };
   if (shellNamed && (await hasChildren(target.pid, run)) === false) return { process, busy: false };
   return { process, busy: process !== null && process !== basename(target.shell) };
 }

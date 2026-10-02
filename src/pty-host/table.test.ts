@@ -6,6 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload, PtyId } from '@shared/ipc/schema';
 import { PROFILE_VARIABLE, writeScratchShellHome } from '../../test/support/shell-home';
 import { terminalEnvironment } from './env';
+import { runProbe } from './foreground';
 import { HIGH_WATERMARK, LOW_WATERMARK } from './flow';
 import { createPtyTable, RING_BYTES, type PtyTable } from './table';
 
@@ -90,8 +91,8 @@ function harness(environment: Record<string, string> = terminalEnvironment(BASE_
 }
 
 const tables: PtyTable[] = [];
-afterEach(() => {
-  for (const table of tables.splice(0)) for (const info of table.list().ptys) if (info.alive) table.kill({ ptyId: info.ptyId, signal: 'SIGKILL' });
+afterEach(async () => {
+  for (const table of tables.splice(0)) for (const info of table.list().ptys) if (info.alive) await table.kill({ ptyId: info.ptyId, signal: 'SIGKILL' });
 });
 
 // The program's output as the renderer will decode it: the tty's `onlcr` turns each line feed into CR LF, and macOS's
@@ -289,6 +290,15 @@ describe('pty host foreground detection', () => {
     await vi.waitFor(async () => expect(await h.table.foreground({ ptyId })).toEqual({ process: 'sleep', busy: true }), { timeout: WAIT_MS, interval: 50 });
   });
 
+  it('reports an exec-replaced shell busy even when it still owns the foreground group', async () => {
+    const h = harness();
+    const { ptyId, pid } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'exec sleep 1000'] }));
+    await expect.poll(async () => (await h.table.foreground({ ptyId })).process, { timeout: WAIT_MS }).toBe('sleep');
+    const group = await runProbe('/bin/ps', ['-o', 'tpgid=', '-p', String(pid)]);
+    expect(Number(group?.stdout.trim())).toBe(pid);
+    await expect(h.table.foreground({ ptyId })).resolves.toEqual({ process: 'sleep', busy: true });
+  });
+
   it('reports nothing running for a dead pty', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'exit 0'] }));
@@ -417,6 +427,23 @@ describe('pty host lifecycle', () => {
     expect(() => h.table.resize({ ptyId, cols: 10, rows: 10 })).toThrow('pty exited');
     h.table.kill({ ptyId });
     expect(h.table.list().ptys).toEqual([]);
+  });
+
+  it.each([
+    { ignored: 'HUP', signal: 15 },
+    { ignored: 'HUP TERM', signal: 9 },
+  ])('waits for exit and escalates past ignored $ignored before kill succeeds', async ({ ignored, signal }) => {
+    const h = harness();
+    const { ptyId, pid } = await h.table.spawn(spawnInput({
+      shell: '/bin/sh', args: ['-c', `trap '' ${ignored}; printf 'READY\\n'; while :; do read line; done`],
+    }));
+    await h.until(() => h.text(ptyId).includes('READY'), WAIT_MS, 'signal handlers installed');
+    const killing = h.table.kill({ ptyId });
+    expect(h.table.list().ptys).toContainEqual(expect.objectContaining({ ptyId, alive: true }));
+    await killing;
+    expect(h.exits.get(ptyId)).toMatchObject({ signal });
+    expect(h.table.list().ptys).toEqual([]);
+    expect(() => process.kill(pid, 0)).toThrow();
   });
 
   it('removes a killed pty once it has exited, with SIGHUP by default', async () => {

@@ -45,6 +45,9 @@ interface PtyEntry {
   ring: RingBuffer;
   flow: Flow;
   checkpoint: PtyCheckpoint | null;
+  exited: Promise<void>;
+  resolveExit(): void;
+  termination: Promise<void> | null;
   killed: boolean; // the renderer asked for it to end: remove the entry on exit instead of keeping it dead
   expiry: ReturnType<typeof setTimeout> | null;
   pending: Buffer[]; // reads not yet flushed as an event
@@ -66,7 +69,7 @@ export interface PtyTable {
   spawn(input: CommandInput<'pty.spawn'>): Promise<CommandOutput<'pty.spawn'>>;
   write(input: CommandInput<'pty.write'>): void;
   resize(input: CommandInput<'pty.resize'>): void;
-  kill(input: CommandInput<'pty.kill'>): void;
+  kill(input: CommandInput<'pty.kill'>): Promise<void>;
   ack(input: CommandInput<'pty.ack'>): void;
   checkpoint(input: CommandInput<'pty.checkpoint'>): void;
   attach(input: CommandInput<'pty.attach'>): CommandOutput<'pty.attach'>;
@@ -122,7 +125,7 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
     entry.flow = flow;
     if (clamped && input.kind === 'ack') console.warn(`[pty-host] clamped an ack at ${input.offset} for ${ptyId} to the ${flow.total} bytes emitted`);
     if (!entry.info.alive) return;
-    if (effect === 'pause') entry.pty.pause();
+    if (effect === 'pause' && !entry.killed) entry.pty.pause();
     else if (effect === 'resume') entry.pty.resume();
   };
 
@@ -146,7 +149,12 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
         encoding: null, // raw Buffers: the renderer decodes exactly what the program wrote
         handleFlowControl: false, // the host pauses the pty itself; in-band XOFF/XON is for programs
       });
+      let resolveExit!: () => void;
+      const exited = new Promise<void>((resolve) => { resolveExit = resolve; });
       const entry: PtyEntry = {
+        exited,
+        resolveExit,
+        termination: null,
         info: { ptyId, appSessionId: appSessionId as AppSessionId, label, pid: pty.pid, cwd, shell: program, cols, rows, spawnedAt: new Date().toISOString(), alive: true, exit: null },
         pty,
         ring: new RingBuffer(RING_BYTES),
@@ -191,6 +199,7 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
           entry.expiry = setTimeout(() => remove(ptyId), DEAD_ENTRY_TTL_MS);
           entry.expiry.unref();
         }
+        entry.resolveExit();
       });
       // The tty buffers the command until the shell reads its input, whenever its startup files are done.
       if (command !== undefined) pty.write(`${command}\n`);
@@ -211,12 +220,13 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
       const entry = get(ptyId);
       if (!entry.info.alive) {
         remove(ptyId);
-        return;
+        return Promise.resolve();
       }
       entry.killed = true;
       // A paused pty would never read to its end, and node-pty reports the exit only once the output is drained.
       step(ptyId, entry, { kind: 'attach' });
-      entry.pty.kill(signal ?? 'SIGHUP');
+      entry.termination ??= terminate(entry, signal ?? 'SIGHUP');
+      return entry.termination;
     },
 
     ack({ ptyId, offset }) {
@@ -259,4 +269,24 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
       return { flow: entry.flow, ringStart: entry.ring.start, reads: entry.reads, read: entry.read };
     },
   };
+}
+
+// One shared, bounded ladder per terminal. Success follows onExit's drain and table removal.
+async function terminate(entry: PtyEntry, first: string): Promise<void> {
+  const signals = first === 'SIGKILL' ? ['SIGKILL'] : first === 'SIGTERM' ? ['SIGTERM', 'SIGKILL'] : [first, 'SIGTERM', 'SIGKILL'];
+  for (const signal of signals) {
+    if (!entry.info.alive) return;
+    entry.pty.kill(signal);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const exited = await Promise.race([
+        entry.exited.then(() => true),
+        new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), signal === 'SIGKILL' ? 1_000 : 300); }),
+      ]);
+      if (exited) return;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error('pty did not exit after SIGKILL');
 }
