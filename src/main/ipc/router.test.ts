@@ -117,6 +117,23 @@ describe('main ipc router', () => {
     });
   });
 
+  it('refuses main-only engine configuration even from the app top frame, before interception or host dispatch', async () => {
+    const dispatch = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    await load(DEV_URL, dispatch);
+    const intercept = vi.fn();
+    router.interceptCommand('engine.configure', intercept);
+    await expect(invoke(appWindow(), 'engine.configure', { binaryPath: '/tmp/other-engine' })).resolves.toMatchObject({
+      ok: false, error: { code: 'forbidden_sender' },
+    });
+    await expect(invoke(appWindow(), 'engine.policy.set', { enabled: true, limitKiB: 1024, statefulMcpServers: [] })).resolves.toMatchObject({
+      ok: false, error: { code: 'forbidden_sender' },
+    });
+    expect(intercept).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    const { isBridgedCommandName } = await import('@shared/ipc/names');
+    expect(isBridgedCommandName('engine.configure')).toBe(false);
+  });
+
   it('hands a host dispatcher the owner, the name and the validated input', async () => {
     const dispatch = vi.fn(async () => ({ ok: true as const, value: { pid: 7, uptimeMs: 1, hostVersion: '0' } }));
     await load(DEV_URL, dispatch);

@@ -2,7 +2,7 @@
 // registered names"). Zod-free, so the sandboxed preload bundles a name list rather than every schema; the renderer
 // client and main validate against the registries in `./schema.ts`, which re-exports the channels and `NAMESPACES`
 // from here. Each namespace's list lives in `./names/<namespace>.ts` beside its registry module, and `./schema.ts`
-// pins at compile time that the lists name exactly the registries' keys.
+// pins at compile time that the bridged and main-only lists together name exactly the registries' keys.
 import * as attention from './names/attention';
 import * as engine from './names/engine';
 import * as fs from './names/fs';
@@ -31,6 +31,8 @@ export const NAMES = {
 
 type Names = typeof NAMES;
 export type BridgedCommandName = { [N in Namespace]: Names[N]['commands'][number] }[Namespace];
+export type MainOnlyCommandName = (typeof engine.mainOnlyCommands)[number];
+export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = engine.mainOnlyCommands;
 export type BridgedEventName = { [N in Namespace]: Names[N]['events'][number] }[Namespace];
 
 // Pure, so a bundle that takes only `NAMESPACES` or a channel (the renderer and main, through `./schema.ts`) drops
@@ -45,5 +47,5 @@ export const isBridgedCommandName = (name: unknown): name is BridgedCommandName 
 export const isBridgedEventName = (name: unknown): name is BridgedEventName =>
   typeof name === 'string' && eventNames.has(name);
 
-export const commandChannel = (name: BridgedCommandName) => `maws:cmd:${name}`;
+export const commandChannel = (name: BridgedCommandName | MainOnlyCommandName) => `maws:cmd:${name}`;
 export const eventChannel = (name: BridgedEventName) => `maws:evt:${name}`;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { IpcErrorSchema } from './errors';
-import { NAMES } from './names';
+import { NAMES, MAIN_ONLY_COMMANDS } from './names';
 import { commandChannel, commands, eventChannel, events, NAMESPACES, type Namespace } from './schema';
 import * as attention from './schema/attention';
 import * as engine from './schema/engine';
@@ -44,7 +44,7 @@ describe('ipc schema validates both directions', () => {
 
     // Debt wave 4: the preload bridges these zod-free lists, not the registries.
     it.each(NAMESPACES)('names/%s.ts lists exactly schema/%s.ts’s keys, once each', (ns) => {
-      expect([...NAMES[ns].commands]).toEqual(Object.keys(modules[ns].commands));
+      expect([...NAMES[ns].commands]).toEqual(Object.keys(modules[ns].commands).filter((name) => !MAIN_ONLY_COMMANDS.includes(name as never)));
       expect([...NAMES[ns].events]).toEqual(Object.keys(modules[ns].events));
     });
 
@@ -596,10 +596,11 @@ describe('ipc schema validates both directions', () => {
       releasing: 'app-1', blocked: [{ appSessionId: 'app-2', reasons: ['turn', 'stateful_mcp'] }], lastRelease: { appSessionId: 'app-3', at: '2026-09-29T09:59:50.000Z', totalKiB: 9_100_000 },
     };
 
-    it('engine.policy.set and engine.budget are engine-host commands; engine.budget is also an event, and both names are bridged', () => {
+    it('engine.policy.set and engine.budget are engine-host commands; engine.budget is also an event, and only the budget read is bridged', () => {
       for (const name of ['engine.policy.set', 'engine.budget'] as const) expect(commands[name].owner, name).toBe('engine-host');
       expect(Object.hasOwn(events, 'engine.budget')).toBe(true);
-      expect(NAMES.engine.commands).toEqual(expect.arrayContaining(['engine.policy.set', 'engine.budget']));
+      expect(NAMES.engine.commands).toContain('engine.budget');
+      expect(NAMES.engine.commands).not.toContain('engine.policy.set');
       expect(NAMES.engine.events).toContain('engine.budget');
     });
 

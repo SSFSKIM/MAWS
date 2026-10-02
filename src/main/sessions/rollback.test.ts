@@ -49,6 +49,49 @@ describe('rollback per resource', () => {
     await runGit(repo.root, ['config', 'core.hooksPath', hooks]);
   };
 
+  describe('worktree creation crash journal', () => {
+    it('journals before git, recovers a checkout created before confirmation, and Retry reuses it', async () => {
+      const id = await create(worktree('crash'));
+      const add = h.worktrees.add.bind(h.worktrees);
+      let created = false;
+      let beforeGit: SetupIntent['progress']['worktree'] = null;
+      vi.spyOn(h.worktrees, 'add').mockImplementation(async (input) => {
+        beforeGit = intentFile(h, id)!.progress.worktree;
+        await add(input);
+        created = true;
+        return new Promise(() => {}); // quit after Git's effect, before the confirmation write
+      });
+      await h.service.startSession(id, { message: MESSAGE, options: {} });
+      await h.until(() => created);
+      expect(beforeGit).toMatchObject({ path: managed('crash'), branch: 'worktree-crash', createdHere: true });
+      await h.restart();
+      expect(h.host.launches).toEqual([]);
+      expect(intentFile(h, id)).toMatchObject({ progress: {
+        worktree: { path: managed('crash'), branch: 'worktree-crash', head: await runGit(repo.root, ['rev-parse', 'HEAD']).then((v) => v.trim()) },
+        lastFailure: { resources: { worktree: { path: managed('crash'), state: 'kept' } } },
+      } });
+      expect(await h.service.startSession(id, { message: null, options: {} })).toMatchObject({ status: 'starting' });
+      expect(await h.settled(id)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });
+      expect(h.host.launches.at(-1)).toMatchObject({ cwd: managed('crash') });
+    });
+
+    it('clears an unconfirmed journal when the app quit before git created anything, so Retry can create', async () => {
+      const id = await create(worktree('before-git'));
+      let entered = false;
+      vi.spyOn(h.worktrees, 'add').mockImplementation(async () => {
+        entered = true;
+        return new Promise(() => {});
+      });
+      await h.service.startSession(id, { message: MESSAGE, options: {} });
+      await h.until(() => entered);
+      expect(intentFile(h, id)!.progress.worktree).toMatchObject({ path: managed('before-git') });
+      await h.restart();
+      expect(intentFile(h, id)!.progress.worktree).toBeNull();
+      expect(await h.service.startSession(id, { message: null, options: {} })).toMatchObject({ status: 'starting' });
+      expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
+    });
+  });
+
   describe('rollback per resource', () => {
     it('a refused launch removes the worktree, its branch and the record, clears progress.worktree, and a retry creates afresh', async () => {
       const id = await create(worktree('one'));

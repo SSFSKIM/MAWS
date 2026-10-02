@@ -14,6 +14,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { SetupResources } from '@shared/sessions/setup';
 import { hostCall, isUnknownSession, pathExists, transcriptPathOf } from './context';
+import { reconcileWorktree } from './intent-rules';
 import { retainedWorktree, type Setup } from './setup';
 
 export type Reconciled = 'none' | 'handed_off' | 'not_started';
@@ -54,6 +55,12 @@ export async function reconcileIntent(s: Setup, intent: SetupIntent): Promise<Re
 // intent already failed keeps its own account. Runs at start before the bootstrap ids are forgotten, whose note is
 // what shows a quit in the trust bootstrap.
 export async function markInterrupted(s: Setup, intent: SetupIntent): Promise<void> {
+  const worktree = await reconcileWorktree(s, intent);
+  if (worktree !== intent.progress.worktree) {
+    intent = { ...intent, updatedAt: s.now(), progress: { ...intent.progress, worktree } };
+    await s.intents.put(intent);
+    s.emit('session.intent.changed', { appSessionId: intent.appSessionId, intent });
+  }
   const p = intent.progress;
   const holds = intent.message !== null || p.worktree?.createdHere === true;
   if (!holds || p.send !== null || p.lastFailure !== null || s.sessions.get(intent.appSessionId) !== null) return;

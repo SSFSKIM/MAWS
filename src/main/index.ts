@@ -22,7 +22,8 @@ import { GitService } from './git/service';
 // C4 end
 // C5 start (emit comes with C3's imports)
 import { startAttention } from './attention';
-import { dropPanelKeysOfRemovedSessions, LayoutFileStore, registerLayoutHandlers } from './layout/store';
+import { LayoutFileStore } from './layout/store';
+import { registerChatPanels } from './sessions/panel-lifetime';
 import { askToQuit, installQuitGuard, listProcesses } from './lifecycle/quit-guard';
 import { registerMenuHandlers, startMenu } from './menu';
 import { registerOpenExternal } from './open-external';
@@ -136,8 +137,10 @@ app.whenReady().then(() => {
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
   const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource });
-  registerLayoutHandlers(layout, (appSessionId) => sessions.model.record(appSessionId) !== null);
-  dropPanelKeysOfRemovedSessions(sessions.model, layout);
+  const sessionsDir = join(app.getPath('userData'), 'sessions');
+  const intents = new FileIntentStore(join(sessionsDir, 'intents'));
+  const stopChatPanels = registerChatPanels(layout, sessions.model, intents);
+  app.on('will-quit', stopChatPanels);
   app.on('will-quit', () => {
     layout.flush();
     sessions.stop();
@@ -157,6 +160,9 @@ app.whenReady().then(() => {
   // C7 start: the composer's main services (C7 execution document, M1): ClaudeUsage's files for the status line (read
   // only), the prompt history (MAWS's own file; the terminal's read only), the `@` menu's file listing and the picker.
   const home = app.getPath('home');
+  const engineEnv = captureShellEnvironment();
+  const engineConfigDir = engineEnv.then((env) => claudeConfigDir(env, env.HOME || home));
+  const userDefaults = async () => readUserEngineDefaults(await engineConfigDir);
   const usage = new ClaudeUsageReader({ dir: claudeUsageDir(process.env, home), emit: (snapshot) => void emit('settings.usageChanged', snapshot) });
   usage.start();
   registerMainHandler('settings.usage', ({ engineSessionIds }) => usage.snapshot(engineSessionIds));
@@ -168,16 +174,16 @@ app.whenReady().then(() => {
       return null; // the index is unavailable
     }
   };
-  const history = new PromptHistory({
+  const history = engineConfigDir.then((configDir) => new PromptHistory({
     file: join(app.getPath('userData'), 'prompt-history.jsonl'),
-    configDir: claudeConfigDir(process.env, home),
+    configDir,
     session: (appSessionId) => {
       const record = recordOf(appSessionId);
       return record && { directory: record.directory, engineSessionId: record.engineSessionId };
     },
-  });
-  registerMainHandler('session.history.list', async ({ appSessionId, limit }) => ({ entries: await history.list(appSessionId as AppSessionId, limit) }));
-  registerMainHandler('session.history.append', ({ appSessionId, display, pastedContents, project }) => history.append(appSessionId as AppSessionId, display, pastedContents, project ?? null));
+  }));
+  registerMainHandler('session.history.list', async ({ appSessionId, limit }) => ({ entries: await (await history).list(appSessionId as AppSessionId, limit) }));
+  registerMainHandler('session.history.append', async ({ appSessionId, display, pastedContents, project }) => (await history).append(appSessionId as AppSessionId, display, pastedContents, project ?? null));
   // listable roots: the directories of every unarchived session the read model holds (both launch modes) or the index
   // holds, and every indexed project's directory; read again after any session or project change main tells the renderer
   const roots = () => {
@@ -187,10 +193,15 @@ app.whenReady().then(() => {
     } catch {
       // the projects are unavailable; the session walk falls back to the read model on its own (with a warning)
     }
-    return listableRoots(knownSessionDirectories(sessions.model, index, { includeArchived: false }), projectDirectories); // debt wave 4: C11's walk
+    const intentDirectories = intents.list().flatMap((intent) => [
+      ...intent.additionalDirectories,
+      ...(intent.location === null ? [] : [intent.location.kind === 'newWorktree' ? intent.location.repoRoot : intent.location.path]),
+      ...(intent.progress.worktree === null ? [] : [intent.progress.worktree.path]),
+    ]);
+    return listableRoots([...knownSessionDirectories(sessions.model, index, { includeArchived: false }), ...intentDirectories], projectDirectories); // debt wave 4: C11's walk
   };
   const files = new FileLister({ run: createGitRunner(), roots });
-  for (const name of ['session.changed', 'session.removed', 'session.projects.changed'] as const) onEmitted(name, () => files.invalidateRoots());
+  for (const name of ['session.changed', 'session.removed', 'session.projects.changed', 'session.intent.changed'] as const) onEmitted(name, () => files.invalidateRoots());
   registerMainHandler('git.lsFiles', (input) => files.list(input));
   registerMainHandler('layout.pickFiles', (input, { sender }) =>
     pickFiles(input, {
@@ -219,22 +230,21 @@ app.whenReady().then(() => {
   // config and the store with the environment the engine receives (the login-shell capture, as C3's host builds every
   // launch's). Its start resets every stale `self` holder at once (D-16), then forgets stale bootstrap ids and
   // reconciles interrupted handoffs once the engine host answers; `session.intent.list` waits for that.
-  const sessionsDir = join(app.getPath('userData'), 'sessions');
   const sessionService = new SessionService({
     index,
     host: { dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), ready: () => engineHostSettled(hosts) },
     git: createGitRunner(),
     worktrees,
-    intents: new FileIntentStore(join(sessionsDir, 'intents')),
+    intents,
     bootstraps: new BootstrapNotes(join(sessionsDir, 'bootstraps')),
     userData: app.getPath('userData'),
-    env: captureShellEnvironment(),
+    env: engineEnv,
     emit,
     trash: trashFor(process.env, (path) => shell.trashItem(path)), // the e2e seam (MAWS_E2E_TRASH_DIR) or the Trash
     reveal: (path) => shell.showItemInFolder(path),
     replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
     settings: () => sessionSettingsOf(settings.state().settings), // C11: the route, the relay policy and the subagent model from settings v3
-    userDefaults: () => readUserEngineDefaults(claudeConfigDir(process.env, home)), // W3: the user's defaultMode seeds a new intent's mode (read only)
+    userDefaults, // W3: the user's defaultMode seeds a new intent's mode (read only)
     launchGate: () => engineConfigure.launchGate(), // C12: a launch waits for the host to hold the binary settings name (W13: custody retired)
   });
   registerSessionServiceHandlers(sessionService);
@@ -288,7 +298,7 @@ app.whenReady().then(() => {
   });
   registerMainHandler('settings.usageControls', () => usageControl.controls());
   registerMainHandler('settings.usageAction', (action) => usageControl.act(action));
-  registerMainHandler('settings.userEngineDefaults', () => readUserEngineDefaults(claudeConfigDir(process.env, home))); // W3: read only
+  registerMainHandler('settings.userEngineDefaults', userDefaults); // W3: read only
   const sessionDirectories = () => knownSessionDirectories(sessions.model, index);
   registerMainHandler('settings.reveal', ({ path }) =>
     revealPath(path, { configHome: () => claudeConfigDir(process.env, home), sessionDirectories, showItemInFolder: (p) => shell.showItemInFolder(p) }),

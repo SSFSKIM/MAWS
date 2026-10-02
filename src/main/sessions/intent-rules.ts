@@ -41,11 +41,33 @@ export async function retainedMatches(deps: RuleDeps, intent: SetupIntent): Prom
   return target !== null && (await canonicalPath(target.path)) === (await canonicalPath(w.path)) && w.branch === target.branch;
 }
 
+// `head === ''` journals an intended worktree before Git runs. Confirm only the intended checkout/branch;
+// an absent checkout and branch mean the app quit before the effect. Unknown or changed resources fail closed.
+export async function reconcileWorktree(deps: RuleDeps, intent: SetupIntent): Promise<SetupIntent['progress']['worktree']> {
+  const w = intent.progress.worktree;
+  if (w === null || w.head !== '' || !w.createdHere || intent.location?.kind !== 'newWorktree') return w;
+  const listed = await deps.worktrees.list(intent.location.repoRoot);
+  const path = await canonicalPath(w.path);
+  const entry = listed.worktrees.find((entry) => entry.path === path);
+  if (entry) {
+    if (entry.branch !== w.branch) throw new Error(`unconfirmed worktree changed: ${w.path}`);
+    if (!(await isDirectory(path))) throw new Error(`unconfirmed worktree is missing: ${w.path}`);
+    return { ...w, path: entry.path, head: entry.head };
+  }
+  if (await pathExists(path)) throw new Error(`unconfirmed path is not a worktree: ${w.path}`);
+  if (intent.location.branch.kind === 'new') {
+    const branch = await deps.worktrees.branch(listed.repoRoot, intent.location.branch.name);
+    if (branch) return { ...w, head: branch.head }; // Git made the branch before failing to create the checkout.
+  }
+  return null;
+}
+
 // A location as `session.intent.patch` and a start's guards check it. `forStart` turns a missing session directory
 // into `missing_directory` (the start's outcome); a patch names it as the location field's error. A New chat with no
 // project chosen has no location yet, which no start passes.
 export async function checkLocation(deps: RuleDeps, intent: SetupIntent, opts: { forStart: boolean }): Promise<RuleVerdict> {
   const location = intent.location;
+  if (intent.progress.worktree?.head === '') return invalid('location', 'worktree creation has not been reconciled; reopen the app to retry');
   if (location === null) return invalid('location', CHOOSE_PROJECT_FIRST);
   const missing = (directory: string): RuleVerdict => (opts.forStart ? { ok: false, kind: 'missing_directory', directory } : invalid('location', `directory not found: ${directory}`));
   switch (location.kind) {

@@ -10,12 +10,12 @@
 import { randomUUID } from 'node:crypto';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { Location, SetupIntent } from '@shared/sessions/intent';
+import type { SetupIntent } from '@shared/sessions/intent';
 import type { SetupEvent, SetupPhase, SetupResources } from '@shared/sessions/setup';
 import { WorktreeAddFailed } from '../git/worktrees';
 import { hostCall, pathExists, realOrSelf, transcriptPathOf } from './context';
 import { canonicalPath } from './holders';
-import { newWorktreeTarget } from './intent-rules';
+import { newWorktreeTarget, reconcileWorktree } from './intent-rules';
 import { LaunchWatch } from './launch-watch';
 import { bootstrapSpec, intentLaunchSpec, seedPermissionMode, trustMapping } from './launch-mapping';
 import {
@@ -155,13 +155,17 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     if (location.kind === 'newWorktree') {
       if (run.intent.progress.worktree === null) {
         run.event('worktree', `Creating worktree ${location.name}`);
+        const target = await newWorktreeTarget(s, location);
+        // An empty head is the write-ahead journal: intended identity, not yet confirmed by Git.
+        await run.progress({ worktree: { path: target.path, branch: target.branch, head: '', createdHere: true } });
         let info;
         try {
           info = await s.worktrees.add({ repoRoot: location.repoRoot, name: location.name, branch: location.branch });
         } catch (error) {
           // only git's own `worktree add` can have created something; a refusal before it (`worktree path exists`,
           // `branch exists`) names what someone else made, which is never read back as this attempt's
-          if (error instanceof WorktreeAddFailed) await recordPartialWorktree(s, run, location);
+          if (error instanceof WorktreeAddFailed) await recordPartialWorktree(s, run);
+          else await run.progress({ worktree: null });
           throw new SetupFailure('worktree', messageOf(error));
         }
         await run.progress({ worktree: { path: info.path, branch: info.branch, head: info.head, createdHere: true } });
@@ -270,18 +274,9 @@ async function finishBinding(s: Setup, run: IntentRun, intent: SetupIntent, engi
 
 // `git worktree add` threw: with `-b` git creates the branch before the checkout, and a failing post-checkout hook
 // leaves the checkout, so what this attempt created is read back from git and recorded, for rollback to undo.
-async function recordPartialWorktree(s: Setup, run: IntentRun, location: Extract<Location, { kind: 'newWorktree' }>): Promise<void> {
+async function recordPartialWorktree(s: Setup, run: IntentRun): Promise<void> {
   try {
-    const target = await newWorktreeTarget(s, location);
-    const path = await canonicalPath(target.path);
-    const entry = (await s.worktrees.list(target.root)).worktrees.find((w) => w.path === path);
-    if (entry) {
-      await run.progress({ worktree: { path: entry.path, branch: entry.branch, head: entry.head, createdHere: true } });
-      return;
-    }
-    if (location.branch.kind !== 'new') return; // an existing branch is never this attempt's
-    const branch = await s.worktrees.branch(target.root, location.branch.name);
-    if (branch) await run.progress({ worktree: { path, branch: branch.branch, head: branch.head, createdHere: true } });
+    await run.progress({ worktree: await reconcileWorktree(s, run.intent) });
   } catch (error) {
     s.log(`could not read back what the failed worktree add left for ${run.appSessionId}: ${messageOf(error)}`);
   }
