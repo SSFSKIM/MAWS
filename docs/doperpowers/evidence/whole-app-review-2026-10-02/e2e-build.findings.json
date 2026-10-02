@@ -1,0 +1,141 @@
+{
+ "verdict": "incorrect",
+ "findings": [
+  {
+   "id": "scalpel-3#1",
+   "priority": "P1",
+   "title": "Strip inherited Git routing variables from fixture commands",
+   "file": "/tmp/maws-review/e2e-build/e2e/support/panel-support.ts",
+   "lines": "22-25",
+   "comment": "I executed the actual scratchRepository() implementation from /tmp/maws-review/e2e-build/e2e/support/panel-support.ts with GIT_DIR targeting a separate disposable repository. The outside repository acquired the fixture's three commits and tracked notes.txt, plan.txt, and later.txt. Thus inherited routing variables can modify another repository's history/index despite the scratch cwd. /tmp/maws-review/e2e-build/e2e/support/code-scratch.ts repeats this environment construction; /tmp/maws-review/e2e-build/test/support/git-fixture.ts demonstrates the existing filter-all-GIT_* approach.",
+   "sources": [
+    "scalpel-3",
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "sweep#1",
+   "priority": "P2",
+   "title": "Shell-quote the configurable scratch paths",
+   "file": "/tmp/maws-review/e2e-build/e2e/c12-prerun.spec.ts",
+   "lines": "486",
+   "comment": "In /tmp/maws-review/e2e-build/e2e/c12-prerun.spec.ts:486 and :814, scratch-root paths are inserted directly into shell command text. prerunScratch() in /tmp/maws-review/e2e-build/e2e/support/c12-prerun.ts checks the resolved prefix and sibling relationship but permits spaces and shell metacharacters. A permitted root containing spaces breaks the hook sentinel/redirection; a root containing $(...) executes command substitution. Quote the literal path portions while retaining the intended $PPID expansion.",
+   "sources": [
+    "sweep",
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "sweep#2",
+   "priority": "P2",
+   "title": "Preserve hand-authored fixtures when refreshing usage data",
+   "file": "/tmp/maws-review/e2e-build/test/support/redact-claude-usage.ts",
+   "lines": "45-46",
+   "comment": "/tmp/maws-review/e2e-build/test/support/redact-claude-usage.ts:45 recursively deletes the entire destination, then recreates only accounts.json, pins.json, optional gateway.json, and history files. I executed the script against disposable source/destination directories: all three seeded synthetic fixture files disappeared. This contradicts its preservation comment and makes /tmp/maws-review/e2e-build/e2e/accounts.spec.ts:57 fail when it reads gateway-requests.jsonl after a refresh.",
+   "sources": [
+    "sweep"
+   ]
+  },
+  {
+   "id": "scalpel-1#2",
+   "priority": "P2",
+   "title": "Wait for an assistant reply rather than the echoed prompt",
+   "file": "/tmp/maws-review/e2e-build/e2e/support/c7-live.ts",
+   "lines": "133-138",
+   "comment": "/tmp/maws-review/e2e-build/e2e/support/c7-live.ts:133-138 searches accumulated terminal output for the marker immediately after typing the prompt. Its caller at /tmp/maws-review/e2e-build/e2e/composer-live.spec.ts:46 includes the identical SCRATCH A READY marker in that prompt, so the terminal's input echo satisfies the purported reply check. With a slow model response, the helper sends /exit and eventually kills the process before a completed assistant turn, yet can persist the session as successfully seeded because it checks only for a transcript filename afterward.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#3",
+   "priority": "P2",
+   "title": "Keep the quit-test terminal busy until explicitly released",
+   "file": "/tmp/maws-review/e2e-build/e2e/c12-quit.spec.ts",
+   "lines": "93-95",
+   "comment": "/tmp/maws-review/e2e-build/e2e/c12-quit.spec.ts:94 starts sleep 30, but subsequently performs two quit interactions, several UI assertions, a screenshot, and a replay-settlement poll allowing another 30 seconds. If these operations take longer than the sleep, a correct app can quit automatically before the assertion that one terminal remains busy or before the explicit Ctrl-C. This creates an avoidable load-sensitive failure within the test's 120-second timeout.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#4",
+   "priority": "P2",
+   "title": "Give the live file probe exclusive ownership of its path",
+   "file": "/tmp/maws-review/e2e-build/e2e/code-tools-live.spec.ts",
+   "lines": "95-98",
+   "comment": "/tmp/maws-review/e2e-build/e2e/code-tools-live.spec.ts:96-98 unconditionally writes c8c-live-probe.txt in REPO_ROOT, without exclusive creation or an existence check. A pre-existing untracked file is truncated and subsequently deleted at :214; concurrent invocations also share that path. The cleanup try/finally starts only after launchMaws resolves, so a launch failure leaves the probe behind. A unique, exclusively created probe with cleanup established before launch avoids both failures.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#5",
+   "priority": "P2",
+   "title": "Bound the relay health check performed during test collection",
+   "file": "/tmp/maws-review/e2e-build/e2e/support/c7-live.ts",
+   "lines": "32-33",
+   "comment": "/tmp/maws-review/e2e-build/e2e/support/c7-live.ts:32 runs synchronous curl without either a curl deadline or a child-process timeout. /tmp/maws-review/e2e-build/e2e/composer-live.spec.ts invokes the gate at module scope, while /tmp/maws-review/e2e-build/playwright.config.ts specifies only per-test timeouts. A relay that accepts but never answers therefore stalls collection without that test timeout applying. A connection refusal instead throws from execFileSync, preventing the documented skip result.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-4#1",
+   "priority": "P3",
+   "title": "Keep bundled renderer libraries out of production dependencies",
+   "file": "/tmp/maws-review/e2e-build/package.json",
+   "lines": "39-44",
+   "comment": "/tmp/maws-review/e2e-build/package.json lists the renderer-only CodeMirror, diff-view, Lezer, and xterm libraries as production dependencies. /tmp/maws-review/e2e-build/electron.vite.config.ts bundles their renderer imports, while /tmp/maws-review/e2e-build/electron-builder.yml contains no dependency exclusions. Inspection of the installed packager confirms it adds dependency file sets separately from out/**, so these unused library trees also enter the application, including highlight.js files unaffected by the renderer alias. This is a real but low-priority packaging-size defect; the claimed exact 25 MiB was not independently measured.",
+   "sources": [
+    "scalpel-4"
+   ]
+  }
+ ],
+ "coverage": [
+  {
+   "finder": "sweep",
+   "lens": null,
+   "status": "ok",
+   "candidates": 2
+  },
+  {
+   "finder": "scalpel-1",
+   "lens": "This range is the test harness and build configuration of a shipped Electron app (MAWS at master c6b07d9a), not a change: judge it as it stands against docs/charter.md. E2E reliability (e2e/, test/support): timing waits, load sensitivity, order dependence and shared state between specs, and assertions that pass vacuously.",
+   "status": "ok",
+   "candidates": 5
+  },
+  {
+   "finder": "scalpel-2",
+   "lens": "This range is the build configuration of a shipped Electron app, not a change; judge it as it stands. Build and packaging (electron-builder.yml, electron.vite.config.ts, package.json, playwright, vitest and tsconfig files): Electron security posture (contextIsolation, sandbox, fuses, CSP, navigation and window.open), asar and entitlements, environment or secrets leaking into the bundle, and dev-only code that ships.",
+   "status": "ok",
+   "candidates": 0
+  },
+  {
+   "finder": "scalpel-3",
+   "lens": "This range is the test harness of a shipped app, not a change; judge it as it stands. The verify chain: what `pnpm verify` and the e2e groups do not cover relative to the shipped surfaces, and scripts/ and plugins/cua for anything that runs on the user's machine without their action.",
+   "status": "ok",
+   "candidates": 2
+  },
+  {
+   "finder": "scalpel-4",
+   "lens": "This range is the build configuration of a shipped Electron app, not a change; judge it as it stands. Dependencies: package.json and pnpm-lock.yaml for unused, duplicated or risky dependencies, and version pins that conflict with the Electron version in use.",
+   "status": "ok",
+   "candidates": 1
+  }
+ ],
+ "lenses": [
+  "This range is the test harness and build configuration of a shipped Electron app (MAWS at master c6b07d9a), not a change: judge it as it stands against docs/charter.md. E2E reliability (e2e/, test/support): timing waits, load sensitivity, order dependence and shared state between specs, and assertions that pass vacuously.",
+  "This range is the build configuration of a shipped Electron app, not a change; judge it as it stands. Build and packaging (electron-builder.yml, electron.vite.config.ts, package.json, playwright, vitest and tsconfig files): Electron security posture (contextIsolation, sandbox, fuses, CSP, navigation and window.open), asar and entitlements, environment or secrets leaking into the bundle, and dev-only code that ships.",
+  "This range is the test harness of a shipped app, not a change; judge it as it stands. The verify chain: what `pnpm verify` and the e2e groups do not cover relative to the shipped surfaces, and scripts/ and plugins/cua for anything that runs on the user's machine without their action.",
+  "This range is the build configuration of a shipped Electron app, not a change; judge it as it stands. Dependencies: package.json and pnpm-lock.yaml for unused, duplicated or risky dependencies, and version pins that conflict with the Electron version in use."
+ ],
+ "explanation": "confirmed: Strip inherited Git routing variables from fixture commands; Shell-quote the configurable scratch paths; Preserve hand-authored fixtures when refreshing usage data",
+ "target": {
+  "base": "base",
+  "baseCommit": "f4f70c20267139c81ece5ba54ca975cc19fe86cc",
+  "headCommit": "686dfdd6e8128da9c19b1fdcd0d5a61d16a7ff60",
+  "repo": "/tmp/maws-review/e2e-build"
+ },
+ "level": "max"
+}

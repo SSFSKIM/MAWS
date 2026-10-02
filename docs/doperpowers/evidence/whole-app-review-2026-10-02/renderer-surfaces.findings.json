@@ -1,0 +1,241 @@
+{
+ "verdict": "incorrect",
+ "findings": [
+  {
+   "id": "sweep#1",
+   "priority": "P2",
+   "title": "Strip git's tab delimiter before decoding patch paths",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/tools/code/review/review-model.ts",
+   "lines": "135-136",
+   "comment": "Reproduced with an actual git diff for `my notes.md`: git emits `+++ b/my notes.md\\t`, and splitPatch returns a path containing that trailing tab. In /tmp/maws-review/renderer-surfaces/src/renderer/src/tools/code/review/review-model.ts, gitScopeFiles consequently misses the numstat path and supplies empty hunks. ReviewShell does not fetch a replacement because those hunks are an empty array, not null.",
+   "sources": [
+    "sweep"
+   ]
+  },
+  {
+   "id": "sweep#2",
+   "priority": "P2",
+   "title": "Identify per-file reads by generation rather than key membership",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/tools/code/review/review-store.ts",
+   "lines": "174-177",
+   "comment": "Reproduced against createReviewStore: start a file read, complete a scope refresh, start the replacement file read, then resolve the replacement before the original. The displayed patch changes from NEW back to OLD. /tmp/maws-review/renderer-surfaces/src/renderer/src/tools/code/review/review-store.ts clears and re-adds the same fileLoads key, so membership does not establish ownership of the response.",
+   "sources": [
+    "sweep",
+    "scalpel-2",
+    "scalpel-3",
+    "scalpel-5"
+   ]
+  },
+  {
+   "id": "sweep#3",
+   "priority": "P2",
+   "title": "Restore the current terminal dimensions after a repaint nudge",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/terminal/registry.ts",
+   "lines": "548-552",
+   "comment": "In /tmp/maws-review/renderer-surfaces/src/renderer/src/terminal/registry.ts, attachAdopted schedules nudgeRepaint using the snapshot dimensions. Mounting can run fitNow and resize both emulator and PTY before the delayed callback restores only the PTY to the obsolete dimensions. Because entry.size already records the new pane size, subsequent unchanged fits do not repair the mismatch.",
+   "sources": [
+    "sweep",
+    "scalpel-5"
+   ]
+  },
+  {
+   "id": "sweep#4",
+   "priority": "P2",
+   "title": "Reveal the panel when reopening an existing log",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/tools/agents/log/LogTool.tsx",
+   "lines": "104-107",
+   "comment": "In /tmp/maws-review/renderer-surfaces/src/renderer/src/tools/agents/log/LogTool.tsx, reopening an existing log calls only panelHost.selectTab. Inspection of /tmp/maws-review/renderer-surfaces/src/renderer/src/panel/host.ts confirms selectTab changes selection/focus but never calls reveal, unlike addTool's activation path. Opening a log, collapsing the panel, and opening that same log again therefore leaves it hidden.",
+   "sources": [
+    "sweep",
+    "scalpel-3",
+    "scalpel-5"
+   ]
+  },
+  {
+   "id": "scalpel-1#1",
+   "priority": "P2",
+   "title": "Handle rewind targets that were folded into another turn",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/reduce.ts",
+   "lines": "699-701",
+   "comment": "Reproduced a consumed next steer followed by a rewind targeting its UUID: hidden remains null, and both the steer and subsequent answer remain visible. In /tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/reduce.ts, fold removes the steer's own turn, while rewind looks exclusively for that removed turn ID in order. The editable steer also passes the rewind picker's target filter.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#2",
+   "priority": "P2",
+   "title": "Apply retractions to every affected turn",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/reduce.ts",
+   "lines": "602-604",
+   "comment": "Reproduced retracting the prompts and answers of turns two and three: turn two disappears, but turn three's prompt and answer remain visible. /tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/reduce.ts retains the retraction on only the first owning turn, and deriveTurn collects retracted UUIDs only from that turn's events. The filesystem ChainFollower can emit removed chains spanning multiple turns.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#3",
+   "priority": "P2",
+   "title": "Filter retracted tool messages before deriving their rows",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/derive.ts",
+   "lines": "323-327",
+   "comment": "Reproduced retracting a completed Bash call's assistant and result UUIDs: its derived summary still reports one command/tool call. In /tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/derive.ts, the tool.use branch constructs tool records without consulting dropped(), unlike text and ordinary user rows. This independently affects a correctly routed single-turn retraction and is not a duplicate of the multi-turn routing defect.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#4",
+   "priority": "P2",
+   "title": "Associate each rewind boundary with its own hidden branch",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/reduce.ts",
+   "lines": "707",
+   "comment": "Reproduced completing and rewinding turn two, then completing and rewinding replacement turn three. Revealing history shows only the replacement; the original branch is no longer accessible. /tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/reduce.ts overwrites state.hidden, while /tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/derive.ts uses that same latest branch for every retained rewind boundary's count and disclosure.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#5",
+   "priority": "P2",
+   "title": "Stop treating unfinished blocks as live after their turn closes",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/derive.ts",
+   "lines": "250-253",
+   "comment": "Reproduced a thinking delta followed by process.exited: the turn is closed, but its thinking row has live:true and durationMs:null. /tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/derive.ts determines liveness solely from block.completed; closeUnended does not complete those blocks. ThinkingRow therefore continues choosing its live, animated presentation for stopped work.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-2#1",
+   "priority": "P2",
+   "title": "Use own-property lookups for question text keys",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/request-card/answers.ts",
+   "lines": "28-31",
+   "comment": "Direct calls to answerOf(EMPTY_DRAFT, question) throw for question texts constructor, toString, and __proto__. /tmp/maws-review/renderer-surfaces/src/renderer/src/request-card/answers.ts spreads inherited values from the ordinary-object selected dictionary instead of treating these keys as unanswered. QuestionBody calls answerOf during render, so such a valid engine-provided question cannot be answered normally.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-2#2",
+   "priority": "P2",
+   "title": "Provide link actions when rendering standalone markdown",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/tools/code/viewer/MarkdownView.tsx",
+   "lines": "19-21",
+   "comment": "In /tmp/maws-review/renderer-surfaces/src/renderer/src/tools/code/viewer/MarkdownView.tsx, Markdown is rendered without a TranscriptProvider; FileViewer supplies none either. /tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/view/context.tsx defaults to NO_ACTIONS, not DEFAULT_ACTIONS. Consequently TranscriptLink prevents normal web navigation and invokes a no-op, and path-chip buttons also do nothing. Standalone plan Markdown has the same missing action context.",
+   "sources": [
+    "scalpel-2",
+    "scalpel-5"
+   ]
+  },
+  {
+   "id": "scalpel-3#1",
+   "priority": "P2",
+   "title": "Avoid recreating editor cache entries after their tabs close",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/tools/code/viewer/CodeView.tsx",
+   "lines": "103-105",
+   "comment": "The cleanup paths support the reported leak. SessionFile's parent effect releases mount ownership; pruning in /tmp/maws-review/renderer-surfaces/src/renderer/src/tools/code/viewer/viewer-store.ts then removes the closed tab's entry and saved view. The subsequent child cleanup in /tmp/maws-review/renderer-surfaces/src/renderer/src/tools/code/viewer/CodeView.tsx calls the allocating viewState(tabId) accessor and stores its EditorState again. Future pruning iterates entries, not orphaned views, so repeated file-tab closures retain documents outside the cache bound.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-3#2",
+   "priority": "P2",
+   "title": "Copy each child's event list only once per batch",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/reduce.ts",
+   "lines": "367-371",
+   "comment": "Reproduced synthetic child-history hydration through applyEvents: 20,000 child events took approximately 568 ms and 40,000 took approximately 2,935 ms on this machine. /tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/model/reduce.ts spreads the entire child event array for each event even within one Batch, producing quadratic copying before virtualization can help.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-4#1",
+   "priority": "P2",
+   "title": "Wait for child backfill before applying its terminal event",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/source/ipc.ts",
+   "lines": "312-313",
+   "comment": "Reproduced an empty incomplete fs.agentEvents snapshot: childSource returns only the parent's completion, and later disk history creates a turn that remains open. /tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/source/ipc.ts discards complete and appends ended prematurely. /tmp/maws-review/renderer-surfaces/src/engine-host/fs/service.ts explicitly permits incomplete snapshots after the backfill wait and delivers the remainder through event batches.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-4#2",
+   "priority": "P2",
+   "title": "Reacquire the child disk follower after its parent relaunches",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/source/ipc.ts",
+   "lines": "283-287",
+   "comment": "A disk child source in /tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/source/ipc.ts subscribes only to session.eventBatch, filters out live-form child history, and never reacquires its follower on a parent relaunch. Both resume and index live-status handling issue fs.unfollow with agentId:null; /tmp/maws-review/renderer-surfaces/src/engine-host/fs/service.ts confirms that this stops every child follower. A mounted child therefore loses its history producer when its parent relaunches unless another consumer happens to restart that follower.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-4#3",
+   "priority": "P2",
+   "title": "Refresh cached child completion when an agent resumes",
+   "file": "/tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/source/ipc.ts",
+   "lines": "294-296",
+   "comment": "Reproduced finishing a child, receiving a later start for that same agent, and requesting another snapshot: the source reads no new parent history and appends the old completion, closing the resumed turn. /tmp/maws-review/renderer-surfaces/src/renderer/src/transcript/source/ipc.ts keeps ended indefinitely after disk provenance is chosen. The same-agent finish/resume sequence is present at sequences 517 and 548 in /tmp/maws-review/renderer-surfaces/spikes/protocol-probe/fixtures/pass3/relay-to-child.jsonl. This remains a defect even when the disk follower itself is active.",
+   "sources": [
+    "scalpel-4"
+   ]
+  }
+ ],
+ "coverage": [
+  {
+   "finder": "sweep",
+   "lens": null,
+   "status": "ok",
+   "candidates": 4
+  },
+  {
+   "finder": "scalpel-1",
+   "lens": "This range is a whole subsystem of a shipped Electron app (MAWS at master c6b07d9a), not a change: judge the code as it stands against docs/charter.md (contracts X1-X8, decisions D-1-D-20) and the engine fixtures under spikes/protocol-probe/fixtures. Transcript model (transcript/model and views): ordering under streaming partials, interleaved tool calls, rewinds, compaction and plugin events, and cases where the shown history diverges from what the engine recorded.",
+   "status": "ok",
+   "candidates": 5
+  },
+  {
+   "finder": "scalpel-2",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Tool renderers and request cards (tools/, request-card/): the permission and AskUserQuestion flows, defaults when a request expires or the session ends, and unsafe rendering of engine- or model-provided text (HTML, markdown, ANSI, links, file paths, shell commands).",
+   "status": "ok",
+   "candidates": 3
+  },
+  {
+   "finder": "scalpel-3",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Performance: very long transcripts, virtualization and memoization, terminal/ xterm buffers, panel/ and widgets/ re-render churn, and listeners, timers or subscriptions that are never removed.",
+   "status": "ok",
+   "candidates": 4
+  },
+  {
+   "finder": "scalpel-4",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Harness fidelity (harness/, test-support/): where the fake engine is more permissive or more orderly than the real wire in spikes/protocol-probe/fixtures, so that tests pass on behaviour the engine does not have.",
+   "status": "ok",
+   "candidates": 3
+  },
+  {
+   "finder": "scalpel-5",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Test quality across the area: tests that restate the implementation and production paths no test exercises; name only the gaps that would let a real defect through.",
+   "status": "ok",
+   "candidates": 4
+  }
+ ],
+ "lenses": [
+  "This range is a whole subsystem of a shipped Electron app (MAWS at master c6b07d9a), not a change: judge the code as it stands against docs/charter.md (contracts X1-X8, decisions D-1-D-20) and the engine fixtures under spikes/protocol-probe/fixtures. Transcript model (transcript/model and views): ordering under streaming partials, interleaved tool calls, rewinds, compaction and plugin events, and cases where the shown history diverges from what the engine recorded.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Tool renderers and request cards (tools/, request-card/): the permission and AskUserQuestion flows, defaults when a request expires or the session ends, and unsafe rendering of engine- or model-provided text (HTML, markdown, ANSI, links, file paths, shell commands).",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Performance: very long transcripts, virtualization and memoization, terminal/ xterm buffers, panel/ and widgets/ re-render churn, and listeners, timers or subscriptions that are never removed.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Harness fidelity (harness/, test-support/): where the fake engine is more permissive or more orderly than the real wire in spikes/protocol-probe/fixtures, so that tests pass on behaviour the engine does not have.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Test quality across the area: tests that restate the implementation and production paths no test exercises; name only the gaps that would let a real defect through."
+ ],
+ "explanation": "confirmed: Strip git's tab delimiter before decoding patch paths; Identify per-file reads by generation rather than key membership; Restore the current terminal dimensions after a repaint nudge",
+ "target": {
+  "base": "base",
+  "baseCommit": "e3c2b4e746481dc3b8980c909fc97f16b9f432fa",
+  "headCommit": "2520f49df6dcb5c79ab2c2027bd974fe35de5e91",
+  "repo": "/tmp/maws-review/renderer-surfaces"
+ },
+ "level": "max"
+}

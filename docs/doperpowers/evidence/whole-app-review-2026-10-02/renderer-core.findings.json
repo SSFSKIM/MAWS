@@ -1,0 +1,260 @@
+{
+ "verdict": "incorrect",
+ "findings": [
+  {
+   "id": "sweep#1",
+   "priority": "P1",
+   "title": "Check the live draft before discarding an unstarted tab",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/sessions/setup-actions.ts",
+   "lines": "216-220",
+   "comment": "In /tmp/maws-review/renderer-core/src/renderer/src/sessions/setup-actions.ts, beforeCloseUnstarted checks only the persisted intent draft. The writer in /tmp/maws-review/renderer-core/src/renderer/src/composer/editor/drafts.ts waits 750 ms after the last change. An independent probe with nonempty text pending in that writer returned 'closed' and issued session.intent.discard before any draft save. Closing immediately after typing therefore bypasses confirmation; the later unmount flush cannot protect the discarded intent.",
+   "sources": [
+    "sweep",
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "sweep#2",
+   "priority": "P2",
+   "title": "Count document attachments when checking draft emptiness",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/sessions/setup-actions.ts",
+   "lines": "193-198",
+   "comment": "The independent probe passed an attachment-only document through the actual draftOf serializer and confirmed isEmptyDraft returned true. /tmp/maws-review/renderer-core/src/renderer/src/composer/editor/drafts.ts stores image/PDF attachments under doc.attrs.attachments, whereas /tmp/maws-review/renderer-core/src/renderer/src/sessions/setup-actions.ts checks only top-level file mentions and document content nodes. Closing a persisted screenshot-only or PDF-only unstarted draft consequently discards it without confirmation.",
+   "sources": [
+    "sweep",
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "sweep#3",
+   "priority": "P2",
+   "title": "Validate the edited payload before issuing a rewind",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/composer/resubmit-seam.ts",
+   "lines": "337-342",
+   "comment": "In /tmp/maws-review/renderer-core/src/renderer/src/composer/resubmit-seam.ts, sendInlineEdit reaches issueRewind without serializing or prechecking the replacement. Only after session.rewind succeeds does sendEdited invoke submitSerialized and its size check. The textarea in /tmp/maws-review/renderer-core/src/renderer/src/composer/InlineEdit.tsx has no size restriction. A replacement exceeding the 1 MiB text bound therefore rewinds the conversation before being refused, leaving rewound_awaiting_send rather than preserving the original conversation.",
+   "sources": [
+    "sweep"
+   ]
+  },
+  {
+   "id": "sweep#4",
+   "priority": "P2",
+   "title": "Serialize queued-message edits as literal prompts",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/composer/queue/QueueEdit.tsx",
+   "lines": "68-69",
+   "comment": "In /tmp/maws-review/renderer-core/src/renderer/src/composer/queue/QueueEdit.tsx, save calls serializeDraft without literal:true and passes only s.content to onSave. An independent serializer probe confirmed '# Heading' becomes 'Heading' and '! x' becomes 'x'. Because this path edits an ordinary queued prompt rather than dispatching the detected memory/bash mode, these prefixes are silently lost.",
+   "sources": [
+    "sweep",
+    "scalpel-2",
+    "scalpel-5"
+   ]
+  },
+  {
+   "id": "sweep#5",
+   "priority": "P2",
+   "title": "Restore the main region when navigating to an attention item",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/attention/navigation.ts",
+   "lines": "18",
+   "comment": "An independent attention.navigate probe selected the destination session while leaving panel.maximized true. /tmp/maws-review/renderer-core/src/renderer/src/attention/navigation.ts calls openTab, which changes only the main layout. /tmp/maws-review/renderer-core/src/renderer/src/app/regions.ts then keeps main at zero width, and Shell makes it inert. Notification navigation and Next Needs-you therefore leave the requested session invisible while the panel is maximized.",
+   "sources": [
+    "sweep"
+   ]
+  },
+  {
+   "id": "sweep#6",
+   "priority": "P2",
+   "title": "Keep app-wide notices visible when the panel is maximized",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/app/Shell.tsx",
+   "lines": "33-40",
+   "comment": "In /tmp/maws-review/renderer-core/src/renderer/src/app/Shell.tsx, both ToastHost and MainArea are inside the main section that becomes zero-width, clipped and inert when the panel is maximized. MainArea contains BannerHost. Consequently the six-second attention fallback toast can expire unseen, and the Cancel/Quit now actions created by /tmp/maws-review/renderer-core/src/renderer/src/lifecycle/quit-wait.ts are unavailable. The documented placement is advisory, not a requirement to hide app-wide notices in this state.",
+   "sources": [
+    "sweep"
+   ]
+  },
+  {
+   "id": "scalpel-2#1",
+   "priority": "P2",
+   "title": "Preserve attachments that arrive during an in-flight submission",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/composer/editor/controller.ts",
+   "lines": "287-289",
+   "comment": "An independent real-editor probe started a pending submission, attached a picked PDF, then accepted the submission: the submitted content excluded the PDF, but acceptance cleared it from the editor. /tmp/maws-review/renderer-core/src/renderer/src/composer/editor/controller.ts guards submit with busy but does not guard attachPicked/addFiles or their asynchronous completions. /tmp/maws-review/renderer-core/src/renderer/src/composer/plus-menu/PlusMenu.tsx also leaves file picking enabled. Read-only text editing does not protect these mutation paths.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-2#2",
+   "priority": "P2",
+   "title": "Keep submission state alive across composer remounts",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/composer/editor/controller.ts",
+   "lines": "271-277",
+   "comment": "An independent real-editor probe submitted a persisted prompt, unmounted while onSubmit remained pending, remounted the same session, and submitted the restored prompt again; onSubmit was called twice. In /tmp/maws-review/renderer-core/src/renderer/src/composer/editor/controller.ts, busy and completion ownership are mount-local. /tmp/maws-review/renderer-core/src/renderer/src/main/Pane.tsx explicitly unmounts inactive tab content. Started-session submissions have no shared lock in Composer, so remounting permits duplicate sends before acceptance reconciles the draft.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-3#1",
+   "priority": "P2",
+   "title": "Provide archive recovery for sessions without a project",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/sessions/ArchivedSessionsDialog.tsx",
+   "lines": "25-27",
+   "comment": "In /tmp/maws-review/renderer-core/src/renderer/src/sessions/ArchivedSessionsDialog.tsx, archived records must match a concrete projectId, and /tmp/maws-review/renderer-core/src/renderer/src/sessions/actions.ts opens this dialog only through a project action. Other sessions has no project menu. Archiving closes its tabs, and the sidebar, palette, Resume picker and Overview exclude archived records. Thus an archived projectId:null session has no in-app unarchive route despite ArchiveDialog promising recovery through Archived sessions.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-3#2",
+   "priority": "P2",
+   "title": "Bound the palette's mounted session results",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/palette/CommandPalette.tsx",
+   "lines": "120-123",
+   "comment": "An independent React-Compiler-enabled happy-dom probe mounted 3,279 session items when opening the empty-query palette, taking approximately 764 ms synchronously, excluding browser layout. /tmp/maws-review/renderer-core/src/renderer/src/palette/CommandPalette.tsx maps every matching record to a cmdk item with session/attention subscriptions; viewport height does not bound mounting. This concretely stalls global navigation for a large indexed workspace. Capping or virtualizing displayed results can preserve full-index searching.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-3#4",
+   "priority": "P2",
+   "title": "Handle hidden projects in the tab strip's reveal action",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/main/TabStrip.tsx",
+   "lines": "192-194",
+   "comment": "In /tmp/maws-review/renderer-core/src/renderer/src/main/TabStrip.tsx, ProjectLabel renders an enabled reveal button whenever the project record exists, including hidden projects. /tmp/maws-review/renderer-core/src/renderer/src/sidebar/reveal.ts only expands and requests focus; Sidebar continues filtering hidden projects out. Since removing a project preserves its open tabs, clicking the retained project's advertised reveal action cannot reveal its row. This needs hidden-state-aware behavior, not necessarily automatic restoration.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-4#1",
+   "priority": "P2",
+   "title": "Restore focus when dismissing the command palette",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/palette/CommandPalette.tsx",
+   "lines": "65-69",
+   "comment": "An independent component probe focused an input, opened the palette, then pressed Escape; focus ended on body. /tmp/maws-review/renderer-core/src/renderer/src/palette/CommandPalette.tsx has neither Dialog.Trigger nor onCloseAutoFocus. The installed Radix implementation prevents default restoration and focuses only triggerRef, which is absent here. /tmp/maws-review/renderer-core/src/renderer/src/sessions/Sheet.tsx uses the same triggerless modal pattern. Dismissing without selecting an action therefore loses the original keyboard position.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-4#2",
+   "priority": "P2",
+   "title": "Transfer focus after closing a tab through the shell action",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/app/shell-actions.ts",
+   "lines": "33-36",
+   "comment": "In /tmp/maws-review/renderer-core/src/renderer/src/app/shell-actions.ts, tab.close only calls requestCloseTab. That function mutates layout without transferring DOM focus. /tmp/maws-review/renderer-core/src/renderer/src/main/TabStrip.tsx restores focus only when its own Delete/Backspace handler sets the refocus record. Consequently Cmd+W on a focused tab or its content removes the focused node and leaves body focused; pane-scoped Ctrl+Tab then has no owning pane.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-4#3",
+   "priority": "P2",
+   "title": "Move keyboard focus into the selected settings section",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/settings-tab/SettingsView.tsx",
+   "lines": "33-36",
+   "comment": "In /tmp/maws-review/renderer-core/src/renderer/src/settings-tab/SettingsView.tsx, show changes the active marker and calls scrollIntoView without moving focus. All five sections remain mounted after the navigation buttons, and their headings are not programmatically focusable. Activating Appearance by keyboard therefore leaves Tab advancing to Notifications and then Engine controls, not Appearance. Traversing those earlier controls scrolls away from the section the user selected.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-4#4",
+   "priority": "P2",
+   "title": "Reject printable shortcuts for app-wide renderer actions",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/settings-tab/keymap.ts",
+   "lines": "85-88",
+   "comment": "An independent captureChord probe accepted bare S for composer.stop. /tmp/maws-review/renderer-core/src/renderer/src/settings-tab/keymap.ts restricts unmodified character shortcuts only for menu actions. In /tmp/maws-review/renderer-core/src/renderer/src/keymap/dispatcher.ts, app scope bypasses text-entry refusal, and ComposerAppKeys registers Stop app-wide. Ordinary 's' typing is consequently prevented even when Stop does nothing, and interrupts the focused session when it is busy.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-4#5",
+   "priority": "P2",
+   "title": "Check every generated tab-selection shortcut for conflicts",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/settings-tab/keymap.ts",
+   "lines": "57-61",
+   "comment": "An independent captureChord probe accepted Cmd+Shift+1 for tab.select while attention.next held Cmd+Shift+5. /tmp/maws-review/renderer-core/src/renderer/src/settings-tab/keymap.ts expands existing tab.select bindings but not the candidate binding. /tmp/maws-review/renderer-core/src/main/menu.ts expands the accepted candidate through digit 9, producing two actions with Cmd+Shift+5. Conflict checking must cover the complete generated candidate set.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-5#2",
+   "priority": "P2",
+   "title": "Wait for the Git watch to settle before releasing it",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/composer/frame/git-watch.ts",
+   "lines": "30-33",
+   "comment": "In /tmp/maws-review/renderer-core/src/renderer/src/composer/frame/git-watch.ts, cleanup invokes git.unwatch immediately, independently of the pending git.watch promise. /tmp/maws-review/renderer-core/src/main/git/watcher.ts awaits status and repository reads before registering its owner count; unwatch returns immediately if that entry is absent. Unmounting or changing directory during those reads therefore leaves the subsequently registered watch unreleased until window release. The delayed release in /tmp/maws-review/renderer-core/src/renderer/src/stores/git.ts already handles this ordering correctly.",
+   "sources": [
+    "scalpel-5"
+   ]
+  },
+  {
+   "id": "scalpel-5#3",
+   "priority": "P2",
+   "title": "Invalidate draft restoration after the editor has been changed",
+   "file": "/tmp/maws-review/renderer-core/src/renderer/src/composer/editor/controller.ts",
+   "lines": "194-198",
+   "comment": "An independent real-editor probe held draft loading pending, inserted and cleared new text, then resolved the load with an old draft; the old text was restored. /tmp/maws-review/renderer-core/src/renderer/src/composer/editor/controller.ts checks only current emptiness and mount liveness, not whether the user changed or submitted the editor since loading began. An accepted send that empties the box before the reply has the same stale-restoration failure.",
+   "sources": [
+    "scalpel-5"
+   ]
+  }
+ ],
+ "coverage": [
+  {
+   "finder": "sweep",
+   "lens": null,
+   "status": "ok",
+   "candidates": 6
+  },
+  {
+   "finder": "scalpel-1",
+   "lens": "This range is a whole subsystem of a shipped Electron app (MAWS at master c6b07d9a), not a change: judge the code as it stands against docs/charter.md (contracts X1-X8, decisions D-1-D-20, sections 4 and 5). State model and persistence in stores/ (layout-model, layout, tab sets per project, replace rules, fromV1 migration), sessions/ and sidebar/derive: invariants that event order can violate, stale derived data, and silent writes of the user's layout or settings.",
+   "status": "ok",
+   "candidates": 2
+  },
+  {
+   "finder": "scalpel-2",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Composer submit semantics (one Send: send when idle, steer at the next step during a turn, Stop on an empty box, Resume on a paused queue; attachments; Add directory): engine states the composer misreads, double-sends, lost input, and controls enabled when the action cannot succeed.",
+   "status": "ok",
+   "candidates": 3
+  },
+  {
+   "finder": "scalpel-3",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Sidebar and session lists (sidebar/, sessions/, overview/, palette/, the Resume picker): correctness of tree derivation, reveal and hidden-project handling, and cost with hundreds of sessions and dozens of projects, including work redone on every render.",
+   "status": "ok",
+   "candidates": 4
+  },
+  {
+   "finder": "scalpel-4",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Keyboard, focus and accessibility across keymap/, palette/, settings-tab/, app/ and main/: focus traps, actions reachable only by mouse, ARIA on custom controls, and styling that bypasses design tokens or assumes the light theme.",
+   "status": "ok",
+   "candidates": 5
+  },
+  {
+   "finder": "scalpel-5",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Test quality across the area: tests that restate the implementation, mocked stores or IPC that hide real behaviour, and production paths no test exercises; name only the gaps that would let a real defect through.",
+   "status": "ok",
+   "candidates": 3
+  }
+ ],
+ "lenses": [
+  "This range is a whole subsystem of a shipped Electron app (MAWS at master c6b07d9a), not a change: judge the code as it stands against docs/charter.md (contracts X1-X8, decisions D-1-D-20, sections 4 and 5). State model and persistence in stores/ (layout-model, layout, tab sets per project, replace rules, fromV1 migration), sessions/ and sidebar/derive: invariants that event order can violate, stale derived data, and silent writes of the user's layout or settings.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Composer submit semantics (one Send: send when idle, steer at the next step during a turn, Stop on an empty box, Resume on a paused queue; attachments; Add directory): engine states the composer misreads, double-sends, lost input, and controls enabled when the action cannot succeed.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Sidebar and session lists (sidebar/, sessions/, overview/, palette/, the Resume picker): correctness of tree derivation, reveal and hidden-project handling, and cost with hundreds of sessions and dozens of projects, including work redone on every render.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Keyboard, focus and accessibility across keymap/, palette/, settings-tab/, app/ and main/: focus traps, actions reachable only by mouse, ARIA on custom controls, and styling that bypasses design tokens or assumes the light theme.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Test quality across the area: tests that restate the implementation, mocked stores or IPC that hide real behaviour, and production paths no test exercises; name only the gaps that would let a real defect through."
+ ],
+ "explanation": "confirmed: Check the live draft before discarding an unstarted tab; Count document attachments when checking draft emptiness; Validate the edited payload before issuing a rewind",
+ "target": {
+  "base": "base",
+  "baseCommit": "7b57b500f70e0c0e59cfad65da8bc900fbc3703d",
+  "headCommit": "d6edd7fffb97d359608a95f24be5a052dc5ccdec",
+  "repo": "/tmp/maws-review/renderer-core"
+ },
+ "level": "max"
+}

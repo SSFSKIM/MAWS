@@ -1,0 +1,272 @@
+{
+ "verdict": "incorrect",
+ "findings": [
+  {
+   "id": "sweep#1",
+   "priority": "P1",
+   "title": "Compare the expected ref atomically when deleting a branch",
+   "file": "/tmp/maws-review/main-process/src/main/git/worktrees.ts",
+   "lines": "221",
+   "comment": "Reproduced through WorktreeService.deleteBranch in /tmp/maws-review/main-process/src/main/git/worktrees.ts: advancing the branch immediately before the unconditional branch -D deleted the new, unmerged tip while returning { deleted: true, wasMerged: true }, with acknowledgeUnmerged false. The earlier head comparison does not protect the destructive operation against concurrent ref updates.",
+   "sources": [
+    "sweep"
+   ]
+  },
+  {
+   "id": "scalpel-1#1",
+   "priority": "P1",
+   "title": "Disable executable fsmonitor hooks for read-only Git calls",
+   "file": "/tmp/maws-review/main-process/src/main/git/runner.ts",
+   "lines": "62-64",
+   "comment": "Reproduced using createGitRunner from /tmp/maws-review/main-process/src/main/git/runner.ts and the production status arguments: a repository core.fsmonitor hook executed and wrote a marker despite the sanitized environment. /tmp/maws-review/main-process/src/renderer/src/composer/frame/git-watch.ts requests status on mount without a trust gate. Opening a repository with executable fsmonitor configuration can therefore execute code before workspace trust is accepted.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#2",
+   "priority": "P1",
+   "title": "Create export temporary files exclusively without following symlinks",
+   "file": "/tmp/maws-review/main-process/src/main/files/save-text.ts",
+   "lines": "22-26",
+   "comment": "Reproduced through saveTextFile in /tmp/maws-review/main-process/src/main/files/save-text.ts: a pre-created predictable temporary-path symlink caused an unrelated file outside the selected export directory to be overwritten. The function returned success and the selected destination became the renamed symlink. Ordinary writeFile follows the existing link; exclusive temporary-file creation is missing.",
+   "sources": [
+    "scalpel-1",
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "sweep#2",
+   "priority": "P2",
+   "title": "Clear stale self ownership when the engine host exits",
+   "file": "/tmp/maws-review/main-process/src/main/index/source.ts",
+   "lines": "108-110",
+   "comment": "In /tmp/maws-review/main-process/src/main/index/source.ts, host-state changes clear only live; foldHolders clears foreign ownership, and digest explicitly skips self-held records. /tmp/maws-review/main-process/src/main/index/sessions.ts preserves self in setHolder, while resetSelfHolders is called only during SessionService startup. After a host crash and empty replacement registry, affected records therefore remain self-held, suppressing Resume and digest refresh.",
+   "sources": [
+    "sweep",
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "sweep#3",
+   "priority": "P2",
+   "title": "Retire ephemeral attention when the engine host is lost",
+   "file": "/tmp/maws-review/main-process/src/main/attention/service.ts",
+   "lines": "189-191",
+   "comment": "/tmp/maws-review/main-process/src/main/attention/service.ts retires broker and held-message items on session exit/forget events, but has no host-loss subscription. /tmp/maws-review/main-process/src/main/hosts/supervisor.ts synthesizes PTY exits on host loss, not engine session exits. A crash during an approval leaves obsolete actionable attention whose request is subsequently sent to a replacement host that cannot answer it.",
+   "sources": [
+    "sweep",
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "sweep#4",
+   "priority": "P2",
+   "title": "Include accepted setup-intent directories in file-list roots",
+   "file": "/tmp/maws-review/main-process/src/main/index.ts",
+   "lines": "190-193",
+   "comment": "The roots callback in /tmp/maws-review/main-process/src/main/index.ts includes records and projects, not setup intents. /tmp/maws-review/main-process/src/main/git/ls-files.ts consequently rejects an additional directory accepted on an unstarted chat when it lies outside those roots. /tmp/maws-review/main-process/src/renderer/src/composer/mentions/AtMenu.tsx queries these additional directories in path mode and converts the refusal to an empty result, breaking mentions before first send.",
+   "sources": [
+    "sweep"
+   ]
+  },
+  {
+   "id": "sweep#5",
+   "priority": "P2",
+   "title": "Resolve engine defaults from the captured shell environment",
+   "file": "/tmp/maws-review/main-process/src/main/index.ts",
+   "lines": "237",
+   "comment": "/tmp/maws-review/main-process/src/main/index.ts gives SessionService captureShellEnvironment() but resolves userDefaults, settings.userEngineDefaults and prompt history from process.env. The capture implementation does not update process.env. A Dock launch whose shell exports a different CLAUDE_CONFIG_DIR therefore reads defaults from the wrong directory and can explicitly launch with auto instead of that directory's configured plan mode.",
+   "sources": [
+    "sweep",
+    "scalpel-5"
+   ]
+  },
+  {
+   "id": "sweep#6",
+   "priority": "P2",
+   "title": "Seed the notifier after persisted attention has loaded",
+   "file": "/tmp/maws-review/main-process/src/main/index.ts",
+   "lines": "319-322",
+   "comment": "Reproduced with the actual attention service and notifier plus an Electron stand-in: loading one persisted error generated one notification. /tmp/maws-review/main-process/src/main/index.ts installs the notifier before attention.ready; /tmp/maws-review/main-process/src/main/window.ts creates the window with show:false until ready-to-show. Hydration therefore arrives after the notifier seeds an empty seen set and while the window is unfocused, re-announcing old failures.",
+   "sources": [
+    "sweep"
+   ]
+  },
+  {
+   "id": "scalpel-1#3",
+   "priority": "P2",
+   "title": "Refuse renderer calls to the main-only engine configuration command",
+   "file": "/tmp/maws-review/main-process/src/main/ipc/router.ts",
+   "lines": "105-106",
+   "comment": "/tmp/maws-review/main-process/src/shared/ipc/names/engine.ts exposes engine.configure to preload, and /tmp/maws-review/main-process/src/main/ipc/router.ts forwards every validated host-owned command without an internal-only check. A renderer can therefore reconfigure the host independently of settings and the coordinator, leaving settings.engineApplied and launchGate's cached verdict describing a different configuration. This also violates the main-only sender contract documented in the settings schema.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-2#1",
+   "priority": "P2",
+   "title": "Acquire a profile lock before opening persisted stores",
+   "file": "/tmp/maws-review/main-process/src/main/index.ts",
+   "lines": "88-96",
+   "comment": "There is no single-instance/profile lock before persisted stores open in /tmp/maws-review/main-process/src/main/index.ts. Reproduced using two actual stores from /tmp/maws-review/main-process/src/main/settings/store.ts: after one saved a binaryPath, the other's unrelated notification patch restored binaryPath to null. Two app processes sharing userData can silently overwrite each other's settings and cached layout; atomic rename does not prevent these lost updates.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-2#2",
+   "priority": "P2",
+   "title": "Include persisted setup intents in the panel existence check",
+   "file": "/tmp/maws-review/main-process/src/main/index.ts",
+   "lines": "139-140",
+   "comment": "/tmp/maws-review/main-process/src/main/index.ts admits panel writes only for sessions.model.record(id), whereas /tmp/maws-review/main-process/src/renderer/src/panel/host.ts also recognizes retained setup intents. Tools added to an unstarted chat therefore appear locally but their panel.<id> writes fail in /tmp/maws-review/main-process/src/main/layout/store.ts and do not survive reopening. Its removal cleanup likewise checks records alone.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-2#3",
+   "priority": "P2",
+   "title": "Preserve migrated settings when their rewrite fails",
+   "file": "/tmp/maws-review/main-process/src/main/settings/store.ts",
+   "lines": "61-65",
+   "comment": "Reproduced in /tmp/maws-review/main-process/src/main/settings/store.ts with valid version-1 dark-theme settings and a forced temporary-file write failure: opening the store returned the light-theme defaults. Migration parsing and persistence share one catch, so a rewrite failure discards successfully migrated preferences in memory; a later successful patch can overwrite the original configuration with those defaults.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-2#4",
+   "priority": "P2",
+   "title": "Restore a line boundary before appending to torn history",
+   "file": "/tmp/maws-review/main-process/src/main/history/prompt-history.ts",
+   "lines": "74-76",
+   "comment": "Reproduced through PromptHistory in /tmp/maws-review/main-process/src/main/history/prompt-history.ts: after an incomplete JSON tail, append successfully saved a new prompt but list returned no entries. Appending without restoring a newline combines the new record with the torn fragment, and jsonLines drops both as one malformed line. This loses the first otherwise successful post-recovery prompt.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-2#5",
+   "priority": "P2",
+   "title": "Journal worktree creation before running git",
+   "file": "/tmp/maws-review/main-process/src/main/sessions/setup.ts",
+   "lines": "160",
+   "comment": "/tmp/maws-review/main-process/src/main/sessions/setup.ts records progress.worktree only after worktrees.add finishes. If the app crashes after Git creates the checkout but before that write, /tmp/maws-review/main-process/src/main/sessions/recovery.ts merely marks the intent interrupted and does not discover the checkout. Retry then fails the existing-path/branch checks in intent-rules.ts, and retained-worktree actions have no recorded resource to resolve.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-3#1",
+   "priority": "P2",
+   "title": "Recognize programs that replace the terminal's shell",
+   "file": "/tmp/maws-review/main-process/src/pty-host/foreground.ts",
+   "lines": "33-35",
+   "comment": "Reproduced with foregroundOf from /tmp/maws-review/main-process/src/pty-host/foreground.ts: process sleep with a successful ps result equal to the original shell PID returns busy:false. An exec-replaced shell retains that PID/process group, so this normal probe path misclassifies active programs and bypasses terminal-close and quit-idle protection. The process-name check only occurs after the successful-probe early return.",
+   "sources": [
+    "scalpel-3",
+    "scalpel-5"
+   ]
+  },
+  {
+   "id": "scalpel-3#2",
+   "priority": "P2",
+   "title": "Confirm terminal termination before reporting a successful close",
+   "file": "/tmp/maws-review/main-process/src/pty-host/table.ts",
+   "lines": "216-219",
+   "comment": "Exercised the actual PTY table in /tmp/maws-review/main-process/src/pty-host/table.ts with a shell ignoring HUP: kill returned while the process and live table entry remained. The method sends SIGHUP without waiting for exit or escalating. /tmp/maws-review/main-process/src/renderer/src/terminal/registry.ts disposes the terminal on that successful command response, leaving a surviving process without its visible terminal.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-3#4",
+   "priority": "P2",
+   "title": "Terminate git descendants when a command times out",
+   "file": "/tmp/maws-review/main-process/src/main/git/runner.ts",
+   "lines": "60-64",
+   "comment": "Reproduced with the actual runner in /tmp/maws-review/main-process/src/main/git/runner.ts: worktree add timed out with GitTimeoutError after ten seconds, but its post-checkout hook process, which ignored SIGTERM, was still alive. The timeout kills only the immediate Git child; surviving descendants can continue acting on the checkout after MAWS reports failure and begins recovery.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-3#5",
+   "priority": "P2",
+   "title": "Override relative diff output for repository-wide answers",
+   "file": "/tmp/maws-review/main-process/src/main/git/service.ts",
+   "lines": "73-77",
+   "comment": "Reproduced using GitService.diff in /tmp/maws-review/main-process/src/main/git/service.ts with diff.relative=true: querying from sub/ returned only child.txt, omitting a simultaneously staged root.txt and losing the repository-relative sub/ prefix. Neither diff invocation overrides relative output, while status normalizes to repoRoot, so the app receives inconsistent and incomplete repository change information.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-4#3",
+   "priority": "P2",
+   "title": "Release session visibility when its renderer disappears",
+   "file": "/tmp/maws-review/main-process/src/main/sessions/index.ts",
+   "lines": "83",
+   "comment": "/tmp/maws-review/main-process/src/main/sessions/index.ts handles session.setVisible without using the sender context or registering renderer-lifecycle cleanup. /tmp/maws-review/main-process/src/main/index/source.ts retains that visibility and marks subsequent transcript advances seen. If a renderer crashes while displaying a session, it cannot send its cleanup notification, so output continues being marked read while no renderer can display it.",
+   "sources": [
+    "scalpel-4"
+   ]
+  }
+ ],
+ "coverage": [
+  {
+   "finder": "sweep",
+   "lens": null,
+   "status": "ok",
+   "candidates": 6
+  },
+  {
+   "finder": "scalpel-1",
+   "lens": "This range is a whole subsystem of a shipped Electron app (MAWS at master c6b07d9a), not a change: judge the code as it stands against docs/charter.md (contracts X1-X8, decisions D-1-D-20). The renderer-to-main boundary (src/preload, src/shared/ipc schemas, src/main/ipc, csp): per-channel validation, what a compromised renderer could make main do (paths, shell and Terminal launches such as `claude update`, file writes, process spawns), and schema drift between sender and handler.",
+   "status": "ok",
+   "candidates": 3
+  },
+  {
+   "finder": "scalpel-2",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Persisted state and migrations (settings through v8, layout tab sets v2, regions v3, the sessions index, history, projects): upgrade paths from every earlier version, loss or duplication on a crash mid-write, concurrent writers, and any write of the user's settings or layout that the user did not ask for.",
+   "status": "ok",
+   "candidates": 5
+  },
+  {
+   "finder": "scalpel-3",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. External processes and services (git/, files/, usage/, gateway/, hosts/, src/pty-host, the ClaudeUsage relay at 127.0.0.1:8641): timeouts, failure paths, zombie processes, unbounded output buffers, and the rule that the relay and ~/.claude are read-only to MAWS.",
+   "status": "ok",
+   "candidates": 5
+  },
+  {
+   "finder": "scalpel-4",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. App lifecycle (lifecycle/, main index, hosts, attention, widgets): startup ordering, window and session teardown on quit, supervision of the engine host and pty host, and synchronous work on the main process that stalls the UI.",
+   "status": "ok",
+   "candidates": 3
+  },
+  {
+   "finder": "scalpel-5",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Test quality across the area: tests that restate the implementation, mocks that hide real Electron or filesystem behaviour, and production paths no test exercises; name only the gaps that would let a real defect through.",
+   "status": "ok",
+   "candidates": 2
+  }
+ ],
+ "lenses": [
+  "This range is a whole subsystem of a shipped Electron app (MAWS at master c6b07d9a), not a change: judge the code as it stands against docs/charter.md (contracts X1-X8, decisions D-1-D-20). The renderer-to-main boundary (src/preload, src/shared/ipc schemas, src/main/ipc, csp): per-channel validation, what a compromised renderer could make main do (paths, shell and Terminal launches such as `claude update`, file writes, process spawns), and schema drift between sender and handler.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Persisted state and migrations (settings through v8, layout tab sets v2, regions v3, the sessions index, history, projects): upgrade paths from every earlier version, loss or duplication on a crash mid-write, concurrent writers, and any write of the user's settings or layout that the user did not ask for.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. External processes and services (git/, files/, usage/, gateway/, hosts/, src/pty-host, the ClaudeUsage relay at 127.0.0.1:8641): timeouts, failure paths, zombie processes, unbounded output buffers, and the rule that the relay and ~/.claude are read-only to MAWS.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. App lifecycle (lifecycle/, main index, hosts, attention, widgets): startup ordering, window and session teardown on quit, supervision of the engine host and pty host, and synchronous work on the main process that stalls the UI.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Test quality across the area: tests that restate the implementation, mocks that hide real Electron or filesystem behaviour, and production paths no test exercises; name only the gaps that would let a real defect through."
+ ],
+ "explanation": "confirmed: Compare the expected ref atomically when deleting a branch; Disable executable fsmonitor hooks for read-only Git calls; Create export temporary files exclusively without following symlinks",
+ "target": {
+  "base": "base",
+  "baseCommit": "65ad4937f3c54a63e499aceb9f8d320f7ce0c4f4",
+  "headCommit": "7de9db7d8a8c36b1dfdc765eb3028a94a0a457ff",
+  "repo": "/tmp/maws-review/main-process"
+ },
+ "level": "max"
+}

@@ -1,0 +1,257 @@
+{
+ "verdict": "incorrect",
+ "findings": [
+  {
+   "id": "scalpel-2#1",
+   "priority": "P1",
+   "title": "Cancel clear-and-implement continuations when interrupting",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/session.ts",
+   "lines": "286-291",
+   "comment": "Independently reproduced through EngineSession: stage clear-and-implement, successfully interrupt with holdEngineQueued enabled, then deliver the interrupted turn's result. /tmp/maws-review/engine-host/src/engine-host/session.ts pauses only MessageQueue; the separately held ClearAndImplementSequence remains armed. The session wrote both '/clear' and the implementation prompt after Stop while queue.isPaused remained true, starting work the user had just stopped.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-2#2",
+   "priority": "P1",
+   "title": "Close launch admission before collecting sessions for shutdown",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/process-table.ts",
+   "lines": "311-313",
+   "comment": "In /tmp/maws-review/engine-host/src/engine-host/process-table.ts, shutdown() snapshots rows before awaiting stops, and reserve() has no shutdown admission check. Independently reproduced a second reservation during the first session's stop: shutdown returned stopped: 1, forced: 0 while the second row remained ready. This is reachable through launcher.ts, whose asynchronous preflight precedes reserve(); main quits after the successful shutdown response without orderly termination of the omitted engine.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-2#3",
+   "priority": "P1",
+   "title": "Terminate owned descendants when forcibly stopping an engine",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/transport.ts",
+   "lines": "308-309",
+   "comment": "In /tmp/maws-review/engine-host/src/engine-host/transport.ts, spawnEngine() does not create an isolated process group and both kill() and the line-budget handler signal only child.pid. Independently spawned a harmless descendant through a real transport, killed the parent with SIGKILL, and awaited transport.exited: the descendant was still alive and required explicit cleanup by the reproduction. A forced session stop can therefore leave owned tool or server processes running after the host reports exit.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "sweep#2",
+   "priority": "P2",
+   "title": "Stop the implementation sequence when clearing is cancelled",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/session-clear.ts",
+   "lines": "71-72",
+   "comment": "In /tmp/maws-review/engine-host/src/engine-host/session-clear.ts, commandLifecycle() maps cancelled, discarded, and refused to the same clear_done trigger as completed; advance() then sends the implementation prompt. Independently exercised all three unsuccessful states after staging a plan: each produced '/clear' followed by 'Implement this plan'. The implementation therefore proceeds even though clearing did not succeed.",
+   "sources": [
+    "sweep"
+   ]
+  },
+  {
+   "id": "sweep#3",
+   "priority": "P2",
+   "title": "Support editing persisted queues without a live session object",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/ipc.ts",
+   "lines": "279-280",
+   "comment": "In /tmp/maws-review/engine-host/src/engine-host/ipc.ts, session.queue.list explicitly loads saved entries when no ProcessTable row exists, but edit and remove call sessionOf(), which throws unknown session in that situation. /tmp/maws-review/engine-host/src/renderer/src/composer/queue/QueueList.tsx exposes both actions without requiring a live process, and Composer.tsx renders the list for existing sessions. After a host restart, retained prompts are visible but cannot be edited or deleted until a session object is created.",
+   "sources": [
+    "sweep"
+   ]
+  },
+  {
+   "id": "sweep#4",
+   "priority": "P2",
+   "title": "Detect writes from foreign processes using the SDK entrypoint",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/fs/service.ts",
+   "lines": "689-694",
+   "comment": "The ownership predicates disagree. /tmp/maws-review/engine-host/src/engine-host/fs/holders.ts requires both entrypoint sdk-ts and a process-table PID for ownership, and its tests explicitly classify another sdk-ts PID as foreign. However, /tmp/maws-review/engine-host/src/engine-host/fs/service.ts excludes all sdk-ts transcript records from foreign-write detection, while chain-follower.ts likewise treats them all as owned. Another SDK client can therefore write a contested session without triggering fs.foreignWrite, the event that starts yielding in /tmp/maws-review/engine-host/src/main/sessions/yield.ts.",
+   "sources": [
+    "sweep"
+   ]
+  },
+  {
+   "id": "scalpel-1#1",
+   "priority": "P2",
+   "title": "Exclude skipped safeguards from successful review verdicts",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/normalizer.ts",
+   "lines": "274-278",
+   "comment": "Independently replayed seq 120 of /tmp/maws-review/engine-host/spikes/protocol-probe/fixtures/pass3/plan-outcomes.jsonl through Normalizer. Its tool-use entry contains only type: skipped, yet /tmp/maws-review/engine-host/src/engine-host/normalizer.ts emitted tool.safeguard with verdict not_flagged and lane server. The renderer counts this as evaluated and labels it reviewed, falsely claiming a safeguard review that the recorded engine frame explicitly skipped.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#2",
+   "priority": "P2",
+   "title": "Preserve final subagent usage from task notifications",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/normalizer-system.ts",
+   "lines": "151-155",
+   "comment": "The local-agent task_notification mapping in /tmp/maws-review/engine-host/src/engine-host/normalizer-system.ts discards usage, and the subagent.finished event has no usage field. Independently replayed /tmp/maws-review/engine-host/spikes/protocol-probe/fixtures/subagent.jsonl through the normalizer and task graph: the first completed agent retained 10,899 tokens and 1,436 ms, despite its completion frame reporting 11,515 tokens and 2,788 ms. The completed-agent drill-in consequently displays stale usage.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-2#4",
+   "priority": "P2",
+   "title": "Complete exit bookkeeping even when the journal remains unwritable",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/session.ts",
+   "lines": "927-931",
+   "comment": "In /tmp/maws-review/engine-host/src/engine-host/session.ts, handleExit() performs a fallible final journal write before assigning exitInfo, setting exited, closing the journal, and resolving session.exited. Its caller catches the exception only to log it. Independently reproduced ENOSPC on all subsequent journal rows followed by process exit: the session stayed ready, its exit promise never settled, and the journal was not closed. Since ProcessTable reserves until lifecycle exited, the dead session remains unavailable for relaunch; an earlier journal-triggered termination can similarly leave it exiting.",
+   "sources": [
+    "scalpel-2",
+    "sweep"
+   ]
+  },
+  {
+   "id": "scalpel-2#5",
+   "priority": "P2",
+   "title": "Propagate stdout EOF independently of process exit",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/transport.ts",
+   "lines": "184-190",
+   "comment": "In /tmp/maws-review/engine-host/src/engine-host/transport.ts, frames.end() is called only from finish(), which depends on process error/exit/close; stdout has no end handler. Independently ran a real child that ended stdout but stayed alive: frames.next() remained pending. Consequently, the stdout-EOF recovery in /tmp/maws-review/engine-host/src/engine-host/session.ts cannot execute while that process has a blocked stdin write, defeating its intended bounded cleanup.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-3#1",
+   "priority": "P2",
+   "title": "Preserve complete transcript records larger than eight MiB",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/fs/chain-follower.ts",
+   "lines": "137-141",
+   "comment": "Independently passed a complete transcript containing a nine-MiB base64 document through /tmp/maws-review/engine-host/src/engine-host/fs/chain-follower.ts. sendContentRefusal() accepted the content, but the follower's one-MiB reads crossed MAX_PARTIAL_BYTES before reaching the newline: it skipped two fragments, emitted no user message, and reported the assistant's missing parent. The partial-tail guard therefore drops supported, valid records already fully present on disk.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-3#2",
+   "priority": "P2",
+   "title": "Parse spill paths without stopping at whitespace",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/normalizer-support.ts",
+   "lines": "23-28",
+   "comment": "Independently evaluated a spill notice whose path contains 'Library/Application Support'. /tmp/maws-review/engine-host/src/engine-host/normalizer-support.ts returned only '/Users/owner/Library/Application', and SPILL_MARKER in /tmp/maws-review/engine-host/src/engine-host/fs/backfill.ts returned no path. Both whitespace-limited regexes break the full-output action for valid paths with spaces when no structured persistedOutputPath is supplied.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-3#3",
+   "priority": "P2",
+   "title": "Avoid rereading workflow journals for progress-only updates",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/fs/workflows.ts",
+   "lines": "31-35",
+   "comment": "In /tmp/maws-review/engine-host/src/engine-host/fs/service.ts, every observed workflow snapshot change queues syncWorkflows(), which calls WorkflowReader.read() and consumes only run.snapshot. /tmp/maws-review/engine-host/src/engine-host/fs/workflows.ts nevertheless readFile()s, splits, and parses the entire journal on every call, without an unchanged-file check or incremental cache. A growing workflow repeatedly reprocesses all historical results for progress-only changes, producing increasing host I/O, allocations, and synchronous JSON-parsing work unrelated to the requested snapshot.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-4#1",
+   "priority": "P2",
+   "title": "Protect pending control operations from budget eviction",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/session.ts",
+   "lines": "352-353",
+   "comment": "Independently started an unanswered generate_session_title request in a ready EngineSession. In /tmp/maws-review/engine-host/src/engine-host/session.ts, status remained busy: false, pendingRequests: 0, keepAlive: [] despite outstanding ControlClient requests; budget evaluation then selected that session for release. Control-request out rows do not advance lastEventSeq, so the existing quiet baseline can remain valid. Memory-pressure eviction can thus abort a user-requested control operation that is still running.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-4#2",
+   "priority": "P2",
+   "title": "Include blocked stdin writes in control deadlines",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/rpc.ts",
+   "lines": "134-135",
+   "comment": "In /tmp/maws-review/engine-host/src/engine-host/rpc.ts, exchange() awaits writer.write() before arming the control timeout. Independently held that write with a 20 ms timeout: after 80 ms the request remained pending and unsettled; releasing the write then sent the mutation, with timeout occurring only afterward. A blocked stdin or an earlier backpressured write therefore bypasses the advertised command deadline, and an outer router timeout does not prevent the mutation from being delivered later.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-4#3",
+   "priority": "P2",
+   "title": "Update session directory state after a successful cwd change",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/ipc.ts",
+   "lines": "358-360",
+   "comment": "The session.setCwd handler in /tmp/maws-review/engine-host/src/engine-host/ipc.ts only returns controls.setCwd(); it does not apply the successful response's cwd to session state. The trust-no-attestation fixture shows success without a replacement system/init. Independently performed successful set_cwd followed by session.bash('pwd'): /tmp/maws-review/engine-host/src/engine-host/session.ts still reported the launch directory and placed that same old cwd in bash_command, directing subsequent Bash work to the wrong directory.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-5#1",
+   "priority": "P2",
+   "title": "Honor the paused state when sending into an empty queue",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/queue.ts",
+   "lines": "118-120",
+   "comment": "Independently exercised recover(), pause('interrupt'), then send() on an empty MessageQueue. /tmp/maws-review/engine-host/src/engine-host/queue.ts returned disposition sent and wrote the prompt while isPaused remained true, because submitNow checks busy and queuedCount but not paused. This directly contradicts the renderer's 'Joins the paused queue; Resume sends it' behavior and can execute a new prompt before the user resumes the queue.",
+   "sources": [
+    "scalpel-5"
+   ]
+  },
+  {
+   "id": "scalpel-5#2",
+   "priority": "P2",
+   "title": "Reconcile sidecars when rescanning the projects root",
+   "file": "/tmp/maws-review/engine-host/src/engine-host/fs/service.ts",
+   "lines": "528-530",
+   "comment": "In /tmp/maws-review/engine-host/src/engine-host/fs/service.ts, a projects rescan runs transcript discovery and relocateFollows(), which only relocates and pokes transcript followers. It never invokes listAgents(), syncWorkflows(), or workflow invalidation; the periodic reconciliation also only pokes followers. Since watcher.ts uses rescan after startup/reopening or a missing filename, a subagent or workflow sidecar change missed in those intervals remains absent from the relevant events and cached views until a later specific file event or explicit read.",
+   "sources": [
+    "scalpel-5"
+   ]
+  }
+ ],
+ "coverage": [
+  {
+   "finder": "sweep",
+   "lens": null,
+   "status": "ok",
+   "candidates": 4
+  },
+  {
+   "finder": "scalpel-1",
+   "lens": "This range is a whole subsystem of a shipped app (MAWS at master c6b07d9a), not a change: judge the code as it stands against docs/charter.md (contracts X1-X8, decisions D-1-D-20) and the engine fixtures under spikes/protocol-probe/fixtures. Wire fidelity: for every frame the normalizer, controls and system decoders accept or the outbound writer emits, check the shape against the fixtures and the conformance suite, and flag decoders that accept shapes no fixture shows or drop fields a fixture carries.",
+   "status": "ok",
+   "candidates": 2
+  },
+  {
+   "finder": "scalpel-2",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Process and stream lifecycle across launch, launcher, transport, session-stream, queue, outbound-writer, rewind, session and process-table: races between stop, steer, rewind and a turn in flight, backpressure, orphaned engine processes, partial JSON lines, and state left behind when the engine exits mid-turn.",
+   "status": "ok",
+   "candidates": 5
+  },
+  {
+   "finder": "scalpel-3",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Everything that reads ~/.claude or ~/.claude.json (fs/, store/, journal, models-cache, memory-append, session-ladder, binary-info): the invariant that MAWS never writes there, tolerance to partial writes and very large JSONL, path handling, and work proportional to file size on hot or repeated paths.",
+   "status": "ok",
+   "candidates": 3
+  },
+  {
+   "finder": "scalpel-4",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Permission and hook surfaces (grants, broker, budget, host-hooks, session-start-hooks, bash-mode, controls): whether a renderer-originated decision or an engine-originated request can escalate beyond what the user approved, and whether defaults are safe when a decision times out, the renderer is gone, or two sessions race.",
+   "status": "ok",
+   "candidates": 3
+  },
+  {
+   "finder": "scalpel-5",
+   "lens": "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Test quality across the area: tests that restate the implementation, mocks that hide the real wire, and production paths no test exercises; name only the gaps that would let a real defect through.",
+   "status": "ok",
+   "candidates": 2
+  }
+ ],
+ "lenses": [
+  "This range is a whole subsystem of a shipped app (MAWS at master c6b07d9a), not a change: judge the code as it stands against docs/charter.md (contracts X1-X8, decisions D-1-D-20) and the engine fixtures under spikes/protocol-probe/fixtures. Wire fidelity: for every frame the normalizer, controls and system decoders accept or the outbound writer emits, check the shape against the fixtures and the conformance suite, and flag decoders that accept shapes no fixture shows or drop fields a fixture carries.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Process and stream lifecycle across launch, launcher, transport, session-stream, queue, outbound-writer, rewind, session and process-table: races between stop, steer, rewind and a turn in flight, backpressure, orphaned engine processes, partial JSON lines, and state left behind when the engine exits mid-turn.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Everything that reads ~/.claude or ~/.claude.json (fs/, store/, journal, models-cache, memory-append, session-ladder, binary-info): the invariant that MAWS never writes there, tolerance to partial writes and very large JSONL, path handling, and work proportional to file size on hot or repeated paths.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Permission and hook surfaces (grants, broker, budget, host-hooks, session-start-hooks, bash-mode, controls): whether a renderer-originated decision or an engine-originated request can escalate beyond what the user approved, and whether defaults are safe when a decision times out, the renderer is gone, or two sessions race.",
+  "This range is a whole subsystem of a shipped app, not a change; judge the code as it stands. Test quality across the area: tests that restate the implementation, mocks that hide the real wire, and production paths no test exercises; name only the gaps that would let a real defect through."
+ ],
+ "explanation": "confirmed: Cancel clear-and-implement continuations when interrupting; Close launch admission before collecting sessions for shutdown; Terminate owned descendants when forcibly stopping an engine",
+ "target": {
+  "base": "base",
+  "baseCommit": "75b1ed310e5170e96164f30701064fd72b8a12d2",
+  "headCommit": "78332d8f4edf0904918f3f000fb236fae0522c68",
+  "repo": "/tmp/maws-review/engine-host"
+ },
+ "level": "max"
+}
