@@ -23,15 +23,21 @@ export const useSettingsValue = () => useSettings((s) => s.state?.settings ?? nu
 export const TEXT_ACTION = 'rounded-sm px-1.5 py-0.5 text-ui-sm whitespace-nowrap text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 export const INPUT = 'h-7 w-full min-w-0 rounded-sm border border-border-strong bg-bg px-2 text-ui-sm text-fg outline-accent focus-visible:outline-2';
 
+// W9 (H1): in a Settings view narrower than 32rem (the view is the `settings` query container, SettingsView.tsx) the
+// row stacks in one column, the label over the control and the note under the control, as Codex's settings rows stack
+// when narrow (readable/chatgpt-26.928.40906/renderer/app/app-shared-360504a28a87.js:380386-380388).
+const SETTING_ROW = 'grid min-h-[34px] grid-cols-[168px_minmax(0,1fr)] items-center gap-x-3 gap-y-1 py-1 text-ui-sm @max-lg/settings:grid-cols-1';
+const SETTING_NOTE = 'col-start-2 -mt-0.5 mb-0.5 text-ui-sm leading-normal text-fg-muted @max-lg/settings:col-start-1';
+
 export function Setting({ label, note, children }: { label: string; note?: ReactNode; children: ReactNode }) {
   const id = useId();
   return (
-    <div role="group" aria-labelledby={id} className="grid min-h-[34px] grid-cols-[168px_minmax(0,1fr)] items-center gap-x-3 gap-y-1 py-1 text-ui-sm">
+    <div role="group" aria-labelledby={id} className={SETTING_ROW}>
       <span id={id} className="text-fg-muted">
         {label}
       </span>
       <div className="flex min-w-0 flex-wrap items-center gap-2">{children}</div>
-      {note !== undefined && note !== null && <div className="col-start-2 -mt-0.5 mb-0.5 text-ui-sm leading-normal text-fg-muted">{note}</div>}
+      {note !== undefined && note !== null && <div className={SETTING_NOTE}>{note}</div>}
     </div>
   );
 }

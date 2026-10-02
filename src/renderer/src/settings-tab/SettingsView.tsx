@@ -53,45 +53,53 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
     setActive(current);
   };
 
+  // W9 (H1): the view is the `settings` query container and never scrolls sideways. Narrower than 32rem (a pane of a
+  // 50/50 split at the default window is about 300px) the index becomes a top row of section links, its title and
+  // footer set aside, and every row stacks (parts.tsx `Setting`, KeymapSection's rows); wider, nothing changes.
   return (
-    <div className="grid h-full min-h-0 grid-cols-[148px_minmax(0,1fr)] bg-bg text-ui text-fg">
-      <nav aria-label="Settings sections" className="flex flex-col border-r border-border bg-bg-raised px-2 py-3.5">
-        <div className="px-2 pb-2.5 text-ui font-semibold">{INDEX.title}</div>
-        {ORDER.map((s) => (
-          <button
-            key={s}
-            type="button"
-            aria-current={active === s ? 'true' : undefined}
-            onClick={() => show(s)}
-            className={`rounded-sm px-2 py-1.5 text-left text-ui-sm outline-accent focus-visible:outline-2 ${active === s ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover'}`}
-          >
-            {SECTIONS[s]}
-          </button>
-        ))}
-        <p className="m-0 px-2 pt-3.5 text-ui-sm leading-normal text-fg-muted">{INDEX.footer}</p>
-      </nav>
-      <div ref={body} onScroll={onScroll} className="min-h-0 overflow-y-auto px-5 pt-2 pb-3">
-        {settings === null ? (
-          <p className="text-ui-sm text-fg-muted">{INDEX.reading}</p>
-        ) : (
-          <div className="max-w-[760px]">
-            <Section id="engine">
-              <EngineSection settings={settings} />
-            </Section>
-            <Section id="gateway">
-              <GatewaySection settings={settings} />
-            </Section>
-            <Section id="keyboard">
-              <KeymapSection keymap={settings.keymap} />
-            </Section>
-            <Section id="appearance">
-              <AppearanceSection settings={settings} />
-            </Section>
-            <Section id="notifications">
-              <NotificationsSection settings={settings} />
-            </Section>
-          </div>
-        )}
+    <div className="@container/settings h-full min-h-0 bg-bg text-ui text-fg">
+      <div className="grid h-full min-h-0 grid-cols-[148px_minmax(0,1fr)] @max-lg/settings:grid-cols-1 @max-lg/settings:grid-rows-[auto_minmax(0,1fr)]">
+        <nav
+          aria-label="Settings sections"
+          className="flex flex-col border-r border-border bg-bg-raised px-2 py-3.5 @max-lg/settings:flex-row @max-lg/settings:flex-wrap @max-lg/settings:gap-0.5 @max-lg/settings:border-r-0 @max-lg/settings:border-b @max-lg/settings:py-1.5"
+        >
+          <div className="px-2 pb-2.5 text-ui font-semibold @max-lg/settings:hidden">{INDEX.title}</div>
+          {ORDER.map((s) => (
+            <button
+              key={s}
+              type="button"
+              aria-current={active === s ? 'true' : undefined}
+              onClick={() => show(s)}
+              className={`rounded-sm px-2 py-1.5 text-left text-ui-sm outline-accent focus-visible:outline-2 ${active === s ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover'}`}
+            >
+              {SECTIONS[s]}
+            </button>
+          ))}
+          <p className="m-0 px-2 pt-3.5 text-ui-sm leading-normal text-fg-muted @max-lg/settings:hidden">{INDEX.footer}</p>
+        </nav>
+        <div ref={body} onScroll={onScroll} data-settings-body className="min-h-0 overflow-x-hidden overflow-y-auto px-5 pt-2 pb-3 @max-lg/settings:px-3">
+          {settings === null ? (
+            <p className="text-ui-sm text-fg-muted">{INDEX.reading}</p>
+          ) : (
+            <div className="max-w-[760px]">
+              <Section id="engine">
+                <EngineSection settings={settings} />
+              </Section>
+              <Section id="gateway">
+                <GatewaySection settings={settings} />
+              </Section>
+              <Section id="keyboard">
+                <KeymapSection keymap={settings.keymap} />
+              </Section>
+              <Section id="appearance">
+                <AppearanceSection settings={settings} />
+              </Section>
+              <Section id="notifications">
+                <NotificationsSection settings={settings} />
+              </Section>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
