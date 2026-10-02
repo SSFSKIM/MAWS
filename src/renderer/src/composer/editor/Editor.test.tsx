@@ -8,7 +8,7 @@ import type { Draft } from '@shared/ipc/schema/session';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetCatalogStore } from '../../stores/catalog';
-import { prefillComposer, resetComposerStore } from '../../stores/composer';
+import { prefillComposer, resetComposerStore, useComposerStore } from '../../stores/composer';
 import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
@@ -447,4 +447,74 @@ it.each([false, true])('ignores a PDF read started before submission that finish
   expect(handle.current!.doc().attrs?.attachments).toEqual([]);
   if (!finishSendFirst) await act(async () => answer(true));
   expect(handle.current!.serialize().empty).toBe(true);
+});
+
+describe('no-op Enter retains pending draft work', () => {
+  it('restores a stored draft after empty Enter during loading', async () => {
+    let loaded!: (draft: Draft | null) => void;
+    const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn() };
+    const handle = createRef<EditorHandle>();
+    const onSubmit = vi.fn(async () => true);
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} />);
+    fireEvent.keyDown(contentOf(container), { key: 'Enter' });
+    expect(onSubmit).not.toHaveBeenCalled();
+    await act(async () => loaded({ doc: docOf([paragraph(textNode('stored thought'))]), attachments: [], updatedAt: '2026-10-02T00:00:00.000Z' }));
+    expect(handle.current!.serialize().display).toBe('stored thought');
+  });
+
+  it('keeps a PDF read that finishes after empty Enter', async () => {
+    let read!: (bytes: ArrayBuffer) => void;
+    const file = new File(['abc'], 'pending.pdf', { type: 'application/pdf' });
+    vi.spyOn(file, 'arrayBuffer').mockImplementation(() => new Promise((resolve) => { read = resolve; }));
+    const handle = createRef<EditorHandle>();
+    const onSubmit = vi.fn(async () => true);
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={drafts(null).port} client={client} handle={handle} onSubmit={onSubmit} />);
+    fireEvent.drop(container.querySelector('[data-key-sink]')!, { dataTransfer: { files: [file] } });
+    expect(file.arrayBuffer).toHaveBeenCalledOnce();
+    fireEvent.keyDown(contentOf(container), { key: 'Enter' });
+    await act(async () => read(new Uint8Array([97, 98, 99]).buffer));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(handle.current!.doc().attrs?.attachments).toEqual([expect.objectContaining({ name: 'pending.pdf', data: 'YWJj' })]);
+  });
+});
+
+it.each([
+  [true, 'mounted'], [false, 'mounted'],
+  [true, 'remounted'], [false, 'remounted'],
+  [true, 'unmounted'], [false, 'unmounted'],
+] as const)('defers a prefill through submission acceptance=%s while %s and persists it', async (accepted, lifecycle) => {
+  let answer!: (accepted: boolean) => void;
+  const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+  const onPrefill = vi.fn();
+  let stored: Draft | null = null;
+  const port: DraftPort = { load: async () => stored, save: (draft) => { stored = draft; } };
+  const handle = createRef<EditorHandle>();
+  const view = () => <Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} onPrefill={onPrefill} />;
+  let mounted = render(view());
+  await act(async () => handle.current!.insertText('original submission'));
+  act(() => {
+    handle.current!.submit();
+    expect(onSubmit).toHaveBeenCalledOnce(); // C10 must acquire its start gate synchronously.
+  });
+  const prefill = { text: 'incoming edit' };
+  act(() => prefillComposer(APP, prefill));
+  const whilePending = handle.current!.serialize().display;
+  const queued = useComposerStore.getState().prefills.get(APP);
+  if (lifecycle !== 'mounted') mounted.unmount();
+  if (lifecycle === 'remounted') mounted = render(view());
+  const takenBeforeCompletion = onPrefill.mock.calls.length;
+  await act(async () => answer(accepted));
+  if (lifecycle === 'unmounted') mounted = render(view());
+  await act(async () => {});
+  const afterCompletion = handle.current!.serialize().display;
+  mounted.unmount(); // Flush the replacement draft, then prove persistence on another mount.
+  mounted = render(view());
+  await act(async () => {});
+  expect(whilePending).toBe('original submission');
+  expect(queued).toEqual(prefill);
+  expect(takenBeforeCompletion).toBe(0);
+  expect(afterCompletion).toBe('incoming edit');
+  expect(handle.current!.serialize().display).toBe('incoming edit');
+  expect(onPrefill).toHaveBeenCalledExactlyOnceWith(prefill);
+  expect(useComposerStore.getState().prefills.has(APP)).toBe(false);
 });

@@ -229,6 +229,8 @@ export class EditorController {
 
   // A prefill for this session (Edit prompt, edit-and-resubmit, C10's hand-back) replaces the document.
   takePrefill(): void {
+    // Leave the replacement queued until the session-owned submission releases its document.
+    if (this.busy || submissions.has(this.inputs.appSessionId)) return;
     const taken = takePrefill(this.inputs.appSessionId);
     if (!taken) return;
     this.nav = { index: null, draft: null };
@@ -246,10 +248,10 @@ export class EditorController {
     const editor = this.editor;
     const { appSessionId, sessionId, cwd, disabled } = this.inputs;
     if (!editor || disabled !== null || this.busy || submissions.has(appSessionId)) return;
-    this.revision += 1;
-    this.attachmentEpoch += 1;
     const s = serializeDraft(editor.getJSON(), { sessionId, cwd });
     if (s.empty) return;
+    this.revision += 1;
+    this.attachmentEpoch += 1;
     // C11 start: a typed `/<name> <args>` naming a registered widget is the widget's (a registered widget wins over the
     // headless text path): an argument the widget resolves fully applies through the widget's own control path with no
     // widget shown, and otherwise the widget opens with its argument, as choosing the row does. The document and its
@@ -327,10 +329,12 @@ export class EditorController {
     this.busy = false;
     this.view.setBusy(false);
     this.editor?.setEditable(this.inputs.disabled === null);
-    if (!accepted) return;
-    this.nav = { index: null, draft: null };
-    this.setDoc(emptyDoc(), { silently: true, caret: focused ? 'end' : null });
-    void this.refreshHistory();
+    if (accepted) {
+      this.nav = { index: null, draft: null };
+      this.setDoc(emptyDoc(), { silently: true, caret: focused ? 'end' : null });
+      void this.refreshHistory();
+    }
+    this.takePrefill();
   }
 
   // Replaces the document; with a caret, also takes focus there at once (Tiptap's own focus waits a frame, and a key
