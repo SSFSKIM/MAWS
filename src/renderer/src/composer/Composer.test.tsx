@@ -483,6 +483,16 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(invoked('session.listModels')).toHaveLength(1)); // the mode menu reads the models as it opens
   });
 
+  // W10 (C10): "model matters a bit more": the model chip toward the middle, the context ring at the outermost edge
+  it('orders the toolbar + · location · mode … model · context ring, the ring last', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    const toolbar = within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools' });
+    await waitFor(() => expect(within(toolbar).getByRole('button', { name: /^Context window/ })).toBeTruthy());
+    const labels = within(toolbar).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? '');
+    expect(labels).toEqual(['Add files, photos or commands', expect.stringMatching(/^Location /), expect.stringMatching(/^Permission mode /), expect.stringMatching(/^Model /), expect.stringMatching(/^Context window/)]);
+  });
+
   // W10 (C9): on an unstarted tab Add directory… patches the intent, and the project row lists the directories read-only
   it('adds a directory to an unstarted tab’s intent from the "+" menu, listed in the project row’s tooltip and menu', async () => {
     const stub = stubIntent({ additionalDirectories: ['/work/other'] });
