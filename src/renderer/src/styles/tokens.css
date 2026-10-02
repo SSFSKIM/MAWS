@@ -14,6 +14,9 @@
   --accent: #c9663f; --accent-soft: rgba(201,102,63,0.14);
   --success: #1f8f55; --warning: #b86a1a; --danger: #c93b3b; --info: #3b6fd1;
   --diff-add-bg: rgba(31,143,85,0.14); --diff-del-bg: rgba(201,59,59,0.12);
+  /* W8 (T1): the light sweep over a live thinking label, Codex's `#ffffffbf` in either theme (its cadenced shimmer,
+     chatgpt-26.928.40906 css/app-initial-2e28cd4bbe72.css:8681) */
+  --shimmer-highlight: rgba(255,255,255,0.75);
 
   --font-ui: -apple-system, "SF Pro Text", Inter, system-ui, sans-serif;
   --font-prose: -apple-system, "SF Pro Text", Inter, system-ui, sans-serif;

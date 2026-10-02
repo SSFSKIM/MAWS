@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useTranscriptStore } from '../../../stores/transcript';
 import { loadEventFixture } from '../../../../../../test/support/fixtures';
 import { api, BASH_RESULT, builder, uuid } from '../../model/test-events';
 import type { Row } from '../../model/rows';
@@ -49,7 +50,7 @@ describe('hook notice row (W1)', () => {
     const store = await storeWith(b.events);
     renderRow(rowOf(store.rows(), 'thinking'), { storeKey: store.key });
     expect(screen.queryByRole('button')).toBeNull();
-    expect(screen.getByText('Thinking')).toBeTruthy();
+    expect(screen.getByText(/^Thinking · \d+s$/)).toBeTruthy();
   });
 });
 
@@ -63,7 +64,7 @@ describe('thinking row', () => {
     const store = await storeWith(b.events);
     const live = rowOf(store.rows(), 'thinking');
     const view = renderRow(live, { storeKey: store.key });
-    const toggle = screen.getByRole('button', { name: 'Thinking' });
+    const toggle = screen.getByRole('button', { name: /^Thinking · \d+s$/ });
     fireEvent.click(toggle);
     act(() => store.push([delta(' the path')]));
     expect(view.container.textContent).toContain('Checking the path');
@@ -73,6 +74,70 @@ describe('thinking row', () => {
     view.rerenderRow(rowOf(store.rows(), 'thinking'));
     expect(screen.getByRole('button', { name: 'Thought for 8s' }).getAttribute('aria-expanded')).toBe('true'); // the disclosure survived
     expect(view.container.textContent).toContain('Checking the path.');
+  });
+});
+
+// W8 (T1): the CLI's words and colour while the block streams, under Codex's shimmer.
+describe('live thinking label', () => {
+  beforeEach(() => vi.useFakeTimers({ now: Date.parse('2026-09-28T10:00:05.000Z'), toFake: ['Date', 'setInterval', 'clearInterval'] }));
+  afterEach(() => vi.useRealTimers());
+
+  const streaming = () => {
+    const b = builder();
+    b.turn('u1');
+    const delta = (text: string) =>
+      b.emit('assistant.block.delta', { apiMessageId: api('m1'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: text, inputJsonDelta: null, userMessageUuid: null });
+    delta('Checking');
+    return { b, delta };
+  };
+  const shimmer = () => document.querySelector<HTMLElement>('[data-shimmer]')!;
+
+  it('reads the tier, the session’s effort and the time the block has run, ticking once a second, and warms from 10 s', async () => {
+    const store = await storeWith(streaming().b.events);
+    renderRow(rowOf(store.rows(), 'thinking'), { storeKey: store.key, effort: 'xhigh' });
+    expect(screen.getByRole('button').textContent).toBe('Thinking with xhigh effort · 0s');
+    expect(shimmer().dataset.warmth).toBe('0');
+    act(() => vi.advanceTimersByTime(12_000));
+    expect(shimmer().textContent).toBe('Still thinking with xhigh effort · 12s');
+    expect(shimmer().dataset.warmth).toBe('0.25');
+    expect(shimmer().style.getPropertyValue('--thinking-warmth')).toBe('25%');
+    act(() => vi.advanceTimersByTime(36_000));
+    expect(shimmer().textContent).toBe('Deep in thought with xhigh effort · 48s');
+    expect(shimmer().dataset.warmth).toBe('1');
+  });
+
+  it('names no effort when the session’s is unknown, and without a live process follows the events, not the clock', async () => {
+    const { b, delta } = streaming();
+    const store = await storeWith(b.events);
+    useTranscriptStore.getState().setLive(store.key, false);
+    renderRow(rowOf(store.rows(), 'thinking'), { storeKey: store.key });
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(shimmer().textContent).toBe('Thinking · 0s');
+    b.tick(21_000);
+    act(() => store.push([delta(' the path')]));
+    expect(shimmer().textContent).toBe('Thinking more · 21s');
+  });
+
+  it('a completed block reads Thought for {t}, without the shimmer', async () => {
+    const { b } = streaming();
+    b.tick(8000);
+    b.thinking('m1', 0, 'Checking the path.');
+    const store = await storeWith(b.events);
+    renderRow(rowOf(store.rows(), 'thinking'), { storeKey: store.key, effort: 'high' });
+    expect(screen.getByRole('button').textContent).toBe('Thought for 8s');
+    expect(shimmer()).toBeNull();
+  });
+
+  it('an active group with nothing running reads Thinking under the shimmer', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'a.txt', { structured: BASH_RESULT('a.txt') });
+    const store = await storeWith(b.events);
+    const group = rowOf(store.rows(), 'group');
+    expect(group.state).toBe('active');
+    renderRow(group, { storeKey: store.key, effort: 'high' });
+    expect(shimmer().textContent).toBe('Thinking');
   });
 });
 

@@ -43,12 +43,13 @@ export function renderRow(
   options: {
     storeKey?: string; actions?: TranscriptActions; rewind?: RewindInterface; renderRequest?: (slot: Extract<Row, { kind: 'request_slot' }>) => ReactNode; sessionDirectory?: string;
     disclosures?: Disclosures; // shared across renders to stand for one transcript whose rows remount
+    effort?: string; // W8: the session's effort, as the live thinking label names it
   } = {},
 ) {
   const actions = options.actions ?? spyActions();
   const value = {
     storeKey: options.storeKey ?? '', variant: 'session' as const, actions, rewind: options.rewind ?? null, renderRequest: options.renderRequest ?? null,
-    disclosures: options.disclosures ?? new Disclosures(), idPrefix: 't', sessionDirectory: options.sessionDirectory ?? null,
+    disclosures: options.disclosures ?? new Disclosures(), idPrefix: 't', sessionDirectory: options.sessionDirectory ?? null, effort: options.effort ?? null,
   };
   const view = render(
     <TranscriptProvider value={value}>

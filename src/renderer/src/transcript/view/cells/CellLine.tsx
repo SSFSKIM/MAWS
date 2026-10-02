@@ -6,11 +6,13 @@ import { useTranscriptStore } from '../../../stores/transcript';
 import type { Cell, TurnId } from '../../model/rows';
 import { useTranscriptContext } from '../context';
 import { Chevron, CodeText, LineCounts } from '../rows/parts';
+import { LiveThinkingLabel } from '../rows/ThinkingLabel';
 import { CellDetailView } from './CellDetail';
 
 const EDIT_COUNTS = / \+(\d+) −(\d+)$/;
 
 function Label({ cell }: { cell: Cell }) {
+  if (cell.toolName === 'thinking' && cell.status === 'running') return <LiveThinkingLabel startedAt={cell.startedAt} />; // W8
   const counts = cell.detail.kind === 'edit' ? EDIT_COUNTS.exec(cell.label) : null;
   if (!counts) return <CodeText text={cell.label} />;
   return (

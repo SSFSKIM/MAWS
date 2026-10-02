@@ -214,6 +214,18 @@ export const shellFooter = (status: 'done' | 'error' | 'stopped', exitCode: numb
 // A block that never streamed (disk history) has no duration: `Thought`, never a live-looking `Thinking`.
 export const thinkingLabel = (live: boolean, durationMs: number | null) => (live ? 'Thinking' : durationMs === null ? 'Thought' : `Thought for ${duration(durationMs)}`);
 
+// W8 (T1): a streaming block's label in the CLI's words (Claude Code 2.1.283, `cli.pretty.js`): the tier by how long the
+// block has run, from 10, 20, 30 and 45 s (`Mo`, `Co`, `Io`, `_o` at :521212, chosen by `Lo` at :521223-521233), then
+// ` with {effort} effort` when the session's effort is known (the spinner's `effortSuffix`, built by `xMt` at
+// :477207-477214), then the elapsed time.
+const THINKING_TIERS: readonly (readonly [number, string])[] = [[45_000, 'Deep in thought'], [30_000, 'Thinking some more'], [20_000, 'Thinking more'], [10_000, 'Still thinking']];
+export const thinkingTier = (elapsedMs: number) => THINKING_TIERS.find(([from]) => elapsedMs >= from)?.[1] ?? 'Thinking';
+export const liveThinkingLabel = (elapsedMs: number, effort: string | null) => `${thinkingTier(elapsedMs)}${effort ? ` with ${effort} effort` : ''} · ${duration(elapsedMs)}`;
+// How far the label has turned to the warning colour: not before 10 s, wholly from 20 s, in eighths (the spinner's
+// thinking intensity, `Tn` at :521172-521179, which colours its thinking text toward the theme's warning by `pC`'s
+// eighths, :655065-655068, through `Do` at :521347 and the colour at :521357).
+export const thinkingWarmth = (elapsedMs: number) => Math.round(Math.min(Math.max((elapsedMs - 10_000) / 10_000, 0), 1) * 8) / 8;
+
 export const SAFEGUARD_LINE = { not_flagged: 'Auto mode · reviewed · not flagged', flagged: 'Auto mode · flagged', not_evaluated: 'Auto mode · not reviewed' } as const;
 
 // ---------------------------------------------------------------------------------------------------------------------

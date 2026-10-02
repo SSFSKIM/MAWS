@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CellId, ToolCategory } from './rows';
 import {
-  activeGroupLabel, boundaryCopy, cellLabel, dividerCopy, groupSummary, plural, subagentSentence, thinkingLabel, turnSummaryCopy, type GroupPhraseInput,
+  activeGroupLabel, boundaryCopy, cellLabel, dividerCopy, groupSummary, liveThinkingLabel, plural, subagentSentence, thinkingLabel, thinkingTier, thinkingWarmth, turnSummaryCopy, type GroupPhraseInput,
 } from './copy';
 
 const cell = (id: string) => id as CellId;
@@ -125,6 +125,25 @@ describe('cell lines', () => {
     expect(thinkingLabel(true, null)).toBe('Thinking');
     expect(thinkingLabel(false, 12_000)).toBe('Thought for 12s');
     expect(thinkingLabel(false, null)).toBe('Thought'); // never streamed: no duration to show
+  });
+
+  // W8 (T1): the CLI's tiers at 10, 20, 30 and 45 s, each from its threshold on.
+  it('a streaming block’s tier by its elapsed time', () => {
+    const at = (seconds: number) => thinkingTier(seconds * 1000);
+    expect([0, 9.999, 10, 19.999, 20, 29.999, 30, 44.999, 45, 600].map(at)).toEqual([
+      'Thinking', 'Thinking', 'Still thinking', 'Still thinking', 'Thinking more', 'Thinking more', 'Thinking some more', 'Thinking some more', 'Deep in thought', 'Deep in thought',
+    ]);
+  });
+
+  it('a streaming block’s label names the effort when known and the elapsed time', () => {
+    expect(liveThinkingLabel(4_000, 'xhigh')).toBe('Thinking with xhigh effort · 4s');
+    expect(liveThinkingLabel(47_500, 'high')).toBe('Deep in thought with high effort · 47s');
+    expect(liveThinkingLabel(75_000, null)).toBe('Deep in thought · 1m 15s');
+    expect(liveThinkingLabel(12_000, '')).toBe('Still thinking · 12s');
+  });
+
+  it('warms to the warning colour between 10 and 20 s, in eighths', () => {
+    expect([0, 10_000, 11_250, 12_000, 15_000, 19_000, 20_000, 60_000].map(thinkingWarmth)).toEqual([0, 0, 0.125, 0.25, 0.5, 0.875, 1, 1]);
   });
 });
 

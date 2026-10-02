@@ -56,6 +56,7 @@ export interface TranscriptContextValue {
   disclosures: Disclosures;
   idPrefix: string; // unique per mounted transcript: row element ids are `<idPrefix>-<rowId>`
   sessionDirectory?: string | null; // additive: where the session runs (its record's), for a shell call that names no cwd
+  effort?: string | null; // additive (W8): the effort the session runs at, which the live thinking label names; null when unknown
 }
 
 const TranscriptContext = createContext<TranscriptContextValue>({

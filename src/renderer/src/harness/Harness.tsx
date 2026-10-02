@@ -40,6 +40,7 @@ export function Harness() {
   const [opened, setOpened] = useState<SubagentRef | null>(null); // the last subagent row the transcript opened
   const [child, setChild] = useState<{ ref: SubagentRef; source: TranscriptSource } | null>(null);
   const [cards, setCards] = useState(false);
+  const [effort, setEffort] = useState<string | null>(params.get('effort')); // W8
   const sessionRef = useRef<HarnessSession | null>(null);
   const listRef = useRef<TranscriptListHandle>(null);
   const frames = useRef(new FrameMetrics());
@@ -111,6 +112,7 @@ export function Harness() {
           following: listRef.current?.following ?? true,
         };
       },
+      setEffort,
     };
     const frameMetrics = frames.current;
     window.__maws_harness = api;
@@ -185,7 +187,7 @@ export function Harness() {
       </div>
       {session ? (
         <div className="flex min-h-0 flex-1">
-          <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} renderRequest={cards ? exampleRequestCard : undefined} handle={listRef} className="min-w-0 flex-1" />
+          <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} renderRequest={cards ? exampleRequestCard : undefined} handle={listRef} className="min-w-0 flex-1" effort={effort} />
           {child && (
             <section className="flex w-[44%] min-w-0 flex-col border-l border-border" aria-label="Child transcript" data-harness-child="">
               <div className="flex items-center justify-between border-b border-border bg-bg-raised px-3 py-1 text-ui-sm text-fg-muted">

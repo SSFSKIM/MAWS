@@ -28,4 +28,5 @@ export interface HarnessApi {
   expandTurn(n: number): Promise<void>;
   scrollToTurn(n: number): Promise<void>;
   metrics(): HarnessMetrics;
+  setEffort(effort: string | null): void; // W8: the session effort the live thinking label names (none by default)
 }

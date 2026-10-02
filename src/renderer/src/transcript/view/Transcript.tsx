@@ -142,6 +142,7 @@ export interface TranscriptProps {
   // prompts whose waiting or dropped bubble is not shown (held back into that queue)
   tail?: readonly Row[];
   withdrawn?: ReadonlySet<string>;
+  effort?: string | null; // W8, additive: the effort the session runs at, which the live thinking label names
 }
 
 const NO_ROWS: Row[] = [];
@@ -171,7 +172,7 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const derived = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const rows = useMemo(() => withQueueTail(derived, withdrawn, tail), [derived, withdrawn, tail]);
@@ -238,8 +239,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   // Every row reads this context: it changes only with the props, never with the rows.
   const context = useMemo<TranscriptContextValue>(
-    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null }),
-    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory],
+    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, effort }),
+    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, effort],
   );
 
   return (
