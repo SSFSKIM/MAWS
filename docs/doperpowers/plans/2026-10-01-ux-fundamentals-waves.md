@@ -281,6 +281,34 @@ Today: disclosures (the work divider, activity groups, cells, thinking, plan, re
 Reference: Codex animates expand and collapse with height and opacity and a translateY(-8px), 150 ms exit (`r1-codex.txt` §8, C:26630-26680); the enter values are in the same region.
 Direction: one shared disclosure primitive (height animation measured from scrollHeight, opacity, Codex's timings, `prefers-reduced-motion` static) used by every transcript disclosure and the sidebar's level slide; the virtualiser's row heights follow the animation's end state.
 
+### H. The comparative assessment's findings (owner's separate sitting at a2dca3a0, 2026-10-01)
+
+The owner ran a comparative assessment in a separate worktree against a2dca3a0, the commit before W1 (`docs/doperpowers/evidence/app-assessment-2026-10-01/assessment.md`, ledger and screenshots beside it; method in `docs/doperpowers/plans/2026-10-01-comparative-app-assessment.md`; merged 4afb58af). Its four MAWS findings, grounded against master 8a950313 (152 commits later):
+
+**H1. Settings is unusable in a 50/50 split (M-01).**
+Observed: ⌘, then ⌘\ (`pane.split`, a 50/50 split of the main area, not the side panel) at the default 1280px window: the main area is 600px, each pane about 300px; the Settings body is about 112px after its 148px index and padding, the label column alone is 168px + 12px, so every control starts off-screen; the body scrolls sideways (`SettingsView.tsx:73` has `overflow-y-auto` and no `overflow-x`, so sideways scroll is implied).
+Today: fixed columns throughout and no container or media query: `settings-tab/SettingsView.tsx:57` `grid-cols-[148px_minmax(0,1fr)]`, `settings-tab/parts.tsx:29` `grid-cols-[168px_minmax(0,1fr)]` with the note in `col-start-2` at `:34`, `KeymapSection.tsx:129` `grid-cols-[minmax(0,1fr)_160px_96px]`; inputs capped at `max-w-[260px]`. The split ratio is clamped 0.25 to 0.75 (`stores/layout-model.ts:223`) and panes have no pixel minimum; the main column's floor is 480 (`app/regions.ts:14`).
+Direction: make the settings view a container (`@container`; Tailwind v4 container queries are already used at `request-card/variants/Question.tsx:209`) and never let it scroll sideways: below about 32rem the index collapses to a top row of section links and every `Setting` stacks its label over its control (one column, the note under the control); the keymap rows stack the same way. The split model is left as is (a pane pixel minimum is a product decision the owner has not made).
+
+**H2. A non-git folder shows the branch `HEAD` (M-02).**
+Observed: after the first turn in a non-repository folder the header toolbar, the composer's location chip and the Overview card say `⎇ HEAD` while the panel summary says "Not a git repository".
+Today: the engine writes `"gitBranch":"HEAD"` in a non-repo (`test/fixtures/transcripts/rewind-terminal.jsonl`, `sdk-unended.jsonl`; also what a detached checkout would write, so the value is ambiguous). It is stored verbatim (`engine-host/fs/summarize.ts:57`, `engine-host/fs/chain-follower.ts:169`, `main/index/sessions.ts:226-227` `branch: summary.gitBranch ?? existing?.branch`) and shown unfiltered by `app/Toolbar.tsx:30`, `overview/SessionCard.tsx:46`, `sidebar/HoverCard.tsx:53`, `sidebar/derive.ts:142-174`. The composer's chip gets it because `composer/frame/git-watch.ts:19` drops the "not a repository" failure and `bindings.ts:145` falls through to the record. Only `panel/summary/Environment.tsx:39-41` distinguishes the cases (matching `GitEntry.error === 'not a git repository'`; `GitStatus.branch === null` means detached, `shared/ipc/schema/git.ts:28`). The unstarted project row is already right (`ProjectRow.tsx:143-145` reads the worktree list).
+Direction: `HEAD` and the empty string are not branch names: normalise them to null at ingestion (summarize, chain follower) and at the index boundary, with a one-time backfill of rows already holding `HEAD` (the `?? existing?.branch` fallback would otherwise keep them); have `useGitWatch` return its failure so the composer's binding stops falling back to the record once git has answered. Display: a non-repository shows no branch label at all (Codex's projectless chat has none); a detached checkout shows `⎇ detached`; until git has answered, nothing. All four readers share the one rule.
+
+**H3. A new tab does not take keyboard focus (M-03).**
+Observed: after "New session in <project>" (and now New chat) the tab opens but focus stays on the button that opened it; an extra click is needed before typing. Claude Desktop and T3 focus the composer.
+Today: every entry point funnels through `createSession` (`keymap/actions-runtime.ts:46-60`: `addUnstarted` then `openTab`), which never focuses; the editor has no autofocus (`composer/editor/Editor.tsx:98`); the per-session focus registry (`stores/composer.ts:156-166`, registered in `Composer.tsx:218-231`) already serves Esc, docked-card resolution and chip close, but the new tab's composer has not mounted when `openTab` returns. `useLayout.focusRequest` (`stores/layout.ts:42,270`) is written by `attention/navigation.ts:29` and read by nothing.
+Direction: a one-shot "focus on mount" mark for the session, set in `createSession` after `openTab` and consumed by the composer's `registerFocusTarget` effect through `focusFrame()` so a docked card still wins; the same handoff when a tab is opened from the Overview or the empty pane. Either make `focusRequest` the mark or delete it.
+
+**H4. Engine vocabulary in routine labels (M-04).**
+Fixed since a2dca3a0: the model chip (W3's alias, `model-label.ts:23-37`), the permission-mode labels (the polish merge's `permission-mode-labels.ts`), the model widget's wire-name foot (`widgets/copy.ts:42-43`).
+Left: the Gateway section's hint "D-19" (`settings-tab/copy.ts:81`, rendered via `SettingsView.tsx:18,105`); the panel summary's model row renders the raw resolved id with effort (`panel/summary/Environment.tsx:32`, `panel/copy.ts:31`), so it reads `claude-sonnet-5-5[1m] · medium`; the mode labels and the Settings mode select are still `font-mono` (`statusline/ModeMenu.tsx:91`, `composer/frame/ModeChip.tsx`, `EngineSection.tsx:134`); the built-in catalogue's Sonnet row resolves to `claude-sonnet-5[1m]` (`shared/sessions/models.ts:33`) while the pass3 and W3 fixtures report `claude-sonnet-5-5[1m]`, so exact-match paths (`ModelSelector.tsx:86`, `mode-menu.ts:57`) miss when only the built-in catalogue is available.
+Direction: delete the hint; the summary row shows the alias label with the exact id in its tooltip; mode labels in the UI font; the catalogue row corrected against the fixtures. The "Read with <wire name>" foot on the remaining framed widgets stays: it is the widget's honesty about which engine command it mirrors, chosen in W3.
+
+**H5. New chat leftovers.** The sidebar's per-project "+" and its menu still say "New session in <project>" while every other entry says "New chat": rename to "New chat in <project>" (the live specs that quote the old copy updated too). Remembering the Worktree tick per project, as Codex does, is deferred (§5).
+
+Also checked against master: the assessment's N3 note that Return on a focused radio did not submit the question is on the old pin; since W4 Enter is Next or Submit and digits pick options (`request-card/variants/Question.tsx:7`).
+
 ## 3. Waves
 
 Each wave is one worker in an isolated worktree off master, one commit per item, `pnpm verify`, a bounded review on opus with findings fixed by a separate worker, merge; the e2e load rule and the attribution rule apply as always. Waves are listed in the recommended order with the reason; none is dispatched until the owner says so. Items that need a charter amendment get it in the same wave, written by the architect before dispatch.
@@ -296,6 +324,7 @@ Each wave is one worker in an isolated worktree off master, one commit per item,
 | **W7 Sessions and custody** (landed 2026-10-01, 8768e5bf; ran in parallel with W5 and W6) | F1, F2, F3 | Needs the F1 reproduction first; the take-over action and the budget toggle are independent | the F1/F2 decisions; the budget default |
 | **W8 Motion and thinking** | T1, T3 (T2 ruled: no change) | Owner's notes after the first look; all in the transcript's view layer, so it waits for debt 7A to land | 7A; the T2 ruling |
 | **New chat** (landed 2026-10-01, 8a950313; ran in parallel with W8) | the owner's New chat note and the location-control ruling (§6) | A general unstarted tab: the project chip, the branch label and the Worktree checkbox in a row inside the composer frame; New chat in the sidebar, the strip's "+", ⌘N and the palette; the toolbar's location chip read-only once started | the toolbar correction (52a09d07) |
+| **W9 Assessment fixes** | H1, H2, H3, H4, H5 | The owner's separate sitting's four findings grounded on master plus New chat's copy leftover; all small, each a different file set, one worker | New chat (8a950313) |
 | Record only | F4, F5 (card copy), F6 (P1), F7 | Rulings and inventory; F5's card copy can ride W4 | |
 
 Acceptance for the whole initiative (the parent's own, beyond the items): the owner sits with the app beside Codex desktop and Claude Desktop on the same session and reports no proportion, type, bubble, composer or selector difference they want changed; a turn under the owner's hooks renders its answer as the answer, live and after reload; a steer sits where it was delivered; AskUserQuestion steps and leaves a one-widget receipt; the sidebar reaches any session of the owner's 276 projects in two clicks; the menu bar routes.
@@ -321,6 +350,8 @@ To be written by the architect as dated §19 entries when the corresponding wave
 - Reading through output-style tags (F7): the extension.
 - Dictation (the mic): P1; the dead control is removed in C2.
 - `queued_command` attachments from terminal-started sessions (A2 risk 2): probe with W1, decide after.
+- Remembering the Worktree tick per project as Codex does (New chat left it out): small, after W9.
+- A pixel minimum for split panes (H1 observed 300px panes at the default window): a product decision for the owner; W9 makes Settings usable at that width instead.
 
 ## 6. Decisions
 
@@ -344,6 +375,9 @@ To be written by the architect as dated §19 entries when the corresponding wave
 - 2026-10-01 (owner): intermediate assistant text keeps Codex's rule, commentary inside the work area folded with it (T2); no change.
 - 2026-10-01 (owner): the location control copies the Codex app: a project chip (search, projects, New project, Don't work in a project), the current branch as a label, a Worktree checkbox; no branch picker, no named or existing-worktree options; on an unstarted tab they sit in Codex's slim row inside the frame above the box, and the toolbar chip is read-only once started.
 - Closed (B5): whether the panel was closed when Review failed no longer matters; opening Review now un-collapses a hidden panel either way.
+- 2026-10-01 (owner): the comparative assessment's findings (§2 H) are filed as enhancement wave W9; the assessment branch is merged for citation (4afb58af).
+- 2026-10-01 (architect, H2): `HEAD` from the engine is not a branch name; a non-repository shows no branch label anywhere, a detached checkout shows "detached", and the composer stops falling back to the record once git has answered.
+- 2026-10-01 (architect, H4): the panel summary's model row shows the alias label with the exact id in its tooltip; the remaining framed widgets keep their "Read with" foot.
 
 ## 7. Outcomes
 
