@@ -1,6 +1,6 @@
 // W13 (charter D-1 as amended 2026-10-01): the binary a launch runs is resolved at every call (the chosen path, else
 // MAWS_E2E's named binary, else ~/.local/bin/claude, else `claude` on the login shell's PATH), answered by its real path,
-// and probed for its version once per file; no version refuses but a missing one.
+// and probed for its version once per file, in the login shell's environment; no version refuses but a missing one.
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -78,7 +78,7 @@ describe('engine.binaryInfo resolves the installed Claude Code at every call', (
     expect(await probeWith()()).toMatchObject({ path: chosen, version: '2.1.300-dev', ok: true });
   });
 
-  it('without the link, takes the first executable claude on the login shell’s PATH; the capture is read only then', async () => {
+  it('without the link, takes the first executable claude on the login shell’s PATH; one capture serves the lookup and --version', async () => {
     const skipped = join(root, 'not-exec');
     mkdirSync(skipped);
     writeFileSync(join(skipped, 'claude'), 'not executable'); // 0644: passed over
@@ -90,8 +90,28 @@ describe('engine.binaryInfo resolves the installed Claude Code at every call', (
 
     link(engine(version('2.1.287'), '2.1.287 (Claude Code)'));
     const withLink = vi.fn(async () => ({ PATH: join(root, 'bin') }));
-    expect(await probeWith({ captureEnv: withLink })()).toMatchObject({ version: '2.1.287' });
-    expect(withLink).not.toHaveBeenCalled();
+    const probe = probeWith({ captureEnv: withLink });
+    expect(await probe()).toMatchObject({ version: '2.1.287' });
+    expect(withLink).toHaveBeenCalledOnce(); // for --version alone
+    await probe();
+    expect(withLink).toHaveBeenCalledOnce(); // a cached version reads no capture
+  });
+
+  it('runs --version in the login shell’s environment, so a script whose interpreter is only on that PATH answers', async () => {
+    const interpreters = join(root, 'shell-only'); // on the captured PATH, never on the host's own
+    engine(join(interpreters, 'maws-fake-node'), '2.1.291 (Claude Code)');
+    const script = (path: string) => {
+      mkdirSync(join(path, '..'), { recursive: true });
+      writeFileSync(path, '#!/usr/bin/env maws-fake-node\n'); // an npm-installed claude: `#!/usr/bin/env node`
+      chmodSync(path, 0o755);
+      return path;
+    };
+    const found = script(join(root, 'bin/claude'));
+    const captureEnv = async () => ({ PATH: `${interpreters}:${join(root, 'bin')}` });
+    expect(process.env.PATH?.split(':')).not.toContain(interpreters);
+    expect(await probeWith({ captureEnv })()).toMatchObject({ path: found, version: '2.1.291', ok: true });
+    setBinaryConfig({ binaryPath: script(join(root, 'opt/claude')) }); // a chosen path runs in the same environment
+    expect(await probeWith({ captureEnv })()).toMatchObject({ path: join(root, 'opt/claude'), version: '2.1.291', ok: true });
   });
 
   it('a dangling installed link falls through to PATH', async () => {
