@@ -52,13 +52,15 @@ describe('shell frame', () => {
     ]);
   });
 
-  // W5: the main region opens with MAWS's top bar, whose Overview button toggles the board floating over the panes.
-  it('puts the top bar above the panes, its Overview button toggling the floating Overview', async () => {
+  it('puts the Overview toggle beside the sidebar toggle in the title-bar toolbar', async () => {
     const user = userEvent.setup();
     render(<Shell />);
-    const topBar = region('main').querySelector<HTMLElement>('[data-top-bar]')!;
-    expect(region('main').firstElementChild).toBe(topBar);
-    const toggle = within(topBar).getByRole('button', { name: 'Overview' });
+    const toolbar = screen.getByRole('banner');
+    const toggle = within(toolbar).getByRole('button', { name: 'Overview' });
+    const sidebar = within(toolbar).getByRole('button', { name: 'Toggle sidebar' });
+    expect(sidebar.nextElementSibling).toBe(toggle);
+    expect(toggle.className).toContain('[-webkit-app-region:no-drag]');
+    expect(toggle.getAttribute('title')).toBe('Overview · ⌘0');
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
     await user.click(toggle);
@@ -67,6 +69,40 @@ describe('shell frame', () => {
     await user.click(toggle);
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
+  });
+
+  it('the toolbar Overview toggle restores main from a maximized panel and still closes on a second click', async () => {
+    const user = userEvent.setup();
+    offs.push(registerShellActions(fakeBridge()));
+    useLayout.getState().setPanel({ width: 444 });
+    render(<Shell />);
+    await user.click(screen.getByRole('button', { name: 'Maximize right panel' }));
+    expect(region('main').inert).toBe(true);
+    expect(grid().style.gridTemplateColumns).toBe('300px 0px minmax(0, 1fr)');
+    const toggle = within(screen.getByRole('banner')).getByRole('button', { name: 'Overview' });
+    expect((toggle as HTMLButtonElement).disabled).toBe(false);
+    await user.click(toggle);
+    expect(region('main').inert).toBe(false);
+    expect(grid().style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 444px');
+    const dialog = within(region('main')).getByRole('dialog', { name: 'Overview' });
+    expect(document.activeElement).toBe(dialog);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(useLayout.getState().regions.panel).toEqual({ width: 444, collapsed: false, maximized: false });
+    await user.click(toggle);
+    expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(region('main').inert).toBe(false);
+  });
+
+  it('mounts the usage slot before the session actions and panel toggle in the title-bar toolbar', () => {
+    registerSlot('topBarEnd', () => <button type="button">Usage</button>);
+    render(<Shell />);
+    const toolbar = screen.getByRole('banner');
+    const usage = within(toolbar).getByRole('button', { name: 'Usage' });
+    const end = usage.parentElement!;
+    expect(end.className).toContain('[-webkit-app-region:no-drag]');
+    expect(end.nextElementSibling).toBe(within(toolbar).getByRole('button', { name: 'Session actions' }));
+    expect(within(toolbar).getByRole('button', { name: 'Toggle right panel' })).toBeTruthy();
   });
 
   it('lays the regions on a grid whose columns are the layout store’s widths', () => {
@@ -247,6 +283,26 @@ describe('shell actions', () => {
     expect(useLayout.getState().regions.panel).toMatchObject({ maximized: true, collapsed: false });
     runAction('panel.maximize');
     expect(useLayout.getState().regions.panel).toMatchObject({ maximized: false, collapsed: false });
+  });
+
+  it.each([false, true])('the Overview action restores main and focuses the dialog when already open=%s', async (alreadyOpen) => {
+    const user = userEvent.setup();
+    offs.push(registerShellActions(fakeBridge()));
+    render(<Shell />);
+    if (alreadyOpen) act(() => runAction('tab.overview'));
+    const previousDialog = screen.queryByRole('dialog', { name: 'Overview' });
+    await user.click(screen.getByRole('button', { name: 'Maximize right panel' }));
+    expect(region('main').inert).toBe(true);
+    act(() => runAction('tab.overview'));
+    expect(region('main').inert).toBe(false);
+    expect(grid().style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 380px');
+    const dialog = within(region('main')).getByRole('dialog', { name: 'Overview' });
+    if (alreadyOpen) expect(dialog).toBe(previousDialog);
+    await vi.waitFor(() => expect(document.activeElement).toBe(dialog));
+    act(() => screen.getByRole('button', { name: 'Maximize right panel' }).focus());
+    act(() => runAction('tab.overview'));
+    expect(document.activeElement).toBe(dialog); // an ordinary bring-focus remains open, never toggles closed
+    expect(useLayout.getState().overviewOpen).toBe(true);
   });
 
   it('switch the appearance through the settings store', () => {

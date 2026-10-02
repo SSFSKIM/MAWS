@@ -2,9 +2,8 @@
 // columns are the layout store's widths (`regions.ts`). A collapsed region keeps its column at 0 and stays mounted but
 // inert; a maximized panel takes the main column's place while the main region keeps its state offscreen. The sidebar
 // is M3's, the main region's panes M4's (C1's diagnostics strip is now the content of the Diagnostics tab). W5: the main
-// region opens with the top bar, and the floating Overview moves over the panes beneath it.
+// region opens with the tab strip directly beneath the toolbar; the floating Overview moves over the panes.
 import { MainArea } from '../main/MainArea';
-import { TopBar } from '../main/TopBar';
 import { OverviewLayer } from '../overview/OverviewPanel';
 import { CommandPalette } from '../palette/CommandPalette';
 import { PanelRegion } from '../panel/PanelRegion';
@@ -34,7 +33,6 @@ export function Shell() {
         inert={mainHidden}
         className="relative col-start-2 row-start-2 flex min-h-0 min-w-0 flex-col overflow-hidden"
       >
-        <TopBar />
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           <MainArea />
           <OverviewLayer />

@@ -70,9 +70,9 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     await expect(mark).toHaveAttribute('title', /^Released at \d\d:\d\d to stay under the 2 GB memory budget · Send resumes it$/);
     await expect(row.getByRole('img', { name: 'Idle' })).toBeVisible(); // the idle glyph: no failed or exited glyph
     await expect(row.getByLabel('Unread')).toHaveCount(0);
-    // W5: the Overview floats over the main area from the top bar's button rather than showing as the first tab.
+    // W5: the Overview floats over the main area from the toolbar's button rather than showing as the first tab.
     const overview = main.getByRole('dialog', { name: 'Overview' });
-    const overviewButton = main.locator('[data-top-bar]').getByRole('button', { name: /^Overview/ });
+    const overviewButton = page.getByRole('banner').getByRole('button', { name: /^Overview/ });
     await overviewButton.click();
     const card = overview.getByRole('article', { name: RELEASED_TITLE });
     await expect(card.getByText('released', { exact: true })).toBeVisible(); // still on the Overview, idle

@@ -1,4 +1,4 @@
-// The top bar's usage pill and its popover end to end (W6, E1), which took over C11's Accounts tab and its spec (C11
+// The title-bar toolbar's usage pill and its popover end to end (W6, E1), which took over C11's Accounts tab and its spec (C11
 // execution document, Acceptance item 2, `accounts.spec.ts`; the same assertions, now against the popover): the built
 // app on C5's stub scenario (`nine-sessions.json`, manual clock, `Settings idle probe` re-pinned to engine id 73171552…)
 // with MAWS_CLAUDE_USAGE_DIR on this spec's own temporary copy of the committed ClaudeUsage fixture, every `recordedAt`
@@ -82,7 +82,7 @@ async function menu(app: ElectronApplication, id: string): Promise<void> {
     }, id);
   await expect.poll(click, { message: `menu item ${id} exists and is enabled` }).toBe(true);
 }
-const pillOf = (page: Page) => page.locator('[data-top-bar] [data-usage-pill]');
+const pillOf = (page: Page) => page.getByRole('banner').locator('[data-usage-pill]');
 const popoverOf = (page: Page) => page.getByRole('dialog', { name: 'Claude Usage' });
 const card = (page: Page, email: string) => popoverOf(page).locator(`[data-account][aria-label="${email}"]`);
 const meter = (scope: Locator, name: string) => scope.getByRole('meter', { name, exact: true });
@@ -112,6 +112,8 @@ test('usage: the pill, and ClaudeUsage’s accounts in its geometry, the routing
     // The pill: 3@ routes, and its most binding limit is the Fable week at 82 %, a warning.
     const pill = pillOf(page);
     await expect(pill).toHaveText('82');
+    await expect(page.getByRole('banner')).toHaveCSS('height', '44px');
+    await expect(pill).toHaveCSS('-webkit-app-region', 'no-drag');
     await expect(pill).toHaveAttribute('data-severity', 'warning');
     await expect(pill.locator('[data-dot]')).toHaveCSS('background-color', await tokenColor(page, '--warning'));
 

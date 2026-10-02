@@ -1,4 +1,4 @@
-// The top bar's usage pill (W6, E1; charter §5.2 and D-17 as amended 2026-10-01), ClaudeUsage's status item in MAWS's
+// The title-bar toolbar's usage pill (W6, E1; charter §5.2 and D-17 as amended 2026-10-01), ClaudeUsage's status item in MAWS's
 // own chrome (MenuBarLabelView.swift): a dot in the severity's colour and one bare number, the routing account's most
 // binding percent (`usagePill`); dimmed while that account needs reauthentication; a muted `--` without ClaudeUsage's
 // data. A click opens the popover, the copy of ClaudeUsage's panel (`UsagePanel`); Esc or a click outside closes it.
@@ -32,7 +32,7 @@ export function UsagePill() {
         data-severity={pill.severity ?? 'none'}
         aria-label={label}
         title={label}
-        className="inline-flex h-6 items-center gap-[5px] rounded-sm px-2 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 aria-expanded:bg-bg-active"
+        className="inline-flex h-6 items-center gap-[5px] rounded-sm px-2 text-ui-sm outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover focus-visible:outline-2 aria-expanded:bg-bg-active"
       >
         <span aria-hidden data-dot className={`size-[7px] shrink-0 rounded-full ${pill.severity === null ? 'bg-fg-muted' : SEVERITY_BG[pill.severity]} ${pill.dimmed ? 'opacity-50' : ''}`} />
         <span aria-hidden className={`font-medium tabular-nums ${pill.percent === null ? 'text-fg-muted' : 'text-fg'}`}>

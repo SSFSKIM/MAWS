@@ -8,7 +8,7 @@
 // template for C7's and C8's end-to-end tests.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
+import { expect, test, type ElectronApplication, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
 import { formatChord } from '../src/shared/keymap/chord';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -42,7 +42,7 @@ test('shell: sidebar, overview, hover approve, tabs and split, persistence, them
   const first = await launchMaws({ env: SHELL_ENV });
   try {
     const firstStderr = collectStderr(first.app);
-    const saved = await firstInstance(first);
+    const saved = await firstInstance(first, test.info());
     await first.app.close();
     expect(quitLines(firstStderr()), 'the quit guard counts four mid-turn after the 8 s entry').toEqual(['quit-guard: 4 mid-turn, auto-answered quit']);
 
@@ -107,6 +107,26 @@ test('sidebar at scale: two levels, 30px rows, worktree groups, a scrolling page
   }
 });
 
+// The owner's title-bar correction: both controls fit the existing 44px chrome; the tab strip has no extra row above it.
+async function assertToolbarPlacement(page: Page): Promise<void> {
+  const toolbar = page.getByRole('banner');
+  const overview = toolbar.getByRole('button', { name: /^Overview/ });
+  const sidebar = toolbar.getByRole('button', { name: 'Toggle sidebar' });
+  const usage = toolbar.locator('[data-usage-pill]');
+  const actions = toolbar.getByRole('button', { name: 'Session actions' });
+  await expect(toolbar).toHaveCSS('height', '44px');
+  await expect(overview).toHaveCSS('width', '28px');
+  await expect(overview).toHaveCSS('height', '28px');
+  await expect(overview).toHaveCSS('-webkit-app-region', 'no-drag');
+  await expect(usage).toHaveCSS('-webkit-app-region', 'no-drag');
+  const [bar, toggle, board, pill, menu, strip] = await Promise.all([
+    toolbar, sidebar, overview, usage, actions, page.locator('[data-pane-strip]').first(),
+  ].map((el) => el.boundingBox()));
+  expect(board!.x).toBe(toggle!.x + toggle!.width + 4);
+  expect(pill!.x + pill!.width).toBeLessThanOrEqual(menu!.x);
+  expect(strip!.y).toBe(bar!.y + bar!.height);
+}
+
 interface Saved {
   regions: unknown;
   main: unknown;
@@ -116,13 +136,13 @@ interface Saved {
   right: string[];
 }
 
-async function firstInstance(maws: MawsLaunch): Promise<Saved> {
+async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Saved> {
   const { app, page } = maws;
   const sidebar = page.locator('[data-region="sidebar"]');
   const main = page.locator('[data-region="main"]');
-  // W5: the Overview floats over the main area, opened from the top bar's button (or ⌘0); it is no tab.
+  // W5: the Overview floats over the main area, opened from the toolbar's button (or ⌘0); it is no tab.
   const overview = main.getByRole('dialog', { name: 'Overview' });
-  const overviewButton = main.locator('[data-top-bar]').getByRole('button', { name: /^Overview/ });
+  const overviewButton = page.getByRole('banner').getByRole('button', { name: /^Overview/ });
   const board = overview.getByRole('list', { name: 'Overview' });
   const usageCard = board.getByRole('article', { name: 'Usage reset countdown' });
   const palette = page.getByRole('dialog', { name: 'Command palette' });
@@ -196,12 +216,36 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
   await test.step('Item 2: the Overview board, floating over the main area', async () => {
     expect(await tabLabels(page, 'Open tabs'), 'no tab: the Overview is not one').toEqual([]);
     await expect(main.getByText('No open tabs')).toBeVisible();
-    await expect(main.locator('[data-top-bar]')).toHaveCSS('height', '30px');
+    await assertToolbarPlacement(page);
+    await page.screenshot({ path: testInfo.outputPath('toolbar-light.png') });
     await expect(overviewButton).toHaveAccessibleName('Overview, 3 waiting');
+    // The global toggle must restore main, not open an invisible dialog inside its zero-width/inert column.
+    const panel = page.locator('[data-region="panel"]');
+    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+    await expect(main).toHaveJSProperty('inert', true);
+    await expect(main).toHaveCSS('width', '0px');
+    await expect(overviewButton).toBeEnabled();
     await overviewButton.click();
+    await expect(main).toHaveJSProperty('inert', false);
+    await expect.poll(async () => (await main.boundingBox())!.width).toBeGreaterThan(0);
+    await expect(panel.getByRole('button', { name: 'Maximize right panel' })).toBeVisible();
+    await expect(page.getByRole('separator', { name: 'Resize right panel' })).toHaveAttribute('aria-valuenow', '380');
     await expect(overview).toBeVisible();
     await expect(overviewButton).toHaveAttribute('aria-pressed', 'true');
     await expect(overview, 'focus moves onto the panel, not a card (Esc on a card declines its request)').toBeFocused();
+    await overview.getByRole('button', { name: 'Close Overview' }).click(); // usable, not merely mounted
+    await expect(overview).toHaveCount(0);
+    await expect(overviewButton).toHaveAttribute('aria-pressed', 'false');
+    await overviewButton.click();
+
+    // Menu/chord opening is not a toggle: an already-open Overview hidden by maximize is restored and refocused.
+    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+    await expect(main).toHaveJSProperty('inert', true);
+    await menu(app, 'tab.overview');
+    await expect(main).toHaveJSProperty('inert', false);
+    await expect(overview).toBeVisible();
+    await expect(overview).toBeFocused();
+    await expect(overviewButton).toHaveAttribute('aria-pressed', 'true');
     // Dragged by its header (a real pointer), it moves and its rect persists in `regions`.
     const header = overview.locator('[data-overview-header]');
     const before = (await overview.boundingBox())!;
@@ -250,6 +294,8 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     await menu(app, 'theme.dark');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await expect.poll(() => regionBackground(page)).toBe(tokens.dark['--bg-raised']);
+    await assertToolbarPlacement(page);
+    await page.screenshot({ path: testInfo.outputPath('toolbar-dark.png') });
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (regions, rows, cards)').toEqual([]);
   });
 
