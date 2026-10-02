@@ -32,6 +32,9 @@ export const ENGINE = {
   configHome: 'Config home',
   readOnly: 'read-only to MAWS',
   configHomeNote: 'The engine owns transcripts, settings and trust. MAWS reads them and keeps its own index elsewhere.',
+  // R1 (charter D-9 as amended 2026-10-01): what MAWS honours of a plugin, information only
+  plugins: 'Plugins',
+  pluginsNote: 'Plugin hooks run in MAWS sessions as in the terminal; their toasts, status lines and log lines show in the session, their panes and bands not yet.',
   subagent: 'Subagent model',
   subagentPlaceholder: 'inherit', // W3: the engine's own word for no override (each agent's model, else the session's)
   subagentNote: 'Sets CLAUDE_CODE_SUBAGENT_MODEL per launch for new sessions; Session info shows what a session actually got.',

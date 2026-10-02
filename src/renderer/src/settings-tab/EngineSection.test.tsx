@@ -94,6 +94,12 @@ describe('the binary row and the update', () => {
     expect(screen.queryByRole('group', { name: 'Engine copy' })).toBeNull();
   });
 
+  it('says in one line what MAWS shows of a plugin, with no control (R1)', () => {
+    renderSection();
+    expect(within(row('Plugins')).getByText('Plugin hooks run in MAWS sessions as in the terminal; their toasts, status lines and log lines show in the session, their panes and bands not yet.')).toBeTruthy();
+    expect(within(row('Plugins')).queryByRole('button')).toBeNull();
+  });
+
   it('a binary that is missing says why, in the warning colour', async () => {
     renderSection(SETTINGS_DEFAULTS_V8, {
       'engine.binaryInfo': () => ({ ...BINARY, path: '/Users/owner/.local/bin/claude', version: null, ok: false, error: 'Claude Code is not installed: nothing at /Users/owner/.local/bin/claude' }),
