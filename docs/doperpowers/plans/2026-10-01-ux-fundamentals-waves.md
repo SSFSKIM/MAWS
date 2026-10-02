@@ -395,8 +395,8 @@ Each wave is one worker in an isolated worktree off master, one commit per item,
 | **W12 Tabs per project** (landed 2026-10-01, 0a972995) | I2, I3 | The layout store, its schema v2 and the strip; the sidebar's project click switches the set (seam with W11, wired at merge) | New chat |
 | **W13 Engine follows the installed binary** (landed 2026-10-01, ef449c54) | J1 | The owner's note; the engine host, custody, settings v8, Session info; independent of W9 to W12 except `panel/summary/Environment.tsx` (W9 touches its model row) | none |
 | **R0 Mods probe** (spike; landed 2026-10-01, ce90983a) | K1 | Findings only: fixtures and answers for R1 and R2 | the installed 2.1.287 under a scratch config dir |
-| **R1 Mods decode** (awaiting the owner) | K1 toasts, status, log, plugin errors | Small; no attach; needs an engine ≥ 2.1.285 at runtime | W13; R0 |
-| **R2 Mods surface** (awaiting the owner, D-9) | K1 attach, panes, band, footer, interaction, prompt access | The extension surface proper | W13; R0; R1 |
+| **R1 Mods decode** (ruled 2026-10-01, dispatched) | K1 toasts, status, log, plugin errors | Small; no attach; needs an engine ≥ 2.1.285 at runtime | W13; R0 |
+| **R2 Mods surface** (ruled 2026-10-01: the next wave after R1) | K1 attach, panes, band, footer, interaction, prompt access | The extension surface proper | W13; R0; R1 |
 | Record only | F4, F5 (card copy), F6 (P1), F7 | Rulings and inventory; F5's card copy can ride W4 | |
 
 Acceptance for the whole initiative (the parent's own, beyond the items): the owner sits with the app beside Codex desktop and Claude Desktop on the same session and reports no proportion, type, bubble, composer or selector difference they want changed; a turn under the owner's hooks renders its answer as the answer, live and after reload; a steer sits where it was delivered; AskUserQuestion steps and leaves a one-widget receipt; the sidebar reaches any session of the owner's 276 projects in two clicks; the menu bar routes.
@@ -456,6 +456,8 @@ To be written by the architect as dated §19 entries when the corresponding wave
 - 2026-10-01 (owner): MAWS runs whatever Claude Code the user has installed; the user's own installer and channel decide latest or stable; MAWS follows (J1).
 - 2026-10-01 (architect, J1 residue): resolution order binaryPath → `~/.local/bin/claude` → the login shell's PATH, realpath per launch; no version refusal; custody retired; `DISABLE_AUTOUPDATER=1` for MAWS's launches with an "Update Claude Code…" action; one notice per session only when newer-than-tested meets an unknown frame; the pin test-only. The owner confirmed the notice-only behaviour the same day ("Notice only, keep running").
 - 2026-10-01 (architect, K1): "Claude Mods" are plugins with function hooks drawing through the engine's `ui_surface_v1` protocol; Desktop is a display client, not a mod host. Engine-side hooks already run in MAWS sessions. The R0 probe is dispatched as a spike; R1 to R3 wait for the owner's D-9 ruling.
+- 2026-10-01 (owner): mods in slices: R1 now, R2 as the next wave, R3 later; D-9 amended (the extension surface is the engine's `ui_surface_v1` protocol).
+- 2026-10-01 (architect, R1 placement): toasts through the toast host with the plugin named; `ui_log` a dim transcript notice at its position; `ui_status` in the panel summary's Plugins block and, during a turn, a muted line under the live working label; init's plugin errors and warnings one notice per session.
 
 ## 7. Outcomes
 
