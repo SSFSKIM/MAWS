@@ -13,7 +13,7 @@ describe('revision regressions', () => {
     b.turn('one');
     b.text('before', 0, 'Before steer');
     b.emit('user.message', { messageUuid: uuid('steer'), content: 'Change direction', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
-    b.emit('command.lifecycle', { commandUuid: uuid('steer'), state: 'started', reason: null });
+    b.emit('command.lifecycle', { commandUuid: uuid('steer'), state: 'started' });
     b.text('after', 0, 'Following answer');
     b.end(['one', 'steer']);
     const before = reduce(b.events);
@@ -51,7 +51,7 @@ describe('revision regressions', () => {
     b.result('bash', '/project');
     b.text('answer', 0, 'Done');
     b.end(['one']);
-    b.emit('boundary.retraction', { retractedMessageUuids: [uuid('msg-bash-u0')], reason: null, fallbackModel: null });
+    b.emit('boundary.retraction', { retractedMessageUuids: [uuid('msg-bash-u0')], reason: 'retracted', fallbackModel: null });
     const state = reduce(b.events);
     const turn = state.turns.get(state.order[0])!;
     expect(turnSummary(turn).toolCalls).toBe(0);
@@ -82,11 +82,11 @@ describe('revision regressions', () => {
   it.each(['process.exited', 'turn.ended', 'turn.started'] as const)('closes unfinished thinking with a duration on %s', (close) => {
     const b = builder();
     b.turn('one');
-    const delta = b.emit('assistant.block.delta', { apiMessageId: api('thinking'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: 'Working it out', inputJsonDelta: null });
+    const delta = b.emit('assistant.block.delta', { apiMessageId: api('thinking'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: 'Working it out', inputJsonDelta: null, userMessageUuid: uuid('one') });
     const before = reduce(b.events);
     const offset = b.events.length;
     b.tick(1200);
-    if (close === 'process.exited') b.emit(close, { code: 1, signal: null, reason: 'crash', lostAttentionCount: 0 });
+    if (close === 'process.exited') b.emit(close, { code: 1, signal: null, reason: 'crash', lostAttentionCount: 0, budget: null });
     else if (close === 'turn.ended') b.end(['one']);
     else b.turn('two');
     const closedAt = b.events[offset].at;
@@ -112,10 +112,10 @@ it('hydrates 40,000 child events with linear copying and preserves prior batches
     if (this[0]?.parentToolUseId === parent('child')) copied += this.length;
     return iterator.call(this);
   };
-  let state = initial;
-  let first = initial;
+  let state: typeof initial;
+  let first: typeof initial;
   const start = performance.now();
-  let firstMs = 0;
+  let firstMs: number;
   try {
     first = applyEvents(initial, childEvents.slice(0, 20_000));
     firstMs = performance.now() - start;
