@@ -425,6 +425,12 @@ test('a streaming thinking block reads the CLI’s tier, effort and time under t
       if (warm) expect(style.colour, `${fixture} ${theme}: the warning colour past 20 s`).toBe(style.warning);
       else expect(style.colour, `${fixture} ${theme}: not yet the warning colour`).not.toBe(style.warning);
       if (process.env.MAWS_W8_SHOTS === '1') {
+        // The sweep held where its band is over the text (0.4 s into a pass that starts at 0.6 s), released after.
+        await label.evaluate((element) => {
+          const sweep = element.getAnimations()[0];
+          sweep.pause();
+          sweep.currentTime = 1000;
+        });
         const turn = page.locator('[data-kind="user"], [data-kind="divider"], [data-kind="cell"], [data-kind="thinking"]');
         const boxes = (await turn.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().toJSON() as DOMRect))).filter((box) => box.height > 0);
         const top = Math.min(...boxes.map((box) => box.top)) - 12;
@@ -432,6 +438,7 @@ test('a streaming thinking block reads the CLI’s tier, effort and time under t
         const left = Math.min(...boxes.map((box) => box.left)) - 12;
         const right = Math.max(...boxes.map((box) => box.right)) + 12;
         await page.screenshot({ path: join(REPO_ROOT, `docs/doperpowers/plans/shots/w8-thinking-${shot}-${theme}.png`), clip: { x: left, y: top, width: right - left, height: bottom - top } });
+        await label.evaluate((element) => element.getAnimations()[0].play());
       }
     }
     await page.evaluate(() => (document.documentElement.dataset.theme = 'light'));
