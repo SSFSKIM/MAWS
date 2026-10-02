@@ -95,3 +95,17 @@ describe('the keymap table', () => {
     expect(groups.find((g) => g.label === 'In a pane')!.rows.map((r) => r.id)).toEqual(['request.accept', 'request.decline']);
   });
 });
+
+it('refuses printable app-wide renderer shortcuts, including Shift-only, without restricting pane shortcuts', () => {
+  expect(captureChord(key('KeyS', 's'), 'composer.stop', {})).toMatchObject({ kind: 'refused' });
+  expect(captureChord(key('KeyS', 'S', { shiftKey: true }), 'composer.stop', {})).toMatchObject({ kind: 'refused' });
+  expect(captureChord(key('Space', ' '), 'composer.stop', {})).toMatchObject({ kind: 'refused' });
+  expect(captureChord(key('F6', 'F6'), 'composer.stop', {})).toEqual({ kind: 'chord', chord: 'F6' });
+  expect(captureChord(key('KeyY', 'y'), 'request.accept', {})).toEqual({ kind: 'chord', chord: 'Y' });
+});
+
+it('checks every generated candidate digit when rebinding Select tab 1–9', () => {
+  const event = key('Digit1', '!', { metaKey: true, shiftKey: true });
+  expect(captureChord(event, 'tab.select', { 'attention.next': 'Cmd+Shift+5' })).toEqual({ kind: 'refused', message: 'Already bound to Next Needs-you · unbind it first' });
+  expect(captureChord(event, 'tab.select', { 'attention.next': null })).toEqual({ kind: 'chord', chord: 'Cmd+Shift+1' });
+});

@@ -1,6 +1,5 @@
-// The banner host (charter §5.5; residue *Banner placement*): the one place in the window for account- and app-wide
-// banners (C11's near-limit banner, once per window, never above every composer). It spans the main region between the
-// tab strips and the panes; banners stack newest last, each with its actions and, when dismissible, a dismiss control.
+// App-wide banners span the shell below the toolbar, outside all collapsible or maximizable regions.
+// Banners stack newest last, each with its actions and, when dismissible, a dismiss control.
 import { useShallow } from 'zustand/react/shallow';
 import { useNotices, type Notice } from '../stores/notices';
 

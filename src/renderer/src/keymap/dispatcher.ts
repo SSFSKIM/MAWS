@@ -58,7 +58,8 @@ const isButtonOrLink = (element: Element) =>
 // Why a key may not reach a binding of this scope at all, before any binding is looked at.
 function refused(event: KeyboardEvent, scope: (typeof ACTIONS)[ActionId]['scope'], target: Element): boolean {
   if (event.isComposing) return true;
-  if (scope === 'app') return false;
+  // Old persisted overrides must not turn ordinary typing into an app-wide action either.
+  if (scope === 'app') return !event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1;
   if (document.querySelector(OPEN_OVERLAY) !== null) return true;
   if (scope === 'composer') return target.closest('[data-key-sink="composer"]') === null;
   // Pane scope: Enter and Escape answer requests, so they come only from the card or pane that holds focus itself.

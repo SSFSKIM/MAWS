@@ -5,6 +5,8 @@ import { ACTION_IDS, ACTIONS } from '@shared/keymap/actions';
 import { formatChord } from '@shared/keymap/chord';
 import { registerShellActions } from '../app/shell-actions';
 import { registerAction, runAction } from '../keymap/actions-runtime';
+import type { AppSessionId } from '@shared/graph/ids';
+import { useSessions } from '../stores/sessions';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
@@ -147,4 +149,26 @@ describe('palette entries', () => {
     expect(paletteEntries('MAWS', { records, projects }).projects.map((p) => p.name)).toEqual(['MAWS']);
     expect(paletteEntries('', { records, projects }).actions).toEqual(ACTION_IDS);
   });
+});
+
+it('bounds mounted results for 3,279 sessions while searching the entire index', async () => {
+  const template = nine.sessions[0];
+  const records = Array.from({ length: 3279 }, (_, n) => ({ ...template, appId: `large-${n}` as AppSessionId, title: { ...template.title, text: `Indexed session ${n}` } }));
+  useSessions.setState({ records: new Map(records.map((r) => [r.appId, r])) });
+  const user = await openAndType('');
+  expect(within(group('Sessions')!).getAllByRole('option').length).toBeLessThanOrEqual(50);
+  await user.keyboard('Indexed session 3278');
+  expect(options('Sessions')).toEqual([expect.stringContaining('Indexed session 3278')]);
+});
+
+it('Escape returns focus to the element focused before each palette opening', async () => {
+  const user = userEvent.setup();
+  render(<><input aria-label="First opener" /><button>Second opener</button><CommandPalette /></>);
+  for (const opener of [screen.getByRole('textbox'), screen.getByRole('button', { name: 'Second opener' })]) {
+    act(() => opener.focus());
+    act(() => runAction('palette.open'));
+    expect(document.activeElement).toBe(within(dialog()).getByRole('combobox'));
+    await user.keyboard('{Escape}');
+    await vi.waitFor(() => expect(document.activeElement).toBe(opener));
+  }
 });

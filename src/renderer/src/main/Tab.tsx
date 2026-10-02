@@ -139,7 +139,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
     <ContextMenu.Root modal={false}>
       <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+        <ContextMenu.Content data-tab-focus-owner={tab.id} className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
           {!UNPINNABLE_KINDS.has(tab.kind) && (
             <TabMenuItem onSelect={() => useLayout.getState().togglePinned(tab.id)}>{tab.pinned ? 'Unpin tab' : 'Pin tab'}</TabMenuItem>
           )}

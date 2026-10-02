@@ -1,5 +1,6 @@
 // The Settings tab (C11 execution document, Interfaces "Settings tab"; M5 pins): five sections over settings v3, every
 // row writing exactly its own field through `settings.set` and re-rendering from the settings store.
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -312,3 +313,14 @@ describe('settings tab: the memory budget rows', () => {
   });
 });
 // C12 end
+
+it('keyboard section selection places focus in Appearance, so Tab enters its controls', async () => {
+  const user = userEvent.setup();
+  renderView();
+  const appearance = within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Appearance' });
+  act(() => appearance.focus());
+  await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Appearance' }));
+  await user.tab();
+  expect(screen.getByRole('region', { name: 'Appearance' }).contains(document.activeElement)).toBe(true);
+});

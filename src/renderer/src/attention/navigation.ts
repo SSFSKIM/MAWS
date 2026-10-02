@@ -15,7 +15,11 @@ import { useSessions } from '../stores/sessions';
 import { nextNeedsYou } from './derive';
 import { displayTitle } from '../sessions/title';
 
-const openInFocusedPane = (appSessionId: AppSessionId) => useLayout.getState().openTab({ kind: 'session', appSessionId }, { pane: 'focused' });
+const openInFocusedPane = (appSessionId: AppSessionId) => {
+  const layout = useLayout.getState();
+  layout.setPanel({ maximized: false });
+  layout.openTab({ kind: 'session', appSessionId }, { pane: 'focused' });
+};
 
 function openNextNeedsYou(): void {
   const rows = selectNeedsYou(useAttention.getState(), useSessions.getState());

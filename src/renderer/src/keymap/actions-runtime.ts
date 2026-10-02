@@ -10,7 +10,8 @@ import type { Location } from '@shared/sessions/intent';
 import { markFocusOnMount } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { NEW_CHAT } from '../sessions/title';
-import { allTabs } from '../stores/layout-model';
+import { allTabs, currentSet } from '../stores/layout-model';
+import { focusPaneElement } from '../main/pane-dom';
 import { useSessions } from '../stores/sessions';
 import { create } from 'zustand';
 import { createHandlerRegistry } from './registry';
@@ -93,16 +94,34 @@ async function guardAllows(ref: TabRef): Promise<boolean> {
 export const isUnstarted = (appSessionId: AppSessionId): boolean => !useSessions.getState().records.has(appSessionId);
 
 export async function requestCloseTab(id: string): Promise<void> {
-  const ref = findTab(useLayout.getState().main, id);
-  if (!ref || !(await guardAllows(ref))) return;
-  // An unstarted session's tab goes without a ⌘⇧T entry, and its intent goes with it. Every other tab closes the
-  // ordinary way.
+  const before = useLayout.getState().main;
+  const ref = findTab(before, id);
+  if (!ref) return;
+  const pane = currentSet(before).panes.findIndex((p) => p.tabs.some((t) => t.id === id));
+  // Capture DOM ownership before a guard's sheet displaces focus. Selection alone does not own
+  // the keyboard: a middle-close in one pane must leave the other pane's editor alone.
+  const focused = document.activeElement;
+  // A portaled tab menu carries its originating tab's ownership outside the pane DOM.
+  const focusedTab = focused?.closest('[data-tab-id]')?.getAttribute('data-tab-id')
+    ?? focused?.closest('[data-tab-focus-owner]')?.getAttribute('data-tab-focus-owner');
+  const focusedContent = focused?.closest('[role="tabpanel"]')?.closest('[data-pane]')?.getAttribute('data-pane');
+  const restore = pane !== -1 && (focusedTab === id || (focusedContent === String(pane) && currentSet(before).panes[pane].activeTabId === id));
+  if (!(await guardAllows(ref))) return;
+  // An unstarted tab and its intent disappear without a reopen entry; other tabs close normally.
   if (ref.kind === 'session' && isUnstarted(ref.appSessionId)) {
     useLayout.getState().dropSession(ref.appSessionId);
     useSessions.getState().dropUnstarted(ref.appSessionId);
-    return;
+  } else {
+    useLayout.getState().closeTab(id);
   }
-  useLayout.getState().closeTab(id);
+  if (restore) {
+    // Wait for React to replace the tab/content, including collapsing a split whose last tab closed.
+    requestAnimationFrame(() => {
+      const main = useLayout.getState().main;
+      if (main.current !== before.current) return;
+      focusPaneElement(currentSet(main).panes.length === 1 ? 0 : pane as 0 | 1);
+    });
+  }
 }
 
 // I2: an unstarted tab a session opened beside in its place (the layout store's `ReplaceGuard`): its guard as for a

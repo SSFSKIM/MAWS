@@ -96,6 +96,7 @@ export const KEYBOARD = {
   unbound: 'Unbound',
   conflict: (title: string) => `Already bound to ${title} · unbind it first`,
   menuNeedsModifier: 'A menu shortcut needs ⌘, ⌃ or ⌥',
+  appNeedsModifier: 'An app-wide shortcut needs ⌘, ⌃ or ⌥',
   reserved: (item: string) => `Reserved by macOS · ${item}`,
   reset: 'Reset to defaults',
   resetTitle: 'Reset every key binding?',

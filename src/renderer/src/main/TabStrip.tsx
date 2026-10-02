@@ -12,9 +12,8 @@ import { createSession, focusedProject, NEW_CHAT, requestCloseTab, useSessionCre
 import { revealProject } from '../sidebar/reveal';
 import { SESSION_DRAG_TYPE } from '../sidebar/SessionRow';
 import { useLayout } from '../stores/layout';
-import { currentSet, isOpen } from '../stores/layout-model';
+import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
-import { focusPaneElement } from './pane-dom';
 import { Tab, TAB_DRAG_TYPE } from './Tab';
 
 export { TAB_DRAG_TYPE };
@@ -56,19 +55,6 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
     strip.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [activeTabId]);
 
-  // After a keyboard close, focus goes to the tab that took the closed one's place (or the new last tab), or, when the
-  // pane survives with none (the only pane's last tab), to the empty pane's own controls.
-  const refocus = useRef<{ id: string; index: number } | null>(null);
-  const stripTabs = state?.tabs;
-  useEffect(() => {
-    const pending = refocus.current;
-    if (!pending || stripTabs?.some((t) => t.id === pending.id)) return;
-    refocus.current = null;
-    const remaining = strip.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [];
-    if (remaining.length === 0) focusPaneElement(pane);
-    else remaining[Math.min(pending.index, remaining.length - 1)].focus();
-  }, [stripTabs, pane]);
-
   if (!state) return null;
   const tabs = state.tabs;
 
@@ -88,14 +74,8 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
         break;
       case 'Delete':
       case 'Backspace':
-        // Focus stays on the tab while its guard decides; only a close that happens hands it to the neighbour (the
-        // effect below, once the tab has left the strip).
-        refocus.current = { id: tab.id, index };
-        void requestCloseTab(tab.id).then(() => {
-          const main = useLayout.getState().main;
-          if (isOpen(main, tab.id)) refocus.current = null; // kept
-          else if (!currentSet(main).panes[pane]) focusPaneElement(0); // the pane collapsed with its last tab
-        });
+        // Every close path shares the guard and focus handoff in requestCloseTab.
+        void requestCloseTab(tab.id);
         break;
       default:
         return;

@@ -5,12 +5,23 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
-import { registerAction, runAction } from '../keymap/actions-runtime';
+import { registerCloseGuard, registerAction, runAction } from '../keymap/actions-runtime';
 import type { PanelHostProps } from '../panel/host-slot';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { registerShellActions } from './shell-actions';
+import { fakeClient } from '../../../../test/support/fake-client';
+import { connectQuitWait } from '../lifecycle/quit-wait';
+import { connectAttention } from '../attention/navigation';
+import { useNotices } from '../stores/notices';
+import { connectKeys } from '../keymap/dispatcher';
+import { Sheet } from '../sessions/Sheet';
+import { SessionDialogs } from '../sessions/SessionDialogs';
+import { beforeCloseUnstarted } from '../sessions/setup-actions';
+import { closeDialog } from '../sessions/dialogs';
+import { ID, intent, putIntent, resetSetupStore } from '../test-support/setup-intents';
+import { useState } from 'react';
 import { Shell } from './Shell';
 import { registerSlot, resetSlots } from './slots';
 import { toolbarTitle } from './Toolbar';
@@ -30,6 +41,7 @@ const offs: (() => void)[] = [];
 const setWindowWidth = (width: number) => (window as unknown as { happyDOM: { setWindowSize(size: { width: number }): void } }).happyDOM.setWindowSize({ width });
 
 beforeEach(() => {
+  useNotices.setState({ notices: [] });
   setWindowWidth(1440); // the app window's default size
   useLayout.setState({ regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, panelPinned: [], panelBySession: new Map(), panelActiveNoSession: null, hydrated: true, overviewOpen: false });
   useSessions.setState({ records: new Map() });
@@ -401,3 +413,139 @@ function fakeBridge() {
     on: vi.fn(() => () => {}),
   } as unknown as MawsBridge & { invoke: ReturnType<typeof vi.fn> };
 }
+
+
+it('keeps fallback notifications and quit-wait actions outside the hidden main region', async () => {
+  const user = userEvent.setup();
+  const fake = fakeClient({ 'layout.quitWait': { waiting: null }, 'layout.quitWaitAnswer': undefined, 'attention.pendingNavigate': { navigate: null } });
+  offs.push(connectQuitWait(fake.client), connectAttention(fake.client));
+  useLayout.getState().setPanel({ maximized: true, collapsed: false });
+  render(<Shell />);
+  act(() => {
+    fake.event('layout.quitWait', { waiting: { midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false } });
+    fake.event('attention.notified', { appSessionId: A, attentionId: 'att-a', delivery: 'fallback', at: '2026-10-02T10:00:00Z' });
+  });
+  const quit = screen.getByRole('button', { name: 'Quit now' });
+  const cancel = screen.getByRole('button', { name: 'Cancel' });
+  const notification = screen.getByRole('region', { name: /Notifications/ });
+  for (const node of [quit, cancel, notification]) {
+    expect(node.closest('[inert]')).toBeNull();
+    expect(region('main').contains(node)).toBe(false);
+  }
+  await user.click(cancel);
+  await user.click(quit);
+  expect(fake.invoked('layout.quitWaitAnswer')).toEqual([{ action: 'cancel' }, { action: 'quitNow' }]);
+  expect(document.querySelectorAll('[data-banner-host]')).toHaveLength(1);
+});
+
+it.each(['tab', 'content'] as const)('Cmd+W from focused %s restores the active tab and pane-scoped cycling', async (from) => {
+  const user = userEvent.setup();
+  offs.push(registerShellActions(fakeBridge()), connectKeys());
+  registerSlot('fileTab', () => <input aria-label="File content" />);
+  useLayout.getState().openTab({ kind: 'file', path: '/one.ts', line: null, appSessionId: null });
+  useLayout.getState().openTab({ kind: 'file', path: '/two.ts', line: null, appSessionId: null });
+  useLayout.getState().openTab({ kind: 'file', path: '/three.ts', line: null, appSessionId: null });
+  render(<Shell />);
+  act(() => (from === 'tab' ? screen.getByRole('tab', { name: /three.ts/ }) : screen.getByRole('textbox', { name: 'File content' })).focus());
+  act(() => runAction('tab.close'));
+  await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole('tab', { name: /two.ts/ })));
+  await user.keyboard('{Control>}{Tab}{/Control}');
+  await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole('tab', { name: /one.ts/ })));
+});
+
+it('closing the last split tab restores focus in the surviving pane; closing its last tab focuses empty-pane controls', async () => {
+  offs.push(registerShellActions(fakeBridge()));
+  useLayout.getState().openTab({ kind: 'file', path: '/left.ts', line: null, appSessionId: null });
+  useLayout.getState().openTab({ kind: 'file', path: '/right.ts', line: null, appSessionId: null }, { pane: 'other' });
+  render(<Shell />);
+  act(() => screen.getByRole('tab', { name: /right.ts/ }).focus());
+  act(() => runAction('tab.close'));
+  await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole('tab', { name: /left.ts/ })));
+  act(() => runAction('tab.close'));
+  await vi.waitFor(() => expect(document.activeElement).toBe(within(screen.getByRole('tabpanel')).getByRole('button', { name: /Overview/ })));
+});
+
+it('a refused Cmd+W keeps the tab and its focus', async () => {
+  offs.push(registerShellActions(fakeBridge()), registerCloseGuard('file', async () => false));
+  useLayout.getState().openTab({ kind: 'file', path: '/keep.ts', line: null, appSessionId: null });
+  render(<Shell />);
+  const tab = screen.getByRole('tab', { name: /keep.ts/ });
+  act(() => tab.focus());
+  await act(async () => runAction('tab.close'));
+  expect(document.activeElement).toBe(tab);
+});
+
+it.each([false, true])('Escape dismisses a triggerless sheet back to its opener (child autofocus: %s)', async (autofocus) => {
+  function Example() {
+    const [open, setOpen] = useState(false);
+    return <><button onClick={() => setOpen(true)}>Open sheet</button>{open && <Sheet title="Confirmation" onClose={() => setOpen(false)}><input aria-label="Name" autoFocus={autofocus} /></Sheet>}</>;
+  }
+  const user = userEvent.setup();
+  render(<Example />);
+  const opener = screen.getByRole('button', { name: 'Open sheet' });
+  await user.click(opener);
+  expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Name' }));
+  await user.keyboard('{Escape}');
+  await vi.waitFor(() => expect(document.activeElement).toBe(opener));
+});
+
+it('Delete on an arrow-focused inactive draft tab restores focus after the real discard guard', async () => {
+  const user = userEvent.setup();
+  resetSetupStore();
+  const previousBridge = window.maws;
+  const fake = fakeClient({ 'session.intent.discard': { leftover: null } });
+  window.maws = fake.client;
+  offs.push(() => { window.maws = previousBridge; closeDialog(); resetSetupStore(); });
+  offs.push(registerCloseGuard('session', async (ref) => ref.kind === 'session' && await beforeCloseUnstarted(ref.appSessionId) === 'closed'));
+  putIntent(intent({ draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'keep my draft' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));
+  useLayout.getState().openTab({ kind: 'session', appSessionId: ID });
+  useLayout.getState().openTab({ kind: 'file', path: '/survivor.ts', line: null, appSessionId: null });
+  render(<><Shell /><SessionDialogs /></>);
+  const survivor = screen.getByRole('tab', { name: /survivor.ts/ });
+  act(() => survivor.focus());
+  await user.keyboard('{ArrowLeft}');
+  const draft = screen.getByRole('tab', { name: 'New chat' });
+  expect(document.activeElement).toBe(draft);
+  expect(draft.getAttribute('aria-selected')).toBe('false');
+  await user.keyboard('{Delete}');
+  await user.click(await screen.findByRole('button', { name: 'Discard' }));
+  await vi.waitFor(() => expect(screen.queryByRole('tab', { name: 'New chat' })).toBeNull());
+  expect(fake.invoked('session.intent.discard')).toEqual([{ appSessionId: ID }]);
+  await vi.waitFor(() => expect(document.activeElement).toBe(survivor));
+});
+
+it('middle-closing the active left tab preserves the surviving right editor focus', async () => {
+  registerSlot('fileTab', () => <input aria-label="File content" />);
+  useLayout.getState().openTab({ kind: 'file', path: '/left-survivor.ts', line: null, appSessionId: null });
+  useLayout.getState().openTab({ kind: 'file', path: '/left-close.ts', line: null, appSessionId: null });
+  useLayout.getState().openTab({ kind: 'file', path: '/right.ts', line: null, appSessionId: null }, { pane: 'other' });
+  render(<Shell />);
+  const editor = within(screen.getByRole('region', { name: 'Right pane' })).getByRole('textbox');
+  act(() => editor.focus());
+  fireEvent(screen.getByRole('tab', { name: /left-close.ts/ }), new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+  await vi.waitFor(() => expect(screen.queryByRole('tab', { name: /left-close.ts/ })).toBeNull());
+  // Drain the close handoff frame before checking that it did not move focus.
+  await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+  expect(screen.getByRole('tab', { name: /left-survivor.ts/ }).getAttribute('aria-selected')).toBe('true');
+  expect(document.activeElement).toBe(editor);
+});
+
+it.each([true, false])('context-menu Close restores pane focus when the closing tab is active=%s', async (active) => {
+  useLayout.getState().openTab({ kind: 'file', path: '/menu-close.ts', line: null, appSessionId: null });
+  useLayout.getState().openTab({ kind: 'file', path: '/menu-survivor.ts', line: null, appSessionId: null });
+  if (active) useLayout.getState().activateTab('file:/menu-close.ts');
+  render(<Shell />);
+  const tab = screen.getByRole('tab', { name: 'menu-close.ts' });
+  act(() => tab.focus());
+  fireEvent.contextMenu(tab);
+  const close = await screen.findByRole('menuitem', { name: 'Close tab' });
+  act(() => close.focus());
+  fireEvent.click(close);
+  await vi.waitFor(() => expect(screen.queryByRole('tab', { name: 'menu-close.ts' })).toBeNull());
+  // Drain Radix's trigger-restoration timeout and the close handoff frame.
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
+  expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'menu-survivor.ts' }));
+});

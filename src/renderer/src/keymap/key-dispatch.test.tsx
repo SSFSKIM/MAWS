@@ -262,3 +262,15 @@ describe('the chord capture', () => {
   });
 });
 // C11 end
+
+it('does not let a persisted bare app-wide shortcut swallow text or stop work', async () => {
+  disconnect();
+  disconnect = connectKeys(window, () => ({ 'composer.stop': 'S' }));
+  const stop = vi.fn();
+  render(<Bound id="composer.stop" label="busy session" spy={stop} />);
+  const input = screen.getByRole('searchbox', { name: 'Search' });
+  const user = userEvent.setup();
+  await user.type(input, 'sessions');
+  expect(stop).not.toHaveBeenCalled();
+  expect((input as HTMLInputElement).value).toBe('sessions');
+});
