@@ -12,10 +12,11 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { resetSetupStore, trustState } from '../test-support/setup-intents';
 import { useSetup } from './store';
-import { resetShellStores } from '../test-support/shell-stores';
+import { fileTabsByProject, resetShellStores } from '../test-support/shell-stores';
 import { registerSessionActions } from './actions';
 import { resubmitProvider } from './record-ops';
 import { closeDialog, useDialogs } from './dialogs';
+import { currentSet } from '../stores/layout-model';
 
 const A = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const P1 = 'p1' as ProjectId;
@@ -48,14 +49,16 @@ describe('the session and project entries', () => {
     expect(Object.values(PROJECT_ACTIONS)).not.toContain('Add directory…');
   });
 
-  // New chat (2026-10-01): ⌘N comes with the session creator, and preselects only a focused project
-  it('⌘N creates in the focused session’s project, else the open project page’s, else in none', async () => {
+  // New chat (2026-10-01): ⌘N comes with the session creator, and preselects only a focused project; W12: the project
+  // whose tab set the strip shows
+  it('⌘N creates in the strip’s project, else the open project page’s, else in none', async () => {
     useSessions.setState({ projects: new Map([[P2, project('p2', 1)], [P1, project('p1', 0)]]), records: new Map([[A, record(A, { projectId: P2 })]]) });
+    fileTabsByProject();
     expect(focusedProject(), 'the project list with nothing open: no project').toBeNull();
     useLayout.getState().setSidebar({ openProject: P1 });
     expect(focusedProject()).toBe(P1);
     useLayout.getState().openTab({ kind: 'session', appSessionId: A });
-    expect(focusedProject(), 'the active session’s project first').toBe(P2);
+    expect(focusedProject(), 'the strip’s project first').toBe(P2);
     expect(focusedProject({ first: 'page' }), 'the sidebar’s own control asks its page first').toBe(P1);
     const created: (ProjectId | null)[] = [];
     offs.push(registerSessionCreator(async (projectId) => (created.push(projectId), null)));
@@ -69,7 +72,7 @@ describe('the session and project entries', () => {
     useSessions.setState({ records: new Map([[A, record(A, { holder: { kind: 'none' } })]]) });
     act(() => runSessionAction('resume', A));
     const active = () => {
-      const pane = useLayout.getState().main.panes[useLayout.getState().main.focusedPane]!;
+      const pane = currentSet(useLayout.getState().main).panes[currentSet(useLayout.getState().main).focusedPane]!;
       return pane.tabs.find((t) => t.id === pane.activeTabId);
     };
     expect(active()).toMatchObject({ kind: 'session', appSessionId: A });
@@ -125,7 +128,7 @@ describe("C7's resubmit seam", () => {
     useSessions.setState({ records: new Map([[A, record(A, { projectId: P1 })]]) });
     await expect(resubmitProvider.forkFrom({ appSessionId: A, messageUuid: EDITED as never, content: 'say it again' })).resolves.toEqual({ appSessionId: FORK });
     expect(fake.invoked('session.fork')).toEqual([{ appSessionId: A, target: { kind: 'inPlace' }, message: { content: 'say it again', display: 'say it again' }, rewindTo: EDITED }]);
-    const pane = useLayout.getState().main.panes[useLayout.getState().main.focusedPane]!;
+    const pane = currentSet(useLayout.getState().main).panes[currentSet(useLayout.getState().main).focusedPane]!;
     expect(pane.tabs.find((t) => t.id === pane.activeTabId)).toMatchObject({ kind: 'session', appSessionId: FORK });
   });
 

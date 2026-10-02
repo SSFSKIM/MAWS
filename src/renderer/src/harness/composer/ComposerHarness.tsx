@@ -27,6 +27,7 @@ import { RequestCard } from '../../request-card';
 import { ComposerColumn, SessionPane } from '../../session/SessionPane';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
+import { currentSet } from '../../stores/layout-model';
 import { TranscriptSlot } from '../../transcript';
 import { RewindWidget } from '../../widgets/RewindWidget';
 import type { CardsHarnessApi, HarnessPane, HarnessPlacement } from './api';
@@ -115,7 +116,10 @@ function mirrorLayout(panes: [HarnessPane, HarnessPane]) {
     pane !== null && 'composer' in pane
       ? { tabs: [{ id: `session:${pane.composer}`, kind: 'session' as const, appSessionId: pane.composer as AppSessionId, pinned: false }], activeTabId: `session:${pane.composer}` }
       : { tabs: [{ id: 'diagnostics' as const, kind: 'diagnostics' as const, pinned: false }], activeTabId: 'diagnostics' }; // W5: a tab of no session (the Overview is no tab)
-  useLayout.setState((s) => ({ main: { ...s.main, panes: [tabsOf(panes[0]), tabsOf(panes[1])], focusedPane: s.main.focusedPane } }));
+  useLayout.setState((s) => {
+    const shown = currentSet(s.main);
+    return { main: { ...s.main, sets: { ...s.main.sets, [s.main.current]: { ...shown, panes: [tabsOf(panes[0]), tabsOf(panes[1])] } } } };
+  });
 }
 
 export function ComposerHarness() {

@@ -6,7 +6,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { Toolbar } from '../app/Toolbar';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { OverviewLayer, placeRect } from './OverviewPanel';
 
@@ -112,7 +112,7 @@ describe('the floating Overview', () => {
     act(() => useLayout.getState().setOverviewOpen(true));
     await user.click(within(panel()).getByText('Charter + research'));
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Charter + research') });
-    expect(useLayout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Charter + research')}`]);
+    expect(currentSet(useLayout.getState().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Charter + research')}`]);
     expect(useLayout.getState().main.closedTabs.map((t) => t.id)).toEqual([`session:${idOf('Settings idle probe')}`]);
     expect(useLayout.getState().overviewOpen).toBe(false);
   });
@@ -138,7 +138,7 @@ describe('the floating Overview', () => {
     render(<World />);
     act(() => useLayout.getState().setOverviewOpen(true));
     fireEvent.click(within(panel()).getByText('Charter + research'), { metaKey: true });
-    expect(useLayout.getState().main.panes.map((p) => p.tabs.map((t) => t.id))).toEqual([[`session:${idOf('Settings idle probe')}`], [`session:${idOf('Charter + research')}`]]);
+    expect(currentSet(useLayout.getState().main).panes.map((p) => p.tabs.map((t) => t.id))).toEqual([[`session:${idOf('Settings idle probe')}`], [`session:${idOf('Charter + research')}`]]);
     expect(useLayout.getState().overviewOpen).toBe(false);
   });
 

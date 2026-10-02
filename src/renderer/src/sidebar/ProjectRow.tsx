@@ -3,6 +3,7 @@
 // A click opens the project's page. "Other sessions" is the same row without a "+" or a context menu.
 import { FolderIcon, PlusIcon } from '../app/IconButton';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { useLayout } from '../stores/layout';
 import type { ProjectEntry, ProjectKey } from './derive';
 import { projectNodeId, useTree } from './tree';
 
@@ -23,7 +24,10 @@ export function ProjectRow({ entry, onOpen }: { entry: ProjectEntry; onOpen(key:
       data-kind="project"
       data-menu={project ? `project:${project.id}` : undefined}
       onFocus={(event) => event.target === event.currentTarget && tree.onFocusItem(nodeId)}
-      onClick={() => onOpen(key)}
+      onClick={() => {
+        useLayout.getState().setCurrentProject(project?.id ?? null); // W12: the strip shows this project's tab set
+        onOpen(key);
+      }}
       className="group/project flex h-(--row-h) cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2"
     >
       <FolderIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} />

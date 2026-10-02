@@ -6,6 +6,7 @@
 import type { StoreApi } from 'zustand/vanilla';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { useLayout } from '../../../stores/layout';
+import { allTabs } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
 import { REVIEW_COPY } from '../copy';
 import { parseRef } from './review-model';
@@ -20,7 +21,7 @@ const views = new Map<string, StoreApi<ReviewUi>>();
 let following: (() => void) | null = null;
 
 function prune(): void {
-  const open = new Set(useLayout.getState().main.panes.flatMap((pane) => pane.tabs.map((t) => t.id)));
+  const open = new Set(allTabs(useLayout.getState().main).map((t) => t.id)); // W12: every project's tab set
   for (const id of views.keys()) if (!open.has(id)) views.delete(id);
 }
 

@@ -30,6 +30,7 @@ import { resetEffectiveEfforts } from './effective-effort'; // W3
 import { registerSlashWidget } from './mentions/widgets'; // W3
 import { closeWidgetDialog, useWidgetDialog } from './WidgetDialog'; // W3
 import { registerSetupIntentHook, type HookResult, type SetupIntentHook, type SetupIntentPatch } from './setup-intent';
+import { currentSet } from '../stores/layout-model';
 import { registerReleasedResume } from './resume-seam'; // C12
 
 const A = 'app-a' as AppSessionId;
@@ -468,11 +469,17 @@ describe('one Stop handler for every pane', () => {
     useLayout.setState((s) => ({
       main: {
         ...s.main,
-        panes: [
-          { tabs: [{ id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` },
-          { tabs: [{ id: `session:${B}`, kind: 'session', appSessionId: B, pinned: false }], activeTabId: `session:${B}` },
-        ],
-        focusedPane,
+        current: 'none',
+        sets: {
+          none: {
+            panes: [
+              { tabs: [{ id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` },
+              { tabs: [{ id: `session:${B}`, kind: 'session', appSessionId: B, pinned: false }], activeTabId: `session:${B}` },
+            ],
+            focusedPane,
+            splitRatio: 0.5,
+          },
+        },
       },
     }));
 
@@ -486,7 +493,7 @@ describe('one Stop handler for every pane', () => {
     await key(editorOf(1), { key: '.', code: 'Period', metaKey: true });
     expect(invoked('session.interrupt')).toEqual([{ appSessionId: B, cancelEngineQueued: false, holdEngineQueued: true }]); // the plain stop holds waiting steers (W1)
     act(() => editorOf(0).focus()); // focus moves to pane 0: C5's pane corrects focusedPane on focusin
-    expect(useLayout.getState().main.focusedPane).toBe(0);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(0);
     await key(editorOf(0), { key: '.', code: 'Period', metaKey: true });
     expect(invoked('session.interrupt')).toEqual([
       { appSessionId: B, cancelEngineQueued: false, holdEngineQueued: true },

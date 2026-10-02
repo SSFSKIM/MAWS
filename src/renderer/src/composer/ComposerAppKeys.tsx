@@ -11,15 +11,14 @@ import { ipc } from '../ipc/client';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
+import { activeTab } from '../stores/layout-model';
 import { useQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { isBusy } from './submit/submit-state';
 
-// The session of the focused pane's active tab, if that tab is a session's.
+// The session of the focused pane's active tab (in the strip's set, W12), if that tab is a session's.
 export function focusedSession(): AppSessionId | null {
-  const { main } = useLayout.getState();
-  const pane = main.panes[main.focusedPane] ?? main.panes[0];
-  const tab = pane.tabs.find((t) => t.id === pane.activeTabId);
+  const tab = activeTab(useLayout.getState().main);
   return tab?.kind === 'session' ? tab.appSessionId : null;
 }
 

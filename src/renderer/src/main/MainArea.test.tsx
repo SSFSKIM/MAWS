@@ -12,9 +12,9 @@ import { registerSlot, resetSlots } from '../app/slots';
 import { createSession, registerCloseGuard, registerSessionCreator, registerUnstartedTitle, runAction } from '../keymap/actions-runtime';
 import { connectKeys } from '../keymap/dispatcher';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
-import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fileTabsByProject, fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { TAB_DRAG_TYPE } from './TabStrip';
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
@@ -311,12 +311,12 @@ describe('split', () => {
     fireEvent.drop(edge, { dataTransfer: dt });
     expect(strips()).toHaveLength(2);
     expect(tabNames(strips()[1])).toEqual(['Fix sidebar drag · MAWS']);
-    expect(useLayout.getState().main.focusedPane).toBe(1);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(1);
     expect(within(main()).getByRole('separator', { name: 'Resize panes' })).toBeTruthy();
 
     await act(async () => runAction('tab.close'));
     expect(strips()).toHaveLength(1);
-    expect(useLayout.getState().main.focusedPane).toBe(0);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(0);
     expect(within(main()).queryByRole('separator', { name: 'Resize panes' })).toBeNull();
   });
 
@@ -334,7 +334,7 @@ describe('split', () => {
     act(() => runAction('pane.split'));
     expect(tabNames(strips()[1])).toEqual(['Quota reset recovery · codex_somersault']);
     act(() => runAction('pane.focusOther'));
-    expect(useLayout.getState().main.focusedPane).toBe(0);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(0);
     act(() => runAction('pane.split'));
     expect(tabNames(strips()[1])).toEqual(['Quota reset recovery · codex_somersault', 'Fix sidebar drag · MAWS']);
   });
@@ -344,13 +344,13 @@ describe('split', () => {
     openThree();
     act(() => runAction('pane.split')); // Quota goes right; Fix stays active on the left
     act(() => tab('Quota reset recovery · codex_somersault').focus());
-    expect(useLayout.getState().main.focusedPane).toBe(1);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(1);
     act(() => runAction('pane.focusOther'));
-    expect(useLayout.getState().main.focusedPane).toBe(0);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(0);
     expect(document.activeElement).toBe(tab('Fix sidebar drag · MAWS'));
     act(() => runAction('pane.focusOther'));
     expect(document.activeElement).toBe(tab('Quota reset recovery · codex_somersault'));
-    expect(useLayout.getState().main.focusedPane).toBe(1);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(1);
   });
 
   it('⌘⇧\\ without a split leaves focus where it is', () => {
@@ -359,7 +359,7 @@ describe('split', () => {
     act(() => tab('Charter + research · MAWS').focus());
     act(() => runAction('pane.focusOther'));
     expect(document.activeElement).toBe(tab('Charter + research · MAWS'));
-    expect(useLayout.getState().main.focusedPane).toBe(0);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(0);
   });
 
   it('a pointer or focus inside a pane focuses it, and only a split marks the focused strip', () => {
@@ -369,10 +369,10 @@ describe('split', () => {
     act(() => runAction('pane.split'));
     expect(strips()[1].dataset.focused).toBe('true');
     fireEvent.pointerDown(within(main()).getAllByRole('tabpanel')[0]);
-    expect(useLayout.getState().main.focusedPane).toBe(0);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(0);
     expect(strips()[0].dataset.focused).toBe('true');
     fireEvent.focus(tab('Quota reset recovery · codex_somersault'));
-    expect(useLayout.getState().main.focusedPane).toBe(1);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(1);
   });
 
   it('the split divider resizes the panes within 25–75 %', async () => {
@@ -383,9 +383,9 @@ describe('split', () => {
     const sep = within(main()).getByRole('separator', { name: 'Resize panes' });
     sep.focus();
     await user.keyboard('{End}');
-    expect(useLayout.getState().main.splitRatio).toBe(0.75);
+    expect(currentSet(useLayout.getState().main).splitRatio).toBe(0.75);
     await user.keyboard('{Home}');
-    expect(useLayout.getState().main.splitRatio).toBe(0.25);
+    expect(currentSet(useLayout.getState().main).splitRatio).toBe(0.25);
   });
 });
 
@@ -411,7 +411,8 @@ describe('unstarted sessions', () => {
     expect(within(screen.getByRole('banner')).getByText('New chat')).toBeTruthy();
   });
 
-  it('the strip’s "+" opens an unstarted tab in its pane, in the project of the pane’s session', async () => {
+  it('the strip’s "+" opens an unstarted tab in its pane, in the project whose tab set the strip shows', async () => {
+    fileTabsByProject();
     const asked: (ProjectId | null)[] = [];
     offs.push(registerSessionCreator(async (projectId) => (asked.push(projectId), NEW)));
     const user = userEvent.setup();
@@ -504,8 +505,11 @@ describe('before the layout has hydrated', () => {
     const user = userEvent.setup();
     // Saved before W5, so it still holds the Overview's tab, which hydration drops.
     const persisted = {
-      ...useLayout.getState().main,
+      version: 1,
       panes: [{ tabs: [{ id: 'overview', kind: 'overview', pinned: true }, { id: 'diagnostics', kind: 'diagnostics', pinned: false }], activeTabId: 'diagnostics' }],
+      focusedPane: 0,
+      splitRatio: 0.5,
+      closedTabs: [],
     };
     const layoutMain = fakeClient({ 'layout.list': { keys: ['main.tabs'] } });
     useLayout.setState({ hydrated: false });
@@ -526,7 +530,7 @@ describe('before the layout has hydrated', () => {
 // ⌃Tab is a renderer-sink, pane-scoped chord: it cycles the pane that owns the focused element, and only from an element
 // that may take it (a tab, a card), never from text entry, a key sink, a button or under an open menu.
 describe('⌃Tab follows DOM focus', () => {
-  const activeOf = (pane: 0 | 1) => useLayout.getState().main.panes[pane]?.activeTabId;
+  const activeOf = (pane: 0 | 1) => currentSet(useLayout.getState().main).panes[pane]?.activeTabId;
   function splitOpen() {
     act(() => {
       useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
@@ -593,6 +597,67 @@ describe('⌃Tab follows DOM focus', () => {
     act(() => screen.getByLabelText('terminal input').focus());
     act(() => runAction('tab.next'));
     expect(activeOf(0)).toBe(`session:${idOf('Charter + research')}`); // wraps from the last tab, once
+  });
+});
+
+// W12 (I3, §5.2 as amended 2026-10-01): each project has its own tab set; the strip shows the current one, its project
+// named at the strip's left edge.
+describe('tab sets per project', () => {
+  beforeEach(() => fileTabsByProject());
+  const label = () => within(main()).queryByRole('button', { name: /^Project / });
+  const projectRow = (name: string) => {
+    act(() => useLayout.getState().setSidebar({ openProject: null }));
+    return within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).getByRole('treeitem', { name });
+  };
+
+  it('a session of another project shows that project’s set, a project click shows its set again, and ⌘1–9 count in the set', async () => {
+    const user = userEvent.setup();
+    render(<Shell />);
+    expect(label()).toBeNull(); // nothing open: the no-project set, unlabelled
+    act(() => {
+      useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
+      useLayout.getState().openSession(idOf('Fix sidebar drag'), { how: 'tab' });
+    });
+    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
+    expect(label()?.textContent).toBe('MAWS');
+    await user.click(sidebarRow('Quota reset recovery'));
+    expect(tabNames()).toEqual(['Quota reset recovery · codex_somersault']);
+    expect(label()?.textContent).toBe('codex_somersault');
+    await act(async () => runAction('tab.select', 2));
+    expect(selected()).toBe('Quota reset recovery · codex_somersault'); // MAWS's tabs are not counted
+    await user.click(projectRow('MAWS'));
+    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
+    expect(selected()).toBe('Fix sidebar drag · MAWS');
+    await act(async () => runAction('tab.select', 1));
+    expect(selected()).toBe('Charter + research · MAWS');
+    // the label reveals its project in the sidebar
+    act(() => useLayout.getState().setSidebar({ openProject: null }));
+    await user.click(label()!);
+    expect(useLayout.getState().regions.sidebar.openProject).toBe('proj-maws');
+  });
+
+  it('a project with nothing open shows the empty pane under its name; Other sessions shows the unlabelled no-project set', async () => {
+    const user = userEvent.setup();
+    render(<Shell />);
+    await user.click(projectRow('claude-usage-menubar'));
+    expect(tabNames()).toEqual([]);
+    expect(within(within(main()).getByRole('tabpanel')).getByText('No open tabs')).toBeTruthy();
+    expect(label()?.textContent).toBe('claude-usage-menubar');
+    await user.click(projectRow('Other sessions'));
+    expect(useLayout.getState().main.current).toBe('none');
+    expect(label()).toBeNull();
+  });
+
+  it('Settings opened from another project’s set moves to the current one', async () => {
+    render(<Shell />);
+    act(() => useLayout.getState().openSession(idOf('Charter + research')));
+    act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
+    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Settings']);
+    act(() => useLayout.getState().openSession(idOf('Quota reset recovery')));
+    act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
+    expect(tabNames()).toEqual(['Quota reset recovery · codex_somersault', 'Settings']);
+    act(() => useLayout.getState().setCurrentProject('proj-maws' as ProjectId));
+    expect(tabNames()).toEqual(['Charter + research · MAWS']);
   });
 });
 

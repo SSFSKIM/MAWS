@@ -3,12 +3,13 @@
 // has a width (a first render, a test) a nominal 1000 px stands in.
 import { Resizer } from '../app/Resizer';
 import { useLayout } from '../stores/layout';
+import { currentSet } from '../stores/layout-model';
 import { paneDomId } from './pane-dom';
 
 const NOMINAL_WIDTH = 1000;
 
 export function SplitDivider({ width }: { width: number }) {
-  const ratio = useLayout((s) => s.main.splitRatio);
+  const ratio = useLayout((s) => currentSet(s.main).splitRatio);
   const w = width > 0 ? width : NOMINAL_WIDTH;
   return (
     <div className="relative w-px bg-border" style={{ gridRow: '1 / -1', gridColumn: 2 }}>

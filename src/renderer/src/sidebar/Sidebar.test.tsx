@@ -10,7 +10,7 @@ import { registerSessionCreator } from '../keymap/actions-runtime';
 import { registerAction } from '../keymap/actions-runtime'; // C11
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { Sidebar } from './Sidebar';
@@ -312,7 +312,7 @@ describe('sidebar keyboard', () => {
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Fix sidebar drag') });
     await user.keyboard('{ArrowDown}{Enter}'); // I2: Enter replaces the shown session, as a click does
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Sidebar interaction pass') });
-    expect(useLayout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Sidebar interaction pass')}`]);
+    expect(currentSet(useLayout.getState().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Sidebar interaction pass')}`]);
     expect(row('Sidebar interaction pass').getAttribute('aria-selected')).toBe('true');
     await user.keyboard('{Backspace}');
     expect(useLayout.getState().regions.sidebar.openProject).toBeNull();

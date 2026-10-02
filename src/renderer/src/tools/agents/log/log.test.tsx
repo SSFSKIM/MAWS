@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { FsReadSpillInput, FsReadSpillOutput } from '@shared/ipc/schema/fs';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { instanceOf, panelHost, setTitle, usePanelHost } from '../../../panel/host';
 import type { PanelToolContext } from '../../../panel/tool';
 import { useLayout } from '../../../stores/layout';
@@ -288,14 +289,14 @@ describe('log tool: openLog and openFullLog', () => {
 
   it('openFullLog does nothing when no session is focused and no transcript holds the cell', () => {
     act(() => useSessions.setState({ records: new Map() }));
-    act(() => useLayout.setState({ main: { ...useLayout.getState().main, panes: [{ tabs: [], activeTabId: null }] } as never }));
+    act(() => useLayout.setState({ main: LAYOUT_DEFAULTS.main })); // nothing open
     expect(() => agentTranscriptActions.openFullLog(cell(shell({ spill: spillOf(PATH) })))).not.toThrow();
     expect(logTabs(A)).toEqual([]);
   });
 
   // No focused pane: the session is the one whose transcript indexes the cell's tool use; a child's key names its parent.
   function unfocusWithTranscript(key: string): void {
-    act(() => useLayout.setState({ main: { ...useLayout.getState().main, panes: [{ tabs: [], activeTabId: null }] } as never }));
+    act(() => useLayout.setState({ main: LAYOUT_DEFAULTS.main })); // nothing open
     const state = createState(null, null);
     state.index.toolUses.set('toolu_1' as ToolUseId, 'turn-1' as never);
     useTranscriptStore.setState({ entries: { [key]: { state } as never } });

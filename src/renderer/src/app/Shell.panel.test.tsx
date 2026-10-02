@@ -13,7 +13,7 @@ import { connectPanelHost, instanceIds, panelHost, pendingAdds, registerPanelToo
 import { PanelHost } from '../panel/PanelHost';
 import type { PanelTool } from '../panel/tool';
 import { createLayoutStore, persistLayout, useLayout } from '../stores/layout';
-import { activeTab, sessionOfTab } from '../stores/layout-model';
+import { activeTab, currentSet, sessionOfTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import {
   A,
@@ -48,7 +48,7 @@ const panel = () => document.querySelector<HTMLElement>('[data-region="panel"]')
 const stripIds = () => [...panel().querySelectorAll<HTMLElement>('[data-tab-id]')].map((el) => el.dataset.tabId);
 const selectedId = () => panel().querySelector('[role="tab"][aria-selected="true"]')?.closest<HTMLElement>('[data-tab-id]')?.dataset.tabId ?? null;
 const shownSession = () => sessionOfTab(activeTab(useLayout.getState().main)); // as C5's region derives it
-const sessionTabs = () => useLayout.getState().main.panes.flatMap((p) => p.tabs.filter((t) => t.kind === 'session').map((t) => t.id));
+const sessionTabs = () => currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs.filter((t) => t.kind === 'session').map((t) => t.id));
 
 // The product's composition: C8a's host in C5's slot, the whole Shell under TanStack Query's provider (App.tsx).
 function renderShell() {

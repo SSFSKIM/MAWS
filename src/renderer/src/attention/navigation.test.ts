@@ -5,7 +5,7 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { runAction } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { connectAttention } from './navigation';
@@ -36,9 +36,9 @@ describe('⌘⇧J (attention.next)', () => {
   it('opens into the focused pane of a split', () => {
     useLayout.getState().openSession(idOf('Settings idle probe')); // the left pane's tab (an empty pane takes a split's tab itself)
     useLayout.getState().openSession(idOf('Charter + research'), { split: true });
-    expect(useLayout.getState().main.focusedPane).toBe(1);
+    expect(currentSet(useLayout.getState().main).focusedPane).toBe(1);
     runAction('attention.next');
-    expect(useLayout.getState().main.panes[1]?.activeTabId).toBe(`session:${idOf('Fix sidebar drag')}`);
+    expect(currentSet(useLayout.getState().main).panes[1]?.activeTabId).toBe(`session:${idOf('Fix sidebar drag')}`);
   });
 
   it('does nothing when nothing needs you', () => {

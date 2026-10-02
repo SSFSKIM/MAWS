@@ -84,7 +84,7 @@ function mirrorLayout(pane: WidgetsPane) {
   const tabs = pane
     ? { tabs: [{ id: `session:${pane.appSessionId}`, kind: 'session' as const, appSessionId: pane.appSessionId as AppSessionId, pinned: false }], activeTabId: `session:${pane.appSessionId}` }
     : noSession;
-  useLayout.setState((s) => ({ main: { ...s.main, panes: [tabs, noSession], focusedPane: 0 } }));
+  useLayout.setState((s) => ({ main: { ...s.main, current: 'none', sets: { none: { panes: [tabs, noSession], focusedPane: 0, splitRatio: 0.5 } } } })); // W12: one tab set
 }
 
 // A widget opened from the picker, placed as C7's editor places one opened from the palette (W3: the model selector's

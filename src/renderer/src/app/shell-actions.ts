@@ -9,7 +9,7 @@ import { focusPaneElement } from '../main/pane-dom';
 import { focusOverview } from '../overview/OverviewPanel';
 import { togglePalette } from '../palette/CommandPalette';
 import { registerReplaceGuard, useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { registerSessionAction } from './session-actions';
@@ -53,8 +53,9 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     registerAction('pane.split', () => layout().splitWithActive()),
     // DOM focus moves too, so a pane-scoped chord (bound to the element that holds focus) follows the pane.
     registerAction('pane.focusOther', () => {
-      if (layout().main.panes.length < 2) return;
-      const other = layout().main.focusedPane === 0 ? 1 : 0;
+      const shown = currentSet(layout().main);
+      if (shown.panes.length < 2) return;
+      const other = shown.focusedPane === 0 ? 1 : 0;
       layout().focusPane(other);
       focusPaneElement(other);
     }),

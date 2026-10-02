@@ -4,10 +4,11 @@
 // handler renders disabled everywhere: in the page through `useActionEnabled`, in the application menu through the
 // enabled set the dispatcher reports to main.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { LayoutMain, TabRef } from '@shared/ipc/schema/layout';
+import { NO_PROJECT, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import type { ActionId } from '@shared/keymap/actions';
 import type { Location } from '@shared/sessions/intent';
 import { useLayout } from '../stores/layout';
+import { allTabs } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { create } from 'zustand';
 import { createHandlerRegistry } from './registry';
@@ -70,7 +71,7 @@ const closeGuards = createHandlerRegistry<TabRef['kind'], [TabRef]>('close guard
 
 export const registerCloseGuard = (kind: TabRef['kind'], guard: CloseGuard): (() => void) => closeGuards.register(kind, guard);
 
-const findTab = (main: LayoutMain, id: string): TabRef | null => main.panes.flatMap((p) => p.tabs).find((t) => t.id === id) ?? null;
+const findTab = (main: LayoutMain, id: string): TabRef | null => allTabs(main).find((t) => t.id === id) ?? null;
 
 async function guardAllows(ref: TabRef): Promise<boolean> {
   const guard = closeGuards.get(ref.kind) as CloseGuard | undefined;
@@ -152,21 +153,19 @@ export function useUnstartedTitle(appSessionId: AppSessionId): UnstartedTitleAns
   return answerOf(appSessionId, registered, { projectId, project }, revision);
 }
 
+// W12: the project an unstarted session's tab belongs with until its record exists (the shell's `projectOf` for the
+// layout): C10's registered answer, else C5's own.
+export const unstartedProjectOf = (appSessionId: AppSessionId): ProjectId | null => unstartedTitleOf(appSessionId).projectId;
+
 // ---- New chat's preselection (2026-10-01) -------------------------------------------------------------------------------
-// The project a New chat starts in when a project is focused, so the common case is one step: the session's project in
-// the active tab (of `pane`, else the focused pane; an unstarted tab's chosen one included), or the project whose page
-// the sidebar shows; `first: 'page'` asks the sidebar first (its own New chat control). None from the project list
-// with nothing open: the chat then starts with "Choose a project".
-export function focusedProject(opts: { pane?: 0 | 1; first?: 'tab' | 'page' } = {}): ProjectId | null {
+// The project a New chat starts in when a project is focused, so the common case is one step: the project whose tab set
+// the strip shows (W12; every session tab in it is that project's), or the project whose page the sidebar shows;
+// `first: 'page'` asks the sidebar first (its own New chat control). None from the no-project set with no page open:
+// the chat then starts with "Choose a project".
+export function focusedProject(opts: { first?: 'tab' | 'page' } = {}): ProjectId | null {
   const { main, regions } = useLayout.getState();
-  const { records, projects } = useSessions.getState();
-  const fromTab = (): ProjectId | null => {
-    const shown = main.panes[opts.pane ?? main.focusedPane] ?? main.panes[0];
-    const tab = shown?.tabs.find((t) => t.id === shown.activeTabId);
-    if (tab?.kind !== 'session' && tab?.kind !== 'agent') return null;
-    const record = records.get(tab.appSessionId);
-    return record ? record.projectId : unstartedTitleOf(tab.appSessionId).projectId;
-  };
+  const { projects } = useSessions.getState();
+  const fromTab = (): ProjectId | null => (main.current === NO_PROJECT ? null : main.current);
   const fromPage = (): ProjectId | null => {
     const open = regions.sidebar.openProject;
     return open !== null && open !== 'other' && projects.has(open as ProjectId) ? (open as ProjectId) : null;

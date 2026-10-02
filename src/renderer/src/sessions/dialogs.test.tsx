@@ -15,6 +15,7 @@ import { Sheet, SheetForm } from './Sheet';
 import { cleanupTargetOf, confirmLabel } from './CleanupDialog';
 import { SessionDialogs, DeletionNotice } from './SessionDialogs';
 import { useSetup } from './store';
+import { currentSet } from '../stores/layout-model';
 
 const WT = `${REPO}/.claude/worktrees/accept-one`;
 const HEAD = 'a'.repeat(40);
@@ -308,7 +309,7 @@ describe('dialogs', () => {
     expect(await within(dialog).findByText(/^Removes what is left of the conversation from ~\/.claude to the Trash/)).toBeTruthy();
     await userEvent.click(within(dialog).getByRole('button', { name: 'Stop and delete' }));
     await waitFor(() => expect(fake.invoked('session.delete')).toEqual([{ appSessionId: LIVE, stopIfLive: true }]));
-    await waitFor(() => expect(useLayout.getState().main.panes[0].tabs.some((t) => t.kind === 'session' && t.appSessionId === LIVE)).toBe(false));
+    await waitFor(() => expect(currentSet(useLayout.getState().main).panes[0].tabs.some((t) => t.kind === 'session' && t.appSessionId === LIVE)).toBe(false));
   });
 
   it('archive names the background work it would stop, and offers the cleanup when the session was the last of its worktree', async () => {

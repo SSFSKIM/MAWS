@@ -3,8 +3,9 @@
 // the events that raced it inside its store (by revision for sessions, projects and digests; by buffer and replay for
 // attention). The layout hydrates once the sessions are known, so a persisted tab of a vanished session is dropped,
 // unless a registered tab retention (C10's) keeps it.
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { EventPayload, MawsBridge, SessionDigest } from '@shared/ipc/schema';
-import { currentTabRetention } from '../keymap/actions-runtime';
+import { currentTabRetention, unstartedProjectOf } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
 import { createFreshness } from '../stores/freshness';
 import { useLayout } from '../stores/layout';
@@ -128,6 +129,16 @@ export function connectShell(
     if (live() && !attention().loaded) attention().applySnapshot([]); // no answerer: start empty, keep what was buffered
   });
 
+  // W12: a session's tabs live in its project's set: the record's project, else its unstarted intent's; a record whose
+  // project changes (a refold) moves its tabs (the layout ignores this until it has hydrated).
+  const projectOf = (id: AppSessionId): ProjectId | null => {
+    const record = sessions().records.get(id);
+    return record ? record.projectId : unstartedProjectOf(id);
+  };
+  const offRefile = stores.sessions.subscribe((state, previous) => {
+    if (state.records !== previous.records) stores.layout.getState().refileTabs();
+  });
+
   void Promise.all([
     answer('session.list', client.invoke('session.list', {}), (value) => sessions().applyList(value)),
     answer('session.projects.list', client.invoke('session.projects.list', undefined), (value) => sessions().applyProjects(value)),
@@ -138,11 +149,12 @@ export function connectShell(
     const retention = currentTabRetention();
     if (retention) await retention.ready;
     if (!live()) return;
-    await stores.layout.getState().hydrate(client, (id) => sessions().records.has(id) || (retention?.retains(id) ?? false), flushNow);
+    await stores.layout.getState().hydrate(client, (id) => sessions().records.has(id) || (retention?.retains(id) ?? false), { settle: flushNow, projectOf });
   });
 
   return () => {
     connected = false;
+    offRefile();
     if (timer) clearTimeout(timer);
     timer = null;
     queued = [];

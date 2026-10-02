@@ -6,7 +6,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { Overview } from './Overview';
@@ -98,8 +98,8 @@ describe('overview board', () => {
     await user.click(within(card('Charter + research')).getByText('Charter + research'));
     expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: idOf('Charter + research') });
     fireEvent.click(within(card('Settings idle probe')).getByText('Settings idle probe'), { metaKey: true });
-    expect(useLayout.getState().main.panes).toHaveLength(2);
-    expect(useLayout.getState().main.panes[1]?.activeTabId).toBe(`session:${idOf('Settings idle probe')}`);
+    expect(currentSet(useLayout.getState().main).panes).toHaveLength(2);
+    expect(currentSet(useLayout.getState().main).panes[1]?.activeTabId).toBe(`session:${idOf('Settings idle probe')}`);
   });
 
   it('arrow keys move focus across cards, Enter opens, ⌘Enter opens in the split', async () => {
@@ -126,7 +126,7 @@ describe('overview board', () => {
     render(<Overview paneIndex={0} />);
     card('Charter + research').focus();
     await user.keyboard('{Meta>}{Enter}{/Meta}');
-    expect(useLayout.getState().main.panes[1]?.activeTabId).toBe(`session:${idOf('Charter + research')}`);
+    expect(currentSet(useLayout.getState().main).panes[1]?.activeTabId).toBe(`session:${idOf('Charter + research')}`);
   });
 
   it('an empty board reads "Nothing live or unread" with a new-session action', async () => {

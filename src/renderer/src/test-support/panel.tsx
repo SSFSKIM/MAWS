@@ -10,7 +10,7 @@ import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema'
 import { queryClient } from '../ipc/query';
 import { useGit } from '../stores/git';
 import { useSummary } from '../stores/summary';
-import { LAYOUT_DEFAULTS, type LayoutMain, type PanelSessionState, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type PanelSessionState, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
 import { resetPanelHost } from '../panel/host';
 import { PanelHost } from '../panel/PanelHost';
@@ -80,7 +80,7 @@ export const ref = (id: string, pinned = false): PanelTabRef => ({ id, toolId: i
 export const sessionTab = (id: AppSessionId): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
 export const mainShowing = (...ids: AppSessionId[]): LayoutMain => {
   const tabs = ids.map(sessionTab);
-  return { ...LAYOUT_DEFAULTS.main, panes: [{ tabs, activeTabId: tabs.at(-1)?.id ?? '' }] };
+  return { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs, activeTabId: tabs.at(-1)?.id ?? '' }] } } };
 };
 
 // The host as C5's region hands it its props, with `onChange` recorded per call.

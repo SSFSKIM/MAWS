@@ -16,6 +16,7 @@ import { builder } from './model/test-events';
 import { connectTranscript, ShellTranscript } from './shell';
 import { DEFAULT_ACTIONS } from './view/context';
 import { registeredActions } from './view/registry';
+import { currentSet } from '../stores/layout-model';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
 beforeAll(() => {
@@ -104,7 +105,7 @@ describe('the transcript slot', () => {
     render(<ShellTranscript appSessionId={APP} agentId={null} paneIndex={0} />);
     await waitFor(() => expect(document.querySelector('[data-chip="path"]')).toBeTruthy());
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
-    const pane = useLayout.getState().main.panes[0];
+    const pane = currentSet(useLayout.getState().main).panes[0];
     expect(pane.tabs.find((tab) => tab.id === pane.activeTabId)).toMatchObject({ kind: 'file', path: 'src/a.ts', line: null, appSessionId: null });
   });
 });

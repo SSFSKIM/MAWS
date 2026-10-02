@@ -14,6 +14,7 @@ import {
   runAction,
 } from './actions-runtime';
 import { connectActions } from './dispatcher';
+import { currentSet } from '../stores/layout-model';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const disposers: (() => void)[] = [];
@@ -127,7 +128,7 @@ describe('session creator', () => {
     await expect(createSession(P)).resolves.toBe(NEW); // C12: the id, for the Worktrees… dialog's location
     expect(creator).toHaveBeenCalledWith(P);
     expect(useSessions.getState().unstarted.get(NEW)).toEqual({ projectId: P, createdAt: expect.any(String) });
-    const pane = useLayout.getState().main.panes[0];
+    const pane = currentSet(useLayout.getState().main).panes[0];
     expect(pane.tabs.map((t) => t.id)).toEqual([`session:${NEW}`]);
     expect(pane.activeTabId).toBe(`session:${NEW}`);
   });

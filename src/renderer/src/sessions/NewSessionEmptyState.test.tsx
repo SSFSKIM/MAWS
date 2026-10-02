@@ -8,9 +8,10 @@ import { ID, intent, putIntent, resetSetupStore } from '../test-support/setup-in
 import { resetShellStores } from '../test-support/shell-stores';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
 import { useSetup } from './store';
+import { currentSet } from '../stores/layout-model';
 
 const P = 'p1' as ProjectId;
-const hasTab = () => useLayout.getState().main.panes.some((p) => p.tabs.some((t) => t.kind === 'session' && t.appSessionId === ID));
+const hasTab = () => currentSet(useLayout.getState().main).panes.some((p) => p.tabs.some((t) => t.kind === 'session' && t.appSessionId === ID));
 
 beforeEach(() => {
   resetShellStores();

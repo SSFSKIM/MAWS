@@ -8,6 +8,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { LayoutMain, LayoutRegions } from '@shared/ipc/schema/layout';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
+import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 
 export function visibleSessions(
@@ -18,7 +19,7 @@ export function visibleSessions(
 ): Set<AppSessionId> {
   const visible = new Set<AppSessionId>();
   if (!windowActive || (regions.panel.maximized && !regions.panel.collapsed)) return visible;
-  for (const pane of main.panes) {
+  for (const pane of currentSet(main).panes) { // W12: the strips show the current set
     const tab = pane.tabs.find((t) => t.id === pane.activeTabId);
     if (tab?.kind === 'session' && records.has(tab.appSessionId)) visible.add(tab.appSessionId);
   }

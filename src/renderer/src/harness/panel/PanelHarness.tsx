@@ -22,7 +22,7 @@ import { connectPanelHost, instanceIds, instanceOf, isRestoredLog, panelHost, pe
 import { PanelHost } from '../../panel/PanelHost';
 import { PanelRegion } from '../../panel/PanelRegion';
 import { persistLayout, useLayout } from '../../stores/layout';
-import { activeTab, sessionOfTab } from '../../stores/layout-model';
+import { activeTab, allTabs, sessionOfTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { useSettings } from '../../stores/settings';
 import { useHarnessTheme } from '../terminal/useHarnessTheme';
@@ -111,7 +111,7 @@ function bootstrap(): () => void {
     await useLayout.getState().hydrate(ipc, (id) => useSessions.getState().records.has(id));
     // A first launch shows A; a relaunch shows what the profile's main.tabs held.
     const layout = useLayout.getState();
-    if (!layout.main.panes.some((p) => p.tabs.some((t) => t.kind === 'session'))) layout.openSession(fakeId('A'));
+    if (!allTabs(layout.main).some((t) => t.kind === 'session')) layout.openSession(fakeId('A'));
     return adopted;
   })();
   return () => offs.reverse().forEach((off) => off());

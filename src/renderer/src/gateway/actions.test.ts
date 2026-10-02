@@ -3,7 +3,7 @@ import { commands, type CommandName, type CommandResult, type MawsBridge } from 
 import { validateCommandInput } from '@shared/ipc/validate';
 import { isActionEnabled, runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { resetShellStores } from '../test-support/shell-stores';
 import { openClaudeUsage, registerGatewayActions } from './actions';
@@ -88,7 +88,7 @@ describe('gateway actions pass the command validator', () => {
     expect(activeTab(useLayout.getState().main)).toEqual({ id: 'settings', kind: 'settings', section: null, pinned: false });
     runAction('settings.open', 2);
     expect(activeTab(useLayout.getState().main)).toEqual({ id: 'settings', kind: 'settings', section: 'keyboard', pinned: false });
-    expect(useLayout.getState().main.panes[0].tabs.filter((t) => t.kind === 'settings')).toHaveLength(1);
+    expect(currentSet(useLayout.getState().main).panes[0].tabs.filter((t) => t.kind === 'settings')).toHaveLength(1);
     expect(isActionEnabled('accounts.open')).toBe(false);
   });
 

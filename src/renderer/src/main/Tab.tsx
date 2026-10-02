@@ -13,6 +13,7 @@ import { glyphFor, type Glyph } from '../attention/glyph';
 import { requestCloseTab, useUnstartedTitle } from '../keymap/actions-runtime';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
+import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 
 export const TAB_DRAG_TYPE = 'application/x-maws-tab';
@@ -165,11 +166,11 @@ function TabMenuItem({ children, onSelect }: { children: string; onSelect(): voi
 function moveToOtherPane(id: string, pane: 0 | 1) {
   const layout = useLayout.getState();
   const to = pane === 0 ? 1 : 0;
-  layout.moveTab(id, to, layout.main.panes[to]?.tabs.length ?? 0);
+  layout.moveTab(id, to, currentSet(layout.main).panes[to]?.tabs.length ?? 0);
 }
 
 // The pane's other tabs, except the pinned ones, each through its close guard.
 async function closeOthers(id: string, pane: 0 | 1) {
-  const others = useLayout.getState().main.panes[pane]?.tabs.filter((t) => t.id !== id && !t.pinned) ?? [];
+  const others = currentSet(useLayout.getState().main).panes[pane]?.tabs.filter((t) => t.id !== id && !t.pinned) ?? [];
   for (const other of others) await requestCloseTab(other.id);
 }
