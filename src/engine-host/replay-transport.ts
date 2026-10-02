@@ -10,18 +10,19 @@
 // test cannot pass by advancing past a frame the probe never saw. `stderr` rows replay; `meta exit` ends the stream with
 // the row's code and signal; `kill` ends a journal that has no exit row. Nothing here journals (the harness does).
 // R2: with `surfaceReads` (the app's replays under MAWS_ENGINE_REPLAY, never the conformance harness), the surface's
-// attach, detach, roster reads and renders are never held: the renderer asks them when its sites mount, in an order
-// and number no recording can fix, so each is answered at once with the fixture's recorded answer for the same ask (a
-// render's by its component and instance) as of the cursor (the latest at or before it, else the next after it), or an
-// empty success when the fixture has none, and their recorded rows are passed over. Everything the person does on the
-// surface (presses, inputs, picks, focus, scroll, panes shown, focused or closed) is still held and matched in order.
+// attach, detach, roster reads and renders, and the renderer's reports of where the keyboard, a window and the shown
+// pane are (focus, scroll, pane shown or focused, a prompt edit) are never held: the renderer sends them as its sites
+// mount and its DOM moves, in an order and number no recording can fix, so each is answered at once with the fixture's
+// recorded answer for the same ask (a render's by its component and instance) as of the cursor (the latest at or before
+// it, else the next after it), or an empty success when the fixture has none, and their recorded rows are passed over.
+// What the person does to a plugin's drawing (presses, inputs, picks, a pane closed) is still held and matched in order.
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { requestClassOf } from './controls';
 import { TransportClosed, type EngineTransport, type TransportItem } from './transport';
 
 export const PRELUDE_SUBTYPES: ReadonlySet<string> = new Set(['initialize', 'get_status']);
-export const SURFACE_READ_SUBTYPES: ReadonlySet<string> = new Set(['ui_attach', 'ui_detach', 'ui_render', 'ui_panes']); // R2
+export const SURFACE_READ_SUBTYPES: ReadonlySet<string> = new Set(['ui_attach', 'ui_detach', 'ui_render', 'ui_panes', 'ui_focus', 'ui_scroll', 'ui_pane_show', 'ui_pane_focus', 'ui_prompt_edit']); // R2
 
 export interface ReplayTransport extends EngineTransport {
   readonly holding: JournalRow | null; // the `out` row the replay waits on, or null while `in` rows remain or the stream ended
