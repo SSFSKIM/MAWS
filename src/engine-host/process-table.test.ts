@@ -139,6 +139,25 @@ describe('process table: change notification, shutdown and reservations', () => 
     expect(await table.shutdown({ graceMs: 5_000 })).toEqual({ stopped: 0, forced: 0 }); // idempotent
   });
 
+  it('closes admission before awaiting shutdown stops, including after shutdown returns', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const first = scriptedSession();
+    table.reserve('app-s' as AppSessionId, () => first.session);
+    await first.session.start();
+    const shutdown = table.shutdown({ graceMs: 5_000 });
+    const create = vi.fn(() => scriptedSession().session);
+    try {
+      expect(() => table.reserve('late' as AppSessionId, create)).toThrow(/shutting down/);
+      expect(create).not.toHaveBeenCalled();
+    } finally {
+      first.transport.exit(0);
+      await shutdown;
+    }
+    expect(await shutdown).toEqual({ stopped: 1, forced: 0 });
+    expect(table.list().every((row) => row.lifecycle === 'exited')).toBe(true);
+    expect(() => table.reserve('after' as AppSessionId, create)).toThrow(/shutting down/);
+  });
+
   it('release frees an exited row only: a live one stays reserved, an exited one leaves the table (archive, whole-branch review)', async () => {
     const table = new ProcessTable({ ps: async () => '' });
     const s = scriptedSession();

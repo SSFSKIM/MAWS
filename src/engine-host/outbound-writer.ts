@@ -32,6 +32,7 @@ export function writeFailedMeta(frame: StdinFrame, message: string): Record<stri
 }
 
 export interface WriteOptions {
+  signal?: AbortSignal;
   preface?: Record<string, unknown>[];
   flushed?: () => void;
 }
@@ -94,7 +95,7 @@ export class OutboundWriter {
         },
       };
       this.inFlight.add(entry);
-      this.transport.write(frame).then(
+      this.transport.write(frame, opts.signal).then(
         () => {
           if (entry.settled) return;
           const failure = this.settle(entry, () => {

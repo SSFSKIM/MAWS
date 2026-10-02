@@ -15,7 +15,7 @@ const PARSE_ERROR_PREVIEW_CHARS = 4_096;
 const CLOSE_AFTER_EXIT_GRACE_MS = 2_000;
 
 export interface TransportProblem {
-  kind: 'parse_error' | 'line_budget' | 'spawn_error' | 'replay_mismatch' | 'replay_unrecorded_read'; // replay_*: the replay transport only (M2; debt wave 3)
+  kind: 'parse_error' | 'line_budget' | 'spawn_error' | 'stalled_write' | 'replay_mismatch' | 'replay_unrecorded_read'; // replay_*: the replay transport only (M2; debt wave 3)
   message: string;
   length: number; // characters of the offending line (0 for a spawn error or a replay item)
   typeGuess: string | null; // the `"type"` a malformed line seemed to carry
@@ -33,7 +33,8 @@ export interface EngineTransport {
   readonly pid: number | null;
   frames: AsyncIterable<TransportItem>; // parsed stdout lines, in order
   stderr: AsyncIterable<string>; // one line per item
-  write(frame: StdinFrame): Promise<void>; // resolves when the bytes reached the OS pipe; rejects on EPIPE/closed
+  // Abort discards a queued frame; a partially written frame closes stdin and reports stalled_write for cleanup.
+  write(frame: StdinFrame, signal?: AbortSignal): Promise<void>; // resolves when the bytes reached the OS pipe; rejects on EPIPE/closed
   endInput(): void; // stdin.end()
   kill(signal: 'SIGTERM' | 'SIGKILL'): void;
   readonly exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
@@ -164,7 +165,7 @@ class AsyncQueue<T> implements AsyncIterable<T> {
 // The process
 
 export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): EngineTransport {
-  const child = spawn(plan.bin, plan.args, { cwd: plan.cwd, env: plan.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(plan.bin, plan.args, { cwd: plan.cwd, env: plan.env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const frames = new AsyncQueue<TransportItem>();
   const stderr = new AsyncQueue<string>();
   const stdoutLines = new LineSplitter(opts.maxLineChars);
@@ -178,14 +179,32 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
     resolveExited = resolve;
   });
 
+  let stdoutEnded = false;
+  const endFrames = () => {
+    if (stdoutEnded) return;
+    stdoutEnded = true;
+    const tail = stdoutLines.flush();
+    if (tail !== null) frames.push(parseLine(tail));
+    frames.end();
+  };
+
+  let stalledWrite = false;
+  // Graceful signals target the engine; a broken input pipe requires cleanup of the whole group.
+  const kill = (signal: 'SIGTERM' | 'SIGKILL') => {
+    if (exitSeen !== null || ended) return;
+    if (signal === 'SIGTERM' && !stalledWrite) { child.kill(signal); return; }
+    if (child.pid === undefined) return;
+    try { process.kill(-child.pid, signal); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    }
+  };
+
   const finish = (exit: { code: number | null; signal: NodeJS.Signals | null }) => {
     if (ended) return;
     ended = true;
-    const tail = stdoutLines.flush();
-    if (tail !== null) frames.push(parseLine(tail));
+    endFrames();
     const errTail = stderrLines.flush();
     if (errTail !== null) stderr.push(errTail);
-    frames.end();
     stderr.end();
     resolveExited(exit);
   };
@@ -208,11 +227,12 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
       for (const line of budget.lines) frames.push(parseLine(line)); // what the chunk completed before the overflow, in order
       frames.push({ frame: null, raw: '', error: { kind: 'line_budget', message: budget.message, length: budget.length, typeGuess: null } });
       child.stdout.destroy();
-      child.kill('SIGKILL');
+      kill('SIGKILL');
       return;
     }
     for (const line of lines) frames.push(parseLine(line));
   });
+  child.stdout.on('end', endFrames);
   child.stdout.on('error', () => {
     /* a destroyed pipe after the line-budget kill; the exit follows */
   });
@@ -296,18 +316,39 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
     },
     frames,
     stderr,
-    write(frame) {
+    write(frame, signal) {
       const data = JSON.stringify(frame) + '\n';
-      const turn = chain.then(() => writeNow(data));
-      chain = turn.catch(() => {}); // one failed write does not poison the chain; the caller sees its own rejection
-      return turn;
+      return new Promise<void>((resolve, reject) => {
+        let started = false;
+        const onAbort = () => {
+          if (started) {
+            stalledWrite = true;
+            child.stdin.destroy(); // never finish a partially written mutation after its deadline
+            frames.push({ frame: null, raw: '', error: { kind: 'stalled_write', message: 'A stalled control write was aborted; ending the engine because its input is incomplete.', length: 0, typeGuess: null } });
+          }
+          reject(new TransportClosed('write aborted'));
+        };
+        if (signal?.aborted) { onAbort(); return; }
+        signal?.addEventListener('abort', onAbort, { once: true });
+        const turn = chain.then(async () => {
+          if (signal?.aborted) return; // the caller already rejected; the frame never reaches stdin
+          started = true;
+          await writeNow(data);
+        });
+        chain = turn.catch(() => {}); // one failed write does not poison the chain
+        void turn.then(() => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, (error: unknown) => {
+          signal?.removeEventListener('abort', onAbort);
+          reject(error);
+        });
+      });
     },
     endInput() {
       if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.end();
     },
-    kill(signal) {
-      if (exitSeen === null && !ended) child.kill(signal);
-    },
+    kill,
     exited,
   };
 }

@@ -553,7 +553,7 @@ describe('a stop before the process is spawned (whole-branch review)', () => {
     expect(events.map((e) => e.kind)).toEqual(['process.exited']);
     expect(await session.stop('stop')).toEqual({ exited: true, code: null, signal: null });
     expect(await table.shutdown({ graceMs: 3_000 })).toEqual({ stopped: 0, forced: 0 });
-    expect(table.reserve('app-s' as AppSessionId, () => setup().session)).toMatchObject({ status: 'launching' });
+    expect(() => table.reserve('app-s' as AppSessionId, () => setup().session)).toThrow(/shutting down/);
   });
 
   it('a stop before start() ends the session at once; start() then spawns nothing', async () => {

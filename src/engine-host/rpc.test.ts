@@ -80,6 +80,33 @@ describe('control client ids, timeouts, cancellation', () => {
     expect(writes[1]).toEqual({ type: 'control_cancel_request', request_id: 'LAUNCH01-1' });
   });
 
+  it('times out a held write before delivery and discards the mutation when the write is released', async () => {
+    const { transport, writes } = fakeTransport();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    transport.write = async (frame, signal?: AbortSignal) => {
+      await held;
+      if (signal?.aborted) throw new Error('write aborted');
+      writes.push(frame);
+    };
+    const journal = fakeJournal();
+    const client = new ControlClient(transport, journal, 'HELD');
+    let outcome: unknown = 'pending';
+    const request = client.request('rename_session', { title: 'late mutation' }, { timeoutMs: 20 })
+      .then(() => { outcome = 'resolved'; }, (error: unknown) => { outcome = error; });
+    try {
+      await vi.advanceTimersByTimeAsync(80);
+      expect(outcome).toBeInstanceOf(ControlTimeout);
+    } finally {
+      release();
+      await vi.advanceTimersByTimeAsync(20);
+      await request;
+      client.close('test done');
+    }
+    expect(writes.filter((frame) => frame.type === 'control_request')).toEqual([]);
+    expect(journal.rows.some((row) => row.direction === 'out' && (row.frame as StdinFrame).type === 'control_request')).toBe(false);
+  });
+
   it('a late response after the timeout is reported to the late handler and does not throw', async () => {
     const { transport } = fakeTransport();
     const warn = vi.fn();

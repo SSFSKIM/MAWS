@@ -72,6 +72,7 @@ export class ProcessTable {
   private readonly sampleMs: number;
   private sampler: ReturnType<typeof setInterval> | null = null;
   private sampling = false;
+  private shuttingDown = false;
   // C12 start: the budget's policy (on at 25% of physical memory until main's first engine.policy.set) and its state
   private policy: BudgetPolicy;
   private stateful: ReadonlySet<string> = new Set();
@@ -106,6 +107,7 @@ export class ProcessTable {
 
   // Creates and starts a session unless the id holds one that has not exited. `create` runs only when accepted.
   reserve(appSessionId: AppSessionId, create: () => EngineSession): ReserveOutcome {
+    if (this.shuttingDown) throw new Error('engine host is shutting down');
     const existing = this.rows.get(appSessionId);
     if (existing) {
       const state = existing.status().process;
@@ -309,6 +311,7 @@ export class ProcessTable {
   // at 3 s); `stopped` counts the exits before SIGKILL, `forced` the SIGKILLs. Idempotent: a process already exited
   // counts in neither, one already in its ladder is awaited on that ladder.
   async shutdown(opts: { graceMs: number }): Promise<{ stopped: number; forced: number }> {
+    this.shuttingDown = true; // close admission synchronously, before any stop yields
     const live = this.list().filter((s) => s.status().process !== 'exited');
     const results = await Promise.all(live.map(async (session) => ({ session, result: await session.stop('quit', { graceMs: opts.graceMs }) })));
     let stopped = 0;

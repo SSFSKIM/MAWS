@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { LaunchPlan } from './launch';
+import { INIT_RESPONSE, ROUTED_STATUS, scriptedSession } from './conformance/session-harness';
+import { ControlTimeout } from './rpc';
 import { LineBudgetExceeded, LineSplitter, MAX_LINE_CHARS, spawnEngine, type EngineTransport, type TransportItem } from './transport';
 
 // A fake engine is `node -e <script>` run through the real transport: the plan is the X6 shape with the bin swapped.
@@ -160,6 +162,130 @@ describe('transport frames and journals', () => {
       expect(await withTimeout(transport.exited, 10_000, 'exit')).toEqual({ code: null, signal: 'SIGTERM' });
       await expect(firstFrame(transport)).rejects.toThrow('frames ended');
     });
+
+    it('ends frames at stdout EOF, flushing the tail while the child is still alive', async () => {
+      const transport = spawnEngine(fakeEngine(`process.stdout.end('{"tail":true}'); setInterval(() => {}, 1000);`), { maxLineChars: MAX_LINE_CHARS });
+      let exited = false;
+      void transport.exited.then(() => { exited = true; });
+      try {
+        expect(await withTimeout(collect(transport.frames), 2_000, 'stdout EOF')).toEqual([
+          { frame: { tail: true }, raw: '{"tail":true}', error: null },
+        ]);
+        expect(exited).toBe(false);
+      } finally {
+        transport.kill('SIGKILL');
+        await transport.exited;
+      }
+    });
+
+    it.each(['forced', 'line budget'] as const)('%s stop kills descendants as well as the engine', async (mode) => {
+      const script = `
+        const { spawn } = require('node:child_process');
+        const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+        process.stdout.write(JSON.stringify({ descendant: child.pid }) + '\\n');
+        process.stdin.once('data', () => process.stdout.write('x'.repeat(128)));
+        setInterval(() => {}, 1000);
+      `;
+      const transport = spawnEngine(fakeEngine(script), { maxLineChars: 64 });
+      let descendant: number | undefined;
+      const alive = (pid: number) => {
+        try { process.kill(pid, 0); return true; } catch { return false; }
+      };
+      try {
+        const first = await withTimeout(firstFrame(transport), 5_000, 'descendant pid');
+        descendant = (first.frame as { descendant: number }).descendant;
+        expect(alive(descendant)).toBe(true);
+        if (mode === 'forced') transport.kill('SIGKILL');
+        else await transport.write({ type: 'keep_alive' });
+        expect((await withTimeout(transport.exited, 5_000, 'exit')).signal).toBe('SIGKILL');
+        await vi.waitFor(() => expect(alive(descendant!)).toBe(false), { timeout: 2_000 });
+      } finally {
+        transport.kill('SIGKILL');
+        if (descendant && alive(descendant)) process.kill(descendant, 'SIGKILL');
+        await transport.exited;
+      }
+    });
+
+    it('discards an aborted queued write without closing the pipe or delivering it later', async () => {
+      const script = `
+        process.on('SIGUSR1', () => {
+          let buffer = '';
+          process.stdin.on('data', chunk => {
+            buffer += chunk;
+            let end;
+            while ((end = buffer.indexOf('\\n')) >= 0) {
+              const frame = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
+              process.stdout.write(JSON.stringify({ id: frame.request_id }) + '\\n');
+            }
+          });
+          process.stdin.on('end', () => process.exit(0));
+        });
+        process.stdout.write('{"ready":true}\\n');
+        setInterval(() => {}, 1000);
+      `;
+      const transport = spawnEngine(fakeEngine(script), { maxLineChars: MAX_LINE_CHARS });
+      try {
+        await withTimeout(firstFrame(transport), 5_000, 'ready');
+        const first = transport.write({ type: 'control_request', request_id: 'first', request: { subtype: 'test', padding: 'x'.repeat(4 * 1024 * 1024) } });
+        void first.catch(() => {});
+        const controller = new AbortController();
+        const queued = transport.write({ type: 'control_request', request_id: 'cancelled', request: { subtype: 'rename_session', title: 'late' } }, controller.signal).catch((error: unknown) => error);
+        controller.abort();
+        expect(await withTimeout(queued, 500, 'queued abort')).toBeInstanceOf(Error);
+        process.kill(transport.pid!, 'SIGUSR1');
+        await first;
+        await transport.write({ type: 'control_cancel_request', request_id: 'last' });
+        transport.endInput();
+        const received = await withTimeout(collect(transport.frames), 5_000, 'received');
+        expect(received.map((item) => item.frame)).toEqual([{ id: 'first' }, { id: 'last' }]);
+        expect(await transport.exited).toEqual({ code: 0, signal: null });
+      } finally {
+        transport.kill('SIGKILL');
+        await transport.exited;
+      }
+    });
+
+    it.each(['graceful', 'forced', 'stdout EOF'] as const)('a stalled control write ends through the session ladder (%s)', async (mode) => {
+      const script = `
+        process.on('SIGTERM', () => {
+          ${mode === 'graceful' ? `process.stdout.write('{"flushed":true}\\n', () => process.exit(0));` : ''}
+        });
+        ${mode === 'stdout EOF' ? `process.on('SIGUSR1', () => process.stdout.end());` : ''}
+        let buffer = '';
+        process.stdin.on('data', chunk => {
+          buffer += chunk;
+          let end;
+          while ((end = buffer.indexOf('\\n')) >= 0) {
+            const frame = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
+            const response = frame.request.subtype === 'initialize' ? ${JSON.stringify(INIT_RESPONSE)} : ${JSON.stringify(ROUTED_STATUS)};
+            process.stdout.write(JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response } }) + '\\n');
+            if (frame.request.subtype === 'get_status') process.stdin.pause();
+          }
+        });
+        setInterval(() => {}, 1000);
+      `;
+      const plan = fakeEngine(script);
+      const transport = spawnEngine(plan, { maxLineChars: MAX_LINE_CHARS });
+      const s = scriptedSession({ session: { plan, spawn: () => transport } });
+      try {
+        await s.session.start();
+        const written = s.session.control!.request('rename_session', { title: 'x'.repeat(4 * 1024 * 1024) }, { timeoutMs: 100 }).catch((error: unknown) => error);
+        await new Promise((resolve) => setImmediate(resolve));
+        if (mode === 'stdout EOF') process.kill(transport.pid!, 'SIGUSR1');
+        expect(await withTimeout(written, 1_000, 'blocked deadline')).toBeInstanceOf(ControlTimeout);
+        expect(await withTimeout(s.session.exited, 5_000, 'aborted exit')).toMatchObject(mode === 'graceful' ? { code: 0, signal: null } : { code: null, signal: 'SIGKILL' });
+        if (mode !== 'stdout EOF') {
+          expect(s.journal.rows).toContainEqual(expect.objectContaining({ direction: 'meta', frame: expect.objectContaining({ event: 'transport_error', code: 'stalled_write', message: expect.stringContaining('stalled control write') }) }));
+          expect(JSON.stringify(s.events)).toContain('stalled_write');
+        }
+        if (mode === 'graceful') expect(s.journal.rows).toContainEqual(expect.objectContaining({ direction: 'in', frame: { flushed: true } }));
+        expect(s.session.forcedKill).toBe(mode !== 'graceful');
+        await expect(transport.write({ type: 'keep_alive' })).rejects.toThrow(/closed/);
+      } finally {
+        transport.kill('SIGKILL');
+        await s.session.exited;
+      }
+    }, 10_000);
 
     it('resolves exited with a spawn error item when the binary does not exist', async () => {
       const plan = { ...fakeEngine(''), bin: '/nonexistent/maws-engine-bin' };
