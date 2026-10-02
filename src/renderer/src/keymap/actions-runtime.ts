@@ -7,6 +7,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { LayoutMain, TabRef } from '@shared/ipc/schema/layout';
 import type { ActionId } from '@shared/keymap/actions';
 import type { Location } from '@shared/sessions/intent';
+import { markFocusOnMount } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { create } from 'zustand';
@@ -55,6 +56,9 @@ export async function createSession(projectId: ProjectId | null, opts: { pane?: 
   }
   if (appSessionId === null) return null; // C12
   useSessions.getState().addUnstarted(appSessionId, { projectId, createdAt: new Date().toISOString() });
+  // W9 (H3): the new tab's composer takes the keyboard as it mounts, so typing goes on without a click (Claude Desktop's
+  // and T3's new thread); marked as the tab opens, before anything could render its composer
+  markFocusOnMount(appSessionId);
   useLayout.getState().openTab({ kind: 'session', appSessionId }, { pane: opts.pane ?? 'focused' });
   return appSessionId; // C12
 }

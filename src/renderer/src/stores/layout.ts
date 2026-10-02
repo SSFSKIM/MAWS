@@ -5,7 +5,7 @@
 // sessions that exist. `persistLayout` writes each changed key back through `layout.set`, 250 ms after its last change
 // and on `beforeunload`.
 import { create } from 'zustand';
-import type { AppSessionId, AttentionId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import {
   LAYOUT_DEFAULTS,
@@ -38,8 +38,6 @@ export interface LayoutState {
   // W5: whether the floating Overview is open (transient: the app opens to the last active tab, §5.2 as amended); its
   // rect persists in `regions.overview`.
   overviewOpen: boolean;
-  // The item a notification click (`attention.navigate`) asked to be shown, for C6's transcript to jump to and clear.
-  focusRequest: { appSessionId: AppSessionId; attentionId: AttentionId } | null;
   // `settle` runs once the reads are in, before `known` is first asked and the early changes are captured (debt wave 5:
   // the shell drains its batched record events there, and the removals that makes are replayed with the rest).
   hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean, settle?: () => void): Promise<void>;
@@ -74,7 +72,6 @@ export interface LayoutState {
   panelTabsOf(appSessionId: AppSessionId): PanelTabRef[];
   updatePanelTabs(appSessionId: AppSessionId, fn: (refs: PanelTabRef[]) => PanelTabRef[], opts?: { activeTabId?: string }): void;
   setDragging(dragging: LayoutState['dragging']): void;
-  requestFocus(request: LayoutState['focusRequest']): void;
 }
 
 const PANEL_KEY = /^panel\.([^.]+)$/;
@@ -130,7 +127,6 @@ export function createLayoutStore() {
       hydrated: false,
       dragging: null,
       overviewOpen: false,
-      focusRequest: null,
 
       async hydrate(client, known, settle) {
         const absent: LayoutKey[] = []; // keys layout.json does not hold yet (not keys that failed to read)
@@ -267,7 +263,6 @@ export function createLayoutStore() {
         get().setPanelTabs(appSessionId, { tabs: after, activeTabId: pinSelection(before, after, current, opts?.activeTabId ?? current) });
       },
       setDragging: (dragging) => set({ dragging }),
-      requestFocus: (focusRequest) => set({ focusRequest }),
     };
   });
 }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import {
@@ -112,6 +113,7 @@ describe('session creator', () => {
     disposers.splice(0).forEach((off) => off());
     useLayout.setState({ main: LAYOUT_DEFAULTS.main });
     useSessions.setState({ unstarted: new Map() });
+    resetComposerStore(); // W9 (H3): no focus mark outlives its case
   });
 
   it('is unavailable until a creator registers, and createSession then does nothing', async () => {
@@ -130,6 +132,24 @@ describe('session creator', () => {
     const pane = useLayout.getState().main.panes[0];
     expect(pane.tabs.map((t) => t.id)).toEqual([`session:${NEW}`]);
     expect(pane.activeTabId).toBe(`session:${NEW}`);
+  });
+
+  // W9 (H3): every entry point (the strip's "+", the sidebar's New chat and "+", ⌘N, the Overview, the empty pane) comes
+  // through here, so the new tab's composer frame takes the keyboard when it mounts: once, and not for another session
+  it('marks the new tab so its composer takes the focus as it registers, once', async () => {
+    disposers.push(registerSessionCreator(async () => NEW));
+    await createSession(P);
+    const target = () => ({ focusEditor: vi.fn(), focusFrame: vi.fn(), insertText: vi.fn() });
+    const other = target();
+    disposers.push(registerFocusTarget('app-other' as AppSessionId, other));
+    expect(other.focusFrame).not.toHaveBeenCalled();
+    const mounted = target();
+    disposers.push(registerFocusTarget(NEW, mounted));
+    expect(mounted.focusFrame).toHaveBeenCalledTimes(1); // the frame: a docked card there would take it first
+    expect(mounted.focusEditor).not.toHaveBeenCalled();
+    const remounted = target();
+    disposers.push(registerFocusTarget(NEW, remounted)); // a later mount (a tab switch back) leaves the focus alone
+    expect(remounted.focusFrame).not.toHaveBeenCalled();
   });
 
   it('opens nothing when the creator declines, and logs a creator that fails', async () => {

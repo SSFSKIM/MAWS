@@ -72,6 +72,7 @@ export interface ComposerState {
   prefills: ReadonlyMap<AppSessionId, Prefill>;
   docked: ReadonlyMap<AppSessionId, ReadonlyMap<RequestId, number>>; // how many docked placements show each request
   focusTargets: ReadonlyMap<AppSessionId, FocusTarget>;
+  focusOnMount: ReadonlySet<AppSessionId>; // W9 (H3): a new tab's composer takes the keyboard when it mounts, once
   memoryTargets: ReadonlyMap<AppSessionId, MemoryTarget>; // M3: the `#` target chosen per session
   starting: ReadonlySet<AppSessionId>; // M4: an unstarted session's first send is with C10's `start`
   inlineEdits: ReadonlyMap<AppSessionId, InlineEdit>; // W3 (B6): the bubble each session edits in place
@@ -94,6 +95,7 @@ const initial = (): ComposerState => ({
   prefills: new Map(),
   docked: new Map(),
   focusTargets: new Map(),
+  focusOnMount: new Set(),
   memoryTargets: new Map(),
   starting: new Set(),
   inlineEdits: new Map(),
@@ -152,9 +154,27 @@ export function markDocked(appSessionId: AppSessionId, requestId: RequestId): ()
 
 export const isDocked = (state: ComposerState, appSessionId: AppSessionId, requestId: RequestId): boolean => (state.docked.get(appSessionId)?.get(requestId) ?? 0) > 0;
 
-// A mounted composer's focus target; the latest registration for a session wins and a disposer removes only its own.
+// W9 (H3): the session's composer takes the keyboard when it next mounts (C5's `createSession` marks the tab it opens,
+// so the strip's "+", the sidebar's New chat and "+", ⌘N, the Overview and the empty pane all hand focus over). One-shot:
+// the registration below takes it.
+export function markFocusOnMount(appSessionId: AppSessionId): void {
+  useComposerStore.setState((s) => ({ focusOnMount: new Set(s.focusOnMount).add(appSessionId) }));
+}
+
+// A mounted composer's focus target; the latest registration for a session wins and a disposer removes only its own. A
+// session marked by `markFocusOnMount` gives its frame the focus as it registers (`focusFrame`: a docked card still wins).
 export function registerFocusTarget(appSessionId: AppSessionId, target: FocusTarget): () => void {
-  useComposerStore.setState((s) => ({ focusTargets: new Map(s.focusTargets).set(appSessionId, target) }));
+  const marked = useComposerStore.getState().focusOnMount.has(appSessionId);
+  useComposerStore.setState((s) => {
+    const next: Partial<ComposerState> = { focusTargets: new Map(s.focusTargets).set(appSessionId, target) };
+    if (marked) {
+      const focusOnMount = new Set(s.focusOnMount);
+      focusOnMount.delete(appSessionId);
+      next.focusOnMount = focusOnMount;
+    }
+    return next;
+  });
+  if (marked) target.focusFrame();
   return () => {
     if (useComposerStore.getState().focusTargets.get(appSessionId) !== target) return;
     useComposerStore.setState((s) => {

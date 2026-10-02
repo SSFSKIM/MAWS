@@ -49,7 +49,6 @@ export function resetShellStores(): void {
     panelBySession: new Map(),
     panelActiveNoSession: null,
     hydrated: true,
-    focusRequest: null,
     overviewOpen: false,
   });
 }

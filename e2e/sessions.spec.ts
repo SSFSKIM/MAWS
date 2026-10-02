@@ -582,8 +582,10 @@ test.describe('sessions', () => {
     await expect(chip).toBeVisible();
     await expect(row.getByRole('checkbox', { name: 'Worktree' })).toHaveCount(0);
     await expect(page.getByRole('toolbar', { name: 'Composer tools' }).getByRole('button', { name: /^Location / }), 'the row stands for the toolbar’s location').toHaveCount(0);
-    await editor(page).click();
+    // W9 (H3): the new tab's composer has the keyboard, so typing needs no click (the button that opened it does not keep it)
+    await expect(editor(page)).toBeFocused();
     await page.keyboard.type('hello');
+    await expect(editor(page)).toHaveText('hello');
     const control = page.locator('[data-region="main"] [data-submit-state]');
     await expect(control).toBeDisabled();
     await expect(control).toHaveAttribute('title', 'Choose a project first');
@@ -656,6 +658,7 @@ test.describe('sessions', () => {
     });
     expect(label, 'File › New chat').toBe('New chat');
     await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible();
+    await expect(editor(page), 'W9 (H3): ⌘N hands the keyboard to the new tab').toBeFocused();
     const created = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!;
     expect(created).toMatchObject({ projectId: project.id, location: { kind: 'directory', path: repo.root } });
     await expect(page.locator('[data-region="main"] [data-project-row]').getByRole('button', { name: `Project ${project.name}` })).toBeVisible();
@@ -684,7 +687,7 @@ test.describe('sessions', () => {
     current = { ...first, repos: [repo] };
     const project = await addProject(first.page, repo.root);
     const id = await plus(first.page, project.name);
-    await editor(first.page).click();
+    await expect(editor(first.page), 'W9 (H3): the project page\'s "+" hands the keyboard to the new tab').toBeFocused();
     await first.page.keyboard.type('half a thought');
     // C7 keeps an unstarted session's draft through C10's hook (the intent), written a moment after the typing
     await expect.poll(async () => JSON.stringify(value(await invoke(first.page, 'session.intent.get', { appSessionId: id }))!.draft)).toContain('half a thought');

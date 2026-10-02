@@ -49,23 +49,18 @@ describe('⌘⇧J (attention.next)', () => {
 });
 
 describe('attention.navigate', () => {
-  it('opens the session’s tab and records the item for the transcript to jump to', () => {
+  it('opens the session’s tab, with an item or without', () => {
     const appSessionId = idOf('Charter + research');
     fake.event('attention.navigate', { appSessionId, attentionId: 'att-1', source: 'notification' });
     expect(active()).toBe(`session:${appSessionId}`);
-    expect(useLayout.getState().focusRequest).toEqual({ appSessionId, attentionId: 'att-1' });
-  });
-
-  it('with no item, opens the tab and records nothing to jump to', () => {
-    const appSessionId = idOf('Quota reset recovery');
-    fake.event('attention.navigate', { appSessionId, attentionId: null, source: 'menu' });
-    expect(active()).toBe(`session:${appSessionId}`);
-    expect(useLayout.getState().focusRequest).toBeNull();
+    const other = idOf('Quota reset recovery');
+    fake.event('attention.navigate', { appSessionId: other, attentionId: null, source: 'menu' });
+    expect(active()).toBe(`session:${other}`);
   });
 });
 
 describe('a navigation queued while no page could hear it (attention.pendingNavigate)', () => {
-  it('subscribes first, then asks once; a late answer still opens the session and records the item', async () => {
+  it('subscribes first, then asks once; a late answer still opens the session', async () => {
     disconnect();
     const late = fakeClient();
     disconnect = connectAttention(late.client);
@@ -74,7 +69,6 @@ describe('a navigation queued while no page could hear it (attention.pendingNavi
     const appSessionId = idOf('Quota reset recovery');
     await late.reply('attention.pendingNavigate', { navigate: { appSessionId, attentionId: 'att-q', source: 'notification' } });
     expect(active()).toBe(`session:${appSessionId}`);
-    expect(useLayout.getState().focusRequest).toEqual({ appSessionId, attentionId: 'att-q' });
   });
 
   it('an empty answer opens nothing', async () => {
