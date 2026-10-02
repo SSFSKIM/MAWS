@@ -178,6 +178,21 @@ Owner: "C11 is not on yet?" (the "arrives with C11" hint).
 Today: C11 is registered unconditionally (`App.tsx:126-144`). The slash palette lists terminal-only engine commands (/doctor, /color, /focus, /reload-plugins per `pass2/real-settings.jsonl` seq 15) disabled with "Opens a widget · arrives with C11" (`composer/mentions/items.ts:16, 69-71`). Other leftovers: "Voice input arrives later", the model labels in C4, and conditional "Arrives with C10/C11" strings that show only outside the normal launch mode.
 Direction: reword to "Terminal only" or hide those rows; sweep every "arrives with Cn" string.
 
+**C8. One Send, no send menu (owner's note after the sitting, 2026-10-01).**
+Owner: "we don't need three things. Just keep 'Send' only. The default behavior is queue after next tool, just like Claude Code CLI does. if user want to send the message 'right now', then they just hit esc to interrupt and send the queued message right now." (shot: the split button "Stop ⌄" with the menu Queue / Hold until the turn ends / Send now.)
+Today (W1): while a turn runs the primary reads "Queue" with a caret menu of Queue (Enter), Hold until the turn ends (⌥Enter) and Send now; ⌥ held over the control or in the box relabels it Hold live; a small secondary Stop sits beside the primary while a turn runs under a message (`composer/submit/submit-state.ts`, `SubmitControl.tsx`, `Composer.tsx:202,264-271,311,417`, `editor/submit.ts`, the keymap entry `composer.steer` ⌥Enter "Hold until the turn ends" in `shared/keymap/actions.ts:47`).
+Direction: the control is one button: Send when the box has text (idle: `session.send`; during a turn: the `next` steer, tooltip "Sends at the next step"), Stop when the box is empty during a turn, Resume on a paused queue; no caret menu, no secondary Stop, no ⌥ relabel, no ⌥Enter chord (the keymap entry is removed). Esc keeps W1's meaning (interrupt and send the queued head now; a plain stop when nothing waits); ⌘. keeps its plain stop that withdraws waiting steers into the paused queue; the queue rows under the composer keep their per-row actions, since they concern messages already sent. `session.queue.hold` stays in X2 for the rows and for Stop's withdrawal.
+
+**C9. "+ dir" folds into "+" (owner's note, 2026-10-01).**
+Owner: "fold '+dir' on '+'. let clicking '+' have option to add-dir. so the only components on composer UI will be '+', project/branch, permissions, model, effort, context ring."
+Today: `AddDirChip` is its own toolbar chip (`+ dir · N`; `composer/frame/AddDirChip.tsx`, placed in `frame/Toolbar.tsx`); the "+" menu offers Files and folders…, Photos…, the palette, Connectors and Plugins (`plus-menu/PlusMenu.tsx`); the location popover already lists the additional directories (`LocationChip.tsx`).
+Direction: an "Add directory…" item in the "+" menu (the same picker and binding, on started and unstarted tabs alike); the chip is removed; the directories stay listed in the location popover once started and, on an unstarted tab, in the project row's chip tooltip and menu as a read-only note.
+
+**C10. The model chip before the context ring (owner's note, 2026-10-01).**
+Owner: "model matters a bit more: place model and effort toward middle, context ring at the outermost."
+Today: `frame/Toolbar.tsx` renders the ring then the model chip at the right.
+Direction: swap them: … · model with effort · context ring, the ring at the frame's outer edge.
+
 ### D. Sidebar, sessions, Overview
 
 **D1. Navigation: project list, then one project's sessions grouped by worktree; no Needs-you section.**
@@ -325,6 +340,7 @@ Each wave is one worker in an isolated worktree off master, one commit per item,
 | **W8 Motion and thinking** | T1, T3 (T2 ruled: no change) | Owner's notes after the first look; all in the transcript's view layer, so it waits for debt 7A to land | 7A; the T2 ruling |
 | **New chat** (landed 2026-10-01, 8a950313; ran in parallel with W8) | the owner's New chat note and the location-control ruling (§6) | A general unstarted tab: the project chip, the branch label and the Worktree checkbox in a row inside the composer frame; New chat in the sidebar, the strip's "+", ⌘N and the palette; the toolbar's location chip read-only once started | the toolbar correction (52a09d07) |
 | **W9 Assessment fixes** | H1, H2, H3, H4, H5 | The owner's separate sitting's four findings grounded on master plus New chat's copy leftover; all small, each a different file set, one worker | New chat (8a950313) |
+| **W10 Composer simplicity** | C8, C9, C10 | Three small changes to the composer frame and the submit control from the owner's sitting; independent of W9's files except `Composer.tsx` | New chat (8a950313) |
 | Record only | F4, F5 (card copy), F6 (P1), F7 | Rulings and inventory; F5's card copy can ride W4 | |
 
 Acceptance for the whole initiative (the parent's own, beyond the items): the owner sits with the app beside Codex desktop and Claude Desktop on the same session and reports no proportion, type, bubble, composer or selector difference they want changed; a turn under the owner's hooks renders its answer as the answer, live and after reload; a steer sits where it was delivered; AskUserQuestion steps and leaves a one-widget receipt; the sidebar reaches any session of the owner's 276 projects in two clicks; the menu bar routes.
@@ -378,6 +394,7 @@ To be written by the architect as dated §19 entries when the corresponding wave
 - 2026-10-01 (owner): the comparative assessment's findings (§2 H) are filed as enhancement wave W9; the assessment branch is merged for citation (4afb58af).
 - 2026-10-01 (architect, H2): `HEAD` from the engine is not a branch name; a non-repository shows no branch label anywhere, a detached checkout shows "detached", and the composer stops falling back to the record once git has answered.
 - 2026-10-01 (architect, H4): the panel summary's model row shows the alias label with the exact id in its tooltip; the remaining framed widgets keep their "Read with" foot.
+- 2026-10-01 (owner): the composer's send control is one Send; Enter during a turn steers at the next tool boundary, Esc interrupts and sends the queued head now; the hold option, the send menu and the secondary Stop go (C8). "+ dir" folds into the "+" menu (C9). The model chip sits before the context ring, the ring outermost (C10).
 
 ## 7. Outcomes
 
