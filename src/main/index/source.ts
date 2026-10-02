@@ -107,6 +107,8 @@ export class IndexSessionSource implements SessionSource {
       }),
       this.host.onState('engine-host', (state) => {
         this.live.clear(); // a host that went away took its processes with it
+        this.holders.clear();
+        this.write('engine-host generation', () => this.index.sessions.resetSelfHolders());
         if (state.state === 'ready') void this.sync();
       }),
     ];

@@ -186,6 +186,29 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     expect(fake.names()).toEqual(['fs.scan', 'fs.state', 'fs.scan', 'fs.state']);
   });
 
+  it('releases self ownership on host loss and refreshes from disk after an empty replacement registry', async () => {
+    const disk = summary({ lastAssistantText: 'Before crash' });
+    const appId = index.sessions.upsertFromSummary(disk).record.appId;
+    const fake = scriptedHost();
+    const recorded = recordingWriter();
+    begin(fake.host, recorded.writer);
+    await settle();
+    fake.fire('session.status', { appSessionId: appId, status: status(appId, { engineSessionId: disk.sessionId }) });
+    expect(index.sessions.get(appId)?.holder.kind).toBe('self');
+
+    fake.setState('crashed'); // no process.exited event: the whole host disappeared
+    expect(index.sessions.get(appId)?.holder).toEqual({ kind: 'none' });
+    expect(recorded.of('setDigest').at(-1)).toMatchObject({ appSessionId: appId, phase: 'exited' });
+    fake.setState('ready');
+    await settle();
+    fake.fire('fs.sessionChanged', { appSessionId: appId, summary: { ...disk, size: disk.size + 1, lastAssistantText: 'After crash' } });
+    expect(index.sessions.get(appId)?.holder).toEqual({ kind: 'none' });
+    expect(recorded.of('setDigest').at(-1)?.lastAssistantLine).toBe('After crash');
+
+    fake.fire('session.status', { appSessionId: appId, status: status(appId, { engineSessionId: disk.sessionId }) });
+    expect(index.sessions.get(appId)?.holder.kind).toBe('self');
+  });
+
   it('creates a record per discovered summary, binds every allocated id with one fs.bind per batch, and emits session.changed coalesced per tick', async () => {
     const fake = scriptedHost();
     begin(fake.host);
@@ -371,12 +394,12 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'terminal', pid: 96367 });
     fake.fire('fs.holderChanged', { sessionId: engineId, appSessionId: record.appId, holder: { kind: 'none' }, registry: null, job: null });
     expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'none' });
-    // and a sync after a host restart clears a contest whose foreign process is gone
+    // A host restart loses both self ownership and the stale contest.
     index.sessions.applyEngineStatus(record.appId, { holder: { kind: 'self', contestedBy: { kind: 'terminal', pid: 1 } } });
     fake.setState('starting');
     fake.setState('ready');
     await settle();
-    expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'self' });
+    expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'none' });
   });
 
   it('a host restart forgets which ids were live: a relaunch after it stops the disk follow again, with no exit seen', async () => {

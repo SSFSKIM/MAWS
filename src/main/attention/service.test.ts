@@ -3,7 +3,7 @@ import { AttentionItemSchema, type AttentionItem } from '@shared/graph/attention
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { CommandName, EventName } from '@shared/ipc/schema';
+import type { CommandName, EventName, HostState } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { interruptedSummary, startAttentionService, type AttentionServiceDeps } from './service';
 import type { AttentionStore } from './store';
@@ -48,6 +48,7 @@ function event(kind: string, payload: Record<string, unknown> = {}): SessionEven
 function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispatch'] } = {}) {
   const listeners = new Map<string, ((payload: unknown) => void)[]>();
   const handlers = new Map<string, (input: unknown) => unknown>();
+  const states = new Set<(state: HostState) => void>();
   const changed: { appSessionId: string; items: AttentionItem[] }[] = [];
   const store = opts.store ?? new FakeStore();
   const dispatch = opts.dispatch ?? vi.fn(async () => ({ ok: true as const, value: { event: null } }));
@@ -56,6 +57,7 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
       listeners.set(name, [...(listeners.get(name) ?? []), listener]);
       return () => {};
     }) as AttentionServiceDeps['onEvent'],
+    onState: (_owner: string, listener: (state: HostState) => void) => { states.add(listener); return () => { states.delete(listener); }; },
     dispatch,
     store,
     emit: ((name: EventName, payload: unknown) => {
@@ -69,7 +71,7 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
   const fire = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
   const batch = (...events: SessionEvent[]) => fire('session.eventBatch', { appSessionId: APP, events });
   const last = () => changed.at(-1)?.items ?? [];
-  return { service, store, dispatch, handlers, changed, fire, batch, last };
+  return { service, store, dispatch, handlers, changed, fire, batch, last, hostState: (state: HostState['state']) => states.forEach((listener) => listener({ state, pid: null, restarts: 1, revision: 2 })) };
 }
 
 describe('attention service merges broker items with the derived kinds', () => {
@@ -100,6 +102,27 @@ describe('attention service merges broker items with the derived kinds', () => {
     expect(store.sessions.get(APP)).toMatchObject([{ kind: 'interrupted', summary: 'Session interrupted, 2 approvals lost' }]);
     batch(event('process.exited', { code: 0, signal: null, reason: 'unknown', lostAttentionCount: 0 }));
     expect(last()).toHaveLength(1); // nothing lost, nothing raised
+  });
+
+  it('retires broker and held-message attention on host loss without erasing durable errors', async () => {
+    const h = setup();
+    await h.service.ready;
+    const permission = item({ kind: 'permission', state: 'pending' });
+    h.fire('session.brokerItems', { appSessionId: APP, items: [permission] });
+    h.fire('session.status', { appSessionId: APP, status: { process: 'ready', engineSessionId: SID, heldPeerMessages: [{ from: 'peer', lane: 'main', messageUuid: 'message', heldAt: AT, expiresAt: null }] } });
+    h.batch(event('turn.ended', { isError: true, result: 'error', errors: [] }));
+    expect(h.service.list().map((i) => i.kind)).toEqual(['permission', 'held_peer_message', 'error']);
+    h.hostState('crashed'); // the supervisor cannot synthesize engine session exits
+    expect(h.service.list().map((i) => i.kind)).toEqual(['error']);
+    expect(h.last().map((i) => i.kind)).toEqual(['error']);
+    await h.service.settled();
+    expect(h.store.sessions.get(APP)?.map((i) => i.kind)).toEqual(['error']);
+    h.hostState('ready');
+    expect(await h.handlers.get('attention.request')!({ appSessionId: APP, requestId: 'req-1' })).toEqual({ event: null });
+    expect(h.dispatch).not.toHaveBeenCalled();
+    h.fire('session.brokerItems', { appSessionId: APP, items: [permission] });
+    expect(h.service.list().map((i) => i.kind)).toEqual(['permission', 'error']);
+    h.service.stop();
   });
 
   it('answers attention.request for a broker item through session.pendingRequest, and null for any other kind without asking', async () => {

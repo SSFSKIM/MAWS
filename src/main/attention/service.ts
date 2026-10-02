@@ -15,6 +15,7 @@ import type { AppSessionId, AttentionId, RequestId, TaskId, ToolUseId } from '@s
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
 import type { AttentionStore } from './store';
+import type { HostSupervisor } from '../hosts/supervisor';
 
 // SPEC 45.25.4 `qpn`: the terminal reasons that are hard failures (an interrupt is not one).
 export const HARD_FAILURE_REASONS: ReadonlySet<string> = new Set([
@@ -29,6 +30,7 @@ export const interruptedSummary = (n: number) => `Session interrupted, ${n} ${n 
 type Dispatch = (owner: 'engine-host', name: 'session.pendingRequest', input: CommandInput<'session.pendingRequest'>) => Promise<{ ok: true; value: unknown } | { ok: false; error: { message: string } }>;
 
 export interface AttentionServiceDeps {
+  onState: HostSupervisor['onState'];
   onEvent: <N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void) => () => void; // HostSupervisor.onEvent
   dispatch: Dispatch; // HostSupervisor.dispatch
   store: AttentionStore;
@@ -189,6 +191,15 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     deps.onEvent('session.eventBatch', ({ appSessionId, events }) => onEvents(appSessionId, events)),
     deps.onEvent('session.status', ({ appSessionId, status }) => onHeld(appSessionId, status)),
     deps.onEvent('session.forgotten', ({ appSessionId }) => retireSession(appSessionId)),
+    deps.onState('engine-host', (host) => {
+      if (host.state === 'ready') return;
+      // A dead host cannot retire its broker or release held messages. Durable errors stay.
+      for (const [id, state] of sessions) {
+        state.broker = [];
+        retireDerived(state, new Set(['held_peer_message']));
+        changed(id, state);
+      }
+    }),
   ];
 
   const list = () => [...sessions.values()].flatMap(merged);

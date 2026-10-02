@@ -11,7 +11,7 @@ import type { SessionReadModel } from '../sessions/read-model';
 import { createNavigationRelay } from './navigation';
 import { startNotifier } from './notifier';
 
-export function startAttention(model: SessionReadModel, deps: { settings(): Settings; openWindow(): BrowserWindow }): () => void {
+export function startAttention(model: SessionReadModel, deps: { ready: Promise<void>; settings(): Settings; openWindow(): BrowserWindow }): () => void {
   const relay = createNavigationRelay(emit);
   registerMainHandler('attention.pendingNavigate', () => ({ navigate: relay.take() }));
   const watch = (win: BrowserWindow) => {
@@ -28,5 +28,11 @@ export function startAttention(model: SessionReadModel, deps: { settings(): Sett
     win.show();
     win.focus();
   };
-  return startNotifier(model, { isFocused, focusWindow, navigate: relay.deliver, settings: deps.settings, emit });
+  // Hydration is not a new arrival: seed the notifier only after persisted attention is visible.
+  let stopped = false;
+  let stopNotifier: (() => void) | undefined;
+  void deps.ready.then(() => {
+    if (!stopped) stopNotifier = startNotifier(model, { isFocused, focusWindow, navigate: relay.deliver, settings: deps.settings, emit });
+  });
+  return () => { stopped = true; stopNotifier?.(); };
 }
