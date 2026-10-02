@@ -3,9 +3,10 @@
 // `totalSeconds`, the serving `account`, `outcome`, `firstByteSeconds`, `longestGapSeconds`, `transportRetries`,
 // `heldSeconds` and the token `usage`), and its panel summarises the requests that ended in the last ten minutes. MAWS
 // keeps the same window by following the file, read only: the first read takes its tail, later reads only what was
-// appended since, and a new file under the name (ClaudeUsage rolls it aside at each UTC day) is followed from its start
-// while the records already held stay until they age out.
-import { open } from 'node:fs/promises';
+// appended since, and a new file under the name (ClaudeUsage rolls it aside at each UTC day, or past 20 MB) is followed
+// from its start while the records already held stay until they age out. The followed file stays open across reads, so
+// the lines it gained after the last read and before the roll are read from it before the switch (debt wave 7).
+import { open, stat, type FileHandle } from 'node:fs/promises';
 import { ACTIVITY_WINDOW_MS, type AccountActivity, type UsageActivity } from '@shared/usage/types';
 
 export const FIRST_TAIL_BYTES = 4 * 1024 * 1024; // ten busy minutes are well under this
@@ -90,58 +91,89 @@ export function summarise(requests: readonly Request[]): UsageActivity {
   };
 }
 
+interface Followed {
+  handle: FileHandle; // open across reads: a roll renames the file, and the handle still reads it
+  ino: number;
+  offset: number | null; // where the next read starts, always just after a newline; null: from the file's tail
+}
+
 export class RequestLedger {
   private requests: Request[] = [];
-  private offset = 0; // where the next read starts: always just after a newline
-  private ino: number | null = null;
+  private followed: Followed | null = null;
 
   constructor(private readonly path: string) {}
 
   // The window as of `now`; null while the file does not exist (the relay has never served from this data directory).
   async read(now: number): Promise<UsageActivity | null> {
-    let handle;
-    try {
-      handle = await open(this.path, 'r');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const named = await inodeAt(this.path);
+    let rolled = false;
+    if (named !== null && this.followed !== null && named !== this.followed.ino) {
+      await this.consume(this.followed); // rolled: the old file's last lines, written after the last read, come first
+      await this.close();
+      rolled = true; // the new file from its start, the held requests kept
+    }
+    if (named === null) await this.close();
+    else if (this.followed === null) {
+      try {
+        const handle = await open(this.path, 'r');
+        this.followed = { handle, ino: (await handle.stat()).ino, offset: rolled ? 0 : null };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    if (this.followed === null) {
       this.requests = [];
-      this.ino = null;
-      this.offset = 0;
       return null;
     }
-    try {
-      const { size, ino } = await handle.stat();
-      let start = this.offset;
-      let tail = false; // a read that starts at an arbitrary byte, whose first partial line is dropped
-      if (this.ino !== null && ino !== this.ino) {
-        start = 0; // rolled: the new file from its start, the held requests kept
-      } else if (this.ino === null || size < this.offset) {
-        // the first read, or a file cut short in place: its tail, one byte early so a tail starting on a line keeps it
-        this.requests = [];
-        start = Math.max(0, size - FIRST_TAIL_BYTES - 1);
-        tail = start > 0;
-      }
-      this.ino = ino;
-      if (size > start) {
-        const buffer = Buffer.alloc(size - start);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
-        const chunk = buffer.subarray(0, bytesRead);
-        const complete = chunk.lastIndexOf(0x0a) + 1; // a last line still being written waits for the next read
-        let text = chunk.subarray(0, complete).toString('utf8');
-        if (tail) text = text.slice(text.indexOf('\n') + 1);
-        for (const line of text.split('\n')) {
-          const request = line.trim() === '' ? null : parse(line);
-          if (request) this.requests.push(request);
-        }
-        this.offset = start + complete;
-      } else {
-        this.offset = start;
-      }
-    } finally {
-      await handle.close();
+    await this.consume(this.followed);
+    return this.window(now);
+  }
+
+  // Ends the follow (the reader stopped, or the file is gone); a later read starts afresh from the file's tail.
+  async close(): Promise<void> {
+    const followed = this.followed;
+    this.followed = null;
+    await followed?.handle.close();
+  }
+
+  // What the file gained since the last read, whole lines only: a last line still being written waits for the next read.
+  // A first read, or one of a file cut short in place (which forgets what was held), takes the tail, one byte early so a
+  // tail starting on a line keeps it, and drops the line the tail cuts.
+  private async consume(followed: Followed): Promise<void> {
+    const { size } = await followed.handle.stat();
+    let tail = false;
+    if (followed.offset === null || size < followed.offset) {
+      this.requests = [];
+      followed.offset = Math.max(0, size - FIRST_TAIL_BYTES - 1);
+      tail = followed.offset > 0;
     }
+    if (size <= followed.offset) return;
+    const buffer = Buffer.alloc(size - followed.offset);
+    const { bytesRead } = await followed.handle.read(buffer, 0, buffer.length, followed.offset);
+    const chunk = buffer.subarray(0, bytesRead);
+    const complete = chunk.lastIndexOf(0x0a) + 1;
+    let text = chunk.subarray(0, complete).toString('utf8');
+    if (tail) text = text.slice(text.indexOf('\n') + 1);
+    for (const line of text.split('\n')) {
+      const request = line.trim() === '' ? null : parse(line);
+      if (request) this.requests.push(request);
+    }
+    followed.offset += complete;
+  }
+
+  private window(now: number): UsageActivity {
     const cutoff = now - ACTIVITY_WINDOW_MS;
     this.requests = this.requests.filter((r) => r.end >= cutoff);
     return summarise(this.requests);
+  }
+}
+
+// The inode under the name, or null when nothing is there.
+async function inodeAt(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).ino;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
   }
 }

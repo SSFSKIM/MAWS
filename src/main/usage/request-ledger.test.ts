@@ -68,6 +68,22 @@ describe('the request ledger', () => {
     expect((await ledger.read(NOW))!.accounts).toEqual([{ account: A1, requests: 1, cacheHitRatio: null, lastServed: '2026-09-29T07:33:02.000Z' }]);
   });
 
+  // Debt wave 7: lines appended after the last read and before the roll are read from the rolled file first.
+  it('reads the rolled file’s unread lines before it follows the new one', async () => {
+    writeFileSync(file, line('2026-09-29T07:30:00Z', A3));
+    const ledger = new RequestLedger(file);
+    expect((await ledger.read(NOW))!.health.requests).toBe(1);
+    appendFileSync(file, line('2026-09-29T07:31:00Z', A3) + line('2026-09-29T07:31:30Z', A1)); // unread when the roll comes
+    renameSync(file, join(scratch, 'gateway-requests.2026-09-29.jsonl'));
+    writeFileSync(file, line('2026-09-29T07:32:00Z', A1));
+    const activity = (await ledger.read(NOW))!;
+    expect(activity.health.requests).toBe(4);
+    expect(activity.accounts.map((a) => [a.account, a.requests])).toEqual([[A3, 2], [A1, 2]]); // by account id
+    appendFileSync(file, line('2026-09-29T07:33:00Z', A1));
+    expect((await ledger.read(NOW))!.health.requests).toBe(5); // the new file followed, nothing read twice
+    await ledger.close();
+  });
+
   it(`starts from the last ${FIRST_TAIL_BYTES / 1024 / 1024} MiB of a long file, dropping the line the tail cuts`, async () => {
     const old = line('2026-09-29T07:27:00Z', A1, { pad: 'x'.repeat(FIRST_TAIL_BYTES) });
     writeFileSync(file, old + readFileSync(FIXTURE, 'utf8'));
