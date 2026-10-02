@@ -127,7 +127,9 @@ function Picker({ projectId }: { projectId: ProjectId }) {
         placeholder="Search sessions"
         className="h-9 w-full rounded-sm border border-border bg-transparent px-2.5 text-ui text-fg outline-none placeholder:text-fg-faint focus:border-accent"
       />
-      <div role="group" aria-label="Filters" className="mt-2 flex flex-wrap gap-1.5">
+      {/* A filter button's Enter and Space are its own: cmdk's root would take Enter (preventing the press) to open the
+          selected session. The toggle chords still reach the root. */}
+      <div role="group" aria-label="Filters" onKeyDown={(event) => (event.key === 'Enter' || event.key === ' ') && event.stopPropagation()} className="mt-2 flex flex-wrap gap-1.5">
         {TOGGLES.map(({ key, label, chord }) => (
           <button
             key={key}

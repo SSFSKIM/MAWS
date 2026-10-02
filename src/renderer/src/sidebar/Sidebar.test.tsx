@@ -359,6 +359,23 @@ describe('the Resume… picker', () => {
     expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
   });
 
+  it('a filter button keeps Enter and Space: Tab from the search to All projects, Enter presses it and opens nothing', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await user.click(within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' }));
+    expect(document.activeElement).toBe(within(picker()).getByRole('combobox'));
+    await user.tab();
+    const all = within(picker()).getByRole('button', { name: /^All projects/ });
+    expect(document.activeElement).toBe(all);
+    await user.keyboard('{Enter}');
+    expect(all.getAttribute('aria-pressed')).toBe('true');
+    expect(picker()).toBeTruthy();
+    expect(activeTab(useLayout.getState().main)).toBeNull();
+    await user.keyboard(' ');
+    expect(all.getAttribute('aria-pressed')).toBe('false');
+    expect(activeTab(useLayout.getState().main)).toBeNull();
+  });
+
   it('⌃B keeps the checkout’s branch; the project’s context menu offers Resume… too', async () => {
     const user = userEvent.setup();
     fillStores({ ...nine, sessions: nine.sessions.map((r) => (r.projectId === 'proj-maws' ? { ...r, branch: r.title.text === 'Fix sidebar drag' ? 'master' : 'feature' } : r)) });
