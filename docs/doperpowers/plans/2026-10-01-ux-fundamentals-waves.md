@@ -341,7 +341,7 @@ To be written by the architect as dated §19 entries when the corresponding wave
 - 2026-10-01 (owner, after the sitting's first look): the Overview button and the usage pill live in the title-bar toolbar, not in a second row under it (D4, E1); W5's bar is removed.
 - 2026-10-01 (owner): New chat, as the Codex app's: a general unstarted tab, the project (and worktree or not) chosen in the composer's location chip, with Open folder…; offered at the top of both sidebar levels, the tab strip's "+", ⌘N and the palette. Owner (confirmed): preselect the project in view.
 - 2026-10-01 (owner): intermediate assistant text keeps Codex's rule, commentary inside the work area folded with it (T2); no change.
-- 2026-10-01 (owner): the location control copies the Codex app: a project chip (search, projects, New project, Don't work in a project), the current branch as a label, a Worktree checkbox; no branch picker, no named or existing-worktree options.
+- 2026-10-01 (owner): the location control copies the Codex app: a project chip (search, projects, New project, Don't work in a project), the current branch as a label, a Worktree checkbox; no branch picker, no named or existing-worktree options; on an unstarted tab they sit in Codex's slim row inside the frame above the box, and the toolbar chip is read-only once started.
 - Closed (B5): whether the panel was closed when Review failed no longer matters; opening Review now un-collapses a hidden panel either way.
 
 ## 7. Outcomes
