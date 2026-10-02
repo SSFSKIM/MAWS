@@ -11,6 +11,7 @@
 // interleave.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
+import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, eventBase, recordToEvents, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
@@ -166,7 +167,7 @@ class FollowerCore {
       length: lineBytes.length,
     };
     this.skeletons.set(uuid, skeleton);
-    if (typeof record.gitBranch === 'string') this.facts.gitBranch = record.gitBranch;
+    if (typeof record.gitBranch === 'string') this.facts.gitBranch = branchName(record.gitBranch); // W9 (H2): HEAD is no branch
     if (typeof record.version === 'string') this.facts.engineVersion = record.version;
     if (skeleton.timestamp !== null) this.facts.lastRecordAt = skeleton.timestamp;
     if (skeleton.isProgress) return; // never the leaf, no event; a child naming it as parent walks through it

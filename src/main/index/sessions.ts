@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { AppSessionId, MessageUuid, ProjectId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { branchName } from '@shared/sessions/branch';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { Db, Value } from './db';
 import type { SessionRecordPatch } from '@shared/engine/status';
@@ -219,12 +220,16 @@ export class SessionStore {
       // New chat (2026-10-01): the home directory is no project, so a chat that works in no project lists under Other
       // sessions (a project already made for it stays)
       const projectId = this.projects.projectAt(location, summary.hasMessages && location.projectDirectory !== homeDirectory());
+      // W9 (H2): the branch is what the transcript's latest record names, `HEAD` and empty being none. It is not kept from
+      // the previous summary: a branch the engine stopped naming (a non-repository's `HEAD`, a detached checkout) must not
+      // outlive it, and migration 3 cleared the `HEAD` an earlier summary stored.
+      const branch = branchName(summary.gitBranch);
       const facts: Record<string, Value> = {
         project_id: projectId,
         directory: location.realpath ?? summary.relocatedCwd ?? summary.directory ?? existing?.directory ?? '',
         worktree_path: location.worktreePath,
-        worktree_branch: location.worktreePath === null ? null : summary.gitBranch,
-        branch: summary.gitBranch ?? existing?.branch ?? null,
+        worktree_branch: location.worktreePath === null ? null : branch,
+        branch,
         custom_title: summary.customTitle,
         ai_title: summary.aiTitle,
         first_prompt: summary.firstPrompt,

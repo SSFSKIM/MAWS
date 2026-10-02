@@ -11,6 +11,7 @@ import { GlyphMark } from '../attention/GlyphMark';
 import { holderLine, waitingItem } from '../attention/derive';
 import { glyphFor } from '../attention/glyph';
 import { ipc } from '../ipc/client';
+import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -43,7 +44,7 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
   const waiting = waitingItem(pending);
   const request = !foreign && waiting?.tier === 1 ? waiting.oldest : null;
   const title = record.title.text;
-  const branch = record.branch ?? record.worktree?.branch ?? null;
+  const branch = branchLabel(recordBranch(record)); // W9 (H2)
   const footer = cardFooter(digest);
 
   return (

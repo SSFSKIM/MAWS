@@ -100,6 +100,19 @@ describe('head and tail summary', () => {
     expect(summarize(windows.head, windows.tail, { size: real.length, mtimeMs: 1 }, '/p/a76ad588-e4b4-4a99-bf4e-69287514916f.jsonl', '-p').firstPrompt).toBe('Remember APPLE.');
   });
 
+  // W9 (H2): the engine writes `"gitBranch":"HEAD"` in a folder that is no repository (and for a detached checkout)
+  it('takes no branch from HEAD or an empty gitBranch, the latest record deciding', () => {
+    const real = readFileSync(join(TEST_FIXTURE_DIR, 'transcripts/rewind-terminal.jsonl'));
+    expect(real.toString('utf8')).toContain('"gitBranch":"HEAD"');
+    const windows = headAndTail(real);
+    expect(summarize(windows.head, windows.tail, { size: real.length, mtimeMs: 1 }, '/p/a76ad588-e4b4-4a99-bf4e-69287514916f.jsonl', '-p').gitBranch).toBeNull();
+    const of = (...branches: string[]) => {
+      const bytes = Buffer.from(branches.map((gitBranch, i) => line({ type: 'user', uuid: `u${i}`, parentUuid: i === 0 ? null : `u${i - 1}`, cwd: '/d', gitBranch, message: { role: 'user', content: 'go' } })).join(''), 'utf8');
+      return summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').gitBranch;
+    };
+    expect([of(''), of('main', 'HEAD'), of('HEAD', 'main')]).toEqual([null, null, 'main']);
+  });
+
   it('a bash-mode first prompt is the command as the terminal shows it, `! <command>`, never its tags', () => {
     const text =
       line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', message: { role: 'user', content: '<bash-input>git status</bash-input>' } }) +

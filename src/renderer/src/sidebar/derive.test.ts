@@ -141,6 +141,12 @@ describe('a project’s page', () => {
     ]);
     expect(hasWorktreeSessions(recs)).toBe(true);
     expect(hasWorktreeSessions([recs[0]])).toBe(false);
+    // W9 (H2): a checkout git lists without a branch is detached, Main's included
+    const detached = projectPage({ sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone, worktrees: [info('/r', null, true), info('/sib/alpha', null)] });
+    expect(detached.groups.slice(0, 2).map((g) => [g.label, g.branch])).toEqual([
+      ['Main', 'detached'],
+      ['alpha', 'detached'],
+    ]);
   });
 
   it('renders every session of a large project: no page cap', () => {
@@ -168,6 +174,7 @@ describe('sidebar row text', () => {
     expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: null }, branch: 'from-index' }))).toBe('from-index');
     expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: null } }))).toBeNull();
     expect(rowBranch(record('p', { branch: 'main' }))).toBeNull();
+    expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: 'HEAD' }, branch: '' }))).toBeNull(); // W9 (H2): no branch names
   });
 
   it('the waiting item a hover card shows is the one main notifies: an actionable item outranks an older held message', () => {

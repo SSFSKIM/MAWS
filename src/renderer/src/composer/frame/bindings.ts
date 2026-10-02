@@ -17,6 +17,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ListModelsResponse } from '@shared/wire/control';
 import { ipc } from '../../ipc/client';
+import { branchLabel, recordBranch, type GitBranchAnswer } from '../../sessions/branch-label'; // W9 (H2)
 import { liveModeBinding, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNING, type ModeBinding } from '../../statusline';
 import { locationPath, type HookResult, type ModelInfo, type SetupIntentHook, type SetupProject } from '../setup-intent';
 import { ENDED, MESSAGE_HELD, STARTING } from '../submit/submit-state';
@@ -115,7 +116,7 @@ export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean 
 type ModelOption = ListModelsResponse['models'][number];
 
 // What the live chips read beside the status and the record: C3's `listModels`, the engine's workspace directories,
-// C4's branch, and a refresh of the rules after a directory was added. The two engine reads are control
+// git's answer for the branch, and a refresh of the rules after a directory was added. The two engine reads are control
 // requests, so the composer makes them only when a chip that shows them opens (never per mount: many open sessions
 // would each ask the engine, and a replayed engine refuses any request its journal did not record).
 export interface LiveReads {
@@ -123,7 +124,7 @@ export interface LiveReads {
   modelNames?: readonly ModelInfo[] | null; // the route's model catalogue (`engine.models`), naming the model before any list is read
   effort?: Effort | null; // W3: the effort the engine runs at (`get_settings.applied.effort`), when known
   directories?: readonly string[] | null;
-  branch?: string | null;
+  git?: GitBranchAnswer | null; // W9 (H2): git's answer for the session's directory, null until it has one
   refresh?: () => void;
 }
 
@@ -142,7 +143,8 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
   const shownEffort = reads.effort !== undefined ? reads.effort : status ? status.effort : (EffortSchema.safeParse(record?.effort).data ?? null);
   const directories = [...(reads.directories ?? record?.additionalDirectories ?? [])];
   return {
-    location: { path: status?.cwd ?? record?.directory ?? '', branch: reads.branch ?? record?.worktree?.branch ?? record?.branch ?? null, note: LOCATION_FIXED },
+    // W9 (H2): the record's branch only until git has answered; then git's, "detached", or none for a non-repository
+    location: { path: status?.cwd ?? record?.directory ?? '', branch: branchLabel(recordBranch(record), reads.git ?? null), note: LOCATION_FIXED },
     project: null,
     model: {
       value: current,

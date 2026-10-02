@@ -3,7 +3,8 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
 import type { SetupIntentHook, SetupProject } from '../setup-intent';
 import { MESSAGE_HELD, STARTING } from '../submit/submit-state';
-import { intentBindings, liveBindings, LOCATION_FIXED, workspaceDirectoriesOf } from './bindings';
+import { gitAnswerOf } from '../../sessions/branch-label';
+import { intentBindings, liveBindings, LOCATION_FIXED, workspaceDirectoriesOf, type LiveReads } from './bindings';
 
 const APP = 'app-1';
 
@@ -75,7 +76,7 @@ describe('the frame binds its chips to the setup intent or to the live session',
     const { client, invoke } = bridge({ 'session.setModel': { ok: true, value: { ok: true, error: null, code: null } }, 'session.listPermissionRules': rulesAnswer });
     const s = { ...status(APP), cwd: '/work/app-1', model: { requested: 'sonnet', resolved: 'claude-sonnet' }, effort: 'medium' as const };
     const refresh = vi.fn();
-    const b = liveBindings(s, record(APP), { models: null, directories: ['/a'], branch: 'main', refresh }, client);
+    const b = liveBindings(s, record(APP), { models: null, directories: ['/a'], git: { repository: true, branch: 'main' }, refresh }, client);
     expect(b.location).toEqual({ path: '/work/app-1', branch: 'main', note: LOCATION_FIXED });
     expect(b.project).toBeNull(); // no project row once started
     expect(b.model.value).toEqual({ model: 'claude-sonnet', effort: 'medium' });
@@ -90,6 +91,25 @@ describe('the frame binds its chips to the setup intent or to the live session',
     ]);
     expect(refresh).toHaveBeenCalledTimes(1); // the chip re-reads the rules afterwards
     expect(b.mode.value).toBe('auto');
+  });
+
+  // W9 (H2): the record's branch only until git has answered; git's answer after, the record never again
+  it('names the branch by git once it has answered: its branch, "detached", or none for a folder that is no repository', () => {
+    const s = { ...status(APP), cwd: '/tmp/not-a-repo' };
+    const branchOf = (r: Parameters<typeof liveBindings>[1], git: LiveReads['git']) => liveBindings(s, r, { git }).location.branch;
+    const onMain = { ...record(APP), branch: 'main' };
+    const stale = { ...record(APP), branch: 'HEAD' }; // what the engine wrote in a non-repository, before migration 3
+    // not yet answered: a branch the record names, never HEAD, never a placeholder
+    expect([branchOf(onMain, null), branchOf(stale, null), branchOf(record(APP), null)]).toEqual(['main', null, null]);
+    // answered: a checkout's branch, a detached checkout, a folder outside any repository (the record is not consulted)
+    expect(branchOf(onMain, { repository: true, branch: 'topic' })).toBe('topic');
+    expect(branchOf(onMain, { repository: true, branch: null })).toBe('detached');
+    expect(branchOf(onMain, { repository: false })).toBeNull();
+    // the watch's states as answers: a refusal for a non-repository is one; any other failure is not
+    expect(gitAnswerOf({ status: null, error: 'not a git repository' })).toEqual({ repository: false });
+    expect(gitAnswerOf({ status: null, error: 'spawn git ENOENT' })).toBeNull();
+    expect(gitAnswerOf({ status: { branch: null }, error: null })).toEqual({ repository: true, branch: null });
+    expect(gitAnswerOf(null)).toBeNull();
   });
 
   it('does not switch to the running model when it is re-picked by its option value', async () => {

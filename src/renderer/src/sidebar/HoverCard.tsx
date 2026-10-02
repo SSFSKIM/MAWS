@@ -16,6 +16,7 @@ import { holderLine, waitingItem } from '../attention/derive';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor } from '../attention/glyph';
 import { ipc } from '../ipc/client';
+import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { rowBranch, sessionAge } from './derive';
@@ -44,13 +45,15 @@ export function SessionHoverCard({ record, children }: { record: SessionRecord; 
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
-// Where the session runs: its branch, and the worktree's folder when it is in one (the full path as the title).
+// Where the session runs: its branch, and the worktree's folder when it is in one (the full path as the title). W9 (H2):
+// a branch the record does not name is left out, never guessed as "detached" (only git can say a checkout is).
 function placeOf(record: SessionRecord): { text: string; title: string | null } | null {
   if (record.worktree !== null) {
     const branch = rowBranch(record);
-    return { text: `${branch ? `⎇ ${branch}` : 'detached'} · worktree ${basename(record.worktree.path)}`, title: record.worktree.path };
+    return { text: `${branch ? `⎇ ${branch} · ` : ''}worktree ${basename(record.worktree.path)}`, title: record.worktree.path };
   }
-  return record.branch ? { text: `⎇ ${record.branch}`, title: null } : null;
+  const branch = branchLabel(recordBranch(record));
+  return branch ? { text: `⎇ ${branch}`, title: null } : null;
 }
 
 function Body({ appSessionId }: { appSessionId: AppSessionId }) {

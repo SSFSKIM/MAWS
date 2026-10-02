@@ -11,6 +11,7 @@ import { runAction, useUnstartedTitle } from '../keymap/actions-runtime';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
+import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { useSessions } from '../stores/sessions';
 import { Icon, IconButton, PanelIcon, SidebarIcon } from './IconButton';
 import { sidebarWidth, useWindowWidth } from './regions';
@@ -27,7 +28,7 @@ export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSession
     case 'agent': {
       const record = records.get(tab.appSessionId);
       const title = record?.title.text ?? 'New session'; // no record yet: an unstarted session
-      return { title: tab.kind === 'agent' ? `${title} · agent` : title, branch: record?.branch ?? record?.worktree?.branch ?? null };
+      return { title: tab.kind === 'agent' ? `${title} · agent` : title, branch: branchLabel(recordBranch(record)) }; // W9 (H2)
     }
     case 'file':
       return { title: basename(tab.path), branch: null };

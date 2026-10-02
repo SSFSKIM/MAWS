@@ -50,4 +50,15 @@ ALTER TABLE sessions DROP COLUMN gateway_routed;
 ALTER TABLE sessions RENAME COLUMN gateway_routed_v2 TO gateway_routed;
 `,
   },
+  {
+    version: 3,
+    // W9 (H2; waves plan §2 H): `HEAD` and the empty string are not branch names (the engine writes `HEAD` for a folder
+    // that is no repository and for a detached checkout alike). Discovery stores null for them from now on; the rows an
+    // earlier summary filled are cleared once here, the kept summary's `gitBranch` with them.
+    sql: `
+UPDATE sessions SET branch = NULL WHERE branch IN ('HEAD', '');
+UPDATE sessions SET worktree_branch = NULL WHERE worktree_branch IN ('HEAD', '');
+UPDATE sessions SET summary = json_set(summary, '$.gitBranch', json('null')) WHERE summary IS NOT NULL AND json_extract(summary, '$.gitBranch') IN ('HEAD', '');
+`,
+  },
 ];

@@ -769,7 +769,7 @@ describe('unstarted send holds a starting state', () => {
     stubIntent({ location: { kind: 'directory', path: repo } });
     mount([{ index: 0, id: A }]);
     const chip = within(composerOf(0)).getByRole('button', { name: `Location ${repo}` });
-    expect(chip.textContent).toMatch(/^repo·/); // the name; the path is the tooltip and the popover's first line
+    expect(chip.textContent).toBe('repo⌄'); // the name; the path is the tooltip and the popover's first line; W9 (H2): no branch, no placeholder
     expect(chip.title).toBe(`${repo} · Where this session will run`);
     const user = userEvent.setup();
     await user.click(chip);

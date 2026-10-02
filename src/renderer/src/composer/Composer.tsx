@@ -35,6 +35,7 @@ import { inlineEditOf, isStarting, memoryTargetOf, registerFocusTarget, resubmit
 import { toast } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
+import { gitAnswerOf } from '../sessions/branch-label'; // W9 (H2)
 import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
@@ -48,7 +49,7 @@ import { ResubmitLine } from './InlineEdit'; // W3 (B6)
 import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
 import { ContextRing } from './frame/ContextRing';
 import { Frame } from './frame/Frame';
-import { useGitWatch } from './frame/git-watch';
+import { useGitWatch, type GitWatch } from './frame/git-watch';
 import { QueueList } from './queue/QueueList';
 import { cancelInlineEdit, sendInlineEdit } from './resubmit-seam'; // W3 (B6)
 import { routeOf, useListModels, useModelCatalogue, type Route } from './list-models';
@@ -124,12 +125,12 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
 
 // The live chips' reads: C3's models and permission rules, each a control request to the engine, read once a chip that
 // shows it has opened (never per mount), the route's model catalogue for the model chip's name (a host read, from the
-// first render), and the checkout's branch for the location chip.
+// first render), and git's answer for the location chip's branch (W9, H2: a status, or that the folder is no repository).
 function useLiveReads(
   appSessionId: AppSessionId,
   want: { models: boolean; rules: boolean },
   directory: string | null,
-  git: { branch: string | null } | null,
+  git: GitWatch | null,
   route: Route | null,
   status: EngineSessionStatus | null,
   client: MawsBridge,
@@ -144,7 +145,7 @@ function useLiveReads(
     modelNames,
     ...(effort !== undefined && { effort }),
     directories: rules.data ? workspaceDirectoriesOf(rules.data.state.workspaceDirectories) : null,
-    branch: git?.branch ?? null,
+    git: gitAnswerOf(git),
     refresh: () => void rules.refetch(),
   };
 }
@@ -393,7 +394,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         onOpen={(what) => !unstarted && setOpened((o) => (o[what] ? o : { ...o, [what]: true }))}
         bindings={bindings}
         cwd={cwd}
-        dirty={repo?.dirty ?? false}
+        dirty={repo?.status?.dirty ?? false}
         ring={unstarted ? null : <ContextRing appSessionId={appSessionId} />}
         attachments={attachmentsOf(doc)}
         editorHandle={handle}

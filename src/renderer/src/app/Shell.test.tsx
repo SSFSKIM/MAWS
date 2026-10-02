@@ -197,6 +197,8 @@ describe('toolbar', () => {
     expect(toolbarTitle(sessionTab('app-a'), records)).toEqual({ title: 'Fix sidebar drag', branch: 'feat/sidebar' });
     expect(toolbarTitle({ id: 'file:/r/src/app.ts', kind: 'file', path: '/r/src/app.ts', line: null, appSessionId: null, pinned: false }, records)).toEqual({ title: 'app.ts', branch: null });
     expect(toolbarTitle({ id: 'diagnostics', kind: 'diagnostics', pinned: false }, records).title).toBe('Diagnostics');
+    // W9 (H2): the engine's HEAD (a folder that is no repository) is no branch, so no chip
+    expect(toolbarTitle(sessionTab('app-a'), new Map([[A, record('app-a', { branch: 'HEAD' })]])).branch).toBeNull();
   });
 
   it('shows the focused pane’s active tab title and branch chip', () => {

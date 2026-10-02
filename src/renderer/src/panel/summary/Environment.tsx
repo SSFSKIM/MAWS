@@ -3,12 +3,11 @@
 // watch says why in words and draws no branch, a failed diff keeps the branch and says the change is unavailable.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { NOT_A_REPOSITORY } from '../../sessions/branch-label'; // C4's message (W9: one constant for every reader)
 import { useGit, type GitEntry } from '../../stores/git';
 import { SUMMARY_COPY } from '../copy';
 import { changeLine } from './derive';
 import { Row, Section, ToolButton, ToolSummary, useToolSummary } from './Section';
-
-const NOT_A_REPOSITORY = 'not a git repository'; // C4's message (src/main/git/runner.ts, NotARepositoryError)
 
 export function Environment({ appSessionId, record, directory }: { appSessionId: AppSessionId; record: SessionRecord; directory: string }) {
   const entry = useGit((s) => s.entries.get(directory));

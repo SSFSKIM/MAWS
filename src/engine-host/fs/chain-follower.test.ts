@@ -371,6 +371,13 @@ describe('a terminal rewind without an anchor', () => {
     return { follower, out };
   };
 
+  // W9 (H2): the terminal ran in a folder that is no repository and wrote `"gitBranch":"HEAD"` on every record
+  it('takes no branch from HEAD: the facts carry a null gitBranch beside the version', async () => {
+    const { out } = await follow(TERMINAL_LINES, 1);
+    expect(TERMINAL_LINES.some((l) => l.includes('"gitBranch":"HEAD"'))).toBe(true);
+    expect(out.facts()).toMatchObject({ gitBranch: null, engineVersion: expect.any(String) });
+  });
+
   it('with one live holder, a new prompt parented at a turn boundary is one boundary.rewind: no retraction, no notice', async () => {
     const { follower, out } = await follow(TERMINAL_LINES.slice(0, 48), 1);
     expect(out.of('boundary.rewind').map((e) => ({ ...e, targetMessageUuid: short(e.targetMessageUuid), precedingAssistantUuid: short(e.precedingAssistantUuid) }))).toEqual([
