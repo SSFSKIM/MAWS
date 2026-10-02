@@ -42,7 +42,7 @@ export function claimOf(path: string, claims: readonly Claim[]): string | null {
   const same = (p: string) => normalizePath(p) === here;
   const progressHere = (c: Claim) => c.intent.progress.worktree !== null && same(c.intent.progress.worktree.path);
   if (claims.some((c) => c.starting && progressHere(c))) return CLAIM_WORDS.settingUp;
-  if (claims.some((c) => c.intent.location.kind === 'existingWorktree' && same(c.intent.location.path))) return CLAIM_WORDS.unstartedTab;
+  if (claims.some((c) => c.intent.location?.kind === 'existingWorktree' && same(c.intent.location.path))) return CLAIM_WORDS.unstartedTab;
   if (claims.some(progressHere)) return CLAIM_WORDS.kept;
   return null;
 }

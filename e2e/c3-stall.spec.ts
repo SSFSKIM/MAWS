@@ -151,10 +151,8 @@ async function makeDeep(page: Page): Promise<string> {
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !before.has(i.appSessionId))?.appSessionId)).toBeDefined();
   value(await invoke(page, 'session.intent.patch', { appSessionId: id!, patch: { model: 'haiku', permissionMode: 'auto' } }));
   const name = `deep-${Date.now().toString(36).slice(-4)}`;
-  await page.getByRole('button', { name: `Location ${repo}` }).click();
-  const popover = page.getByRole('dialog', { name: 'Location' });
-  await popover.getByRole('textbox', { name: 'New worktree name' }).fill(name);
-  await popover.getByRole('button', { name: 'Use' }).click();
+  // New chat (2026-10-01): the Worktree checkbox names its worktree itself, so this named one is set on the intent
+  value(await invoke(page, 'session.intent.patch', { appSessionId: id!, patch: { location: { kind: 'newWorktree', repoRoot: repo, name, branch: { kind: 'new', name: `worktree-${name}`, base: 'HEAD' } } } }));
   await main(page).getByRole('textbox', { name: 'Message' }).click();
   await page.keyboard.insertText('Reply with exactly: DEEP READY');
   await page.keyboard.press('Enter');

@@ -32,7 +32,7 @@ export interface SlashItem {
 // MAWS's palette entries: the name typed after `/` and the words the row shows. Only actions the table lists as menu
 // actions or app-scoped appear (the composer's own keys excluded); `tab.select` needs an argument and is left out.
 const MAWS_PALETTE: Partial<Record<ActionId, { name: string; title: string; description: string }>> = {
-  'session.new': { name: 'new-session', title: 'New session', description: 'Start a new session in this project' },
+  'session.new': { name: 'new-chat', title: 'New chat', description: 'Start a new chat in this project' }, // New chat (2026-10-01)
   'tab.close': { name: 'close-tab', title: 'Close tab', description: 'Close the current tab' },
   'tab.reopen': { name: 'reopen-tab', title: 'Reopen closed tab', description: 'Bring back the tab closed last' },
   'tab.overview': { name: 'overview', title: 'Open Overview', description: 'Move to the Overview of every session' },

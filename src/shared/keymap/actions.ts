@@ -16,7 +16,7 @@ export interface ActionSpec {
 }
 
 export const ACTIONS = {
-  'session.new':          { title: 'New session',                 chord: 'Cmd+N',        sink: 'menu', menu: 'file', scope: 'app' },   // handler registered by C10; disabled until then
+  'session.new':          { title: 'New chat',                    chord: 'Cmd+N',        sink: 'menu', menu: 'file', scope: 'app' },   // New chat (2026-10-01): registered with the session creator; disabled until one exists
   'tab.close':            { title: 'Close tab',                   chord: 'Cmd+W',        sink: 'menu', menu: 'file', scope: 'app' },
   'tab.reopen':           { title: 'Reopen closed tab',           chord: 'Cmd+Shift+T',  sink: 'menu', menu: 'file', scope: 'app' },
   'tab.overview':         { title: 'Overview',                    chord: 'Cmd+0',        sink: 'menu', menu: 'view', scope: 'app' },

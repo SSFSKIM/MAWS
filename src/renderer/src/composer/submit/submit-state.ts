@@ -9,12 +9,13 @@
 // opens the turn at the engine's `started`, so between a write and its start the entry is what makes the session busy).
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { QueueEntry } from '@shared/engine/session-state-store';
+import { CHOOSE_PROJECT_FIRST } from '@shared/sessions/intent';
 
 export type SubmitState = 'send' | 'queue' | 'hold' | 'stop' | 'resume'; // queue: a `next` steer; hold: MAWS's queue (W1)
 
 export interface SubmitInput {
   status: EngineSessionStatus | null;
-  intent: { starting: boolean; messageHeld: boolean; phase?: string | null } | null; // non-null while the session is unstarted (C10's hook answers); phase: C10's running setup phase in words
+  intent: { starting: boolean; messageHeld: boolean; phase?: string | null; noProject?: boolean } | null; // non-null while the session is unstarted (C10's hook answers); phase: C10's running setup phase in words; noProject: a New chat with no project chosen yet
   queue: { entries: readonly QueueEntry[]; paused: boolean };
   empty: boolean;
   mode: 'send' | 'bash' | 'memory';
@@ -80,6 +81,7 @@ export function submitState(i: SubmitInput): SubmitDecision {
   if (intent !== null) { // C10: the caller answers the intent while unstarted, even beside a failed setup's exited status
     if (intent.starting || (intent.phase ?? null) !== null) return decide('send', 'Starting…', false, intent.phase ?? STARTING); // C10: the setup phase is the reason
     if (intent.messageHeld) return decide('send', 'Send', false, MESSAGE_HELD);
+    if (intent.noProject) return decide('send', 'Send', false, CHOOSE_PROJECT_FIRST); // New chat: the project row's chip chooses one
     if (mode !== 'send') return decide('send', 'Send', false, NOT_YET);
     return decide('send', 'Send', !empty);
   }

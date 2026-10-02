@@ -472,6 +472,18 @@ const c10Events = {
   'session.intent.changed': z.strictObject({ appSessionId: AppSessionIdSchema, intent: SetupIntentSchema.nullable() }), // null when discarded or bound
 } as const satisfies Record<`session.${string}`, z.ZodType>;
 // C10 end -------------------------------------------------------------------------------------------------------------
+// New chat start (2026-10-01; charter §5.1 and §5.4) ------------------------------------------------------------------
+// "Open folder…" in a New chat's project picker: the picked folder (`layout.pickFiles`, kind directory) becomes a
+// project by the membership rule (a worktree folds under its main checkout's project, created or made the user's and
+// visible as `session.projects.add` does), answered with where a session there starts. Owner main.
+const newChatCommands = {
+  'session.projects.addFolder': {
+    input: z.strictObject({ directory: z.string() }),
+    output: z.strictObject({ project: ProjectRecordSchema, location: LocationSchema }),
+    owner: 'main',
+  },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// New chat end ----------------------------------------------------------------------------------------------------------
 
 export const commands = {
   ...c3Commands, // C3
@@ -479,6 +491,7 @@ export const commands = {
   ...c5Commands, // C5
   ...c7Commands, // C7
   ...c10Commands, // C10
+  ...newChatCommands, // New chat
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

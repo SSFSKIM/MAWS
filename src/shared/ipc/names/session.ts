@@ -19,7 +19,7 @@ export const commands = [
   'session.forget', 'session.create', 'session.intent.get', 'session.intent.list', 'session.intent.patch',
   'session.intent.release', 'session.intent.discard', 'session.intent.resolveWorktree', 'session.start',
   'session.fork', 'session.archive', 'session.takeOver' /* W7 */, 'session.delete', 'session.rename', 'session.revealPath',
-  'session.deletions.list', 'session.deletions.keep', 'session.deletions.preview',
+  'session.deletions.list', 'session.deletions.keep', 'session.deletions.preview', 'session.projects.addFolder' /* New chat */,
 ] as const;
 
 export const events = [

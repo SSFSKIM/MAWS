@@ -1,21 +1,22 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ModelCatalogue } from '@shared/sessions/models';
 import { GATEWAY_AUTO_NOTE } from '@shared/sessions/models';
 import type { StartOutcome } from '@shared/sessions/setup';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { useUnstartedTitle } from '../keymap/actions-runtime';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, trustState } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
 import { beforeCloseUnstarted } from './setup-actions';
 import { closeDialog, useDialogs } from './dialogs';
-import { createUnstartedSession, retainsTab, unstartedTitle } from './connect';
+import { connectSessions, createUnstartedSession, retainsTab, unstartedTitle } from './connect';
 import { connectSetup, useSetup } from './store';
-import { modelsOf, useSetupIntent } from './useSetupIntent';
+import { modelsOf, projectFacts, useSetupIntent, worktreeNameFor } from './useSetupIntent';
 import type { UseSetupIntent } from '../composer/setup-intent';
 
 const CATALOGUE: ModelCatalogue = {
@@ -28,6 +29,7 @@ const CATALOGUE: ModelCatalogue = {
   ],
 };
 const WORKTREE = `${REPO}/.claude/worktrees/one`;
+const P1 = 'p-1' as ProjectId;
 
 let fake: FakeClient;
 // `auto` answers commands at once; a command given as undefined waits for the test to answer it.
@@ -79,19 +81,20 @@ describe('setup intent hook', () => {
     expect(result.current).toBeNull();
   });
 
-  it('offers the project directory, every listed worktree and one new-worktree template, the current branch first', async () => {
+  // New chat (2026-10-01): the project row in place of the location chip's worktree and branch lists
+  it('describes the project row: the project, the checkout’s branch read-only, and the Worktree checkbox in a repository', async () => {
     withMain();
-    putIntent(intent());
+    useSessions.setState({ projects: new Map([[P1, { id: P1, name: 'Repo', directory: REPO, order: 0, createdAt: '2026-09-29T10:00:00.000Z' }]]) });
+    putIntent(intent({ projectId: P1 }));
     const { result } = renderHook(() => useSetupIntent(ID));
-    await waitFor(() => expect(result.current?.options.locations).toHaveLength(3));
-    const [directory, existing, template] = result.current!.options.locations;
-    expect(directory).toEqual({ kind: 'directory', path: REPO });
-    expect(existing).toEqual({ kind: 'existingWorktree', repoRoot: REPO, path: WORKTREE });
-    expect(template).toMatchObject({ kind: 'newWorktree', repoRoot: REPO, branch: { kind: 'new', base: 'HEAD' } });
-    const name = (template as { name: string }).name;
-    expect(name).toMatch(/^\d{4}-\d{2}-\d{2}-[a-z2-7]{4}$/);
-    expect(template).toMatchObject({ branch: { name: `worktree-${name}` } });
-    expect(result.current!.options.branches).toEqual(['main', 'feature']);
+    await waitFor(() => expect(result.current?.project.branch).toBe('main'));
+    expect(result.current!.project).toMatchObject({ projectId: P1, label: 'Repo', path: REPO, branch: 'main', worktree: false });
+    void result.current!.project.setWorktree(true); // the patch waits for main's answer, which this test never gives
+    await waitFor(() => expect(fake.invoked('session.intent.patch')).toHaveLength(1));
+    const patched = fake.invoked('session.intent.patch')[0] as { patch: { location: { kind: string; name: string; branch: { name: string } } } };
+    expect(patched.patch.location).toMatchObject({ kind: 'newWorktree', repoRoot: REPO, branch: { kind: 'new', base: 'HEAD' } });
+    expect(patched.patch.location.name).toMatch(/^repo-[0-9a-f]{4}$/);
+    expect(patched.patch.location.branch.name).toBe(`worktree-${patched.patch.location.name}`);
     expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']);
     expect(result.current!.options.models[1]).toEqual({ value: 'haiku', displayName: 'Haiku', supportsAutoMode: false });
   });
@@ -231,7 +234,7 @@ describe('setup intent hook', () => {
     withMain({ 'session.start': () => outcome });
     putIntent(intent());
     const { result } = renderHook(() => useSetupIntent(ID));
-    await waitFor(() => expect(result.current!.options.locations.length).toBeGreaterThan(0));
+    await waitFor(() => expect(result.current!.project.branch).toBe('main')); // the repository read
     expect(await act(() => result.current!.start(MESSAGE))).toEqual({ ok: true });
     expect(fake.invoked('session.start')[0]).toEqual({ appSessionId: ID, message: MESSAGE, options: {} });
     outcome = { status: 'needs_trust', appSessionId: ID, trust: trustState() };
@@ -343,12 +346,88 @@ describe('tab retention', () => {
   });
 });
 
+// New chat (2026-10-01): what the project row shows of each intent, and how its writes reach main
+describe('the project row’s facts', () => {
+  const repository = {
+    repoRoot: REPO,
+    worktrees: [
+      { repoRoot: REPO, path: REPO, branch: 'main', head: 'a'.repeat(40), isMain: true, locked: false, prunable: false, managed: false },
+      { repoRoot: REPO, path: WORKTREE, branch: 'worktree-one', head: 'b'.repeat(40), isMain: false, locked: false, prunable: false, managed: true },
+    ],
+  };
+  const repo = { name: 'Repo', directory: REPO };
+
+  it('none chosen: no label, branch or checkbox', () => {
+    expect(projectFacts(intent({ location: null }), null, null)).toEqual({ projectId: null, label: null, path: null, branch: null, worktree: null });
+  });
+
+  it('a project: its name and the checkout’s branch, the checkbox off in a repository and hidden outside one', () => {
+    expect(projectFacts(intent({ projectId: P1 }), repo, repository)).toEqual({ projectId: P1, label: 'Repo', path: REPO, branch: 'main', worktree: false });
+    expect(projectFacts(intent({ projectId: P1 }), repo, { repoRoot: null, worktrees: [] })).toMatchObject({ branch: null, worktree: null });
+    expect(projectFacts(intent({ projectId: P1, location: { kind: 'directory', path: `${WORKTREE}/pkg` } }), repo, repository).branch).toBe('worktree-one'); // the deepest checkout holding it
+  });
+
+  it('the Worktree checkbox on: a new worktree, the branch it starts from', () => {
+    const location = { kind: 'newWorktree' as const, repoRoot: REPO, name: 'repo-1a2b', branch: { kind: 'new' as const, name: 'worktree-repo-1a2b', base: 'HEAD' } };
+    expect(projectFacts(intent({ projectId: P1, location }), repo, repository)).toEqual({ projectId: P1, label: 'Repo', path: REPO, branch: 'main', worktree: true });
+  });
+
+  it('an existing worktree (a worktree group’s "+"): its folder and branch, the checkbox hidden', () => {
+    expect(projectFacts(intent({ projectId: P1, location: { kind: 'existingWorktree', repoRoot: REPO, path: WORKTREE } }), repo, repository)).toEqual({ projectId: P1, label: 'one', path: WORKTREE, branch: 'worktree-one', worktree: null });
+  });
+
+  it('no project ("Don’t work in a project"): "No project", the checkbox hidden', () => {
+    expect(projectFacts(intent({ projectId: null, location: { kind: 'directory', path: '/Users/someone' } }), null, { repoRoot: null, worktrees: [] })).toEqual({ projectId: null, label: 'No project', path: '/Users/someone', branch: null, worktree: null });
+  });
+
+  it('names a worktree after its project with a short id, in the engine’s worktree-name characters', () => {
+    expect(worktreeNameFor('My App (v2)', () => '1a2b3c4d')).toBe('my-app-v2-1a2b');
+    expect(worktreeNameFor('…', () => 'ffff')).toBe('worktree-ffff');
+  });
+
+  it('chooses a project by id alone (main moves the location), keeps the same choice, and adds a picked folder as a New project', async () => {
+    withMain({ 'layout.pickFiles': () => ({ files: [{ path: '/picked', name: 'picked', bytes: 0, mediaType: 'inode/directory', data: null }] }), 'session.projects.addFolder': () => ({ project: { id: 'p-9', name: 'picked', directory: '/picked', order: 3, createdAt: '2026-10-01T00:00:00.000Z' }, location: { kind: 'directory', path: '/picked' } }) });
+    putIntent(intent({ location: null }));
+    const { result } = renderHook(() => useSetupIntent(ID));
+    void result.current!.project.choose(P1);
+    await waitFor(() => expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: ID, patch: { projectId: P1 } }]));
+    void result.current!.project.newProject();
+    await waitFor(() => expect(fake.invoked('session.intent.patch')).toHaveLength(2));
+    expect(fake.invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: null, multiple: false }]);
+    expect(fake.invoked('session.projects.addFolder')).toEqual([{ directory: '/picked' }]);
+    expect(fake.invoked('session.intent.patch')[1]).toEqual({ appSessionId: ID, patch: { projectId: 'p-9', location: { kind: 'directory', path: '/picked' } } });
+    act(() => putIntent(intent({ projectId: P1 })));
+    expect(await result.current!.project.choose(P1)).toEqual({ ok: true }); // the same project: nothing to change
+    expect(fake.invoked('session.intent.patch')).toHaveLength(2);
+  });
+});
+
 describe('the unstarted title and the creator', () => {
-  it("titles the tab 'New session' with its project, and the creator opens with main's intent", async () => {
-    withMain({ 'session.create': () => ({ appSessionId: ID, intent: intent() }) });
+  it('updates the rendered unstarted title when its chosen project is renamed', async () => {
+    withMain({ 'session.launchMode': { mode: 'index' }, 'session.intent.list': { intents: [intent({ projectId: P1 })] }, 'session.deletions.list': { manifests: [] } });
+    const project = { id: P1, name: 'Original', directory: REPO, order: 0, createdAt: '2026-09-29T10:00:00.000Z' };
+    useSessions.setState({ projects: new Map([[P1, project]]) });
+    let disconnect!: () => void;
+    await act(async () => { disconnect = connectSessions(fake.client); });
+    try {
+      const { result } = renderHook(() => useUnstartedTitle(ID));
+      expect(result.current).toEqual({ title: 'New chat', project: 'Original', projectId: P1 });
+      act(() => useSessions.setState({ projects: new Map([[P1, { ...project, name: 'Renamed' }]]) }));
+      expect(result.current).toEqual({ title: 'New chat', project: 'Renamed', projectId: P1 });
+    } finally {
+      act(() => disconnect());
+    }
+  });
+
+  it("titles the tab 'New chat' with its project once one is chosen, and the creator opens with main's intent", async () => {
+    withMain({ 'session.create': () => ({ appSessionId: ID, intent: intent({ location: null }) }) });
     expect(unstartedTitle(ID)).toBeNull();
     expect(await createUnstartedSession(null, fake.client)).toBe(ID);
     expect(fake.invoked('session.create')).toEqual([{ projectId: null, location: null }]);
-    expect(unstartedTitle(ID)).toEqual({ title: 'New session', project: 'repo' });
+    expect(unstartedTitle(ID)).toEqual({ title: 'New chat', project: null, projectId: null });
+    act(() => putIntent(intent({ projectId: P1 }))); // chosen in the row; the project's own record not read yet: its folder
+    expect(unstartedTitle(ID)).toEqual({ title: 'New chat', project: 'repo', projectId: P1 });
+    act(() => putIntent(intent({ projectId: null }))); // "Don't work in a project"
+    expect(unstartedTitle(ID)).toEqual({ title: 'New chat', project: null, projectId: null });
   });
 });

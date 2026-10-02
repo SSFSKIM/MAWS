@@ -21,7 +21,8 @@ export type WorktreeResource = NonNullable<SetupResources['worktree']>;
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 // A directory inside the intent's repository, which a cleanup target of a hand-made checkout is asked through.
-const repositoryOf = (intent: SetupIntent) => (intent.location.kind === 'directory' ? intent.location.path : intent.location.repoRoot);
+// (a failed attempt's intent always has a location: a start refuses one without)
+const repositoryOf = (intent: SetupIntent) => (intent.location === null ? '' : intent.location.kind === 'directory' ? intent.location.path : intent.location.repoRoot);
 
 // ---- outcomes in words -------------------------------------------------------------------------------------------
 

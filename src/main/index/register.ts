@@ -5,6 +5,7 @@ import type { AppSessionId, MessageUuid, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionPatch } from '@shared/ipc/schema/session';
 import { registerMainHandler } from '../ipc/router';
+import { addFolder } from './add-folder'; // New chat
 import type { Index } from './index';
 
 export function registerIndexHandlers(index: Index): void {
@@ -14,6 +15,7 @@ export function registerIndexHandlers(index: Index): void {
   registerMainHandler('session.update', ({ appSessionId, patch }) => applyPatch(index, appSessionId as AppSessionId, patch as SessionPatch));
   registerMainHandler('session.projects.list', () => ({ projects: index.projects.list(), revision: index.revision }));
   registerMainHandler('session.projects.add', ({ directory }) => index.projects.add(directory));
+  registerMainHandler('session.projects.addFolder', ({ directory }) => addFolder(index.projects, directory)); // New chat: "Open folder…"
   registerMainHandler('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));
   registerMainHandler('session.projects.remove', ({ id }) => index.projects.hide(id as ProjectId));
   registerMainHandler('session.drafts.get', ({ appSessionId }) => index.drafts.get(appSessionId as AppSessionId));

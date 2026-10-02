@@ -6,7 +6,9 @@
 // through `session.setModel` and `session.setEffort`, the mode through the shared mode menu's binding (M5), additional
 // directories through `session.applyFlagSettings` (`/add-dir` is gated to remote entrypoints headless, SPEC 28 §22);
 // location and branch are read-only under a live engine: where a session runs is fixed once it starts (§19, the C8
-// recomposition entry).
+// recomposition entry). New chat (2026-10-01, the owner's ruling after Codex's new-thread composer): an unstarted
+// tab chooses where it runs in the project row above the box (the project chip with its read-only branch, and the
+// Worktree checkbox), so the toolbar's location chip is a started session's and only reads.
 import type { Effort } from '@shared/engine/launch-spec';
 import { EffortSchema } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -16,7 +18,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { ListModelsResponse } from '@shared/wire/control';
 import { ipc } from '../../ipc/client';
 import { liveModeBinding, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNING, type ModeBinding } from '../../statusline';
-import type { HookResult, Location, ModelInfo, SetupIntentHook } from '../setup-intent';
+import { locationPath, type HookResult, type ModelInfo, type SetupIntentHook, type SetupProject } from '../setup-intent';
 import { ENDED, MESSAGE_HELD, STARTING } from '../submit/submit-state';
 import { aliasOf, chipLabel, DEFAULT_ROW } from './model-label';
 
@@ -36,17 +38,25 @@ export interface ModelChoice {
 // session's source: the intent with the user's own settings while unstarted, the engine's status and effective effort once live.
 export type ModelBinding = ChipBinding<ModelChoice, ModelInfo> & { label: string };
 
+// The toolbar's location chip (W2), read-only: where a started session runs, its branch, and why it cannot move.
+export interface LocationView {
+  path: string;
+  branch: string | null;
+  note: string;
+}
+
+// New chat: the unstarted tab's project row, the hook's project facts with their writes gated as every chip's are.
+export type ProjectRowBinding = SetupProject & { disabled: string | null };
+
 export interface FrameBindings {
-  location: ChipBinding<Location, Location>; // the toolbar's LocationChip (W2)
-  branch: ChipBinding<string | null, string>; // inside the location chip's popover
+  location: LocationView; // the toolbar's LocationChip (W2), shown once the session has started
+  project: ProjectRowBinding | null; // New chat: the row above the box on an unstarted tab (null once started)
   model: ModelBinding; // the toolbar's ModelChip; the selector C11 registers opens from it (W3)
   mode: ModeBinding; // the toolbar's ModeChip, on the shared mode menu (M5)
   directories: ChipBinding<string[]>; // AddDirChip
 }
 
 export const LOCATION_FIXED = 'The location is fixed once the session starts';
-export const BRANCH_FIXED = 'The branch is fixed once the session starts';
-export const NEW_WORKTREE_BRANCH = 'Choose New worktree to pick a branch';
 
 const refused = (error: string) => async (): Promise<HookResult> => ({ ok: false, error });
 
@@ -66,23 +76,21 @@ export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean 
   const { intent, options } = hook;
   const gated = gate.starting ? STARTING : intent.message !== null ? MESSAGE_HELD : null;
   const through = <V>(write: (v: V) => Parameters<SetupIntentHook['patch']>[0]) => (gated === null ? (v: V) => hook.patch(write(v)) : refused(gated));
-  const location = intent.location;
   const chosen = options.models.find((m) => m.value === (intent.model ?? defaults?.model ?? DEFAULT_ROW));
+  const project = hook.project ?? null;
   return {
-    location: { value: location, options: options.locations, disabled: gated, set: through((l: Location) => ({ location: l })) },
-    branch: {
-      value: location.kind === 'newWorktree' ? location.branch.name : null,
-      options: options.branches,
-      disabled: gated ?? (location.kind === 'newWorktree' ? null : NEW_WORKTREE_BRANCH),
-      set:
-        gated === null && location.kind === 'newWorktree'
-          ? (name) => {
-              // a listed branch is checked out as it is; a new name creates it from the worktree's base
-              const branch = name !== null && options.branches.includes(name) ? { kind: 'existing' as const, name } : { kind: 'new' as const, name: name ?? location.branch.name, base: location.branch.kind === 'new' ? location.branch.base : 'HEAD' };
-              return hook.patch({ location: { ...location, branch } });
-            }
-          : refused(gated ?? NEW_WORKTREE_BRANCH),
-    },
+    // a hook without project facts (the harness's stub) keeps the toolbar's chip, naming the intent's location
+    location: { path: intent.location === null ? '' : locationPath(intent.location), branch: null, note: gated ?? 'Where this session will run' },
+    project:
+      project === null
+        ? null
+        : {
+            ...project,
+            disabled: gated,
+            choose: gated === null ? (projectId) => project.choose(projectId) : refused(gated),
+            newProject: gated === null ? () => project.newProject() : refused(gated),
+            setWorktree: gated === null ? (on) => project.setWorktree(on) : refused(gated),
+          },
     model: {
       value: { model: intent.model, effort: intent.effort },
       label: intentModelLabel(intent, options.models, defaults),
@@ -107,7 +115,7 @@ export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean 
 type ModelOption = ListModelsResponse['models'][number];
 
 // What the live chips read beside the status and the record: C3's `listModels`, the engine's workspace directories,
-// C4's branch and branch list, and a refresh of the rules after a directory was added. The two engine reads are control
+// C4's branch, and a refresh of the rules after a directory was added. The two engine reads are control
 // requests, so the composer makes them only when a chip that shows them opens (never per mount: many open sessions
 // would each ask the engine, and a replayed engine refuses any request its journal did not record).
 export interface LiveReads {
@@ -116,7 +124,6 @@ export interface LiveReads {
   effort?: Effort | null; // W3: the effort the engine runs at (`get_settings.applied.effort`), when known
   directories?: readonly string[] | null;
   branch?: string | null;
-  branches?: readonly string[];
   refresh?: () => void;
 }
 
@@ -134,10 +141,9 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
   const names = reads.models && reads.models.length > 0 ? reads.models : (reads.modelNames ?? []);
   const shownEffort = reads.effort !== undefined ? reads.effort : status ? status.effort : (EffortSchema.safeParse(record?.effort).data ?? null);
   const directories = [...(reads.directories ?? record?.additionalDirectories ?? [])];
-  const location: Location = { kind: 'directory', path: status?.cwd ?? record?.directory ?? '' };
   return {
-    location: { value: location, options: [location], disabled: LOCATION_FIXED, set: refused(LOCATION_FIXED) },
-    branch: { value: reads.branch ?? record?.worktree?.branch ?? record?.branch ?? null, options: [...(reads.branches ?? [])], disabled: BRANCH_FIXED, set: refused(BRANCH_FIXED) },
+    location: { path: status?.cwd ?? record?.directory ?? '', branch: reads.branch ?? record?.worktree?.branch ?? record?.branch ?? null, note: LOCATION_FIXED },
+    project: null,
     model: {
       value: current,
       label: chipLabel(aliasOf(current.model, names), shownEffort),
@@ -183,11 +189,10 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
 // ---- neither: no intent, no status, no record (a session nothing knows yet, e.g. a scenario's new tab) ------------
 
 export function endedBindings(reason: string = ENDED): FrameBindings {
-  const location: Location = { kind: 'directory', path: '' };
   const none = refused(reason);
   return {
-    location: { value: location, options: [], disabled: reason, set: none },
-    branch: { value: null, options: [], disabled: reason, set: none },
+    location: { path: '', branch: null, note: reason },
+    project: null,
     model: { value: { model: null, effort: null }, label: chipLabel(null, null), options: [], disabled: reason, set: none },
     mode: { value: null, options: MODE_OPTIONS.map((o) => o.mode), disabled: reason, refusal: null, autoUnavailable: null, set: none },
     directories: { value: [], options: [], disabled: reason, set: none },

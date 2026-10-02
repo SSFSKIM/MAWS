@@ -340,16 +340,14 @@ async function plus(page: Page, repo: string, first: string, o: { mode?: string;
   const known = new Set(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId));
   await openProject(page, name); // W5: the "+" beside the name on the project's page
   await sidebar(page).locator('[data-level-pane="2"]').getByRole('button', { name: `New session in ${name}`, exact: true }).click();
-  await expect(page.getByRole('heading', { name: `New session in ${name}` })).toBeVisible();
+  await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
   let id: AppSessionId | undefined;
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !known.has(i.appSessionId))?.appSessionId)).toBeDefined();
   value(await invoke(page, 'session.intent.patch', { appSessionId: id!, patch: { model: 'sonnet', permissionMode: (o.mode ?? 'default') as 'default' } }));
   if (o.worktree) {
-    await page.getByRole('button', { name: `Location ${repo}` }).click();
-    const popover = page.getByRole('dialog', { name: 'Location' });
-    await popover.getByRole('textbox', { name: 'New worktree name' }).fill(o.worktree);
-    await popover.getByRole('button', { name: 'Use' }).click();
-    await expect(page.getByRole('button', { name: `Location ${join(repo, '.claude/worktrees', o.worktree)}` })).toBeVisible();
+    // New chat (2026-10-01): the Worktree checkbox names its worktree itself, so this named one is set on the intent
+    value(await invoke(page, 'session.intent.patch', { appSessionId: id!, patch: { location: { kind: 'newWorktree', repoRoot: repo, name: o.worktree, branch: { kind: 'new', name: `worktree-${o.worktree}`, base: 'HEAD' } } } }));
+    await expect(page.locator('[data-project-row]').getByRole('checkbox', { name: 'Worktree' })).toBeChecked();
   }
   await send(page, first);
   const card = page.getByRole('group', { name: 'Trust this folder?' });

@@ -150,7 +150,7 @@ async function plusSession(live: Live, repo: string, first: string, opts: { mode
   if (!projects.some((p) => p.directory === repo)) value(await invoke(page, 'session.projects.add', { directory: repo }));
   await openProject(page, name); // W5: the "+" beside the name on the project's page
   await page.locator('[data-region="sidebar"] [data-level-pane="2"]').getByRole('button', { name: `New session in ${name}`, exact: true }).click();
-  await expect(page.getByRole('heading', { name: `New session in ${name}` })).toBeVisible();
+  await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
   const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
   const w = await openWidget(live, 'model'); // W3: the model selector, a pick applies at once
   await w.getByRole('menuitemradio', { name: SONNET }).click();

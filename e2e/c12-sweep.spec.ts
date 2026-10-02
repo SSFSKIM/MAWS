@@ -79,10 +79,10 @@ test('Worktrees…: every checkout with its state and bound session; New session
   await expect(rowOf(dialog, 'gone').getByText('missing', { exact: true })).toBeVisible();
   await expect(rowOf(dialog, project.name).getByRole('button', { name: 'Remove…' })).toHaveCount(0);
 
-  // New session here on the bound worktree: an unstarted tab whose Location chip names it, then that checkout is busy
+  // New session here on the bound worktree: an unstarted tab whose project chip names it, then that checkout is busy
   await rowOf(dialog, 'bound').getByRole('button', { name: 'New session here' }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole('button', { name: `Location ${bound}` })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Project bound' })).toBeVisible(); // New chat: the project row's chip
   const intent = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!;
   expect(intent.location).toEqual({ kind: 'existingWorktree', repoRoot: repo.root, path: bound });
   dialog = await openWorktrees(page, project.id, project.name);

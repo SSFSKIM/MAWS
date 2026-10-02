@@ -3,7 +3,7 @@
 // directory a location starts in and the one its trust key is read from, and retry validation, which replaces the
 // exists-checks for a checkout a failed attempt created and kept.
 import { join } from 'node:path';
-import type { Location, SetupIntent } from '@shared/sessions/intent';
+import { CHOOSE_PROJECT_FIRST, type Location, type SetupIntent } from '@shared/sessions/intent';
 import { validateWorktreeName, worktreeDirName } from '@shared/sessions/worktree';
 import { GitCommandError, type GitRun } from '../git/runner';
 import type { WorktreeService } from '../git/worktrees';
@@ -36,15 +36,17 @@ export function trustDirectoryOf(location: Location): string {
 // exists-checks).
 export async function retainedMatches(deps: RuleDeps, intent: SetupIntent): Promise<boolean> {
   const w = intent.progress.worktree;
-  if (w === null || !w.createdHere || intent.location.kind !== 'newWorktree') return false;
+  if (w === null || !w.createdHere || intent.location?.kind !== 'newWorktree') return false;
   const target = await newWorktreeTarget(deps, intent.location).catch(() => null);
   return target !== null && (await canonicalPath(target.path)) === (await canonicalPath(w.path)) && w.branch === target.branch;
 }
 
 // A location as `session.intent.patch` and a start's guards check it. `forStart` turns a missing session directory
-// into `missing_directory` (the start's outcome); a patch names it as the location field's error.
+// into `missing_directory` (the start's outcome); a patch names it as the location field's error. A New chat with no
+// project chosen has no location yet, which no start passes.
 export async function checkLocation(deps: RuleDeps, intent: SetupIntent, opts: { forStart: boolean }): Promise<RuleVerdict> {
   const location = intent.location;
+  if (location === null) return invalid('location', CHOOSE_PROJECT_FIRST);
   const missing = (directory: string): RuleVerdict => (opts.forStart ? { ok: false, kind: 'missing_directory', directory } : invalid('location', `directory not found: ${directory}`));
   switch (location.kind) {
     case 'directory':

@@ -33,8 +33,6 @@ function useStubIntent(appSessionId: AppSessionId): SetupIntentHook | null {
   return {
     intent,
     options: {
-      locations: [intent.location, { kind: 'newWorktree', repoRoot: intent.location.kind === 'directory' ? intent.location.path : '', name: 'harness-wt', branch: { kind: 'new', name: 'worktree-harness-wt', base: 'HEAD' } }],
-      branches: ['main'],
       models: [
         { value: 'sonnet', displayName: 'Sonnet', supportsAutoMode: true },
         { value: 'haiku', displayName: 'Haiku', supportsAutoMode: false },

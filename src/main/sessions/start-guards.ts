@@ -46,7 +46,8 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   if (!verdict.ok) {
     return reject(verdict.kind === 'invalid' ? { status: 'invalid', appSessionId, field: verdict.field, message: verdict.message } : { status: 'missing_directory', appSessionId, directory: verdict.directory });
   }
-  const dirs = await checkAdditionalDirectories(intent, await sessionDirectoryOf(s, intent.location));
+  const location = intent.location!; // checkLocation refuses a New chat with no project chosen
+  const dirs = await checkAdditionalDirectories(intent, await sessionDirectoryOf(s, location));
   if (!dirs.ok && dirs.kind === 'invalid') return reject({ status: 'invalid', appSessionId, field: dirs.field, message: dirs.message });
   if (intent.kind === 'fork') {
     const refusal = await forkRefusal(s, intent.source!.appSessionId);
@@ -59,7 +60,7 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   }
 
   // the card outcomes: the message stays with the intent until the card's continuation, a release or the handoff
-  const trust = await trustStateOf(trustDirectoryOf(intent.location), { git: s.git, env: s.env });
+  const trust = await trustStateOf(trustDirectoryOf(location), { git: s.git, env: s.env });
   if (!trust.trusted && intent.trust === 'unanswered') return [{ status: 'needs_trust', appSessionId, trust }, null];
   let gateway = intent.gateway;
   let directFallback = false;

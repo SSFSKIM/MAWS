@@ -10,7 +10,7 @@
 // under MAWS_E2E `layout.pickFiles` answers from `MAWS_E2E_PICK_PATHS` or as cancelled (main's pick seam).
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
@@ -99,7 +99,7 @@ async function addProject(page: Page, directory: string): Promise<{ id: string; 
 async function plus(page: Page, name: string): Promise<string> {
   await openProject(page, name);
   await page.locator('[data-region="sidebar"] [data-level-pane="2"]').getByRole('button', { name: `New session in ${name}`, exact: true }).click();
-  await expect(page.getByRole('heading', { name: `New session in ${name}` })).toBeVisible();
+  await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
   const intents = value(await invoke(page, 'session.intent.list', undefined)).intents;
   return intents.at(-1)!.appSessionId;
 }
@@ -122,13 +122,17 @@ async function send(page: Page, text: string): Promise<void> {
   await control.click();
 }
 
-// The Location chip's new worktree (C7's popover: the name, then Use).
-async function chooseNewWorktree(page: Page, repoRoot: string, name: string): Promise<void> {
-  await page.getByRole('button', { name: `Location ${repoRoot}` }).click();
-  const popover = page.getByRole('dialog', { name: 'Location' });
-  await popover.getByRole('textbox', { name: 'New worktree name' }).fill(name);
-  await popover.getByRole('button', { name: 'Use' }).click();
-  await expect(page.getByRole('button', { name: `Location ${join(repoRoot, '.claude/worktrees', name)}` })).toBeVisible();
+// The project row's Worktree checkbox (New chat, 2026-10-01, the owner's ruling after Codex): the first send creates a
+// new worktree named for the project with a short id; answers the name the intent holds.
+async function checkWorktree(page: Page, id: string, repoRoot: string): Promise<string> {
+  const box = page.locator('[data-project-row]').getByRole('checkbox', { name: 'Worktree' });
+  await box.click(); // controlled: checked once main has the patched location
+  await expect(box).toBeChecked();
+  const location = value(await invoke(page, 'session.intent.get', { appSessionId: id }))!.location;
+  const name = location?.kind === 'newWorktree' ? location.name : '';
+  expect(name).toMatch(/^[a-z0-9-]+-[0-9a-f]{4}$/);
+  expect(location).toEqual({ kind: 'newWorktree', repoRoot, name, branch: { kind: 'new', name: `worktree-${name}`, base: 'HEAD' } });
+  return name;
 }
 
 // The turns C3 reports ended, per session, from before the first start.
@@ -227,15 +231,14 @@ test.describe('sessions', () => {
     return { ...current, trustedRepos, untrustedRepos };
   }
 
-  test('new worktree: the Location chip creates the worktree and the first send runs in it, unattested and with no card in a trusted repository', async () => {
+  test('new worktree: the Worktree checkbox creates a worktree and the first send runs in it, unattested and with no card in a trusted repository', async () => {
     const { page, maws, trustedRepos } = await begin({ fixtures: [AUTO_ROUTED] });
     const repo = trustedRepos[0]!;
     const project = await addProject(page, repo.root);
     const id = await plus(page, project.name);
     await expect(row(page, id), 'an unstarted session has no sidebar row').toHaveCount(0);
     await routeDirect(page, id);
-    await chooseNewWorktree(page, repo.root, 'e2e-one');
-    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))!.location).toEqual({ kind: 'newWorktree', repoRoot: repo.root, name: 'e2e-one', branch: { kind: 'new', name: 'worktree-e2e-one', base: 'HEAD' } });
+    const name = await checkWorktree(page, id, repo.root);
     await collectTurns(page);
     await watchTranscriptFailures(page);
     const early = await invoke(page, 'session.events', { appSessionId: id, afterSeq: null, limit: null });
@@ -244,12 +247,12 @@ test.describe('sessions', () => {
     await send(page, prompt.display);
     await untilPhase(page, id, 'ready');
     expect((await setupOf(page, id)).map((e) => [e.phase, e.detail])).toEqual([
-      ['worktree', 'Creating worktree e2e-one'],
+      ['worktree', `Creating worktree ${name}`],
       ['launching', 'Starting'],
       ['ready', null],
     ]);
     expect((await setupOf(page, id)).at(-1)!.outcome).toMatchObject({ kind: 'ready', firstTurn: 'sent' });
-    const worktree = join(repo.root, '.claude/worktrees/e2e-one');
+    const worktree = join(repo.root, '.claude/worktrees', name);
     expect(await runGit(repo.root, ['worktree', 'list', '--porcelain'])).toContain(`worktree ${worktree}\n`);
     expect(spawnRow(maws, id).cwd).toBe(worktree);
     expect(initializeRequest(maws, id).workspaceTrust, 'a trusted key attests nothing').toBeUndefined();
@@ -268,7 +271,7 @@ test.describe('sessions', () => {
     const repo = untrustedRepos[0]!;
     const project = await addProject(page, repo.root);
     const id = await plus(page, project.name);
-    await expect(page.getByRole('button', { name: `Location ${repo.root}` }), "C7's composer frame under the heading").toBeVisible();
+    await expect(page.getByRole('button', { name: `Project ${project.name}` }), "C7's composer frame under the heading, its project row chosen").toBeVisible();
     await routeDirect(page, id);
     await collectTurns(page);
     const prompt = fixtureIdentity(AUTO_ROUTED).firstPrompt!;
@@ -285,7 +288,7 @@ test.describe('sessions', () => {
     expect(events.at(-1)!.outcome).toEqual({ kind: 'ready', engineSessionId: fixtureIdentity(AUTO_ROUTED).sessionId, firstTurn: 'sent' });
     expect(bootstrapId).not.toBe(fixtureIdentity(AUTO_ROUTED).sessionId);
     await expect(row(page, id)).toBeVisible();
-    await expect(page.getByRole('heading', { name: `New session in ${project.name}` }), 'the tab became the session').toHaveCount(0);
+    await expect(page.getByRole('heading', { name: `New chat in ${project.name}` }), 'the tab became the session').toHaveCount(0);
     await turnEnded(page, id);
     expect(value(await invoke(page, 'session.queue.list', { appSessionId: id })).entries).toEqual([]);
     expect(initializeRequest(maws, id).workspaceTrust).toEqual({ accepted: true, directory: repo.root });
@@ -326,7 +329,7 @@ test.describe('sessions', () => {
     await page.exposeFunction('__c10Removed', (appSessionId: string) => void removed.push(appSessionId));
     await page.evaluate(() => window.maws.on('session.removed', (e) => (window as unknown as { __c10Removed(id: string): void }).__c10Removed(e.appSessionId)));
     await routeDirect(page, id);
-    await chooseNewWorktree(page, repo.root, 'e2e-fail');
+    const name = await checkWorktree(page, id, repo.root);
     await send(page, 'This launch will be refused.');
     await page.getByRole('group', { name: 'Trust this folder?' }).getByRole('button', { name: 'Trust and start' }).click();
     await untilPhase(page, id, 'failed');
@@ -334,12 +337,12 @@ test.describe('sessions', () => {
     const card = page.getByRole('group', { name: 'The session did not start' });
     await expect(card).toBeVisible();
     await expect(card.getByText('replay_disabled: MAWS_E2E_REPLAY_FIXTURES has no fixture left for this launch')).toBeVisible();
-    await expect(card.getByText('Worktree e2e-fail removed')).toBeVisible();
-    await expect(card.getByText('Branch worktree-e2e-fail deleted')).toBeVisible();
+    await expect(card.getByText(`Worktree ${name} removed`)).toBeVisible();
+    await expect(card.getByText(`Branch worktree-${name} deleted`)).toBeVisible();
     await expect(card.getByText('Record removed')).toBeVisible();
-    await expect(page.getByRole('heading', { name: `New session in ${project.name}` }), 'the tab stayed').toBeVisible();
-    expect(await runGit(repo.root, ['worktree', 'list', '--porcelain'])).not.toContain('e2e-fail');
-    expect(await runGit(repo.root, ['branch', '--list', 'worktree-e2e-fail'])).toBe('');
+    await expect(page.getByRole('heading', { name: `New chat in ${project.name}` }), 'the tab stayed').toBeVisible();
+    expect(await runGit(repo.root, ['worktree', 'list', '--porcelain'])).not.toContain(name);
+    expect(await runGit(repo.root, ['branch', '--list', `worktree-${name}`])).toBe('');
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ progress: { lastFailure: { phase: 'launching' } } });
     await card.getByRole('button', { name: 'Back to editing' }).click();
     await expect(card).toHaveCount(0);
@@ -562,6 +565,103 @@ test.describe('sessions', () => {
     expect(launched.maws.consoleErrors()).toEqual([]);
   });
 
+  // New chat (2026-10-01, the owner's request after Codex): the sidebar's New chat from the project list opens a tab with
+  // no project; the composer's project row chooses one (or a new folder, or none) before the first send.
+  test('New chat from the project list: "Choose a project" with Send disabled; a project enables Send with its branch and the Worktree checkbox; New project adds a folder; no project runs at home', async () => {
+    const { page, maws, trustedRepos } = await begin({ fixtures: [], trusted: 2 });
+    assertPickSeamBuilt(maws);
+    const [first, second] = trustedRepos as [ScratchRepo, ScratchRepo];
+    const alpha = await addProject(page, first.root);
+    await showProjectList(page);
+    await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'New chat', exact: true })).toBeVisible();
+    const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: null, location: null });
+    const row = page.locator('[data-region="main"] [data-project-row]');
+    const chip = row.getByRole('button', { name: 'Choose a project' });
+    await expect(chip).toBeVisible();
+    await expect(row.getByRole('checkbox', { name: 'Worktree' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Composer tools' }).getByRole('button', { name: /^Location / }), 'the row stands for the toolbar’s location').toHaveCount(0);
+    await editor(page).click();
+    await page.keyboard.type('hello');
+    const control = page.locator('[data-region="main"] [data-submit-state]');
+    await expect(control).toBeDisabled();
+    await expect(control).toHaveAttribute('title', 'Choose a project first');
+    await page.screenshot({ path: test.info().outputPath('new-chat-choose-a-project.png') });
+
+    // the chip's menu: search, the projects most recently active first, New project, Don't work in a project
+    await chip.click();
+    const menu = page.getByRole('dialog', { name: 'Choose a project' });
+    await expect(menu.getByPlaceholder('Search projects')).toBeVisible();
+    await expect(menu.getByRole('option')).toHaveText([alpha.name, 'New project', "Don't work in a project"]);
+    await page.screenshot({ path: test.info().outputPath('new-chat-project-menu.png') });
+    await menu.getByRole('option', { name: alpha.name }).click();
+    await expect(page.getByRole('heading', { name: `New chat in ${alpha.name}` })).toBeVisible();
+    await expect(page.getByRole('tab', { name: `New chat · ${alpha.name}` }), 'the tab names the project too').toBeVisible();
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: alpha.id, location: { kind: 'directory', path: first.root } });
+    await expect(row.getByRole('button', { name: `Project ${alpha.name}` })).toBeVisible();
+    await expect(row.getByLabel('Branch main')).toBeVisible();
+    const worktree = row.getByRole('checkbox', { name: 'Worktree' });
+    await expect(worktree).not.toBeChecked();
+    await expect(control).toBeEnabled();
+    await page.screenshot({ path: test.info().outputPath('new-chat-project-chosen.png') });
+    await page.evaluate(() => (document.documentElement.dataset.theme = 'dark')); // both themes render the row (tokens only)
+    await expect(row.getByRole('button', { name: `Project ${alpha.name}` })).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath('new-chat-project-chosen-dark.png') });
+    await page.evaluate(() => (document.documentElement.dataset.theme = 'light'));
+    await checkWorktree(page, id, first.root); // a new worktree `<project>-<4 hex>` for the first send
+    await worktree.click();
+    await expect(worktree).not.toBeChecked();
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))!.location).toEqual({ kind: 'directory', path: first.root });
+
+    // New project: the native folder dialog (main's e2e seam) and the folder becomes a project, chosen
+    await maws.app.evaluate((_electron, dir) => void (process.env.MAWS_E2E_PICK_PATHS = dir), second.root);
+    await row.getByRole('button', { name: `Project ${alpha.name}` }).click();
+    await menu.getByRole('option', { name: 'New project' }).click();
+    const addedOf = async () => value(await invoke(page, 'session.projects.list', undefined)).projects.find((p) => p.directory === second.root);
+    await expect.poll(async () => (await addedOf())?.directory).toBe(second.root);
+    const added = (await addedOf())!;
+    await expect(page.getByRole('heading', { name: `New chat in ${added.name}` })).toBeVisible();
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: added.id, location: { kind: 'directory', path: second.root } });
+
+    // Don't work in a project: the home directory, the chip says so, no checkbox, and Send goes
+    await row.getByRole('button', { name: `Project ${added.name}` }).click();
+    await menu.getByRole('option', { name: "Don't work in a project" }).click();
+    await expect(row.getByRole('button', { name: 'Project No project' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'New chat', exact: true })).toBeVisible();
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: null, location: { kind: 'directory', path: realpathSync(homedir()) } });
+    await expect(row.getByRole('checkbox', { name: 'Worktree' })).toHaveCount(0);
+    await expect(control).toBeEnabled();
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
+  test('⌘N (File › New chat) from an open session starts a New chat in that session’s project', async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const sid = '5e551011-0000-4000-8000-0000000000aa';
+    await store.addTranscript(repo.root, sid, [{ type: 'user', uuid: `u-${sid}`, parentUuid: null, cwd: repo.root, sessionId: sid, timestamp: '2026-09-29T10:00:00.000Z', message: { role: 'user', content: 'an open session' } }]);
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+    current = { ...launched, repos: [repo] };
+    const { page, maws } = launched;
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
+    const open = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!;
+    const project = value(await invoke(page, 'session.projects.list', undefined)).projects.find((p) => p.id === open.projectId)!;
+    expect(project.directory).toBe(repo.root);
+    await (await sidebarRow(page, { appSessionId: open.appId })).click();
+    await expect(page.getByRole('tab', { name: new RegExp(`^an open session`) })).toHaveAttribute('aria-selected', 'true');
+    const label = await maws.app.evaluate(({ Menu }) => {
+      const item = Menu.getApplicationMenu()?.getMenuItemById('session.new');
+      item?.click();
+      return item?.label ?? null;
+    });
+    expect(label, 'File › New chat').toBe('New chat');
+    await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible();
+    const created = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!;
+    expect(created).toMatchObject({ projectId: project.id, location: { kind: 'directory', path: repo.root } });
+    await expect(page.locator('[data-region="main"] [data-project-row]').getByRole('button', { name: `Project ${project.name}` })).toBeVisible();
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
   test("Add project picks through main's e2e seam: cancelled when MAWS_E2E_PICK_PATHS is unset, the listed directory when set; no native panel", async () => {
     const { page, maws, trustedRepos } = await begin({ fixtures: [] });
     assertPickSeamBuilt(maws);
@@ -593,7 +693,7 @@ test.describe('sessions', () => {
 
     const second = await launchCase({ fixtures: [], trusted: [repo.root], store, userData: first.maws.userData });
     current = { ...second, repos: [repo], dispose: async () => (await second.maws.cleanup(), await first.maws.cleanup()) };
-    await expect(second.page.getByRole('heading', { name: `New session in ${project.name}` }), 'hydration kept the unstarted tab').toBeVisible();
+    await expect(second.page.getByRole('heading', { name: `New chat in ${project.name}` }), 'hydration kept the unstarted tab').toBeVisible();
     await expect(editor(second.page), 'the draft is back in the editor').toHaveText('half a thought');
     expect(second.maws.consoleErrors()).toEqual([]);
   });

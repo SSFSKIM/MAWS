@@ -136,7 +136,7 @@ describe('overview board', () => {
     fillStores(scenarioFile('empty'));
     render(<Overview paneIndex={0} />);
     expect(screen.getByText('Nothing live or unread')).toBeTruthy();
-    const button = screen.getByRole('button', { name: 'New session' }) as HTMLButtonElement;
+    const button = screen.getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     let asked = 0;
     offs.push(registerSessionCreator(async () => (asked++, null)));
@@ -162,7 +162,7 @@ describe('overview board', () => {
     render(<Overview paneIndex={0} />);
     expect(screen.getByRole('status').textContent).toBe('Indexing sessions · 0 of 3,274');
     expect(screen.queryByText('Nothing live or unread')).toBeNull();
-    expect(screen.getByRole('button', { name: 'New session' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'New chat' })).toBeTruthy();
   });
 });
 

@@ -367,12 +367,12 @@ describe('sidebar states', () => {
     expect(screen.queryAllByTestId('skeleton-row')).toHaveLength(0);
   });
 
-  it('an empty workspace reads "No projects yet" with its creation actions', async () => {
+  it('an empty workspace reads "No projects yet" with Add project, and the New chat row above opens a chat in no project', async () => {
     fillStores(scenarioFile('empty'));
     const { rerender } = render(<Sidebar />);
     expect(screen.getByText('No projects yet')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Add project' }) as HTMLButtonElement).disabled).toBe(true);
-    const create = screen.getByRole('button', { name: 'New session' }) as HTMLButtonElement;
+    const create = screen.getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
     expect(create.disabled).toBe(true);
     offs.push(registerSessionCreator(async () => 'app-new-2' as AppSessionId));
     rerender(<Sidebar />);

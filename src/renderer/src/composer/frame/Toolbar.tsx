@@ -30,7 +30,8 @@ export function Toolbar({ appSessionId, bindings, cwd, dirty, editor, onOpen, ri
   return (
     <div role="toolbar" aria-label="Composer tools" className="flex min-w-0 items-center gap-0.5">
       <PlusMenu cwd={cwd} editor={editor} />
-      <LocationChip location={bindings.location} branch={bindings.branch} directories={bindings.directories.value} dirty={dirty} onOpen={() => onOpen?.('rules')} />
+      {/* New chat: an unstarted tab's project row above the box stands for the location until the session starts */}
+      {bindings.project === null && <LocationChip location={bindings.location} directories={bindings.directories.value} dirty={dirty} onOpen={() => onOpen?.('rules')} />}
       <AddDirChip directories={bindings.directories} cwd={cwd} />
       <ModeChip binding={bindings.mode} onOpen={() => onOpen?.('models')} />
       <span className="min-w-2 flex-1" />

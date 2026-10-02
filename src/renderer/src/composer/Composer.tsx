@@ -124,7 +124,7 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
 
 // The live chips' reads: C3's models and permission rules, each a control request to the engine, read once a chip that
 // shows it has opened (never per mount), the route's model catalogue for the model chip's name (a host read, from the
-// first render), and the branch list for the location popover.
+// first render), and the checkout's branch for the location chip.
 function useLiveReads(
   appSessionId: AppSessionId,
   want: { models: boolean; rules: boolean },
@@ -139,14 +139,12 @@ function useLiveReads(
   const modelNames = useModelCatalogue(route, ready, directory);
   const effort = useEffectiveEffort(appSessionId, status, client); // W3: get_settings once per ready and per change
   const rules = useCommand('session.listPermissionRules', { appSessionId }, { enabled: want.rules, staleTime: 10_000 });
-  const branches = useCommand('git.branches', { directory: directory ?? '' }, { enabled: want.rules && directory !== null && git !== null, staleTime: 30_000 });
   return {
     models,
     modelNames,
     ...(effort !== undefined && { effort }),
     directories: rules.data ? workspaceDirectoriesOf(rules.data.state.workspaceDirectories) : null,
     branch: git?.branch ?? null,
-    branches: branches.data?.branches.map((b) => b.name) ?? [],
     refresh: () => void rules.refetch(),
   };
 }
@@ -175,7 +173,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const rewoundEdit = useComposerStore((s) => (inlineEditOf(s, appSessionId) !== null && resubmitRecordOf(s, appSessionId).state === 'rewound_awaiting_send' ? inlineEditOf(s, appSessionId) : null));
 
   // ---- what the frame binds to ------------------------------------------------------------------------------------
-  const cwd = setup ? locationPath(setup.intent.location) : (status?.cwd ?? record?.directory ?? '');
+  const location = setup?.intent.location ?? null; // New chat: null until a project is chosen
+  const cwd = setup ? (location === null ? '' : locationPath(location)) : (status?.cwd ?? record?.directory ?? '');
   const repo = useGitWatch(setup ? null : cwd || null, client);
   const [opened, setOpened] = useState({ models: false, rules: false });
   const ready = status?.process === 'ready';
@@ -196,7 +195,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const released = useSessions((s) => s.digests.get(appSessionId)?.released !== undefined);
   const decision = submitState({
     status,
-    intent: unstarted ? { starting, messageHeld, phase: setup.phase ?? null } : null, // C10: the setup phase
+    intent: unstarted ? { starting, messageHeld, phase: setup.phase ?? null, noProject: setup.intent.location === null } : null, // C10: the setup phase
     queue,
     empty: draft.empty,
     mode: draft.mode,
@@ -249,14 +248,15 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     const retry = () => handle.current?.submit(how);
     if (setup) {
       // read synchronously: a second Enter in the same tick, or before C10 answers, starts nothing
-      if (isStarting(useComposerStore.getState(), appSessionId) || setup.intent.message !== null || s.mode !== 'send' || s.empty) return false;
+      const where = setup.intent.location; // New chat: Send waits for a project
+      if (where === null || isStarting(useComposerStore.getState(), appSessionId) || setup.intent.message !== null || s.mode !== 'send' || s.empty) return false;
       setStarting(appSessionId, true);
       try {
         const start: Dispatch = async () => {
           const result = await setup.start({ content: s.content, display: s.display });
           return result.ok ? null : result.error;
         };
-        return await submitSerialized(client, appSessionId, s, 'send', null, { dispatch: start, project: locationPath(setup.intent.location), retry });
+        return await submitSerialized(client, appSessionId, s, 'send', null, { dispatch: start, project: locationPath(where), retry });
       } finally {
         setStarting(appSessionId, false);
       }
