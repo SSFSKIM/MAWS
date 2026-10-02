@@ -52,13 +52,15 @@ describe('shell frame', () => {
     ]);
   });
 
-  // W5: the main region opens with MAWS's top bar, whose Overview button toggles the board floating over the panes.
-  it('puts the top bar above the panes, its Overview button toggling the floating Overview', async () => {
+  it('puts the Overview toggle beside the sidebar toggle in the title-bar toolbar', async () => {
     const user = userEvent.setup();
     render(<Shell />);
-    const topBar = region('main').querySelector<HTMLElement>('[data-top-bar]')!;
-    expect(region('main').firstElementChild).toBe(topBar);
-    const toggle = within(topBar).getByRole('button', { name: 'Overview' });
+    const toolbar = screen.getByRole('banner');
+    const toggle = within(toolbar).getByRole('button', { name: 'Overview' });
+    const sidebar = within(toolbar).getByRole('button', { name: 'Toggle sidebar' });
+    expect(sidebar.nextElementSibling).toBe(toggle);
+    expect(toggle.className).toContain('[-webkit-app-region:no-drag]');
+    expect(toggle.getAttribute('title')).toBe('Overview · ⌘0');
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
     await user.click(toggle);
@@ -67,6 +69,17 @@ describe('shell frame', () => {
     await user.click(toggle);
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
+  });
+
+  it('mounts the usage slot before the session actions and panel toggle in the title-bar toolbar', () => {
+    registerSlot('topBarEnd', () => <button type="button">Usage</button>);
+    render(<Shell />);
+    const toolbar = screen.getByRole('banner');
+    const usage = within(toolbar).getByRole('button', { name: 'Usage' });
+    const end = usage.parentElement!;
+    expect(end.className).toContain('[-webkit-app-region:no-drag]');
+    expect(end.nextElementSibling).toBe(within(toolbar).getByRole('button', { name: 'Session actions' }));
+    expect(within(toolbar).getByRole('button', { name: 'Toggle right panel' })).toBeTruthy();
   });
 
   it('lays the regions on a grid whose columns are the layout store’s widths', () => {

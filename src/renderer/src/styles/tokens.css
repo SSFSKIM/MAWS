@@ -30,8 +30,7 @@
   --radius-2xl: 22px;
   --shadow-composer: 0 0 0 1px #0000000a, 0 2px 8px 0 #0000000a, 0 4px 80px 8px #00000006;
   --row-h: 30px; --toolbar-h: 44px; --sidebar-w: 300px; --panel-w: 380px;
-  /* W5: the top bar above the tab strip, and the floating Overview's lift off the main area */
-  --topbar-h: 30px;
+  /* W5: the floating Overview's lift off the main area */
   --shadow-float: 0 0 0 1px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.10), 0 24px 64px rgba(0,0,0,0.08);
 
   /* Terminal (C9, X7 extension; values advisory): a VS Code-light-derived readable set on a white ground. */

@@ -132,10 +132,10 @@ async function hoverCardOf(page: Page, id: string): Promise<Locator> {
   return card;
 }
 
-// The floating Overview (W5: no tab; the top bar's button floats it over the main area), opened when it is not.
+// The floating Overview (W5: no tab; the toolbar's button floats it over the main area), opened when it is not.
 async function openOverview(page: Page): Promise<Locator> {
   const overview = main(page).getByRole('dialog', { name: 'Overview' });
-  if (!(await overview.isVisible())) await main(page).locator('[data-top-bar]').getByRole('button', { name: /^Overview/ }).click();
+  if (!(await overview.isVisible())) await page.getByRole('banner').getByRole('button', { name: /^Overview/ }).click();
   await expect(overview).toBeVisible();
   return overview;
 }

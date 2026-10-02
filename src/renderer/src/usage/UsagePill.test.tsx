@@ -1,4 +1,4 @@
-// The top bar's usage pill and its popover (W6, E1) over the committed ClaudeUsage fixture as C7's reader answers it at
+// The title-bar toolbar's usage pill and its popover (W6, E1) over the committed ClaudeUsage fixture as C7's reader answers it at
 // the fixture's clock: the pill's reading and colour, the popover's sections in ClaudeUsage's panel order, the four
 // account actions disabled under the one hint, the hand-off to ClaudeUsage's own panel, and the absent case. The
 // retired Accounts tab's own suite moved here with its content (its order, geometry, states and hand-off). W6 route

@@ -1,5 +1,5 @@
 // The floating Overview (§5.2 as amended 2026-10-01, W5; owner's ruling, Claude Desktop's floating side chat as the
-// pattern): the board in a panel over the main area, not a tab. The top bar's button toggles it; ⌘0, the View menu and
+// pattern): the board in a panel over the main area, not a tab. The toolbar's button toggles it; ⌘0, the View menu and
 // the palette open it (or bring focus back to it); Esc, the button and its close control close it. It is dragged by its
 // header and resized from its corner, kept inside the main area, and its rect persists in `regions.overview`. The
 // session behind it stays mounted and live. Opening moves focus to the panel itself, not to a card: a focused card

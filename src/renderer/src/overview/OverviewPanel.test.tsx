@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { TopBar } from '../main/TopBar';
+import { Toolbar } from '../app/Toolbar';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
@@ -28,7 +28,7 @@ function World() {
   return (
     <>
       <button type="button">Somewhere else</button>
-      <TopBar />
+      <Toolbar />
       <div style={{ position: 'relative' }}>
         <OverviewLayer />
       </div>
@@ -54,12 +54,13 @@ afterEach(() => {
 });
 
 describe('the floating Overview', () => {
-  it('the top bar’s button toggles it, pressed while open, and carries the waiting count', async () => {
+  it('the toolbar’s button toggles it, pressed while open, and carries the waiting count', async () => {
     const user = userEvent.setup();
     render(<World />);
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
     expect(button().getAttribute('aria-label')).toBe('Overview, 3 waiting');
-    expect(button().textContent).toBe('Overview◐3');
+    expect(button().textContent).toBe('◐3');
+    expect(button().getAttribute('title')).toBe('Overview, 3 waiting · ⌘0');
     await user.click(button());
     expect(useLayout.getState().overviewOpen).toBe(true);
     expect(button().getAttribute('aria-pressed')).toBe('true');

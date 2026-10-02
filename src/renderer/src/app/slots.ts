@@ -19,7 +19,7 @@ export interface Slots {
   diffTab: ComponentType<{ tab: Extract<TabRef, { kind: 'diff' }> }>; // C8
   newSession: ComponentType<{ appSessionId: AppSessionId }>; // C10: an unstarted session's setup, in its pane above the composer (no modal sheet)
   settingsTab: ComponentType<{ section: Extract<TabRef, { kind: 'settings' }>['section'] }>; // C11: the Settings tab's content, at a section
-  topBarEnd: ComponentType<Record<never, never>>; // W5's mount point at the top bar's right, for W6's usage pill
+  topBarEnd: ComponentType<Record<never, never>>; // the title-bar toolbar's right-side mount point, for W6's usage pill
 }
 
 // A store rather than a plain map, so a registration after the first render still reaches the page.

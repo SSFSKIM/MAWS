@@ -1,4 +1,4 @@
-// The top bar's usage control (W6, E1): the pill in W5's `topBarEnd` slot, opening the copy of ClaudeUsage's panel, and
+// The title-bar toolbar's usage control (W6, E1): the pill in W5's `topBarEnd` slot, opening the copy of ClaudeUsage's panel, and
 // the Usage action (View › Usage and the palette) that opens the same popover. The action keeps the retired Accounts
 // tab's id, `accounts.open`, because the settings' keymap overrides are keyed by it.
 import { registerSlot } from '../app/slots';
