@@ -74,10 +74,12 @@ test('quit names a replayed session’s background work and a busy terminal; can
   const repo = join(root, 'repo');
   const config = join(root, 'claude-config');
   let maws: MawsLaunch | undefined;
+  let child: ReturnType<ElectronApplication['process']> | undefined;
   try {
     mkdirSync(repo);
     const engineId = seedRecord(config, repo);
     maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_E2E_QUIT_ANSWER: 'cancel' } });
+    child = maws.app.process(); // Playwright drops app.process() when the app closes; teardown still needs the handle.
     const lines = stderrOf(maws.app);
     const { app, page } = maws;
     let id = '';
@@ -93,7 +95,9 @@ test('quit names a replayed session’s background work and a busy terminal; can
 
     // Keep the terminal busy beyond this test's 120 s timeout; only the explicit Ctrl-C below releases it.
     const { ptyId } = value(await invoke(page, 'pty.spawn', { appSessionId: id as AppSessionId, label: 'c12-quit', cwd: repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: 'sleep 3600' }));
-    await expect.poll(async () => value(await invoke(page, 'pty.foreground', { ptyId })).busy).toBe(true);
+    // A cold pty can report spawn-helper or the startup wrapper as busy before the shell reaches its prompt.
+    // Wait for our command, not that transient busy reading, before comparing the renderer and quit probes.
+    await expect.poll(async () => value(await invoke(page, 'pty.foreground', { ptyId }))).toEqual({ process: 'sleep', busy: true });
 
     // a quit asks with both parts named; cancel keeps the app
     await quit(app);
@@ -135,11 +139,12 @@ test('quit names a replayed session’s background work and a busy terminal; can
       if (maws) {
         // Assertion failures can leave either cancel or when_idle armed while sleep is still running.
         // Let the ordinary close path stop both hosts instead of waiting for that hour-long command.
-        const { app } = maws;
-        await answerWith(app, 'quit').catch(() => {
-          const child = app.process();
-          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-        });
+        const process = child;
+        if (process && process.exitCode === null && process.signalCode === null) {
+          await answerWith(maws.app, 'quit').catch(() => {
+            if (process.exitCode === null && process.signalCode === null) process.kill('SIGKILL');
+          });
+        }
         await maws.cleanup();
       }
     } finally {
