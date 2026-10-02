@@ -45,7 +45,9 @@ export const SetupIntentSchema = z.strictObject({
   updatedAt: z.string(),
   kind: z.enum(['create', 'fork']),
   source: z.strictObject({ appSessionId: AppSessionIdSchema, engineSessionId: SessionIdSchema, rewindTo: MessageUuidSchema.nullable() }).nullable(), // fork only; rewindTo from C7's resubmit seam
-  location: LocationSchema,
+  // New chat (2026-10-01): null while no project is chosen (a `session.create` with neither a project nor a location);
+  // the composer's project picker patches it, with the project, before the first send, and a start refuses it until then
+  location: LocationSchema.nullable(),
   additionalDirectories: z.array(z.string()),
   model: z.string().nullable(), // null = engine default / settings
   effort: EffortSchema.nullable(),
@@ -70,9 +72,10 @@ export const SetupIntentSchema = z.strictObject({
 export type SetupIntent = z.infer<typeof SetupIntentSchema>;
 
 // `message` and `progress` are never patched from the renderer: `session.start` sets the message,
-// `session.intent.release` clears it, the setup owns `progress`.
+// `session.intent.release` clears it, the setup owns `progress`. New chat: a patched location is never null again;
+// `projectId` is the project chip's choice, alone (main moves the location to the project's directory, or for null,
+// "Don't work in a project", to the home directory) or with a location (the Worktree checkbox).
 export const SetupIntentPatchSchema = SetupIntentSchema.pick({
-  location: true,
   additionalDirectories: true,
   model: true,
   effort: true,
@@ -80,8 +83,13 @@ export const SetupIntentPatchSchema = SetupIntentSchema.pick({
   gateway: true,
   trust: true,
   draft: true,
-}).partial();
+})
+  .extend({ location: LocationSchema, projectId: ProjectIdSchema.nullable() })
+  .partial();
 export type SetupIntentPatch = z.infer<typeof SetupIntentPatchSchema>;
+
+// What a start answers, and the composer's Send says, while a New chat has no project (2026-10-01).
+export const CHOOSE_PROJECT_FIRST = 'Choose a project first';
 
 export const ForkTargetSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('inPlace') }),

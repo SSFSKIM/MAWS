@@ -13,7 +13,7 @@ import { registerSlot } from '../app/slots';
 import { registerResubmitProvider } from '../composer/resubmit-seam';
 import { registerReleasedResume } from '../composer/resume-seam'; // C12
 import { ipc } from '../ipc/client';
-import { registerCloseGuard, registerSessionCreator, registerTabRetention, registerUnstartedTitle } from '../keymap/actions-runtime';
+import { NEW_CHAT, registerCloseGuard, registerSessionCreator, registerTabRetention, registerUnstartedTitle, unstartedTitlesChanged, type UnstartedTitleAnswer } from '../keymap/actions-runtime';
 import { prefillComposer } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { registerSessionActions } from './actions';
@@ -25,22 +25,34 @@ import { resubmitProvider } from './record-ops';
 import { connectSetupDock } from './SetupCard';
 import { beforeCloseUnstarted, resumeSession } from './setup-actions'; // C12: resumeSession
 import { connectSetup, useSetup } from './store';
-import { baseDirectoryOf } from './useSetupIntent';
+import { intentProjectName } from './useSetupIntent';
 
-const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
-
-// The project an unstarted session was created in, by name: its project's, else its directory's.
+// The project an unstarted session will run in, by name (`intentProjectName`).
 export function projectNameOf(appSessionId: AppSessionId): string | null {
   const intent = useSetup.getState().intents.get(appSessionId);
   if (intent === undefined) return null;
-  const project = intent.projectId ? useSessions.getState().projects.get(intent.projectId) : undefined;
-  return project?.name ?? basename(baseDirectoryOf(intent.location));
+  return intentProjectName(intent, intent.projectId ? useSessions.getState().projects.get(intent.projectId) : undefined);
 }
 
-// What the tab strip calls an unstarted session's tab (called during render: reads state, calls no hook).
-export function unstartedTitle(appSessionId: AppSessionId): { title: string; project: string | null } | null {
-  if (!useSetup.getState().intents.has(appSessionId)) return null;
-  return { title: 'New session', project: projectNameOf(appSessionId) };
+// What the tab strip calls an unstarted session's tab (called during render: reads state, calls no hook): "New chat",
+// with the project beside it once one is chosen (New chat, 2026-10-01).
+export function unstartedTitle(appSessionId: AppSessionId): UnstartedTitleAnswer | null {
+  const intent = useSetup.getState().intents.get(appSessionId);
+  if (intent === undefined) return null;
+  return { title: NEW_CHAT, project: projectNameOf(appSessionId), projectId: intent.projectId };
+}
+
+// The strip and the toolbar call `unstartedTitle` during render without subscribing to the intents, so a change of what
+// it answers (a project chosen, changed or dropped) is announced to C5 (New chat, 2026-10-01).
+function watchUnstartedTitles(): () => void {
+  const signature = (intents: ReadonlyMap<AppSessionId, { projectId: ProjectId | null }>) => [...intents].map(([id, i]) => `${id}:${i.projectId}`).join('|');
+  let last = signature(useSetup.getState().intents);
+  return useSetup.subscribe((state) => {
+    const next = signature(state.intents);
+    if (next === last) return;
+    last = next;
+    unstartedTitlesChanged();
+  });
 }
 
 // C5's retention: a tab is kept while its id has a persisted intent, a failed one included.
@@ -68,6 +80,7 @@ export function connectSessions(client: MawsBridge = ipc): () => void {
       registerSessionCreator((projectId, location) => createUnstartedSession(projectId, client, location ?? null)),
       registerCloseGuard('session', (ref) => (ref.kind === 'session' ? beforeCloseUnstarted(ref.appSessionId).then((r) => r === 'closed') : Promise.resolve(true))),
       registerUnstartedTitle(unstartedTitle),
+      watchUnstartedTitles(), // New chat: a project chosen in the row renames the tab
       registerSessionActions(),
       connectSetupDock(),
       registerMessageReturn((appSessionId, message) => prefillComposer(appSessionId, messagePrefill(message))),

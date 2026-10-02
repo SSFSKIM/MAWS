@@ -189,19 +189,21 @@ export class SessionService {
     return this.deps.intents.get(appSessionId);
   }
 
-  // `session.create`: an app id and a persisted intent; no process, no record, no row.
+  // `session.create`: an app id and a persisted intent; no process, no record, no row. With neither a project nor a
+  // location it is a New chat (2026-10-01): no location until the composer's project picker patches one in.
   async create(req: { projectId: ProjectId | null; location: Location | null }): Promise<{ appSessionId: AppSessionId; intent: SetupIntent }> {
     const s = await this.ready();
     const appSessionId = randomUUID() as AppSessionId;
     const now = this.now();
+    const location = req.location ?? this.projectLocation(req.projectId);
     const intent: SetupIntent = {
       appSessionId,
-      projectId: req.projectId,
+      projectId: location === null ? null : req.projectId,
       createdAt: now,
       updatedAt: now,
       kind: 'create',
       source: null,
-      location: req.location ?? { kind: 'directory', path: this.defaultDirectory(req.projectId) },
+      location,
       additionalDirectories: [],
       model: null,
       effort: null,
@@ -217,23 +219,38 @@ export class SessionService {
     return { appSessionId, intent };
   }
 
-  // The project's directory, else the last directory an intent or a session used, else the home directory.
-  private defaultDirectory(projectId: ProjectId | null): string {
-    const project = projectId === null ? undefined : this.deps.index.projects.list({ includeHidden: true }).find((p) => p.id === projectId);
-    if (project) return project.directory;
-    const lastIntent = [...this.deps.intents.list()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-    if (lastIntent) return trustDirectoryOf(lastIntent.location);
-    const lastRecord = this.deps.index.sessions.list()[0];
-    return lastRecord?.directory ?? this.s.env.HOME ?? homedir();
+  // The project's directory as a location; none for no project or an unknown one (the New chat's project picker asks).
+  private projectLocation(projectId: ProjectId | null): Location | null {
+    const project = projectId === null ? undefined : this.knownProject(projectId);
+    return project ? { kind: 'directory', path: project.directory } : null;
+  }
+
+  private knownProject(projectId: ProjectId) {
+    return this.deps.index.projects.list({ includeHidden: true }).find((p) => p.id === projectId);
+  }
+
+  // The location a project choice moves a New chat to when the patch names none: the project's directory, or for
+  // "Don't work in a project" (null) the home directory the engine receives, whose session lists under Other sessions.
+  private projectChoiceLocation(projectId: ProjectId | null): Location {
+    if (projectId === null) return { kind: 'directory', path: this.s.env.HOME ?? homedir() };
+    const location = this.projectLocation(projectId);
+    if (location === null) throw new IntentRefused('invalid', `projectId: unknown project ${projectId}`, 'projectId');
+    return location;
   }
 
   // `session.intent.patch`: the changed fields validated; a location change re-binds the trust decision to its key.
-  async patch(appSessionId: AppSessionId, patch: SetupIntentPatch): Promise<SetupIntent> {
+  // New chat: the project chip patches `projectId`, alone (the location follows it) or with a location; a project
+  // must be one the index knows.
+  async patch(appSessionId: AppSessionId, requested: SetupIntentPatch): Promise<SetupIntent> {
     this.refuseWhileStarting(appSessionId);
     return this.serial(appSessionId, async () => {
       const s = await this.ready();
       const intent = this.intentOf(appSessionId);
       this.refuseWhileStarting(appSessionId);
+      if (requested.projectId != null && this.knownProject(requested.projectId) === undefined) {
+        throw new IntentRefused('invalid', `projectId: unknown project ${requested.projectId}`, 'projectId');
+      }
+      const patch = requested.projectId !== undefined && requested.location === undefined ? { ...requested, location: this.projectChoiceLocation(requested.projectId) } : requested;
       if (patch.location !== undefined && intent.progress.worktree?.createdHere) {
         throw new IntentRefused('retained_worktree', `retained_worktree: the failed attempt's worktree ${intent.progress.worktree.path} is kept; discard it or keep it first`);
       }
@@ -243,7 +260,7 @@ export class SessionService {
         if (intent.progress.worktree !== null) next = { ...next, progress: { ...next.progress, worktree: null } }; // an existing worktree's note: the next start re-reads it
       }
       if (patch.location !== undefined || patch.additionalDirectories !== undefined) {
-        this.rule(await checkAdditionalDirectories(next, await sessionDirectoryOf(s, next.location)));
+        this.rule(await checkAdditionalDirectories(next, next.location === null ? null : await sessionDirectoryOf(s, next.location)));
       }
       next = await this.bindTrust(next, patch.location !== undefined, patch.trust);
       return this.putIntent(next);
@@ -259,12 +276,13 @@ export class SessionService {
   // A decision answers one trust key: when the effective key moved (a location change), the decision resets before
   // anything else, so a decision for A never attests B; a decision given now is bound to the key as it is now. The
   // recorded trust belongs to the key it was recorded for: whenever the bound key moves (to null included), it goes.
+  // A New chat with no location has no key, so it holds no decision.
   private async bindTrust(intent: SetupIntent, locationChanged: boolean, decision: SetupIntent['trust'] | undefined): Promise<SetupIntent> {
     if (!locationChanged && decision === undefined) return intent;
-    const key = (await trustKeyOf(trustDirectoryOf(intent.location), this.s.git)).trustKey;
+    const key = intent.location === null ? null : (await trustKeyOf(trustDirectoryOf(intent.location), this.s.git)).trustKey;
     let next = intent;
     if (next.trustKey !== null && next.trustKey !== key) next = { ...next, trust: 'unanswered', trustKey: null };
-    if (decision !== undefined) next = { ...next, trust: decision, trustKey: decision === 'unanswered' ? null : key };
+    if (decision !== undefined) next = { ...next, trust: key === null ? 'unanswered' : decision, trustKey: decision === 'unanswered' ? null : key };
     if (next.trustKey !== intent.trustKey && next.progress.trustRecorded) next = { ...next, progress: { ...next.progress, trustRecorded: false } };
     return next;
   }
@@ -314,7 +332,7 @@ export class SessionService {
       const intent = this.intentOf(appSessionId);
       this.refuseWhileStarting(appSessionId);
       const w = intent.progress.worktree;
-      if (w === null || !w.createdHere || intent.location.kind !== 'newWorktree') throw new IntentRefused('no_retained_worktree', `no retained worktree for ${appSessionId}`);
+      if (w === null || !w.createdHere || intent.location?.kind !== 'newWorktree') throw new IntentRefused('no_retained_worktree', `no retained worktree for ${appSessionId}`);
       const repoRoot = intent.location.repoRoot;
       if (resolution === 'keep') {
         const next = await this.putIntent({
@@ -397,7 +415,7 @@ export class SessionService {
   // A new worktree an unretained intent would create, claimed by its directory name (every repository alike: two spellings
   // of one repository must not both pass, and the name is known without an await). 'taken' when another start holds it.
   private claimWorktreeName(intent: SetupIntent | null): string | null | 'taken' {
-    if (intent === null || intent.location.kind !== 'newWorktree' || intent.progress.worktree !== null) return null;
+    if (intent === null || intent.location?.kind !== 'newWorktree' || intent.progress.worktree !== null) return null;
     const key = worktreeDirName(intent.location.name);
     if (this.startingNames.has(key)) return 'taken';
     this.startingNames.add(key);

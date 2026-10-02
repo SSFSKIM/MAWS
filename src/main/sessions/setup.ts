@@ -149,7 +149,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
   try {
     await passLaunchGate(s); // C12: custody refuses before anything this setup would have to undo
     // worktree
-    const location = run.intent.location;
+    const location = run.intent.location!; // the start guards refused an intent with no location (New chat, 2026-10-01)
     let worktree: SessionRecord['worktree'] = null;
     if (location.kind === 'newWorktree') {
       if (run.intent.progress.worktree === null) {
@@ -298,7 +298,7 @@ export function retainedWorktree(intent: SetupIntent): WorktreeResource | null {
 }
 
 function createdNewBranch(intent: SetupIntent): boolean {
-  return intent.location.kind === 'newWorktree' && intent.location.branch.kind === 'new';
+  return intent.location?.kind === 'newWorktree' && intent.location.branch.kind === 'new';
 }
 
 // A checkout this attempt created: removed only when clean (or with the human's acknowledged discard), then its
@@ -376,7 +376,7 @@ async function rollbackIntent(s: Setup, run: IntentRun, cwd: string | null, erro
       if (error instanceof RelayFailure || !p.worktree.createdHere) {
         worktree = retainedWorktree(intent);
       } else {
-        const repoRoot = intent.location.kind === 'directory' ? p.worktree.path : intent.location.repoRoot;
+        const repoRoot = intent.location === null || intent.location.kind === 'directory' ? p.worktree.path : intent.location.repoRoot;
         const result = await removeCreatedWorktree(s, repoRoot, p.worktree, { newBranch, discard: false });
         worktree = result.resource;
         clearWorktree = result.removed;

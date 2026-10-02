@@ -8,7 +8,7 @@ import type { Draft } from '@shared/ipc/schema/session';
 import type { Effort } from '@shared/engine/launch-spec';
 import type { ContentBlock } from '@shared/graph/events';
 import type { PermissionMode } from '@shared/graph/enums';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { ListModelsResponse } from '@shared/wire/control';
 
 // Where an unstarted session will run (C10's `LocationSchema`).
@@ -31,7 +31,7 @@ export interface FirstMessage {
 }
 
 export interface SetupIntent {
-  location: Location;
+  location: Location | null; // New chat: null while no project is chosen; Send waits for one
   additionalDirectories: string[];
   model: string | null;
   effort: Effort | null;
@@ -40,17 +40,33 @@ export interface SetupIntent {
   draft: Draft | null; // the composer's draft while unstarted (C4's drafts table has no row for an unstarted session)
 }
 
-export type SetupIntentPatch = Partial<Pick<SetupIntent, 'location' | 'additionalDirectories' | 'model' | 'effort' | 'permissionMode' | 'draft'>>;
+export type SetupIntentPatch = Partial<Pick<SetupIntent, 'additionalDirectories' | 'model' | 'effort' | 'permissionMode' | 'draft'>> & { location?: Location };
 export type HookResult = { ok: true } | { ok: false; error: string };
 
 export interface SetupIntentHook {
   intent: SetupIntent;
-  options: { locations: Location[]; branches: string[]; models: ModelInfo[]; autoModeNote: string | null };
+  options: { models: ModelInfo[]; autoModeNote: string | null };
   // C10: the running setup's phase in words ("Creating worktree <name>…", "Trusting <key>…", "Starting…"), the submit
   // control's disabled-state reason while it runs; null (or absent) otherwise.
   phase?: string | null;
   patch(p: SetupIntentPatch): Promise<HookResult>;
   start(first: FirstMessage): Promise<HookResult>; // ok for starting, needs_trust and relay_unreachable; not ok for invalid, missing_directory, refused
+  // New chat: the project row's facts and writes (C10's); a hook without them, the harness's stub, keeps the toolbar's
+  // location chip on the intent's location
+  project?: SetupProject;
+}
+
+// New chat (2026-10-01, the owner's ruling after Codex's new-thread composer): what the row above the box shows of an
+// unstarted session and what it can change: the project chip, the branch beside it, and the Worktree checkbox.
+export interface SetupProject {
+  projectId: ProjectId | null;
+  label: string | null; // the chip's words: the project's name, an existing worktree's folder, "No project"; null until one is chosen
+  path: string | null; // where the session would run, the chip's tooltip
+  branch: string | null; // the checkout's current branch, read-only beside the chip
+  worktree: boolean | null; // the Worktree checkbox; null hides it (no project, no git repository, or an existing worktree chosen)
+  choose(projectId: ProjectId | null): Promise<HookResult>; // null: "Don't work in a project" (the home directory)
+  newProject(): Promise<HookResult>; // the native folder dialog; the folder becomes a project and is chosen
+  setWorktree(on: boolean): Promise<HookResult>; // on: the first send creates a new worktree with a generated name
 }
 
 export type UseSetupIntent = (appSessionId: AppSessionId) => SetupIntentHook | null;

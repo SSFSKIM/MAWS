@@ -9,6 +9,7 @@ import type { ActionId } from '@shared/keymap/actions';
 import type { Location } from '@shared/sessions/intent';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
+import { create } from 'zustand';
 import { createHandlerRegistry } from './registry';
 
 export type ActionHandler = (arg: number | null) => void | Promise<void>;
@@ -93,21 +94,66 @@ export async function requestCloseTab(id: string): Promise<void> {
 
 // ---- unstarted titles ---------------------------------------------------------------------------------------------------
 // What the strip and the toolbar call a session tab with no record yet. C10 registers its `unstartedTitle` over its
-// intent store; until then C5 answers from `sessions.unstarted`: "New session" and the project it was created in. The
-// registered function is called during render and must not call hooks.
-export type UnstartedTitle = (appSessionId: AppSessionId) => { title: string; project: string | null } | null;
+// intent store; until then C5 answers from `sessions.unstarted`: "New chat" and the project it was created in. The
+// registered function is called during render and must not call hooks; when what it would answer changes, its
+// registrant calls `unstartedTitlesChanged` (New chat, 2026-10-01: the project row chooses the project after the tab
+// opened). `projectId` is the project the unstarted session is in, for New chat's preselection.
+export const NEW_CHAT = 'New chat';
+export interface UnstartedTitleAnswer {
+  title: string;
+  project: string | null;
+  projectId: ProjectId | null;
+}
+export type UnstartedTitle = (appSessionId: AppSessionId) => UnstartedTitleAnswer | null;
 
 const unstartedTitles = createHandlerRegistry<'title', [AppSessionId]>('unstarted title');
+const titleRevision = create<{ n: number }>()(() => ({ n: 0 }));
 
 export const registerUnstartedTitle = (fn: UnstartedTitle): (() => void) => unstartedTitles.register('title', fn);
+export const unstartedTitlesChanged = (): void => titleRevision.setState((s) => ({ n: s.n + 1 }));
 
-export function useUnstartedTitle(appSessionId: AppSessionId): { title: string; project: string | null } {
-  const project = useSessions((s) => {
-    const projectId = s.unstarted.get(appSessionId)?.projectId;
-    return projectId ? (s.projects.get(projectId)?.name ?? null) : null;
-  });
-  const registered = unstartedTitles.useHandler('title') as UnstartedTitle | undefined;
-  return registered?.(appSessionId) ?? { title: 'New session', project };
+function unstartedTitleOf(appSessionId: AppSessionId): UnstartedTitleAnswer {
+  const registered = unstartedTitles.get('title') as UnstartedTitle | undefined;
+  const answer = registered?.(appSessionId);
+  if (answer) return answer;
+  const { unstarted, projects } = useSessions.getState();
+  const projectId = unstarted.get(appSessionId)?.projectId ?? null;
+  return { title: NEW_CHAT, project: projectId ? (projects.get(projectId)?.name ?? null) : null, projectId };
+}
+
+export function useUnstartedTitle(appSessionId: AppSessionId): UnstartedTitleAnswer {
+  useSessions((s) => s.unstarted.get(appSessionId)?.projectId); // re-render when the fallback's answer moves
+  useSessions((s) => s.projects);
+  unstartedTitles.useHandler('title');
+  titleRevision((s) => s.n);
+  return unstartedTitleOf(appSessionId);
+}
+
+// ---- New chat's preselection (2026-10-01) -------------------------------------------------------------------------------
+// The project a New chat starts in when a project is focused, so the common case is one step: the session's project in
+// the active tab (of `pane`, else the focused pane; an unstarted tab's chosen one included), or the project whose page
+// the sidebar shows; `first: 'page'` asks the sidebar first (its own New chat control). None from the project list
+// with nothing open: the chat then starts with "Choose a project".
+export function focusedProject(opts: { pane?: 0 | 1; first?: 'tab' | 'page' } = {}): ProjectId | null {
+  const { main, regions } = useLayout.getState();
+  const { records, projects } = useSessions.getState();
+  const fromTab = (): ProjectId | null => {
+    const shown = main.panes[opts.pane ?? main.focusedPane] ?? main.panes[0];
+    const tab = shown?.tabs.find((t) => t.id === shown.activeTabId);
+    if (tab?.kind !== 'session' && tab?.kind !== 'agent') return null;
+    const record = records.get(tab.appSessionId);
+    return record ? record.projectId : unstartedTitleOf(tab.appSessionId).projectId;
+  };
+  const fromPage = (): ProjectId | null => {
+    const open = regions.sidebar.openProject;
+    return open !== null && open !== 'other' && projects.has(open as ProjectId) ? (open as ProjectId) : null;
+  };
+  const order = opts.first === 'page' ? [fromPage, fromTab] : [fromTab, fromPage];
+  for (const read of order) {
+    const projectId = read();
+    if (projectId !== null && projects.has(projectId)) return projectId;
+  }
+  return null;
 }
 
 // ---- tab retention ------------------------------------------------------------------------------------------------------

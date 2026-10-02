@@ -10,12 +10,17 @@
 // act wins in either direction. Projection: override, else custom title (`user`), else AI title (`generated`), else first
 // prompt (`none`) less the engine's slash-command wrappers (`promptTitle`), else an empty title.
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import type { AppSessionId, MessageUuid, ProjectId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { Db, Value } from './db';
 import type { SessionRecordPatch } from '@shared/engine/status';
 import { locate, type ProjectStore } from './projects';
+
+// The home directory as `locate` answers it (realpathed), which discovery never makes a project of; read once.
+let home: string | null | undefined;
+const homeDirectory = () => (home === undefined ? (home = locate(homedir()).realpath) : home);
 
 export type ChangeCause = 'discovered' | 'facts' | 'holder' | 'update' | 'live' | 'replay' | 'removed';
 
@@ -211,7 +216,9 @@ export class SessionStore {
     return this.db.transaction(() => {
       const existing = this.db.get<SessionRow>('SELECT * FROM sessions WHERE engine_session_id = ?', summary.sessionId);
       const location = locate(summary.relocatedCwd ?? summary.directory);
-      const projectId = this.projects.projectAt(location, summary.hasMessages);
+      // New chat (2026-10-01): the home directory is no project, so a chat that works in no project lists under Other
+      // sessions (a project already made for it stays)
+      const projectId = this.projects.projectAt(location, summary.hasMessages && location.projectDirectory !== homeDirectory());
       const facts: Record<string, Value> = {
         project_id: projectId,
         directory: location.realpath ?? summary.relocatedCwd ?? summary.directory ?? existing?.directory ?? '',

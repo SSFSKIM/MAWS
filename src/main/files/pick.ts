@@ -22,7 +22,7 @@ const ATTACHABLE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'imag
 const IMAGE_EXTENSIONS = Object.keys(MEDIA_TYPES).filter((ext) => ATTACHABLE_IMAGES.has(MEDIA_TYPES[ext]!)).map((ext) => ext.slice(1));
 
 export async function pickFiles(input: PickFilesInput, deps: { showOpenDialog: OpenDialog; imageMaxBytes?: number }): Promise<{ files: PickedFile[] }> {
-  const options: OpenDialogOptions = { properties: input.kind === 'directory' ? ['openDirectory'] : input.multiple ? ['openFile', 'multiSelections'] : ['openFile'] };
+  const options: OpenDialogOptions = { properties: input.kind === 'directory' ? ['openDirectory', 'createDirectory'] : input.multiple ? ['openFile', 'multiSelections'] : ['openFile'] };
   if (input.kind === 'photos') options.filters = [{ name: 'Images', extensions: IMAGE_EXTENSIONS }];
   if (input.directory !== null) options.defaultPath = input.directory;
   const { canceled, filePaths } = await deps.showOpenDialog(options);

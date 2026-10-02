@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
-import type { SetupIntentHook } from '../setup-intent';
+import type { SetupIntentHook, SetupProject } from '../setup-intent';
 import { MESSAGE_HELD, STARTING } from '../submit/submit-state';
-import { BRANCH_FIXED, intentBindings, liveBindings, LOCATION_FIXED, workspaceDirectoriesOf } from './bindings';
+import { intentBindings, liveBindings, LOCATION_FIXED, workspaceDirectoriesOf } from './bindings';
 
 const APP = 'app-1';
 
@@ -12,52 +12,62 @@ function bridge(answers: Record<string, unknown> = {}) {
   return { client: { invoke, on: () => () => {}, pathForFile: () => '' } as unknown as MawsBridge, invoke };
 }
 
-function hook(over: Partial<SetupIntentHook['intent']> = {}): SetupIntentHook & { patch: ReturnType<typeof vi.fn> } {
+function hook(over: Partial<SetupIntentHook['intent']> = {}, project?: SetupProject): SetupIntentHook & { patch: ReturnType<typeof vi.fn> } {
   return {
     intent: { location: { kind: 'directory', path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over },
     options: {
-      locations: [{ kind: 'directory', path: '/repo' }, { kind: 'newWorktree', repoRoot: '/repo', name: 'wt-1', branch: { kind: 'new', name: 'worktree-wt-1', base: 'HEAD' } }],
-      branches: ['main', 'dev'],
       models: [{ value: 'sonnet', displayName: 'Sonnet' }, { value: 'haiku', displayName: 'Haiku', supportsAutoMode: false }],
       autoModeNote: null,
     },
     patch: vi.fn(async () => ({ ok: true as const })),
     start: vi.fn(async () => ({ ok: true as const })),
+    ...(project && { project }),
   };
+}
+
+const answered = () => vi.fn(async () => ({ ok: true as const }));
+function project(over: Partial<SetupProject> = {}): SetupProject {
+  return { projectId: null, label: null, path: null, branch: null, worktree: null, choose: answered(), newProject: answered(), setWorktree: answered(), ...over };
 }
 
 describe('the frame binds its chips to the setup intent or to the live session', () => {
   it('writes every chip of an unstarted session through the hook’s patch', async () => {
     const h = hook({ model: 'haiku' });
     const b = intentBindings(h, { starting: false });
-    expect([b.location.disabled, b.model.disabled, b.mode.disabled, b.directories.disabled]).toEqual([null, null, null, null]);
-    expect(b.location.options).toHaveLength(2);
-    await b.location.set(h.options.locations[1]);
+    expect([b.model.disabled, b.mode.disabled, b.directories.disabled]).toEqual([null, null, null]);
     await b.model.set({ model: 'sonnet', effort: 'high' });
     await b.mode.set('plan');
     await b.directories.set(['/extra']);
-    expect(h.patch.mock.calls.map(([p]) => p)).toEqual([{ location: h.options.locations[1] }, { model: 'sonnet', effort: 'high' }, { permissionMode: 'plan' }, { additionalDirectories: ['/extra'] }]);
+    expect(h.patch.mock.calls.map(([p]) => p)).toEqual([{ model: 'sonnet', effort: 'high' }, { permissionMode: 'plan' }, { additionalDirectories: ['/extra'] }]);
     expect(b.mode.autoUnavailable).toBe('This model does not support auto mode'); // haiku holds no auto
-    expect(b.branch.disabled).not.toBeNull(); // a directory runs on its own branch; a new worktree picks one
+    expect(b.location.path).toBe('/repo'); // a hook without project facts (the harness's stub) keeps the toolbar's chip
+    expect(b.project).toBeNull();
   });
 
-  it('picks the branch of a new worktree from the hook’s branches', async () => {
-    const worktree = { kind: 'newWorktree' as const, repoRoot: '/repo', name: 'wt-1', branch: { kind: 'new' as const, name: 'worktree-wt-1', base: 'HEAD' } };
-    const h = hook({ location: worktree });
-    const b = intentBindings(h, { starting: false });
-    expect(b.branch).toMatchObject({ value: 'worktree-wt-1', options: ['main', 'dev'], disabled: null });
-    await b.branch.set('dev');
-    expect(h.patch).toHaveBeenCalledWith({ location: { ...worktree, branch: { kind: 'existing', name: 'dev' } } });
-    await b.branch.set('feature/x'); // not listed: created from the worktree's base
-    expect(h.patch).toHaveBeenLastCalledWith({ location: { ...worktree, branch: { kind: 'new', name: 'feature/x', base: 'HEAD' } } });
+  it('New chat: the project row carries the hook’s project facts and writes through them', async () => {
+    const facts = project({ projectId: 'p-1' as SetupProject['projectId'], label: 'repo', path: '/repo', branch: 'main', worktree: false });
+    const b = intentBindings(hook({}, facts), { starting: false });
+    expect(b.project).toMatchObject({ projectId: 'p-1', label: 'repo', path: '/repo', branch: 'main', worktree: false, disabled: null });
+    await b.project!.choose(null);
+    await b.project!.setWorktree(true);
+    await b.project!.newProject();
+    expect(facts.choose).toHaveBeenCalledWith(null);
+    expect(facts.setWorktree).toHaveBeenCalledWith(true);
+    expect(facts.newProject).toHaveBeenCalledTimes(1);
+    const none = intentBindings(hook({ location: null }, project()), { starting: false });
+    expect(none.location.path).toBe('');
+    expect(none.project).toMatchObject({ label: null, worktree: null });
   });
 
   it('disables every chip with one reason while starting, or while C10 holds the first message', async () => {
-    const starting = intentBindings(hook(), { starting: true });
-    expect([starting.location, starting.branch, starting.model, starting.mode, starting.directories].map((c) => c.disabled)).toEqual([STARTING, STARTING, STARTING, STARTING, STARTING]);
-    const held = intentBindings(hook({ message: { content: 'hi', display: 'hi' } }), { starting: false });
-    expect([held.location, held.branch, held.model, held.mode, held.directories].map((c) => c.disabled)).toEqual([MESSAGE_HELD, MESSAGE_HELD, MESSAGE_HELD, MESSAGE_HELD, MESSAGE_HELD]);
+    const starting = intentBindings(hook({}, project()), { starting: true });
+    expect([starting.project!.disabled, starting.model.disabled, starting.mode.disabled, starting.directories.disabled, starting.location.note]).toEqual([STARTING, STARTING, STARTING, STARTING, STARTING]);
+    const facts = project();
+    const held = intentBindings(hook({ message: { content: 'hi', display: 'hi' } }, facts), { starting: false });
+    expect([held.project!.disabled, held.model.disabled, held.mode.disabled, held.directories.disabled]).toEqual([MESSAGE_HELD, MESSAGE_HELD, MESSAGE_HELD, MESSAGE_HELD]);
     expect(await held.model.set({ model: 'sonnet', effort: null })).toEqual({ ok: false, error: MESSAGE_HELD });
+    expect(await held.project!.choose(null)).toEqual({ ok: false, error: MESSAGE_HELD });
+    expect(facts.choose).not.toHaveBeenCalled();
   });
 
   it('applies a live session’s model, effort and directories through C3, and keeps location and branch read-only', async () => {
@@ -65,11 +75,9 @@ describe('the frame binds its chips to the setup intent or to the live session',
     const { client, invoke } = bridge({ 'session.setModel': { ok: true, value: { ok: true, error: null, code: null } }, 'session.listPermissionRules': rulesAnswer });
     const s = { ...status(APP), cwd: '/work/app-1', model: { requested: 'sonnet', resolved: 'claude-sonnet' }, effort: 'medium' as const };
     const refresh = vi.fn();
-    const b = liveBindings(s, record(APP), { models: null, directories: ['/a'], branch: 'main', branches: ['main'], refresh }, client);
-    expect(b.location).toMatchObject({ value: { kind: 'directory', path: '/work/app-1' }, disabled: 'The location is fixed once the session starts' });
-    expect(b.branch).toMatchObject({ value: 'main', disabled: BRANCH_FIXED });
-    expect(await b.location.set({ kind: 'directory', path: '/x' })).toEqual({ ok: false, error: LOCATION_FIXED });
-    expect(await b.branch.set('feature')).toEqual({ ok: false, error: BRANCH_FIXED });
+    const b = liveBindings(s, record(APP), { models: null, directories: ['/a'], branch: 'main', refresh }, client);
+    expect(b.location).toEqual({ path: '/work/app-1', branch: 'main', note: LOCATION_FIXED });
+    expect(b.project).toBeNull(); // no project row once started
     expect(b.model.value).toEqual({ model: 'claude-sonnet', effort: 'medium' });
     await b.model.set({ model: 'haiku', effort: 'medium' });
     await b.model.set({ model: 'claude-sonnet', effort: 'high' });

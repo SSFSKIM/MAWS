@@ -386,18 +386,18 @@ describe('unstarted sessions', () => {
     offs.push(registerSessionCreator(async () => NEW));
   });
 
-  it('createSession opens a "New session" tab under the project with no glyph, the composer frame and no transcript; the sidebar does not list it', async () => {
+  it('createSession opens a "New chat" tab under the project with no glyph, the composer frame and no transcript; the sidebar does not list it', async () => {
     render(<Shell />);
     await act(() => createSession(MAWS));
-    const t = tab('New session · MAWS');
+    const t = tab('New chat · MAWS');
     expect(t.getAttribute('aria-selected')).toBe('true');
     expect(within(t).queryByRole('img')).toBeNull();
     const panel = within(main()).getByRole('tabpanel');
     expect(within(panel).getByText('Composer unavailable')).toBeTruthy();
     expect(within(panel).queryByText('Transcript unavailable')).toBeNull();
     expect(within(panel).queryByRole('group', { name: 'Session status' })).toBeNull();
-    expect(within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).queryByText('New session')).toBeNull();
-    expect(within(screen.getByRole('banner')).getByText('New session')).toBeTruthy();
+    expect(within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).queryByText('New chat')).toBeNull();
+    expect(within(screen.getByRole('banner')).getByText('New chat')).toBeTruthy();
   });
 
   it('the strip’s "+" opens an unstarted tab in its pane, in the project of the pane’s session', async () => {
@@ -407,12 +407,12 @@ describe('unstarted sessions', () => {
     render(<Shell />);
     await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New session' }));
     expect(asked).toEqual([null]); // an empty pane has no session to take a project from
-    expect(selected()).toBe('New session');
+    expect(selected()).toBe('New chat');
     await act(async () => runAction('tab.close'));
     act(() => useLayout.getState().openSession(idOf('Quota reset recovery')));
     await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New session' }));
     expect(asked).toEqual([null, 'proj-codex-somersault']);
-    expect(selected()).toBe('New session · codex_somersault');
+    expect(selected()).toBe('New chat · codex_somersault');
   });
 
   it('a record arriving for the id turns the tab into the session’s ordinary tab', async () => {
@@ -429,7 +429,7 @@ describe('unstarted sessions', () => {
   });
 
   it('takes its title from a registered unstarted title', async () => {
-    offs.push(registerUnstartedTitle((id) => (id === NEW ? { title: 'Set up a session', project: 'MAWS' } : null)));
+    offs.push(registerUnstartedTitle((id) => (id === NEW ? { title: 'Set up a session', project: 'MAWS', projectId: MAWS } : null)));
     render(<Shell />);
     await act(() => createSession(MAWS));
     expect(tab('Set up a session · MAWS')).toBeTruthy();
@@ -452,7 +452,7 @@ describe('unstarted sessions', () => {
     await act(() => createSession(MAWS));
     await act(async () => runAction('tab.close'));
     expect(guard).toHaveBeenCalledWith(expect.objectContaining({ kind: 'session', appSessionId: NEW }));
-    expect(tabNames()).toEqual(['New session · MAWS']);
+    expect(tabNames()).toEqual(['New chat · MAWS']);
     expect(screen.queryByRole('alertdialog')).toBeNull(); // the guard asks, not the shell
     answer = true;
     await act(async () => runAction('tab.close'));

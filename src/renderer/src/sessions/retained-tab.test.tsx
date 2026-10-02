@@ -57,8 +57,10 @@ describe("a failed setup's retained tab", () => {
         <Composer appSessionId={ID} paneIndex={0} />
       </QueryClientProvider>,
     );
-    const location = await screen.findByRole('button', { name: `Location ${REPO}` });
-    expect(location.title, 'the intent’s chip, not the live one').toBe(REPO);
+    // New chat: the intent's project row (an intent with no project runs in its directory), not the live location chip
+    const chip = await screen.findByRole('button', { name: 'Project No project' });
+    expect(chip.title).toBe(`${REPO} · Change the project for this chat`);
+    expect(screen.queryByRole('button', { name: `Location ${REPO}` })).toBeNull();
     const editor = screen.getByRole('textbox', { name: 'Message', hidden: true }) as HTMLElement & { editor: { commands: { insertContent(text: string): boolean } } };
     act(() => void editor.editor.commands.insertContent('typed after the failure'));
     const control = document.querySelector<HTMLButtonElement>('[data-submit-state]')!;

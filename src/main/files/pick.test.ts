@@ -45,7 +45,7 @@ describe('layout.pickFiles', () => {
     writeFileSync(join(folder, 'secret.png'), 'x');
     const directory = dialogAnswering([folder]);
     const { files } = await pickFiles({ kind: 'directory', directory: dir, multiple: false }, { showOpenDialog: directory });
-    expect(directory.mock.calls[0]![0].properties).toEqual(['openDirectory']);
+    expect(directory.mock.calls[0]![0].properties).toEqual(['openDirectory', 'createDirectory']); // New chat: Codex's folder dialog lets a new project's folder be made there (main-BvBtZhys.js:121436-121458)
     expect(files).toEqual([{ path: folder, name: 'extra', bytes: 0, mediaType: 'inode/directory', data: null }]);
   });
 

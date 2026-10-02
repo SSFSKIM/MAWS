@@ -54,7 +54,7 @@ export function useSessionDirectory(appSessionId: AppSessionId): string | null {
   const known = useSessions((s) => s.engine.get(appSessionId)?.cwd || s.records.get(appSessionId)?.directory || null);
   const intended = useSetup((s) => {
     const intent = s.intents.get(appSessionId);
-    return intent ? settingsDirectoryOf(intent.location) : null;
+    return intent?.location ? settingsDirectoryOf(intent.location) : null;
   });
   return known ?? intended;
 }

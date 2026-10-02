@@ -10,7 +10,7 @@ import { autoModeNote, BUILTIN_MODELS } from '@shared/sessions/models';
 import type { FirstMessage, Location, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
 import type { SetupEvent } from '@shared/sessions/setup';
 import { defaultBranchName, type WorktreeInfo } from '@shared/sessions/worktree';
-import type { ModelInfo, SetupIntentHook as ComposerSetupIntentHook } from '../composer/setup-intent';
+import type { ModelInfo, SetupIntentHook as ComposerSetupIntentHook, SetupProject } from '../composer/setup-intent';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings'; // W3
@@ -22,8 +22,6 @@ import { useSetup } from './store';
 export type { ModelInfo };
 
 export interface SetupIntentOptions {
-  locations: Location[]; // the project directory; each listed worktree of its repository; one new-worktree template
-  branches: string[]; // local branches, the current one first
   models: ModelInfo[];
   autoModeNote: string | null;
 }
@@ -34,6 +32,7 @@ export interface SetupIntentHook extends ComposerSetupIntentHook {
   phase: string | null; // the running setup's phase in words: C7's submit control shows it as its disabled-state reason
   patch(p: SetupIntentPatch): Promise<HookResult>;
   start(first: FirstMessage): Promise<HookResult>;
+  project: SetupProject; // New chat: the project row above the box
 }
 
 // The directory whose repository the options describe: the project's, the new worktree's repository, or the
@@ -56,18 +55,60 @@ export function defaultWorktreeName(now: Date = new Date(), random: () => number
   return `${date}-${tail}`;
 }
 
-export function newWorktreeTemplate(repoRoot: string, name: string): Location {
+// New chat (2026-10-01): the Worktree checkbox's new worktree, named `<project>-<4 hex>`: Codex's short id
+// (`crypto.randomUUID().slice(0, 4)`, readable/chatgpt-26.928.40906/main-process/worker.js:110755-110757) after the
+// project, folded to Codex's name characters (lowercase letters, digits, single hyphens, worker.js:110737-110743). Its
+// branch is the engine's `worktree-<name>` convention, started from HEAD; the agent can rename it later.
+export function worktreeNameFor(project: string, id: () => string = () => crypto.randomUUID()): string {
+  const slug = project.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'worktree';
+  return `${slug}-${id().slice(0, 4)}`;
+}
+
+export function newWorktreeLocation(repoRoot: string, name: string): Location {
   return { kind: 'newWorktree', repoRoot, name, branch: { kind: 'new', name: defaultBranchName(name), base: 'HEAD' } };
 }
 
-// The location list the location chip offers, from what git reported about the repository (null outside one).
-export function locationsOf(input: { projectDirectory: string; intent: SetupIntent; repoRoot: string | null; worktrees: WorktreeInfo[]; worktreeName: string }): Location[] {
-  const directory: Location = { kind: 'directory', path: input.projectDirectory };
-  if (input.repoRoot === null) return [directory];
-  const repoRoot = input.repoRoot;
-  const existing: Location[] = input.worktrees.filter((w) => !w.isMain && !w.prunable).map((w) => ({ kind: 'existingWorktree', repoRoot, path: w.path }));
-  const template = input.intent.location.kind === 'newWorktree' ? input.intent.location : newWorktreeTemplate(repoRoot, input.worktreeName);
-  return [directory, ...existing, template];
+// The checkout a directory lies in (the deepest listed worktree holding it), for the branch beside the chip.
+function checkoutOf(worktrees: readonly WorktreeInfo[], path: string): WorktreeInfo | null {
+  const holding = worktrees.filter((w) => path === w.path || path.startsWith(`${w.path}/`));
+  return holding.sort((a, b) => b.path.length - a.path.length)[0] ?? null;
+}
+
+const NO_PROJECT_LABEL = 'No project';
+
+// What the project row shows of an intent, from the project the index knows and what git reported about the location's
+// repository (null while it is read): the chip's words and tooltip path, the read-only branch, and the Worktree
+// checkbox (offered for a project in a git repository; hidden with no project, outside git, or on an existing worktree).
+export function projectFacts(
+  intent: Pick<SetupIntent, 'projectId' | 'location'>,
+  project: { name: string; directory: string } | null,
+  repository: { repoRoot: string | null; worktrees: readonly WorktreeInfo[] } | null,
+): Pick<SetupProject, 'projectId' | 'label' | 'path' | 'branch' | 'worktree'> {
+  const location = intent.location;
+  if (location === null) return { projectId: null, label: null, path: null, branch: null, worktree: null };
+  const worktrees = repository?.worktrees ?? [];
+  const base = baseDirectoryOf(location);
+  switch (location.kind) {
+    case 'existingWorktree':
+      return { projectId: intent.projectId, label: basename(location.path), path: location.path, branch: checkoutOf(worktrees, location.path)?.branch ?? null, worktree: null };
+    case 'newWorktree':
+      return { projectId: intent.projectId, label: project?.name ?? basename(base), path: base, branch: checkoutOf(worktrees, base)?.branch ?? null, worktree: intent.projectId === null ? null : true };
+    case 'directory': {
+      const label = intent.projectId === null ? NO_PROJECT_LABEL : (project?.name ?? basename(base));
+      const git = intent.projectId !== null && (repository?.repoRoot ?? null) !== null;
+      return { projectId: intent.projectId, label, path: base, branch: checkoutOf(worktrees, base)?.branch ?? null, worktree: git ? false : null };
+    }
+  }
+}
+
+const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
+
+// The project an unstarted session will run in, by name (New chat, 2026-10-01): its project's, else (a project the index
+// no longer lists) its directory's; null while no project is chosen and for a chat that works in no project. The tab,
+// the toolbar title and the heading name it.
+export function intentProjectName(intent: Pick<SetupIntent, 'projectId' | 'location'>, project: { name: string } | null | undefined): string | null {
+  if (intent.projectId === null || intent.location === null) return null;
+  return project?.name ?? basename(baseDirectoryOf(intent.location));
 }
 
 // The catalogue's entries as C7's `ModelInfo`. The entry schema is loose, so the engine's other `list_models` fields
@@ -117,8 +158,7 @@ export function phaseText(event: SetupEvent | undefined, intent: Pick<SetupInten
 interface RepositoryFacts {
   directory: string; // the base directory these facts answer
   repoRoot: string | null;
-  worktrees: WorktreeInfo[];
-  branches: string[];
+  worktrees: WorktreeInfo[]; // each checkout with its branch (the project row's read-only branch)
   trustError: string | null; // a failed trust check disables Send with the error
 }
 
@@ -126,12 +166,11 @@ const BUILTIN_FALLBACK: ModelCatalogue = { models: [...BUILTIN_MODELS], source: 
 
 async function readRepository(directory: string): Promise<RepositoryFacts> {
   const trust = await ipc.invoke('session.trust.check', { directory });
-  if (!trust.ok) return { directory, repoRoot: null, worktrees: [], branches: [], trustError: trust.error.message };
-  if (trust.value.keyKind !== 'repo') return { directory, repoRoot: null, worktrees: [], branches: [], trustError: null };
+  if (!trust.ok) return { directory, repoRoot: null, worktrees: [], trustError: trust.error.message };
+  if (trust.value.keyKind !== 'repo') return { directory, repoRoot: null, worktrees: [], trustError: null };
   const repoRoot = trust.value.trustKey; // a repository's trust key is its main worktree's root
-  const [listed, branches] = await Promise.all([ipc.invoke('git.worktree.list', { repoRoot }), ipc.invoke('git.branches', { directory: repoRoot })]);
-  const names = branches.ok ? [...branches.value.branches].sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent)).map((b) => b.name) : [];
-  return { directory, repoRoot, worktrees: listed.ok ? listed.value.worktrees : [], branches: names, trustError: null };
+  const listed = await ipc.invoke('git.worktree.list', { repoRoot });
+  return { directory, repoRoot, worktrees: listed.ok ? listed.value.worktrees : [], trustError: null };
 }
 
 // The catalogue at every mount and on every route change: the host answers the tab's route's catalogue from its cache
@@ -149,17 +188,16 @@ async function readCatalogue(gateway: SetupIntent['gateway'], cwd: string | null
 function useSetupOptions(
   appSessionId: AppSessionId,
   intent: SetupIntent | null,
-): { options: SetupIntentOptions; trustError: string | null; recheck(): Promise<string | null> } {
-  const projectDirectory = useSessions((s) => (intent?.projectId ? (s.projects.get(intent.projectId)?.directory ?? null) : null));
-  const base = intent ? baseDirectoryOf(intent.location) : null;
+): { options: SetupIntentOptions; facts: RepositoryFacts | null; trustError: string | null; recheck(): Promise<string | null> } {
+  const location = intent?.location ?? null; // New chat: none until a project is chosen, and nothing to read
+  const base = location ? baseDirectoryOf(location) : null;
   const [facts, setFacts] = useState<RepositoryFacts | null>(null);
   const [catalogue, setCatalogue] = useState<ModelCatalogue>(BUILTIN_FALLBACK);
-  const [worktreeName] = useState(() => defaultWorktreeName());
   const fallback = useSettings((s) => s.state?.settings.permissions.autoFallback) ?? 'acceptEdits'; // W3
 
   // Only an unstarted session reads it: C7 calls this hook from every composer, and a started session's has no intent.
   const route = intent?.gateway ?? null;
-  const settingsDirectory = intent ? settingsDirectoryOf(intent.location) : null;
+  const settingsDirectory = location ? settingsDirectoryOf(location) : null;
   useEffect(() => {
     if (route === null) return;
     let live = true;
@@ -182,14 +220,9 @@ function useSetupOptions(
   }, [appSessionId, base, known]);
 
   const options = useMemo((): SetupIntentOptions => {
-    if (intent === null) return { locations: [], branches: [], models: [], autoModeNote: null };
-    return {
-      locations: locationsOf({ projectDirectory: projectDirectory ?? facts?.repoRoot ?? baseDirectoryOf(intent.location), intent, repoRoot: facts?.repoRoot ?? null, worktrees: facts?.worktrees ?? [], worktreeName }),
-      branches: facts?.branches ?? [],
-      models: modelsOf(catalogue),
-      autoModeNote: noteFor(catalogue, intent, fallback),
-    };
-  }, [intent, projectDirectory, facts, catalogue, worktreeName, fallback]);
+    if (intent === null) return { models: [], autoModeNote: null };
+    return { models: modelsOf(catalogue), autoModeNote: noteFor(catalogue, intent, fallback) };
+  }, [intent, catalogue, fallback]);
   // A failed trust check is read again at Send (the directory may be readable now): the refusal stands only while the
   // check still fails.
   const recheck = useCallback(async () => {
@@ -198,7 +231,23 @@ function useSetupOptions(
     setFacts(read);
     return read.trustError;
   }, [base]);
-  return { options, trustError: facts?.trustError ?? null, recheck };
+  // facts answer the current base only (a project change reads the new one; meanwhile the row shows no branch)
+  const current = facts !== null && known ? facts : null;
+  return { options, facts: current, trustError: current?.trustError ?? null, recheck };
+}
+
+// ---- New chat: the project row's writes ------------------------------------------------------------------------
+
+// "New project": the native folder dialog (main's, `layout.pickFiles`), then the folder as a project by the membership
+// rule (`session.projects.addFolder`), chosen with the location main answered. A cancelled dialog changes nothing.
+async function newProject(appSessionId: AppSessionId): Promise<HookResult> {
+  const picked = await ipc.invoke('layout.pickFiles', { kind: 'directory', directory: null, multiple: false });
+  if (!picked.ok) return { ok: false, error: picked.error.message };
+  const directory = picked.value.files[0]?.path;
+  if (directory === undefined) return { ok: true };
+  const added = await ipc.invoke('session.projects.addFolder', { directory });
+  if (!added.ok) return { ok: false, error: added.error.message };
+  return patchIntent(appSessionId, { projectId: added.value.project.id, location: added.value.location });
 }
 
 // Non-null exactly while the session is unstarted: an intent, and no record with an engine status (C7's definition).
@@ -206,9 +255,11 @@ export function useSetupIntent(appSessionId: AppSessionId): SetupIntentHook | nu
   const intent = useSetup((s) => s.intents.get(appSessionId) ?? null);
   const started = useSessions((s) => s.records.has(appSessionId) && s.engine.has(appSessionId));
   const event = useSetup((s) => s.phases.get(appSessionId));
-  const { options, trustError, recheck } = useSetupOptions(appSessionId, intent);
+  const project = useSessions((s) => (intent?.projectId ? (s.projects.get(intent.projectId) ?? null) : null));
+  const { options, facts, trustError, recheck } = useSetupOptions(appSessionId, intent);
   return useMemo(() => {
     if (intent === null || started) return null;
+    const shown = projectFacts(intent, project, facts);
     return {
       intent,
       options,
@@ -218,6 +269,18 @@ export function useSetupIntent(appSessionId: AppSessionId): SetupIntentHook | nu
         const error = trustError === null ? null : await recheck();
         return error !== null ? { ok: false, error } : startIntent(appSessionId, first);
       },
+      project: {
+        ...shown,
+        // the same project again keeps the choice (and its Worktree box); from an existing worktree it moves to the project
+        choose: async (projectId) =>
+          projectId === intent.projectId && intent.location !== null && (projectId === null || intent.location.kind !== 'existingWorktree') ? { ok: true } : patchIntent(appSessionId, { projectId }),
+        newProject: () => newProject(appSessionId),
+        setWorktree: async (on) => {
+          const repoRoot = facts?.repoRoot ?? null;
+          if (repoRoot === null || shown.worktree === null || on === shown.worktree) return { ok: true };
+          return patchIntent(appSessionId, { location: on ? newWorktreeLocation(repoRoot, worktreeNameFor(shown.label ?? basename(repoRoot))) : { kind: 'directory', path: project?.directory ?? repoRoot } });
+        },
+      },
     };
-  }, [appSessionId, intent, started, event, options, trustError, recheck]);
+  }, [appSessionId, intent, started, event, project, options, facts, trustError, recheck]);
 }

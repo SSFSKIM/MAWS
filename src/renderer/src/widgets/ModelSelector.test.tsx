@@ -181,7 +181,7 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
       id === INTENT_ID
         ? {
             intent: current,
-            options: { locations: [current.location], branches: [], models, autoModeNote: null },
+            options: { models, autoModeNote: null },
             patch: async (p) => {
               patches.push(p);
               current = { ...current, ...p };
