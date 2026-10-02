@@ -529,3 +529,23 @@ it('middle-closing the active left tab preserves the surviving right editor focu
   expect(screen.getByRole('tab', { name: /left-survivor.ts/ }).getAttribute('aria-selected')).toBe('true');
   expect(document.activeElement).toBe(editor);
 });
+
+it.each([true, false])('context-menu Close restores pane focus when the closing tab is active=%s', async (active) => {
+  useLayout.getState().openTab({ kind: 'file', path: '/menu-close.ts', line: null, appSessionId: null });
+  useLayout.getState().openTab({ kind: 'file', path: '/menu-survivor.ts', line: null, appSessionId: null });
+  if (active) useLayout.getState().activateTab('file:/menu-close.ts');
+  render(<Shell />);
+  const tab = screen.getByRole('tab', { name: 'menu-close.ts' });
+  act(() => tab.focus());
+  fireEvent.contextMenu(tab);
+  const close = await screen.findByRole('menuitem', { name: 'Close tab' });
+  act(() => close.focus());
+  fireEvent.click(close);
+  await vi.waitFor(() => expect(screen.queryByRole('tab', { name: 'menu-close.ts' })).toBeNull());
+  // Drain Radix's trigger-restoration timeout and the close handoff frame.
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
+  expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'menu-survivor.ts' }));
+});

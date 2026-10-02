@@ -101,7 +101,9 @@ export async function requestCloseTab(id: string): Promise<void> {
   // Capture DOM ownership before a guard's sheet displaces focus. Selection alone does not own
   // the keyboard: a middle-close in one pane must leave the other pane's editor alone.
   const focused = document.activeElement;
-  const focusedTab = focused?.closest('[data-tab-id]')?.getAttribute('data-tab-id');
+  // A portaled tab menu carries its originating tab's ownership outside the pane DOM.
+  const focusedTab = focused?.closest('[data-tab-id]')?.getAttribute('data-tab-id')
+    ?? focused?.closest('[data-tab-focus-owner]')?.getAttribute('data-tab-focus-owner');
   const focusedContent = focused?.closest('[role="tabpanel"]')?.closest('[data-pane]')?.getAttribute('data-pane');
   const restore = pane !== -1 && (focusedTab === id || (focusedContent === String(pane) && currentSet(before).panes[pane].activeTabId === id));
   if (!(await guardAllows(ref))) return;
