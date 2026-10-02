@@ -6,10 +6,9 @@
 // inset.
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { createSession, requestCloseTab, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { createSession, focusedProject, NEW_CHAT, requestCloseTab, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { SESSION_DRAG_TYPE } from '../sidebar/SessionRow';
 import { useLayout } from '../stores/layout';
-import { useSessions } from '../stores/sessions';
 import { focusPaneElement } from './pane-dom';
 import { Tab, TAB_DRAG_TYPE } from './Tab';
 
@@ -172,26 +171,18 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   );
 }
 
-// §5.2's "+" at the strip's end: a new session in this pane, in the project of the session the pane shows when it
-// shows one. Disabled until a session creator is registered (C10; the stub's in launch mode scenario), like the
-// sidebar's "+".
+// §5.2's "+" at the strip's end: a New chat in this pane (2026-10-01), in the project of the session the pane shows,
+// else of the sidebar's open project page, else in none. Disabled until a session creator is registered (C10; the
+// stub's in launch mode scenario), like the sidebar's "+".
 function NewSessionButton({ pane }: { pane: Pane }) {
   const canCreate = useSessionCreatorRegistered();
-  const appSessionId = useLayout((s) => {
-    const p = s.main.panes[pane];
-    const tab = p?.tabs.find((t) => t.id === p.activeTabId);
-    return tab?.kind === 'session' || tab?.kind === 'agent' ? tab.appSessionId : null;
-  });
-  const projectId = useSessions((s) =>
-    appSessionId ? (s.records.get(appSessionId)?.projectId ?? s.unstarted.get(appSessionId)?.projectId ?? null) : null,
-  );
   return (
     <button
       type="button"
-      aria-label="New session"
-      title={canCreate ? 'New session' : 'Not available here'}
+      aria-label={NEW_CHAT}
+      title={canCreate ? NEW_CHAT : 'Not available here'}
       disabled={!canCreate}
-      onClick={() => void createSession(projectId, { pane })}
+      onClick={() => void createSession(focusedProject({ pane }), { pane })}
       className="mx-1 inline-flex size-7 shrink-0 items-center justify-center self-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
     >
       <span aria-hidden className="text-ui leading-none">

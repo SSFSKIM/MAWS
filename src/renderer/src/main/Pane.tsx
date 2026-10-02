@@ -7,7 +7,7 @@ import type { TabRef } from '@shared/ipc/schema/layout';
 import { Diagnostics } from '../app/Diagnostics';
 import { useSlot } from '../app/slots';
 import { useChordHint } from '../app/IconButton';
-import { createSession, runAction, useActionEnabled, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { createSession, focusedProject, NEW_CHAT, runAction, useActionEnabled, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { SessionPane } from '../session/SessionPane';
 import { useLayout } from '../stores/layout';
@@ -100,8 +100,8 @@ function EmptyPane() {
         <button type="button" disabled={!canOverview} onClick={() => runAction('tab.overview')} className={TEXT_BUTTON}>
           {chord ? `Overview ${chord}` : 'Overview'}
         </button>
-        <button type="button" disabled={!canCreate} title={canCreate ? undefined : 'Not available here'} onClick={() => void createSession(null)} className={TEXT_BUTTON}>
-          New session
+        <button type="button" disabled={!canCreate} title={canCreate ? undefined : 'Not available here'} onClick={() => void createSession(focusedProject())} className={TEXT_BUTTON}>
+          {NEW_CHAT}
         </button>
       </div>
     </div>

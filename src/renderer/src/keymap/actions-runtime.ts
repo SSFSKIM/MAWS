@@ -24,17 +24,21 @@ export const subscribeActions = (listener: () => void): (() => void) => registry
 export const useActionEnabled = (id: ActionId): boolean => registry.useEnabled(id);
 
 // ---- new sessions -------------------------------------------------------------------------------------------------------
-// The owner's design (charter §19, 2026-09-28): no modal sheet. "+" and "New session" ask the registered creator for an
+// The owner's design (charter §19, 2026-09-28): no modal sheet. "+" and "New chat" ask the registered creator for an
 // app session id with a setup intent and no engine process (C10's `session.create`; in launch mode `scenario` the
 // stub's), and the shell opens that unstarted session's tab. A project id cannot ride the numeric `layout.action` arg,
-// so the "+" buttons call `createSession(projectId)` directly and C10's `session.new` handler calls it with null. W5: a
-// worktree group's "+" in the sidebar names the checkout as the location, which the creator puts on the intent (a
-// creator without intents ignores it).
+// so the "+" buttons call `createSession(projectId)` directly. W5: a worktree group's "+" in the sidebar names the
+// checkout as the location, which the creator puts on the intent (a creator without intents ignores it). New chat
+// (2026-10-01): `session.new` (⌘N, File › New chat, the ⌘K palette) is registered with the creator, so it is available
+// wherever a session can be made, and starts in the focused project, if any (`focusedProject`).
 export type SessionCreator = (projectId: ProjectId | null, location?: Location | null) => Promise<AppSessionId | null>;
 
 const creators = createHandlerRegistry<'create', [ProjectId | null, (Location | null)?]>('session creator');
 
-export const registerSessionCreator = (fn: SessionCreator): (() => void) => creators.register('create', fn);
+export const registerSessionCreator = (fn: SessionCreator): (() => void) => {
+  const offs = [creators.register('create', fn), registerAction('session.new', async () => void (await createSession(focusedProject())))];
+  return () => offs.forEach((off) => off());
+};
 export const isSessionCreatorRegistered = (): boolean => creators.has('create');
 export const useSessionCreatorRegistered = (): boolean => creators.useEnabled('create');
 

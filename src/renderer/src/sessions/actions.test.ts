@@ -5,7 +5,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { project, record } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { runSessionAction, sessionActionsFor } from '../app/session-actions';
-import { registerSessionCreator, runAction } from '../keymap/actions-runtime';
+import { focusedProject, registerSessionCreator, runAction } from '../keymap/actions-runtime';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runAddProject, runProjectAction } from '../sidebar/project-actions';
 import { useNotices } from '../stores/notices';
 import { useLayout } from '../stores/layout';
@@ -13,7 +13,7 @@ import { useSessions } from '../stores/sessions';
 import { resetSetupStore, trustState } from '../test-support/setup-intents';
 import { useSetup } from './store';
 import { resetShellStores } from '../test-support/shell-stores';
-import { focusedProject, registerSessionActions } from './actions';
+import { registerSessionActions } from './actions';
 import { resubmitProvider } from './record-ops';
 import { closeDialog, useDialogs } from './dialogs';
 
@@ -48,11 +48,15 @@ describe('the session and project entries', () => {
     expect(Object.values(PROJECT_ACTIONS)).not.toContain('Add directory…');
   });
 
-  it('⌘N creates in the focused session’s project, else the first project', async () => {
+  // New chat (2026-10-01): ⌘N comes with the session creator, and preselects only a focused project
+  it('⌘N creates in the focused session’s project, else the open project page’s, else in none', async () => {
     useSessions.setState({ projects: new Map([[P2, project('p2', 1)], [P1, project('p1', 0)]]), records: new Map([[A, record(A, { projectId: P2 })]]) });
+    expect(focusedProject(), 'the project list with nothing open: no project').toBeNull();
+    useLayout.getState().setSidebar({ openProject: P1 });
     expect(focusedProject()).toBe(P1);
     useLayout.getState().openTab({ kind: 'session', appSessionId: A });
-    expect(focusedProject()).toBe(P2);
+    expect(focusedProject(), 'the active session’s project first').toBe(P2);
+    expect(focusedProject({ first: 'page' }), 'the sidebar’s own control asks its page first').toBe(P1);
     const created: (ProjectId | null)[] = [];
     offs.push(registerSessionCreator(async (projectId) => (created.push(projectId), null)));
     runAction('session.new');

@@ -5,14 +5,14 @@
 // does not persist. The search filters the level on screen: projects (by name, or holding a matching session) on the
 // list, the open project's sessions on its page. Cross-project attention is the Overview's, the notifier's, the dock
 // badge's and ⌘⇧J's, which read the attention table directly. One context menu serves every row, and each level is one
-// roving tab stop (`tree.ts`).
+// roving tab stop (`tree.ts`). New chat (2026-10-01): a "New chat" row sits first, above the search and both levels.
 import { ContextMenu } from 'radix-ui';
 import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
 import type { WorktreeInfo } from '@shared/sessions/worktree';
 import { FolderIcon, GearIcon, IconButton, PlusIcon } from '../app/IconButton';
 import { useChordHint } from '../app/IconButton'; // C11
 import { ipc } from '../ipc/client';
-import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
@@ -194,6 +194,9 @@ function SidebarBody() {
   return (
     <TreeContext.Provider value={tree}>
       <div className="px-2.5 pt-2.5">
+        <NewChatRow />
+      </div>
+      <div className="px-2.5 pt-1">
         <Search
           value={query}
           onChange={setQuery}
@@ -266,6 +269,36 @@ function SidebarBody() {
   );
 }
 
+// New chat (2026-10-01): the sidebar's first row, above the search and both levels, as Codex's first nav row sits above
+// its projects (readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:519957-519987, 520284-520293).
+// It starts in the project whose page is open, else the active session's, else in none ("Choose a project").
+function NewChatRow() {
+  const canCreate = useSessionCreatorRegistered();
+  const chord = useChordHint('session.new');
+  return (
+    <button
+      type="button"
+      aria-label={NEW_CHAT}
+      disabled={!canCreate}
+      title={canCreate ? (chord ? `${NEW_CHAT} · ${chord}` : NEW_CHAT) : 'Not available here'}
+      onClick={() => void createSession(focusedProject({ first: 'page' }))}
+      className="group/new flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] text-ui text-fg outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
+    >
+      <NewChatIcon className="size-[13px] text-fg-muted" />
+      <span className="min-w-0 flex-1 truncate text-left">{NEW_CHAT}</span>
+      {chord && <kbd className="font-ui text-ui-sm text-fg-faint opacity-0 group-hover/new:opacity-100 group-focus-visible/new:opacity-100">{chord}</kbd>}
+    </button>
+  );
+}
+
+// A pencil over a square, the new-chat glyph (tokens only: it draws in the current colour).
+const NewChatIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 16 16" aria-hidden className={`shrink-0 fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.5] ${className ?? ''}`}>
+    <path d="M7 2.5H3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V9" />
+    <path d="M11.5 2.5l2 2L8 10H6V8z" />
+  </svg>
+);
+
 function AddProjectButton() {
   const enabled = useAddProjectEnabled();
   return (
@@ -278,19 +311,16 @@ function AddProjectButton() {
 const TEXT_BUTTON =
   'rounded-sm border border-border-strong px-2.5 py-1 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:border-border disabled:text-fg-faint disabled:hover:bg-transparent';
 
-// An empty workspace (residue *Empty and loading states*): the two ways in, each disabled until its handler exists.
+// An empty workspace (residue *Empty and loading states*): Add project, disabled until its handler exists; the other way
+// in is the New chat row above (New chat, 2026-10-01).
 function EmptyProjects() {
   const canAdd = useAddProjectEnabled();
-  const canCreate = useSessionCreatorRegistered();
   return (
     <div className="flex flex-col gap-2.5 px-2.5 py-2">
       <p className="m-0 text-ui-sm text-fg-muted">No projects yet</p>
       <div className="flex gap-2">
         <button type="button" disabled={!canAdd} title={canAdd ? undefined : 'Not available here'} onClick={runAddProject} className={TEXT_BUTTON}>
           Add project
-        </button>
-        <button type="button" disabled={!canCreate} title={canCreate ? undefined : 'Not available here'} onClick={() => void createSession(null)} className={TEXT_BUTTON}>
-          New session
         </button>
       </div>
     </div>

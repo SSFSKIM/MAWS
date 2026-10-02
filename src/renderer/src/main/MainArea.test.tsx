@@ -98,7 +98,7 @@ describe('tab strip reorders, closes, reopens', () => {
     expect(tabNames()).toEqual([]);
     const panel = within(main()).getByRole('tabpanel');
     expect(within(panel).getByText('No open tabs')).toBeTruthy();
-    expect((within(panel).getByRole('button', { name: 'New session' }) as HTMLButtonElement).disabled).toBe(true); // no creator registered
+    expect((within(panel).getByRole('button', { name: 'New chat' }) as HTMLButtonElement).disabled).toBe(true); // no creator registered
     expect(within(main()).queryByRole('dialog', { name: 'Overview' })).toBeNull();
     await user.click(within(panel).getByRole('button', { name: /^Overview/ }));
     expect(within(main()).getByRole('dialog', { name: 'Overview' })).toBeTruthy();
@@ -203,7 +203,7 @@ describe('tab strip reorders, closes, reopens', () => {
 
   it('the strip’s "+" is disabled with "Not available here" while no session creator is registered', () => {
     render(<Shell />);
-    const plus = within(strips()[0].parentElement!).getByRole('button', { name: 'New session' }) as HTMLButtonElement;
+    const plus = within(strips()[0].parentElement!).getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
     expect(plus.disabled).toBe(true);
     expect(plus.title).toBe('Not available here');
   });
@@ -396,7 +396,7 @@ describe('unstarted sessions', () => {
     expect(within(panel).getByText('Composer unavailable')).toBeTruthy();
     expect(within(panel).queryByText('Transcript unavailable')).toBeNull();
     expect(within(panel).queryByRole('group', { name: 'Session status' })).toBeNull();
-    expect(within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).queryByText('New chat')).toBeNull();
+    expect(document.querySelector(`[data-region="sidebar"] [data-menu="session:${NEW}"]`)).toBeNull(); // no row (the sidebar's New chat control is no session)
     expect(within(screen.getByRole('banner')).getByText('New chat')).toBeTruthy();
   });
 
@@ -405,12 +405,12 @@ describe('unstarted sessions', () => {
     offs.push(registerSessionCreator(async (projectId) => (asked.push(projectId), NEW)));
     const user = userEvent.setup();
     render(<Shell />);
-    await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New session' }));
+    await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New chat' }));
     expect(asked).toEqual([null]); // an empty pane has no session to take a project from
     expect(selected()).toBe('New chat');
     await act(async () => runAction('tab.close'));
     act(() => useLayout.getState().openSession(idOf('Quota reset recovery')));
-    await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New session' }));
+    await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New chat' }));
     expect(asked).toEqual([null, 'proj-codex-somersault']);
     expect(selected()).toBe('New chat · codex_somersault');
   });

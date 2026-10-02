@@ -1,11 +1,11 @@
-// C10's entries in C5's action registries (C10 execution document, "Actions registered into C5"): ⌘N and the palette's
-// `session.new`, the per-session entries C5's menus, hover actions and toolbar menu render through
-// `runSessionAction`, the per-project entries its project menu renders through `runProjectAction`, and the workspace's
-// "Add project" (`registerAddProject`) over C7's native directory chooser (`layout.pickFiles`).
+// C10's entries in C5's action registries (C10 execution document, "Actions registered into C5"): the per-session
+// entries C5's menus, hover actions and toolbar menu render through `runSessionAction`, the per-project entries its
+// project menu renders through `runProjectAction`, and the workspace's "Add project" (`registerAddProject`) over C7's
+// native directory chooser (`layout.pickFiles`). New chat (2026-10-01): ⌘N's `session.new` is registered with the
+// session creator in C5's runtime (`registerSessionCreator`), so it follows wherever a session can be made.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { registerSessionAction } from '../app/session-actions';
 import { ipc } from '../ipc/client';
-import { createSession, registerAction } from '../keymap/actions-runtime';
 import { registerAddProject, registerProjectAction } from '../sidebar/project-actions';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
@@ -15,24 +15,8 @@ import { cleanupTargetOf } from './CleanupDialog';
 import { confirm, openDialog } from './dialogs';
 import { archiveSession, forkInPlace } from './record-ops';
 import { resumeSession } from './setup-actions';
-import { useSetup } from './store';
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
-
-// The project ⌘N creates in: the focused session's, else the first project, else none.
-export function focusedProject(): ProjectId | null {
-  const { main } = useLayout.getState();
-  const pane = main.panes[main.focusedPane] ?? main.panes[0];
-  const active = pane?.tabs.find((t) => t.id === pane.activeTabId);
-  const sessions = useSessions.getState();
-  if (active?.kind === 'session' || active?.kind === 'agent') {
-    const id = active.appSessionId;
-    const projectId = sessions.records.get(id)?.projectId ?? useSetup.getState().intents.get(id)?.projectId ?? sessions.unstarted.get(id)?.projectId ?? null;
-    if (projectId !== null) return projectId;
-  }
-  const first = [...sessions.projects.values()].sort((a, b) => a.order - b.order)[0];
-  return first?.id ?? null;
-}
 
 function removeWorktree(appSessionId: AppSessionId): void {
   const record = useSessions.getState().records.get(appSessionId);
@@ -98,7 +82,6 @@ async function addProject(): Promise<void> {
 
 export function registerSessionActions(): () => void {
   const offs = [
-    registerAction('session.new', async () => void (await createSession(focusedProject()))), // C12: createSession answers the id
     // the session's tab first, so a trust or relay card its start docks is on screen
     registerSessionAction('resume', (id) => {
       useLayout.getState().openSession(id);
