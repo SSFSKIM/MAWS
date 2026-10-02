@@ -29,7 +29,7 @@ export const SUMMARY_COPY = {
   untracked: (n: number) => ` · ${n} untracked`,
   binary: (n: number) => ` · ${n} binary`,
   changeUnavailable: 'Change unavailable',
-  model: (model: string | null, effort: string | null) => `${model ?? 'model unknown'} · ${effort ?? 'effort unknown'}`,
+  modelUnknown: 'model unknown', // W9 (H4): the row names the model by its alias (`<alias> <effort>`, the composer chip's words)
   review: 'Review',
   sessionInfo: 'Session info',
   // Push state

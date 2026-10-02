@@ -21,7 +21,9 @@ describe('the mode menu on a live session', () => {
     render(<ModeMenu binding={liveModeBinding(record('app-a'), status('app-a'), OPUS, fake.client)} onDone={done} />);
     const menu = screen.getByRole('menu', { name: 'Permission mode' });
     const items = within(menu).getAllByRole('menuitemradio');
-    expect(items.map((i) => i.querySelector('.font-mono')?.textContent)).toEqual(['Auto', 'Bypass permissions', 'Manual', 'Accept edits', 'Plan'] /* W3: auto and bypass first */);
+    // W3: auto and bypass first; W9 (H4): the labels in the UI font, not mono
+    expect(items.map((i) => i.firstElementChild?.textContent)).toEqual(['Auto', 'Bypass permissions', 'Manual', 'Accept edits', 'Plan']);
+    expect(menu.querySelector('.font-mono')).toBeNull();
     expect(items[0].getAttribute('aria-checked')).toBe('true'); // auto
     expect((items[0] as HTMLButtonElement).disabled).toBe(true);
     expect(items[0].textContent).toContain('This model does not support auto mode');

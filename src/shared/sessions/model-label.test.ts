@@ -2,10 +2,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
 import type { ListModelsResponse } from '@shared/wire/control';
-import { fixtureLine, RESPONSES } from '../../../../../test/support/widget-backend';
+import { fixtureLine, RESPONSES } from '../../../test/support/widget-backend';
 import { aliasOf, chipLabel, defaultTarget, rowFor, shortAlias } from './model-label';
 
-const ROOT = join(__dirname, '../../../../..');
+const ROOT = join(__dirname, '../../..');
 const CATALOGUE = (fixtureLine(ROOT, RESPONSES.list_models) as ListModelsResponse).models; // pass2/auto-routed seq 143: default and opus share claude-opus-5-5[1m]
 
 describe('the model chip says `<alias> <effort>`', () => {

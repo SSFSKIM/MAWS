@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { AppearanceSection } from './AppearanceSection';
-import { GATEWAY, INDEX, KEYBOARD, SECTIONS } from './copy';
+import { INDEX, KEYBOARD, SECTIONS } from './copy';
 import { EngineSection } from './EngineSection';
 import { GatewaySection } from './GatewaySection';
 import { KeymapSection } from './KeymapSection';
@@ -15,7 +15,7 @@ import { useSettingsValue } from './parts';
 
 export type SettingsSection = NonNullable<Extract<TabRef, { kind: 'settings' }>['section']>;
 const ORDER: SettingsSection[] = ['engine', 'gateway', 'keyboard', 'appearance', 'notifications'];
-const HINTS: Partial<Record<SettingsSection, string>> = { gateway: GATEWAY.hint, keyboard: KEYBOARD.hint };
+const HINTS: Partial<Record<SettingsSection, string>> = { keyboard: KEYBOARD.hint }; // W9 (H4): no charter labels in the UI
 const headingId = (section: SettingsSection) => `settings-${section}`;
 
 export function SettingsView({ section }: { section: SettingsSection | null }) {

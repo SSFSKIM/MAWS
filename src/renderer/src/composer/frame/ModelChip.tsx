@@ -1,5 +1,5 @@
 // The toolbar's model with effort (C7 execution document, "Composer frame" Model · effort; W3, charter §5.4 as amended
-// 2026-10-01): the chip reads `<alias> <effort>` (the binding's label, model-label.ts) and opens Codex's selector, one
+// 2026-10-01): the chip reads `<alias> <effort>` (the binding's label, @shared/sessions/model-label.ts) and opens Codex's selector, one
 // 254px menu anchored above the chip in a portal, which C11 registers as the `effort`, `model` and `fast` widgets with
 // the `modelChip` placement. The chip opens it on its effort view; `/effort`, `/model` and `/fast` from the palette or
 // typed open it here too (the editor puts the ask in the composer store). Esc or a choice that closes it hands the

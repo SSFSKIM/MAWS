@@ -78,7 +78,6 @@ export const CUSTODY_SETTINGS = {
 // C12 end
 
 export const GATEWAY = {
-  hint: 'D-19',
   defaultRoute: 'Default route',
   routes: { gateway: 'ClaudeUsage relay', direct: 'Direct' },
   defaultRouteNote: 'New sessions start on this route; a session can be switched from its Session info.', // W2: no status line

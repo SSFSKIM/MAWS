@@ -163,7 +163,8 @@ describe('summary card', () => {
     act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { model: { requested: 'opus', resolved: 'claude-opus-4-1' }, effort: 'high' })) })));
     await mount();
     const env = section('Environment');
-    expect(within(env).getByText('claude-opus-4-1 · high')).toBeTruthy();
+    // W9 (H4): the chip's words, the exact id the engine reported in the tooltip
+    expect(within(env).getByText('opus high').getAttribute('title')).toBe('claude-opus-4-1');
     expect(within(env).getByRole('button', { name: 'session-info is not available' }).hasAttribute('disabled')).toBe(true);
     offs.push(registerPanelTool(probeTool('session-info', { title: 'Session info', multiInstance: false }).tool));
     await settle();

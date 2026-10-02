@@ -18,7 +18,7 @@ import { isGatewayModel } from '@shared/sessions/models';
 import { SETTINGS_DEFAULTS_V7 } from '@shared/settings/defaults';
 import { useShownEffort } from '../composer/effective-effort';
 import { intentBindings } from '../composer/frame/bindings';
-import { aliasOf, DEFAULT_ROW, EFFORT_WORDS, rowFor } from '../composer/frame/model-label';
+import { aliasOf, DEFAULT_ROW, EFFORT_WORDS, rowFor } from '@shared/sessions/model-label';
 import { useSetupIntent } from '../composer/setup-intent';
 import { ROUTE, type Route } from '../gateway/copy';
 import { pickDirectModel } from '../gateway/direct-model';

@@ -21,7 +21,7 @@ import { branchLabel, recordBranch, type GitBranchAnswer } from '../../sessions/
 import { liveModeBinding, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNING, type ModeBinding } from '../../statusline';
 import { locationPath, type HookResult, type ModelInfo, type SetupIntentHook, type SetupProject } from '../setup-intent';
 import { ENDED, MESSAGE_HELD, STARTING } from '../submit/submit-state';
-import { aliasOf, chipLabel, DEFAULT_ROW } from './model-label';
+import { aliasOf, chipLabel, DEFAULT_ROW } from '@shared/sessions/model-label';
 
 export interface ChipBinding<V, O = never> {
   value: V;
@@ -35,7 +35,7 @@ export interface ModelChoice {
   effort: Effort | null;
 }
 
-// W3: the model chip's binding carries its words, `<alias> <effort>` (model-label.ts), worked out here from the
+// W3: the model chip's binding carries its words, `<alias> <effort>` (@shared/sessions/model-label.ts), worked out here from the
 // session's source: the intent with the user's own settings while unstarted, the engine's status and effective effort once live.
 export type ModelBinding = ChipBinding<ModelChoice, ModelInfo> & { label: string };
 

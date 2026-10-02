@@ -23,13 +23,16 @@ export type ModelCatalogue = z.infer<typeof ModelCatalogueSchema>;
 // The five entries `reads.jsonl` seq 3 carries before the relay's aliases, which exist only through the relay and
 // arrive with the first routed launch. Haiku is the one that cannot hold auto mode and has no effort levels. W3: with the
 // resolved model and the effort levels, so an unstarted tab names what `default` runs and offers its levels before any
-// launch has listed the catalogue (the engine is pinned, so the fixture's rows are its rows).
+// launch has listed the catalogue (the engine is pinned, so the fixture's rows are its rows). W9 (H4): Sonnet resolves to
+// `claude-sonnet-5-5[1m]`, as every pass3 recording lists it (`pass3/w4-question-partial.jsonl` the latest) and as the
+// owner's sessions report it; reads.jsonl's `claude-sonnet-5[1m]` predates it, so an exact match on the resolved id
+// (the selector's check mark, the mode menu's auto verdict) missed a running Sonnet session.
 const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 export const BUILTIN_MODELS: readonly ModelCatalogueEntry[] = Object.freeze([
   { value: 'default', displayName: 'Default (recommended)', resolvedModel: 'claude-opus-5-5[1m]', supportedEffortLevels: LEVELS, supportsAutoMode: true, supportsFastMode: true },
   { value: 'opus', displayName: 'Opus 5.5 (1M context)', resolvedModel: 'claude-opus-5-5[1m]', supportedEffortLevels: LEVELS, supportsAutoMode: true, supportsFastMode: true },
   { value: 'fable', displayName: 'Fable 5.1', resolvedModel: 'claude-fable-5-1[1m]', supportedEffortLevels: LEVELS, supportsAutoMode: true },
-  { value: 'sonnet', displayName: 'Sonnet 5', resolvedModel: 'claude-sonnet-5[1m]', supportedEffortLevels: LEVELS, supportsAutoMode: true },
+  { value: 'sonnet', displayName: 'Sonnet 5', resolvedModel: 'claude-sonnet-5-5[1m]', supportedEffortLevels: LEVELS, supportsAutoMode: true },
   { value: 'haiku', displayName: 'Haiku', resolvedModel: 'claude-haiku-4-5-20251001', supportsAutoMode: false },
 ]);
 

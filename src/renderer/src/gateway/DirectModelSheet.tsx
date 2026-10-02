@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogueEntry } from '@shared/sessions/models';
-import { DEFAULT_ROW, listName } from '../composer/frame/model-label';
+import { DEFAULT_ROW, listName } from '@shared/sessions/model-label';
 import { useCommand } from '../ipc/query';
 import { useSetup } from '../sessions/store';
 import { settingsDirectoryOf } from '../sessions/useSetupIntent';

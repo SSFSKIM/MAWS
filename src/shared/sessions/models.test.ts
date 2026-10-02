@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { autoModeNote, isGatewayModel, ModelCatalogueSchema, type ModelCatalogueEntry } from './models';
+import { rowFor } from './model-label';
+import { autoModeNote, BUILTIN_MODELS, isGatewayModel, ModelCatalogueSchema, type ModelCatalogueEntry } from './models';
 
 const sonnet: ModelCatalogueEntry = { value: 'sonnet', displayName: 'Sonnet 5', supportsAutoMode: true };
 const haiku: ModelCatalogueEntry = { value: 'haiku', displayName: 'Haiku' }; // reads.jsonl seq 3: no supportsAutoMode
@@ -35,5 +38,17 @@ describe('the model catalogue', () => {
     const parsed = ModelCatalogueSchema.parse({ models: [{ ...sonnet, resolvedModel: 'claude-sonnet-5' }], source: 'live', at: '2026-09-29T00:00:00.000Z' });
     expect(parsed.models[0]).toMatchObject({ resolvedModel: 'claude-sonnet-5' });
     expect(ModelCatalogueSchema.safeParse({ models: [], source: 'guess', at: null }).success).toBe(false);
+  });
+});
+
+// W9 (H4): the built-in rows stand in until a launch lists the catalogue, so a running session's resolved id must find
+// its row among them (the selector's check mark and the mode menu's auto verdict match on it exactly).
+describe('the built-in catalogue', () => {
+  it('resolves Sonnet as the latest pass3 recording lists it, so a running Sonnet session finds its row', () => {
+    const recorded = readFileSync(join(__dirname, '../../../spikes/protocol-probe/fixtures/pass3/w4-question-partial.jsonl'), 'utf8');
+    const resolved = /\{"value":"sonnet","resolvedModel":"([^"]+)"/.exec(recorded)?.[1];
+    expect(resolved).toBe('claude-sonnet-5-5[1m]');
+    expect(BUILTIN_MODELS.find((m) => m.value === 'sonnet')?.resolvedModel).toBe(resolved);
+    expect(rowFor(BUILTIN_MODELS, resolved!)?.value).toBe('sonnet');
   });
 });
