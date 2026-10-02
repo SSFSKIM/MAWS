@@ -50,8 +50,8 @@
       "model": "claude-sonnet-5-5",
       "safeguard": {
         "flagged": 0,
-        "notEvaluated": 1,
-        "reviewed": 3
+        "notEvaluated": 4,
+        "reviewed": 0
       },
       "terminalReason": "completed",
       "toolCalls": 4,
@@ -79,7 +79,7 @@
           "groupable": true,
           "hidden": false,
           "humanDecision": false,
-          "safeguard": "not_flagged",
+          "safeguard": "skipped",
           "startsGroup": true,
           "subagentLifecycle": null
         },
@@ -178,7 +178,7 @@
       "groupable": true,
       "hidden": false,
       "humanDecision": false,
-      "safeguard": "not_flagged",
+      "safeguard": "skipped",
       "startsGroup": false,
       "subagentLifecycle": null
     },
@@ -241,7 +241,7 @@
       "groupable": true,
       "hidden": false,
       "humanDecision": false,
-      "safeguard": "not_flagged",
+      "safeguard": "skipped",
       "startsGroup": false,
       "subagentLifecycle": null
     },
@@ -376,8 +376,8 @@
       "model": "claude-sonnet-5-5",
       "safeguard": {
         "flagged": 0,
-        "notEvaluated": 1,
-        "reviewed": 1
+        "notEvaluated": 2,
+        "reviewed": 0
       },
       "terminalReason": "aborted_tools",
       "toolCalls": 2,
@@ -453,7 +453,7 @@
           "groupable": true,
           "hidden": false,
           "humanDecision": false,
-          "safeguard": "not_flagged",
+          "safeguard": "skipped",
           "startsGroup": false,
           "subagentLifecycle": null
         },
@@ -610,8 +610,8 @@
       "model": "claude-sonnet-5-5",
       "safeguard": {
         "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 1
+        "notEvaluated": 1,
+        "reviewed": 0
       },
       "terminalReason": "completed",
       "toolCalls": 1,
@@ -636,7 +636,7 @@
       "groupable": true,
       "hidden": false,
       "humanDecision": false,
-      "safeguard": "not_flagged",
+      "safeguard": "skipped",
       "startsGroup": false,
       "subagentLifecycle": null
     },
