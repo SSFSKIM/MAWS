@@ -32,7 +32,7 @@ export type UnknownSystemFrame = z.infer<typeof UnknownSystemFrameSchema>;
 // ---------------------------------------------------------------------------------------------------------------------
 // System subtypes. Present in the fixtures (both passes): init, status, thinking_tokens, background_tasks_changed,
 // task_started, task_progress, task_updated, task_notification, hook_started, hook_response, commands_changed.
-// The rest are typed from research/sdk-wire-gap.md §1.2.
+// The rest are typed from research/sdk-wire-gap.md §1.2, except the remote-surface pushes (R1), typed from pass 3.
 
 const systemFrame = <S extends string, T extends z.ZodRawShape>(subtype: S, shape: T) =>
   UnknownSystemFrameSchema.extend({ subtype: z.literal(subtype), ...shape });
@@ -51,6 +51,10 @@ export const SystemInitFrameSchema = systemFrame('init', {
   capabilities: z.array(z.string()).optional(),
   claude_code_version: z.string(),
   output_style: z.string().optional(),
+  // R1: plugin load errors and warnings (absent on 2.1.283 when there are none, null on 2.1.287); the engine's schema
+  // names `plugin`, `type` and `message` on each, `path` on an error of a directory entry that did not load at all
+  plugin_errors: z.array(z.looseObject({ plugin: z.string(), message: z.string(), type: z.string().optional() })).nullable().optional(),
+  plugin_warnings: z.array(z.looseObject({ plugin: z.string(), message: z.string(), type: z.string().optional() })).nullable().optional(),
 });
 export type SystemInitFrame = z.infer<typeof SystemInitFrameSchema>;
 
@@ -224,6 +228,25 @@ export type SystemPeerMessageHoldFrame = z.infer<typeof SystemPeerMessageHoldFra
 export const SystemElicitationCompleteFrameSchema = systemFrame('elicitation_complete', { mcp_server_name: z.string(), elicitation_id: z.string() });
 export type SystemElicitationCompleteFrame = z.infer<typeof SystemElicitationCompleteFrameSchema>;
 
+// R1 (charter D-9 as amended 2026-10-01): the engine's remote-surface pushes (2.1.285 onward), fire-and-forget frames a
+// headless session sends with no `ui_attach` for a plugin's `$.ui.toast`, `$.ui.status` and `$.ui.log`, and when a
+// drawn tree may be stale. Typed from pass3/mods-* (2.1.287) and the engine's schema text: `plugin` is the registry name
+// the hooks engine knows (never plugin-settable); `text` is plain text of at most 4096 characters, drawn as a text node;
+// a toast's `timeout_ms` is the plugin's or the engine's default (4000); a status replaces the plugin's one pinned line
+// and null removes it (no fixture records the removal, so the key may be absent too); an invalidate names the render
+// event (`ui.render`), never a plugin.
+export const SystemUiToastFrameSchema = systemFrame('ui_toast', { plugin: z.string(), text: z.string(), timeout_ms: z.number().optional() });
+export type SystemUiToastFrame = z.infer<typeof SystemUiToastFrameSchema>;
+
+export const SystemUiStatusFrameSchema = systemFrame('ui_status', { plugin: z.string(), text: z.string().nullable().optional() });
+export type SystemUiStatusFrame = z.infer<typeof SystemUiStatusFrameSchema>;
+
+export const SystemUiLogFrameSchema = systemFrame('ui_log', { plugin: z.string(), text: z.string() });
+export type SystemUiLogFrame = z.infer<typeof SystemUiLogFrameSchema>;
+
+export const SystemUiInvalidateFrameSchema = systemFrame('ui_invalidate', { event: z.string().optional() });
+export type SystemUiInvalidateFrame = z.infer<typeof SystemUiInvalidateFrameSchema>;
+
 // The validator for every `system` frame: one entry per typed subtype; a subtype absent here parses as UnknownSystemFrame.
 export const SYSTEM_SUBTYPE_SCHEMAS: Readonly<Record<string, z.ZodType>> = Object.freeze({
   init: SystemInitFrameSchema,
@@ -248,6 +271,10 @@ export const SYSTEM_SUBTYPE_SCHEMAS: Readonly<Record<string, z.ZodType>> = Objec
   permission_denied: SystemPermissionDeniedFrameSchema,
   peer_message_hold: SystemPeerMessageHoldFrameSchema,
   elicitation_complete: SystemElicitationCompleteFrameSchema,
+  ui_toast: SystemUiToastFrameSchema, // R1
+  ui_status: SystemUiStatusFrameSchema, // R1
+  ui_log: SystemUiLogFrameSchema, // R1
+  ui_invalidate: SystemUiInvalidateFrameSchema, // R1
 });
 
 export type SystemFrame =
@@ -257,6 +284,7 @@ export type SystemFrame =
   | SystemHookStartedFrame | SystemHookProgressFrame | SystemHookResponseFrame
   | SystemModelRefusalFallbackFrame | SystemModelRefusalNoFallbackFrame | SystemNotificationFrame | SystemPermissionDeniedFrame
   | SystemPeerMessageHoldFrame | SystemElicitationCompleteFrame
+  | SystemUiToastFrame | SystemUiStatusFrame | SystemUiLogFrame | SystemUiInvalidateFrame // R1
   | UnknownSystemFrame;
 
 // Table lookup that ignores inherited keys, so a frame typed `constructor` or `toString` is unknown, not a prototype method.

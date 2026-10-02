@@ -2,6 +2,8 @@
 // `system` frame to its X1 payloads. Subtypes observed in the fixtures: init (handled by the class: it touches turn
 // state), status, thinking_tokens, background_tasks_changed, task_started, task_progress, task_updated,
 // task_notification, hook_started, hook_response, commands_changed; the rest follow C1's typed frames and the table.
+// R1: the remote-surface pushes (ui_toast, ui_status, ui_log, ui_invalidate; pass3/mods-*) map to `plugin.*`, and
+// init's plugin load errors and warnings to `plugin.load_issue` (`pluginLoadIssues`, called by the class's init).
 // C1's `SystemFrame` union carries the loose `UnknownSystemFrame` (`subtype: string`), so a switch on `subtype` does
 // not narrow; each case names its frame type explicitly (the frame was parsed with that schema by `parseStdoutFrame`).
 import type { AgentId, MessageUuid, TaskId, ToolUseId } from '@shared/graph/ids';
@@ -24,6 +26,11 @@ import type {
   SystemTaskProgressFrame,
   SystemTaskStartedFrame,
   SystemTaskUpdatedFrame,
+  SystemInitFrame,
+  SystemUiInvalidateFrame,
+  SystemUiLogFrame,
+  SystemUiStatusFrame,
+  SystemUiToastFrame,
 } from '@shared/wire/frames';
 import { boolOr, compact, stringOrNull } from './normalizer-support';
 
@@ -44,6 +51,17 @@ const none: SystemMapping = { payloads: [], agentId: null };
 const one = (payload: EventPayload, agentId: AgentId | null = null): SystemMapping => ({ payloads: [payload], agentId });
 const asTaskId = (id: string) => id as TaskId;
 const emptyToNull = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
+
+// R1: how long the engine would show a toast whose frame names no time (its documented default, 2.1.287).
+export const ENGINE_TOAST_TIMEOUT_MS = 4000;
+
+// R1: init's plugin load errors, then its warnings, one `plugin.load_issue` each, in the frame's order.
+export function pluginLoadIssues(frame: SystemInitFrame): EventPayload[] {
+  return [
+    ...(frame.plugin_errors ?? []).map((e): EventPayload => ({ kind: 'plugin.load_issue', plugin: e.plugin, level: 'error', message: e.message })),
+    ...(frame.plugin_warnings ?? []).map((w): EventPayload => ({ kind: 'plugin.load_issue', plugin: w.plugin, level: 'warning', message: w.message })),
+  ];
+}
 
 export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemMapping {
   switch (frame.subtype) {
@@ -141,6 +159,22 @@ export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemM
     case 'background_tasks_changed': {
       const f = frame as SystemBackgroundTasksChangedFrame;
       return one({ kind: 'tasks.snapshot', tasks: f.tasks.map((t) => ({ taskId: asTaskId(t.task_id), taskType: t.task_type, description: t.description, ambient: boolOr(t.ambient, false) })) });
+    }
+    case 'ui_toast': { // R1
+      const f = frame as SystemUiToastFrame;
+      return one({ kind: 'plugin.toast', plugin: f.plugin, text: f.text, timeoutMs: f.timeout_ms ?? ENGINE_TOAST_TIMEOUT_MS });
+    }
+    case 'ui_status': { // R1: the wire's null (a removal) is ''
+      const f = frame as SystemUiStatusFrame;
+      return one({ kind: 'plugin.status', plugin: f.plugin, text: f.text ?? '' });
+    }
+    case 'ui_log': { // R1
+      const f = frame as SystemUiLogFrame;
+      return one({ kind: 'plugin.log', plugin: f.plugin, text: f.text });
+    }
+    case 'ui_invalidate': { // R1: carried for R2's surface, which re-asks the trees it drew
+      const f = frame as SystemUiInvalidateFrame;
+      return one({ kind: 'plugin.invalidate', event: f.event ?? null });
     }
     // Journaled, no event, no consumer in P0 (the process table reads status and peer holds from the frames themselves).
     case 'status':

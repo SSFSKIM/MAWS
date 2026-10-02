@@ -244,6 +244,7 @@ describe('wire frames reject malformed input', () => {
       'hook_progress', 'hook_response', 'hook_started', 'informational', 'init', 'model_refusal_fallback',
       'model_refusal_no_fallback', 'notification', 'peer_message_hold', 'permission_denied', 'session_state_changed',
       'status', 'task_notification', 'task_progress', 'task_started', 'task_updated', 'thinking_tokens',
+      'ui_invalidate', 'ui_log', 'ui_status', 'ui_toast', // R1
     ]);
   });
 });

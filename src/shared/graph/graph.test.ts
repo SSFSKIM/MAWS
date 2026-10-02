@@ -80,7 +80,7 @@ describe('graph schemas accept and reject', () => {
 
     it('lists every event kind once and the union covers each', () => {
       expect(new Set(EVENT_KINDS).size).toBe(EVENT_KINDS.length);
-      expect(EVENT_KINDS).toHaveLength(49);
+      expect(EVENT_KINDS).toHaveLength(54); // R1: the five plugin.* kinds
       const covered = SessionEventSchema.options.map((option) => option.shape.kind.value).sort();
       expect(covered).toEqual([...EVENT_KINDS].sort());
     });
@@ -162,6 +162,11 @@ describe('graph schemas accept and reject', () => {
         'session.reconnect': { phase: 'reconnected', attempt: 2, maxAttempts: null, trigger: 'host_restart', reason: null },
         'notice.posted': { level: 'info', text: 'hi', key: null },
         'process.exited': { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null /* C12 */ },
+        'plugin.toast': { plugin: 'mods-probe', text: 'hi', timeoutMs: 4000 }, // R1
+        'plugin.status': { plugin: 'mods-probe', text: '' },
+        'plugin.log': { plugin: 'mods-probe', text: 'line' },
+        'plugin.invalidate': { event: 'ui.render' },
+        'plugin.load_issue': { plugin: 'p@market', level: 'warning', message: 'shadowed folder' },
         'frame.unknown': { frameType: 'wibble', subtype: null },
       };
       expect(Object.keys(samples).sort()).toEqual([...EVENT_KINDS].sort());

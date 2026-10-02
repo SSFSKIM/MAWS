@@ -77,6 +77,10 @@ export const EVENT_KINDS = [
   // trouble: api.retry is the engine's own HTTP retry inside a turn (system/api_retry); session.reconnect is the app
   // re-attaching a session record to an engine process (charter X1 "error and reconnect")
   'error.raised', 'api.retry', 'session.reconnect', 'notice.posted', 'process.exited',
+  // plugins (R1; charter D-9 as amended 2026-10-01): a plugin's toast, pinned status line and log line from the engine's
+  // remote-surface pushes, a drawn tree the engine says may be stale (carried, unused until R2), and a load error or
+  // warning from `system/init`
+  'plugin.toast', 'plugin.status', 'plugin.log', 'plugin.invalidate', 'plugin.load_issue',
   // retention of the unknown
   'frame.unknown',
 ] as const;
@@ -211,6 +215,15 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     code: z.number().nullable(), signal: nullableString(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */]), lostAttentionCount: z.number(),
     budget: z.strictObject({ limitKiB: z.number(), totalKiB: z.number() }).nullable(), // C12
   }),
+  // R1: `plugin` is the engine's registry name for the plugin; `text` is plain text. A toast's `timeoutMs` is the
+  // plugin's, else the engine's default (4000). A status replaces the plugin's one pinned line; '' removes it (the
+  // wire's null). An invalidate names the render event whose trees may be stale (`ui.render`), not a plugin. A load
+  // issue is one entry of init's `plugin_errors` (level error) or `plugin_warnings` (level warning); every init repeats them.
+  event('plugin.toast', { plugin: z.string(), text: z.string(), timeoutMs: z.number() }),
+  event('plugin.status', { plugin: z.string(), text: z.string() }),
+  event('plugin.log', { plugin: z.string(), text: z.string() }),
+  event('plugin.invalidate', { event: nullableString() }),
+  event('plugin.load_issue', { plugin: z.string(), level: z.enum(['error', 'warning']), message: z.string() }),
   event('frame.unknown', { frameType: z.string(), subtype: nullableString() }),
 ]);
 
