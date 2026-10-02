@@ -2,7 +2,7 @@
 // M2 "Proves"). The probe-journal pins live in journals.test.ts.
 import type { SessionEvent } from '@shared/graph/events';
 import { afterEach, describe, expect, it } from 'vitest';
-import { loadEventFixture, loadSyntheticJournal } from '../../../../../test/support/fixtures';
+import { loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../test/support/fixtures';
 import { synthesise } from '../../../../../test/support/synth-transcript';
 import { journalToEvents } from '../dev/journal';
 import { rowsOf, withAllExpanded } from './derive';
@@ -253,6 +253,35 @@ describe('event fixtures', () => {
     expect(cellsOf(rows).some((c) => c.toolName === 'Agent')).toBe(false);
     expect(ofKind(rows, 'divider').map((d) => d.origin)).toEqual(['human']);
     expect(ofKind(rows, 'thinking')[0].durationMs).toBeNull();
+  });
+
+  // W1's hook notices after a reload (C4 · C6): disk keeps no hook events, so C4's backfill (debt wave 7) states a hook
+  // that got in the way from what the engine writes, in the wire's own kinds: the meta "Stop hook feedback" record and
+  // the blocked prompt's `informational` record (w1-hooks-blocking.jsonl lines 24 and 31) each become a `hook.started`
+  // and a `hook.finished` in the exit-2 form (outcome error, exit code 2, the reason on stderr), whichever way the hook
+  // blocked live; the blocked prompt opens and closes a turn of its own with the record's "Original prompt:". The
+  // reload reads the notices the live session showed (pass3/hooks-blocking is the same run), in the same places, folded
+  // or not.
+  it('events/hooks-blocking-disk: the disk form of pass3/hooks-blocking reads the same hook notices in the same places as live', () => {
+    const shape = (rows: Row[]) =>
+      rows
+        .filter((row) => row.kind !== 'time' && !(row.kind === 'error' && row.scope === 'exit')) // the disk read ends with no exit of its own
+        .map((row) => (row.kind === 'error' ? `${row.scope}:${row.severity}:${row.text}${row.action ? `:${row.action}` : ''}` : row.kind === 'user' ? `user:${row.text}` : row.kind === 'assistant_text' ? `${row.phase}:${row.markdown}` : row.kind));
+    const disk = stateOf(loadEventFixture('hooks-blocking-disk'));
+    const live = stateOf(journalToEvents(loadJournal('pass3', 'hooks-blocking')));
+    expect(shape(rowsOf(disk))).toEqual([
+      'user:Reply ONE',
+      'answer:ONE',
+      'hook:notice:Hook re-prompted Claude · Say REPROMPTED and stop',
+      'answer:REPROMPTED',
+      'user:BLOCKME please reply TWO',
+      'hook:notice:A hook blocked your prompt · BLOCKED_BY_TEST_HOOK:edit_prompt',
+    ]);
+    expect(shape(rowsOf(disk))).toEqual(shape(rowsOf(live)));
+    expect(shape(rowsOf(withAllExpanded(disk)))).toEqual(shape(rowsOf(withAllExpanded(live))));
+    // the blocked prompt's notice sits in the turn of the prompt it hands back
+    const blocked = ofKind(rowsOf(disk), 'error').find((row) => row.action === 'edit_prompt')!;
+    expect(ofKind(rowsOf(disk), 'user').find((row) => row.turnId === blocked.turnId)?.text).toBe('BLOCKME please reply TWO');
   });
 
   it('events/spill: the shell detail carries the spill unloaded, its size from persistedOutputSize, with the wire preview as content', () => {
