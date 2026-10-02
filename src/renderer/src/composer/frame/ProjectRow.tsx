@@ -65,7 +65,8 @@ function ProjectMenu({ binding, onDone }: { binding: ProjectRowBinding; onDone(r
       />
       {/* about five rows show before the list scrolls (Codex, app-primary:147583) */}
       <Command.List className="max-h-40 overflow-y-auto py-1">
-        <Command.Empty className="px-2 py-1.5 text-ui-sm text-fg-muted">No projects found</Command.Empty>
+        {/* the footer's items are cmdk items too, so its own Empty never shows: the list says it */}
+        {shown.length === 0 && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">No projects found</p>}
         {shown.map((project) => {
           const folder = basename(project.directory);
           const chosen = project.id === binding.projectId;

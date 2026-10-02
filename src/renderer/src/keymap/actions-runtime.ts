@@ -111,26 +111,34 @@ export interface UnstartedTitleAnswer {
 export type UnstartedTitle = (appSessionId: AppSessionId) => UnstartedTitleAnswer | null;
 
 const unstartedTitles = createHandlerRegistry<'title', [AppSessionId]>('unstarted title');
-const titleRevision = create<{ n: number }>()(() => ({ n: 0 }));
+// a hook by name, so the React Compiler never memoizes its call away
+const useTitleRevision = create<{ n: number }>()(() => ({ n: 0 }));
 
 export const registerUnstartedTitle = (fn: UnstartedTitle): (() => void) => unstartedTitles.register('title', fn);
-export const unstartedTitlesChanged = (): void => titleRevision.setState((s) => ({ n: s.n + 1 }));
+export const unstartedTitlesChanged = (): void => useTitleRevision.setState((s) => ({ n: s.n + 1 }));
 
-function unstartedTitleOf(appSessionId: AppSessionId): UnstartedTitleAnswer {
-  const registered = unstartedTitles.get('title') as UnstartedTitle | undefined;
-  const answer = registered?.(appSessionId);
-  if (answer) return answer;
-  const { unstarted, projects } = useSessions.getState();
-  const projectId = unstarted.get(appSessionId)?.projectId ?? null;
-  return { title: NEW_CHAT, project: projectId ? (projects.get(projectId)?.name ?? null) : null, projectId };
+// The answer: the registrant's, else C5's own from `sessions.unstarted`. `revision` is an input so that a memoizing
+// compiler (the React Compiler runs over the renderer) computes it again when the registrant announces a change.
+function answerOf(appSessionId: AppSessionId, registered: UnstartedTitle | undefined, fallback: Omit<UnstartedTitleAnswer, 'title'>, revision: number): UnstartedTitleAnswer {
+  void revision;
+  return registered?.(appSessionId) ?? { title: NEW_CHAT, ...fallback };
 }
 
+function fallbackOf(appSessionId: AppSessionId): Omit<UnstartedTitleAnswer, 'title'> {
+  const { unstarted, projects } = useSessions.getState();
+  const projectId = unstarted.get(appSessionId)?.projectId ?? null;
+  return { projectId, project: projectId ? (projects.get(projectId)?.name ?? null) : null };
+}
+
+const unstartedTitleOf = (appSessionId: AppSessionId): UnstartedTitleAnswer =>
+  answerOf(appSessionId, unstartedTitles.get('title') as UnstartedTitle | undefined, fallbackOf(appSessionId), useTitleRevision.getState().n);
+
 export function useUnstartedTitle(appSessionId: AppSessionId): UnstartedTitleAnswer {
-  useSessions((s) => s.unstarted.get(appSessionId)?.projectId); // re-render when the fallback's answer moves
-  useSessions((s) => s.projects);
-  unstartedTitles.useHandler('title');
-  titleRevision((s) => s.n);
-  return unstartedTitleOf(appSessionId);
+  const projectId = useSessions((s) => s.unstarted.get(appSessionId)?.projectId ?? null);
+  const project = useSessions((s) => (projectId ? (s.projects.get(projectId)?.name ?? null) : null));
+  const registered = unstartedTitles.useHandler('title') as UnstartedTitle | undefined;
+  const revision = useTitleRevision((s) => s.n);
+  return answerOf(appSessionId, registered, { projectId, project }, revision);
 }
 
 // ---- New chat's preselection (2026-10-01) -------------------------------------------------------------------------------
