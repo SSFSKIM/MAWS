@@ -1,4 +1,4 @@
-// Transient notices (residue *Banner placement*): Radix toasts at the main region's bottom right, gone after six seconds
+// Transient notices (residue *Banner placement*): Radix toasts at the shell's bottom right, gone after six seconds
 // (paused while hovered or while the window is in the background, Radix's rule). Acting on a toast dismisses it; the
 // attention fallback toast (`attention/navigation.ts`) opens its session that way.
 import { Toast } from 'radix-ui';

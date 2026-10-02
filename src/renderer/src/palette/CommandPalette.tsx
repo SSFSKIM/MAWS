@@ -3,6 +3,7 @@
 // found with the sidebar search's own rule (title, project name, directory), so the two agree. ⏎ opens a session in
 // the focused pane and ⌘⏎ in the split; a project is revealed in the sidebar; an action runs through `runAction`.
 // Actions with no handler are listed greyed with what they wait for.
+import { useDialogFocus } from '../app/dialog-focus';
 import { Command } from 'cmdk';
 import { Dialog, VisuallyHidden } from 'radix-ui';
 import { useState, type KeyboardEvent } from 'react';
@@ -55,16 +56,21 @@ const UNAVAILABLE: Partial<Record<ActionId, string>> = {
   'composer.cycleMode': 'Keyboard only, in the composer',
 };
 
+// Bound item registration and subscriptions; filtering still searches the complete index.
+const RESULT_LIMIT = 50;
+
 const ITEM =
   'flex h-(--row-h) cursor-default items-center gap-2 rounded-sm px-2 text-ui data-[disabled=true]:text-fg-faint data-[selected=true]:bg-bg-hover';
 const GROUP = '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-ui-sm [&_[cmdk-group-heading]]:text-fg-muted';
 
 export function CommandPalette() {
   const open = usePalette((s) => s.open);
+  const focus = useDialogFocus();
   return (
     <Dialog.Root open={open} onOpenChange={(next) => usePalette.setState({ open: next })}>
       <Dialog.Portal>
         <Dialog.Content
+          {...focus}
           aria-describedby={undefined}
           className="fixed top-[16%] left-1/2 z-50 w-[min(560px,90vw)] -translate-x-1/2 overflow-hidden rounded-lg border border-border-strong bg-bg-overlay text-fg"
         >
@@ -114,18 +120,21 @@ function Palette() {
         placeholder="Search sessions, projects and actions"
         className="h-11 w-full border-b border-border bg-transparent px-3 text-ui text-fg outline-none placeholder:text-fg-faint"
       />
+      {(entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT) && (
+        <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Showing the first {RESULT_LIMIT} matches per group. Type to narrow results.</p>
+      )}
       <Command.List className="max-h-[min(420px,60vh)] overflow-y-auto p-1">
         <Command.Empty className="p-3 text-ui-sm text-fg-muted">Nothing matches</Command.Empty>
         {entries.sessions.length > 0 && (
           <Command.Group heading="Sessions" className={GROUP}>
-            {entries.sessions.map((record) => (
+            {entries.sessions.slice(0, RESULT_LIMIT).map((record) => (
               <SessionItem key={record.appId} record={record} project={record.projectId ? (projects.get(record.projectId) ?? null) : null} onOpen={openSession} />
             ))}
           </Command.Group>
         )}
         {entries.projects.length > 0 && (
           <Command.Group heading="Projects" className={GROUP}>
-            {entries.projects.map((project) => (
+            {entries.projects.slice(0, RESULT_LIMIT).map((project) => (
               <Command.Item key={project.id} value={`project:${project.id}`} onSelect={() => reveal(project.id)} className={ITEM}>
                 <span className="truncate">{project.name}</span>
               </Command.Item>

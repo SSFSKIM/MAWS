@@ -32,6 +32,7 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
   const show = (target: SettingsSection) => {
     setActive(target);
     scrollTo(target);
+    body.current?.querySelector<HTMLElement>(`#${headingId(target)}`)?.focus({ preventScroll: true });
   };
   // Opened or re-opened at a section (settings.open's argument): scroll to it once its rows exist.
   const ready = settings !== null;
@@ -108,8 +109,8 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
 function Section({ id, children }: { id: SettingsSection; children: ReactNode }) {
   return (
     <section aria-labelledby={headingId(id)} className="border-t border-border pt-3 pb-2.5 first:border-t-0">
-      <h3 className="m-0 mb-1 flex items-baseline gap-2.5 text-ui font-semibold">
-        <span id={headingId(id)}>{SECTIONS[id]}</span>
+      <h3 id={headingId(id)} aria-label={SECTIONS[id]} tabIndex={-1} className="m-0 mb-1 flex items-baseline gap-2.5 text-ui font-semibold outline-accent focus-visible:outline-2">
+        <span>{SECTIONS[id]}</span>
         {HINTS[id] && <span className="text-ui-sm font-normal text-fg-muted">{HINTS[id]}</span>}
       </h3>
       {children}

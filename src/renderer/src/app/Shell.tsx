@@ -3,6 +3,7 @@
 // inert; a maximized panel takes the main column's place while the main region keeps its state offscreen. The sidebar
 // is M3's, the main region's panes M4's (C1's diagnostics strip is now the content of the Diagnostics tab). W5: the main
 // region opens with the tab strip directly beneath the toolbar; the floating Overview moves over the panes.
+import { BannerHost } from './BannerHost';
 import { MainArea } from '../main/MainArea';
 import { OverviewLayer } from '../overview/OverviewPanel';
 import { CommandPalette } from '../palette/CommandPalette';
@@ -23,22 +24,23 @@ export function Shell() {
   const mainHidden = useLayout((s) => s.regions.panel.maximized && !s.regions.panel.collapsed);
 
   return (
-    <div className="grid h-full grid-rows-[var(--toolbar-h)_minmax(0,1fr)] bg-bg text-fg" style={{ gridTemplateColumns: columns }}>
+    <div className="relative grid h-full grid-rows-[var(--toolbar-h)_auto_minmax(0,1fr)] bg-bg text-fg [&>[data-region=panel]]:row-start-3" style={{ gridTemplateColumns: columns }}>
       <Toolbar />
+      <BannerHost className="col-span-full row-start-2" />
       <SidebarRegion />
       <section
         id={MAIN_REGION_ID}
         data-region="main"
         aria-label="Main"
         inert={mainHidden}
-        className="relative col-start-2 row-start-2 flex min-h-0 min-w-0 flex-col overflow-hidden"
+        className="relative col-start-2 row-start-3 flex min-h-0 min-w-0 flex-col overflow-hidden"
       >
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           <MainArea />
           <OverviewLayer />
         </div>
-        <ToastHost />
       </section>
+      <ToastHost />
       <PanelRegion />
       <CommandPalette />
     </div>
@@ -58,7 +60,7 @@ function SidebarRegion() {
       data-region="sidebar"
       aria-label="Sidebar"
       inert={collapsed}
-      className={`relative col-start-1 row-start-2 flex min-h-0 min-w-0 bg-bg-raised ${collapsed ? '' : 'border-r border-border'}`}
+      className={`relative col-start-1 row-start-3 flex min-h-0 min-w-0 bg-bg-raised ${collapsed ? '' : 'border-r border-border'}`}
     >
       {/* The contents clip here, not on the region, so the resizer can straddle the region's edge. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

@@ -55,10 +55,10 @@ export function reservedItemOf(chord: string): string | null {
 
 // The action other than `id` that already holds `chord`, if any.
 export function conflictOf(id: ActionId, chord: string, overrides: KeymapOverrides): ActionId | null {
-  const wanted = parseChord(chord);
+  const wanted = chordsHeld(id, { ...overrides, [id]: chord }).map(parseChord);
   for (const other of ACTION_IDS) {
     if (other === id) continue;
-    if (chordsHeld(other, overrides).some((held) => same(parseChord(held), wanted))) return other;
+    if (chordsHeld(other, overrides).some((held) => wanted.some((candidate) => same(parseChord(held), candidate)))) return other;
   }
   return null;
 }
@@ -82,10 +82,9 @@ export function captureChord(event: KeyEventLike, id: ActionId, overrides: Keyma
   } catch (error) {
     return { kind: 'refused', message: (error as Error).message };
   }
-  // The macOS menu owns a menu action's chord everywhere in the window, so a key that types a character (with or
-  // without Shift) would stop typing it; a function key is the one bare key a menu may take.
+  // Menu and app-wide renderer actions own their chord even in text fields. Only a function key may be bare.
   const spec: ActionSpec = ACTIONS[id];
-  if (spec.sink === 'menu' && !event.metaKey && !event.ctrlKey && !event.altKey && !FUNCTION_KEY.test(event.key)) return { kind: 'refused', message: KEYBOARD.menuNeedsModifier };
+  if ((spec.sink === 'menu' || spec.scope === 'app') && !event.metaKey && !event.ctrlKey && !event.altKey && !FUNCTION_KEY.test(event.key)) return { kind: 'refused', message: spec.sink === 'menu' ? KEYBOARD.menuNeedsModifier : KEYBOARD.appNeedsModifier };
   // A role item's chord never reaches an action, whatever its sink: the menu takes it first.
   const reserved = reservedItemOf(chord);
   if (reserved !== null) return { kind: 'refused', message: KEYBOARD.reserved(reserved) };

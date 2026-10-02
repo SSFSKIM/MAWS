@@ -10,7 +10,8 @@ import type { Location } from '@shared/sessions/intent';
 import { markFocusOnMount } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { NEW_CHAT } from '../sessions/title';
-import { allTabs } from '../stores/layout-model';
+import { allTabs, currentSet } from '../stores/layout-model';
+import { focusPaneElement } from '../main/pane-dom';
 import { useSessions } from '../stores/sessions';
 import { create } from 'zustand';
 import { createHandlerRegistry } from './registry';
@@ -95,14 +96,25 @@ export const isUnstarted = (appSessionId: AppSessionId): boolean => !useSessions
 export async function requestCloseTab(id: string): Promise<void> {
   const ref = findTab(useLayout.getState().main, id);
   if (!ref || !(await guardAllows(ref))) return;
-  // An unstarted session's tab goes without a ⌘⇧T entry, and its intent goes with it. Every other tab closes the
-  // ordinary way.
+  const before = useLayout.getState().main;
+  const pane = currentSet(before).panes.findIndex((p) => p.tabs.some((t) => t.id === id));
+  const focusedTab = document.activeElement?.closest('[data-tab-id]')?.getAttribute('data-tab-id');
+  const restore = pane !== -1 && (currentSet(before).panes[pane].activeTabId === id || focusedTab === id);
+  // An unstarted tab and its intent disappear without a reopen entry; other tabs close normally.
   if (ref.kind === 'session' && isUnstarted(ref.appSessionId)) {
     useLayout.getState().dropSession(ref.appSessionId);
     useSessions.getState().dropUnstarted(ref.appSessionId);
-    return;
+  } else {
+    useLayout.getState().closeTab(id);
   }
-  useLayout.getState().closeTab(id);
+  if (restore) {
+    // Wait for React to replace the tab/content, including collapsing a split whose last tab closed.
+    requestAnimationFrame(() => {
+      const main = useLayout.getState().main;
+      if (main.current !== before.current) return;
+      focusPaneElement(currentSet(main).panes.length === 1 ? 0 : pane as 0 | 1);
+    });
+  }
 }
 
 // I2: an unstarted tab a session opened beside in its place (the layout store's `ReplaceGuard`): its guard as for a

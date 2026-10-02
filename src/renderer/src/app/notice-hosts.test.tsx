@@ -43,24 +43,24 @@ describe('banner host', () => {
     expect(screen.getAllByRole('status')).toHaveLength(1);
   });
 
-  it('sits once in the main region, between the tab strips and the panes, spanning both panes of a split', () => {
+  it('sits once in the shell outside both panes of a split and survives panel maximization', () => {
     render(<Shell />);
     act(() => {
       useLayout.getState().openSession(nine.sessions[0].appId, { split: true });
       banner({ id: 'near-limit', level: 'warning', text: 'near the limit', actions: [], dismissible: true });
     });
     const main = document.querySelector<HTMLElement>('[data-region="main"]')!;
-    const hosts = main.querySelectorAll<HTMLElement>('[data-banner-host]');
+    const hosts = document.querySelectorAll<HTMLElement>('[data-banner-host]');
     expect(hosts).toHaveLength(1);
-    expect(hosts[0].style.gridRow).toBe('2');
-    expect(hosts[0].style.gridColumn).toBe('1 / -1');
-    for (const strip of within(main).getAllByRole('tablist')) expect(strip.closest<HTMLElement>('[data-pane-strip]')!.style.gridRow).toBe('1');
-    for (const panel of within(main).getAllByRole('tabpanel')) expect(panel.style.gridRow).toBe('3');
+    expect(main.contains(hosts[0])).toBe(false);
+    act(() => useLayout.getState().setPanel({ maximized: true, collapsed: false }));
+    expect(screen.getByText('near the limit').closest('[inert]')).toBeNull();
+    expect(document.querySelectorAll('[data-banner-host]')).toHaveLength(1);
   });
 });
 
 describe('toast host', () => {
-  it('shows toasts at the main region’s corner with their actions, and a toast goes after six seconds', async () => {
+  it('shows toasts at the shell’s corner with their actions, and a toast goes after six seconds', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const open = vi.fn();
     render(<ToastHost />);

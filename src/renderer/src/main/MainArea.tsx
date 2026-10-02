@@ -4,7 +4,6 @@
 // strips, the banner host spanning every pane, then the panes' contents; each pane places its strip and its content
 // in its own column (the pane element itself is `display: contents`).
 import { useLayoutEffect, useRef, useState } from 'react';
-import { BannerHost } from '../app/BannerHost';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { DropEdge } from './DropEdge';
@@ -28,8 +27,6 @@ export function MainArea() {
       }}
     >
       <Pane index={0} split={split} column={1} />
-      {/* Over the divider's line in its row: a banner belongs to the whole region, not to a pane. */}
-      <BannerHost className="relative z-10" style={{ gridRow: 2, gridColumn: '1 / -1' }} />
       {split && <SplitDivider width={width} />}
       {split && <Pane index={1} split column={3} />}
       {dragging && !split && <DropEdge />}
