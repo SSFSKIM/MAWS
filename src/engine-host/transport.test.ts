@@ -287,6 +287,91 @@ describe('transport frames and journals', () => {
       }
     }, 10_000);
 
+    it('stdout EOF aborts active and queued writes before reporting failure, even when TERM resumes stdin', async () => {
+      const script = `
+        process.on('SIGUSR1', () => process.stdout.end());
+        process.on('SIGTERM', () => { process.stderr.write('term\\n'); process.stdin.resume(); });
+        process.stdin.on('end', () => process.exit(0));
+        let buffer = '';
+        process.stdin.on('data', chunk => {
+          buffer += chunk;
+          let end;
+          while ((end = buffer.indexOf('\\n')) >= 0) {
+            const frame = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
+            if (frame.type === 'control_request' && ['initialize', 'get_status'].includes(frame.request.subtype)) {
+              const response = frame.request.subtype === 'initialize' ? ${JSON.stringify(INIT_RESPONSE)} : ${JSON.stringify(ROUTED_STATUS)};
+              process.stdout.write(JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response } }) + '\\n');
+              if (frame.request.subtype === 'get_status') process.stdin.pause();
+            } else if (frame.type === 'control_response') process.stderr.write('mutation:' + frame.response.request_id + '\\n');
+          }
+        });
+        setInterval(() => {}, 1000);
+      `;
+      const plan = fakeEngine(script);
+      const transport = spawnEngine(plan, { maxLineChars: MAX_LINE_CHARS });
+      const s = scriptedSession({ session: { plan, spawn: () => transport } });
+      try {
+        await s.session.start();
+        // Broker answers have no RPC deadline signal. Both the active frame and the queued one must abort.
+        const active = s.session.control!.respond('active' as never, { padding: 'x'.repeat(4 * 1024 * 1024) }).catch((error: unknown) => error);
+        const queued = s.session.control!.respond('queued' as never, {}).catch((error: unknown) => error);
+        await new Promise((resolve) => setImmediate(resolve));
+        process.kill(transport.pid!, 'SIGUSR1');
+        expect(await withTimeout(active, 5_000, 'EOF active failure')).toBeInstanceOf(Error);
+        expect(await queued).toBeInstanceOf(Error);
+        expect(await withTimeout(s.session.exited, 5_000, 'EOF exit')).toMatchObject({ code: 0, signal: null });
+        const stderr = s.journal.rows.filter((row) => row.direction === 'stderr').map((row) => (row.frame as { text: string }).text);
+        expect(stderr).toContain('term');
+        expect(stderr.filter((line) => line.startsWith('mutation:'))).toEqual([]);
+        const failed = s.journal.rows.filter((row) => (row.frame as { event?: string }).event === 'write_failed');
+        expect(failed.map((row) => (row.frame as { requestId: string }).requestId)).toEqual(['active', 'queued']);
+        expect(s.journal.rows.filter((row) => row.direction === 'out' && (row.frame as { type: string }).type === 'control_response')).toEqual([]);
+      } finally {
+        transport.kill('SIGKILL');
+        await s.session.exited;
+      }
+    }, 10_000);
+
+    it.each(['inherited', 'closed'] as const)('cleans a TERM-ignoring descendant after a stalled-write leader exits (%s stdio)', async (stdio) => {
+      const descendantScript = `process.on('SIGTERM', () => {}); process.send('ready'); setInterval(() => {}, 1000);`;
+      const script = `
+        const { spawn } = require('node:child_process');
+        const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendantScript)}], { stdio: ['ignore', '${stdio === 'inherited' ? 'inherit' : 'ignore'}', 'ignore', 'ipc'] });
+        child.once('message', () => process.stdout.write(JSON.stringify({ descendant: child.pid }) + '\\n'));
+        process.on('SIGTERM', () => process.stdout.write('{"flushed":true}\\n', () => process.exit(0)));
+        setInterval(() => {}, 1000);
+      `;
+      const transport = spawnEngine(fakeEngine(script), { maxLineChars: MAX_LINE_CHARS });
+      let descendant: number | undefined;
+      const alive = (pid: number) => {
+        try { process.kill(pid, 0); return true; } catch { return false; }
+      };
+      try {
+        const first = await withTimeout(firstFrame(transport), 5_000, 'descendant ready');
+        descendant = (first.frame as { descendant: number }).descendant;
+        const controller = new AbortController();
+        const writing = transport.write({ type: 'control_request', request_id: 'blocked', request: { subtype: 'test', padding: 'x'.repeat(4 * 1024 * 1024) } }, controller.signal).catch((error: unknown) => error);
+        await new Promise((resolve) => setImmediate(resolve));
+        controller.abort();
+        expect(await writing).toBeInstanceOf(Error);
+        transport.kill('SIGTERM');
+        expect(await withTimeout(transport.exited, 5_000, 'leader exit')).toEqual({ code: 0, signal: null });
+        expect((await collect(transport.frames)).map((item) => item.frame)).toContainEqual({ flushed: true });
+        await vi.waitFor(() => expect(alive(descendant!)).toBe(false), { timeout: 1_000 });
+        const signal = vi.spyOn(process, 'kill');
+        try {
+          transport.kill('SIGTERM');
+          transport.kill('SIGKILL');
+          expect(signal).not.toHaveBeenCalled();
+        } finally { signal.mockRestore(); }
+      } finally {
+        transport.kill('SIGKILL');
+        if (descendant && alive(descendant)) process.kill(descendant, 'SIGKILL');
+        await transport.exited;
+        if (descendant) await vi.waitFor(() => expect(alive(descendant!)).toBe(false), { timeout: 2_000 });
+      }
+    }, 10_000);
+
     it('resolves exited with a spawn error item when the binary does not exist', async () => {
       const plan = { ...fakeEngine(''), bin: '/nonexistent/maws-engine-bin' };
       const transport = spawnEngine(plan, { maxLineChars: MAX_LINE_CHARS });

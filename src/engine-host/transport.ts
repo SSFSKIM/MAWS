@@ -189,14 +189,22 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
   };
 
   let stalledWrite = false;
+  let groupRetired = false;
+  const signalGroup = (signal: 'SIGTERM' | 'SIGKILL') => {
+    if (child.pid === undefined || groupRetired) return;
+    try {
+      process.kill(-child.pid, signal);
+      if (signal === 'SIGKILL') groupRetired = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      groupRetired = true;
+    }
+  };
   // Graceful signals target the engine; a broken input pipe requires cleanup of the whole group.
   const kill = (signal: 'SIGTERM' | 'SIGKILL') => {
     if (exitSeen !== null || ended) return;
     if (signal === 'SIGTERM' && !stalledWrite) { child.kill(signal); return; }
-    if (child.pid === undefined) return;
-    try { process.kill(-child.pid, signal); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-    }
+    signalGroup(signal);
   };
 
   const finish = (exit: { code: number | null; signal: NodeJS.Signals | null }) => {
@@ -260,6 +268,11 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
   });
   child.on('exit', (code, signal) => {
     exitSeen = { code, signal };
+    // TERM gave the engine its flush opportunity. Retire any remaining members now, at the owned child's
+    // exit event, not from a later close/grace timer that could target a recycled group id. Public kill()
+    // stays closed after leader exit, and a group already killed (or observed absent) is never signalled again.
+    if (stalledWrite) signalGroup('SIGKILL');
+    groupRetired = true;
     // 'close' waits for every stdio pipe; a grandchild holding one must not keep the session in limbo.
     setTimeout(() => {
       if (!ended) {

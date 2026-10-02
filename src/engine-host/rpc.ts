@@ -152,7 +152,8 @@ export class ControlClient {
     }
     // The deadline covers the write queue and backpressure, not just the response.
     const written = this.writer.write(frame, { signal: writeAbort.signal }).then(() => {
-      if (this.pendingTable.has(requestId)) opts.onWritten?.(requestId);
+      // onIdle may already have correlated a held response and removed the pending entry.
+      if (!writeAbort.signal.aborted) opts.onWritten?.(requestId);
     }, (error: unknown) => {
       const pending = this.take(requestId);
       const message = error instanceof Error ? error.message : String(error);
