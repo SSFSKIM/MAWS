@@ -301,7 +301,7 @@ export class IndexSessionSource implements SessionSource {
     if (this.projectsRevision !== null) {
       const revision = this.projectsRevision;
       this.projectsRevision = null;
-      const projects = this.index.projects.list();
+      const projects = this.index.projects.listWithRemoved(); // W11 (I5): as `session.projects.list` answers
       out.push({ revision, send: () => this.options.emit('session.projects.changed', { projects, revision }) });
     }
     out.sort((a, b) => a.revision - b.revision);

@@ -6,6 +6,7 @@ import type { MawsBridge, ProjectRecord } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerSessionAction } from '../app/session-actions';
 import { registerSessionCreator } from '../keymap/actions-runtime';
+import { useDialogs } from '../sessions/dialogs';
 import { registerAction } from '../keymap/actions-runtime'; // C11
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
@@ -13,6 +14,7 @@ import { activeTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import type { ProjectKey } from './derive';
+import { registerProjectAction } from './project-actions';
 import { Sidebar } from './Sidebar';
 
 const nine = scenarioFile('nine-sessions');
@@ -116,6 +118,42 @@ describe('the project list', () => {
     unmount();
     render(<Sidebar />);
     expect(projectRows()).toHaveLength(6);
+  });
+});
+
+// W11 (I5): the archive icon removes a project from the sidebar; a hidden project and its sessions show nowhere in the
+// tree (never under Other sessions), and "Hidden projects…" at the end offers them back.
+describe('removing a project from the sidebar', () => {
+  beforeEach(() => fillStores(nine));
+
+  it('the archive icon beside "+" runs the confirmed removal, disabled until it has a handler', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    expect((within(row('MAWS')).getByRole('button', { name: 'Remove MAWS from sidebar' }) as HTMLButtonElement).disabled).toBe(true);
+    const remove = vi.fn();
+    offs.push(registerProjectAction('removeProject', remove));
+    await user.click(within(row('MAWS')).getByRole('button', { name: 'Remove MAWS from sidebar' }));
+    expect(remove).toHaveBeenCalledWith('proj-maws');
+    expect(expanded()).toEqual([]); // the click does not toggle the row
+    const buttons = within(row('MAWS')).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
+    expect(buttons.indexOf('Remove MAWS from sidebar')).toBe(buttons.indexOf('New chat in MAWS') - 1);
+  });
+
+  it('a hidden project and its sessions are listed nowhere, and "Hidden projects…" opens the list to show it again', async () => {
+    const maws = nine.projects.find((p) => p.id === 'proj-maws')!;
+    fillStores({ ...nine, projects: nine.projects.map((p) => (p.id === maws.id ? { ...p, hidden: true } : p)) });
+    expand('proj-maws', 'other');
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'Other sessions']);
+    expect(sessionRows(row('Other sessions'))).toEqual(['Terminal workflow notes']); // none of MAWS's
+    await user.click(screen.getByRole('button', { name: 'Hidden projects…' }));
+    expect(useDialogs.getState().open).toEqual({ kind: 'hiddenProjects' });
+  });
+
+  it('offers no "Hidden projects…" while nothing is hidden', () => {
+    render(<Sidebar />);
+    expect(screen.queryByRole('button', { name: 'Hidden projects…' })).toBeNull();
   });
 });
 

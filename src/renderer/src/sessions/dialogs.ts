@@ -50,6 +50,7 @@ export type OpenDialog =
   | { kind: 'delete'; appSessionId: AppSessionId }
   | { kind: 'cleanup'; target: CleanupTarget; returnTo?: WorktreesDialogRef } // C12: returnTo, the dialog a close goes back to
   | { kind: 'archived'; projectId: ProjectId }
+  | { kind: 'hiddenProjects' } // W11 (I5)
   | WorktreesDialogRef // C12
   | ({ kind: 'confirm'; answer(yes: boolean): void } & ConfirmRequest);
 

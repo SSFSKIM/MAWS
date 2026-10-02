@@ -30,10 +30,11 @@ async function removeProject(projectId: ProjectId): Promise<void> {
   const project = sessions.projects.get(projectId);
   if (!project) return;
   const count = [...sessions.records.values()].filter((r) => r.projectId === projectId && !r.archived).length;
+  // W11 (I5): the project row's archive icon and the menu's "Remove from sidebar…"; nothing is deleted
   const yes = await confirm({
-    title: `Remove ${project.name}?`,
-    body: `${count} ${count === 1 ? 'session stays' : 'sessions stay'} on disk and in the terminal; the project leaves the sidebar until you add it again.`,
-    confirmLabel: 'Remove project',
+    title: `Remove ${project.name} from the sidebar?`,
+    body: `Its ${count} ${count === 1 ? 'session stays' : 'sessions stay'} on disk and in the terminal. Show the project again from Hidden projects… at the end of the sidebar's list.`,
+    confirmLabel: 'Remove from sidebar',
     destructive: false,
   });
   if (!yes) return;

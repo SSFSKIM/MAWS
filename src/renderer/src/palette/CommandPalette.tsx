@@ -40,7 +40,7 @@ export function paletteEntries(
   const matches = sessionMatcher(query, input.projects);
   return {
     sessions: [...input.records.values()].filter((r) => !r.archived && matches(r)),
-    projects: [...input.projects.values()].filter((p) => q === '' || p.name.toLowerCase().includes(q) || p.directory.toLowerCase().includes(q)),
+    projects: [...input.projects.values()].filter((p) => !p.hidden && (q === '' || p.name.toLowerCase().includes(q) || p.directory.toLowerCase().includes(q))), // W11: a hidden project is not revealed
     actions: ACTION_IDS.filter((id) => q === '' || ACTIONS[id].title.toLowerCase().includes(q)),
   };
 }

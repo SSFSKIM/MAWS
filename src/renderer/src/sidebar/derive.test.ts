@@ -73,6 +73,17 @@ describe('the project list', () => {
     ]);
   });
 
+  // W11 (I5): a project removed from the sidebar takes its sessions with it, never to Other sessions
+  it('lists a hidden project’s sessions nowhere', () => {
+    const hidden = new Set(['proj-maws' as never]);
+    const list = projectList({ ...base, projects: projects.filter((p) => p.id !== 'proj-maws'), hidden });
+    expect(list.map((e) => [e.name, e.sessions.length])).toEqual([
+      ['claude-usage-menubar', 3],
+      ['codex_somersault', 3],
+      ['Other sessions', 1],
+    ]);
+  });
+
   it('places a project without sessions by when it was added, and leaves Other sessions out when it is empty', () => {
     const fresh = project('fresh', 5, { createdAt: '2026-09-30T00:00:00Z' });
     const list = projectList({ ...base, records: new Map([...records].filter(([, r]) => r.projectId !== null)), projects: [...projects, fresh] });

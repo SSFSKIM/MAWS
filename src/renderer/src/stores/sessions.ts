@@ -220,9 +220,17 @@ function memo<K, V>(): (owner: object, key: K, compute: () => V, same: (a: K, b:
   };
 }
 
+// The projects the app lists, in their order: every project but those removed from the sidebar (W11, I5: the list
+// carries hidden ones, marked, so their sessions stay out of the sidebar and "Hidden projects…" can offer them back).
 const projectOrderMemo = memo<number, ProjectRecord[]>();
 export function selectProjectOrder(state: SessionsState): ProjectRecord[] {
-  return projectOrderMemo(state.projects, state.projectsVersion, () => orderProjects(state.projects.values()), (a, b) => a === b);
+  return projectOrderMemo(state.projects, state.projectsVersion, () => orderProjects([...state.projects.values()].filter((p) => !p.hidden)), (a, b) => a === b);
+}
+
+// The projects removed from the sidebar, by name.
+const hiddenProjectsMemo = memo<number, ProjectRecord[]>();
+export function selectHiddenProjects(state: SessionsState): ProjectRecord[] {
+  return hiddenProjectsMemo(state.projects, state.projectsVersion, () => [...state.projects.values()].filter((p) => p.hidden).sort((a, b) => a.name.localeCompare(b.name)), (a, b) => a === b);
 }
 
 const sessionsOfMemo = new Map<string, ReturnType<typeof memo<number, SessionRecord[]>>>();

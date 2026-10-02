@@ -30,8 +30,9 @@ export function sessionMatcher(query: string, projects: ReadonlyMap<ProjectId, P
 export interface ProjectListInput {
   records: ReadonlyMap<AppSessionId, SessionRecord>;
   digests: ReadonlyMap<AppSessionId, SessionDigest>;
-  projects: readonly ProjectRecord[];
+  projects: readonly ProjectRecord[]; // the listed ones
   rows: NeedsYouRow[]; // the Needs-you rows: a project's waiting count is how many of its sessions have one
+  hidden?: ReadonlySet<ProjectId>; // W11 (I5): projects removed from the sidebar, whose sessions show nowhere in it
 }
 
 export interface ProjectEntry {
@@ -44,15 +45,16 @@ export interface ProjectEntry {
 
 const OTHER_NAME = 'Other sessions';
 
-// Every project, then Other sessions when it holds anything, each with its sessions and its waiting (◐) and working (●)
-// counts. Projects are sorted by recency of activity: the latest movement of any of their sessions (archived ones
+// Every listed project, then Other sessions when it holds anything, each with its sessions and its waiting (◐) and
+// working (●) counts; a hidden project's sessions are in neither. Projects are sorted by recency of activity: the latest movement of any of their sessions (archived ones
 // included, so archiving does not demote a project), a project without sessions by when it was added; ties by the
 // project order, then the name.
-export function projectList({ records, digests, projects, rows }: ProjectListInput): ProjectEntry[] {
+export function projectList({ records, digests, projects, rows, hidden }: ProjectListInput): ProjectEntry[] {
   const byId = new Map(projects.map((p) => [p.id, p]));
   const waiting = new Set(rows.map((row) => row.appSessionId));
   const grouped = new Map<ProjectKey, { live: SessionRecord[]; activity: number }>();
   for (const record of records.values()) {
+    if (record.projectId !== null && hidden?.has(record.projectId)) continue; // never Other sessions'
     const key: ProjectKey = record.projectId !== null && byId.has(record.projectId) ? record.projectId : OTHER_SESSIONS;
     const entry = grouped.get(key) ?? { live: [], activity: Number.NEGATIVE_INFINITY };
     if (!grouped.has(key)) grouped.set(key, entry);

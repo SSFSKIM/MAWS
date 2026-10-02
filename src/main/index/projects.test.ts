@@ -112,7 +112,18 @@ describe('projects and the membership rule', () => {
     const again = index.sessions.upsertFromSummary({ ...s, size: 999, lastRecordAt: '2026-09-28T11:00:00.000Z' });
     expect(again.record.projectId).toBe(projectId);
     expect(index.projects.list()).toEqual([]);
-    expect(index.projects.list({ includeHidden: true }).map((p) => p.id)).toEqual([projectId]);
+    expect(index.projects.list({ includeHidden: true }).map((p) => [p.id, p.hidden])).toEqual([[projectId, true]]);
+    expect(index.projects.listWithRemoved().map((p) => [p.id, p.hidden])).toEqual([[projectId, true]]);
+  });
+
+  // W11 (I5): the renderer's list carries a removed project, but not a discovered one the refold hid once its sessions
+  // moved under the main checkout (nobody removed it, and it holds nothing)
+  it('the renderer’s list keeps removed projects and leaves out a hidden discovered project with no session', () => {
+    const kept = index.sessions.upsertFromSummary(summary({ directory: repo('alpha') })).record.projectId!;
+    const empty = index.projects.ensureForDirectory(repo('beta'), 'discovered').id;
+    const added = index.projects.add(repo('gamma')).id;
+    for (const id of [kept, empty, added]) index.projects.hide(id);
+    expect(index.projects.listWithRemoved().map((p) => p.id).sort()).toEqual([kept, added].sort());
   });
 
   it('add realpaths an existing directory as origin user, attaches the sessions already there, and brings a hidden project back', () => {
@@ -125,7 +136,7 @@ describe('projects and the membership rule', () => {
     expect(index.sessions.get(orphan.appId)?.projectId).toBe(added.id);
 
     index.projects.hide(added.id);
-    expect(index.projects.add(directory).id).toBe(added.id);
+    expect(index.projects.add(directory)).toEqual(added); // shown again: no `hidden` mark
     expect(index.projects.list().map((p) => p.id)).toEqual([added.id]);
     expect(() => index.projects.add(join(tree.path, 'missing'))).toThrow('not a directory');
   });

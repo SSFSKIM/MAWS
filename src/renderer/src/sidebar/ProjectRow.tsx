@@ -11,10 +11,11 @@
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { FolderIcon, Icon, PlusIcon } from '../app/IconButton';
+import { ArchiveIcon, FolderIcon, Icon, PlusIcon } from '../app/IconButton';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { DisclosureBody } from '../ui/disclosure';
 import type { ProjectEntry, ProjectKey } from './derive';
+import { runProjectAction, useProjectActionEnabled } from './project-actions';
 import { SessionRow } from './SessionRow';
 import { moreNodeId, projectNodeId, useTree } from './tree';
 
@@ -87,12 +88,28 @@ const ACTION =
   'inline-flex size-[22px] shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-active hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent';
 
 // The row's hover actions, out of the tab order (the row is the tree's stop; its context menu carries the same actions
-// for the keyboard): "+" opens an unstarted session tab in the project ("New chat in X", the New chat landing's open copy
+// for the keyboard): the archive icon removes the project from the sidebar after a confirm (I5; the menu's "Remove from
+// sidebar…"), and "+" opens an unstarted session tab in the project ("New chat in X", the New chat landing's open copy
 // item).
 function ProjectActions({ projectId, name }: { projectId: ProjectId; name: string }) {
   const canCreate = useSessionCreatorRegistered();
+  const canRemove = useProjectActionEnabled('removeProject');
   return (
     <span className="hidden shrink-0 items-center group-hover/line:flex group-focus-visible/project:flex">
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={`Remove ${name} from sidebar`}
+        title={canRemove ? 'Remove from sidebar' : 'Not available here'}
+        disabled={!canRemove}
+        onClick={(event) => {
+          event.stopPropagation();
+          runProjectAction('removeProject', projectId);
+        }}
+        className={ACTION}
+      >
+        <ArchiveIcon className="size-[13px]" />
+      </button>
       <button
         type="button"
         tabIndex={-1}

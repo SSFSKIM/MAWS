@@ -83,10 +83,17 @@ describe('the session and project entries', () => {
     }
   });
 
-  it('Remove project asks first, naming the sessions that stay', async () => {
+  it('Remove from sidebar asks first, naming the sessions that stay and where the project comes back from', async () => {
     useSessions.setState({ projects: new Map([[P1, project('p1', 0, { name: 'maws' })]]), records: new Map([[A, record(A, { projectId: P1 })]]) });
     act(() => runProjectAction('removeProject', P1));
-    await waitFor(() => expect(useDialogs.getState().open).toMatchObject({ kind: 'confirm', title: 'Remove maws?', body: expect.stringContaining('1 session stays') }));
+    await waitFor(() =>
+      expect(useDialogs.getState().open).toMatchObject({
+        kind: 'confirm',
+        title: 'Remove maws from the sidebar?',
+        body: 'Its 1 session stays on disk and in the terminal. Show the project again from Hidden projects… at the end of the sidebar\'s list.',
+        confirmLabel: 'Remove from sidebar',
+      }),
+    );
     act(() => (useDialogs.getState().open as { answer(yes: boolean): void }).answer(true));
     await waitFor(() => expect(fake.invoked('session.projects.remove')).toEqual([{ id: P1 }]));
     act(() => runProjectAction('archivedSessions', P1));

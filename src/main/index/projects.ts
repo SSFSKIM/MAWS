@@ -249,6 +249,7 @@ const project = (row: ProjectRow): ProjectRecord => ({
   directory: row.directory,
   order: row.sort_order,
   createdAt: row.created_at,
+  ...(row.hidden ? { hidden: true } : {}), // W11: carried on the renderer's list, which hides it
 });
 
 export class ProjectStore {
@@ -264,6 +265,19 @@ export class ProjectStore {
   list(opts: { includeHidden?: boolean } = {}): ProjectRecord[] {
     const where = opts.includeHidden ? '' : 'WHERE hidden = 0';
     return this.db.all<ProjectRow>(`SELECT * FROM projects ${where} ORDER BY sort_order, created_at, id`).map(project);
+  }
+
+  // What `session.projects.list` answers (W11, I5): the visible projects and, marked `hidden`, those removed from the
+  // sidebar, so the renderer keeps their sessions out of Other sessions and can offer them back. A hidden project
+  // discovery made that holds no session is left out: the start-up refold hides the linked worktrees it folds that way
+  // once their sessions have moved (`SessionStore.refoldLinkedWorktrees`), and nobody removed those.
+  listWithRemoved(): ProjectRecord[] {
+    return this.db
+      .all<ProjectRow>(
+        `SELECT * FROM projects WHERE hidden = 0 OR origin = 'user' OR EXISTS (SELECT 1 FROM sessions WHERE sessions.project_id = projects.id)
+         ORDER BY sort_order, created_at, id`,
+      )
+      .map(project);
   }
 
   // The project for a realpath, creating it with `origin` when there is none. An explicit add (`user`) of a project

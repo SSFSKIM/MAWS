@@ -161,13 +161,16 @@ export const C3_SESSION_EVENTS = Object.keys(c3Events) as (keyof typeof c3Events
 // the replay (`.control` for an id the host knows nothing of is a no-op), and its `session.replay.progress`.
 
 // C5's project shape (C5 execution document, "Main modules"), defined here and imported by C5: the `projects` row
-// projected, `order` being its sort order.
+// projected, `order` being its sort order. W11 (I5, additive): `hidden` is true for a project removed from the sidebar
+// (`session.projects.remove`), absent otherwise; the list and its change event carry hidden projects so the renderer
+// can keep them and their sessions out of the sidebar and offer them under "Hidden projects…".
 export const ProjectRecordSchema = z.strictObject({
   id: ProjectIdSchema,
   name: z.string(),
   directory: z.string(),
   order: z.number().int(),
   createdAt: z.string(),
+  hidden: z.boolean().optional(),
 });
 export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
 

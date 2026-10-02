@@ -157,9 +157,10 @@ export function focusedProject(opts: { pane?: 0 | 1 } = {}): ProjectId | null {
     const record = records.get(tab.appSessionId);
     return record ? record.projectId : unstartedTitleOf(tab.appSessionId).projectId;
   };
+  const listed = (id: ProjectId | null): id is ProjectId => id !== null && projects.has(id) && !projects.get(id)!.hidden;
   const tabProject = fromTab();
-  if (tabProject !== null && projects.has(tabProject)) return tabProject;
-  return (regions.sidebar.expandedProjects.find((key) => key !== 'other' && projects.has(key as ProjectId)) as ProjectId | undefined) ?? null;
+  if (listed(tabProject)) return tabProject;
+  return (regions.sidebar.expandedProjects.find((key) => key !== 'other' && listed(key as ProjectId)) as ProjectId | undefined) ?? null;
 }
 
 // ---- tab retention ------------------------------------------------------------------------------------------------------

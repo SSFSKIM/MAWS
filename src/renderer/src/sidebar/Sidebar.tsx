@@ -5,7 +5,8 @@
 // reveals do not persist. The search filters every project (by name, or holding a matching session) and shows each
 // listed project open on its matching sessions without changing what is expanded. Cross-project attention is the
 // Overview's, the notifier's, the dock badge's and ⌘⇧J's, which read the attention table directly. One context menu
-// serves every row, and the tree is one roving tab stop (`tree.ts`).
+// serves every row, and the tree is one roving tab stop (`tree.ts`). A project removed from the sidebar (I5) is listed
+// nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { Fragment, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
 import type { SessionRecord } from '@shared/graph/session';
@@ -17,7 +18,8 @@ import type { SidebarSort } from '../overview/derive';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
-import { selectProjectOrder, useSessions } from '../stores/sessions';
+import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
+import { openDialog } from '../sessions/dialogs';
 import { filterProjectList, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, type ProjectEntry, type ProjectKey } from './derive';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
 import { ProjectRow, ShowMoreRow } from './ProjectRow';
@@ -54,6 +56,7 @@ function SidebarBody() {
   const recordsVersion = useSessions((s) => s.recordsVersion);
   const digests = useSessions((s) => s.digests);
   const projects = useSessions(selectProjectOrder);
+  const hiddenProjects = useSessions(selectHiddenProjects);
   const rows = useAttention((s) => selectNeedsYou(s, { records, recordsVersion }));
   const sidebar = useLayout((s) => s.regions.sidebar);
   const selected = useLayout((s) => {
@@ -71,7 +74,8 @@ function SidebarBody() {
   const scroller = useRef<HTMLDivElement>(null);
 
   const byId = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
-  const everyEntry = useMemo(() => projectList({ records, digests, projects, rows }), [records, digests, projects, rows]);
+  const hidden = useMemo(() => new Set(hiddenProjects.map((p) => p.id)), [hiddenProjects]);
+  const everyEntry = useMemo(() => projectList({ records, digests, projects, rows, hidden }), [records, digests, projects, rows, hidden]);
   const searching = query.trim() !== '';
   const matches = useMemo(() => sessionMatcher(query, byId), [query, byId]);
   const expanded = useMemo(() => new Set(sidebar.expandedProjects), [sidebar.expandedProjects]);
@@ -237,6 +241,15 @@ function SidebarBody() {
                 ))}
                 {moreAt === shown.length && moreProjects}
               </div>
+            )}
+            {hiddenProjects.length > 0 && !searching && (
+              <button
+                type="button"
+                onClick={() => openDialog({ kind: 'hiddenProjects' })}
+                className="mt-1 flex h-(--row-h) w-full cursor-default items-center rounded-sm pr-[9px] pl-[30px] text-left text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
+              >
+                Hidden projects…
+              </button>
             )}
           </div>
         </ContextMenu.Trigger>
