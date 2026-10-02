@@ -514,6 +514,13 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   await page.getByRole('menuitemradio', { name: /^Plan/ }).click();
   await expect.poll(() => cards(page, 'patches')).toEqual([{ appSessionId: id, patch: { permissionMode: 'plan' } }]);
   await expect(p.getByRole('button', { name: /^Permission mode/ })).toHaveAttribute('aria-label', 'Permission mode Plan');
+  // W10 (C9): the "+" menu's Add directory… writes through the intent too (main's e2e pick seam answers the picker)
+  const extra = join(scratch, 'extra-dir');
+  mkdirSync(extra, { recursive: true });
+  await editor.app.evaluate((_electron, dir) => void (process.env.MAWS_E2E_PICK_PATHS = dir), extra);
+  await p.getByRole('button', { name: 'Add files, photos or commands' }).click();
+  await page.getByRole('menuitem', { name: 'Add directory…' }).click();
+  await expect.poll(async () => (await cards(page, 'patches')).filter((x) => 'additionalDirectories' in x.patch)).toEqual([{ appSessionId: id, patch: { additionalDirectories: [extra] } }]);
 
   // `!` waits for the engine
   await messageIn(page, 0).click();
@@ -527,11 +534,17 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   await page.keyboard.press('Enter');
   await expect(control(page, 0)).toHaveText('Starting…');
   await expect(control(page, 0)).toBeDisabled();
-  await expect(p.getByRole('button', { name: 'Add a directory' })).toHaveAttribute('title', 'Session is starting…');
   await page.keyboard.press('Enter');
   await page.keyboard.type('x');
   expect(await cards(page, 'starts')).toEqual([{ appSessionId: id, content: 'first words', display: 'first words' }]);
   await expect(messageIn(page, 0)).toHaveText('first words');
+  // W10 (C9): the "+" menu's Add directory… is gated with every chip while the start runs
+  await p.getByRole('button', { name: 'Add files, photos or commands' }).click();
+  const addDirectory = page.getByRole('menuitem', { name: /^Add directory…/ });
+  await expect(addDirectory).toHaveAttribute('aria-disabled', 'true');
+  await expect(addDirectory).toContainText('Session is starting…');
+  await page.keyboard.press('Escape');
+  await expect(addDirectory).toHaveCount(0);
 
   await cards(page, 'answerStart', { ok: false, error: 'refused: the directory is not trusted' });
   await expect(control(page, 0)).toHaveText('Send');
@@ -833,7 +846,7 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   await page.keyboard.press('Backspace');
   await expect.poll(async () => (await box.boundingBox())!.height).toBe(44);
 
-  // C2: nothing above the box at rest, one toolbar row below it: + · location · + dir · mode … model (no @, no mic)
+  // C2: nothing above the box at rest, one toolbar row below it: + · location · mode … model (no @, no mic; W10: no + dir)
   const frameBox = (await p.locator('[data-composer-frame]').boundingBox())!;
   const boxAtRest = (await box.boundingBox())!;
   const toolbar = p.getByRole('toolbar', { name: 'Composer tools' });
@@ -843,7 +856,7 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   expect(frameBox.y + frameBox.height).toBe(tools.y + tools.height);
   console.log(`W2 composer at rest: box ${boxAtRest.height}px, toolbar ${tools.height}px, frame ${frameBox.height}px, ${frameBox.width}px wide`);
   const labels = await toolbar.getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label') ?? ''));
-  expect(labels).toEqual(['Add files, photos or commands', expect.stringMatching(/^Location /), 'Add a directory', expect.stringMatching(/^Permission mode /), expect.stringMatching(/^Model /)]);
+  expect(labels).toEqual(['Add files, photos or commands', expect.stringMatching(/^Location /), expect.stringMatching(/^Permission mode /), expect.stringMatching(/^Model /)]);
   await expect(toolbar.getByRole('button', { name: 'Mention a file or agent' })).toHaveCount(0);
   await expect(toolbar.getByRole('button', { name: 'Voice input' })).toHaveCount(0);
   expect(editor.consoleErrors()).toEqual([]);

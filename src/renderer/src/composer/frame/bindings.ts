@@ -53,7 +53,7 @@ export interface FrameBindings {
   project: ProjectRowBinding | null; // New chat: the row above the box on an unstarted tab (null once started)
   model: ModelBinding; // the toolbar's ModelChip; the selector C11 registers opens from it (W3)
   mode: ModeBinding; // the toolbar's ModeChip, on the shared mode menu (M5)
-  directories: ChipBinding<string[]>; // AddDirChip
+  directories: ChipBinding<string[]>; // the "+" menu's Add directory… (W10)
 }
 
 export const LOCATION_FIXED = 'The location is fixed once the session starts';

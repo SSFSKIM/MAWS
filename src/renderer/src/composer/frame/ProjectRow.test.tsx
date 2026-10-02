@@ -177,6 +177,23 @@ describe('the project row', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Project Alpha' }));
     expect(within(menu()).getAllByRole('option').every((o) => o.getAttribute('aria-disabled') === 'true')).toBe(true);
   });
+
+  // W10 (C9): what the "+" menu's Add directory… gave the tab, read-only, in the chip's tooltip and at the menu's foot
+  it('lists the additional directories read-only in the chip’s tooltip and its menu, and nothing when there are none', async () => {
+    const b = binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha' });
+    const { rerender } = render(<ProjectRow binding={b} />);
+    expect(screen.getByRole('button', { name: 'Project Alpha' }).title).toBe('/work/alpha · Change the project for this chat');
+    rerender(<ProjectRow binding={b} directories={['/work/shared', '/Users/someone/notes']} />);
+    expect(screen.getByRole('button', { name: 'Project Alpha' }).title).toBe('/work/alpha · Change the project for this chat\n\nAdditional directories\n/work/shared\n~/notes');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Project Alpha' }));
+    const list = within(menu()).getByRole('list', { name: 'Additional directories' });
+    expect(within(list).getAllByRole('listitem').map((li) => [li.textContent, li.title])).toEqual([
+      ['/work/shared', '/work/shared'],
+      ['~/notes', '/Users/someone/notes'],
+    ]);
+    expect(within(list).queryByRole('button')).toBeNull(); // read-only
+    expect(rows()).not.toContain('/work/shared'); // a note, not a choice
+  });
 });
 
 describe('the picker’s order and search', () => {

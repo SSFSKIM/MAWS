@@ -120,6 +120,16 @@ const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).
 const key = (target: HTMLElement, init: KeyboardEventInit) => act(async () => void target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })));
 const primary = (index: 0 | 1 = 0) => composerOf(index).querySelector<HTMLButtonElement>('[data-submit-state]')!;
 const invoked = (name: Parameters<FakeClient['invoked']>[0]) => fake.invoked(name);
+const plusOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('button', { name: 'Add files, photos or commands' });
+// W10 (C9): the "+" menu's Add directory…, its disabled reason (null when enabled), the menu closed again
+async function addDirectoryState(user = userEvent.setup()): Promise<string | null> {
+  await user.click(plusOf());
+  const item = await screen.findByRole('menuitem', { name: /^Add directory…/ });
+  const reason = item.getAttribute('aria-disabled') === 'true' ? item.textContent!.replace('Add directory…', '') : null;
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+  return reason;
+}
 
 describe("composer DOM under C5's dispatcher", () => {
   it('marks only the editor root as the key sink; the control, the chips, the toolbar and the queue are pane content', async () => {
@@ -129,7 +139,7 @@ describe("composer DOM under C5's dispatcher", () => {
     const sinks = composerOf(0).querySelectorAll('[data-key-sink]');
     expect(sinks).toHaveLength(1);
     expect(sinks[0].contains(editorOf())).toBe(true);
-    for (const outside of [primary(), within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools' }), within(composerOf(0)).getByRole('button', { name: 'Add a directory' })]) expect(sinks[0].contains(outside)).toBe(false);
+    for (const outside of [primary(), within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools' }), plusOf()]) expect(sinks[0].contains(outside)).toBe(false);
   });
 
   it('is one Send: idle it sends, during a turn Enter and the button steer with priority next; no menu, no ⌥ relabel, no Stop beside it (W10)', async () => {
@@ -304,7 +314,7 @@ describe("composer DOM under C5's dispatcher", () => {
     act(() => useAttention.setState({ bySession: new Map([[A, [item]]]), requests: new Map([[item.id, event]]), version: 1 }));
     const frame = await within(composerOf(0)).findByRole('group', { name: 'Approval needed' });
     expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(true); // the box and the toolbar
-    expect(within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools', hidden: true }).closest('[hidden]')).not.toBeNull(); // W2: the location and `+ dir` with it
+    expect(within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools', hidden: true }).closest('[hidden]')).not.toBeNull(); // W2: the location with it
     expect(editorOf().editor.getText()).toBe('a draft kept aside'); // mounted, hidden
     await waitFor(() => expect(document.activeElement).toBe(frame)); // the pane held focus
     expect(useComposerStore.getState().docked.get(A)?.has('req-a' as never)).toBe(true);
@@ -451,23 +461,37 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(primary().getAttribute('aria-description')).toBe('Runs now; the model sees the output in this turn');
   });
 
-  it('shows the engine’s effective mode with the refusal in words, and + dir adds to the engine’s directories', async () => {
+  it('shows the engine’s effective mode with the refusal in words, and the "+" menu’s Add directory… adds to the engine’s directories', async () => {
     live(A, { status: { permissionMode: { requested: 'auto', effective: 'default', refusal: 'auto_mode_model' } } });
     mount([{ index: 0, id: A }]);
     const chip = within(composerOf(0)).getByRole('button', { name: /^Permission mode Manual/ });
     expect(chip.getAttribute('aria-label')).toBe('Permission mode Manual · This model does not support auto mode');
     expect(invoked('session.listPermissionRules')).toEqual([]); // no engine read on mount
     expect(invoked('session.listModels')).toEqual([]);
+    expect(within(composerOf(0)).queryByRole('button', { name: 'Add a directory' })).toBeNull(); // W10: no `+ dir` chip
     const user = userEvent.setup();
     await user.click(within(composerOf(0)).getByRole('button', { name: /^Location/ }));
     await waitFor(() => expect(invoked('session.listPermissionRules')).toHaveLength(1)); // read as the popover opens
-    await waitFor(() => expect(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }).textContent).toBe('+ dir · 1'));
+    await waitFor(() => expect(within(screen.getByRole('dialog', { name: 'Location' })).getByRole('list', { name: 'Additional directories' }).textContent).toContain('/work/app-a/extra'));
     await user.keyboard('{Escape}');
-    await user.click(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }));
+    await user.click(plusOf());
+    await user.click(await screen.findByRole('menuitem', { name: 'Add directory…' }));
+    await waitFor(() => expect(invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: '/work/app-a', multiple: false }]));
     await waitFor(() => expect(invoked('session.applyFlagSettings')).toEqual([{ appSessionId: A, settings: { permissions: { additionalDirectories: ['/work/app-a/extra', '/work/picked'] } } }]));
     await waitFor(() => expect(invoked('session.listPermissionRules')).toHaveLength(3)); // read at the change, and again afterwards
     await user.click(chip);
     await waitFor(() => expect(invoked('session.listModels')).toHaveLength(1)); // the mode menu reads the models as it opens
+  });
+
+  // W10 (C9): on an unstarted tab Add directory… patches the intent, and the project row lists the directories read-only
+  it('adds a directory to an unstarted tab’s intent from the "+" menu, listed in the project row’s tooltip and menu', async () => {
+    const stub = stubIntent({ additionalDirectories: ['/work/other'] });
+    mount([{ index: 0, id: A }]);
+    const user = userEvent.setup();
+    await user.click(plusOf());
+    await user.click(await screen.findByRole('menuitem', { name: 'Add directory…' }));
+    await waitFor(() => expect(stub.patch).toHaveBeenCalledWith({ additionalDirectories: ['/work/other', '/work/picked'] }));
+    expect(invoked('session.applyFlagSettings')).toEqual([]);
   });
 });
 
@@ -582,7 +606,7 @@ describe('unstarted send holds a starting state', () => {
     expect(stub.start).toHaveBeenCalledWith({ content: 'first message', display: 'first message' });
     await waitFor(() => expect(primary().textContent).toBe('Starting…'));
     expect(primary().disabled).toBe(true);
-    expect(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }).title).toBe('Session is starting…');
+    expect(await addDirectoryState()).toBe('Session is starting…'); // W10: the "+" menu's item is gated as every chip is
     expect(within(composerOf(0)).getByRole('button', { name: /^Location/ }).title).toContain('Session is starting…');
     await key(editor, { key: 'Enter' });
     expect(editor.getAttribute('contenteditable')).toBe('false'); // read-only: a keystroke changes nothing
@@ -593,7 +617,7 @@ describe('unstarted send holds a starting state', () => {
     await waitFor(() => expect(isStarting(useComposerStore.getState(), A)).toBe(false));
     expect(editor.editor.getText()).toBe('first message');
     expect(primary().disabled).toBe(false);
-    expect((within(composerOf(0)).getByRole('button', { name: 'Add a directory' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(await addDirectoryState()).toBeNull();
     expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([['missing_directory: /repo is gone', ['Retry']]]);
   });
 
@@ -608,7 +632,7 @@ describe('unstarted send holds a starting state', () => {
     expect(invoked('session.history.append')).toEqual([{ appSessionId: A, display: 'go', pastedContents: {}, project: '/repo' }]);
     expect(primary().title).toBe('Your first message is with the setup above');
     expect(primary().disabled).toBe(true);
-    expect(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }).title).toBe('Your first message is with the setup above');
+    expect(await addDirectoryState()).toBe('Your first message is with the setup above');
     act(() => stub.set({ message: null }));
     await type('again');
     await waitFor(() => expect(primary().disabled).toBe(false));
@@ -737,7 +761,7 @@ describe('unstarted send holds a starting state', () => {
     await waitFor(() => expect(editorOf()).toBeTruthy());
     const location = within(composerOf(0)).getByRole('button', { name: /^Location/ });
     expect(location.title).toBe('/repo · Where this session will run');
-    expect(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }).hasAttribute('disabled')).toBe(false);
+    expect(await addDirectoryState()).toBeNull();
     vi.useFakeTimers();
     await type('after the failure');
     expect(primary().textContent).toBe('Send');
@@ -763,7 +787,7 @@ describe('unstarted send holds a starting state', () => {
     await user.click(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }));
     await user.keyboard('{Escape}');
     live(A);
-    await waitFor(() => expect(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }).hasAttribute('disabled')).toBe(false));
+    await waitFor(() => expect(within(composerOf(0)).getByRole('button', { name: /^Context window/ })).toBeTruthy()); // the live frame (its ring) replaced the intent's
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
     expect(invoked('session.listPermissionRules')).toEqual([]);
     expect(invoked('session.listModels')).toEqual([]);

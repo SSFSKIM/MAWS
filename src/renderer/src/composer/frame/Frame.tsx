@@ -1,8 +1,8 @@
 // The compact frame (C7 execution document, "Composer frame", §5.4 as amended by the owner's ruling and sizing
 // correction, D-20 after Claude Desktop, and as amended 2026-10-01 for W2 after Codex): the attachment strip when there
 // are attachments; the box holding only the editor and the submit control at its right (44px at rest, growing to a
-// quarter of the window, then the editor scrolls); the toolbar below the box, outside it, which holds the location and
-// `+ dir` too (W2: no chip row above the box). At rest: the box and one row. Nothing around it: no heading, no hint
+// quarter of the window, then the editor scrolls); the toolbar below the box, outside it, which holds the location (W2:
+// no chip row above the box; W10: Add directory… is in its "+"). At rest: the box and one row. Nothing around it: no heading, no hint
 // line, except on an unstarted tab: New chat's project row (`ProjectRow`, the owner's ruling of 2026-10-01 after Codex)
 // sits inside the frame above the box until the session starts. The same component sits centred on an unstarted session
 // and docked under the transcript (C5 places it); it fills the column C5 puts it in, the transcript's own (W2), and caps
@@ -39,7 +39,7 @@ export function Frame({ appSessionId, bindings, cwd, dirty, attachments, editorH
     <div data-composer-frame data-docked={isDocked || undefined} className="flex w-full min-w-0 flex-col gap-1">
       {docked}
       <div data-composer-draft hidden={isDocked} className="flex min-w-0 flex-col gap-1">
-        {bindings.project && <ProjectRow binding={bindings.project} />}
+        {bindings.project && <ProjectRow binding={bindings.project} directories={bindings.directories.value} />}
         <AttachmentStrip attachments={attachments} onRemove={(id) => editorHandle.current?.removeAttachment(id)} />
         {/* W2 (C1, Codex's): 22px corners and the faint shadow, no border; 44px at rest, the editor's 20px line inside
             12px above and below, the submit control 8px in from the box's foot */}

@@ -8,7 +8,8 @@
 // (app-primary:147519-147702, 154066-154125): "Search projects", the projects most recently active first (the sidebar's
 // order) with a check on the chosen one and the folder's name where it differs from the project's, "No projects
 // found", then "New project" and "Don't work in a project". Once the session starts the row is gone and the toolbar's
-// location chip reads where it runs.
+// location chip reads where it runs. W10 (C9): the directories the "+" menu's Add directory… gave this tab are listed
+// read-only in the chip's tooltip and at the foot of its menu, as the location popover lists them once started.
 import { Command } from 'cmdk';
 import { Popover } from 'radix-ui';
 import { useMemo, useState } from 'react';
@@ -17,7 +18,7 @@ import { projectList } from '../../sidebar/derive';
 import { selectProjectOrder, useSessions } from '../../stores/sessions';
 import type { HookResult } from '../setup-intent';
 import type { ProjectRowBinding } from './bindings';
-import { CHIP, POPOVER } from './chip-style';
+import { CHIP, NOTE, POPOVER } from './chip-style';
 import { formatCwd } from './LocationChip';
 
 export const CHOOSE_PROJECT = 'Choose a project';
@@ -104,7 +105,24 @@ function ProjectMenu({ binding, disabled, onWrite }: { binding: ProjectRowBindin
   );
 }
 
-export function ProjectRow({ binding }: { binding: ProjectRowBinding }) {
+// The tab's additional directories, read-only (W10): what the session will be given besides its project.
+export const ADDITIONAL_DIRECTORIES = 'Additional directories';
+function DirectoriesNote({ directories }: { directories: readonly string[] }) {
+  return (
+    <div className="border-t border-border py-1">
+      <p className={`${NOTE} m-0`}>{ADDITIONAL_DIRECTORIES}</p>
+      <ul aria-label={ADDITIONAL_DIRECTORIES} className="m-0 flex list-none flex-col p-0">
+        {directories.map((d) => (
+          <li key={d} title={d} className="truncate px-2 py-0.5 font-mono text-ui-sm text-fg-muted">
+            {formatCwd(d)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function ProjectRow({ binding, directories = [] }: { binding: ProjectRowBinding; directories?: readonly string[] }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -122,7 +140,8 @@ export function ProjectRow({ binding }: { binding: ProjectRowBinding }) {
       setPending(false);
     }
   };
-  const title = binding.disabled ?? (chosen ? `${binding.path ?? binding.label} · Change the project for this chat` : 'Select a project to run your chat in');
+  const base = binding.disabled ?? (chosen ? `${binding.path ?? binding.label} · Change the project for this chat` : 'Select a project to run your chat in');
+  const title = directories.length > 0 ? `${base}\n\n${ADDITIONAL_DIRECTORIES}\n${directories.map(formatCwd).join('\n')}` : base;
   return (
     <div data-project-row className="flex min-w-0 flex-col">
       <div className="flex min-w-0 items-center justify-between gap-2 px-1 py-1.5">
@@ -137,6 +156,7 @@ export function ProjectRow({ binding }: { binding: ProjectRowBinding }) {
             <Popover.Portal>
               <Popover.Content aria-label="Choose a project" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-72 p-0`}>
                 <ProjectMenu binding={binding} disabled={disabled} onWrite={(write) => void run(write)} />
+                {directories.length > 0 && <DirectoriesNote directories={directories} />}
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
