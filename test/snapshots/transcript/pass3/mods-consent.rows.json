@@ -1,0 +1,46 @@
+[
+  {
+    "at": "2026-10-02T03:34:37.222Z",
+    "id": "time:turn:80012f27-e058-42ad-aa93-7c43452708d0",
+    "kind": "time",
+    "label": "Oct 2, 2026 3:34 AM",
+    "turnId": "turn:80012f27-e058-42ad-aa93-7c43452708d0"
+  },
+  {
+    "at": "2026-10-02T03:34:37.222Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:80012f27-e058-42ad-aa93-7c43452708d0",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "80012f27-e058-42ad-aa93-7c43452708d0",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply with exactly MODS_PROBE_OK",
+    "turnId": "turn:80012f27-e058-42ad-aa93-7c43452708d0"
+  },
+  {
+    "at": "2026-10-02T03:34:38.367Z",
+    "blockIndex": 1,
+    "id": "text:msg_011Cfci4JAUx4Y6tfHdEd2LL:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "MODS_PROBE_OK",
+    "messageUuid": "f1f53f27-f467-4642-bac5-a9c65d4ed663",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:80012f27-e058-42ad-aa93-7c43452708d0"
+  },
+  {
+    "at": "2026-10-02T03:34:44.721Z",
+    "attempt": null,
+    "id": "error:replay:journal:53:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]
