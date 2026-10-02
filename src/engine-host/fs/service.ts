@@ -31,7 +31,7 @@ import { Bindings } from './bindings';
 import type { FileReader } from './chain-follower';
 import { Discovery, mapConcurrent, matchesKnown, SUMMARY_CONCURRENCY, type ListedTranscript } from './discovery';
 import { Follow, FsFileReader, SNAPSHOT_WAIT_MS } from './follow';
-import { HolderRegistry, OWN_ENTRYPOINT, type HolderDeps } from './holders';
+import { HolderRegistry, type HolderDeps } from './holders';
 import { isMissing } from './sidecars';
 import type { StorePaths } from './paths';
 import { SubagentReader, subagentLookup } from './subagents';
@@ -128,6 +128,8 @@ export class FsService {
   private readonly agents = new Map<SessionId, SubagentEntry[]>(); // each session's agents as last listed
   private readonly agentListing = new Map<SessionId, Promise<SubagentEntry[]>>(); // one listing at a time per session
   private readonly workflowReader = new WorkflowReader();
+  private readonly workflowRuns = new Map<SessionId, Set<string>>();
+  private sidecarReconcile: Promise<void> | null = null;
   private readonly taskReader: TaskReader;
   // C8b start (M4 task 6): the lists a reader asked for, by sanitised id, announced again after a rescan of tasks/;
   // insertion-ordered as least to most recently read, at most READ_LISTS_CAP (debt wave 4)
@@ -163,7 +165,10 @@ export class FsService {
   // for main's fs.scan, which says what it already holds; without one the fallback summarises everything.
   async start(): Promise<void> {
     this.watcher.start();
-    this.reconcile = setInterval(() => this.pokeFollows(() => true), this.reconcileMs);
+    this.reconcile = setInterval(() => {
+      this.pokeFollows(() => true);
+      void this.reconcileSidecars();
+    }, this.reconcileMs);
     this.fallback = setTimeout(() => {
       this.fallback = null;
       if (this.summarising || this.stopped) return;
@@ -345,8 +350,11 @@ export class FsService {
   }
 
   async workflows(appSessionId: AppSessionId): Promise<{ runs: WorkflowRun[] }> {
-    const dir = this.sessionDir(this.sessionOf(appSessionId));
-    return { runs: dir === null ? [] : await this.workflowReader.list(dir) };
+    const sessionId = this.sessionOf(appSessionId);
+    const dir = this.sessionDir(sessionId);
+    const runs = dir === null ? [] : await this.workflowReader.list(dir);
+    this.workflowRuns.set(sessionId, new Set(runs.map((run) => run.runId)));
+    return { runs };
   }
 
   async tasks(listId: string): Promise<{ tasks: PersistedTask[] }> {
@@ -420,6 +428,7 @@ export class FsService {
       subagents: subagentLookup(() => this.agents.get(sessionId) ?? [], this.subagentReader),
       holders: () => this.holders.liveCount(sessionId),
       pinned: () => this.holders.holderOf(sessionId).kind !== 'none', // W7
+      isOwnRecord: (record) => this.holders.ownsTranscriptRecord(sessionId, record),
       emit: this.send,
     });
     return { follow, sessionId, agentId: agent?.agentId ?? null, location, workflows: new Map(), workflowIds: new Map(), workflowWork: Promise.resolve() };
@@ -456,6 +465,11 @@ export class FsService {
         const dir = this.sessionDir(entry.sessionId);
         if (dir === null || this.follows.get(followKey(entry.follow.appSessionId, null)) !== entry) return;
         const runs = runId === null ? await this.workflowReader.list(dir) : [await this.workflowReader.read(dir, runId)];
+        const knownRuns = this.workflowRuns.get(entry.sessionId) ?? new Set<string>();
+        for (const run of runs) knownRuns.add(run.runId);
+        this.workflowRuns.set(entry.sessionId, knownRuns);
+        const present = new Set(runs.map((run) => run.runId));
+        if (runId === null) for (const id of entry.workflows.keys()) if (!present.has(id)) entry.workflows.delete(id);
         const events: SessionEvent[] = [];
         for (const run of runs) {
           if (run.snapshot === null) continue;
@@ -491,6 +505,9 @@ export class FsService {
     const run = snapshotRun ?? WORKFLOW_JOURNAL.exec(rel)?.[1];
     if (run !== undefined) {
       if (appSessionId === null) return;
+      const knownRuns = this.workflowRuns.get(sessionId) ?? new Set<string>();
+      knownRuns.add(run);
+      this.workflowRuns.set(sessionId, knownRuns);
       this.send('fs.workflowChanged', { appSessionId, runId: run });
       const entry = this.follows.get(followKey(appSessionId, null));
       if (entry && snapshotRun !== undefined) void this.syncWorkflows(entry, run);
@@ -544,6 +561,34 @@ export class FsService {
   private relocateFollows(): void {
     for (const entry of this.follows.values()) if (entry.agentId === null) entry.location.path = this.listed.get(entry.sessionId)?.path ?? null;
     this.pokeFollows(() => true);
+    void this.reconcileSidecars();
+  }
+
+  // A nameless/dropped watch event carries no sidecar paths. Re-list bound or previously read sessions, invalidate
+  // both present and removed workflow runs, and advance followed progress. Coalesce overlapping timer/rescan passes.
+  private reconcileSidecars(): Promise<void> {
+    if (this.sidecarReconcile !== null) return this.sidecarReconcile;
+    const sessions = new Set([...this.listed.keys(), ...this.agents.keys(), ...this.workflowRuns.keys()]);
+    const work = (async () => {
+      for (const sessionId of sessions) {
+        if (this.stopped) break;
+        const appSessionId = this.bindings.appIdOf(sessionId);
+        if (appSessionId === null) continue;
+        try {
+          await this.listAgents(sessionId);
+          const before = this.workflowRuns.get(sessionId) ?? new Set<string>();
+          const { runs } = await this.workflows(appSessionId);
+          for (const runId of new Set([...before, ...runs.map((run) => run.runId)])) this.send('fs.workflowChanged', { appSessionId, runId });
+          const entry = this.follows.get(followKey(appSessionId, null));
+          if (entry) await this.syncWorkflows(entry, null);
+        } catch (error) {
+          console.error(`[fs] cannot reconcile sidecars of ${sessionId}:`, error instanceof Error ? error.message : error);
+        }
+      }
+    })();
+    this.sidecarReconcile = work;
+    void work.finally(() => { this.sidecarReconcile = null; });
+    return work;
   }
 
   // A session's followers take their location from the discovery listing; one that moved is poked (the new file's
@@ -688,7 +733,7 @@ export class FsService {
         if (contest.reported || this.contests.get(sessionId) !== contest) return;
         const { records, next } = await readAppended(path, contest.offset);
         contest.offset = next;
-        const foreign = records.some((r) => typeof r.uuid === 'string' && r.entrypoint !== OWN_ENTRYPOINT && typeof r.timestamp === 'string' && r.timestamp >= contest.since);
+        const foreign = records.some((r) => typeof r.uuid === 'string' && !this.holders.ownsTranscriptRecord(sessionId, r) && typeof r.timestamp === 'string' && r.timestamp >= contest.since);
         if (!foreign || this.contests.get(sessionId) !== contest) return;
         contest.reported = true;
         this.send('fs.foreignWrite', { sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder: contest.by });

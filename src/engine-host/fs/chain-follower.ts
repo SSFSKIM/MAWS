@@ -1,8 +1,8 @@
 // The chain follower (C4 execution document, "Chain follower and backfill"): one per transcript file, it keeps the
 // transcript the model sees (root → leaf through `parentUuid`) as lines are appended, and turns the records that join
 // the chain into X1 events through the backfill mapping. The tailer keeps a read cursor at the end of what it has read
-// plus the trailing partial line; every poke reads `[offset, size)` once, so the ranges read over a file's life are
-// contiguous, ascending and disjoint. Rewinds arrive as `last-prompt {rewound: true}` anchors that cut the chain at
+// plus the trailing partial line; every poke reads `[offset, size)` once. Oversized partials retain only their start
+// offset until a newline arrives, then re-read that one complete record for parsing. Rewinds arrive as `last-prompt {rewound: true}` anchors that cut the chain at
 // once; the engine then continues from an attachment the cut removed, which the announced `rewind` state recognises.
 // A branch nothing explains is a second writer: retraction plus a warning, unless the session is contested (W7: a
 // foreign process holds it now) and the branch would replace records MAWS wrote with another writer's, in which case
@@ -23,7 +23,7 @@ export interface Skeleton {
   isProgress: boolean;
   startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
   endsTurn: boolean; // a `system/turn_duration` record (backfill's `turn.ended`); not a blocked prompt's record, also written for a steer dropped mid-turn
-  own: boolean; // W7: written by an SDK-entrypoint process, MAWS's (`entrypoint: 'sdk-ts'`, pass3/w7-collision)
+  own: boolean; // holder-backed writer attribution at ingestion, not entrypoint alone
   timestamp: string | null;
   offset: number; // byte position of the line (leading NULs included); re-reading [offset, offset + length) yields the record
   length: number;
@@ -70,9 +70,8 @@ export interface ChainFollowerOptions {
   // W7: whether a foreign process holds the session now (charter §4.3 as amended 2026-10-01). While it does, a sibling
   // branch another writer starts does not displace records MAWS wrote; absent, never.
   pinned?: () => boolean;
+  isOwnRecord?: (record: TranscriptRecord) => boolean; // holder-backed writer attribution; absent, no ownership evidence
 }
-
-const OWN_ENTRYPOINT = 'sdk-ts'; // the holder registry's own-record rule, read off the transcript's records
 
 const PAGE_BYTES = 1024 * 1024;
 const MAX_PARTIAL_BYTES = 8 * 1024 * 1024;
@@ -100,6 +99,7 @@ class FollowerCore {
   ino: number | null = null;
   offset = 0;
   partial: Buffer = Buffer.alloc(0);
+  private deferredLine: number | null = null; // oversized unsealed line: keep its offset, not its bytes
   readonly skeletons = new Map<MessageUuid, Skeleton>();
   chain: MessageUuid[] = [];
   onChain = new Set<MessageUuid>();
@@ -119,6 +119,7 @@ class FollowerCore {
     readonly ctx: BackfillContext,
     private readonly holders: () => number = () => 0,
     private readonly pinned: () => boolean = () => false,
+    private readonly isOwnRecord: (record: TranscriptRecord) => boolean = () => false,
   ) {}
 
   // One chunk read at the cursor: dispatch every complete line, keep the remainder, advance the cursor.
@@ -129,16 +130,28 @@ class FollowerCore {
     for (;;) {
       const newline = buf.indexOf(NEWLINE, lineStart);
       if (newline === -1) break;
-      await this.dispatchLine(buf.subarray(lineStart, newline), base + lineStart);
+      if (this.deferredLine !== null) {
+        // Only a sealed record is materialised. Retained tail memory stays bounded even if a writer never seals it;
+        // parsing a complete record costs O(record size), not O(file size), and never discards valid large documents.
+        const length = base + newline - this.deferredLine;
+        const line = await this.reader.read(this.deferredLine, length);
+        if (line.length !== length) {
+          this.interrupted = true;
+          return;
+        }
+        await this.dispatchLine(line, this.deferredLine);
+        this.deferredLine = null;
+      } else {
+        await this.dispatchLine(buf.subarray(lineStart, newline), base + lineStart);
+      }
       lineStart = newline + 1;
     }
-    this.partial = Buffer.from(buf.subarray(lineStart));
     this.offset += chunk.length;
+    if (this.deferredLine !== null) return;
+    this.partial = Buffer.from(buf.subarray(lineStart));
     if (this.partial.length > MAX_PARTIAL_BYTES) {
-      // A single record this size is a torn tail in practice: drop it, the cursor stays, the bytes up to the next
-      // newline then parse as garbage once more.
+      this.deferredLine = this.offset - this.partial.length;
       this.partial = Buffer.alloc(0);
-      this.skippedLines += 1;
     }
   }
 
@@ -161,7 +174,7 @@ class FollowerCore {
       isProgress: record.type === 'progress',
       startsTurn: startsTurn(record),
       endsTurn: record.type === 'system' && record.subtype === 'turn_duration',
-      own: record.entrypoint === OWN_ENTRYPOINT,
+      own: this.isOwnRecord(record),
       timestamp: typeof record.timestamp === 'string' ? record.timestamp : null,
       offset,
       length: lineBytes.length,
@@ -332,7 +345,7 @@ class FollowerCore {
   // branch MAWS itself writes goes through (its own branch is the one kept in view), and so does any branch that leaves
   // MAWS's records where they are (two foreign writers flip as before).
   private holdsBack(record: TranscriptRecord, removed: MessageUuid[]): boolean {
-    if (this.chain.length === 0 || record.entrypoint === OWN_ENTRYPOINT || !this.pinned()) return false;
+    if (this.chain.length === 0 || this.isOwnRecord(record) || !this.pinned()) return false;
     return removed.some((member) => this.skeletons.get(member)?.own === true);
   }
 
@@ -575,7 +588,7 @@ export class ChainFollower {
   }
 
   private freshCore(): FollowerCore {
-    return new FollowerCore(this.reader, createBackfillContext({ sessionId: this.sessionId, agent: this.agent, subagents: this.options.subagents }), this.options.holders, this.options.pinned);
+    return new FollowerCore(this.reader, createBackfillContext({ sessionId: this.sessionId, agent: this.agent, subagents: this.options.subagents }), this.options.holders, this.options.pinned, this.options.isOwnRecord);
   }
 
   private enqueue(task: () => Promise<void>): Promise<void> {
@@ -593,7 +606,7 @@ export class ChainFollower {
       const chunk = await this.reader.read(core.offset, Math.min(PAGE_BYTES, toSize - core.offset));
       if (this.stopped || chunk.length === 0) return false;
       await core.consume(chunk);
-      if (this.stopped) return false;
+      if (this.stopped || core.interrupted) return false;
       if (flushEachPage) this.flush(core);
     }
     return !core.interrupted;

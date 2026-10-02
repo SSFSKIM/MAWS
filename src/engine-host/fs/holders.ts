@@ -32,6 +32,21 @@ export interface HolderDeps {
 
 export const OWN_ENTRYPOINT = 'sdk-ts'; // what X6 launches with (CLAUDE_CODE_ENTRYPOINT); the transcript's records carry it too
 
+type Writer = Record<string, unknown>;
+
+export function isOwnWriter(record: Writer, ownPids: ReadonlySet<number>): boolean {
+  return record.entrypoint === OWN_ENTRYPOINT && typeof record.pid === 'number' && ownPids.has(record.pid);
+}
+
+// Pinned engine transcripts carry entrypoint but no PID (pass3/w7-collision-disk). Only unambiguous live registry
+// evidence can attribute those records. Another SDK client makes a PID-less SDK write foreign conservatively.
+export function ownsTranscriptRecord(record: Writer, sessionId: SessionId, live: readonly LiveSessionRecord[], ownPids: ReadonlySet<number>): boolean {
+  if (record.pid !== undefined) return isOwnWriter(record, ownPids);
+  if (record.entrypoint !== OWN_ENTRYPOINT) return false;
+  const writers = live.filter((writer) => writer.sessionId === sessionId && writer.entrypoint === record.entrypoint);
+  return writers.length > 0 && writers.every((writer) => isOwnWriter(writer, ownPids));
+}
+
 export const POLL_MS = 2_000;
 export const JOB_STATE_MAX_BYTES = 8 * 1024 * 1024; // the engine's own cap; a larger state.json is treated as absent
 const NONE: Holder = { kind: 'none' };
@@ -69,6 +84,10 @@ export class HolderRegistry {
     this.pollMs = deps.pollMs ?? POLL_MS;
     this.ownPids = deps.ownPids ?? (() => new Set());
     this.contestSink = deps.contests ?? (() => {});
+  }
+
+  ownsTranscriptRecord(sessionId: SessionId, record: Writer): boolean {
+    return ownsTranscriptRecord(record, sessionId, this.live, this.ownPids());
   }
 
   async start(): Promise<void> {
@@ -245,7 +264,7 @@ export class HolderRegistry {
     const live = alive.filter((record) => record.procStart === undefined || tokens === null || tokens.get(record.pid) === record.procStart);
     this.live = live;
     const own = this.ownPids();
-    const isOwn = (record: LiveSessionRecord) => record.entrypoint === OWN_ENTRYPOINT && own.has(record.pid);
+    const isOwn = (record: LiveSessionRecord) => isOwnWriter(record, own);
     this.foreign = live.filter((record) => !isOwn(record));
     const ownSessions = new Set(live.filter(isOwn).map((record) => record.sessionId as SessionId));
 

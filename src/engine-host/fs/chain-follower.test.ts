@@ -7,8 +7,12 @@ import { currentChain } from '@shared/wire/transcript';
 import { FIXTURE_DIR, loadSyntheticTranscript, loadTranscriptFixture, TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../test/support/memory-reader';
 import { ChainFollower, type FollowerEvent } from './chain-follower';
+import { ownsTranscriptRecord } from './holders';
 
 const SESSION = 'bdb23713-2f6c-40f3-8b18-b41a667a64e3' as SessionId;
+const ownPids = new Set([42]);
+const writers = [{ pid: 42, sessionId: SESSION, entrypoint: 'sdk-ts' }];
+const isOwnRecord = (record: Record<string, unknown>) => ownsTranscriptRecord(record, SESSION, writers, ownPids);
 
 const linesOf = (file: string) => readFileSync(file, 'latin1').split('\n').filter((line) => line.length > 0);
 const REWIND_LINES = linesOf(join(TRANSCRIPT_FIXTURE_DIR, 'rewind-real.jsonl'));
@@ -584,20 +588,28 @@ describe('survives torn tails and rewrites', () => {
     }
   });
 
-  it('drops a partial line longer than 8 MiB and counts it, then parses the sealed remainder as garbage once', async () => {
+  it('backfills a complete nine-MiB document without dropping its record or its child parent link', async () => {
+    const data = 'A'.repeat(9 * 1024 * 1024);
+    const prompt = line({ type: 'user', uuid: 'large', parentUuid: null, timestamp: at(0), message: { role: 'user', content: [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }] } });
+    const answer = line({ type: 'assistant', uuid: 'answer', parentUuid: 'large', timestamp: at(1), message: { role: 'assistant', content: [{ type: 'text', text: 'Read it' }] } });
+    const { follower, out } = await started(joined([prompt, answer]));
+    expect(out.of('user.message')).toHaveLength(1);
+    expect(follower.snapshot()).toMatchObject({ chain: ['large', 'answer'], gap: null, skippedLines: 0 });
+  });
+
+  it('keeps an oversized partial tail on disk and recovers it once sealed', async () => {
     const first = line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'one' } });
     const { reader, follower, out } = await started(joined([first]), 'S' as SessionId);
     reader.append(Buffer.from('{"type":"user","uuid":"huge","parentUuid":"u1","message":{"role":"user","content":"' + 'x'.repeat(8 * 1024 * 1024) + '"'));
     await follower.poke();
-    expect(follower.snapshot().skippedLines).toBe(1);
+    expect(follower.snapshot().skippedLines).toBe(0);
     expect(follower.snapshot().partial.length).toBe(0);
     expect(follower.snapshot().offset).toBe(reader.size);
-    reader.append(Buffer.from('}}\n' + line({ type: 'user', uuid: 'u2', parentUuid: 'u1', timestamp: at(1), message: { role: 'user', content: 'two' } }) + '\n'));
+    reader.append(Buffer.from('}}\n' + line({ type: 'user', uuid: 'u2', parentUuid: 'huge', timestamp: at(1), message: { role: 'user', content: 'two' } }) + '\n'));
     await follower.poke();
-    expect(follower.snapshot().skippedLines).toBe(2);
-    expect(follower.snapshot().chain).toEqual(['u1', 'u2']);
-    expect(out.of('user.message').map((e) => e.messageUuid)).toEqual(['u1', 'u2']);
-    reader.assertContiguous(reader.size);
+    expect(follower.snapshot().skippedLines).toBe(0);
+    expect(follower.snapshot().chain).toEqual(['u1', 'huge', 'u2']);
+    expect(out.of('user.message').map((e) => e.messageUuid)).toEqual(['u1', 'huge', 'u2']);
   });
 
   it('a rewrite that drops the abandoned branch (the GC shape) reloads to the same chain with nothing delivered twice', async () => {
@@ -989,7 +1001,7 @@ describe('a transcript a terminal and MAWS both write (W7)', () => {
   async function feed(pinned: { on: boolean }) {
     const reader = new MemoryFileReader(joined(steps[0]));
     const out = new Collector();
-    const follower = new ChainFollower(reader, SESSION, null, out.sink, { holders: () => 2, pinned: () => pinned.on });
+    const follower = new ChainFollower(reader, SESSION, null, out.sink, { holders: () => 2, pinned: () => pinned.on, isOwnRecord });
     await follower.start();
     const marks: number[] = [];
     for (const step of steps.slice(1)) {
@@ -1008,7 +1020,7 @@ describe('a transcript a terminal and MAWS both write (W7)', () => {
     const lines = [own('user', 'u1', null, 0), own('assistant', 'a1', 'u1', 1), own('user', 'u2', 'a1', 2), own('assistant', 'a2', 'u2', 3), own('user', 'c1', 'a1', 4, 'cli')];
     for (const pinned of [false, true]) {
       const out = new Collector();
-      const follower = new ChainFollower(new MemoryFileReader(joined(lines)), SESSION, null, out.sink, { holders: () => 1, pinned: () => pinned });
+      const follower = new ChainFollower(new MemoryFileReader(joined(lines)), SESSION, null, out.sink, { holders: () => 1, pinned: () => pinned, isOwnRecord });
       await follower.start();
       if (pinned) {
         expect(out.of('boundary.rewind')).toEqual([]);
@@ -1018,6 +1030,19 @@ describe('a transcript a terminal and MAWS both write (W7)', () => {
         expect(out.of('boundary.rewind').map((e) => e.targetMessageUuid)).toEqual(['u2']); // the heuristic, unpinned
       }
     }
+  });
+
+  it('attributes PID-less probe records only through unambiguous holder evidence', () => {
+    const sdk = records.find((record) => record.entrypoint === 'sdk-ts')!;
+    expect(sdk).not.toHaveProperty('pid'); // the real engine does not persist writer PIDs
+    expect(isOwnRecord(sdk)).toBe(true);
+    const contested = [...writers, { pid: 43, sessionId: SESSION, entrypoint: 'sdk-ts' }];
+    expect(ownsTranscriptRecord(sdk, SESSION, contested, ownPids)).toBe(false);
+    expect(ownsTranscriptRecord(sdk, SESSION, [], ownPids)).toBe(false);
+    expect(ownsTranscriptRecord(sdk, 'other' as SessionId, writers, ownPids)).toBe(false);
+    expect(ownsTranscriptRecord({ ...sdk, pid: 42 }, SESSION, contested, ownPids)).toBe(true);
+    expect(ownsTranscriptRecord({ ...sdk, pid: 43 }, SESSION, writers, ownPids)).toBe(false);
+    expect(ownsTranscriptRecord({ entrypoint: 'cli', pid: 42 }, SESSION, writers, ownPids)).toBe(false);
   });
 
   it('records the writers it claims: one fork, a terminal branch and a MAWS branch', () => {
