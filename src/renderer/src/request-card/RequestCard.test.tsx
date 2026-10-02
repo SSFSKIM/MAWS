@@ -690,3 +690,17 @@ describe('a card whose item changes starts over (C5 renders the slot unkeyed)', 
     expect(screen.getByRole('button', { name: 'Allow' })).toBeTruthy();
   });
 });
+
+// R2 (the waves plan's R2 rulings): the engine's dev-mods consent reaches MAWS as an ordinary AskUserQuestion permission
+// request headed "Mods" (pass3/mods-consent seq 7, R0's question 5), so the question card already asks it.
+describe('the dev-mods consent (R2, pass3/mods-consent)', () => {
+  it('renders as a question card headed "Mods" with the engine’s three choices', () => {
+    const consent = fixtureRequest('pass3', 'mods-consent', 7);
+    expect(consent.kind).toBe('question.requested');
+    mount(consent, 'docked');
+    expect(screen.getByText('Mods')).toBeTruthy();
+    expect(screen.getByText(/Enable hot reloading for this session\?/)).toBeTruthy();
+    for (const choice of ['How does this work?', 'Enable for this session', 'Not now']) expect(screen.getByRole('radio', { name: choice })).toBeTruthy();
+  });
+});
+

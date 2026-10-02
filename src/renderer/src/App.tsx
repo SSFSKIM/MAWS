@@ -3,7 +3,8 @@ import { useEffect } from 'react';
 import { Shell } from './app/Shell';
 import { connectScenarioSessionCreator } from './app/scenario-session-creator';
 import { connectPluginToasts } from './app/plugin-toasts'; // R1
-import { connectEngineSurface } from './engine-surface'; // R2
+import { connectEngineSurface, connectSurfaceAsks } from './engine-surface'; // R2
+import { connectPluginPanes } from './engine-surface/panes'; // R2
 import { connectAttention } from './attention/navigation';
 import { registerShellActions } from './app/shell-actions';
 import { ipc } from './ipc/client';
@@ -75,6 +76,8 @@ export function App() {
   useEffect(() => connectAttention(), []); // C5: ⌘⇧J, notification clicks and the fallback toast
   useEffect(() => connectPluginToasts(), []); // R1: a plugin's toast, for a session this window shows
   useEffect(() => connectEngineSurface(), []); // R2: the engine's drawings re-asked when it invalidates them
+  useEffect(() => connectSurfaceAsks(), []); // R2: a plugin's copy and prompt requests, answered by this window
+  useEffect(() => connectPluginPanes(), []); // R2: a plugin's panes as panel tabs, from the engine's roster
   useEffect(() => connectKeys(), []); // C5: renderer-sink chords, bound to the element that holds focus
   useEffect(() => connectActions(), []); // C5: menu actions in, the enabled set out
   useEffect(() => connectScenarioSessionCreator(), []); // C5: the stub's session creator in launch mode scenario

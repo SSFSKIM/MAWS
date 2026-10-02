@@ -5,13 +5,16 @@
 // auto-mode verdict appears there, never on a cell line). A working turn's duration ticks. W8: a click opens or folds
 // the work area through the shared disclosure motion (motion.ts); a fold reads closed from the click on, while its rows
 // close, and the store folds the turn when they have. R1: while the turn works, the most recent status line a plugin
-// pinned (the engine's `ui_status`) reads under the divider, muted and on one line, the label itself untouched.
+// pinned (the engine's `ui_status`) reads under the divider, muted and on one line, the label itself untouched. R2: a
+// plugin hooking the Spinner site replaces the working label's text (engine-surface/spinner.ts), nothing else.
 import { Popover } from 'radix-ui';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ticks, useTranscriptStore, workingDurationMs, type TranscriptEntry } from '../../../stores/transcript';
 import { dividerCopy, turnSummaryCopy } from '../../model/copy';
 import { isPersistentRow, turnPhrases } from '../../model/derive';
 import { latestPluginLine } from '../../model/plugins';
+import type { AppSessionId } from '@shared/graph/ids';
+import { useSpinnerText } from '../../../engine-surface/spinner'; // R2
 import type { CellId, Row, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { Chevron } from './parts';
@@ -50,7 +53,7 @@ function workAreaRowIds(rows: readonly Row[], divider: DividerRowData): string[]
 }
 
 export function DividerRow({ row }: { row: DividerRowData }) {
-  const { storeKey, idPrefix } = useTranscriptContext();
+  const { storeKey, idPrefix, variant } = useTranscriptContext();
   const durationMs = useDuration(row, storeKey);
   const motion = useWorkMotion();
   const turn = row.turnId!;
@@ -61,7 +64,9 @@ export function DividerRow({ row }: { row: DividerRowData }) {
     return rows ? workAreaRowIds(rows, row).map((id) => rowElementId(idPrefix, id)).join(' ') : '';
   });
   const store = useTranscriptStore.getState();
-  const label = dividerCopy({ state: row.state, origin: row.origin, durationMs, toolCalls: row.toolCalls, denied: 0, autoDenied: 0 });
+  // R2: a plugin hooking the Spinner gives the working label its text (a session's own transcript, never a child's)
+  const spinner = useSpinnerText(variant === 'session' ? (storeKey as AppSessionId) : null, row.state === 'working');
+  const label = spinner ?? dividerCopy({ state: row.state, origin: row.origin, durationMs, toolCalls: row.toolCalls, denied: 0, autoDenied: 0 });
   const firstOf = (disposition: 'denied' | 'auto_denied') => row.summary.denials.find((denial) => denial.disposition === disposition)?.cellId ?? null;
   return (
     <>
@@ -80,7 +85,7 @@ export function DividerRow({ row }: { row: DividerRowData }) {
           }}
         >
           <Chevron />
-          {label}
+          {spinner === null ? label : <span data-plugin-spinner="">{label}</span>}
         </button>
         {row.denied > 0 && <CountLink count={row.denied} noun="denied" cell={firstOf('denied')} turnId={row.turnId!} storeKey={storeKey} />}
         {row.autoDenied > 0 && <CountLink count={row.autoDenied} noun="auto-denied" cell={firstOf('auto_denied')} turnId={row.turnId!} storeKey={storeKey} />}

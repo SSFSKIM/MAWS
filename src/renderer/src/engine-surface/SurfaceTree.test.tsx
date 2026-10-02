@@ -22,7 +22,7 @@ const press = { plugin: 'mods-probe', handle: 6 };
 
 describe('SurfaceTree (R2)', () => {
   it('Box is a flex box in cells and Text a span with its styles, strings in a Box wrapped as Text', () => {
-    setup({ type: 'Box', props: { flexDirection: 'column', gap: 1, paddingX: 2, borderStyle: 'round', borderColor: 'cyan' }, children: ['loose', { type: 'Text', props: { bold: true, color: 'red', dimColor: true }, children: ['styled'] }, { type: 'Text', props: { color: '#ff00ff', inverse: true }, children: ['inverse'] }] });
+    setup({ type: 'Box', props: { flexDirection: 'column', gap: 1, paddingX: 2, borderStyle: 'round', borderColor: 'cyan' }, children: ['loose', { type: 'Text', props: { bold: true, color: 'red', dimColor: true }, children: ['styled'] }, { type: 'Text', props: { color: 'ansi256(201)', inverse: true }, children: ['inverse'] }] });
     const box = document.querySelector<HTMLElement>('[data-surface="box"]')!;
     expect(box.style.display).toBe('flex');
     expect(box.style.flexDirection).toBe('column');
@@ -36,7 +36,7 @@ describe('SurfaceTree (R2)', () => {
     expect(styled.style.fontWeight).toBe('600');
     expect(styled.style.color).toBe('var(--term-ansi-red)'); // a colour wins over dim
     const inverse = screen.getByText('inverse');
-    expect(inverse.style.color).toBe('var(--bg)'); // a hex colour is not a token: the default, inverted
+    expect(inverse.style.color).toBe('var(--bg)'); // a colour not spelled by name is not a token: the default, inverted
     expect(inverse.style.backgroundColor).toBe('var(--fg)');
   });
 

@@ -48,6 +48,7 @@ import { ResubmitLine } from './InlineEdit'; // W3 (B6)
 import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
 import { ContextRing } from './frame/ContextRing';
 import { Frame } from './frame/Frame';
+import { PluginBand, PluginHint } from './frame/PluginSites'; // R2
 import { useGitWatch, type GitWatch } from './frame/git-watch';
 import { QueueList } from './queue/QueueList';
 import { cancelInlineEdit, sendInlineEdit } from './resubmit-seam'; // W3 (B6)
@@ -147,6 +148,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const handle = useRef<EditorHandle>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<ComposerDoc>(emptyDoc);
+  // R2: a plugin's suggested prompt (the engine's `ui_prompt_suggest`), the empty box's placeholder until taken, typed
+  // over, or a turn starts
+  const [suggestion, setSuggestion] = useState<string | null>(null);
   // W3 (B6): a rewound edit whose resend still waits (its bubble left with the rewound turn) shows its line in the dock
   const resubmit = useComposerStore((s) => resubmitRecordOf(s, appSessionId));
   const rewoundEdit = useComposerStore((s) => (inlineEditOf(s, appSessionId) !== null && resubmitRecordOf(s, appSessionId).state === 'rewound_awaiting_send' ? inlineEditOf(s, appSessionId) : null));
@@ -193,6 +197,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // ---- focus: the one app-level ⌘L and the docked frame's return go through this -----------------------------------------
   const rootRef = useRef<HTMLElement>(null);
+  // R2: what the engine's prompt requests read, as of the latest render
+  const promptState = useRef({ docked: false, readOnly: false, busy: false });
   useEffect(
     () =>
       registerFocusTarget(appSessionId, {
@@ -204,6 +210,23 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         },
         insertText: (text) => handle.current?.insertText(text),
         openWidget: (name, args) => handle.current?.openWidget(name, args) ?? false, // C11: openComposerWidget
+        // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts)
+        prompt: {
+          read: () => handle.current?.promptBox() ?? { text: '', cursor: 0 },
+          fill: (text, mode) => {
+            const { docked: covered, readOnly } = promptState.current;
+            if (covered || readOnly || !handle.current) return false; // a card holds the box, or it takes no typing
+            handle.current.fill(text, mode);
+            setSuggestion(null);
+            return true;
+          },
+          suggest: (text) => {
+            const { busy } = promptState.current;
+            if (busy || text.trim() === '' || !(handle.current?.serialize().empty ?? false)) return false; // the box holds text, or a turn runs
+            setSuggestion(text);
+            return true;
+          },
+        },
       }),
     [appSessionId],
   );
@@ -316,6 +339,13 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // The editor is read-only while C10 holds the first send (starting, or its message retained behind a card).
   const editorDisabled = setup && (starting || messageHeld) ? decision.reason : null;
+  // R2: the prompt requests' view of the composer, and a suggestion gone once a turn runs or the box holds text
+  const working = isBusy(status, queue.entries);
+  useLayoutEffect(() => {
+    promptState.current = { docked, readOnly: editorDisabled !== null || setup !== null, busy: working };
+  });
+  if (suggestion !== null && (working || !draft.empty)) setSuggestion(null); // typed over, or a turn started: gone
+  useEffect(() => handle.current?.refreshPlaceholder(), [suggestion]);
   const sessionId = status?.engineSessionId ?? record?.engineSessionId ?? null;
 
   return (
@@ -339,6 +369,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {!unstarted && <QueueList appSessionId={appSessionId} queue={queue} busy={isBusy(status, queue.entries)} sessionId={sessionId} cwd={cwd} client={client} />}
       {rewoundEdit && <ResubmitLine resubmit={resubmit} onSend={() => void sendInlineEdit(client, appSessionId)} onLeave={() => cancelInlineEdit(appSessionId)} />}
       {swap.notice && <RequestCard key={swap.notice.id} item={swap.notice} request={null} placement="docked" paneIndex={paneIndex} />}
+      {/* R2: a plugin's band above the frame, only while a plugin draws one */}
+      {!unstarted && <PluginBand appSessionId={appSessionId} working={working} />}
       <Frame
         appSessionId={appSessionId}
         docked={
@@ -376,11 +408,15 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               onDocChange={setDoc}
               onEscape={onEscape}
               onSubmit={onSubmit}
+              suggestion={suggestion}
+              onSuggestionTaken={() => setSuggestion(null)}
             />
           </div>
         }
         submit={<SubmitControl decision={decision} multiline={isMultiline(doc)} onPrimary={onPrimary} />}
       />
+      {/* R2: a plugin's hint under the frame, only while a plugin draws one */}
+      {!unstarted && <PluginHint appSessionId={appSessionId} isDraft={!draft.empty} isWorking={working} />}
     </section>
   );
 }

@@ -8,6 +8,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { Icon, IconButton } from '../app/IconButton';
 import { COPY } from './copy';
+import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
+import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
 import { instanceOf, panelHost, requestFocus, togglePinned, usePanelHost, type PanelHostState } from './host';
 import type { PanelHostProps } from './host-slot';
 
@@ -116,7 +118,8 @@ function GlyphButton(props: { label: string; pressed?: boolean; disabled?: boole
 const MENU_ORDER: readonly string[] = ['subagents', 'review', 'terminal', 'files', 'background', 'session-info'];
 
 // "+": every registered tool offered from the menu, in the §5.6 order then registration order, less a single-instance
-// tool that already has a tab here. With no session shown there is nothing for a tool to read, so it is disabled.
+// tool that already has a tab here. With no session shown there is nothing for a tool to read, so it is disabled. R2:
+// then the shown session's plugin panes under "Plugin panes", each selecting its pane's tab (added when it has none).
 export function menuTools(tools: PanelHostState['tools'], tabs: PanelTabRef[]) {
   const rank = (id: string) => (MENU_ORDER.includes(id) ? MENU_ORDER.indexOf(id) : MENU_ORDER.length);
   return [...tools.values()]
@@ -126,6 +129,7 @@ export function menuTools(tools: PanelHostState['tools'], tabs: PanelTabRef[]) {
 
 function AddMenu({ appSessionId, tabs }: { appSessionId: AppSessionId | null; tabs: PanelTabRef[] }) {
   const tools = usePanelHost((s) => s.tools);
+  const panes = usePanes(appSessionId); // R2: the session's plugin panes, listed under their own heading
   if (appSessionId === null) {
     return (
       <IconButton label={COPY.addNoSession} disabled>
@@ -162,6 +166,22 @@ function AddMenu({ appSessionId, tabs }: { appSessionId: AppSessionId | null; ta
               </DropdownMenu.Item>
             );
           })}
+          {panes.length > 0 && (
+            <DropdownMenu.Group aria-label={PANE_COPY.menu}>
+              <DropdownMenu.Separator className="my-1 h-px bg-border" />
+              <DropdownMenu.Label className="px-2 py-1 text-ui-sm text-fg-faint select-none">{PANE_COPY.menu}</DropdownMenu.Label>
+              {panes.map((pane) => (
+                <DropdownMenu.Item
+                  key={pane.id}
+                  onSelect={() => openPaneTab(appSessionId, pane.id)}
+                  className="flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover"
+                >
+                  <span className="min-w-0 truncate">{pane.title || pane.id}</span>
+                  <span className="ml-auto shrink-0 text-ui-sm text-fg-faint">{pane.plugin}</span>
+                </DropdownMenu.Item>
+              ))}
+            </DropdownMenu.Group>
+          )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

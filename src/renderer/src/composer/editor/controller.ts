@@ -18,7 +18,7 @@ import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
 import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
-import { atomId, attachmentsOf, emptyDoc, isMultiline, mentionNode, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
+import { atomId, attachmentsOf, docOf, emptyDoc, hardBreak, isMultiline, mentionNode, paragraph, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
 import { createDraftWriter, docOfDraft, isEmptyDoc, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
@@ -50,6 +50,12 @@ export interface EditorHandle {
   attachPicked(files: PickedFile[]): Promise<void>; // `layout.pickFiles`'s answer: bytes attach, a path is mentioned
   openSlash(): void; // the "+" menu's Slash commands: the palette at `/`
   openWidget(name: string, args?: string): boolean; // whether a widget is registered for the name (C11: `args`, default '')
+  // R2: the engine's prompt requests on a plugin's behalf: the box as it stands (its text as sent, the caret at its end:
+  // MAWS does not map the caret into the flattened text), a fill (`replace` the draft, `append` after it, `insert` at
+  // the caret), and the placeholder redrawn after the suggestion changed
+  promptBox(): { text: string; cursor: number };
+  fill(text: string, mode: 'replace' | 'append' | 'insert'): void;
+  refreshPlaceholder(): void;
 }
 
 // What the controller reads from the component, refreshed after every render.
@@ -67,6 +73,8 @@ export interface ControllerInputs {
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;
   onRestore?(doc: ComposerDoc): void; // a draft was restored into the editor
+  suggestion?: string | null; // R2: a plugin's suggested prompt, the empty box's placeholder; Tab takes it
+  onSuggestionTaken?(): void;
 }
 
 // The component's state the controller sets.
@@ -96,6 +104,10 @@ export function ipcDrafts(client: MawsBridge, appSessionId: AppSessionId): Draft
       }),
   };
 }
+
+// R2: plain text as a document (one paragraph a line) and as inline content (lines joined by hard breaks).
+const textDoc = (text: string): ComposerDoc => docOf(text.split('\n').map((line) => paragraph(...(line ? [textNode(line)] : []))));
+const inlineContent = (text: string) => text.split('\n').flatMap((line, i) => [...(i > 0 ? [hardBreak()] : []), ...(line ? [textNode(line)] : [])]);
 
 // C11 start: how long Enter on a typed `/<widget> <args>` waits for the widget to decide before opening it
 export const TYPED_DECIDE_MS = 300;
@@ -138,7 +150,7 @@ export class EditorController {
       additionalDirectories,
       catalog: catalog ?? EMPTY_CATALOG,
       widgets,
-      placeholder: followUp ? 'Ask a follow-up…' : 'Do anything',
+      placeholder: this.inputs.suggestion ?? (followUp ? 'Ask a follow-up…' : 'Do anything'), // R2: a plugin's suggestion
       files: (files, at) => void this.addFiles(files, at),
       pasteText: (text) => this.pasteText(text),
       openWidget: (name, args) => void this.openWidget(name, args),
@@ -178,6 +190,12 @@ export class EditorController {
     if (event.key === 'Enter' && plain) {
       if (isMultiline(editor.getJSON())) return false; // the line breaks (ProseMirror's own Enter); ⌘Enter sends
       void this.submit();
+      return true;
+    }
+    // R2: Tab takes a plugin's suggestion into the empty box
+    if (event.key === 'Tab' && plain && this.inputs.suggestion && isEmptyDoc(editor.getJSON())) {
+      this.setDoc(textDoc(this.inputs.suggestion), { silently: false, caret: 'end' });
+      this.inputs.onSuggestionTaken?.();
       return true;
     }
     if (event.key === 'ArrowUp' && plain) return this.history('up');
@@ -419,6 +437,20 @@ export class EditorController {
       },
       openSlash: () => void editor().chain().focus().insertContentAt(1, '/').run(),
       openWidget: (name, args = '' /* C11: the argument a widget opens with */) => this.openWidget(name, args),
+      // R2
+      promptBox: () => {
+        const text = serializeDraft(editor().getJSON(), { sessionId: this.inputs.sessionId, cwd: this.inputs.cwd }).display;
+        return { text, cursor: text.length };
+      },
+      fill: (text, mode) => {
+        if (mode === 'replace') this.setDoc(textDoc(text), { silently: false, caret: 'end' });
+        else if (mode === 'append') editor().chain().focus('end').insertContent(inlineContent(text)).run();
+        else editor().chain().focus().insertContent(inlineContent(text)).run();
+      },
+      refreshPlaceholder: () => {
+        const view = editor().view;
+        view.dispatch(view.state.tr.setMeta('placeholder', true)); // the placeholder's decoration is read again
+      },
     };
   }
 }

@@ -8,3 +8,5 @@ export { connectEngineSurface, useSurfaceAttached, useSurfaceSite, type SiteOpti
 export { invalidateSession, resetSurfaceRegistry, type SiteAnswer } from './registry';
 export { drawsEngine, parseTree, textOf, type SurfaceNode } from './tree';
 export type { Site } from './actions';
+export { connectSurfaceAsks, ASK_COPY } from './asks';
+export { useSpinnerText } from './spinner';

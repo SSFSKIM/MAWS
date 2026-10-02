@@ -22,7 +22,8 @@ export interface SurfaceSiteProps {
   props: Record<string, unknown>;
   viewport?: SurfaceViewport;
   enabled?: boolean;
-  engine?: ReactNode; // MAWS's own drawing of the site
+  // MAWS's own drawing of the site, or how to draw it from the answer (a hook that rewrote the props and drew nothing)
+  engine?: ReactNode | ((answer: SiteAnswer | null) => ReactNode);
   // what wraps a drawn tree (the band's frame, the chip's look); absent, the tree alone
   frame?: (tree: ReactNode, answer: SiteAnswer) => ReactNode;
   client?: MawsBridge;
@@ -38,9 +39,10 @@ export function drawnTree(answer: SiteAnswer | null): SiteAnswer | null {
 export function SurfaceSite({ appSessionId, component, instanceId, props, viewport, enabled = true, engine = null, frame, client = ipc }: SurfaceSiteProps) {
   const answer = useSurfaceSite({ appSessionId, component, instanceId, props, viewport, enabled, client });
   const drawn = drawnTree(answer);
-  if (appSessionId === null || drawn === null) return <>{engine}</>;
+  const own = typeof engine === 'function' ? engine(answer) : engine;
+  if (appSessionId === null || drawn === null) return <>{own}</>;
   const site: Site = { appSessionId, component, instanceId, client };
-  const tree = <SurfaceTree tree={drawn.tree!} site={site} engine={engine} />;
+  const tree = <SurfaceTree tree={drawn.tree!} site={site} engine={own} />;
   const body = isScrollSite(component) ? <ScrollingSite site={{ ...site, component }}>{tree}</ScrollingSite> : tree;
   return <>{frame ? frame(body, drawn) : body}</>;
 }
