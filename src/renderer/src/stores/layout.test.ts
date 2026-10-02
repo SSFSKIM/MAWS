@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type LayoutMain } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { createLayoutStore } from './layout';
+import { createLayoutStore, registerReplaceGuard } from './layout';
 
 const A = 'app-a' as AppSessionId;
 const session = (id: string) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
@@ -74,8 +74,8 @@ describe('layout store actions', () => {
     const store = createLayoutStore();
     const s = () => store.getState();
     s().openSession(A);
-    s().openSession('b' as AppSessionId);
-    s().openSession('c' as AppSessionId);
+    s().openSession('b' as AppSessionId, { how: 'tab' });
+    s().openSession('c' as AppSessionId, { how: 'tab' });
     s().activateTab('session:b');
     s().closeTab('session:b');
     expect(s().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:c']);
@@ -146,12 +146,68 @@ describe('layout store actions', () => {
   });
 });
 
+// I2: a replace that would take an unstarted tab's place asks C10's close guard first (registered by the shell).
+describe('replacing an unstarted tab', () => {
+  const NEW = 'new-1' as AppSessionId;
+  const B = 'b' as AppSessionId;
+  const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  function unstartedShown(answer: boolean) {
+    const store = createLayoutStore();
+    const discard = vi.fn(async () => answer);
+    const off = registerReplaceGuard({ unstarted: (id) => id === NEW, discard });
+    store.getState().openSession(A);
+    store.getState().openSession(NEW, { how: 'tab' });
+    const tabs = () => store.getState().main.panes[0].tabs.map((t) => t.id);
+    return { store, discard, off, tabs };
+  }
+
+  it('discarded, the session takes the unstarted tab’s place and leaves no ⌘⇧T entry', async () => {
+    const { store, discard, off, tabs } = unstartedShown(true);
+    try {
+      store.getState().openSession(B);
+      expect(discard).toHaveBeenCalledWith(expect.objectContaining({ id: `session:${NEW}` }));
+      expect(tabs()).toEqual([`session:${A}`, `session:${NEW}`]); // nothing changes while the guard decides
+      await settled();
+      expect(tabs()).toEqual([`session:${A}`, 'session:b']);
+      expect(store.getState().main.panes[0].activeTabId).toBe('session:b');
+      expect(store.getState().main.closedTabs).toEqual([]);
+    } finally {
+      off();
+    }
+  });
+
+  it('declined, the unstarted tab stays and the session opens in a tab of its own', async () => {
+    const { store, off, tabs } = unstartedShown(false);
+    try {
+      store.getState().openSession(B);
+      await settled();
+      expect(tabs()).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']);
+    } finally {
+      off();
+    }
+  });
+
+  it('asks nothing for a session already open, a new tab or a split', async () => {
+    const { store, discard, off, tabs } = unstartedShown(true);
+    try {
+      store.getState().openSession(A);
+      store.getState().openSession(NEW);
+      store.getState().openSession(B, { how: 'tab' });
+      expect(discard).not.toHaveBeenCalled();
+      expect(tabs()).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']);
+    } finally {
+      off();
+    }
+  });
+});
+
 describe('tab changes before hydration', () => {
   it('a tab opened while the layout snapshot is outstanding is replayed over the hydrated tabs', async () => {
     const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } });
     const store = createLayoutStore();
     const hydrating = store.getState().hydrate(fake.client, (id) => id === A || id === ('b' as AppSessionId));
-    store.getState().openSession('b' as AppSessionId); // a click before layout.get answers
+    store.getState().openSession('b' as AppSessionId, { how: 'tab' }); // a ⌘-click before layout.get answers
     expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:b']); // shown at once
     await new Promise((resolve) => setTimeout(resolve, 0)); // layout.list answered; the three reads are outstanding
     expect(fake.pending('layout.get')).toBe(3);

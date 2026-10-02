@@ -18,6 +18,7 @@ import {
   type LayoutRegions,
   type PanelSessionState,
   type PanelTabRef,
+  type TabRef,
   type TabTarget,
 } from '@shared/ipc/schema/layout';
 import type * as z from 'zod';
@@ -44,7 +45,8 @@ export interface LayoutState {
   // the shell drains its batched record events there, and the removals that makes are replayed with the rest).
   hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean, settle?: () => void): Promise<void>;
   openTab(ref: TabTarget, opts?: { pane?: model.PaneTarget; activate?: boolean }): void;
-  openSession(appSessionId: AppSessionId, opts?: { split?: boolean }): void;
+  // I2: replaces the focused pane's session unless `how: 'tab'` or `split` asks otherwise (`model.openSession`).
+  openSession(appSessionId: AppSessionId, opts?: model.OpenSessionOptions): void;
   closeTab(id: string): void;
   reopenClosed(): void;
   moveTab(id: string, toPane: Pane, index: number): void;
@@ -78,6 +80,23 @@ export interface LayoutState {
 }
 
 const PANEL_KEY = /^panel\.([^.]+)$/;
+
+// I2: an unstarted tab a replace would take the place of passes C10's close guard first (it asks only about a non-empty
+// draft) and its intent goes; declined, the session opens in a tab of its own. The action runtime, which owns the
+// guards, registers this (`registerShellActions`); unregistered, every unpinned session tab is replaced alike.
+export interface ReplaceGuard {
+  unstarted(appSessionId: AppSessionId): boolean;
+  discard(tab: TabRef): Promise<boolean>;
+}
+
+let replaceGuard: ReplaceGuard | null = null;
+
+export function registerReplaceGuard(guard: ReplaceGuard): () => void {
+  replaceGuard = guard;
+  return () => {
+    if (replaceGuard === guard) replaceGuard = null;
+  };
+}
 
 const samePins = (a: PanelTabRef[], b: PanelTabRef[]) =>
   a.length === b.length && a.every((t, i) => t.id === b[i].id && t.toolId === b[i].toolId && t.pinned === b[i].pinned);
@@ -188,7 +207,20 @@ export function createLayoutStore() {
       },
 
       openTab: (ref, opts) => main((m) => model.openTab(m, ref, opts)),
-      openSession: (appSessionId, opts) => main((m) => model.openSession(m, appSessionId, opts)),
+      openSession(appSessionId, opts = {}) {
+        const shown = model.activeTab(get().main);
+        const guard = replaceGuard;
+        const settles =
+          !opts.split && opts.how !== 'tab' && guard !== null && shown?.kind === 'session' && !shown.pinned &&
+          !model.isOpen(get().main, `session:${appSessionId}`) && guard.unstarted(shown.appSessionId);
+        if (!settles) {
+          main((m) => model.openSession(m, appSessionId, opts));
+          return;
+        }
+        void guard.discard(shown).then((discarded) =>
+          main((m) => (discarded ? model.replaceWithSession(m, shown.id, appSessionId, { remember: false }) : model.openSession(m, appSessionId, { how: 'tab' }))),
+        );
+      },
       closeTab(id) {
         const pane = get().main.panes.find((p) => p.tabs.some((t) => t.id === id));
         if (pane) closedAt.set(id, pane.tabs.findIndex((t) => t.id === id));

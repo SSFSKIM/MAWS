@@ -70,9 +70,9 @@ function layOut(strip: HTMLElement) {
 
 function openThree() {
   act(() => {
-    useLayout.getState().openSession(idOf('Charter + research'));
-    useLayout.getState().openSession(idOf('Fix sidebar drag'));
-    useLayout.getState().openSession(idOf('Quota reset recovery'));
+    useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
+    useLayout.getState().openSession(idOf('Fix sidebar drag'), { how: 'tab' });
+    useLayout.getState().openSession(idOf('Quota reset recovery'), { how: 'tab' });
   });
 }
 
@@ -104,17 +104,28 @@ describe('tab strip reorders, closes, reopens', () => {
     expect(within(main()).getByRole('dialog', { name: 'Overview' })).toBeTruthy();
   });
 
-  it('opening a session from the sidebar activates its tab in the focused pane; a second open activates the existing tab', async () => {
+  // I2: a click shows the session in place of the focused pane's (⌘⇧T brings the replaced one back); ⌘-click and a
+  // middle-click open a tab of its own; a session open anywhere is activated.
+  it('a sidebar click replaces the active session tab, ⌘-click and a middle-click open a new one, an open session is activated', async () => {
     const user = userEvent.setup();
     render(<Shell />);
     await user.click(sidebarRow('Charter + research'));
     expect(tabNames()).toEqual(['Charter + research · MAWS']);
-    expect(selected()).toBe('Charter + research · MAWS');
     await user.click(sidebarRow('Fix sidebar drag'));
+    expect(tabNames()).toEqual(['Fix sidebar drag · MAWS']);
     expect(selected()).toBe('Fix sidebar drag · MAWS');
-    await user.click(sidebarRow('Charter + research'));
-    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
-    expect(selected()).toBe('Charter + research · MAWS');
+    await act(async () => runAction('tab.reopen'));
+    expect(tabNames()).toEqual(['Fix sidebar drag · MAWS', 'Charter + research · MAWS']);
+    await user.click(sidebarRow('Fix sidebar drag'));
+    expect(tabNames()).toEqual(['Fix sidebar drag · MAWS', 'Charter + research · MAWS']);
+    expect(selected()).toBe('Fix sidebar drag · MAWS');
+    await user.keyboard('{Meta>}');
+    await user.click(sidebarRow('Sidebar interaction pass'));
+    await user.keyboard('{/Meta}');
+    expect(tabNames()).toEqual(['Fix sidebar drag · MAWS', 'Sidebar interaction pass · MAWS', 'Charter + research · MAWS']);
+    fireEvent(sidebarRow('Workstation north star'), new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+    expect(tabNames()).toEqual(['Fix sidebar drag · MAWS', 'Sidebar interaction pass · MAWS', 'Workstation north star · MAWS', 'Charter + research · MAWS']);
+    expect(selected()).toBe('Workstation north star · MAWS');
   });
 
   it('shows the session glyph on its tab and the project as its secondary text', () => {
@@ -460,6 +471,25 @@ describe('unstarted sessions', () => {
     expect(useSessions.getState().unstarted.has(NEW)).toBe(false);
   });
 
+  // I2: a sidebar click while an unstarted tab is shown passes that tab's guard first, as a close would.
+  it('a sidebar click on a shown unstarted tab asks its guard: true takes its place without a reopen entry, false opens a new tab', async () => {
+    let answer = false;
+    const guard = vi.fn<(ref: TabRef) => Promise<boolean>>(async () => answer);
+    offs.push(registerCloseGuard('session', guard));
+    const user = userEvent.setup();
+    render(<Shell />);
+    await act(() => createSession(MAWS));
+    await user.click(sidebarRow('Charter + research'));
+    expect(guard).toHaveBeenCalledWith(expect.objectContaining({ kind: 'session', appSessionId: NEW }));
+    await waitFor(() => expect(tabNames()).toEqual(['New chat · MAWS', 'Charter + research · MAWS']));
+    act(() => useLayout.getState().activateTab(`session:${NEW}`));
+    answer = true;
+    await user.click(sidebarRow('Fix sidebar drag'));
+    await waitFor(() => expect(tabNames()).toEqual(['Fix sidebar drag · MAWS', 'Charter + research · MAWS']));
+    expect(useSessions.getState().unstarted.has(NEW)).toBe(false);
+    expect(useLayout.getState().main.closedTabs).toEqual([]);
+  });
+
   it('a guard for one kind leaves the other kinds closing at once', async () => {
     offs.push(registerCloseGuard('file', async () => false));
     render(<Shell />);
@@ -499,10 +529,10 @@ describe('⌃Tab follows DOM focus', () => {
   const activeOf = (pane: 0 | 1) => useLayout.getState().main.panes[pane]?.activeTabId;
   function splitOpen() {
     act(() => {
-      useLayout.getState().openSession(idOf('Charter + research'));
-      useLayout.getState().openSession(idOf('Fix sidebar drag'));
+      useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
+      useLayout.getState().openSession(idOf('Fix sidebar drag'), { how: 'tab' });
       useLayout.getState().openSession(idOf('Quota reset recovery'), { split: true });
-      useLayout.getState().openSession(idOf('Sidebar interaction pass')); // into the focused pane, the new right one
+      useLayout.getState().openSession(idOf('Sidebar interaction pass'), { how: 'tab' }); // into the focused pane, the new right one
     });
   }
   const pane = (label: string) => within(main()).getByRole('region', { name: label });
@@ -530,8 +560,8 @@ describe('⌃Tab follows DOM focus', () => {
     registerSlotForTest();
     render(<Shell />);
     act(() => {
-      useLayout.getState().openSession(idOf('Charter + research'));
-      useLayout.getState().openSession(idOf('Fix sidebar drag'));
+      useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
+      useLayout.getState().openSession(idOf('Fix sidebar drag'), { how: 'tab' });
     });
     const start = activeOf(0);
     for (const label of ['pane scratch', 'terminal input', 'composer input']) {
@@ -557,8 +587,8 @@ describe('⌃Tab follows DOM focus', () => {
     registerSlotForTest();
     render(<Shell />);
     act(() => {
-      useLayout.getState().openSession(idOf('Charter + research'));
-      useLayout.getState().openSession(idOf('Fix sidebar drag'));
+      useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
+      useLayout.getState().openSession(idOf('Fix sidebar drag'), { how: 'tab' });
     });
     act(() => screen.getByLabelText('terminal input').focus());
     act(() => runAction('tab.next'));

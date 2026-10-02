@@ -72,28 +72,39 @@ export const registerCloseGuard = (kind: TabRef['kind'], guard: CloseGuard): (()
 
 const findTab = (main: LayoutMain, id: string): TabRef | null => main.panes.flatMap((p) => p.tabs).find((t) => t.id === id) ?? null;
 
+async function guardAllows(ref: TabRef): Promise<boolean> {
+  const guard = closeGuards.get(ref.kind) as CloseGuard | undefined;
+  if (!guard) return true;
+  try {
+    return await guard(ref);
+  } catch (error) {
+    console.error(`[actions] close guard for ${ref.kind} failed; keeping the tab`, error);
+    return false;
+  }
+}
+
+// A session with no record yet: an unstarted tab, which leaves nothing to reopen.
+export const isUnstarted = (appSessionId: AppSessionId): boolean => !useSessions.getState().records.has(appSessionId);
+
 export async function requestCloseTab(id: string): Promise<void> {
   const ref = findTab(useLayout.getState().main, id);
-  if (!ref) return;
-  const guard = closeGuards.get(ref.kind) as CloseGuard | undefined;
-  if (guard) {
-    let close: boolean;
-    try {
-      close = await guard(ref);
-    } catch (error) {
-      console.error(`[actions] close guard for ${ref.kind} failed; keeping the tab`, error);
-      return;
-    }
-    if (!close) return;
-  }
-  // An unstarted session (no record yet) leaves nothing to reopen: its tab goes without a ⌘⇧T entry, and its intent
-  // goes with it. Every other tab closes the ordinary way.
-  if (ref.kind === 'session' && !useSessions.getState().records.has(ref.appSessionId)) {
+  if (!ref || !(await guardAllows(ref))) return;
+  // An unstarted session's tab goes without a ⌘⇧T entry, and its intent goes with it. Every other tab closes the
+  // ordinary way.
+  if (ref.kind === 'session' && isUnstarted(ref.appSessionId)) {
     useLayout.getState().dropSession(ref.appSessionId);
     useSessions.getState().dropUnstarted(ref.appSessionId);
     return;
   }
   useLayout.getState().closeTab(id);
+}
+
+// I2: an unstarted tab a session is about to replace (the layout store's `ReplaceGuard`): its guard as for a close,
+// then its intent goes; the store swaps the tab itself, so it leaves no ⌘⇧T entry either.
+export async function discardForReplace(ref: TabRef): Promise<boolean> {
+  if (ref.kind !== 'session' || !(await guardAllows(ref))) return false;
+  useSessions.getState().dropUnstarted(ref.appSessionId);
+  return true;
 }
 
 // ---- unstarted titles ---------------------------------------------------------------------------------------------------

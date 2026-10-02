@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, LayoutMainSchema, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import {
-  activateTab, activeTab, closeTab, cycleTab, dropSession, focusPane, moveTab, openSession, openTab, reopenClosed, repairMain, selectTab, sessionOfTab,
-  setSplitRatio, splitWithActive, togglePinned,
+  activateTab, activeTab, closeTab, cycleTab, dropSession, focusPane, moveTab, openSession, openTab, reopenClosed, repairMain, replaceActive, replaceWithSession, selectTab,
+  sessionOfTab, setSplitRatio, splitWithActive, togglePinned,
 } from './layout-model';
 
 const S = (id: string) => ({ kind: 'session' as const, appSessionId: id as AppSessionId });
@@ -182,6 +182,58 @@ describe('layout store transitions', () => {
     expect(repairMain(onlyA, known)).toEqual(onlyA); // nothing is added
     const unordered: LayoutMain = { ...base, panes: [{ tabs: [session('a'), { id: 'diagnostics', kind: 'diagnostics', pinned: true }], activeTabId: 'session:zz' }] };
     expect(repairMain(unordered, known).panes).toEqual([{ tabs: [unordered.panes[0].tabs[1], session('a')], activeTabId: 'diagnostics' }]); // pinned first; a lost active tab is the first
+  });
+});
+
+// I2 (§5.2 as amended 2026-10-01): a session opened from the sidebar, the Overview or the palette replaces the focused
+// pane's session.
+describe('replacing the active session', () => {
+  it('an unpinned session tab active in the focused pane gives its place to the session, remembered for ⌘⇧T', () => {
+    const m = replaceActive(activateTab(abc(), 'session:b'), 'x' as AppSessionId);
+    expect(ids(m)).toEqual([['session:a', 'session:x', 'session:c']]);
+    expect(active(m)).toEqual(['session:x']);
+    expect(m.closedTabs.map((t) => t.id)).toEqual(['session:b']);
+    expect(ids(reopenClosed(m, null))).toEqual([['session:a', 'session:x', 'session:b', 'session:c']]);
+    expect(openSession(abc(), 'x' as AppSessionId)).toEqual(replaceActive(abc(), 'x' as AppSessionId)); // openSession's default
+  });
+
+  it('a session open anywhere is activated, in its pane, and nothing is replaced', () => {
+    const m = replaceActive(focusPane(split(), 1), 'b' as AppSessionId);
+    expect(ids(m)).toEqual(ids(split()));
+    expect(active(m)).toEqual(['session:b', 'session:d']);
+    expect(m.focusedPane).toBe(0);
+    expect(m.closedTabs).toEqual([]);
+  });
+
+  it('a pinned tab, a tab of another kind or an empty pane is left alone: the session opens after the active tab', () => {
+    const pinned = togglePinned(abc(), 'session:c');
+    expect(ids(replaceActive(pinned, 'x' as AppSessionId))).toEqual([['session:c', 'session:x', 'session:a', 'session:b']]);
+    const settings = openTab(abc(), { kind: 'settings', section: null });
+    expect(ids(replaceActive(settings, 'x' as AppSessionId))).toEqual([['session:a', 'session:b', 'session:c', 'settings', 'session:x']]);
+    const file = openTab(abc(), { kind: 'file', path: '/r/a.ts', line: null, appSessionId: 'a' as AppSessionId });
+    expect(ids(replaceActive(file, 'x' as AppSessionId))[0]).toContain('file:/r/a.ts');
+    expect(ids(replaceActive(base, 'x' as AppSessionId))).toEqual([['session:x']]);
+    expect(replaceActive(pinned, 'x' as AppSessionId).closedTabs).toEqual([]);
+  });
+
+  it('replaces in the focused pane of a split, leaving the other pane alone', () => {
+    const m = replaceActive(split(), 'x' as AppSessionId); // pane 1 focused, d active
+    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c'], ['session:x']]);
+    expect(m.focusedPane).toBe(1);
+  });
+
+  it('openSession with how: tab opens a tab of its own, as before', () => {
+    expect(ids(openSession(abc(), 'x' as AppSessionId, { how: 'tab' }))).toEqual([['session:a', 'session:b', 'session:c', 'session:x']]);
+  });
+
+  it('replaceWithSession without remembering: an unstarted tab whose guard passed leaves no ⌘⇧T entry', () => {
+    const m = replaceWithSession(abc(), 'session:b', 'x' as AppSessionId, { remember: false });
+    expect(ids(m)).toEqual([['session:a', 'session:x', 'session:c']]);
+    expect(active(m)).toEqual(['session:x']);
+    expect(m.closedTabs).toEqual([]);
+    // the session opened meanwhile: the old tab just goes; the old tab gone: the session opens like any tab
+    expect(ids(replaceWithSession(abc(), 'session:b', 'c' as AppSessionId, { remember: false }))).toEqual([['session:a', 'session:c']]);
+    expect(ids(replaceWithSession(abc(), 'session:zz', 'x' as AppSessionId, { remember: false }))).toEqual([['session:a', 'session:b', 'session:c', 'session:x']]);
   });
 });
 

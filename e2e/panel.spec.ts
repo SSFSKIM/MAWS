@@ -961,7 +961,8 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await expect(summary.getByRole('region', { name: 'Subagents' })).toContainText('2 working · 1 done'); // the fixture's digest
 
       // Fix sidebar drag in a split, focused: the summary follows; its probe directory does not exist on this machine.
-      await (await sidebarRow(page, SIDEBAR_DRAG)).click();
+      // I2: ⌘-click opens it in a tab of its own (a plain click would replace Charter's).
+      await (await sidebarRow(page, SIDEBAR_DRAG)).click({ modifiers: ['Meta'] });
       await menu(app, 'pane.split');
       await expect(page.getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab', { name: tabNamed(SIDEBAR_DRAG) })).toBeVisible();
       await expect(title).toContainText(SIDEBAR_DRAG);

@@ -1,8 +1,9 @@
 // One session on a project's page (§5.1 as amended 2026-10-01, W5, D2; Codex's and Claude Desktop's 30px rows): one
 // line of 13px text, the status glyph, the title, a pin mark when pinned, the unread dot and the age, with pin and
 // archive taking the age's place on hover and on keyboard focus. Everything else (branch and worktree, holder or activity, the
-// last answer, the pending request, context) is in the hover card. A click opens its tab; dragging carries its id to a
-// tab strip (`application/x-maws-session`, residue *Tab strip*). A foreign-live session shows no actions (D-12).
+// last answer, the pending request, context) is in the hover card. A click shows it in place of the focused pane's
+// session, ⌘-click or a middle-click in a new tab (I2); dragging carries its id to a tab strip
+// (`application/x-maws-session`, residue *Tab strip*). A foreign-live session shows no actions (D-12).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { ArchiveIcon, PinIcon } from '../app/IconButton';
@@ -57,7 +58,9 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: 1 
           // card for it would cover the main area unasked. Radix skips its open for a prevented focus event.
           if (!focusVisible(event.currentTarget)) event.preventDefault();
         }}
-        onClick={() => useLayout.getState().openSession(id)}
+        // I2: a click replaces the focused pane's session; ⌘-click and a middle-click open a tab of its own (Chrome's rule)
+        onClick={(event) => useLayout.getState().openSession(id, event.metaKey ? { how: 'tab' } : {})}
+        onAuxClick={(event) => event.button === 1 && useLayout.getState().openSession(id, { how: 'tab' })}
         className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[7px] rounded-sm px-[9px] outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
       >
         <GlyphMark glyph={glyph} className="w-[14px] shrink-0" />

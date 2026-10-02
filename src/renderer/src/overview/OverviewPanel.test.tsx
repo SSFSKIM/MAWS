@@ -104,14 +104,16 @@ describe('the floating Overview', () => {
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
   });
 
-  it('a card opens its session tab and closes the panel; the session behind it was never touched', async () => {
+  // I2: a card shows its session in place of the focused pane's, which ⌘⇧T brings back.
+  it('a card shows its session in place of the active session tab and closes the panel', async () => {
     const user = userEvent.setup();
     useLayout.getState().openSession(idOf('Settings idle probe'));
     render(<World />);
     act(() => useLayout.getState().setOverviewOpen(true));
     await user.click(within(panel()).getByText('Charter + research'));
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Charter + research') });
-    expect(useLayout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Settings idle probe')}`, `session:${idOf('Charter + research')}`]);
+    expect(useLayout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Charter + research')}`]);
+    expect(useLayout.getState().main.closedTabs.map((t) => t.id)).toEqual([`session:${idOf('Settings idle probe')}`]);
     expect(useLayout.getState().overviewOpen).toBe(false);
   });
 
@@ -132,7 +134,7 @@ describe('the floating Overview', () => {
 
   it('a ⌘-click on the active session’s card moves it into the split and closes it', () => {
     useLayout.getState().openSession(idOf('Settings idle probe'));
-    useLayout.getState().openSession(idOf('Charter + research'));
+    useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
     render(<World />);
     act(() => useLayout.getState().setOverviewOpen(true));
     fireEvent.click(within(panel()).getByText('Charter + research'), { metaKey: true });

@@ -40,7 +40,7 @@ describe('the session and project entries', () => {
   it('offers Resume to a session with no process, never to a MAWS-live or foreign-live one', () => {
     expect(sessionActionsFor(record('x', { holder: { kind: 'none' } }))).toContain('resume');
     expect(sessionActionsFor(record('x', { holder: { kind: 'self' } }))).not.toContain('resume');
-    expect(sessionActionsFor(record('x', { holder: { kind: 'terminal', pid: 1 } }))).toEqual(['open']);
+    expect(sessionActionsFor(record('x', { holder: { kind: 'terminal', pid: 1 } }))).toEqual(['open', 'openInNewTab']);
   });
 
   it('retires the project-level "Add directory…" and adds "Archived sessions…"', () => {

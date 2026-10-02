@@ -413,14 +413,15 @@ test('the real composer gives way to the card and returns with focus in the edit
 
     // A launched replay reports the fixture's engine session id, so the record keeps its app id but no longer its
     // title (C4 files the transcript under a record of its own again): the rows are found by app id.
-    const openRow = async (id: string) => (await sidebarRow(page, { appSessionId: id })).click();
+    // I2: a plain click replaces the focused pane's session, ⌘-click opens a tab of its own
+    const openRow = async (id: string, opts: { newTab?: boolean } = {}) => (await sidebarRow(page, { appSessionId: id })).click(opts.newTab ? { modifiers: ['Meta'] } : {});
     const main = page.locator('[data-region="main"]');
     const left = main.locator('[data-pane="0"]');
     const right = main.locator('[data-pane="1"]');
     const message = (paneLocator: typeof left) => paneLocator.getByRole('textbox', { name: 'Message' });
     await openRow(permissionId);
     await expect(message(left)).toBeVisible();
-    await openRow(countingId);
+    await openRow(countingId, { newTab: true });
     await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('pane.split')?.click());
     await expect(right.locator(`[data-composer="${countingId}"]`)).toBeVisible();
     await openRow(permissionId);

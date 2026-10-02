@@ -43,6 +43,8 @@ function locate(main: LayoutMain, id: string): { pane: Pane; index: number } | n
   return null;
 }
 
+export const isOpen = (main: LayoutMain, id: string): boolean => locate(main, id) !== null;
+
 // Pinned tabs precede unpinned, keeping relative order.
 const pinnedFirst = (tabs: TabRef[]) => [...tabs.filter((t) => t.pinned), ...tabs.filter((t) => !t.pinned)];
 
@@ -117,16 +119,54 @@ function replaceTab(main: LayoutMain, pane: Pane, index: number, tab: TabRef): L
   return { ...main, panes: panes as LayoutMain['panes'] };
 }
 
-// ⌘-click and "open in split": an already open session moves to the other pane.
-export function openSession(main: LayoutMain, appSessionId: AppSessionId, opts: { split?: boolean } = {}): LayoutMain {
+// How a session opens (I2, §5.2 as amended 2026-10-01): by default it takes the place of the focused pane's session
+// (`replaceActive`); `how: 'tab'` gives it a tab of its own (⌘-click, middle-click, "Open in new tab", a fork); `split`
+// opens it in the other pane ("Open in split", ⌘Enter), an already open session moving there.
+export interface OpenSessionOptions {
+  split?: boolean;
+  how?: 'replace' | 'tab';
+}
+
+export function openSession(main: LayoutMain, appSessionId: AppSessionId, opts: OpenSessionOptions = {}): LayoutMain {
   const target: TabTarget = { kind: 'session', appSessionId };
-  if (!opts.split) return openTab(main, target);
+  if (!opts.split) return opts.how === 'tab' ? openTab(main, target) : replaceActive(main, appSessionId);
   const found = locate(main, tabId(target));
   const other = paneOf(main, 'other');
   if (!found) return openTab(main, target, { pane: other });
   if (main.panes.length === 2 && found.pane === other) return activateTab(main, tabId(target));
   const to: Pane = main.panes.length === 2 ? other : 1;
   return moveTab(main, tabId(target), to, main.panes[to]?.tabs.length ?? 0);
+}
+
+// I2: a session opened from the sidebar, the Overview or the palette replaces what the focused pane shows. Open anywhere,
+// it is activated; an unpinned session tab active in the focused pane gives its place to it (`replaceWithSession`,
+// remembered for ⌘⇧T); a pinned tab, a tab of another kind or an empty pane is left alone and the session opens after
+// it. An unstarted active tab is the store's to settle first (C10's close guard may ask).
+export function replaceActive(main: LayoutMain, appSessionId: AppSessionId): LayoutMain {
+  const target: TabTarget = { kind: 'session', appSessionId };
+  if (locate(main, tabId(target))) return activateTab(main, tabId(target));
+  const shown = activeTab(main);
+  if (shown?.kind !== 'session' || shown.pinned) return openTab(main, target);
+  return replaceWithSession(main, shown.id, appSessionId, { remember: true });
+}
+
+// The session takes tab `id`'s place, active, under its own tab id; the old ref joins the closed-tab history when
+// `remember` (an unstarted tab, whose intent is gone, leaves nothing to reopen). With the session open already, tab `id`
+// just goes and the session is activated; with tab `id` gone, the session opens like any tab.
+export function replaceWithSession(main: LayoutMain, id: string, appSessionId: AppSessionId, opts: { remember: boolean }): LayoutMain {
+  const target: TabTarget = { kind: 'session', appSessionId };
+  const found = locate(main, id);
+  if (!found) return openTab(main, target);
+  const old = paneAt(main, found.pane).tabs[found.index];
+  const closedTabs = opts.remember ? [...main.closedTabs.filter((t) => t.id !== id), old].slice(-CLOSED_MAX) : main.closedTabs;
+  if (locate(main, tabId(target))) {
+    const panes = main.panes.map((p, i) => (i === found.pane ? without(p, id) : p));
+    return activateTab({ ...withPanes(main, panes, main.focusedPane), closedTabs }, tabId(target));
+  }
+  const tab = toRef(target);
+  const panes = [...main.panes] as PaneState[];
+  panes[found.pane] = { tabs: panes[found.pane].tabs.map((t) => (t.id === id ? tab : t)), activeTabId: tab.id };
+  return { ...main, panes: panes as LayoutMain['panes'], focusedPane: found.pane, closedTabs };
 }
 
 export function activateTab(main: LayoutMain, id: string): LayoutMain {

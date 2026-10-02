@@ -150,14 +150,14 @@ describe('a project’s page', () => {
     expect(within(row('Fix sidebar drag')).getByRole('img', { name: 'Unread' })).toBeTruthy();
   });
 
-  it('offers a foreign-live session Open only in its context menu, and no hover actions', async () => {
+  it('offers a foreign-live session only the opens in its context menu, and no hover actions', async () => {
     openPage('proj-codex-somersault');
     render(<Sidebar />);
     const foreign = row('Somersault terminal run');
     expect(within(foreign).queryByRole('button')).toBeNull();
     fireEvent.contextMenu(foreign);
     const menu = await screen.findByRole('menu');
-    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open']);
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab']);
   });
 
   it('offers §5.1’s session actions in a session’s context menu, disabled until a handler registers', async () => {
@@ -168,8 +168,8 @@ describe('a project’s page', () => {
     const menu = await screen.findByRole('menu');
     const items = within(menu).getAllByRole('menuitem');
     // C10: a live session offers no Resume; "Fork to a new worktree…" sits beside the fork in place
-    expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in split', 'Pin', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…']);
-    expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, true, true, true, true]);
+    expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…']);
+    expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, true, true, true, true, true]);
   });
 
   it('a session row’s hover actions pin, and archive stays disabled until C10', async () => {
@@ -308,8 +308,11 @@ describe('sidebar keyboard', () => {
     row('MAWS').focus();
     await user.keyboard('{ArrowRight}');
     expect(document.activeElement).toBe(row('Workstation north star'));
-    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Fix sidebar drag') });
+    await user.keyboard('{ArrowDown}{Enter}'); // I2: Enter replaces the shown session, as a click does
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Sidebar interaction pass') });
+    expect(useLayout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Sidebar interaction pass')}`]);
     expect(row('Sidebar interaction pass').getAttribute('aria-selected')).toBe('true');
     await user.keyboard('{Backspace}');
     expect(useLayout.getState().regions.sidebar.openProject).toBeNull();

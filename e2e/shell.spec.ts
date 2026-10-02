@@ -385,8 +385,9 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
   });
 
   await test.step('Item 5: tabs, the split, drags', async () => {
-    await (await sidebarRow(page, SIP)).click();
-    await (await sidebarRow(page, QUOTA)).click();
+    // I2: a plain click replaces the focused pane's session; ⌘-click opens a tab of its own
+    await (await sidebarRow(page, SIP)).click({ modifiers: ['Meta'] });
+    await (await sidebarRow(page, QUOTA)).click({ modifiers: ['Meta'] });
     expect(await tabLabels(page, 'Open tabs')).toEqual(three);
     for (const n of [1, 2, 3]) {
       await menu(app, `tab.select:${n}`);

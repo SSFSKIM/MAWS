@@ -124,7 +124,7 @@ describe('usage store: connectUsage', () => {
   it('subscribes before it asks, and asks with the engine ids of the open session tabs', async () => {
     const { fake, usage, sessions, layout } = setup();
     layout.getState().openSession('a' as AppSessionId);
-    layout.getState().openSession('c' as AppSessionId);
+    layout.getState().openSession('c' as AppSessionId, { how: 'tab' });
     const off = connectUsage(fake.client, { usage, sessions, layout });
     expect(fake.calls.slice(0, 2)).toEqual(['on settings.usageChanged', 'invoke settings.usage']);
     expect(fake.invoked('settings.usage')).toEqual([{ engineSessionIds: ['eng-a'] }]);

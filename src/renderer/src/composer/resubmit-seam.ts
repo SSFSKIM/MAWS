@@ -286,7 +286,7 @@ export async function forkInlineEdit(client: MawsBridge, appSessionId: AppSessio
     }
   };
   const accepted = await submitOnce(client, appSessionId, () => submitSerialized(client, appSessionId, s, 'send', null, { dispatch }), record(appSessionId));
-  if (accepted && opened) useLayout.getState().openSession(opened);
+  if (accepted && opened) useLayout.getState().openSession(opened, { how: 'tab' });
   return accepted;
 }
 
