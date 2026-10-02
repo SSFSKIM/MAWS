@@ -11,7 +11,7 @@ import type { CommandName } from '@shared/ipc/schema';
 import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { loadJournal } from '../../../../test/support/fixtures';
-import { panelHost } from '../panel/host';
+import { panelHost, usePanelHost } from '../panel/host';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { A, panelOf, resetPanelStores, TestHost } from '../test-support/panel';
@@ -141,6 +141,23 @@ describe('plugin panes as panel tabs (R2)', () => {
     act(() => panelHost.selectTab(paneTabs()[0]!.id)); // the person goes back to One
     push(fake, roster([pane('one', 'One'), pane('two', 'Two')], 'two'), 3); // the same roster again (another field moved)
     await waitFor(() => expect(tabs()).toEqual([['Plugin pane · One', true], ['Plugin pane · Two', false]]));
+  });
+
+  it('a passive change of the shown pane selects its tab and leaves the keyboard where it is', async () => {
+    connect({ 'session.ui.panes': roster([pane('one', 'One'), pane('two', 'Two')], 'one'), 'session.ui.render': PANE_ANSWER });
+    render(<TestHost />);
+    attach();
+    await waitFor(() => expect(paneTabs()).toHaveLength(2));
+    const composer = document.body.appendChild(document.createElement('textarea'));
+    composer.focus();
+    const two = paneTabs()[1]!.id;
+    const asked = usePanelHost.getState().focus[two] ?? 0;
+    push(fake, roster([pane('one', 'One'), pane('two', 'Two')], 'two'), 2);
+    await waitFor(() => expect(tabs()).toEqual([['Plugin pane · One', false], ['Plugin pane · Two', true]]));
+    expect(await screen.findByText('MODS_PROBE_PANE picked=one focused=false placement=dock')).toBeTruthy();
+    expect(usePanelHost.getState().focus[two] ?? 0).toBe(asked);
+    expect(document.activeElement).toBe(composer);
+    composer.remove();
   });
 
   it('a roster read still out when the connection goes never applies', async () => {

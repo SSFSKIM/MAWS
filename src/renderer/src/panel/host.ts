@@ -481,14 +481,16 @@ export function registerPanelTool<S, P>(tool: PanelTool<S, P>): () => void {
 
 export const panelHost = {
   addTool,
-  selectTab(id: string): void {
+  // Selects the tab and, on screen, asks it to take the keyboard; `focus: false` selects it alone (a move the person did
+  // not make, which leaves the keyboard where it is).
+  selectTab(id: string, { focus = true }: { focus?: boolean } = {}): void {
     const tabId = resolveId(id);
     const at = locate(tabId);
     if (!at) return;
     const shown = shownSession();
     const owner = at.pinned ? shown : at.appSessionId;
     writeRefs(owner, (refs) => refs, tabId);
-    if (owner === shown) requestFocus(tabId);
+    if (focus && owner === shown) requestFocus(tabId);
   },
   closeTab(id: string): Promise<boolean> {
     const tabId = resolveId(id);

@@ -67,6 +67,8 @@ function moveTo(container: HTMLElement, top: number, placed: { current: number |
 
 function ScrollingSite({ site, children }: { site: Site & { component: ScrollSite }; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null); // the drawn tree at its own height, so any growth of it resizes something
+  const movement = useRef(0); // each move of the window (the person's, a layout change, a plugin's): an older reply is stale
   const lastOffset = useRef(0); // the window's first row as the engine last heard or set it
   const reported = useRef(''); // the geometry last reported, so an unchanged layout reports nothing
   const following = useRef(false); // a plugin asked the window to follow its end, until it says otherwise or the person scrolls away
@@ -75,13 +77,14 @@ function ScrollingSite({ site, children }: { site: Site & { component: ScrollSit
   const siteRef = useRef(site);
   useLayoutEffect(() => void (siteRef.current = site));
 
-
   // The layout as it stands, on mount and whenever the window or its content changes size (a zero-move report), so a
   // plugin's `$.ui.scroll({ to: 'end' })` knows the last row before the person ever scrolls (pass3/mods-surface-panes
-  // seq 49 before 52); a followed end stays in view through redraws and resizes.
+  // seq 49 before 52); a followed end stays in view through redraws and resizes. The window and the content wrapper are
+  // watched: the wrapper takes the tree's height whatever the tree is (text alone, an inline root, text that grew).
   useEffect(() => {
     const container = ref.current;
-    if (!container || typeof ResizeObserver === 'undefined') return;
+    const drawn = content.current;
+    if (!container || !drawn || typeof ResizeObserver === 'undefined') return;
     const onResize = () => {
       if (following.current) moveTo(container, container.scrollHeight, placed);
       const { offset, bodyRows, contentRows } = geometry(container);
@@ -89,21 +92,13 @@ function ScrollingSite({ site, children }: { site: Site & { component: ScrollSit
       if (key === reported.current) return;
       reported.current = key;
       lastOffset.current = offset;
+      movement.current += 1;
       void sendScroll(siteRef.current, { offset, by: 0, bodyRows, contentRows });
     };
     const observer = new ResizeObserver(onResize);
-    const watch = () => {
-      observer.disconnect();
-      observer.observe(container);
-      for (const child of Array.from(container.children)) observer.observe(child);
-    };
-    watch();
-    const redrawn = typeof MutationObserver === 'undefined' ? null : new MutationObserver(watch); // a redraw may replace the root
-    redrawn?.observe(container, { childList: true });
-    return () => {
-      observer.disconnect();
-      redrawn?.disconnect();
-    };
+    observer.observe(container);
+    observer.observe(drawn);
+    return () => observer.disconnect();
   }, []);
 
   // a plugin's own moves of the ring and the window
@@ -120,6 +115,7 @@ function ScrollingSite({ site, children }: { site: Site & { component: ScrollSit
             const focusable = target?.matches('button, input, select') ? target : target?.querySelector<HTMLElement>('input, select, button');
             focusable?.focus();
           } else {
+            movement.current += 1;
             following.current = event.followEnd;
             const line = lineHeight(container);
             moveTo(container, event.followEnd ? container.scrollHeight : event.offset * line, placed);
@@ -143,7 +139,8 @@ function ScrollingSite({ site, children }: { site: Site & { component: ScrollSit
     sendFocus(site, false, null);
   };
   // The person's move, once per frame: the offset the engine held before it and the rows it covered (the engine applies
-  // `by` to `offset`, pass3/mods-surface-panes seq 59/60); the window then goes where the engine says it is.
+  // `by` to `offset`, pass3/mods-surface-panes seq 59/60); the window then goes where the engine says it is, unless the
+  // window moved again before the reply (the newer move's reply, layout or plugin push decides).
   const onScroll = () => {
     const container = ref.current;
     if (container && placed.current !== null && container.scrollTop === placed.current) {
@@ -163,8 +160,9 @@ function ScrollingSite({ site, children }: { site: Site & { component: ScrollSit
       if (by < 0) following.current = false; // scrolled up, away from the followed end
       lastOffset.current = offset;
       reported.current = `${offset}:${bodyRows}:${contentRows}`;
+      const generation = (movement.current += 1);
       void sendScroll(site, { offset: before, by, bodyRows, contentRows }).then((answer) => {
-        if (!answer) return;
+        if (!answer || generation !== movement.current) return;
         following.current = answer.followEnd;
         if (answer.offset === null || answer.offset === lastOffset.current || ref.current !== container) return;
         lastOffset.current = answer.offset;
@@ -183,7 +181,9 @@ function ScrollingSite({ site, children }: { site: Site & { component: ScrollSit
   };
   return (
     <div ref={ref} data-surface-site={site.component} data-instance={site.instanceId} className="min-h-0 min-w-0 overflow-auto" onFocus={onFocus} onBlur={onBlur} onScroll={onScroll} onKeyDown={onKeyDown}>
-      {children}
+      <div ref={content} data-surface-content="">
+        {children}
+      </div>
     </div>
   );
 }

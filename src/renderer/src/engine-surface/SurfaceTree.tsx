@@ -41,7 +41,7 @@ const FIELD = 'h-6 min-w-0 rounded-sm border border-border-strong bg-bg px-1.5 t
 export function SurfaceTree({ tree, site, engine = null }: { tree: SurfaceNode; site: Site; engine?: ReactNode }) {
   return (
     <SurfaceContext.Provider value={{ site, engine }}>
-      <Node node={tree} />
+      <Node key={identityOf(tree) ?? 'root'} node={tree} />
     </SurfaceContext.Provider>
   );
 }
@@ -64,8 +64,9 @@ function Children({ nodes, inline }: { nodes: SurfaceNode[]; inline: boolean }) 
   );
 }
 
-// A child's React key: an element a plugin addresses (`press.plugin` and `props.key`) keeps its identity, and so the
-// text typed or the option picked in it, when siblings move around it; anything else, or a duplicate, its position.
+// A node's React key: an element a plugin addresses (`press.plugin` and `props.key`) keeps its identity, and so the
+// text typed or the option picked in it, when siblings move around it or another element takes its place (the root
+// included); anything else, or a duplicate among siblings, its position.
 const identityOf = (node: SurfaceNode): string | null =>
   typeof node !== 'string' && (node.type === 'Button' || node.type === 'Input' || node.type === 'Select' || (node.type === 'Markdown' && node.press)) && node.props.key !== undefined
     ? `el:${node.press!.plugin}:${node.props.key}`

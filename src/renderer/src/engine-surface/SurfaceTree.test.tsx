@@ -124,4 +124,14 @@ describe('SurfaceTree (R2)', () => {
     expect((screen.getByRole('textbox', { name: 'first' }) as HTMLInputElement).value).toBe('typed');
     expect((screen.getByRole('textbox', { name: 'second' }) as HTMLInputElement).value).toBe('');
   });
+
+  it('a root field replaced by another field does not carry what was typed into it', async () => {
+    const fake = fakeClient({ 'session.ui.input': { handled: true, element: null, value: null } });
+    const site: Site = { appSessionId: ID, component: 'AbovePrompt', instanceId: 'above-prompt', client: fake.client };
+    const field = (key: string) => parseTree({ type: 'Input', props: { key, label: key, value: '' }, press: { plugin: 'mods-probe', handle: 1 } }) as SurfaceNode;
+    const view = render(<SurfaceTree tree={field('first')} site={site} />);
+    await userEvent.type(screen.getByRole('textbox', { name: 'first' }), 'typed');
+    view.rerender(<SurfaceTree tree={field('second')} site={site} />);
+    expect((screen.getByRole('textbox', { name: 'second' }) as HTMLInputElement).value).toBe('');
+  });
 });

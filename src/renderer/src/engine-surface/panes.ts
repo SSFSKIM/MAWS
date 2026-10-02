@@ -65,12 +65,13 @@ function reconcile(appSessionId: AppSessionId): void {
     setTitle(tab, titleOf(roster, pane.id));
   }
   // the engine moved the shown pane (a plugin's open or show of one that already has a tab): on screen, its tab is
-  // selected; only on a change, so an unchanged roster never overrides the person's own selection
+  // selected, the keyboard left where it is (a focus request is the roster's own field); only on a change, so an
+  // unchanged roster never overrides the person's own selection
   const previous = shownSeen.get(appSessionId);
   shownSeen.set(appSessionId, roster.shownId);
   if (shown && roster.shownId !== null && previous !== undefined && previous !== roster.shownId && kept.has(roster.shownId)) {
     const tab = paneTab(appSessionId, roster.shownId);
-    if (tab !== null && useLayout.getState().panelBySession.get(appSessionId)?.activeTabId !== tab) panelHost.selectTab(tab);
+    if (tab !== null && useLayout.getState().panelBySession.get(appSessionId)?.activeTabId !== tab) panelHost.selectTab(tab, { focus: false });
   }
   // a plugin's `$.ui.open({ focus: true })`: honoured on screen (its tab selected, its body takes the keyboard and says
   // so), refused for a session this window does not show
