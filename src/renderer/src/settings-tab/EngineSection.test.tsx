@@ -1,6 +1,7 @@
 // C12 M4: Settings › Engine never configures the host itself (C12 execution document, Interfaces "Engine custody",
-// Configure): Change… and "Use default" write settings, await `settings.engineApplied` (main's push for the settings as
-// they now stand), and re-read `engine.binaryInfo`. W13: custody and the pin are retired.
+// Configure): Change… and "Use installed" write settings, await `settings.engineApplied` (main's push for the settings as
+// they now stand), and re-read `engine.binaryInfo`. W13: custody and the pin are retired; the row shows the installed
+// binary's real path and version, the tested version as information, and the update runs in a terminal tab.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +11,9 @@ import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { BINARY, settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { EngineSection } from './EngineSection';
+import { openEngineUpdate } from './engine-update';
+
+vi.mock('./engine-update', () => ({ openEngineUpdate: vi.fn(() => 'terminal:update') })); // W13: the panel host is not under test here
 
 let b: SettingsBridge;
 let unsubscribe = () => {};
@@ -56,10 +60,10 @@ describe('Settings › Engine writes settings; main configures the host', () => 
     expect(names()).not.toContain('engine.configure');
   });
 
-  it('"Use default" puts launches back on the installed binary, and the row reads it', async () => {
+  it('"Use installed" puts launches back on the installed binary, and the row reads it', async () => {
     renderSection({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine, binaryPath: '/opt/claude' } });
     expect(await within(row('Binary')).findByText('/opt/claude')).toBeTruthy();
-    fireEvent.click(within(row('Binary')).getByRole('button', { name: 'Use default' }));
+    fireEvent.click(within(row('Binary')).getByRole('button', { name: 'Use installed' }));
     expect(await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287')).toBeTruthy();
     expect(b.sets).toEqual([{ engine: { binaryPath: null } }]);
     expect(names()).not.toContain('engine.configure');
@@ -77,12 +81,40 @@ describe('Settings › Engine writes settings; main configures the host', () => 
   });
 });
 
-// W13: no pin, no Re-pin…, no copy row
-it('shows no pin and no custody row', async () => {
-  renderSection();
-  expect(await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287')).toBeTruthy();
-  expect(screen.queryByRole('group', { name: 'Pinned version' })).toBeNull();
-  expect(screen.queryByRole('group', { name: 'Engine copy' })).toBeNull();
+// W13 (charter D-1 as amended 2026-10-01): the installed Claude Code, never refused for its version
+describe('the binary row and the update', () => {
+  it('shows the resolved real path and the probed version, the tested version as information, and no pin or copy row', async () => {
+    renderSection();
+    expect(await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287')).toBeTruthy();
+    expect(within(row('Binary')).getByText('2.1.287')).toBeTruthy();
+    expect(within(row('Binary')).getByText("MAWS's fixtures and conformance tests were recorded on Claude Code 2.1.283")).toBeTruthy();
+    expect(within(row('Binary')).queryByRole('button', { name: 'Use installed' })).toBeNull(); // nothing chosen
+    expect(row('Binary').querySelector('.text-warning')).toBeNull(); // a newer version is information, never a refusal
+    expect(screen.queryByRole('group', { name: 'Pinned version' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Engine copy' })).toBeNull();
+  });
+
+  it('a binary that is missing says why, in the warning colour', async () => {
+    renderSection(SETTINGS_DEFAULTS_V8, {
+      'engine.binaryInfo': () => ({ ...BINARY, path: '/Users/owner/.local/bin/claude', version: null, ok: false, error: 'Claude Code is not installed: nothing at /Users/owner/.local/bin/claude' }),
+    });
+    expect(await within(row('Binary')).findByText('Claude Code is not installed: nothing at /Users/owner/.local/bin/claude')).toBeTruthy();
+  });
+
+  it('Update Claude Code… opens the update in a terminal tab and says which sessions take the new version', async () => {
+    renderSection();
+    expect(within(row('Update')).getByText('Runs claude update in a terminal tab. New sessions start on the new version; running sessions keep theirs.')).toBeTruthy();
+    fireEvent.click(within(row('Update')).getByRole('button', { name: 'Update Claude Code…' }));
+    expect(openEngineUpdate).toHaveBeenCalledOnce();
+    expect(names()).not.toContain('settings.set'); // nothing written: the user's own updater runs
+  });
+
+  it('with a chosen binary, the notes say new sessions stay on it until Use installed', async () => {
+    renderSection({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine, binaryPath: '/opt/claude' } });
+    expect(await within(row('Binary')).findByText('/opt/claude')).toBeTruthy();
+    expect(within(row('Binary')).getByText('New sessions start on the binary you chose. Running sessions keep the binary they started on.', { exact: false })).toBeTruthy();
+    expect(within(row('Update')).getByText('Runs claude update in a terminal tab. New sessions stay on the binary you chose until Use installed.')).toBeTruthy();
+  });
 });
 
 // W3 (charter D-18 as amended 2026-10-01): the mode a session takes when the engine refuses auto, settings version 6

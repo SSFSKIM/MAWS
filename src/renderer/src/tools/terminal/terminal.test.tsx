@@ -162,6 +162,14 @@ describe('terminal tool state', () => {
     expect(registry.terminals.open).not.toHaveBeenCalled();
   });
 
+  // W13: Settings › Engine's update is a pinned tab no session owns; its params name the label its shell is filed under
+  it('opens the terminal of a pinned tab with no session at once when its params name an owner and a directory', () => {
+    const owner = 'maws-engine-update' as AppSessionId;
+    const state = terminalTool.createState({ appSessionId: null, session: null, instanceId: 'terminal:1', params: { cwd: '/', command: 'cd ~ && claude update', owner } });
+    expect(registry.terminals.open).toHaveBeenCalledWith({ appSessionId: owner, label: 'terminal:1', cwd: '/', command: 'cd ~ && claude update' });
+    expect(state.terminalId).toBe('t1');
+  });
+
   it('completes a deferred terminal through open() once it has a directory', () => {
     const state = terminalTool.createState({ appSessionId: A, session: null, instanceId: 'terminal:1', params: {} });
     expect(state.terminalId).toBeNull();

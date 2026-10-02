@@ -92,8 +92,8 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(afterWrite().slice(0, 2)).toEqual(['settings.engineApplied', 'engine.binaryInfo'])); // C12
     expect(b.calls.map((c) => c.name)).not.toContain('engine.configure'); // C12: main is its only sender
 
-    // Use default puts the binary path back to the installed Claude Code
-    fireEvent.click(within(row('Binary')).getByRole('button', { name: 'Use default' }));
+    // Use installed puts the binary path back to the installed Claude Code
+    fireEvent.click(within(row('Binary')).getByRole('button', { name: 'Use installed' }));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ engine: { binaryPath: null } }));
   });
 

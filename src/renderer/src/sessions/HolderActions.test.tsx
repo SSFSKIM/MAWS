@@ -340,9 +340,9 @@ describe('held outcomes and the attach command', () => {
     expect(screen.getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
   });
 
-  it('names the version the job runs when it is not the pinned one', async () => {
+  it('names the version the job runs when it is not the installed one, which attach runs', async () => {
     const { unmount } = renderNotice(held(JOB, { engineVersion: '2.1.284' }));
-    expect(await screen.findByText('Job on 2.1.284; attach runs 2.1.283')).toBeTruthy();
+    expect(await screen.findByText('Job on 2.1.284; attach runs the installed 2.1.283')).toBeTruthy();
     unmount();
     renderNotice(held(JOB));
     await waitFor(() => expect(fake.invoked('engine.binaryInfo').length).toBeGreaterThan(0));

@@ -5,7 +5,6 @@
 // 2026-10-01): with the status line gone, the Route row carries the Direct⇄gateway switch as its action, with the reason
 // when none is offered, and the usage rows carry the pace line the usage popover's footer showed.
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
-import type { BinaryInfo } from '@shared/ipc/schema/engine';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
@@ -37,7 +36,6 @@ export interface SessionInfoInput {
   record: SessionRecord;
   status: EngineSessionStatus | null;
   digest: SessionDigest | null;
-  binary: BinaryInfo | null;
   facts: RoutingFacts;
   directLogin: DirectLogin | null;
   lane: Lane | null; // null without a status
@@ -81,14 +79,16 @@ export function heldByRow(record: SessionRecord): InfoRow {
   return { label: INFO.heldBy, value: record.holder.kind === 'self' ? INFO.heldByMaws : INFO.heldByNone };
 }
 
-function engineSection({ record, status, digest, binary, budget }: SessionInfoInput): InfoSection { // C12: digest, budget
+function engineSection({ record, status, digest, budget }: SessionInfoInput): InfoSection { // C12: digest, budget
   const version = status?.engineVersion ?? record.engineVersion;
   const tree = status?.memory.treeRssKiB ?? null;
   return {
     title: INFO.sections.engine,
     rows: [
-      { label: INFO.version, value: version ?? NONE }, // W13: the session's own, no pin to compare it with
-      { label: INFO.binary, value: binary ? homeAbbreviated(binary.path) : NONE },
+      // W13: the session's own version (its init frame's, else the probe's at spawn, else the record's) and the binary it
+      // was spawned from (the spawn row's), never today's setting
+      { label: INFO.version, value: version ?? NONE },
+      { label: INFO.binary, value: status ? homeAbbreviated(status.bin) : NONE },
       { label: INFO.sessionId, value: record.engineSessionId ?? NONE },
       heldByRow(record), // W7
       { label: INFO.processTree, value: tree === null ? NONE : INFO.tree(mb(tree), status?.memory.rssKiB == null ? null : mb(status.memory.rssKiB)) },

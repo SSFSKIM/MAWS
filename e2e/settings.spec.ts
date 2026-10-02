@@ -5,7 +5,7 @@
 // relaunch over the same profile. The monospace-font case needs the harness's `#probe` page (`pnpm e2e:settings` builds
 // one; under a plain build it skips): a terminal of the product registry drawing Nerd Font private-use glyphs once
 // `appearance.monoFont` names an installed Nerd Font, and boxes again when it is cleared.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -174,6 +174,34 @@ test('settings: the transcript width applies to the root --measure, and Narrow r
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();
+  }
+});
+
+// W13 (charter D-1 as amended 2026-10-01): the Binary row is the binary this run resolves (MAWS_E2E_ENGINE_BIN here, a
+// stand-in a version ahead of the fixtures), by its real path, with its probed version and the tested version as
+// information, never a refusal; Update is offered and never clicked, since it would update this Mac's Claude Code.
+test('settings: Engine shows the resolved binary, its version and the tested one, and offers the update', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'maws-w13-engine-'));
+  const stub = join(dir, 'claude');
+  writeFileSync(stub, '#!/bin/sh\necho "2.1.290 (Claude Code)"\n');
+  chmodSync(stub, 0o755);
+  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: stub } });
+  try {
+    const { app, page } = maws;
+    await menu(app, 'settings.open');
+    const binary = panel(page).getByRole('group', { name: 'Binary' });
+    await expect(binary).toContainText(realpathSync(stub));
+    await expect(binary).toContainText('2.1.290');
+    await expect(binary).toContainText("MAWS's fixtures and conformance tests were recorded on Claude Code 2.1.283");
+    await expect(binary.locator('.text-warning')).toHaveCount(0);
+    await expect(binary.getByRole('button', { name: 'Use installed' })).toHaveCount(0);
+    const update = panel(page).getByRole('group', { name: 'Update' });
+    await expect(update.getByRole('button', { name: 'Update Claude Code…' })).toBeVisible();
+    await expect(update).toContainText('New sessions start on the new version; running sessions keep theirs.');
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

@@ -1,6 +1,6 @@
 // "Attach in a terminal tab" (C10 execution document, Interfaces "Session service", Attach; M5): C9's Terminal tool
-// running the engine's own `claude attach <short>` for a background job, through the pinned binary. The holder notice,
-// the row menu and the Attach of a `held` toast all come here.
+// running the engine's own `claude attach <short>` for a background job, through the installed binary (W13). The
+// holder notice, the row menu and the Attach of a `held` toast all come here.
 //
 // The job is read fresh (`fs.holders`, as main's guards read it): the id and the directory it runs in come from the
 // registry record, which for a `--bg` job is the job's own directory (a job may run in a worktree); the session's

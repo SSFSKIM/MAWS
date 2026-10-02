@@ -39,6 +39,7 @@ export const EngineSessionStatusSchema = z.strictObject({
   }),
   subagentModel: z.string().nullable(), modelOverrides: z.record(z.string(), z.string()), // ANTHROPIC_DEFAULT_*_MODEL in effect (names and values from the constructed env)
   engineVersion: z.string().nullable(), fileCheckpointing: z.boolean(),
+  bin: z.string(), // W13: the real path this process was spawned from, as the journal's spawn row records it (a replay's: its fixture)
   fastMode: z.strictObject({ state: z.enum(['off', 'cooldown', 'on']).nullable(), disabledReason: z.string().nullable() }), // C11's ask: from initialize and every system/init (`fast_mode_state`, `fast_mode_disabled_reason`; pass2/real-settings seq 15 carries `off` / `sdk_opt_in_required`); nulls before the first frame
   plugins: z.array(z.strictObject({ name: z.string(), path: z.string(), source: z.string().nullable(), version: z.string().nullable() })), // system/init.plugins (real-settings lists eleven)
   pluginErrors: z.array(z.strictObject({ plugin: z.string(), type: z.string(), message: z.string(), path: z.string().nullable() })), // system/init.plugin_errors (SPEC 45 §45.10.2; absent when empty)

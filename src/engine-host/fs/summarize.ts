@@ -55,7 +55,7 @@ export function summarize(
     firstPrompt: firstUserText(headRecords) ?? firstOfType([...headRecords, ...tailRecords], 'last-prompt', 'lastPrompt'),
     lastAssistantText: lastAssistant,
     gitBranch: firstString(tailReversed, 'gitBranch') ?? firstString(headReversed, 'gitBranch'),
-    engineVersion: firstString(headRecords, 'version') ?? firstString(tailReversed, 'version'),
+    engineVersion: firstString(tailReversed, 'version') ?? firstString(headReversed, 'version'), // W13: the latest version that wrote the file
     entrypoint: firstString(headRecords, 'entrypoint') ?? firstString(tailReversed, 'entrypoint'),
     sessionKind,
     hasMessages: headText.includes('"parentUuid":') || tailText.includes('"parentUuid":'),

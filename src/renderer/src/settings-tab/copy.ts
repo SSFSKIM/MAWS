@@ -17,11 +17,18 @@ export const INDEX = {
 };
 
 export const ENGINE = {
+  // W13 (charter D-1 as amended 2026-10-01): the installed Claude Code by default, never refused for its version
   binary: 'Binary',
   change: 'Change…',
-  useDefault: 'Use default',
-  binaryNote: 'Absolute path, never resolved through PATH. Verified at every launch.',
+  useInstalled: 'Use installed',
+  binaryNote: "New sessions start on your installed Claude Code (~/.local/bin/claude, else claude on your shell's PATH), found again at every launch. Running sessions keep the binary they started on.",
+  binaryChosenNote: 'New sessions start on the binary you chose. Running sessions keep the binary they started on.',
+  tested: (version: string) => `MAWS's fixtures and conformance tests were recorded on Claude Code ${version}`,
   binaryReading: 'Reading the binary…',
+  update: 'Update',
+  updateAction: 'Update Claude Code…',
+  updateNote: 'Runs claude update in a terminal tab. New sessions start on the new version; running sessions keep theirs.',
+  updateChosenNote: 'Runs claude update in a terminal tab. New sessions stay on the binary you chose until Use installed.',
   configHome: 'Config home',
   readOnly: 'read-only to MAWS',
   configHomeNote: 'The engine owns transcripts, settings and trust. MAWS reads them and keeps its own index elsewhere.',

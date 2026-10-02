@@ -79,6 +79,7 @@ describe('session info renders the six sections', () => {
     const labels = screen.getAllByRole('term').map((t) => t.textContent);
     expect(labels).toEqual(['Version', 'Binary', 'Session id', 'Held by' /* W7 */, 'Process tree', 'Memory budget' /* C12 */, 'Main', 'Subagents', 'Route', 'Account', 'Tool search', 'Mode', 'Auto-mode lane', 'Rules', 'Context', 'Usage', 'Cost', 'Hooks', 'MCP']);
     expect(valueOf('Version')).toBe('2.1.283'); // W13: the session's own, no pin note
+    expect(valueOf('Binary')).toBe('~/.local/share/claude/versions/2.1.283'); // W13: the file it was spawned from, not today's setting
     expect(valueOf('Session id')).toBe(record.engineSessionId);
     expect(valueOf('Main')).toBe('claude-sonnet-5[1m]');
     expect(valueOf('Subagents')).toBe("each agent's own, else Main"); // W3: no "engine default"

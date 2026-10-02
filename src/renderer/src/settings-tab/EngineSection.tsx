@@ -1,8 +1,10 @@
 // The Engine section (C11 execution document, Interfaces "Settings tab" Engine; mockup 06 vignette 04): the binary MAWS
-// launches and the version it is pinned to (both reach the engine host through `engine.configure`, which main pushes on
-// every change; C12: main alone, and this section awaits `settings.engineApplied`), the engine's config home (read-only
-// to MAWS), the subagent model new sessions launch with, and (W3) the mode a session takes when the engine refuses auto.
-// W7: the memory budget's switch, whose rows show only while it is on.
+// launches (W13: the installed Claude Code unless one is chosen, shown by its real path and probed version, with the
+// version MAWS's fixtures were recorded on as information and the user's own `claude update` one click away; a chosen
+// path reaches the engine host through `engine.configure`, which main alone pushes, and this section awaits
+// `settings.engineApplied`), the engine's config home (read-only to MAWS), the subagent model new sessions launch with,
+// and (W3) the mode a session takes when the engine refuses auto. W7: the memory budget's switch, whose rows show only
+// while it is on.
 import { useQueryClient } from '@tanstack/react-query';
 import { useId } from 'react';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
@@ -17,14 +19,18 @@ import { useCommand } from '../ipc/query';
 import { toast } from '../stores/notices';
 import { homeAbbreviated } from '../tools/session-info/model';
 import { ENGINE } from './copy';
+import { openEngineUpdate } from './engine-update'; // W13
 import { Chip, INPUT, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 import { BudgetSwitch, MemoryBudget, StatefulServers } from './BudgetSettings'; // C12; W7: the switch
 
 const BINARY_INFO_KEY = ['maws', 'engine.binaryInfo', undefined];
+// W13: the host resolves the binary per call, so the row follows an update made in a terminal while it is shown
+export const BINARY_REFRESH_MS = 10_000;
 
 export function EngineSection({ settings }: { settings: Settings }) {
   const client = useQueryClient();
-  const info = useCommand('engine.binaryInfo', undefined);
+  const info = useCommand('engine.binaryInfo', undefined, { refetchInterval: BINARY_REFRESH_MS });
+  const chosen = settings.engine.binaryPath !== null;
   const binary = info.data ?? null;
 
   // C12 start: main is the only sender of `engine.configure` (C12 execution document, Interfaces "Engine custody",
@@ -50,19 +56,34 @@ export function EngineSection({ settings }: { settings: Settings }) {
 
   return (
     <>
-      <Setting label={ENGINE.binary} note={ENGINE.binaryNote}>
+      <Setting
+        label={ENGINE.binary}
+        note={
+          <>
+            {chosen ? ENGINE.binaryChosenNote : ENGINE.binaryNote}
+            {binary && <span className="block">{ENGINE.tested(binary.testedVersion)}</span>}
+          </>
+        }
+      >
         <span className="min-w-0 truncate font-mono text-ui-sm text-fg" title={binary?.path}>
           {binary ? homeAbbreviated(binary.path) : info.isError ? info.error.message : ENGINE.binaryReading}
         </span>
+        {binary?.version && <Chip>{binary.version}</Chip>}
         <button type="button" className={TEXT_ACTION} onClick={() => void change()}>
           {ENGINE.change}
         </button>
-        {settings.engine.binaryPath !== null && (
+        {chosen && (
           <button type="button" className={TEXT_ACTION} onClick={() => void writeEngine({ binaryPath: null })}>
-            {ENGINE.useDefault}
+            {ENGINE.useInstalled}
           </button>
         )}
         {binary && !binary.ok && binary.error && <span className="basis-full text-ui-sm text-warning">{binary.error}</span>}
+      </Setting>
+      {/* W13: the user's own updater, in a terminal tab; MAWS's launches never update themselves */}
+      <Setting label={ENGINE.update} note={chosen ? ENGINE.updateChosenNote : ENGINE.updateNote}>
+        <button type="button" className={TEXT_ACTION} onClick={() => openEngineUpdate()}>
+          {ENGINE.updateAction}
+        </button>
       </Setting>
       <ConfigHome />
       <SubagentModel settings={settings} />

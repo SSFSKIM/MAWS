@@ -171,6 +171,15 @@ describe('summary card', () => {
     expect(panelOf(A)!.tabs.map((t) => t.toolId)).toEqual(['session-info']);
   });
 
+  // W13: the Claude Code version the session last ran on, a line of its own
+  it('names the Claude Code version the session ran on, and nothing while none is known', async () => {
+    act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { engineVersion: '2.1.287' })) })));
+    await mount();
+    expect(within(section('Environment')).getByText('Claude Code 2.1.287')).toBeTruthy();
+    act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { engineVersion: null })) })));
+    expect(within(section('Environment')).queryByText(/^Claude Code /)).toBeNull();
+  });
+
   it('counts subagents from the digest and draws the transcript’s glyphs; Open says it is not available', async () => {
     await live();
     await attachTranscript('agents-and-messages');

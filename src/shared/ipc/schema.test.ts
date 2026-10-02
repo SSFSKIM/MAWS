@@ -302,7 +302,7 @@ describe('ipc schema validates both directions', () => {
       process: 'starting', exit: null, engineState: 'unknown', activity: null, turn: null, model: { requested: null, resolved: null }, effort: null,
       permissionMode: { requested: 'default', effective: 'default', refusal: null }, prePlanMode: null,
       gateway: { mode: 'gateway', baseUrl: null, verified: 'pending', autoModeServer: 'unknown', localLane: null },
-      subagentModel: null, modelOverrides: {}, engineVersion: null, fileCheckpointing: true, fastMode: { state: null, disabledReason: null },
+      subagentModel: null, modelOverrides: {}, engineVersion: null, fileCheckpointing: true, bin: '/b/claude', fastMode: { state: null, disabledReason: null },
       plugins: [], pluginErrors: [], pluginWarnings: [], backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0,
       queue: { length: 0, paused: false }, keepAlive: [], busy: false, lastUsedAt: '2026-09-28T10:00:00.000Z' /* C12 */, memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, trust: { attested: false, recorded: null } /* C10 */,
     };

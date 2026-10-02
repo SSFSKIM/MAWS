@@ -28,7 +28,7 @@ export function liveStatus(record: SessionRecord): EngineSessionStatus {
     cwd: record.directory, pendingPlan: null, process: 'ready', exit: null, engineState: 'idle', activity: null, turn: null, model: record.model,
     effort: null, permissionMode: record.permissionMode, prePlanMode: null,
     gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'unknown', localLane: null }, subagentModel: null, modelOverrides: {},
-    engineVersion: record.engineVersion, fileCheckpointing: true, fastMode: { state: null, disabledReason: null }, plugins: [], pluginErrors: [], pluginWarnings: [],
+    engineVersion: record.engineVersion, fileCheckpointing: true, bin: `/Users/owner/.local/share/claude/versions/${record.engineVersion ?? '2.1.283'}`, fastMode: { state: null, disabledReason: null }, plugins: [], pluginErrors: [], pluginWarnings: [],
     backgroundTasks: [
       { taskId: 'harness-shell', taskType: 'local_bash', description: 'pnpm dev', ambient: false },
       { taskId: 'harness-workflow', taskType: 'local_workflow', description: 'review pass', ambient: false },

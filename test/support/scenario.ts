@@ -146,6 +146,7 @@ export function expandEngine(compact: CompactEngine, record: SessionRecord, time
     modelOverrides: {},
     engineVersion: record.engineVersion,
     fileCheckpointing: true, // C3 sets CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING on every launch
+    bin: `/Users/owner/.local/share/claude/versions/${record.engineVersion ?? '2.1.283'}`, // W13: the file the version names
     fastMode: { state: null, disabledReason: null },
     plugins: [],
     pluginErrors: [],
