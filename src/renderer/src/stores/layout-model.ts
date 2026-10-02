@@ -200,14 +200,13 @@ function openIn(view: View, target: TabTarget, pane: PaneTarget, activate: boole
   return place(view, toRef(target), paneOf(view, pane), 'afterActive', activate);
 }
 
-// Removes tab `id`, remembered for ⌘⇧T when `remember`.
-function removeIn(view: View, id: string, remember: boolean): View {
+// Removes tab `id`, remembered for ⌘⇧T.
+function closeIn(view: View, id: string): View {
   const found = locate(view, id);
   if (!found) return view;
   const tab = paneAt(view, found.pane).tabs[found.index];
   const panes = view.panes.map((p, i) => (i === found.pane ? without(p, id) : p));
-  const closedTabs = remember ? [...view.closedTabs.filter((t) => t.id !== id), tab].slice(-CLOSED_MAX) : view.closedTabs;
-  return { ...withPanes(view, panes, view.focusedPane), closedTabs };
+  return { ...withPanes(view, panes, view.focusedPane), closedTabs: [...view.closedTabs.filter((t) => t.id !== id), tab].slice(-CLOSED_MAX) };
 }
 
 function moveIn(view: View, id: string, toPane: Pane, index: number): View {
@@ -272,36 +271,22 @@ export function openSession(main: LayoutMain, appSessionId: AppSessionId, opts: 
 
 // I2: a session opened from the sidebar, the Overview or the palette replaces what the focused pane shows. Open anywhere,
 // it is activated, the strip moving to its set; otherwise the strip moves to `set` (I3: the session's project's) and an
-// unpinned session tab active in its focused pane gives its place to it (`replaceWithSession`, remembered for ⌘⇧T); a
-// pinned tab, a tab of another kind or an empty pane is left alone and the session opens after it. An unstarted active
-// tab is the store's to settle first (C10's close guard may ask).
+// unpinned session tab active in its focused pane gives its place to it under the session's own tab id, the old ref
+// joining the closed-tab history for ⌘⇧T; a pinned tab, a tab of another kind or an empty pane is left alone and the
+// session opens after it. An unstarted active tab is the store's to keep out of this (it opens a tab beside it).
 export function replaceActive(main: LayoutMain, appSessionId: AppSessionId, set?: TabSetKey): LayoutMain {
   const target: TabTarget = { kind: 'session', appSessionId };
   if (isOpen(main, tabId(target))) return openTab(main, target, { set });
-  const shown = switchSet(main, set ?? main.current);
+  const to = set ?? main.current;
+  const shown = switchSet(main, to);
   const old = activeTab(shown);
   if (old?.kind !== 'session' || old.pinned) return openTab(shown, target, { set });
-  return replaceWithSession(shown, old.id, appSessionId, { remember: true, set });
-}
-
-// The session takes tab `id`'s place, active, under its own tab id, the strip showing tab `id`'s set; the old ref joins
-// the closed-tab history when `remember` (an unstarted tab, whose intent is gone, leaves nothing to reopen). With the
-// session open already, tab `id` just goes and the session is activated; with tab `id` gone, the session opens like
-// any tab (in `set`).
-export function replaceWithSession(main: LayoutMain, id: string, appSessionId: AppSessionId, opts: { remember: boolean; set?: TabSetKey }): LayoutMain {
-  const target: TabTarget = { kind: 'session', appSessionId };
-  const found = locateTab(main, id);
-  if (!found || isOpen(main, tabId(target))) {
-    const rest = found ? onSet(main, found.set, (v) => removeIn(v, id, opts.remember)) : main;
-    return openTab(rest, target, { set: opts.set });
-  }
-  return onSet(switchSet(main, found.set), found.set, (v) => {
-    const old = paneAt(v, found.pane).tabs[found.index];
+  return onSet(shown, to, (v) => {
+    const at = locate(v, old.id) as { pane: Pane; index: number };
     const tab = toRef(target);
     const panes = [...v.panes] as PaneState[];
-    panes[found.pane] = { tabs: panes[found.pane].tabs.map((t) => (t.id === id ? tab : t)), activeTabId: tab.id };
-    const closedTabs = opts.remember ? [...v.closedTabs.filter((t) => t.id !== id), old].slice(-CLOSED_MAX) : v.closedTabs;
-    return { ...v, panes: panes as TabSet['panes'], focusedPane: found.pane, closedTabs };
+    panes[at.pane] = { tabs: panes[at.pane].tabs.map((t) => (t.id === old.id ? tab : t)), activeTabId: tab.id };
+    return { ...v, panes: panes as TabSet['panes'], closedTabs: [...v.closedTabs.filter((t) => t.id !== old.id), old].slice(-CLOSED_MAX) };
   });
 }
 
@@ -317,7 +302,7 @@ export function focusPane(main: LayoutMain, pane: Pane): LayoutMain {
 
 export function closeTab(main: LayoutMain, id: string): LayoutMain {
   const found = locateTab(main, id);
-  return found ? onSet(main, found.set, (v) => removeIn(v, id, true)) : main;
+  return found ? onSet(main, found.set, (v) => closeIn(v, id)) : main;
 }
 
 // Within the current set (the strips show only it).

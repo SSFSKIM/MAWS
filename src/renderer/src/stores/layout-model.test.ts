@@ -3,7 +3,7 @@ import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, LayoutMainSchema, NO_PROJECT, type LayoutMain, type LayoutMainV1, type TabRef, type TabSet, type TabSetKey } from '@shared/ipc/schema/layout';
 import {
   activateTab, activeTab, closeTab, currentSet, cycleTab, dropSession, focusPane, fromV1, moveTab, openSession, openTab, refile, reopenClosed, repairMain,
-  replaceActive, replaceWithSession, selectTab, sessionOfTab, setSplitRatio, splitWithActive, switchSet, togglePinned, type SetOfTab,
+  replaceActive, selectTab, sessionOfTab, setSplitRatio, splitWithActive, switchSet, togglePinned, type SetOfTab,
 } from './layout-model';
 
 const S = (id: string) => ({ kind: 'session' as const, appSessionId: id as AppSessionId });
@@ -230,15 +230,6 @@ describe('replacing the active session', () => {
     expect(ids(openSession(abc(), 'x' as AppSessionId, { how: 'tab' }))).toEqual([['session:a', 'session:b', 'session:c', 'session:x']]);
   });
 
-  it('replaceWithSession without remembering: an unstarted tab whose guard passed leaves no ⌘⇧T entry', () => {
-    const m = replaceWithSession(abc(), 'session:b', 'x' as AppSessionId, { remember: false });
-    expect(ids(m)).toEqual([['session:a', 'session:x', 'session:c']]);
-    expect(active(m)).toEqual(['session:x']);
-    expect(m.closedTabs).toEqual([]);
-    // the session opened meanwhile: the old tab just goes; the old tab gone: the session opens like any tab
-    expect(ids(replaceWithSession(abc(), 'session:b', 'c' as AppSessionId, { remember: false }))).toEqual([['session:a', 'session:c']]);
-    expect(ids(replaceWithSession(abc(), 'session:zz', 'x' as AppSessionId, { remember: false }))).toEqual([['session:a', 'session:b', 'session:c', 'session:x']]);
-  });
 });
 
 // C11's eighth ask: a singleton tab kind, opened like any tab, closable, never pinned (W6: the Accounts tab, the other

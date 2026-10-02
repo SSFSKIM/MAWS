@@ -130,10 +130,14 @@ export function connectShell(
   });
 
   // W12: a session's tabs live in its project's set: the record's project, else its unstarted intent's; a record whose
-  // project changes (a refold) moves its tabs (the layout ignores this until it has hydrated).
-  const projectOf = (id: AppSessionId): ProjectId | null => {
+  // project changes (a refold) moves its tabs (the layout ignores this until it has hydrated). A session with neither
+  // (a removal on its way to closing its tabs, a draft whose intent was just discarded) is not known: its tabs stay put.
+  const projectOf = (id: AppSessionId): ProjectId | null | undefined => {
     const record = sessions().records.get(id);
-    return record ? record.projectId : unstartedProjectOf(id);
+    if (record) return record.projectId;
+    const retention = currentTabRetention();
+    const unstarted = retention ? retention.retains(id) : sessions().unstarted.has(id);
+    return unstarted ? unstartedProjectOf(id) : undefined;
   };
   const offRefile = stores.sessions.subscribe((state, previous) => {
     if (state.records !== previous.records) stores.layout.getState().refileTabs();

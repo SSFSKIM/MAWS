@@ -91,6 +91,22 @@ describe('shell event subscription', () => {
     expect(tabIds(stores)).toEqual(['session:a']);
   });
 
+  // The review's F3: the records change of a removal reaches the layout before the removal closes the tab; a session no
+  // longer known is not refiled, so its tab closes in its own set and the strip keeps showing that project.
+  it('removing the shown session of a project closes its tab there and shows the project’s next tab', async () => {
+    const { fake, stores } = setup();
+    await fake.reply('session.list', { sessions: [record('a', { projectId: 'p1' as ProjectId }), record('c', { projectId: 'p1' as ProjectId })], revision: 1 });
+    await fake.reply('session.projects.list', { projects: [project('p1', 0)], revision: 1 });
+    await fake.reply('session.digests', { digests: [] });
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    stores.layout.getState().openSession('c' as AppSessionId, { how: 'tab' });
+    stores.layout.getState().activateTab('session:a');
+    fake.event('session.removed', { appSessionId: 'a', revision: 2 });
+    expect(stores.layout.getState().main.current).toBe('p1');
+    expect(Object.keys(stores.layout.getState().main.sets)).toEqual(['p1']);
+    expect(tabIds(stores)).toEqual(['session:c']);
+  });
+
   it('keeps a session’s tabs when its removal is older than what the store knows', async () => {
     const { fake, stores } = setup();
     await answerSnapshots(fake); // session.list at revision 1

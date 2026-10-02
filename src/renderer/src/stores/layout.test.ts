@@ -167,12 +167,13 @@ describe('replacing an unstarted tab', () => {
     return { store, discard, off, tabs };
   }
 
-  it('discarded, the session takes the unstarted tab’s place and leaves no ⌘⇧T entry', async () => {
+  it('the session opens beside it at once; discarded, the unstarted tab goes, leaving the session in its place and no ⌘⇧T entry', async () => {
     const { store, discard, off, tabs } = unstartedShown(true);
     try {
       store.getState().openSession(B);
+      expect(tabs()).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']); // shown while the guard decides
+      expect(shown(store).panes[0].activeTabId).toBe('session:b');
       expect(discard).toHaveBeenCalledWith(expect.objectContaining({ id: `session:${NEW}` }));
-      expect(tabs()).toEqual([`session:${A}`, `session:${NEW}`]); // nothing changes while the guard decides
       await settled();
       expect(tabs()).toEqual([`session:${A}`, 'session:b']);
       expect(shown(store).panes[0].activeTabId).toBe('session:b');
@@ -188,6 +189,29 @@ describe('replacing an unstarted tab', () => {
       store.getState().openSession(B);
       await settled();
       expect(tabs()).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']);
+    } finally {
+      off();
+    }
+  });
+
+  // A change replayed over the hydrated tabs meets what the person never saw: a draft in the way there is kept and not
+  // asked about, and the session opens beside it.
+  it('an open made before hydration, replayed over a saved draft that is shown, keeps the draft and asks nothing', async () => {
+    const discard = vi.fn(async () => true);
+    const off = registerReplaceGuard({ unstarted: (id) => id === NEW, discard });
+    try {
+      const saved = { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [session(A), session(NEW)], activeTabId: `session:${NEW}` }] } } };
+      const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } });
+      const store = createLayoutStore();
+      const hydrating = store.getState().hydrate(fake.client, () => true);
+      store.getState().openSession(B); // a click before layout.get answers
+      await settled();
+      for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'main.tabs' ? saved : null });
+      await hydrating;
+      await settled();
+      expect(discard).not.toHaveBeenCalled();
+      expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, `session:${NEW}`, 'session:b']);
+      expect(store.getState().main.closedTabs).toEqual([]);
     } finally {
       off();
     }
@@ -253,7 +277,7 @@ describe('tab sets per project', () => {
     expect(Object.keys(store.getState().main.sets)).toEqual([Y]);
   });
 
-  it('an unstarted tab a replace would take the place of is asked about in its project’s set, shown first', async () => {
+  it('an unstarted tab in the session’s project’s set is asked about once the strip shows the session there', async () => {
     const store = await hydrated();
     const discard = vi.fn(async () => true);
     const off = registerReplaceGuard({ unstarted: (id) => id === 'new', discard });
@@ -261,11 +285,38 @@ describe('tab sets per project', () => {
       store.getState().openSession('new' as AppSessionId, { how: 'tab' }); // in Y
       store.getState().openSession(A); // X
       store.getState().openSession('y1' as AppSessionId);
-      expect(store.getState().main.current).toBe(Y); // switched before the guard answers
+      expect(store.getState().main.current).toBe(Y); // switched, and the session shown, before the guard answers
+      expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:new', 'session:y1']);
       expect(discard).toHaveBeenCalledTimes(1);
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:y1']);
     } finally {
+      off();
+    }
+  });
+
+  // The review's F1: discarding the draft's intent refiles it (to the no-project set) before the guard answers; the
+  // session already stands in its own project's set, and the strip stays there.
+  it('a draft refiled while its guard decides leaves the session in its project’s set and the strip on it', async () => {
+    const store = await hydrated();
+    const off = registerReplaceGuard({
+      unstarted: (id) => id === 'new',
+      discard: async () => {
+        projects.new = null; // the intent went: the draft falls back to the project it was created with, none
+        store.getState().refileTabs(); // as the intents subscription does
+        return true;
+      },
+    });
+    try {
+      store.getState().openSession('new' as AppSessionId, { how: 'tab' }); // in Y
+      store.getState().openSession('y1' as AppSessionId);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(store.getState().main.current).toBe(Y);
+      expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:y1']);
+      expect(Object.keys(store.getState().main.sets)).toEqual([Y]); // the draft's brief none set went with it
+      expect(store.getState().main.closedTabs).toEqual([]);
+    } finally {
+      projects.new = Y;
       off();
     }
   });

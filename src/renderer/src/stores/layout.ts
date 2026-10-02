@@ -50,7 +50,8 @@ export interface LayoutState {
   // `settle` runs once the reads are in, before `known` is first asked and the early changes are captured (debt wave 5:
   // the shell drains its batched record events there, and the removals that makes are replayed with the rest).
   // `projectOf` (W12) answers the project a session's tabs belong with (its record's, else its unstarted intent's; null
-  // for none), from then on; until it is given, every tab is in the no-project set.
+  // for none; undefined for a session not known now), from then on; until it is given, every tab is in the no-project
+  // set.
   hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean, opts?: { settle?: () => void; projectOf?: ProjectOf }): Promise<void>;
   // A tab of a session opens in its project's set, which the strip shows first when it is activated (W12).
   openTab(ref: TabTarget, opts?: { pane?: model.PaneTarget; activate?: boolean }): void;
@@ -95,12 +96,15 @@ export interface LayoutState {
 
 const PANEL_KEY = /^panel\.([^.]+)$/;
 
-export type ProjectOf = (appSessionId: AppSessionId) => ProjectId | null;
+// A session's project, null for none; undefined when the session is not known now (no record, no unstarted intent):
+// its tabs stay where they are.
+export type ProjectOf = (appSessionId: AppSessionId) => ProjectId | null | undefined;
 export const NO_PROJECT_OF: ProjectOf = () => null;
 
-// I2: an unstarted tab a replace would take the place of passes C10's close guard first (it asks only about a non-empty
-// draft) and its intent goes; declined, the session opens in a tab of its own. The action runtime, which owns the
-// guards, registers this (`registerShellActions`); unregistered, every unpinned session tab is replaced alike.
+// I2: an unstarted tab a replace would take the place of is not replaced: the session opens beside it, then the tab
+// passes C10's close guard (it asks only about a non-empty draft) and goes with its intent, or stays when declined
+// (`openSession`). The action runtime, which owns the guards, registers this (`registerShellActions`); unregistered,
+// every unpinned session tab is replaced alike.
 export interface ReplaceGuard {
   unstarted(appSessionId: AppSessionId): boolean;
   discard(tab: TabRef): Promise<boolean>;
@@ -135,11 +139,15 @@ export function createLayoutStore() {
   const closedAt = new Map<string, number>();
   return create<LayoutState>()((set, get) => {
     // W12: the set a session's tabs belong in, its project's; asked when a change applies (an early change replayed after
-    // hydration asks the resolver hydration was given).
-    const setOfSession = (appSessionId: AppSessionId): TabSetKey => get().projectOf(appSessionId) ?? NO_PROJECT;
+    // hydration asks the resolver hydration was given). Undefined for a session not known now: an open of it goes to the
+    // current set, and its tabs are not refiled.
+    const setOfSession = (appSessionId: AppSessionId): TabSetKey | undefined => {
+      const project = get().projectOf(appSessionId);
+      return project === undefined ? undefined : (project ?? NO_PROJECT);
+    };
     const setOfTab = (tab: TabTarget): TabSetKey | null => {
       const appSessionId = model.sessionOfTab(tab);
-      return appSessionId === null ? null : setOfSession(appSessionId);
+      return appSessionId === null ? null : (setOfSession(appSessionId) ?? null);
     };
     // Tab changes made before the persisted tabs are read (a row click, a card, a menu action or a new session racing
     // the first `layout.get`) apply at once and are kept, then replayed over the hydrated tabs, so hydration never
@@ -236,25 +244,24 @@ export function createLayoutStore() {
 
       openTab: (ref, opts) => main((m) => model.openTab(m, ref, { ...opts, set: setOfTab(ref) ?? undefined })),
       openSession(appSessionId, opts = {}) {
-        const to = setOfSession(appSessionId);
-        // The set first, so an unstarted tab's guard asks over what the person then sees.
-        const shown = model.activeTab(model.switchSet(get().main, to));
+        // I2: a replace never takes an unstarted tab's place (a draft, C10): the session opens in a tab of its own right
+        // after it, at once, so the change lands in the click's own task (the floating Overview closes on it). The live
+        // call then asks the draft's close guard (only about a non-empty draft) and drops the draft when it may go, so
+        // the session ends up in its place with no ⌘⇧T entry; declined, both stay. The same check runs again when an
+        // early change is replayed over the hydrated tabs, where a draft it meets is kept and never asked about.
         const guard = replaceGuard;
-        const settles =
-          !opts.split && opts.how !== 'tab' && guard !== null && shown?.kind === 'session' && !shown.pinned &&
-          !model.isOpen(get().main, `session:${appSessionId}`) && guard.unstarted(shown.appSessionId);
-        if (!settles) {
-          main((m) => model.openSession(m, appSessionId, { ...opts, set: setOfSession(appSessionId) }));
-          return;
-        }
-        main((m) => model.switchSet(m, to));
-        void guard.discard(shown).then((discarded) =>
-          main((m) =>
-            discarded
-              ? model.replaceWithSession(m, shown.id, appSessionId, { remember: false, set: setOfSession(appSessionId) })
-              : model.openSession(m, appSessionId, { how: 'tab', set: setOfSession(appSessionId) }),
-          ),
-        );
+        const draftInTheWay = (m: LayoutMain): Extract<TabRef, { kind: 'session' }> | null => {
+          if (opts.split || opts.how === 'tab' || guard === null || model.isOpen(m, `session:${appSessionId}`)) return null;
+          const to = setOfSession(appSessionId);
+          const shown = model.activeTab(to === undefined ? m : model.switchSet(m, to));
+          return shown?.kind === 'session' && !shown.pinned && guard.unstarted(shown.appSessionId) ? shown : null;
+        };
+        const draft = draftInTheWay(get().main);
+        main((m) => model.openSession(m, appSessionId, { ...opts, how: draftInTheWay(m) ? 'tab' : opts.how, set: setOfSession(appSessionId) }));
+        if (draft === null || guard === null) return;
+        void guard.discard(draft).then((discarded) => {
+          if (discarded) get().dropSession(draft.appSessionId);
+        });
       },
       setCurrentProject: (projectId) => main((m) => model.switchSet(m, projectId ?? NO_PROJECT)),
       // Called on every records change, so nothing is set (and no subscriber woken) when nothing moves.

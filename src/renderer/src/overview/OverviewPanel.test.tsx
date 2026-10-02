@@ -2,10 +2,11 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { Toolbar } from '../app/Toolbar';
-import { useLayout } from '../stores/layout';
+import { registerReplaceGuard, useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { OverviewLayer, placeRect } from './OverviewPanel';
@@ -115,6 +116,27 @@ describe('the floating Overview', () => {
     expect(currentSet(useLayout.getState().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Charter + research')}`]);
     expect(useLayout.getState().main.closedTabs.map((t) => t.id)).toEqual([`session:${idOf('Settings idle probe')}`]);
     expect(useLayout.getState().overviewOpen).toBe(false);
+  });
+
+  // The review's F4: with an unstarted draft shown, the card's session opens beside it at once (its guard asks after), so
+  // the click's own layout change closes the panel.
+  it('a card clicked over an unstarted draft opens its session and closes the panel; the draft goes once its guard agrees', async () => {
+    const user = userEvent.setup();
+    const NEW = 'app-new-1' as AppSessionId;
+    let release!: (discard: boolean) => void;
+    const off = registerReplaceGuard({ unstarted: (id) => id === NEW, discard: () => new Promise<boolean>((resolve) => (release = resolve)) });
+    try {
+      useLayout.getState().openSession(NEW, { how: 'tab' });
+      render(<World />);
+      act(() => useLayout.getState().setOverviewOpen(true));
+      await user.click(within(panel()).getByText('Charter + research'));
+      expect(useLayout.getState().overviewOpen).toBe(false);
+      expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Charter + research') });
+      await act(async () => release(true));
+      expect(currentSet(useLayout.getState().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Charter + research')}`]);
+    } finally {
+      off();
+    }
   });
 
   // Opening changes the layout even when the active tab stays the same (the tab is activated again, or moves pane).

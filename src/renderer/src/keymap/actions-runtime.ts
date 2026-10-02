@@ -100,8 +100,8 @@ export async function requestCloseTab(id: string): Promise<void> {
   useLayout.getState().closeTab(id);
 }
 
-// I2: an unstarted tab a session is about to replace (the layout store's `ReplaceGuard`): its guard as for a close,
-// then its intent goes; the store swaps the tab itself, so it leaves no ⌘⇧T entry either.
+// I2: an unstarted tab a session opened beside in its place (the layout store's `ReplaceGuard`): its guard as for a
+// close, then its intent goes; the store drops the tab itself, so it leaves no ⌘⇧T entry either.
 export async function discardForReplace(ref: TabRef): Promise<boolean> {
   if (ref.kind !== 'session' || !(await guardAllows(ref))) return false;
   useSessions.getState().dropUnstarted(ref.appSessionId);

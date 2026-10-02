@@ -473,7 +473,7 @@ describe('unstarted sessions', () => {
   });
 
   // I2: a sidebar click while an unstarted tab is shown passes that tab's guard first, as a close would.
-  it('a sidebar click on a shown unstarted tab asks its guard: true takes its place without a reopen entry, false opens a new tab', async () => {
+  it('a sidebar click on a shown unstarted tab opens the session beside it, then asks its guard: true drops the tab without a reopen entry, false keeps it', async () => {
     let answer = false;
     const guard = vi.fn<(ref: TabRef) => Promise<boolean>>(async () => answer);
     offs.push(registerCloseGuard('session', guard));
@@ -481,11 +481,15 @@ describe('unstarted sessions', () => {
     render(<Shell />);
     await act(() => createSession(MAWS));
     await user.click(sidebarRow('Charter + research'));
+    expect(tabNames()).toEqual(['New chat · MAWS', 'Charter + research · MAWS']); // shown at once, the draft beside it
+    expect(selected()).toBe('Charter + research · MAWS');
     expect(guard).toHaveBeenCalledWith(expect.objectContaining({ kind: 'session', appSessionId: NEW }));
-    await waitFor(() => expect(tabNames()).toEqual(['New chat · MAWS', 'Charter + research · MAWS']));
+    await act(async () => {});
+    expect(tabNames()).toEqual(['New chat · MAWS', 'Charter + research · MAWS']); // declined: the draft stays
     act(() => useLayout.getState().activateTab(`session:${NEW}`));
     answer = true;
     await user.click(sidebarRow('Fix sidebar drag'));
+    expect(selected()).toBe('Fix sidebar drag · MAWS');
     await waitFor(() => expect(tabNames()).toEqual(['Fix sidebar drag · MAWS', 'Charter + research · MAWS']));
     expect(useSessions.getState().unstarted.has(NEW)).toBe(false);
     expect(useLayout.getState().main.closedTabs).toEqual([]);
