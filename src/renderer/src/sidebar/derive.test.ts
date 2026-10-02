@@ -85,6 +85,7 @@ describe('the project list', () => {
     expect(list.map((e) => [e.name, e.lastActivity])).toEqual([
       ['a', Date.parse('2026-09-28T12:00:00Z')],
       ['b', null],
+      ['Other sessions', null],
     ]);
   });
 
@@ -99,10 +100,10 @@ describe('the project list', () => {
     ]);
   });
 
-  it('places a project without sessions by when it was added, and leaves Other sessions out when it is empty', () => {
+  it('places a project without sessions by when it was added, and keeps empty Other sessions reachable for archive recovery', () => {
     const fresh = project('fresh', 5, { createdAt: '2026-09-30T00:00:00Z' });
     const list = projectList({ ...base, records: new Map([...records].filter(([, r]) => r.projectId !== null)), projects: [...projects, fresh] });
-    expect(list.map((e) => e.name)).toEqual(['fresh', 'claude-usage-menubar', 'codex_somersault', 'MAWS']);
+    expect(list.map((e) => e.name)).toEqual(['fresh', 'claude-usage-menubar', 'codex_somersault', 'MAWS', 'Other sessions']);
   });
 
   it('filters by project name, or by a session the project holds (title, directory)', () => {

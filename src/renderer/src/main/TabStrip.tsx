@@ -190,8 +190,8 @@ function ProjectLabel() {
       type="button"
       data-strip-project={project.id}
       aria-label={`Tabs of ${project.name}`}
-      title={`Reveal ${project.name} in the sidebar`}
-      onClick={() => revealProject(project.id)}
+      title={project.hidden ? 'Show in sidebar' : `Reveal ${project.name} in the sidebar`}
+      onClick={() => void revealProject(project.id)}
       className="flex max-w-48 shrink-0 items-center gap-1.5 border-r border-border px-2.5 text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2"
     >
       <FolderIcon className="size-[12px] shrink-0" />

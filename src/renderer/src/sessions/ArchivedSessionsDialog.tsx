@@ -13,8 +13,8 @@ import { Sheet } from './Sheet';
 import { QUIET, SECONDARY } from './ui';
 import { displayTitle } from './title';
 
-export function ArchivedSessionsDialog({ projectId }: { projectId: ProjectId }) {
-  const project = useSessions((s) => s.projects.get(projectId) ?? null);
+export function ArchivedSessionsDialog({ projectId }: { projectId: ProjectId | null }) {
+  const project = useSessions((s) => (projectId === null ? null : (s.projects.get(projectId) ?? null)));
   const [rows, setRows] = useState<SessionRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0); // read again after an unarchive
@@ -38,7 +38,7 @@ export function ArchivedSessionsDialog({ projectId }: { projectId: ProjectId }) 
   };
 
   return (
-    <Sheet title={`Archived sessions${project ? ` · ${project.name}` : ''}`} width="w-[min(560px,92vw)]">
+    <Sheet title={`Archived sessions${projectId === null ? ' · Other sessions' : project ? ` · ${project.name}` : ''}`} width="w-[min(560px,92vw)]">
       {rows === null ? (
         <p className="m-0 text-fg-muted">{error ?? 'Loading…'}</p>
       ) : rows.length === 0 ? (

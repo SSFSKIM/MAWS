@@ -9,15 +9,17 @@ import type { SessionRecord } from '@shared/graph/session';
 import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from '../app/session-actions';
 import { ipc } from '../ipc/client';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { openDialog } from '../sessions/dialogs';
 import { useSessions } from '../stores/sessions';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
 import { openResumePicker } from './ResumePicker';
 
-export type MenuTarget = { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId };
+export type MenuTarget = { kind: 'other' } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId };
 
-// The target a `data-menu` attribute names: `session:<appSessionId>` or `project:<projectId>`.
+// The target a `data-menu` attribute names: `session:<appSessionId>`, `project:<projectId>` or `other`.
 export function menuTargetOf(element: Element | null): MenuTarget | null {
   const value = element?.closest('[data-menu]')?.getAttribute('data-menu') ?? null;
+  if (value === 'other') return { kind: 'other' };
   if (value?.startsWith('session:')) return { kind: 'session', appSessionId: value.slice('session:'.length) as AppSessionId };
   if (value?.startsWith('project:')) return { kind: 'project', projectId: value.slice('project:'.length) as ProjectId };
   return null;
@@ -38,6 +40,11 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
   return (
     <ContextMenu.Portal>
       <ContextMenu.Content className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+        {target?.kind === 'other' && (
+          <Item enabled onSelect={() => openDialog({ kind: 'archived', projectId: null })}>
+            Archived sessions…
+          </Item>
+        )}
         {target?.kind === 'session' && <SessionItems appSessionId={target.appSessionId} />}
         {target?.kind === 'project' && <ProjectItems projectId={target.projectId} />}
       </ContextMenu.Content>

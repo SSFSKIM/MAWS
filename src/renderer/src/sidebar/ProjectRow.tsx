@@ -7,7 +7,7 @@
 // one flat list of 30px rows (pinned first, worktree sessions marked by their ⎇ branch), their titles under the
 // project's name as Codex's leading slot sets them (:437865-437867), at most five, then "Show more" to eight; a gap
 // after the group (Codex's `pb-2`, :377821). A project's hover card is `ProjectHoverCard.tsx` (I6). "Other sessions" is
-// the same row without actions, a context menu or a card. The pre-W5 group (`ProjectGroup.tsx` at 6d50bf26^) is the
+// the same row without hover actions or a card, with a context menu for archived sessions. The pre-W5 group (`ProjectGroup.tsx` at 6d50bf26^) is the
 // template.
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
@@ -80,7 +80,7 @@ export function ProjectRow({ entry, open, sessions, more, onToggle, onShowMore }
       tabIndex={tree.tabStop === nodeId ? 0 : -1}
       data-tree-id={nodeId}
       data-kind="project"
-      data-menu={project ? `project:${project.id}` : undefined}
+      data-menu={project ? `project:${project.id}` : 'other'}
       onFocus={(event) => {
         if (event.target !== event.currentTarget) return;
         tree.onFocusItem(nodeId);

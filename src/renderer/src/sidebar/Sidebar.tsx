@@ -207,7 +207,7 @@ function SidebarBody() {
   };
 
   const tree = { tabStop, selected, onFocusItem: setFocused };
-  const listEmpty = everyEntry.length === 0;
+  const listEmpty = projects.length === 0 && everyEntry.every((entry) => entry.sessions.length === 0);
   const moreProjects = <ShowMoreRow id={MORE_PROJECTS} level={1} onShow={() => showMore(null)} />;
 
   return (
@@ -234,9 +234,8 @@ function SidebarBody() {
               <SortMenu sort={sidebar.sort} />
               {projects.length > 0 && <AddProjectButton />}
             </SectionHeading>
-            {listEmpty ? (
-              <EmptyProjects />
-            ) : listed.length === 0 ? (
+            {listEmpty && <EmptyProjects />}
+            {listed.length === 0 ? (
               <p className="m-0 px-[9px] py-1.5 text-ui-sm text-fg-faint">No projects match</p>
             ) : (
               <div role="tree" aria-label="Projects" onKeyDown={onTreeKeyDown} className="flex flex-col gap-px">
