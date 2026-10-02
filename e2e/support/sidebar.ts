@@ -12,9 +12,13 @@ export const projectRow = (page: Page, name: string) => sidebarOf(page).locator(
 export const projectLine = (row: Locator) => row.locator('[data-project-line]');
 
 // An expanding or collapsing project moves what sits below it (300 ms): the motion is finished at once, so a row's box is
-// where it stays (a hidden window, which some specs use, may not run it at all).
+// where it stays (a hidden window, which some specs use, may not run it at all). Only the sidebar's finite animations:
+// a spinner or a shimmer never ends, and finishing it throws.
 async function settled(page: Page): Promise<void> {
-  await page.evaluate(() => document.getAnimations().forEach((animation) => animation.finish()));
+  await page.evaluate(() => {
+    const animations = document.querySelector('[data-region="sidebar"]')?.getAnimations({ subtree: true }) ?? [];
+    for (const animation of animations) if (Number.isFinite(animation.effect?.getComputedTiming().endTime)) animation.finish();
+  });
 }
 
 // Every project row on screen: the list's "Show more" (past the first five projects) is opened when it shows.
@@ -35,13 +39,15 @@ export async function openProject(page: Page, name: string): Promise<void> {
   await expandRow(page, projectRow(page, name));
 }
 
-// Collapses a project by its name (its counts show only while collapsed).
+// Collapses a project by its name (its counts show only while collapsed), then leaves the pointer in the main region: on
+// the row's line the hover swaps the counts for the row's buttons.
 export async function closeProject(page: Page, name: string): Promise<void> {
   await showProjectList(page);
   const row = projectRow(page, name);
   if ((await row.getAttribute('aria-expanded')) === 'true') await projectLine(row).click();
   await expect(row).toHaveAttribute('aria-expanded', 'false');
   await settled(page);
+  await page.mouse.move(700, 400);
 }
 
 // The "+" on a project's row, revealed on hover: New chat in that project.
