@@ -3,6 +3,7 @@
 // and the path-backed mention chips listed as `{ path, kind }`; an empty document with no attachments writes `null`. A
 // draft is per app session, survives tab switches and reloads, and is cleared by a successful send. The writer is the
 // timing only; where it writes (C4's `session.drafts.set`, or C10's intent on an unstarted session) is its caller's.
+import type { AppSessionId } from '@shared/graph/ids';
 import type { JSONContent } from '@tiptap/core';
 import type { Draft } from '@shared/ipc/schema/session';
 import { markPersisted } from './attachments';
@@ -70,4 +71,12 @@ export function createDraftWriter(save: (draft: Draft | null) => void, options: 
       pending = null;
     },
   };
+}
+
+// Close guards read the editor before persistence catches up. Until it loads or changes, use the stored draft.
+const liveDrafts = new Map<AppSessionId, () => ComposerDoc | undefined>();
+export const liveDraftDoc = (id: AppSessionId): ComposerDoc | undefined => liveDrafts.get(id)?.();
+export function registerLiveDraft(id: AppSessionId, read: () => ComposerDoc | undefined): () => void {
+  liveDrafts.set(id, read);
+  return () => { if (liveDrafts.get(id) === read) liveDrafts.delete(id); };
 }

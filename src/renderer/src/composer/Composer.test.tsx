@@ -791,6 +791,7 @@ describe('unstarted send holds a starting state', () => {
     act(() => editorOf().focus());
     await key(editorOf(), { key: 'Enter' });
     expect(stub.start).toHaveBeenCalledWith({ content: 'after the failure', display: 'after the failure' });
+    await stub.answer({ ok: true }); // the session-owned flight outlives unmount; settle this test's start
   });
 
   // The C7/C10 seam: a chip opened on the intent's frame reads nothing from the engine, so the live frame that replaces

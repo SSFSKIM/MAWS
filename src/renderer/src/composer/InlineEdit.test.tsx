@@ -214,3 +214,18 @@ describe('once the rewind hid the bubble, the composer’s dock carries the rese
     await waitFor(() => expect(useComposerStore.getState().inlineEdits.size).toBe(0));
   });
 });
+
+
+it('keeps an oversized replacement in its real bubble editor without rewinding', async () => {
+  renderRow(rowOf('u-1'), { storeKey: A });
+  act(() => editAndResubmitRow(rowOf('u-1')));
+  const text = 'x'.repeat(1024 * 1024 + 1);
+  fireEvent.change(field(), { target: { value: text } });
+  await act(async () => fireEvent.click(within(editor()).getByRole('button', { name: 'Send' })));
+  expect(fake.invoked('session.rewind')).toEqual([]);
+  expect(fake.invoked('session.send')).toEqual([]);
+  expect(state()).toBe('idle');
+  expect(field().value).toBe(text);
+  expect(field().readOnly).toBe(false);
+  expect(useNotices.getState().notices.some((notice) => notice.text.includes('Message too large'))).toBe(true);
+});

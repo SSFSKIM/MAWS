@@ -18,7 +18,7 @@ export function useGitWatch(directory: string | null, client: MawsBridge = ipc):
     const off = client.on('git.changed', (e) => {
       if (live && repoRoot !== null && e.repoRoot === repoRoot) setWatch({ directory, answer: { status: e.status, error: null } });
     });
-    void client.invoke('git.watch', { directory }).then((result) => {
+    const landed = client.invoke('git.watch', { directory }).then((result) => {
       if (!live) return;
       if (!result.ok) {
         setWatch({ directory, answer: { status: null, error: result.error.message } });
@@ -30,7 +30,8 @@ export function useGitWatch(directory: string | null, client: MawsBridge = ipc):
     return () => {
       live = false;
       off();
-      void client.invoke('git.unwatch', { directory });
+      // Main acquires ownership only after its asynchronous repository reads; release cannot overtake that acquire.
+      void landed.then(() => client.invoke('git.unwatch', { directory }));
     };
   }, [directory, client]);
   return watch !== null && watch.directory === directory ? watch.answer : null;
