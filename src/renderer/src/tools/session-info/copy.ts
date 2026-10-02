@@ -22,8 +22,6 @@ export const INFO = {
   sections: { engine: 'Engine', model: 'Model', gateway: 'Gateway', permissions: 'Permissions', usage: 'Context, usage, cost', hooks: 'Hooks and MCP' },
   // Engine
   version: 'Version',
-  pinned: 'pinned',
-  notPinned: (pin: string) => `pinned is ${pin}`,
   binary: 'Binary',
   sessionId: 'Session id',
   // W7: who holds the session (the glyph's derivation, attention/derive.ts)

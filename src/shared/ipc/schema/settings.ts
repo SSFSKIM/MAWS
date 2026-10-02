@@ -2,8 +2,8 @@
 // Version 2 (C5): the keymap overrides and the notification policy. Version 3 (C11): the engine binary, the gateway
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
 // memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
-// auto. Version 7 (W7): the memory budget's switch. Migrations live in `src/shared/settings/defaults.ts`, run by main's
-// store; the schema never defaults.
+// auto. Version 7 (W7): the memory budget's switch. Version 8 (W13): the engine's pin retired (MAWS runs the installed
+// Claude Code). Migrations live in `src/shared/settings/defaults.ts`, run by main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
 import { CHORD_PATTERN } from '../../keymap/chord';
@@ -27,11 +27,10 @@ export const ChordSchema = z.string().regex(CHORD_PATTERN); // Electron accelera
 // heldPeerMessages = held_peer_message (not actionable, so it never notifies in P0).
 export const NotificationKindsSchema = z.strictObject({ approvals: z.boolean(), questions: z.boolean(), planReviews: z.boolean(), errors: z.boolean(), heldPeerMessages: z.boolean() });
 export type NotificationKinds = z.infer<typeof NotificationKindsSchema>;
-// An engine binary is named by absolute path, never resolved through PATH (§4.1); macOS paths only.
+// A chosen engine binary is named by absolute path (§4.1); macOS paths only.
 export const AbsolutePathSchema = z.string().refine((path) => path.startsWith('/'), { message: 'must be an absolute path' });
 const EngineSettingsSchema = z.strictObject({
-  binaryPath: AbsolutePathSchema.nullable(), // null = C3's ENGINE_BIN
-  pinnedVersion: z.string(), // what engine.binaryInfo must report; a mismatch refuses launches (binary_version) until re-pinned
+  binaryPath: AbsolutePathSchema.nullable(), // null = the installed Claude Code, resolved per launch (W13; engine-host/binary-info.ts)
   subagentModel: z.string().nullable(), // the default CLAUDE_CODE_SUBAGENT_MODEL for new sessions; null = the captured shell's value
   // C12 start: version 4, the memory budget (C12 execution document, Interfaces "Settings, version 4"; charter §4.4).
   // memoryBudgetMiB: the limit on the sum of the engine process trees; null = 25% of physical memory.
@@ -69,7 +68,7 @@ export type AutoFallback = z.infer<typeof AutoFallbackSchema>;
 const PermissionsSettingsSchema = z.strictObject({ autoFallback: AutoFallbackSchema });
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(7), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget)
+  version: z.literal(8), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.
@@ -139,18 +138,9 @@ const c11Commands = {
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C11 end
 
-// C12 start: MAWS's custody of the pinned engine (C12 execution document, Interfaces "Engine custody" and "X2
-// additions"). `settings.engineCustody` answers the copy the next launch uses, null when custody does not run (MAWS_E2E
-// and replay, where the host keeps C3's ENGINE_BIN). `settings.engineApplied` answers once main's `engine.configure` push
-// for `settings.engine` as it now stands has been answered by the host, custody for a changed pin included; its error
-// carries custody's or the push's message. Main is the only sender of `engine.configure`.
-export const CustodyManifestSchema = z.strictObject({ version: z.string(), sha256: z.string(), size: z.number().int(), source: z.string(), copiedAt: z.string() });
-export type CustodyManifest = z.infer<typeof CustodyManifestSchema>;
-export const CustodySchema = z.discriminatedUnion('state', [
-  z.strictObject({ state: z.literal('ok'), path: z.string(), manifest: CustodyManifestSchema }),
-  z.strictObject({ state: z.enum(['missing', 'mismatch', 'version']), path: z.string(), message: z.string() }),
-]);
-export type Custody = z.infer<typeof CustodySchema>;
+// C12 start: `settings.engineApplied` answers once main's `engine.configure` push for `settings.engine` as it now stands
+// has been answered by the host; its error carries the push's message. Main is the only sender of `engine.configure`.
+// W13: custody of a pinned copy is retired with the pin, and `settings.engineCustody` with it.
 // W3 start: what the engine will use when MAWS passes nothing (charter §5.4 and D-18 as amended 2026-10-01): the user's
 // own `model`, `effortLevel` and `permissions.defaultMode` from `<CLAUDE_CONFIG_DIR or ~/.claude>/settings.json`, read
 // and never written. A key the file does not set, or sets to a value the engine would not take, is null.
@@ -162,7 +152,6 @@ const w3Commands = {
 // W3 end
 
 const c12Commands = {
-  'settings.engineCustody': { input: z.void(), output: CustodySchema.nullable(), owner: 'main' },
   'settings.engineApplied': { input: z.void(), output: z.void(), owner: 'main' },
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C12 end

@@ -6,7 +6,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { SETTINGS_DEFAULTS_V7 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
 import { routingFacts } from '../../gateway/routing-facts';
 import { useGateway } from '../../gateway/store';
 import { useCommand } from '../../ipc/query';
@@ -61,7 +61,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   // only while no sample has arrived (a session C3 has not sampled yet, or one whose digest predates the sampling).
   const context = useEngineRead('session.getContextUsage', { appSessionId, detail: 'summary' }, { ...read, enabled: visible && !digest?.context });
   const binary = useCommand('engine.binaryInfo', undefined, { enabled: visible, staleTime: 60_000 });
-  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V7;
+  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V8;
   const snapshot = useUsage((s) => s.snapshot);
   const directLogin = useGateway((s) => s.directLogin.get(appSessionId) ?? null);
   // the model's catalogue entry, when C7 listed the session's models (the lane reads only its value, which the status
@@ -92,7 +92,6 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
     status,
     digest,
     binary: binary.data ?? null,
-    pinnedVersion: settings.engine.pinnedVersion,
     facts,
     directLogin,
     lane,

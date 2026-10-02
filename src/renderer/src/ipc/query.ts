@@ -50,7 +50,6 @@ export const QUERY_COMMANDS = [
   'settings.claudeUsage.status',
   'fs.state', // M5: the Settings tab's config home, as the engine host resolves it
   // C11 end
-  'settings.engineCustody', // C12: Settings › Engine's custody row
   'settings.userEngineDefaults', // W3: what an unstarted tab's model chip and the mode seed show
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];

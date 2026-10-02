@@ -4,7 +4,7 @@
 export const commands = [
   'settings.get', 'settings.set', 'settings.usage', 'settings.claudeUsage.status', 'settings.claudeUsage.open',
   'settings.reveal',
-  'settings.engineCustody', 'settings.engineApplied', // C12
+  'settings.engineApplied', // C12 (W13: settings.engineCustody retired)
   'settings.userEngineDefaults', // W3
   'settings.usageControls', 'settings.usageAction', // W6 route executor
 ] as const;

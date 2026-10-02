@@ -894,11 +894,12 @@ describe('session service', () => {
   });
 });
 
-// C12 start: the custody gate (C12 execution document, Interfaces "Engine custody", the launch gate; Acceptance item 7):
-// main refuses a launch itself when MAWS's copy of the engine is gone or altered, when a setup or a resume begins and
-// before anything it would have to undo: no worktree, no record, no unfollow, no trust bootstrap, nothing spawned.
-describe('the custody gate', () => {
-  const REFUSAL = { status: 'refused' as const, reason: 'binary_version' as const, message: "Claude Code 2.1.283 has been altered in MAWS's copy at /u/engine/2.1.283/claude." };
+// C12 start: the launch gate (C12 execution document, Interfaces "Engine custody", the launch gate; Acceptance item 7):
+// main refuses a launch itself when the engine host does not hold the configured binary (W13: custody is retired; the
+// gate is the configure push's), when a setup or a resume begins and before anything it would have to undo: no
+// worktree, no record, no unfollow, no trust bootstrap, nothing spawned.
+describe('the launch gate', () => {
+  const REFUSAL = { status: 'refused' as const, reason: 'host_unavailable' as const, message: 'The engine host is crashed and holds no engine configuration. Restart MAWS.' };
   const SID = sessionIdFor(0xc12);
   let h: SessionHarness;
   let repo: ScratchRepo;
@@ -918,7 +919,7 @@ describe('the custody gate', () => {
     const location = { kind: 'newWorktree' as const, repoRoot: repo.root, name: 'gated', branch: { kind: 'new' as const, name: 'worktree-gated', base: 'HEAD' } };
     const { appSessionId: id } = await h.service.create({ projectId: null, location });
     expect(await h.service.startSession(id, { message: OK_MESSAGE, options: { trust: 'accepted' } })).toEqual({ status: 'starting', appSessionId: id });
-    expect(await h.settled(id)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: `binary_version: ${REFUSAL.message}`, resources: { worktree: null, record: 'none', transcript: 'none' } } });
+    expect(await h.settled(id)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: `host_unavailable: ${REFUSAL.message}`, resources: { worktree: null, record: 'none', transcript: 'none' } } });
     expect(h.setupEvents(id).map((e) => e.phase)).toEqual(['failed']); // not even `worktree`
     expect(h.host.launches).toEqual([]); // no bootstrap, no launch
     expect(h.index.sessions.get(id)).toBeNull();
@@ -929,7 +930,7 @@ describe('the custody gate', () => {
   it('fails a resume before the trust bootstrap and fs.unfollow; the record stays', async () => {
     const record = h.index.sessions.upsertFromSummary(summary({ sessionId: SID, directory: h.work })).record;
     await h.service.startSession(record.appId, { message: OK_MESSAGE, options: { trust: 'accepted' } });
-    expect(await h.settled(record.appId)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: `binary_version: ${REFUSAL.message}`, resources: { record: 'kept' } } });
+    expect(await h.settled(record.appId)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: `host_unavailable: ${REFUSAL.message}`, resources: { record: 'kept' } } });
     expect(h.host.launches).toEqual([]);
     expect(h.host.calledWith('fs.unfollow')).toEqual([]);
     expect(h.index.sessions.get(record.appId)).toMatchObject({ engineSessionId: SID });

@@ -56,7 +56,8 @@ const input = <S extends z.ZodRawShape>(shape: S) => z.strictObject({ appSession
 const host = <I extends z.ZodType, O extends z.ZodType>(i: I, o: O) => ({ input: i, output: o, owner: 'engine-host' as const });
 const read = <O extends z.ZodType>(o: O) => host(input({}), o); // a structured read answers the typed response of the same name
 
-export const LAUNCH_REFUSALS = ['already_live', 'binary_missing', 'binary_version', 'replay_disabled', 'settings_conflict'] as const;
+// W13: `binary_version` is retired with the pin; a missing binary and one that prints no version are `binary_missing`.
+export const LAUNCH_REFUSALS = ['already_live', 'binary_missing', 'replay_disabled', 'settings_conflict'] as const;
 export const LaunchResultSchema = z.discriminatedUnion('status', [
   z.strictObject({ status: z.literal('launching'), session: EngineSessionStatusSchema }), // readiness arrives as session.status
   z.strictObject({ status: z.literal('relay_unreachable'), health: RelayHealthSchema }),

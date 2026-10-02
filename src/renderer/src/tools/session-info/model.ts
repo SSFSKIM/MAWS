@@ -38,7 +38,6 @@ export interface SessionInfoInput {
   status: EngineSessionStatus | null;
   digest: SessionDigest | null;
   binary: BinaryInfo | null;
-  pinnedVersion: string;
   facts: RoutingFacts;
   directLogin: DirectLogin | null;
   lane: Lane | null; // null without a status
@@ -82,13 +81,13 @@ export function heldByRow(record: SessionRecord): InfoRow {
   return { label: INFO.heldBy, value: record.holder.kind === 'self' ? INFO.heldByMaws : INFO.heldByNone };
 }
 
-function engineSection({ record, status, digest, binary, pinnedVersion, budget }: SessionInfoInput): InfoSection { // C12: digest, budget
+function engineSection({ record, status, digest, binary, budget }: SessionInfoInput): InfoSection { // C12: digest, budget
   const version = status?.engineVersion ?? record.engineVersion;
   const tree = status?.memory.treeRssKiB ?? null;
   return {
     title: INFO.sections.engine,
     rows: [
-      { label: INFO.version, value: version ?? NONE, note: version === null ? undefined : version === pinnedVersion ? INFO.pinned : INFO.notPinned(pinnedVersion) },
+      { label: INFO.version, value: version ?? NONE }, // W13: the session's own, no pin to compare it with
       { label: INFO.binary, value: binary ? homeAbbreviated(binary.path) : NONE },
       { label: INFO.sessionId, value: record.engineSessionId ?? NONE },
       heldByRow(record), // W7

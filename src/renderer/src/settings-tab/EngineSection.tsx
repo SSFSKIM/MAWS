@@ -4,7 +4,7 @@
 // to MAWS), the subagent model new sessions launch with, and (W3) the mode a session takes when the engine refuses auto.
 // W7: the memory budget's switch, whose rows show only while it is on.
 import { useQueryClient } from '@tanstack/react-query';
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { PERMISSION_MODES } from '@shared/graph/enums';
 import type { Settings } from '@shared/ipc/schema';
@@ -12,7 +12,6 @@ import type { AutoFallback } from '@shared/ipc/schema/settings';
 import type { BinaryInfo } from '@shared/ipc/schema/engine';
 import { isGatewayModel } from '@shared/sessions/models';
 import { DEFAULT_ROW, listName } from '../composer/frame/model-label';
-import { GatewaySheet } from '../gateway/GatewaySheet';
 import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
 import { toast } from '../stores/notices';
@@ -20,27 +19,23 @@ import { homeAbbreviated } from '../tools/session-info/model';
 import { ENGINE } from './copy';
 import { Chip, INPUT, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 import { BudgetSwitch, MemoryBudget, StatefulServers } from './BudgetSettings'; // C12; W7: the switch
-import { CUSTODY_KEY, CustodySetting } from './CustodySetting'; // C12
 
 const BINARY_INFO_KEY = ['maws', 'engine.binaryInfo', undefined];
 
 export function EngineSection({ settings }: { settings: Settings }) {
   const client = useQueryClient();
   const info = useCommand('engine.binaryInfo', undefined);
-  const [repinning, setRepinning] = useState<string | null>(null);
-  const pin = settings.engine.pinnedVersion;
   const binary = info.data ?? null;
 
   // C12 start: main is the only sender of `engine.configure` (C12 execution document, Interfaces "Engine custody",
-  // Configure). A write is followed by `settings.engineApplied`, which answers once main's push for it has landed (custody
-  // for a new pin included, its error custody's or the push's), then the rows re-read what the host now holds.
+  // Configure). A write is followed by `settings.engineApplied`, which answers once main's push for it has landed (its
+  // error the push's), then the rows re-read what the host now holds.
   const writeEngine = async (patch: Partial<Settings['engine']>) => {
     if (!(await writeSettings({ engine: patch }))) return;
     const applied = await ipc.invoke('settings.engineApplied', undefined);
     if (!applied.ok) toast({ level: 'warning', text: applied.error.message, actions: [], dismissible: true });
     const reread = await ipc.invoke('engine.binaryInfo', undefined);
     if (reread.ok) client.setQueryData<BinaryInfo>(BINARY_INFO_KEY, reread.value);
-    void client.invalidateQueries({ queryKey: CUSTODY_KEY });
   };
   // C12 end
   const change = async () => {
@@ -53,7 +48,6 @@ export function EngineSection({ settings }: { settings: Settings }) {
     if (path) await writeEngine({ binaryPath: path });
   };
 
-  const mismatch = binary !== null && binary.version !== null && binary.version !== pin;
   return (
     <>
       <Setting label={ENGINE.binary} note={ENGINE.binaryNote}>
@@ -68,17 +62,8 @@ export function EngineSection({ settings }: { settings: Settings }) {
             {ENGINE.useDefault}
           </button>
         )}
-        {mismatch && <span className="basis-full text-ui-sm text-warning">{ENGINE.binaryMismatch}</span>}
-        {binary && !binary.ok && !mismatch && binary.error && <span className="basis-full text-ui-sm text-warning">{binary.error}</span>}
+        {binary && !binary.ok && binary.error && <span className="basis-full text-ui-sm text-warning">{binary.error}</span>}
       </Setting>
-      <Setting label={ENGINE.pinned} note={ENGINE.pinnedNote}>
-        <span>{pin}</span>
-        {binary && <Chip>{binary.version === null ? ENGINE.noVersion : mismatch ? ENGINE.reports(binary.version) : ENGINE.matches}</Chip>}
-        <button type="button" className={TEXT_ACTION} disabled={!mismatch} onClick={() => setRepinning(binary!.version)}>
-          {ENGINE.repin}
-        </button>
-      </Setting>
-      <CustodySetting settings={settings} /> {/* C12 */}
       <ConfigHome />
       <SubagentModel settings={settings} />
       <AutoFallback settings={settings} /> {/* W3 */}
@@ -91,21 +76,6 @@ export function EngineSection({ settings }: { settings: Settings }) {
         </>
       )}
       {/* C12 end */}
-      {repinning !== null && (
-        <GatewaySheet
-          title={ENGINE.repinTitle(repinning)}
-          onClose={() => setRepinning(null)}
-          canSubmit
-          onSubmit={() => {
-            setRepinning(null);
-            void writeEngine({ pinnedVersion: repinning });
-          }}
-          submitLabel={ENGINE.repinConfirm(repinning)}
-          cancelLabel={ENGINE.cancel}
-        >
-          <p className="m-0 text-ui-sm leading-normal text-fg-muted">{ENGINE.repinBody(pin, repinning)}</p>
-        </GatewaySheet>
-      )}
     </>
   );
 }

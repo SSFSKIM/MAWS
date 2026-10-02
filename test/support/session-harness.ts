@@ -31,7 +31,7 @@ export interface HarnessOptions {
   replay?: ReplaySeam | null;
   watchdogMs?: number;
   stopWaitMs?: number;
-  launchGate?: SessionServiceDeps['launchGate']; // C12: main's custody gate
+  launchGate?: SessionServiceDeps['launchGate']; // C12: main's launch gate
   userDefaults?: SessionServiceDeps['userDefaults']; // W3: the user's settings.json as main reads it
 }
 

@@ -20,8 +20,8 @@ import type { C10Settings } from './launch-mapping';
 import type { BootstrapNotes, IntentStore } from './intents';
 import type { ReplaySeam } from './replay-seam';
 
-// C12: main's custody gate (C12 execution document, Interfaces "Engine custody"): null, or the refusal the setup fails
-// with (custody's, which a launch answers, or a bounded wait's)
+// C12: main's launch gate (C12 execution document, Interfaces "Engine custody"; W13: custody retired): null, or the
+// refusal the setup fails with (a host that does not hold the configured binary, or a bounded wait's)
 export type LaunchGate = () => Promise<{ reason: string; message: string } | null>;
 
 export type Emit = <N extends EventName>(name: N, payload: EventPayload<N>) => boolean;

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V7 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { loadScenario } from '../../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, type WidgetBackend } from '../../../../../test/support/widget-backend';
@@ -78,7 +78,7 @@ describe('session info renders the six sections', () => {
     for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) expect(screen.getByRole('region', { name: title })).toBeTruthy();
     const labels = screen.getAllByRole('term').map((t) => t.textContent);
     expect(labels).toEqual(['Version', 'Binary', 'Session id', 'Held by' /* W7 */, 'Process tree', 'Memory budget' /* C12 */, 'Main', 'Subagents', 'Route', 'Account', 'Tool search', 'Mode', 'Auto-mode lane', 'Rules', 'Context', 'Usage', 'Cost', 'Hooks', 'MCP']);
-    expect(valueOf('Version')).toBe('2.1.283 · pinned');
+    expect(valueOf('Version')).toBe('2.1.283'); // W13: the session's own, no pin note
     expect(valueOf('Session id')).toBe(record.engineSessionId);
     expect(valueOf('Main')).toBe('claude-sonnet-5[1m]');
     expect(valueOf('Subagents')).toBe("each agent's own, else Main"); // W3: no "engine default"
@@ -176,7 +176,7 @@ describe('session info renders the six sections', () => {
 
 // W2 (C3; §5.5 as amended 2026-10-01): the status line is gone, so what only its usage popover's footer offered lives here.
 describe('the route switch and the Direct poll, re-homed from the status line', () => {
-  const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V7, gateway: { ...SETTINGS_DEFAULTS_V7.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
+  const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V8, gateway: { ...SETTINGS_DEFAULTS_V8.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
   const route = () => screen.getByText('Route', { selector: 'dt' }).nextElementSibling as HTMLElement;
 
   it('a routed session’s Route offers Switch to Direct…, which opens the switch’s confirm', async () => {

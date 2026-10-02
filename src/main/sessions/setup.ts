@@ -37,8 +37,9 @@ import { trustStateOf } from './trust';
 
 export { SetupFailure, type Setup } from './setup-steps';
 
-// C12 start: main's custody gate (C12 execution document, Interfaces "Engine custody"). A refusal fails as a refused
-// `session.launch` does, when a setup or a resume begins: no worktree, record, bootstrap, unfollow or spawn precedes it.
+// C12 start: main's launch gate (C12 execution document, Interfaces "Engine custody"; W13: the configure push's, since
+// custody is retired). A refusal fails as a refused `session.launch` does, when a setup or a resume begins: no worktree,
+// record, bootstrap, unfollow or spawn precedes it.
 export async function passLaunchGate(s: Setup): Promise<void> {
   const refusal = await s.launchGate();
   if (refusal !== null) throw new SetupFailure('launching', `${refusal.reason}: ${refusal.message}`);
@@ -147,7 +148,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
   let cwd: string | null = null;
   let watch: LaunchWatch | null = null;
   try {
-    await passLaunchGate(s); // C12: custody refuses before anything this setup would have to undo
+    await passLaunchGate(s); // C12: the gate refuses before anything this setup would have to undo
     // worktree
     const location = run.intent.location!; // the start guards refused an intent with no location (New chat, 2026-10-01)
     let worktree: SessionRecord['worktree'] = null;

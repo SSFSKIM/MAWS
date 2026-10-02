@@ -41,18 +41,20 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       const { app, page } = maws;
       // Main migrated C5's file to version 3 on load, keeping its theme, override and notification choices. C12: to
       // version 4, with the memory budget's defaults. W2: to version 5, with the transcript's default width. W3: to
-      // version 6, with acceptEdits as the auto fallback. W7: to version 7, with the memory budget on.
+      // version 6, with acceptEdits as the auto fallback. W7: to version 7, with the memory budget on. W13: to version 8,
+      // with no engine pin.
       expect(readSettings(userData)).toMatchObject({
-        version: 7, // C12: 4; W2: 5; W3: 6; W7: 7
+        version: 8, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
         notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
-        engine: { binaryPath: null, pinnedVersion: '2.1.283', subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */ },
+        engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */ }, // W13: no pinnedVersion
         gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
         usage: { nearLimitPercent: 90 },
         appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
         permissions: { autoFallback: 'acceptEdits' }, // W3
       });
+      expect(readSettings(userData).engine).not.toHaveProperty('pinnedVersion'); // W13
 
       // Settings… sits in the application menu at ⌘, and opens the singleton tab.
       expect(await accelerator(app, 'settings.open')).toBe('Cmd+,');

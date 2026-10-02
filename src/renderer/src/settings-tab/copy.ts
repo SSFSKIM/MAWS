@@ -21,19 +21,7 @@ export const ENGINE = {
   change: 'Change…',
   useDefault: 'Use default',
   binaryNote: 'Absolute path, never resolved through PATH. Verified at every launch.',
-  binaryMismatch: 'does not match the pinned version · sessions will refuse to start until you re-pin',
   binaryReading: 'Reading the binary…',
-  pinned: 'Pinned version',
-  matches: 'matches binary',
-  reports: (version: string) => `binary reports ${version}`,
-  noVersion: 'binary did not report a version',
-  repin: 'Re-pin…',
-  pinnedNote: 'Each session records the version it ran on.',
-  repinTitle: (version: string) => `Re-pin the engine to ${version}?`,
-  repinBody: (from: string, to: string) =>
-    `The pin moves from ${from} to ${to}, and sessions start on ${to}. Upgrading the engine is a deliberate re-probe: the fixtures and conformance tests were recorded on 2.1.283.`,
-  repinConfirm: (version: string) => `Re-pin to ${version}`,
-  cancel: 'Cancel',
   configHome: 'Config home',
   readOnly: 'read-only to MAWS',
   configHomeNote: 'The engine owns transcripts, settings and trust. MAWS reads them and keeps its own index elsewhere.',
@@ -66,15 +54,6 @@ export const BUDGET_SETTINGS = {
   remove: (name: string) => `Remove ${name}`,
 };
 
-// M4: MAWS's copy of the pinned engine (Interfaces "Engine custody")
-export const CUSTODY_SETTINGS = {
-  label: 'Engine copy',
-  ok: (version: string, sha256: string, copiedAt: string) => `MAWS copy · ${version} · sha256 ${sha256.slice(0, 8)}… · copied ${copiedAt.slice(0, 10)}`,
-  chosen: 'not used while a binary path is chosen',
-  off: 'not kept in this run · launches use the installed binary',
-  reading: 'Checking the copy…',
-  note: "Sessions launch from MAWS's own copy of the pinned version, verified at every start, so the installer's cleanup never removes it. A missing or altered copy refuses launches.",
-};
 // C12 end
 
 export const GATEWAY = {

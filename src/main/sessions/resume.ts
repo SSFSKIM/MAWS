@@ -30,7 +30,7 @@ export async function runResume(
   let watch: LaunchWatch | null = null;
   let launched = false;
   try {
-    await passLaunchGate(s); // C12: custody refuses before the trust bootstrap and the handover
+    await passLaunchGate(s); // C12: the gate refuses before the trust bootstrap and the handover
     const trust = await trustStateOf(record.directory, { git: s.git, env: s.env });
     const attestation = input.decision === 'accepted' ? { accepted: true as const, directory: trust.trustKey } : null;
     const gateway = input.options.gateway ?? (record.gateway.routed === true ? 'gateway' : record.gateway.routed === false ? 'direct' : s.settings().gateway.defaultRoute);
