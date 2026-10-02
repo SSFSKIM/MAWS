@@ -67,7 +67,10 @@ function setup(opts: { spec?: Partial<LaunchSpec>; responder?: Responder; sessio
   const transport = scriptedTransport({ ...opts.transport, onWrite: autoResponder(opts.responder ?? defaultResponder()) });
   const journal = new MemoryJournal();
   const logs: string[] = [];
-  const session = new EngineSession({ spec: launchSpec, plan, spawn: () => transport, journal, log: (m) => logs.push(m), ...opts.session });
+  // The SessionStart hooks' bound comes from the launch's settings files by default; here it is read at once, so a fake
+  // clock never runs ahead of a real file read (a late read re-arms a running hook's deadline). Its own suite reads files.
+  const sessionStartHookMs = () => Promise.resolve(SESSION_START_HOOK_MS);
+  const session = new EngineSession({ spec: launchSpec, plan, spawn: () => transport, journal, log: (m) => logs.push(m), sessionStartHookMs, ...opts.session });
   const events: SessionEvent[] = [];
   const lists: AttentionItem[][] = [];
   session.on('events', (batch) => {
