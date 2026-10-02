@@ -7,13 +7,14 @@ import { GATEWAY_AUTO_NOTE } from '@shared/sessions/models';
 import type { StartOutcome } from '@shared/sessions/setup';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { useUnstartedTitle } from '../keymap/actions-runtime';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, trustState } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
 import { beforeCloseUnstarted } from './setup-actions';
 import { closeDialog, useDialogs } from './dialogs';
-import { createUnstartedSession, retainsTab, unstartedTitle } from './connect';
+import { connectSessions, createUnstartedSession, retainsTab, unstartedTitle } from './connect';
 import { connectSetup, useSetup } from './store';
 import { modelsOf, projectFacts, useSetupIntent, worktreeNameFor } from './useSetupIntent';
 import type { UseSetupIntent } from '../composer/setup-intent';
@@ -402,6 +403,22 @@ describe('the project row’s facts', () => {
 });
 
 describe('the unstarted title and the creator', () => {
+  it('updates the rendered unstarted title when its chosen project is renamed', async () => {
+    withMain({ 'session.launchMode': { mode: 'index' }, 'session.intent.list': { intents: [intent({ projectId: P1 })] }, 'session.deletions.list': { manifests: [] } });
+    const project = { id: P1, name: 'Original', directory: REPO, order: 0, createdAt: '2026-09-29T10:00:00.000Z' };
+    useSessions.setState({ projects: new Map([[P1, project]]) });
+    let disconnect!: () => void;
+    await act(async () => { disconnect = connectSessions(fake.client); });
+    try {
+      const { result } = renderHook(() => useUnstartedTitle(ID));
+      expect(result.current).toEqual({ title: 'New chat', project: 'Original', projectId: P1 });
+      act(() => useSessions.setState({ projects: new Map([[P1, { ...project, name: 'Renamed' }]]) }));
+      expect(result.current).toEqual({ title: 'New chat', project: 'Renamed', projectId: P1 });
+    } finally {
+      act(() => disconnect());
+    }
+  });
+
   it("titles the tab 'New chat' with its project once one is chosen, and the creator opens with main's intent", async () => {
     withMain({ 'session.create': () => ({ appSessionId: ID, intent: intent({ location: null }) }) });
     expect(unstartedTitle(ID)).toBeNull();

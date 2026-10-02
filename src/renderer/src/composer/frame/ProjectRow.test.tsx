@@ -1,12 +1,13 @@
 // New chat (2026-10-01, the owner's ruling after Codex's new-thread composer): the project row's chip, its menu (the
 // project picker), the read-only branch and the Worktree checkbox.
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { project, record } from '../../../../../test/support/builders';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
+import type { HookResult } from '../setup-intent';
 import type { ProjectRowBinding } from './bindings';
 import { matchesProject, ProjectRow, recentProjects } from './ProjectRow';
 
@@ -90,6 +91,56 @@ describe('the project row', () => {
     await user.click(screen.getByRole('button', { name: 'Choose a project' }));
     await user.click(within(menu()).getByRole('option', { name: "Don't work in a project" }));
     expect(b.choose).toHaveBeenLastCalledWith(null);
+  });
+
+  it.each(['choose', 'newProject', 'setWorktree'] as const)('disables the checkbox and all menu choices while %s is pending, then releases them', async (write) => {
+    let resolve!: (result: HookResult) => void;
+    const pending = new Promise<HookResult>((done) => { resolve = done; });
+    const b = binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha', worktree: false, [write]: vi.fn(() => pending) });
+    render(<ProjectRow binding={b} />);
+    const user = userEvent.setup();
+    const checkbox = screen.getByRole('checkbox', { name: 'Worktree' }) as HTMLInputElement;
+    const chip = screen.getByRole('button', { name: 'Project Alpha' });
+    if (write === 'setWorktree') await user.click(checkbox);
+    await user.click(chip);
+    if (write !== 'setWorktree') await user.click(within(menu()).getByRole('option', { name: write === 'choose' ? 'beta' : 'New project' }));
+    expect(b[write]).toHaveBeenCalledTimes(1);
+    expect(checkbox.disabled).toBe(true);
+    expect(within(menu()).getAllByRole('option').every((o) => o.getAttribute('aria-disabled') === 'true')).toBe(true);
+    await user.click(within(menu()).getByRole('option', { name: 'beta' }));
+    expect(b.choose).toHaveBeenCalledTimes(write === 'choose' ? 1 : 0);
+    await act(async () => resolve({ ok: true }));
+    expect(checkbox.disabled).toBe(false);
+    expect(screen.queryByRole('dialog', { name: 'Choose a project' })).toBeNull();
+    await user.click(chip);
+    expect(within(menu()).getAllByRole('option').every((o) => o.getAttribute('aria-disabled') === 'false')).toBe(true);
+  });
+
+  it.each([
+    ['New project', '{End}{ArrowUp}'],
+    ["Don't work in a project", '{End}'],
+  ])('reaches %s with the keyboard and selects it with Enter', async (name, keys) => {
+    const b = binding();
+    render(<ProjectRow binding={b} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Choose a project' }));
+    await user.keyboard(`{ArrowDown}${keys}`);
+    expect(within(menu()).getByRole('option', { name }).getAttribute('data-selected')).toBe('true');
+    await user.keyboard('{Enter}');
+    if (name === 'New project') expect(b.newProject).toHaveBeenCalledTimes(1);
+    else expect(b.choose).toHaveBeenCalledWith(null);
+  });
+
+  it('can create a project with the keyboard when there are no projects and no project is already the choice', async () => {
+    useSessions.setState({ projects: new Map(), records: new Map() });
+    const b = binding({ label: 'No project' });
+    render(<ProjectRow binding={b} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Project No project' }));
+    expect(within(menu()).getByText('No projects found')).toBeTruthy();
+    expect(rows()).toEqual(['New project']);
+    await user.keyboard('{ArrowDown}{End}{Enter}');
+    expect(b.newProject).toHaveBeenCalledTimes(1);
   });
 
   it('marks the chosen project, shows its branch read-only and the Worktree checkbox, which writes through the binding', async () => {

@@ -39,7 +39,7 @@ export function matchesProject(project: ProjectRecord, query: string): boolean {
 
 const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 text-ui outline-none select-none data-[selected=true]:bg-bg-hover data-[disabled=true]:text-fg-faint';
 
-function ProjectMenu({ binding, onDone }: { binding: ProjectRowBinding; onDone(result: HookResult): void }) {
+function ProjectMenu({ binding, disabled, onWrite }: { binding: ProjectRowBinding; disabled: boolean; onWrite(write: () => Promise<HookResult>): void }) {
   const [query, setQuery] = useState('');
   const records = useSessions((s) => s.records);
   const digests = useSessions((s) => s.digests);
@@ -51,8 +51,6 @@ function ProjectMenu({ binding, onDone }: { binding: ProjectRowBinding; onDone(r
     for (const p of ordered) count.set(p.name, (count.get(p.name) ?? 0) + 1);
     return (p: ProjectRecord) => (count.get(p.name) ?? 0) > 1;
   }, [ordered]);
-  const disabled = binding.disabled !== null;
-  const run = (write: () => Promise<HookResult>) => void write().then(onDone);
   const noProject = binding.projectId === null && binding.label !== null;
   return (
     <Command label="Projects" shouldFilter={false} loop>
@@ -63,42 +61,45 @@ function ProjectMenu({ binding, onDone }: { binding: ProjectRowBinding; onDone(r
         aria-label="Search projects"
         className="h-8 w-full border-b border-border bg-transparent px-2 text-ui text-fg outline-none placeholder:text-fg-faint"
       />
-      {/* about five rows show before the list scrolls (Codex, app-primary:147583) */}
-      <Command.List className="max-h-40 overflow-y-auto py-1">
-        {/* the footer's items are cmdk items too, so its own Empty never shows: the list says it */}
-        {shown.length === 0 && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">No projects found</p>}
-        {shown.map((project) => {
-          const folder = basename(project.directory);
-          const chosen = project.id === binding.projectId;
-          return (
-            <Command.Item
-              key={project.id}
-              value={`project:${project.id}`}
-              disabled={disabled}
-              onSelect={() => run(() => binding.choose(project.id))}
-              title={collides(project) ? formatCwd(project.directory) : undefined}
-              aria-current={chosen || undefined}
-              className={ITEM}
-            >
-              <span className="min-w-0 truncate">{project.name}</span>
-              {folder !== project.name && <span className="min-w-0 shrink truncate text-ui-sm text-fg-muted">{folder}</span>}
-              <span aria-hidden className="ml-auto w-3 shrink-0 text-accent">
-                {chosen ? '✓' : ''}
-              </span>
-            </Command.Item>
-          );
-        })}
-      </Command.List>
-      <div className="border-t border-border py-1">
-        <Command.Item value="new-project" disabled={disabled} onSelect={() => run(binding.newProject)} className={ITEM}>
-          {NEW_PROJECT}
-        </Command.Item>
-        {!noProject && (
-          <Command.Item value="no-project" disabled={disabled} onSelect={() => run(() => binding.choose(null))} className={ITEM}>
-            {NO_PROJECT}
+      <Command.List>
+        {/* about five project rows show before they scroll (Codex, app-primary:147583); actions stay visible */}
+        <Command.Group className="max-h-40 overflow-y-auto py-1">
+          {/* the footer's items are cmdk items too, so its own Empty never shows: the list says it */}
+          {shown.length === 0 && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">No projects found</p>}
+          {shown.map((project) => {
+            const folder = basename(project.directory);
+            const chosen = project.id === binding.projectId;
+            return (
+              <Command.Item
+                key={project.id}
+                value={`project:${project.id}`}
+                disabled={disabled}
+                onSelect={() => onWrite(() => binding.choose(project.id))}
+                title={collides(project) ? formatCwd(project.directory) : undefined}
+                aria-current={chosen || undefined}
+                className={ITEM}
+              >
+                <span className="min-w-0 truncate">{project.name}</span>
+                {folder !== project.name && <span className="min-w-0 shrink truncate text-ui-sm text-fg-muted">{folder}</span>}
+                <span aria-hidden className="ml-auto w-3 shrink-0 text-accent">
+                  {chosen ? '✓' : ''}
+                </span>
+              </Command.Item>
+            );
+          })}
+        </Command.Group>
+        <Command.Separator alwaysRender className="border-t border-border" />
+        <Command.Group className="py-1">
+          <Command.Item value="new-project" disabled={disabled} onSelect={() => onWrite(binding.newProject)} className={ITEM}>
+            {NEW_PROJECT}
           </Command.Item>
-        )}
-      </div>
+          {!noProject && (
+            <Command.Item value="no-project" disabled={disabled} onSelect={() => onWrite(() => binding.choose(null))} className={ITEM}>
+              {NO_PROJECT}
+            </Command.Item>
+          )}
+        </Command.Group>
+      </Command.List>
     </Command>
   );
 }
@@ -106,10 +107,20 @@ function ProjectMenu({ binding, onDone }: { binding: ProjectRowBinding; onDone(r
 export function ProjectRow({ binding }: { binding: ProjectRowBinding }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
   const chosen = binding.label !== null;
-  const done = (result: HookResult) => {
-    setError(result.ok ? null : result.error);
-    if (result.ok) setOpen(false);
+  const disabled = binding.disabled !== null || pending;
+  // All row writes share this lock: a worktree location must use the settled project's repository facts.
+  const run = async (write: () => Promise<HookResult>) => {
+    if (disabled) return;
+    setPending(true);
+    try {
+      const result = await write();
+      setError(result.ok ? null : result.error);
+      if (result.ok) setOpen(false);
+    } finally {
+      setPending(false);
+    }
   };
   const title = binding.disabled ?? (chosen ? `${binding.path ?? binding.label} · Change the project for this chat` : 'Select a project to run your chat in');
   return (
@@ -125,7 +136,7 @@ export function ProjectRow({ binding }: { binding: ProjectRowBinding }) {
             </Popover.Trigger>
             <Popover.Portal>
               <Popover.Content aria-label="Choose a project" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-72 p-0`}>
-                <ProjectMenu binding={binding} onDone={done} />
+                <ProjectMenu binding={binding} disabled={disabled} onWrite={(write) => void run(write)} />
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
@@ -141,8 +152,8 @@ export function ProjectRow({ binding }: { binding: ProjectRowBinding }) {
             <input
               type="checkbox"
               checked={binding.worktree}
-              disabled={binding.disabled !== null}
-              onChange={(event) => void binding.setWorktree(event.target.checked).then(done)}
+              disabled={disabled}
+              onChange={(event) => void run(() => binding.setWorktree(event.target.checked))}
               className="size-3.5 accent-accent"
             />
           </label>

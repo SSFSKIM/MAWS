@@ -43,16 +43,23 @@ export function unstartedTitle(appSessionId: AppSessionId): UnstartedTitleAnswer
 }
 
 // The strip and the toolbar call `unstartedTitle` during render without subscribing to the intents, so a change of what
-// it answers (a project chosen, changed or dropped) is announced to C5 (New chat, 2026-10-01).
+// it answers (a project chosen, changed, renamed or dropped) is announced to C5 (New chat, 2026-10-01).
 function watchUnstartedTitles(): () => void {
   const signature = (intents: ReadonlyMap<AppSessionId, { projectId: ProjectId | null }>) => [...intents].map(([id, i]) => `${id}:${i.projectId}`).join('|');
   let last = signature(useSetup.getState().intents);
-  return useSetup.subscribe((state) => {
+  const offIntents = useSetup.subscribe((state) => {
     const next = signature(state.intents);
     if (next === last) return;
     last = next;
     unstartedTitlesChanged();
   });
+  const offProjects = useSessions.subscribe((state, previous) => {
+    if (state.projects !== previous.projects) unstartedTitlesChanged();
+  });
+  return () => {
+    offIntents();
+    offProjects();
+  };
 }
 
 // C5's retention: a tab is kept while its id has a persisted intent, a failed one included.
