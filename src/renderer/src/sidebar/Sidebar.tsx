@@ -236,7 +236,7 @@ function SidebarBody() {
             </SectionHeading>
             {listEmpty && <EmptyProjects />}
             {listed.length === 0 ? (
-              <p className="m-0 px-[9px] py-1.5 text-ui-sm text-fg-faint">No projects match</p>
+              searching && <p className="m-0 px-[9px] py-1.5 text-ui-sm text-fg-faint">No projects match</p>
             ) : (
               <div role="tree" aria-label="Projects" onKeyDown={onTreeKeyDown} className="flex flex-col gap-px">
                 {shown.map((group, i) => (

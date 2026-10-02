@@ -642,6 +642,7 @@ describe('sidebar states', () => {
     fillStores(scenarioFile('empty'));
     const { rerender } = render(<Sidebar />);
     expect(screen.getByText('No projects yet')).toBeTruthy();
+    expect(screen.queryByText('No projects match')).toBeNull();
     expect((screen.getByRole('button', { name: 'Add project' }) as HTMLButtonElement).disabled).toBe(true);
     const create = screen.getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
     expect(create.disabled).toBe(true);
