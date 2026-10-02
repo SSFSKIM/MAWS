@@ -84,6 +84,16 @@ describe('the render registry (R2)', () => {
     expect(screen.getByTestId('band').textContent).toBe('MODS_PROBE_BAND presses=0');
   });
 
+  it('an invalidate while an ask is in flight outranks that ask’s unhooked answer: the queued re-ask runs and draws', async () => {
+    attach(true);
+    render(<Band client={fake.client} />);
+    invalidate(fake); // a plugin loaded while the first ask was out
+    await act(() => fake.reply('session.ui.render', UNHOOKED));
+    expect(fake.invoked('session.ui.render')).toHaveLength(2);
+    await act(() => fake.reply('session.ui.render', band(0)));
+    expect(screen.getByTestId('band').textContent).toBe('MODS_PROBE_BAND presses=0');
+  });
+
   it('forgets the session’s answers when its status no longer carries the surface, and asks afresh at the next attach', async () => {
     attach(true);
     render(<Band client={fake.client} />);

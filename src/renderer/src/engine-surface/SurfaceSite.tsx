@@ -4,7 +4,7 @@
 // keyboard and the window are (`session.ui.focus`, `session.ui.scroll`, in rows of the line height), follows a plugin's
 // own moves of them (`plugin.focus`, `plugin.scroll`, from live batches), and presses a Button by its hotkey while the
 // site holds the keyboard.
-import { useEffect, useRef, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type { ScrollSite, SurfaceSite as SiteName, SurfaceViewport } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -52,10 +52,59 @@ const lineHeight = (element: HTMLElement): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 18;
 };
 
+// The window and its content in rows of the line height.
+function geometry(container: HTMLElement) {
+  const line = lineHeight(container);
+  return { line, offset: Math.round(container.scrollTop / line), bodyRows: Math.max(1, Math.round(container.clientHeight / line)), contentRows: Math.round(container.scrollHeight / line) };
+}
+
+// MAWS moves the window itself (a plugin's move, the engine's adjustment, following the end): a scroll event that finds
+// the window where MAWS put it is not the person's and is not reported back.
+function moveTo(container: HTMLElement, top: number, placed: { current: number | null }): void {
+  container.scrollTop = top;
+  placed.current = container.scrollTop; // as clamped
+}
+
 function ScrollingSite({ site, children }: { site: Site & { component: ScrollSite }; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
-  const lastOffset = useRef(0);
+  const lastOffset = useRef(0); // the window's first row as the engine last heard or set it
+  const reported = useRef(''); // the geometry last reported, so an unchanged layout reports nothing
+  const following = useRef(false); // a plugin asked the window to follow its end, until it says otherwise or the person scrolls away
+  const placed = useRef<number | null>(null); // where MAWS last put the window itself, until a scroll event finds it there
   const frame = useRef<number | null>(null);
+  const siteRef = useRef(site);
+  useLayoutEffect(() => void (siteRef.current = site));
+
+
+  // The layout as it stands, on mount and whenever the window or its content changes size (a zero-move report), so a
+  // plugin's `$.ui.scroll({ to: 'end' })` knows the last row before the person ever scrolls (pass3/mods-surface-panes
+  // seq 49 before 52); a followed end stays in view through redraws and resizes.
+  useEffect(() => {
+    const container = ref.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const onResize = () => {
+      if (following.current) moveTo(container, container.scrollHeight, placed);
+      const { offset, bodyRows, contentRows } = geometry(container);
+      const key = `${offset}:${bodyRows}:${contentRows}`;
+      if (key === reported.current) return;
+      reported.current = key;
+      lastOffset.current = offset;
+      void sendScroll(siteRef.current, { offset, by: 0, bodyRows, contentRows });
+    };
+    const observer = new ResizeObserver(onResize);
+    const watch = () => {
+      observer.disconnect();
+      observer.observe(container);
+      for (const child of Array.from(container.children)) observer.observe(child);
+    };
+    watch();
+    const redrawn = typeof MutationObserver === 'undefined' ? null : new MutationObserver(watch); // a redraw may replace the root
+    redrawn?.observe(container, { childList: true });
+    return () => {
+      observer.disconnect();
+      redrawn?.disconnect();
+    };
+  }, []);
 
   // a plugin's own moves of the ring and the window
   useEffect(
@@ -71,9 +120,10 @@ function ScrollingSite({ site, children }: { site: Site & { component: ScrollSit
             const focusable = target?.matches('button, input, select') ? target : target?.querySelector<HTMLElement>('input, select, button');
             focusable?.focus();
           } else {
-            const top = event.followEnd ? container.scrollHeight : event.offset * lineHeight(container);
-            container.scrollTop = top;
-            lastOffset.current = Math.round(container.scrollTop / lineHeight(container));
+            following.current = event.followEnd;
+            const line = lineHeight(container);
+            moveTo(container, event.followEnd ? container.scrollHeight : event.offset * line, placed);
+            lastOffset.current = event.followEnd ? Math.round(container.scrollTop / line) : event.offset;
           }
         }
       }),
@@ -92,19 +142,34 @@ function ScrollingSite({ site, children }: { site: Site & { component: ScrollSit
     if (ref.current?.contains(event.relatedTarget as Node | null)) return;
     sendFocus(site, false, null);
   };
-  // the window as rows, once per frame
+  // The person's move, once per frame: the offset the engine held before it and the rows it covered (the engine applies
+  // `by` to `offset`, pass3/mods-surface-panes seq 59/60); the window then goes where the engine says it is.
   const onScroll = () => {
+    const container = ref.current;
+    if (container && placed.current !== null && container.scrollTop === placed.current) {
+      placed.current = null;
+      return;
+    }
+    placed.current = null;
     if (frame.current !== null) return;
     frame.current = requestAnimationFrame(() => {
       frame.current = null;
       const container = ref.current;
       if (!container) return;
-      const line = lineHeight(container);
-      const offset = Math.round(container.scrollTop / line);
-      const by = offset - lastOffset.current;
+      const { line, offset, bodyRows, contentRows } = geometry(container);
+      const before = lastOffset.current;
+      const by = offset - before;
       if (by === 0) return;
+      if (by < 0) following.current = false; // scrolled up, away from the followed end
       lastOffset.current = offset;
-      void sendScroll(site, { offset, by, bodyRows: Math.max(1, Math.round(container.clientHeight / line)), contentRows: Math.round(container.scrollHeight / line) });
+      reported.current = `${offset}:${bodyRows}:${contentRows}`;
+      void sendScroll(site, { offset: before, by, bodyRows, contentRows }).then((answer) => {
+        if (!answer) return;
+        following.current = answer.followEnd;
+        if (answer.offset === null || answer.offset === lastOffset.current || ref.current !== container) return;
+        lastOffset.current = answer.offset;
+        moveTo(container, answer.offset * line, placed);
+      });
     });
   };
   // a Button's hotkey presses it while the site holds the keyboard, never from a field

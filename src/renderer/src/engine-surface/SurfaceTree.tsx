@@ -47,20 +47,35 @@ export function SurfaceTree({ tree, site, engine = null }: { tree: SurfaceNode; 
 }
 
 function Children({ nodes, inline }: { nodes: SurfaceNode[]; inline: boolean }) {
+  const keys = childKeys(nodes);
   return (
     <>
       {nodes.map((child, index) =>
         // a Box wraps each string in a Text, as core does
         typeof child === 'string' && !inline ? (
-          <span key={index} style={textStyle({})}>
+          <span key={keys[index]} style={textStyle({})}>
             {child}
           </span>
         ) : (
-          <Node key={index} node={child} inline={inline} />
+          <Node key={keys[index]} node={child} inline={inline} />
         ),
       )}
     </>
   );
+}
+
+// A child's React key: an element a plugin addresses (`press.plugin` and `props.key`) keeps its identity, and so the
+// text typed or the option picked in it, when siblings move around it; anything else, or a duplicate, its position.
+const identityOf = (node: SurfaceNode): string | null =>
+  typeof node !== 'string' && (node.type === 'Button' || node.type === 'Input' || node.type === 'Select' || (node.type === 'Markdown' && node.press)) && node.props.key !== undefined
+    ? `el:${node.press!.plugin}:${node.props.key}`
+    : null;
+
+export function childKeys(nodes: readonly SurfaceNode[]): string[] {
+  const identities = nodes.map(identityOf);
+  const counts = new Map<string, number>();
+  for (const id of identities) if (id !== null) counts.set(id, (counts.get(id) ?? 0) + 1);
+  return identities.map((id, index) => (id !== null && counts.get(id) === 1 ? id : `at:${index}`));
 }
 
 function Node({ node, inline = false }: { node: SurfaceNode; inline?: boolean }) {

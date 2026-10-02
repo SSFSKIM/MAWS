@@ -113,4 +113,15 @@ describe('SurfaceTree (R2)', () => {
     expect(screen.getByRole('note').textContent).toBe('mods-probe: this drawing needs a client module, which MAWS does not run yet');
     expect(screen.getByText('MAWS own')).toBeTruthy();
   });
+
+  it('a field keeps what was typed in it when the plugin draws another field before it', async () => {
+    const fake = fakeClient({ 'session.ui.input': { handled: true, element: null, value: null } });
+    const site: Site = { appSessionId: ID, component: 'AbovePrompt', instanceId: 'above-prompt', client: fake.client };
+    const field = (key: string, handle: number) => ({ type: 'Input', props: { key, label: key, value: '' }, press: { plugin: 'mods-probe', handle } });
+    const view = render(<SurfaceTree tree={parseTree({ type: 'Box', children: [field('first', 1)] }) as SurfaceNode} site={site} />);
+    await userEvent.type(screen.getByRole('textbox', { name: 'first' }), 'typed');
+    view.rerender(<SurfaceTree tree={parseTree({ type: 'Box', children: [field('second', 2), field('first', 3)] }) as SurfaceNode} site={site} />);
+    expect((screen.getByRole('textbox', { name: 'first' }) as HTMLInputElement).value).toBe('typed');
+    expect((screen.getByRole('textbox', { name: 'second' }) as HTMLInputElement).value).toBe('');
+  });
 });

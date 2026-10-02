@@ -5,15 +5,16 @@
 // (`session.ui.answer`, from the window showing the session); one no window answers in time is refused just inside the
 // engine's own 5 s, so every request the journal holds has its answer beside it. The normaliser turns the request rows
 // into `plugin.ask`; nothing here builds an event.
-import { DEFAULT_SURFACE_VIEWPORT, SURFACE_ANSWERS, SURFACE_CLIENT_ID, type SurfaceAnswer } from '@shared/engine/surface';
+import { DEFAULT_SURFACE_VIEWPORT, SURFACE_ANSWER_MS, SURFACE_ANSWERS, SURFACE_CLIENT_ID, type SurfaceAnswer } from '@shared/engine/surface';
 import type { RequestId } from '@shared/graph/ids';
 import { isSurfaceRequest, type SurfaceRequestSubtype } from '@shared/wire/control';
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import { uiAttach, uiDetach, uiPanes } from './controls';
 import type { ControlClient } from './rpc';
 
-// The engine resolves an unanswered request after 5 s; the host refuses at 4 s, so the refusal is the answer it reads.
-export const SURFACE_ANSWER_MS = 4_000;
+// The engine resolves an unanswered request after 5 s; the host refuses at 4 s (shared with the renderer, which acts on
+// no request older than that), so the refusal is the answer it reads.
+export { SURFACE_ANSWER_MS };
 export const SURFACE_CAPABILITY = 'ui_surface_v1';
 
 // What each request answers when no window took it (the engine's own unanswered outcomes, said explicitly).

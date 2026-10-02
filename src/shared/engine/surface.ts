@@ -68,6 +68,10 @@ export const SURFACE_ASKS = ['copy', 'prompt_read', 'prompt_fill', 'prompt_sugge
 export type SurfaceAsk = (typeof SURFACE_ASKS)[number];
 export const PromptFillModeSchema = z.enum(['replace', 'append', 'insert']);
 export type PromptFillMode = z.infer<typeof PromptFillModeSchema>;
+// The engine resolves a request no client answered after 5 s; the host refuses one at 4 s, so the refusal is the
+// answer the engine reads, and the renderer acts on none older than that (its answer would come after the refusal).
+export const SURFACE_ANSWER_MS = 4_000;
+
 export const SurfaceAnswerSchema = z.discriminatedUnion('ask', [
   z.strictObject({ ask: z.literal('copy'), copied: z.boolean() }),
   z.strictObject({ ask: z.literal('prompt_read'), text: z.string(), cursor: z.number().int().nonnegative() }),

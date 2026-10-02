@@ -7,12 +7,12 @@ import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
-import { connectSurfaceAsks } from './asks';
+import { ASK_ACTIONABLE_MS, connectSurfaceAsks } from './asks';
 
 const nine = scenarioFile('nine-sessions');
 const [shown, other] = nine.sessions.map((r) => r.appId);
 const ask = (seq: number, payload: Record<string, unknown>) =>
-  ({ id: `${shown}:L:${seq}:0`, sessionId: 's', at: '2026-10-02T00:00:00.000Z', seq, agentId: null, parentToolUseId: null, kind: 'plugin.ask', plugin: null, text: null, mode: null, ...payload }) as SessionEvent;
+  ({ id: `${shown}:L:${seq}:0`, sessionId: 's', at: new Date().toISOString(), seq, agentId: null, parentToolUseId: null, kind: 'plugin.ask', plugin: null, text: null, mode: null, ...payload }) as SessionEvent;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 let fake: FakeClient;
@@ -67,6 +67,20 @@ describe('the surface’s requests, answered by this window (R2)', () => {
       { appSessionId: shown, requestId: 'fill-1', answer: { ask: 'prompt_fill', filled: true } },
       { appSessionId: shown, requestId: 'suggest-1', answer: { ask: 'prompt_suggest', shown: false } },
     ]);
+  });
+
+  it('a request older than the host’s refusal is skipped: no fill, no clipboard, no answer', async () => {
+    const prompt = { read: vi.fn(() => ({ text: '', cursor: 0 })), fill: vi.fn(() => true), suggest: vi.fn(() => true) };
+    registerFocusTarget(shown!, { focusEditor: () => {}, focusFrame: () => {}, insertText: () => {}, prompt });
+    const stale = new Date(Date.now() - ASK_ACTIONABLE_MS - 100).toISOString();
+    fake.event('session.eventBatch', {
+      appSessionId: shown,
+      events: [ask(27, { requestId: 'fill-old', ask: 'prompt_fill', text: 'late', mode: 'replace', at: stale }), ask(19, { requestId: 'copy-old', ask: 'copy', text: 'late', at: stale })],
+    });
+    await settle();
+    expect(prompt.fill).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
+    expect(fake.invoked('session.ui.answer')).toEqual([]);
   });
 
   it('a shown session with no composer refuses at once; one no pane shows is left to the host', async () => {

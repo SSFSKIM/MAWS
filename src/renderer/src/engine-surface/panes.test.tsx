@@ -131,6 +131,29 @@ describe('plugin panes as panel tabs (R2)', () => {
     expect(fake.invoked('session.ui.paneFocus')).toContainEqual({ appSessionId: A, id: 'two' });
   });
 
+  it('a change of the engine’s shown pane selects its existing tab; an unchanged roster leaves the person’s choice', async () => {
+    connect({ 'session.ui.panes': roster([pane('one', 'One'), pane('two', 'Two')], 'one'), 'session.ui.render': PANE_ANSWER });
+    render(<TestHost />);
+    attach();
+    await waitFor(() => expect(tabs()).toEqual([['Plugin pane · One', true], ['Plugin pane · Two', false]]));
+    push(fake, roster([pane('one', 'One'), pane('two', 'Two')], 'two'), 2);
+    await waitFor(() => expect(tabs()).toEqual([['Plugin pane · One', false], ['Plugin pane · Two', true]]));
+    act(() => panelHost.selectTab(paneTabs()[0]!.id)); // the person goes back to One
+    push(fake, roster([pane('one', 'One'), pane('two', 'Two')], 'two'), 3); // the same roster again (another field moved)
+    await waitFor(() => expect(tabs()).toEqual([['Plugin pane · One', true], ['Plugin pane · Two', false]]));
+  });
+
+  it('a roster read still out when the connection goes never applies', async () => {
+    connect({ 'session.ui.render': PANE_ANSWER }); // `session.ui.panes` stays unanswered until the test replies
+    render(<TestHost />);
+    attach();
+    await waitFor(() => expect(fake.pending('session.ui.panes')).toBe(1));
+    disconnect();
+    await act(() => fake.reply('session.ui.panes', roster([pane('stale', 'Stale')])));
+    expect(paneTabs()).toEqual([]);
+    disconnect = () => {};
+  });
+
   it('forgets the roster and closes the tabs when the session’s surface goes', async () => {
     connect({ 'session.ui.panes': roster([pane('mods-probe-pane', 'Probe pane')]), 'session.ui.render': PANE_ANSWER });
     render(<TestHost />);

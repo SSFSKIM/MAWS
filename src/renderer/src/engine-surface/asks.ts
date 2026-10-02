@@ -3,10 +3,13 @@
 // `$.prompt.suggest` read, fill and suggest through the composer of the session, as a pane of this window shows it (the
 // composer's prompt port, stores/composer.ts). A session shown with no composer mounted refuses at once; one no pane of
 // this window shows is left to the host, which refuses for it just inside the engine's 5 s. Live batches only: a
-// snapshot never answers a request twice.
+// snapshot never answers a request twice. A request older than the host's refusal (less a margin for the answer's own
+// trip) is skipped with no side effect and no answer: the plugin was already told no, so filling the draft or the
+// clipboard then would act on a refused call. The age is the event's `at` (the host's clock, this machine's) against
+// now; a request handled just inside the margin can still race the refusal, and then its answer finds nothing pending.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { SurfaceAnswer } from '@shared/engine/surface';
+import { SURFACE_ANSWER_MS, type SurfaceAnswer } from '@shared/engine/surface';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { shownHere } from '../app/plugin-toasts';
 import { ipc } from '../ipc/client';
@@ -16,6 +19,13 @@ import { toast } from '../stores/notices';
 export const ASK_COPY = { copied: 'Copied' };
 
 type Ask = Extract<SessionEvent, { kind: 'plugin.ask' }>;
+
+// How old a request may be when handled: the host's refusal less the answer's trip back to it.
+export const ASK_ACTIONABLE_MS = SURFACE_ANSWER_MS - 500;
+const expired = (ask: Ask, now: number): boolean => {
+  const at = Date.parse(ask.at);
+  return Number.isFinite(at) && now - at > ASK_ACTIONABLE_MS;
+};
 
 async function copy(text: string): Promise<boolean> {
   try {
@@ -48,7 +58,7 @@ async function answerOf(appSessionId: AppSessionId, ask: Ask): Promise<SurfaceAn
 export function connectSurfaceAsks(client: MawsBridge = ipc): () => void {
   return client.on('session.eventBatch', ({ appSessionId, events }) => {
     for (const event of events) {
-      if (event.kind !== 'plugin.ask') continue;
+      if (event.kind !== 'plugin.ask' || expired(event, Date.now())) continue;
       void answerOf(appSessionId as AppSessionId, event).then(async (answer) => {
         if (answer === null) return;
         const result = await client.invoke('session.ui.answer', { appSessionId, requestId: event.requestId, answer });

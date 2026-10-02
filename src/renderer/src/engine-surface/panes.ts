@@ -39,6 +39,7 @@ export function openPaneTab(appSessionId: AppSessionId, paneId: string): void {
 }
 
 const answered = new Map<AppSessionId, string>(); // the focus request each session's roster carried and this window answered
+const shownSeen = new Map<AppSessionId, string | null>(); // the pane each session's last roster said the surface shows
 
 function reconcile(appSessionId: AppSessionId): void {
   if (!useLayout.getState().hydrated) return; // the barrier passes hydration's tabs first; reconciled again once it has
@@ -63,6 +64,14 @@ function reconcile(appSessionId: AppSessionId): void {
     const tab = panelHost.addTool(PLUGIN_PANE_TOOL, { appSessionId, params: { paneId: pane.id }, activate: shown && pane.id === roster.shownId });
     setTitle(tab, titleOf(roster, pane.id));
   }
+  // the engine moved the shown pane (a plugin's open or show of one that already has a tab): on screen, its tab is
+  // selected; only on a change, so an unchanged roster never overrides the person's own selection
+  const previous = shownSeen.get(appSessionId);
+  shownSeen.set(appSessionId, roster.shownId);
+  if (shown && roster.shownId !== null && previous !== undefined && previous !== roster.shownId && kept.has(roster.shownId)) {
+    const tab = paneTab(appSessionId, roster.shownId);
+    if (tab !== null && useLayout.getState().panelBySession.get(appSessionId)?.activeTabId !== tab) panelHost.selectTab(tab);
+  }
   // a plugin's `$.ui.open({ focus: true })`: honoured on screen (its tab selected, its body takes the keyboard and says
   // so), refused for a session this window does not show
   const request = roster.focusRequestedId;
@@ -85,7 +94,10 @@ function setRoster(appSessionId: AppSessionId, roster: PaneRoster | null): void 
     else rosters.set(appSessionId, roster);
     return { rosters };
   });
-  if (roster === null) answered.delete(appSessionId);
+  if (roster === null) {
+    answered.delete(appSessionId);
+    shownSeen.delete(appSessionId);
+  }
   reconcile(appSessionId);
 }
 
@@ -101,10 +113,11 @@ export function connectPluginPanes(client: MawsBridge = ipc): () => void {
   registerPanelTool(pluginPaneTool);
   const attached = new Set<AppSessionId>();
   const pushed = new Map<AppSessionId, number>(); // pushes seen per session, so a read older than a push is dropped
+  let disposed = false; // a read this connection made after it was replaced (a remount) never applies
   const read = (appSessionId: AppSessionId) => {
     const before = pushed.get(appSessionId) ?? 0;
     void client.invoke('session.ui.panes', { appSessionId }).then((result) => {
-      if (!result.ok || !attached.has(appSessionId) || (pushed.get(appSessionId) ?? 0) !== before) return;
+      if (disposed || !result.ok || !attached.has(appSessionId) || (pushed.get(appSessionId) ?? 0) !== before) return;
       setRoster(appSessionId, result.value);
     });
   };
@@ -138,6 +151,7 @@ export function connectPluginPanes(client: MawsBridge = ipc): () => void {
     setRoster(id, latest);
   });
   return () => {
+    disposed = true;
     offSessions();
     offLayout();
     offEvents();
@@ -148,5 +162,6 @@ export function connectPluginPanes(client: MawsBridge = ipc): () => void {
 export function resetPaneRosters(): void {
   usePaneRosters.setState({ rosters: new Map() });
   answered.clear();
+  shownSeen.clear();
   setPanesClient(ipc);
 }

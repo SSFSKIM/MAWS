@@ -3,8 +3,9 @@
 // `session.ui.render` when it mounts and when its props change, keeps one ask in flight (a change meanwhile asks again
 // once it lands, so the last answer is for the latest props), and is asked again whenever the engine says its trees may
 // be stale (`plugin.invalidate`, from a live batch). A site whose answer says no plugin hooks it (`hooked: false`) is not
-// asked again until the next invalidate, as the engine allows. The answers live in a small store React reads; the
-// bookkeeping is module state.
+// asked again until the next invalidate, as the engine allows; an answer to an ask made before the latest invalidate
+// never marks its site unhooked (the invalidate may say a plugin hooks it now), so the re-ask it queued still runs. The
+// answers live in a small store React reads; the bookkeeping is module state.
 import { create } from 'zustand';
 import type { RenderAnswer, SurfaceSite, SurfaceViewport } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -44,6 +45,8 @@ export const useSurfaceAnswers = create<SurfaceAnswers>()(() => ({ answers: new 
 
 const entries = new Map<string, Entry>();
 const unhooked = new Set<string>(); // sites a ui_render answered `hooked: false`, until the session's next invalidate
+const generations = new Map<AppSessionId, number>(); // invalidations seen per session
+const generationOf = (appSessionId: AppSessionId): number => generations.get(appSessionId) ?? 0;
 
 const propsKeyOf = (props: Record<string, unknown>, viewport: SurfaceViewport | undefined): string => JSON.stringify([props, viewport ?? null]);
 
@@ -71,11 +74,13 @@ async function ask(key: string): Promise<void> {
   entry.inFlight = true;
   entry.again = false;
   const { appSessionId, component, instanceId, props, viewport } = entry;
+  const generation = generationOf(appSessionId);
   const result = await entry.client.invoke('session.ui.render', { appSessionId, component, instanceId, props, ...(viewport && { viewport }) });
   entry.inFlight = false;
   if (entries.get(key) !== entry) return; // unmounted meanwhile
   if (result.ok) {
-    if (!result.value.hooked) unhooked.add(hookKey(appSessionId, component));
+    // an invalidate since this ask began outranks its `hooked: false`
+    if (!result.value.hooked && generation === generationOf(appSessionId)) unhooked.add(hookKey(appSessionId, component));
     store(key, answerOf(result.value));
   } else {
     console.warn(`[engine-surface] ${component} ${instanceId} not drawn: ${result.error.message}`);
@@ -119,6 +124,7 @@ export function setSiteProps(address: SiteAddress, props: Record<string, unknown
 // The engine says every tree it drew for the session may be stale: every mounted instance of it is asked again, and
 // sites answered unhooked may be hooked now.
 export function invalidateSession(appSessionId: AppSessionId): void {
+  generations.set(appSessionId, generationOf(appSessionId) + 1);
   for (const key of [...unhooked]) if (key.startsWith(`${appSessionId}\u0000`)) unhooked.delete(key);
   for (const [key, entry] of entries) if (entry.appSessionId === appSessionId) void ask(key);
 }
@@ -136,5 +142,6 @@ export function forgetSession(appSessionId: AppSessionId): void {
 export function resetSurfaceRegistry(): void {
   entries.clear();
   unhooked.clear();
+  generations.clear();
   useSurfaceAnswers.setState({ answers: new Map() });
 }
