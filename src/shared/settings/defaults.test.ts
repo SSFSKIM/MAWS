@@ -45,6 +45,15 @@ describe('settings migrate v1 and v2 to v3', () => {
     });
   });
 
+  // W10: ⌥Enter's hold (`composer.steer`) is gone; a file that overrode it keeps everything else
+  it('drops an override of a retired action instead of refusing the file, at the current version and an earlier one', () => {
+    const v7 = { ...SETTINGS_DEFAULTS_V7, theme: 'dark', keymap: { 'composer.steer': 'Cmd+Enter', 'attention.next': 'Cmd+Alt+J' } };
+    expect(migrateSettings(v7)).toEqual({ ...SETTINGS_DEFAULTS_V7, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' } });
+    const v2 = { version: 2, theme: 'system', keymap: { 'composer.steer': null }, notifications: { enabled: true, sound: false } };
+    expect(migrateSettings(v2).keymap).toEqual({});
+    expect(() => migrateSettings({ ...SETTINGS_DEFAULTS_V7, keymap: { 'composer.nothing': 'Cmd+J' } })).toThrow(); // an unknown id still refuses
+  });
+
   // C12 start: version 4 (the memory budget); a v3 object gains the budget's defaults. W2: the identity moves to v5, and
   // a v3 or v4 object gains the transcript's default width. W3: the identity moves to v6. W7: to v7, and every earlier
   // object gains the budget's switch, on.

@@ -3,7 +3,7 @@
 // `settings.set` applies. Pure; main's store (src/main/settings/store.ts) reads, migrates, merges and writes with these,
 // and nothing else does.
 import * as z from 'zod';
-import { ACTION_IDS } from '../keymap/actions';
+import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
 import { ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
 export const SETTINGS_DEFAULTS_V7: Settings = {
@@ -65,8 +65,9 @@ const fromV4 = (v4: SettingsV4): Settings => fromV5({ ...v4, version: 5, appeara
 // defaults) → v4 (C12's budget) → v5 (W2's transcript width) → v6 (W3's auto fallback) → v7 (W7's budget switch). A
 // version 7 object is validated and returned as it is;
 // anything else (another version, an invalid file of a known version) throws the schema's error, which the store turns
-// into the defaults with a warning.
-export function migrateSettings(raw: unknown): Settings {
+// into the defaults with a warning. At any version, overrides of a retired action are dropped first (W10).
+export function migrateSettings(input: unknown): Settings {
+  const raw = withoutRetiredActions(input);
   const version = typeof raw === 'object' && raw !== null ? (raw as { version?: unknown }).version : undefined;
   switch (version) {
     case 1: {
@@ -94,6 +95,15 @@ export function migrateSettings(raw: unknown): Settings {
     default:
       return SettingsSchema.parse(raw);
   }
+}
+
+// W10: a keymap override naming an action that no longer exists (⌥Enter's hold) would fail the keymap's schema and
+// reset the whole file to the defaults; it is left out instead, and the file loses it at its next write.
+function withoutRetiredActions(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null) return raw;
+  const keymap = (raw as { keymap?: unknown }).keymap;
+  if (typeof keymap !== 'object' || keymap === null || !RETIRED_ACTION_IDS.some((id) => id in keymap)) return raw;
+  return { ...raw, keymap: Object.fromEntries(Object.entries(keymap).filter(([id]) => !RETIRED_ACTION_IDS.includes(id))) };
 }
 
 // The one merge rule (Interfaces, stated once): a patch is merged one level deep, section by section and field by

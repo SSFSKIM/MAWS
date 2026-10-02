@@ -9,7 +9,6 @@ export interface EditorPane {
 
 export interface EditorSubmission {
   mode: 'send' | 'bash' | 'memory';
-  how: 'send' | 'steer';
   content: unknown; // what went on the wire: a string or content blocks
   display: string;
   accepted: boolean;

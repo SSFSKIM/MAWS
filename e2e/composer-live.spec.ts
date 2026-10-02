@@ -403,9 +403,9 @@ test('plan mode: Clear context and implement yields a reset boundary and a turn 
   });
 });
 
-// ---- 6. modes, memory, paste, history, the palette, the status line, + dir -----------------------------------------
+// ---- 6. modes, memory, paste, history, the palette, the status line, add directory ---------------------------------
 
-test('bash, memory, paste, history recall, the palette, the status line and + dir against the live engine', async () => {
+test('bash, memory, paste, history recall, the palette, the status line and Add directory… against the live engine', async () => {
   await withApp('misc', async (live) => {
     const { page, maws } = live;
     const pane = paneAt(page, 0);
@@ -597,19 +597,20 @@ test('bash, memory, paste, history recall, the palette, the status line and + di
       observe('misc.auto-after-haiku', { before, autoText, autoDisabled, after, line, models: value(await invoke(page, 'session.listModels', { appSessionId: m.id as never })) });
     });
 
-    await test.step('+ dir through flag settings', async () => {
+    await test.step('Add directory… (the "+" menu, W10) through flag settings', async () => {
       const extra = join(scratch.root, 'extra-dir');
       mkdirSync(extra, { recursive: true });
       await maws.app.evaluate((_electron, dir) => {
         process.env.MAWS_E2E_PICK_PATHS = dir; // C10: main's e2e pick seam answers it; no native panel under MAWS_E2E
       }, extra);
       const before = value(await invoke(page, 'session.listPermissionRules', { appSessionId: m.id as never }));
-      await pane.getByRole('button', { name: 'Add a directory' }).click();
+      await pane.getByRole('button', { name: 'Add files, photos or commands' }).click();
+      await page.getByRole('menuitem', { name: 'Add directory…' }).click();
       await page.waitForTimeout(3_000);
       const after = value(await invoke(page, 'session.listPermissionRules', { appSessionId: m.id as never }));
       const flag = framesOf(rowsOf(m.journalPath), 'out').filter(({ frame }) => frame.type === 'control_request' && frame.request?.subtype === 'apply_flag_settings').map(({ seq, frame }) => ({ seq, request: frame.request }));
       const notices = await page.locator('[role="status"], [role="alert"]').allInnerTexts();
-      observe('misc.add-dir', { extra, before: (before as { state?: { workspaceDirectories?: unknown } }).state?.workspaceDirectories, after: (after as { state?: { workspaceDirectories?: unknown } }).state?.workspaceDirectories, flag, chip: await pane.getByRole('button', { name: 'Add a directory' }).innerText(), notices });
+      observe('misc.add-dir', { extra, before: (before as { state?: { workspaceDirectories?: unknown } }).state?.workspaceDirectories, after: (after as { state?: { workspaceDirectories?: unknown } }).state?.workspaceDirectories, flag, notices });
     });
   });
 });

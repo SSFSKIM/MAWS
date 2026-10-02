@@ -47,9 +47,10 @@ describe('keymap: chords unique and single-sink', () => {
     expect(effectiveChord('panel.maximize', {})).toBeNull();
   });
 
-  // C7 start: the composer's three actions (C7 execution document, Keymap additions)
-  it('carries the composer actions: steer in the editor sink, stop and focus app-scoped, none in the menu', () => {
-    expect(ACTIONS['composer.steer']).toMatchObject({ chord: 'Alt+Enter', sink: 'renderer', menu: null, scope: 'composer' });
+  // C7 start: the composer's actions (C7 execution document, Keymap additions; W10: no ⌥Enter)
+  it('carries the composer actions: stop and focus app-scoped, none in the menu, and no ⌥Enter hold (W10)', () => {
+    expect('composer.steer' in ACTIONS).toBe(false);
+    expect(Object.values(ACTIONS).map((a) => a.chord)).not.toContain('Alt+Enter');
     expect(ACTIONS['composer.stop']).toMatchObject({ chord: 'Cmd+.', sink: 'renderer', menu: null, scope: 'app' });
     expect(ACTIONS['composer.focus']).toMatchObject({ chord: 'Cmd+L', sink: 'renderer', menu: null, scope: 'app' });
   });

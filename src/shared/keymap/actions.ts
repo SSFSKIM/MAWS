@@ -38,13 +38,10 @@ export const ACTIONS = {
   'request.decline':      { title: 'Decline the docked request', chord: 'Escape',       sink: 'renderer', menu: null, scope: 'pane' },
   'composer.send':        { title: 'Send (multi-line editor)',    chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
   'composer.cycleMode':   { title: 'Cycle permission mode',       chord: 'Shift+Tab',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
-  // C7 start: the composer's own actions (C7 execution document, Keymap additions). Hold is delivered only inside the
-  // editor's `data-key-sink="composer"`; Stop and Focus are app-scoped because ⌘. is pressed while typing, where C5's
-  // dispatcher refuses every pane-scoped action, and are registered once (ComposerAppKeys), resolving the focused pane.
-  // W1 (charter §4.2 as amended 2026-10-01): ⌥Enter now holds the message until the turn ends (Enter while a turn runs
-  // is the `next` steer, and Esc in the editor interrupts and sends the held head now); the id stays `composer.steer`
-  // because the settings' keymap overrides are keyed by it.
-  'composer.steer':       { title: 'Hold until the turn ends',    chord: 'Alt+Enter',    sink: 'renderer', menu: null, scope: 'composer' },
+  // C7 start: the composer's own actions (C7 execution document, Keymap additions). Stop and Focus are app-scoped
+  // because ⌘. is pressed while typing, where C5's dispatcher refuses every pane-scoped action, and are registered once
+  // (ComposerAppKeys), resolving the focused pane. W10 (charter §4.2 as amended 2026-10-01): `composer.steer` (⌥Enter,
+  // W1's hold until the turn ends) is gone with the hold; a saved override of it is dropped on read (RETIRED_ACTION_IDS).
   'composer.stop':        { title: 'Stop, holding waiting messages', chord: 'Cmd+.',     sink: 'renderer', menu: null, scope: 'app' }, // W1: nothing runs after it
   'composer.focus':       { title: 'Focus the composer',          chord: 'Cmd+L',        sink: 'renderer', menu: null, scope: 'app' },
   // C7 end
@@ -60,6 +57,10 @@ export const ACTIONS = {
 
 export type ActionId = keyof typeof ACTIONS;
 export const ACTION_IDS = Object.keys(ACTIONS) as [ActionId, ...ActionId[]];
+
+// Ids an earlier version had, which a settings file may still carry as overrides: the keymap's schema names only the
+// current ids, so a read drops these first rather than refusing the whole file (W10: ⌥Enter's hold).
+export const RETIRED_ACTION_IDS: readonly string[] = ['composer.steer'];
 
 // `settings.keymap`: overrides only; null unbinds; absent means the default.
 export type KeymapOverrides = Partial<Record<ActionId, string | null>>;

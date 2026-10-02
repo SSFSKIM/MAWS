@@ -107,11 +107,10 @@ export function RelayComposer({ appSessionId, agentId, node, status, sessionTitl
     if (relay && !isPending(relay.state)) useRelays.getState().dismiss(key); // a failure shows until the next edit
   };
 
-  // ⌘↵ sends and ⌥↵ (a steer, which every relay is) does too; plain Enter breaks the line. The sink keeps the pane's
-  // Enter and Esc (a docked card's answers) from firing here.
+  // ⌘↵ sends; plain Enter breaks the line. The sink keeps the pane's Enter and Esc (a docked card's answers) from firing
+  // here.
   const root = useRef<HTMLDivElement>(null);
   useKeyChord('composer.send', () => void send(), { within: root });
-  useKeyChord('composer.steer', () => void send(), { within: root });
   const id = useId();
 
   return (

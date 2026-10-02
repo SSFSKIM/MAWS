@@ -30,7 +30,7 @@ export const QUERY_COMMANDS = [
   'settings.usage',
   'git.lsFiles',
   'session.history.list',
-  'session.listPermissionRules', // M4: the + dir chip's workspace directories
+  'session.listPermissionRules', // M4: the workspace directories (the location popover; W10: Add directory… re-reads them)
   'git.branches', // M4: the location chip's branch picker
   'git.worktree.list', // debt wave 4: the location popover's existing worktrees and their branches
   // C7 end

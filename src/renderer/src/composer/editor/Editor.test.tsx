@@ -11,7 +11,7 @@ import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore } from '../../stores/composer';
 import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
-import { Editor, type DraftPort, type EditorHandle, type SubmitHow } from './Editor';
+import { Editor, type DraftPort, type EditorHandle } from './Editor';
 import type { Serialized } from './serialize';
 
 const APP = 'app-1' as AppSessionId;
@@ -67,7 +67,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
   });
 
   it('sends on ⌘Enter from the editor through C5’s dispatcher, then clears and drops the draft', async () => {
-    const onSubmit = vi.fn<(s: Serialized, how: SubmitHow) => Promise<boolean>>(async () => true);
+    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => true);
     const { port, saved } = drafts({ doc: docOf([paragraph(textNode('hello'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
     const content = contentOf(container);
@@ -78,7 +78,6 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     });
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ mode: 'send', content: 'hello', display: 'hello' });
-    expect(onSubmit.mock.calls[0][1]).toBe('send');
     await waitFor(() => expect(content.textContent).toBe(''));
     expect(saved).toEqual([null]);
   });
@@ -91,15 +90,30 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     await waitFor(() => expect(content.textContent).toBe('keep me'));
     content.focus();
     await act(async () => {
-      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }));
+      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
     });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'keep me' }), 'hold')); // ⌥Enter holds (W1)
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'keep me' })));
     expect(content.textContent).toBe('keep me');
     expect(saved).toEqual([]);
   });
 
+  it('sends nothing on ⌥Enter: the hold chord is gone (W10)', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const { port } = drafts({ doc: docOf([paragraph(textNode('not yet'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('not yet'));
+    content.focus();
+    await act(async () => {
+      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }));
+    });
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 20))));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(content.textContent).toBe('not yet');
+  });
+
   it('sends on a plain Enter in a one-line document, and breaks the line with it once the document has more lines', async () => {
-    const onSubmit = vi.fn<(s: Serialized, how: SubmitHow) => Promise<boolean>>(async () => false);
+    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => false);
     const multiline = docOf([paragraph(textNode('one'), hardBreak(), textNode('two'))]);
     const { port } = drafts({ doc: multiline, attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
     const handle = createRef<EditorHandle>();
@@ -114,11 +128,11 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     act(() => handle.current?.clear());
     act(() => handle.current?.insertText('single'));
     await enter();
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'single' }), 'send'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'single' })));
   });
 
   it('treats an open @ popup with no rows as no popup: Enter sends', async () => {
-    const onSubmit = vi.fn<(s: Serialized, how: SubmitHow) => Promise<boolean>>(async () => false);
+    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => false);
     const { port } = drafts(null);
     const handle = createRef<EditorHandle>();
     const { container } = render(<Editor appSessionId={APP} cwd="" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
@@ -127,7 +141,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     act(() => handle.current?.insertText('see @zzz'));
     await waitFor(() => expect(document.querySelector('.react-renderer')).not.toBeNull()); // the @ popup is open, empty
     await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'see @zzz' }), 'send'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'see @zzz' })));
     expect(handle.current?.doc().content).toHaveLength(1);
   });
 
@@ -135,7 +149,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     const fake = fakeClient();
     window.maws = fake.client;
     try {
-      const onSubmit = vi.fn<(s: Serialized, how: SubmitHow) => Promise<boolean>>(async () => false);
+      const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => false);
       const { port } = drafts(null);
       const handle = createRef<EditorHandle>();
       const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
@@ -183,7 +197,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
       ...client,
       invoke: vi.fn(async (name: string) => (name === 'session.history.list' ? { ok: true, value: { entries: history } } : { ok: false, error: { code: 'internal', message: 'no session' } })),
     } as unknown as MawsBridge;
-    const onSubmit = vi.fn<(s: Serialized, how: SubmitHow) => Promise<boolean>>(async () => false);
+    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => false);
     const { port } = drafts(null);
     const handle = createRef<EditorHandle>();
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={recalling} onSubmit={onSubmit} handle={handle} />);
@@ -200,7 +214,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     await press('ArrowDown');
     expect(handle.current?.serialize().display).toBe('/compact');
     await press('Enter');
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/compact' }), 'send'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/compact' })));
   });
 
   it('numbers pasted chips in document order, as display and pastedContents do', async () => {
@@ -282,7 +296,7 @@ describe('a registered widget named at Enter opens with its argument', () => {
     await waitFor(() => expect(content.textContent).toBe('/review the diff'));
     content.focus();
     await enter(content);
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/review the diff' }), 'send'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/review the diff' })));
     expect(opened(container)).toBeNull();
   });
 
@@ -292,8 +306,8 @@ describe('a registered widget named at Enter opens with its argument', () => {
     const handle = createRef<EditorHandle>();
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
     await waitFor(() => expect(handle.current?.serialize().display).toBe('/model haiku\nand the rest of the note'));
-    act(() => handle.current?.submit('send')); // ⌘Enter's path: a multi-line document never sends on a plain Enter
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/model haiku\nand the rest of the note' }), 'send'));
+    act(() => handle.current?.submit()); // ⌘Enter's path: a multi-line document never sends on a plain Enter
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/model haiku\nand the rest of the note' })));
     expect(opened(container)).toBeNull();
   });
 

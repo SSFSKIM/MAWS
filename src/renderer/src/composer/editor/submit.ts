@@ -1,11 +1,10 @@
 // What a submitted draft does (C7 execution document, "Document model and serialisation", "History", "`!` and `#`"): a
-// prompt goes through `session.send`, or into the running turn through `session.steer` with priority `next` (W1: Enter
-// while a turn runs, the Queue label; the priority is always explicit because the command's default interrupts); a `!`
-// command through `session.bash`; a `#` note through `session.memoryAppend`. Every submission runs the same three
-// steps, one copy each: the pre-check (nothing empty, nothing over C3's send bounds is written), a dispatch (the mode's
-// own, above, unless the caller supplies one: the Composer maps Send, Queue, Hold, Send now and an unstarted session's
-// start through its submit state, M4), and the steps after the host accepted (the unavailable-segments notice and the
-// history append).
+// prompt goes through `session.send`, or into the running turn through `session.steer` with priority `next` (W10: Send
+// while a turn runs; the priority is always explicit because the command's default interrupts); a `!` command through
+// `session.bash`; a `#` note through `session.memoryAppend`. Every submission runs the same three steps, one copy each:
+// the pre-check (nothing empty, nothing over C3's send bounds is written), a dispatch (the mode's own, above, chosen by
+// the Composer's submit state, unless the caller supplies one: an unstarted session's start, M4), and the steps after
+// the host accepted (the unavailable-segments notice and the history append).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { DEFAULT_MEMORY_TARGET, type MemoryTarget } from '../../stores/composer';

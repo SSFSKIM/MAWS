@@ -115,3 +115,28 @@ export function queueInterruptJournal(dir: string, name: string): string {
   const rows = rowsOf('spikes/protocol-probe/fixtures/queue-and-interrupt.jsonl').filter((r) => ![146, 150, 191].includes(r.seq));
   return writeJournal(dir, `${name}-queue-interrupt`, rows);
 }
+
+// W10: `queue-and-interrupt` as the one Send meets it. The probe's second prompt, written into the running turn (seq
+// 146) and queued by the engine (seq 150), is the Send's `next` steer; the plain stop (⌘.) first withdraws it into
+// MAWS's queue with `cancel_async_message`, answered as `pass3/steer-next-cancelled` answers one (seq 34-36: the
+// steer's `cancelled`, then `cancelled: true`), then interrupts (seq 190, its answer cancelling nothing, since the
+// steer is already withdrawn; the probe's own cancel of it at seq 191 is dropped); Resume releases the held entry as the
+// next prompt (seq 199).
+export function steerStopJournal(dir: string, name: string): string {
+  const rows = rowsOf('spikes/protocol-probe/fixtures/queue-and-interrupt.jsonl').filter((r) => r.seq !== 191);
+  const steer = rows.find((r) => r.seq === 146)!;
+  steer.frame = { ...steer.frame, priority: 'next' };
+  const session = rows.find((r) => r.seq === 150)!.frame.session_id;
+  const interrupt = rows.findIndex((r) => r.seq === 190);
+  const answer = rows.find((r) => r.seq === 192)!;
+  answer.frame = { ...answer.frame, response: { ...(answer.frame.response as Record<string, unknown>), response: { still_queued: [], cancelled: [] } } };
+  const withdrawal = rowsOf('spikes/protocol-probe/fixtures/pass3/steer-next-cancelled.jsonl')
+    .filter((r) => [34, 35, 36].includes(r.seq))
+    .map((r, k) => {
+      const text = JSON.stringify(r.frame).replaceAll('d7fade79-6f39-40b6-91f3-9998597857b4', steer.frame.uuid as string);
+      const frame = JSON.parse(text) as Record<string, unknown>;
+      return { ...r, seq: 189 * 10 + k, frame: 'session_id' in frame ? { ...frame, session_id: session } : frame };
+    });
+  rows.splice(interrupt, 0, ...withdrawal);
+  return writeJournal(dir, `${name}-steer-stop`, rows);
+}
