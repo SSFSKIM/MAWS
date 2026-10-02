@@ -4,6 +4,7 @@
 // running, the live label is the live thinking label of a thinking cell still streaming, else `Thinking`, either under
 // Codex's shimmer (ThinkingLabel.tsx).
 import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
+import { DisclosureBody } from '../../../ui/disclosure';
 import { activeGroupLabel } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { CellLine } from '../cells/CellLine';
@@ -44,13 +45,13 @@ export function GroupRow({ row }: { row: GroupRowData }) {
         </span>
         <Chevron />
       </button>
-      {row.expanded && (
+      <DisclosureBody open={row.expanded}>
         <div className="transcript-group-cells" data-group-cells="" tabIndex={0} aria-label="Tool calls, scroll for details">
           {row.cells.map((cell) => (
             <CellLine key={cell.id} cell={cell} turnId={row.turnId} />
           ))}
         </div>
-      )}
+      </DisclosureBody>
     </div>
   );
 }

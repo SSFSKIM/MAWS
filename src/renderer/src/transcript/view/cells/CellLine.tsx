@@ -3,6 +3,7 @@
 // `data-status`, so the line's text is the label alone. A standalone denied cell is itself focusable (tabindex -1,
 // scroll-margin) so the divider's count can land on it.
 import { useTranscriptStore } from '../../../stores/transcript';
+import { DisclosureBody } from '../../../ui/disclosure';
 import type { Cell, TurnId } from '../../model/rows';
 import { useTranscriptContext } from '../context';
 import { Chevron, CodeText, LineCounts } from '../rows/parts';
@@ -39,7 +40,9 @@ export function CellLine({ cell, turnId, focusable = false }: { cell: Cell; turn
         </span>
         <Chevron />
       </button>
-      {cell.expanded && <CellDetailView cell={cell} turnId={turnId} />}
+      <DisclosureBody open={cell.expanded}>
+        <CellDetailView cell={cell} turnId={turnId} />
+      </DisclosureBody>
     </div>
   );
 }

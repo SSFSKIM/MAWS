@@ -3,6 +3,7 @@
 // `Thought for {t}` after, its text bounded when open. A block with no text yet (a signature-only block still
 // streaming) is a plain label with nothing to open; a completed one with no text has no row at all (derive.ts, W1).
 import { liveBuffer, useTranscriptStore } from '../../../stores/transcript';
+import { DisclosureBody } from '../../../ui/disclosure';
 import { thinkingLabel } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { useDisclosure, useTranscriptContext } from '../context';
@@ -28,7 +29,9 @@ export function ThinkingRow({ row }: { row: Extract<Row, { kind: 'thinking' }> }
         <Chevron />
         {label}
       </button>
-      {open && <div className="transcript-thinking-text">{text}</div>}
+      <DisclosureBody open={open}>
+        <div className="transcript-thinking-text">{text}</div>
+      </DisclosureBody>
     </div>
   );
 }

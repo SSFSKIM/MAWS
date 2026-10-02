@@ -251,6 +251,66 @@ test('collapsing a divider keeps its position', async ({ harness }) => {
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// W8 (T3): a group opens and closes as Codex's disclosures do, its height running through the values between closed and
+// open (300 ms opening, 150 ms closing) rather than jumping, the row below following it frame by frame and flush with it
+// at the end, and its cells unmounted once it has closed.
+test('a group’s height moves through its disclosure rather than jumping, and the row below follows it', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await load(page, 'synthetic/500');
+  const turnId = await openTurn(page);
+  const groupRowId = await page.evaluate((id) => {
+    const groups = Array.from(document.querySelectorAll(`[data-kind="group"][data-turn-id="${id}"]`));
+    const group = groups.find((element) => Number(element.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')) >= 2);
+    return group?.closest('[data-row-id]')?.getAttribute('data-row-id') ?? null;
+  }, turnId);
+  expect(groupRowId, `turn ${TURN} shows a group of at least two cells`).not.toBeNull();
+  // Clicks the group's header and samples, every frame for 600 ms, the row's height and the next row's top.
+  const sample = () =>
+    page.evaluate(async (id) => {
+      const row = document.querySelector<HTMLElement>(`[data-row-id="${id}"]`)!;
+      const next = () => document.querySelector<HTMLElement>(`[data-index="${Number(row.dataset.index) + 1}"]`)!;
+      const before = row.getBoundingClientRect().height;
+      const heights: number[] = [];
+      const gaps: number[] = [];
+      const started = performance.now();
+      row.querySelector<HTMLElement>('button[aria-expanded]')!.click();
+      while (performance.now() - started < 600) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const box = row.getBoundingClientRect();
+        heights.push(box.height);
+        gaps.push(next().getBoundingClientRect().top - box.bottom);
+      }
+      return { before, heights, gaps, cells: row.querySelectorAll('[data-group-cells]').length };
+    }, groupRowId!);
+  const between = (values: number[], a: number, b: number) => values.filter((value) => value > Math.min(a, b) + 1 && value < Math.max(a, b) - 1);
+
+  const opened = await sample();
+  const open = opened.heights.at(-1)!;
+  console.log(`group motion, opening: ${JSON.stringify({ from: opened.before, to: open, heights: opened.heights.map(Math.round), gaps: opened.gaps.map(Math.round) })}`);
+  expect(open - opened.before, 'the group opened').toBeGreaterThan(40);
+  expect(between(opened.heights, opened.before, open).length, 'heights between closed and open while it opens').toBeGreaterThanOrEqual(2);
+  expect(opened.heights.every((height, i) => i === 0 || height >= opened.heights[i - 1] - 1), 'it only grows').toBe(true);
+  expect(Math.abs(opened.gaps.at(-1)!), 'the row below sits flush at the end').toBeLessThanOrEqual(1);
+  expect(opened.cells).toBe(1);
+
+  const closed = await sample();
+  console.log(`group motion, closing: ${JSON.stringify({ from: closed.before, to: closed.heights.at(-1), heights: closed.heights.map(Math.round), gaps: closed.gaps.map(Math.round) })}`);
+  expect(closed.before).toBeCloseTo(open, 0);
+  expect(closed.heights.at(-1), 'back to its closed height').toBeCloseTo(opened.before, 0);
+  expect(between(closed.heights, open, opened.before).length, 'heights between open and closed while it closes').toBeGreaterThanOrEqual(1);
+  expect(Math.abs(closed.gaps.at(-1)!), 'the row below sits flush at the end').toBeLessThanOrEqual(1);
+  expect(closed.cells, 'its cells unmounted once closed').toBe(0);
+
+  // Under reduced motion the same click jumps: the first frame already has the end height.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const jumped = await sample();
+  expect(jumped.heights[0]).toBeCloseTo(open, 0);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 test('theme switch re-themes highlighted code without reload', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);

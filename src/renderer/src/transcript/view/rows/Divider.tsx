@@ -2,14 +2,16 @@
 // aria-expanded and, while open, aria-controls naming the work area's rows by their element ids (they are virtual, so
 // only the mounted ones resolve; an id with no element is ignored); the denied and auto-denied counts are links to the first
 // such cell (the store's jumpTo expands and scrolls); a trailing control opens the turn summary popover (§19: the
-// auto-mode verdict appears there, never on a cell line). A working turn's duration ticks.
+// auto-mode verdict appears there, never on a cell line). A working turn's duration ticks. W8: a click opens or folds
+// the work area through the shared disclosure motion (motion.ts); a fold reads closed from the click on, while its rows
+// close, and the store folds the turn when they have.
 import { Popover } from 'radix-ui';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ticks, useTranscriptStore, workingDurationMs, type TranscriptEntry } from '../../../stores/transcript';
 import { dividerCopy, turnSummaryCopy } from '../../model/copy';
 import { isPersistentRow, turnPhrases } from '../../model/derive';
 import type { CellId, Row, TurnId } from '../../model/rows';
-import { rowElementId, useTranscriptContext } from '../context';
+import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { Chevron } from './parts';
 
 type DividerRowData = Extract<Row, { kind: 'divider' }>;
@@ -48,9 +50,12 @@ function workAreaRowIds(rows: readonly Row[], divider: DividerRowData): string[]
 export function DividerRow({ row }: { row: DividerRowData }) {
   const { storeKey, idPrefix } = useTranscriptContext();
   const durationMs = useDuration(row, storeKey);
+  const motion = useWorkMotion();
+  const turn = row.turnId!;
+  const open = !useSyncExternalStore(motion.subscribe, () => motion.isFolding(turn)) && row.expanded;
   // A string, so the divider re-renders only when the work area's rows change, not with every batch.
   const controls = useTranscriptStore((state) => {
-    const rows = row.expanded ? state.entries[storeKey]?.rows : undefined;
+    const rows = open ? state.entries[storeKey]?.rows : undefined;
     return rows ? workAreaRowIds(rows, row).map((id) => rowElementId(idPrefix, id)).join(' ') : '';
   });
   const store = useTranscriptStore.getState();
@@ -61,9 +66,9 @@ export function DividerRow({ row }: { row: DividerRowData }) {
       <button
         type="button"
         className="transcript-disclosure"
-        aria-expanded={row.expanded}
+        aria-expanded={open}
         aria-controls={controls || undefined}
-        onClick={() => store.toggleTurn(storeKey, row.turnId!)}
+        onClick={() => motion.toggle(turn, row.expanded, () => store.toggleTurn(storeKey, turn))}
       >
         <Chevron />
         {label}

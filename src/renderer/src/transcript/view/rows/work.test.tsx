@@ -150,7 +150,7 @@ describe('receipt row', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show 2 more' }));
     expect(files()).toHaveLength(5);
     fireEvent.click(screen.getByRole('button', { name: 'Collapse files' }));
-    expect(files()).toHaveLength(3);
+    await waitFor(() => expect(files()).toHaveLength(3)); // W8: once the 150 ms close has run
     fireEvent.click(screen.getByRole('button', { name: /Review changes/ }));
     expect(actions.reviewChanges).toHaveBeenCalledWith(receipt.turnId);
     fireEvent.click(files()[1]);
