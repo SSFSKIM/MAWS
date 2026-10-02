@@ -183,9 +183,9 @@ export class MessageQueue {
     await this.persist();
   }
 
-  // Steer: written at once, never entering the app queue (§4.2). On 2.1.283 `now` (the command's default, the caret
-  // menu's "Interrupt and send") preempts the running turn and runs as the next turn (M6 live 3.7); `next` (⌥Enter's
-  // Steer, C8b's relay) folds into the running turn at its next tool boundary, and one result names both prompts
+  // Steer: written at once, never entering the app queue (§4.2). On 2.1.283 `now` (the command's default)
+  // preempts the running turn and runs as the next turn (M6 live 3.7); `next` (the composer's
+  // Send during a turn, W10; C8b's relay) folds into the running turn at its next tool boundary, and one result names both prompts
   // (pass3/steer-next seq 71, 239).
   async steer(content: SendContent, opts: { priority?: SteerPriority } = {}): Promise<{ messageUuid: MessageUuid }> {
     this.checkContent(content);

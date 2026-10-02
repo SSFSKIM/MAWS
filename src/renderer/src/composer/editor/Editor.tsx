@@ -1,7 +1,7 @@
 // The composer's editor (C7 execution document, M3): the Tiptap instance with its keys, draft, history, paste and drop,
 // the `@` menu and `/` palette, the `!` and `#` decoration and the prefill intake (the behaviour is `controller.ts`'s).
 // The root is the one element that carries `data-key-sink="composer"` (with the popups it portals), so C5's dispatcher
-// delivers the composer's chords here (⌘Enter sends, ⌥Enter holds: W1) and never a pane's Enter or Esc. Enter sends a
+// delivers the composer's chords here (⌘Enter sends; W10: no ⌥Enter) and never a pane's Enter or Esc. Enter sends a
 // one-line document and breaks the line once there are more (§5.8), Shift+Enter breaks the line, a composing IME key
 // never sends; ArrowUp on an empty editor (or while recalling) walks
 // history. Mount one Editor per session (key it by the session): its draft and history are that session's. What a
@@ -19,12 +19,12 @@ import { useComposerStore, type Prefill } from '../../stores/composer';
 import { useTranscriptStore } from '../../transcript';
 import { useRegisteredWidgets } from '../mentions/widgets';
 import { ModeChrome } from '../modes/ModeChrome';
-import { EditorController, ipcDrafts, type ControllerInputs, type DraftPort, type EditorHandle, type SubmitHow } from './controller';
+import { EditorController, ipcDrafts, type ControllerInputs, type DraftPort, type EditorHandle } from './controller';
 import { emptyDoc, type ComposerDoc } from './doc';
 import { composerExtensions } from './extensions';
 import type { Serialized } from './serialize';
 
-export type { DraftPort, EditorHandle, SubmitHow };
+export type { DraftPort, EditorHandle };
 
 export interface EditorProps {
   appSessionId: AppSessionId;
@@ -33,11 +33,10 @@ export interface EditorProps {
   sessionId: string | null; // the engine session id, for the pasted tags' id
   disabled?: string | null; // read-only, for this reason
   drafts?: DraftPort;
-  // What a submission does, and whether it was accepted (the editor then clears and drops the draft). `how` is the
-  // chord: 'send' for Enter and ⌘Enter, 'hold' for ⌥Enter (the handle's `submit` adds the caret menu's). Given, the editor dispatches nothing itself, so the
-  // Composer maps the chord through its submit state (W1: Enter while a turn runs is a `next` steer, ⌥Enter with no
-  // turn open is a Send); absent, the default (`submitSerialized`) sends, or steers with priority 'next' for 'queue'.
-  onSubmit?(s: Serialized, how: SubmitHow): Promise<boolean>;
+  // What a submission does, and whether it was accepted (the editor then clears and drops the draft). Given, the
+  // editor dispatches nothing itself, so the Composer decides through its submit state (W10: while a turn runs a Send
+  // is a `next` steer); absent, the default (`submitSerialized`) sends.
+  onSubmit?(s: Serialized): Promise<boolean>;
   onPrefill?(prefill: Prefill): void; // a prefill the editor took (the Composer keeps its `editing`)
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;
@@ -105,8 +104,7 @@ export function Editor(props: EditorProps) {
     if (prefill) controller.takePrefill();
   }, [controller, editor, prefill]);
 
-  useKeyChord('composer.send', () => void controller.submit('send'), { within: rootRef });
-  useKeyChord('composer.steer', () => void controller.submit('hold'), { within: rootRef }); // W1: ⌥Enter holds until the turn ends (the action id predates W1; overrides are keyed by it)
+  useKeyChord('composer.send', () => void controller.submit(), { within: rootRef });
   useImperativeHandle(props.handle, () => controller.handle(), [controller]);
 
   // W3 (C6): a widget the palette opens is the app's floating dialog (`WidgetDialog.tsx`), never in the box

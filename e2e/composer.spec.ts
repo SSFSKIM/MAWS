@@ -19,7 +19,7 @@ import { expect, test as base, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
-import { invoke, launchReady, queueInterruptJournal, rewindJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
+import { invoke, launchReady, queueInterruptJournal, rewindJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
@@ -386,16 +386,27 @@ const pane = (page: Page, index: 0 | 1) => page.getByRole('region', { name: `pan
 const messageIn = (page: Page, index: 0 | 1) => pane(page, index).getByRole('textbox', { name: 'Message', exact: true }); // exact: an open inline edit is "Edited message"
 const control = (page: Page, index: 0 | 1) => pane(page, index).locator('[data-submit-state]');
 const statusOf = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id }));
+// The frames the engine host wrote to the engine, from its own journal of the launch (W10: a steer's priority).
+type OutFrame = { type?: string; priority?: string; message?: { content?: unknown }; request?: { subtype?: string } };
+async function outFrames(page: Page, id: string): Promise<OutFrame[]> {
+  return readFileSync((await statusOf(page, id)).journalPath, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { direction: string; frame: OutFrame })
+    .filter((row) => row.direction === 'out')
+    .map((row) => row.frame);
+}
 const COUNT = 'Count to 30 slowly. For each number use a separate Bash call sleep 1; echo NUMBER. Start now.';
 
-// W1 (charter §4.2 as amended 2026-10-01): while a turn runs the control reads Queue (Enter: a `next` steer) and Hold
-// while ⌥ is down (⌥Enter: MAWS's queue, released at the turn's end). The replay holds at the recorded writes, and this
-// journal recorded the held message as a plain write after the resume, so the case holds it with ⌥Enter.
-test('the composer sends, queues, holds, stops and resumes as labelled', async ({ editor }) => {
+// W10 (charter §4.2 and §5.4 as amended 2026-10-01): one button. While a turn runs it reads Send with text (Enter and
+// the button write a `next` steer, "Sends at the next step") and Stop without; ⌥ changes nothing and there is no menu
+// and no Stop beside it. The plain stop (⌘.) withdraws the waiting steer into MAWS's paused queue before it interrupts,
+// and Resume releases it as a plain write (`steerStopJournal`).
+test('the composer sends, steers, stops and resumes as labelled', async ({ editor }) => {
   const { page } = editor;
   const id = 'c7-surface-queue';
   await openComposerPage(page);
-  await launchReady(page, id, queueInterruptJournal(scratch, id));
+  await launchReady(page, id, steerStopJournal(scratch, id));
   await showPanes(page, [{ composer: id }, null]);
   await messageIn(page, 0).click();
   await expect(control(page, 0)).toHaveText('Send');
@@ -406,35 +417,29 @@ test('the composer sends, queues, holds, stops and resumes as labelled', async (
   await expect.poll(() => sent(page, id)).toEqual([COUNT]);
   await expect(control(page, 0)).toHaveText('Stop'); // the turn runs, the editor is empty
 
-  const queued = 'Counting is cancelled. Reply exactly RESUMED.';
-  await page.keyboard.type(queued);
-  await expect(control(page, 0)).toHaveText('Queue');
+  const steered = 'Counting is cancelled. Reply exactly RESUMED.';
+  await page.keyboard.type(steered);
+  await expect(control(page, 0)).toHaveText('Send');
+  await expect(control(page, 0)).toHaveAttribute('title', 'Sends at the next step (Enter)');
   await page.keyboard.down('Alt');
-  await expect(control(page, 0)).toHaveText('Hold'); // live while ⌥ is down
+  await expect(control(page, 0)).toHaveText('Send'); // no relabel under ⌥
   await page.keyboard.up('Alt');
-  await expect(control(page, 0)).toHaveText('Queue');
-  await pane(page, 0).getByRole('button', { name: 'More ways to send' }).click();
-  const menu = page.getByRole('menu');
-  expect(await menu.getByRole('menuitem').allTextContents()).toEqual([
-    'QueueEnterSends at the next step',
-    'Hold until the turn ends⌥EnterSends when this turn ends',
-    'Send nowStops the running turn, then sends this',
-  ]);
-  await page.keyboard.press('Escape');
-  await expect(menu).toHaveCount(0);
-  await messageIn(page, 0).click();
-  await page.keyboard.press('Alt+Enter'); // the app queue holds it: nothing is written while the turn runs
+  const box = pane(page, 0).locator('[data-composer-box]');
+  await expect(box.getByRole('button')).toHaveCount(1); // the one button: no caret, no Stop beside it
+  await page.keyboard.press('Enter'); // the `next` steer, written into the running turn
   const list = pane(page, 0).getByRole('region', { name: 'Queued messages' });
-  await expect(list).toContainText('1 held until the turn ends');
-  await expect(list).toContainText(queued);
-  expect(await sent(page, id)).toEqual([COUNT]);
+  await expect(list).toContainText('1 at the next step');
+  await expect(list).toContainText(steered);
+  const steer = (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === steered);
+  expect(steer?.priority).toBe('next');
 
-  await page.keyboard.press('Meta+.'); // the one app-level Stop, from the editor
-  await expect(list.locator('header')).toHaveText(/Queue paused because you interrupted/);
+  await page.keyboard.press('Meta+.'); // the one app-level Stop, from the editor: the steer is held first, then the turn stops
+  await expect(list.locator('header')).toHaveText(/1 held until the turn ends · Queue paused because you interrupted/);
   await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  expect((await outFrames(page, id)).filter((f) => f.type === 'control_request').map((f) => f.request?.subtype)).toEqual(expect.arrayContaining(['cancel_async_message', 'interrupt']));
   await expect(control(page, 0)).toHaveText('Resume');
   await list.getByRole('button', { name: 'Resume' }).click();
-  await expect.poll(async () => (await sent(page, id)).filter((c) => typeof c === 'string')).toEqual([COUNT, queued]); // released: seq 199 (between them, the engine's own interruption row)
+  await expect.poll(async () => (await outFrames(page, id)).filter((f) => f.type === 'user' && f.message?.content === steered && f.priority === undefined)).toHaveLength(1); // released: seq 199, a plain write
   await expect(list).toHaveCount(0);
   expect(editor.consoleErrors()).toEqual([]);
 });

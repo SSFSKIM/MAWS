@@ -10,13 +10,14 @@ const entry = (state: QueueEntry['state'], over: Partial<QueueEntry> = {}): Queu
 });
 const idle = status(APP);
 const turning = { ...status(APP, { engineState: 'running', turn: humanTurn }) };
-const input = (over: Partial<SubmitInput>): SubmitInput => ({ status: idle, intent: null, queue: { entries: [], paused: false }, empty: false, mode: 'send', holdHeld: false, released: false /* C12 */, ...over });
+const input = (over: Partial<SubmitInput>): SubmitInput => ({ status: idle, intent: null, queue: { entries: [], paused: false }, empty: false, mode: 'send', released: false /* C12 */, ...over });
+// the last column: whether this Send is the `next` steer (W10)
 const row = (over: Partial<SubmitInput>) => {
   const d = submitState(input(over));
-  return [d.primary, d.label, d.enabled, d.reason, d.secondaryStop];
+  return [d.primary, d.label, d.enabled, d.reason, d.steer];
 };
 
-describe('submitState covers the five states, the caret menu and the unstarted rows', () => {
+describe('submitState covers Send, Stop, Resume and the unstarted rows (W10: one button)', () => {
   it('holds an unstarted session while it starts, while C10 holds its first message, and sends once ready', () => {
     const intent = { starting: false, messageHeld: false };
     expect(row({ status: null, intent: { ...intent, starting: true } })).toEqual(['send', 'Starting…', false, 'Session is starting…', false]);
@@ -60,12 +61,11 @@ describe('submitState covers the five states, the caret menu and the unstarted r
     expect(row({ status: { ...idle, process: 'exiting' } })[3]).toBe('Session ended');
   });
 
-  it('runs `!` and saves `#` whenever the process is ready, with Stop beside them during a turn', () => {
+  it('runs `!` and saves `#` whenever the process is ready, through their own modes, never as a steer', () => {
     expect(row({ mode: 'bash' })).toEqual(['send', 'Run', true, null, false]);
-    expect(row({ mode: 'bash', status: turning })).toEqual(['send', 'Run', true, null, true]);
+    expect(row({ mode: 'bash', status: turning })).toEqual(['send', 'Run', true, null, false]);
     expect(row({ mode: 'bash', empty: true })[2]).toBe(false);
-    expect(row({ mode: 'memory', status: turning })).toEqual(['send', 'Save to memory', true, null, true]);
-    expect(submitState(input({ mode: 'bash', status: turning })).menu).toEqual([]);
+    expect(row({ mode: 'memory', status: turning })).toEqual(['send', 'Save to memory', true, null, false]);
   });
 
   it('says what `!` does while busy: it runs now and the model sees the output in this turn (architect’s ruling on M6)', () => {
@@ -76,47 +76,44 @@ describe('submitState covers the five states, the caret menu and the unstarted r
 
   it('reads busy from the open turn, or an entry in flight before the engine’s started', () => {
     expect(row({ status: turning, empty: true })).toEqual(['stop', 'Stop', true, null, false]);
-    // W1: Queue is the `next` steer (Enter), Hold the app queue (⌥ held), each saying when it sends
-    expect(row({ status: turning, holdHeld: true })).toEqual(['hold', 'Hold', true, null, true]);
-    expect(row({ status: turning })).toEqual(['queue', 'Queue', true, null, true]);
+    // W10: with text it is Send, the `next` steer, saying when it goes
+    expect(row({ status: turning })).toEqual(['send', 'Send', true, null, true]);
     expect(submitState(input({ status: turning })).detail).toBe('Sends at the next step');
-    expect(submitState(input({ status: turning, holdHeld: true })).detail).toBe('Sends when this turn ends');
+    expect(submitState(input({ status: turning, queue: { entries: [entry('queued')], paused: true } })).steer).toBe(true); // a paused queue does not hold a steer back
     // a first entry `submitting` while status.turn is still null: busy
     const submitting = { entries: [entry('submitting')], paused: false };
     expect(row({ queue: submitting, empty: true })).toEqual(['stop', 'Stop', true, null, false]);
-    expect(row({ queue: submitting })).toEqual(['queue', 'Queue', true, null, true]);
+    expect(row({ queue: submitting })).toEqual(['send', 'Send', true, null, true]);
     expect(row({ queue: { entries: [entry('released')], paused: false }, empty: true })[0]).toBe('stop');
     expect(isBusy(idle, [entry('queued')])).toBe(false);
     expect(isBusy(null, [entry('submitting')])).toBe(true);
   });
 
-  it('resumes a paused queue, queues behind waiting entries, and otherwise sends', () => {
+  it('resumes a paused queue, sends behind waiting entries saying so, and otherwise sends', () => {
     const paused = { entries: [entry('queued')], paused: true };
     expect(row({ queue: paused, empty: true })).toEqual(['resume', 'Resume', true, null, false]);
     expect(row({ queue: { entries: [], paused: true }, empty: true })).toEqual(['resume', 'Resume', false, null, false]);
-    // idle with messages waiting in the app queue: a new one joins them there (the control still reads Queue)
-    expect(row({ queue: paused })).toEqual(['hold', 'Queue', true, null, false]);
-    expect(row({ queue: { entries: [entry('queued')], paused: false } })).toEqual(['hold', 'Queue', true, null, false]);
-    expect(row({ queue: { entries: [entry('queued')], paused: false }, empty: true })).toEqual(['hold', 'Queue', false, null, false]);
+    // idle with messages waiting in the app queue: Send, and C3 puts the new one behind them (W10: no Queue label)
+    expect(row({ queue: paused })).toEqual(['send', 'Send', true, null, false]);
+    expect(submitState(input({ queue: paused })).detail).toBe('Joins the paused queue; Resume sends it');
+    expect(row({ queue: { entries: [entry('queued')], paused: false } })).toEqual(['send', 'Send', true, null, false]);
+    expect(submitState(input({ queue: { entries: [entry('queued')], paused: false } })).detail).toBe('Sends after the queued messages');
+    expect(row({ queue: { entries: [entry('queued')], paused: false }, empty: true })).toEqual(['send', 'Send', false, null, false]);
     expect(row({})).toEqual(['send', 'Send', true, null, false]);
+    expect(submitState(input({})).detail).toBeNull(); // idle with nothing waiting: Send is all there is to say
     expect(row({ empty: true })).toEqual(['send', 'Send', false, null, false]);
-    // ⌥ held with no turn open decides as Send (nothing to hold back from)
-    expect(row({ holdHeld: true })).toEqual(['send', 'Send', true, null, false]);
   });
 
-  it('offers Queue, Hold until the turn ends and Send now in the caret menu while busy, each labelled with what it does (W1)', () => {
-    const menu = submitState(input({ status: turning })).menu;
-    expect(menu).toEqual([
-      { id: 'queue', label: 'Queue', detail: 'Sends at the next step', chord: 'Enter', enabled: true },
-      { id: 'hold', label: 'Hold until the turn ends', detail: 'Sends when this turn ends', chord: '⌥Enter', enabled: true },
-      { id: 'interrupt_and_send', label: 'Send now', detail: 'Stops the running turn, then sends this', chord: null, enabled: true },
-    ]);
-    expect(submitState(input({ status: turning, empty: true })).menu.map((m) => m.enabled)).toEqual([false, false, false]);
-    expect(submitState(input({})).menu).toEqual([]);
-    expect(submitState(input({ queue: { entries: [entry('queued')], paused: true } })).menu).toEqual([]);
+  it('decides only Send, Stop and Resume (W10: no hold, no queue primary, no menu, no Stop beside it)', () => {
+    const cases: Partial<SubmitInput>[] = [{}, { empty: true }, { status: turning }, { status: turning, empty: true }, { queue: { entries: [entry('queued')], paused: true } }, { queue: { entries: [entry('queued')], paused: true }, empty: true }, { mode: 'bash', status: turning }];
+    for (const c of cases) {
+      const d = submitState(input(c));
+      expect(['send', 'stop', 'resume']).toContain(d.primary);
+      expect(Object.keys(d).sort()).toEqual(['detail', 'enabled', 'label', 'primary', 'reason', 'steer']);
+    }
   });
 
-  it('maps Queue to next and Send now to now, in one place', () => {
+  it('maps a next-step send to next and Send now to now, in one place', () => {
     expect(steerPriority('queue')).toBe('next');
     expect(steerPriority('interrupt_and_send')).toBe('now');
   });
@@ -129,7 +126,7 @@ describe('a released session resumes on Send; stopped, crashed, archived and exi
 
   it('released + send: Send is enabled, says it resumes the session, and waits for text', () => {
     const d = submitState(input({ released: true, status: exited('budget') }));
-    expect([d.primary, d.label, d.enabled, d.reason, d.secondaryStop, d.menu]).toEqual(['send', 'Send', true, null, false, []]);
+    expect([d.primary, d.label, d.enabled, d.reason, d.steer]).toEqual(['send', 'Send', true, null, false]);
     expect(d.detail).toBe('Resumes this session');
     expect(row({ released: true, status: exited('budget'), empty: true })).toEqual(['send', 'Send', false, null, false]);
     // no status at all (the host forgot the row after the exited-row cap): the digest's mark still decides

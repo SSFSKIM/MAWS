@@ -8,9 +8,8 @@
 //
 // Every submission ends in the editor's `onSubmit`, decided here through `submitState`: an unstarted session's first
 // send goes to C10's `start` under the synchronous `starting` gate; a live one sends (C3 decides sent or queued), and
-// while a turn runs (W1, charter §4.2 as amended 2026-10-01) Enter is Queue, a steer with priority `next` the engine
-// delivers at the turn's next tool boundary, ⌥Enter is Hold, MAWS's own queue released when the turn ends, and the
-// caret menu's Send now steers with `now`; `!` and `#` run through their modes. Esc in the editor interrupts and sends
+// while a turn runs (W10, charter §4.2 as amended 2026-10-01) Send is a steer with priority `next` the engine delivers
+// at the turn's next tool boundary; `!` and `#` run through their modes. Esc in the editor interrupts and sends
 // now: the held head (a `now` promote), else whatever `next` steer waits (the engine starts it once the turn is
 // interrupted), else it just stops; an open `@` or `/` list takes it before the composer does, and with no turn
 // running a second Esc within a moment on an empty editor opens the rewind picker (W3, B7). The Stop button and ⌘. are the plain stop: `session.interrupt` with `holdEngineQueued`, which first
@@ -38,10 +37,10 @@ import { useSessions } from '../stores/sessions';
 import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
-import { ipcDrafts, type DraftPort, type EditorHandle, type SubmitHow } from './editor/controller';
+import { ipcDrafts, type DraftPort, type EditorHandle } from './editor/controller';
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
-import { afterAccepted, dispatchByMode, precheck, submitSerialized, type Dispatch } from './editor/submit'; // C12: afterAccepted, precheck
+import { afterAccepted, precheck, submitSerialized, type Dispatch } from './editor/submit'; // C12: afterAccepted, precheck
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
 import { ResubmitLine } from './InlineEdit'; // W3 (B6)
@@ -54,7 +53,7 @@ import { cancelInlineEdit, sendInlineEdit } from './resubmit-seam'; // W3 (B6)
 import { routeOf, useListModels, useModelCatalogue, type Route } from './list-models';
 import { releasedResume } from './resume-seam'; // C12
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
-import { isBusy, steerPriority, submitState, type SubmitDecision } from './submit/submit-state';
+import { isBusy, steerPriority, submitState } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
 
 // W3 (B7): how close two Escs must come to count as the terminal's Esc Esc.
@@ -79,24 +78,6 @@ function useSessionStatus(appSessionId: AppSessionId, client: MawsBridge) {
     return () => void (live = false);
   }, [appSessionId, client]);
   return status;
-}
-
-// ⌥ held (the Hold label replaces Queue live while it is down over the control or with focus in the box).
-function useAltHeld(): boolean {
-  const [held, setHeld] = useState(false);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => setHeld(event.altKey);
-    const onBlur = () => setHeld(false);
-    window.addEventListener('keydown', onKey, true);
-    window.addEventListener('keyup', onKey, true);
-    window.addEventListener('blur', onBlur);
-    return () => {
-      window.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('keyup', onKey, true);
-      window.removeEventListener('blur', onBlur);
-    };
-  }, []);
-  return held;
 }
 
 // Where the draft lives: C10's intent while the session is unstarted (C4's drafts table has no row for it), C4's drafts
@@ -165,9 +146,6 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const handle = useRef<EditorHandle>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<ComposerDoc>(emptyDoc);
-  const [hover, setHover] = useState(false);
-  const [boxFocused, setBoxFocused] = useState(false);
-  const alt = useAltHeld();
   // W3 (B6): a rewound edit whose resend still waits (its bubble left with the rewound turn) shows its line in the dock
   const resubmit = useComposerStore((s) => resubmitRecordOf(s, appSessionId));
   const rewoundEdit = useComposerStore((s) => (inlineEditOf(s, appSessionId) !== null && resubmitRecordOf(s, appSessionId).state === 'rewound_awaiting_send' ? inlineEditOf(s, appSessionId) : null));
@@ -199,10 +177,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     queue,
     empty: draft.empty,
     mode: draft.mode,
-    holdHeld: alt && (hover || boxFocused),
     released, // C12
   });
-  const shown: SubmitDecision = decision;
 
   // ---- the docked swap ---------------------------------------------------------------------------------------------
   const cards = useDockedCards(appSessionId);
@@ -244,8 +220,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // ---- submissions ---------------------------------------------------------------------------------------------
   const drafts = useDraftPort(appSessionId, setup, client);
 
-  const onSubmit = async (s: Serialized, how: SubmitHow): Promise<boolean> => {
-    const retry = () => handle.current?.submit(how);
+  const onSubmit = async (s: Serialized): Promise<boolean> => {
+    const retry = () => handle.current?.submit();
     if (setup) {
       // read synchronously: a second Enter in the same tick, or before C10 answers, starts nothing
       const where = setup.intent.location; // New chat: Send waits for a project
@@ -261,24 +237,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         setStarting(appSessionId, false);
       }
     }
-    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, holdHeld: how === 'hold', released /* C12 */ });
+    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, released /* C12 */ });
     if (!decided.enabled) return false;
     if (released && (status === null || status.process === 'exited')) return resumeReleased(s); // C12
     const target = memoryTargetOf(useComposerStore.getState(), appSessionId);
-    let dispatch: Dispatch;
-    if (s.mode !== 'send') dispatch = () => dispatchByMode(client, appSessionId, s, 'send', target);
-    else if (decided.primary === 'queue' || (how === 'interrupt_and_send' && decided.menu.length > 0)) {
-      const priority = steerPriority(how === 'interrupt_and_send' ? 'interrupt_and_send' : 'queue');
-      dispatch = async () => {
-        const result = await client.invoke('session.steer', { appSessionId, content: s.content, priority });
-        return result.ok ? null : result.error.message;
-      };
-    } else
-      dispatch = async () => {
-        const result = await client.invoke('session.send', { appSessionId, content: s.content });
-        return result.ok ? null : result.error.message;
-      };
-    return submitSerialized(client, appSessionId, s, 'send', target, { dispatch, retry });
+    // the mode's own dispatch: `!` and `#` through theirs, a prompt as `session.send`, or (W10) the `next` steer while busy
+    return submitSerialized(client, appSessionId, s, decided.steer ? 'steer' : 'send', target, { retry });
   };
 
   // C12 start: Send on a released session resumes it through C10's resume (registered in `resume-seam.ts`), the message
@@ -292,7 +256,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   };
   // C12 end
 
-  // The plain stop (the Stop button, a primary Stop): nothing runs after it (W1)
+  // The plain stop (the Stop button): nothing runs after it (W1)
   const stop = () =>
     void client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
@@ -303,12 +267,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
     });
   const onPrimary = () => {
-    if (shown.primary === 'stop') return stop();
-    if (shown.primary === 'resume')
+    if (decision.primary === 'stop') return stop();
+    if (decision.primary === 'resume')
       return void client.invoke('session.queue.setPaused', { appSessionId, paused: false }).then((result) => {
         if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true }); // as the queued list does
       });
-    handle.current?.submit(shown.primary === 'hold' ? 'hold' : 'send');
+    handle.current?.submit();
   };
 
   // W1: Esc while a turn runs interrupts and sends now: the held head (a `now` promote, which preempts the turn), or,
@@ -398,7 +362,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         attachments={attachmentsOf(doc)}
         editorHandle={handle}
         editor={
-          <div ref={boxRef} onFocus={() => setBoxFocused(true)} onBlur={(event) => setBoxFocused(event.currentTarget.contains(event.relatedTarget))}>
+          <div ref={boxRef}>
             <Editor
               appSessionId={appSessionId}
               cwd={cwd}
@@ -414,7 +378,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
             />
           </div>
         }
-        submit={<SubmitControl decision={shown} multiline={isMultiline(doc)} onPrimary={onPrimary} onStop={stop} onMenu={(id) => handle.current?.submit(id)} onHover={setHover} />}
+        submit={<SubmitControl decision={decision} multiline={isMultiline(doc)} onPrimary={onPrimary} />}
       />
     </section>
   );

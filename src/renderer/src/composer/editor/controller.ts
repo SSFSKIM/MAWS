@@ -37,14 +37,11 @@ export interface DraftPort {
   clearsOnSend?(): boolean;
 }
 
-// How a submission was asked for: Enter and ⌘Enter send (W1: while a turn runs the Composer makes that a `next`
-// steer), ⌥Enter holds; the Composer's control adds its caret menu's Queue and Send now (M4), which reach the caller's
-// `onSubmit` through the same path as a key.
-export type SubmitHow = 'send' | 'hold' | 'queue' | 'interrupt_and_send';
-
+// A submission is asked for one way (W10): Enter and ⌘Enter, and the Composer's Send, reach the caller's `onSubmit`
+// through the same path, which decides what it does (while a turn runs the Composer makes it a `next` steer).
 export interface EditorHandle {
   focus(): void;
-  submit(how: SubmitHow): void; // the submit control and its caret menu: as a key would (refused while one is in flight)
+  submit(): void; // the submit control: as a key would (refused while one is in flight)
   insertText(text: string): void; // at the caret when focused, else at the end (C11's insertComposerText)
   doc(): ComposerDoc;
   serialize(): Serialized;
@@ -65,7 +62,7 @@ export interface ControllerInputs {
   catalog: SessionCatalog;
   widgets: ReadonlySet<string>;
   followUp: boolean;
-  onSubmit?(s: Serialized, how: SubmitHow): Promise<boolean>;
+  onSubmit?(s: Serialized): Promise<boolean>;
   onPrefill?(prefill: Prefill): void;
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;
@@ -174,13 +171,13 @@ export class EditorController {
   keyDown(view: EditorView, event: KeyboardEvent): boolean {
     const editor = this.editor;
     if (!editor) return false;
-    if (event.defaultPrevented) return true; // C5's dispatcher ran a composer chord for this key (⌘Enter, ⌥Enter)
+    if (event.defaultPrevented) return true; // C5's dispatcher ran a composer chord for this key (⌘Enter)
     if (event.isComposing || view.composing) return false;
     if (suggesting(editor) && popupTakesKeys(editor)) return false; // an open list takes Enter and the arrows
     const plain = !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey;
     if (event.key === 'Enter' && plain) {
       if (isMultiline(editor.getJSON())) return false; // the line breaks (ProseMirror's own Enter); ⌘Enter sends
-      void this.submit('send');
+      void this.submit();
       return true;
     }
     if (event.key === 'ArrowUp' && plain) return this.history('up');
@@ -224,7 +221,7 @@ export class EditorController {
 
   // ---- behaviour ------------------------------------------------------------------------------------------------
 
-  async submit(how: SubmitHow): Promise<void> {
+  async submit(): Promise<void> {
     const editor = this.editor;
     const { appSessionId, sessionId, cwd, disabled } = this.inputs;
     if (!editor || disabled !== null || this.busy) return;
@@ -277,7 +274,7 @@ export class EditorController {
     this.writer.cancel(); // no draft write runs while a submission is in flight (an unstarted session's start forbids one)
     let accepted: boolean;
     try {
-      accepted = await (this.inputs.onSubmit ? this.inputs.onSubmit(s, how) : submitSerialized(this.client, appSessionId, s, how === 'queue' ? 'steer' : 'send', target));
+      accepted = await (this.inputs.onSubmit ? this.inputs.onSubmit(s) : submitSerialized(this.client, appSessionId, s, 'send', target));
     } finally {
       this.busy = false;
       this.view.setBusy(false);
@@ -400,7 +397,7 @@ export class EditorController {
     const editor = () => this.editor!;
     return {
       focus: () => void editor().commands.focus(),
-      submit: (how) => void this.submit(how),
+      submit: () => void this.submit(),
       insertText: (text) => {
         if (editor().isFocused) editor().chain().insertContent(text).run();
         else editor().chain().focus('end').insertContent(text).run();
