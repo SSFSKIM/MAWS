@@ -1,11 +1,10 @@
-// The sidebar's readings of the stores (§5.1 as amended 2026-10-01, W5; C5 execution document, M3): the two levels of
-// the drill-in (the project list, then one project's page with its sessions grouped Main first and then each worktree),
-// what a row says, and how old it is. Pure, so the layout is testable without React.
+// The sidebar's readings of the stores (§5.1 as amended 2026-10-01, W11; C5 execution document, M3): the project list
+// of Codex's flat tree, one expanded project's sessions with their caps, what a row says, and how old it is. Pure, so
+// the layout is testable without React.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import type { WorktreeInfo } from '@shared/sessions/worktree';
 import type { NeedsYouRow } from '../attention/derive';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 
@@ -26,7 +25,7 @@ export function sessionMatcher(query: string, projects: ReadonlyMap<ProjectId, P
     (record.projectId !== null && (projects.get(record.projectId)?.name.toLowerCase().includes(q) ?? false));
 }
 
-// ---- level one: the project list ---------------------------------------------------------------------------------------
+// ---- the project list --------------------------------------------------------------------------------------------------
 
 export interface ProjectListInput {
   records: ReadonlyMap<AppSessionId, SessionRecord>;
@@ -87,88 +86,40 @@ export function filterProjectList(entries: ProjectEntry[], query: string, projec
   return entries.filter((e) => (e.project !== null && e.name.toLowerCase().includes(q)) || e.sessions.some(matches));
 }
 
-// ---- level two: one project's page -------------------------------------------------------------------------------------
+// ---- an expanded project's sessions ------------------------------------------------------------------------------------
 
-export interface SessionGroup {
-  key: string; // 'main', or the worktree's path
-  kind: 'main' | 'worktree';
-  label: string; // "Main", or the worktree's folder name
-  branch: string | null; // the checkout's branch, beside the label
-  path: string | null; // the worktree's path (null for Main)
-  sessions: SessionRecord[];
-}
+// Codex's shape, as the owner corrected it (waves plan §2 I4, 2026-10-01): five project rows by recency, then "Show
+// more" for the rest (Codex's `maxGroups={5}`, readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:547146);
+// an expanded project's five sessions (`maxItems={ncs}`, `ncs = 5`, :545584), then "Show more" to eight at most, never
+// more (Codex adds ten per click; the owner capped it). Whatever lies
+// past eight is the Resume… picker's (I7), reached from the project row, so a project never takes the list over.
+export const PROJECTS_FIRST = 5;
+export const SESSIONS_FIRST = 5;
+export const SESSIONS_CAP = 8;
 
-export interface ProjectPage {
-  pinned: SessionRecord[]; // pin keeps a session at the top of its project, above the groups
-  groups: SessionGroup[]; // Main first, then each worktree that holds a session, in `git worktree list` order
-  grouped: boolean; // a project with no worktree session shows one flat list, without a Main heading
-}
+// How many of `total` sessions an expanded project shows, before and after its "Show more".
+export const shownCount = (total: number, more: boolean): number => Math.min(total, more ? SESSIONS_CAP : SESSIONS_FIRST);
 
-export interface ProjectPageInput {
+export interface ProjectSessionsInput {
   sessions: readonly SessionRecord[]; // the project's sessions, not archived
   digests: Map<AppSessionId, SessionDigest>;
   rows: NeedsYouRow[];
   sort: SidebarSort;
   matches: (record: SessionRecord) => boolean;
-  worktrees: readonly WorktreeInfo[] | null; // `git.worktree.list` for the project's directory, when read
 }
 
-const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
-const trimSlash = (path: string) => path.replace(/\/+$/, '');
-
-// The page: pinned sessions first, then Main, then each worktree with a session. Worktrees git lists come in git's
-// order with git's branch; a worktree git does not list (removed since, or not read yet) follows, by folder name, with
-// the branch its sessions recorded.
-export function projectPage({ sessions, digests, rows, sort, matches, worktrees }: ProjectPageInput): ProjectPage {
+// One flat list: pinned sessions first (pin keeps a session at the top of its project), then the rest in the chosen
+// sort; worktree sessions sit among them, marked by their branch (`rowBranch`).
+export function projectSessions({ sessions, digests, rows, sort, matches }: ProjectSessionsInput): SessionRecord[] {
   const order = (list: SessionRecord[]) => sortSessions(list, sort, { digests, rows });
   const shown = sessions.filter(matches);
-  const pinned = order(shown.filter((r) => r.pinned));
-  const listed = new Map((worktrees ?? []).filter((w) => !w.isMain).map((w, i) => [trimSlash(w.path), { info: w, index: i }]));
-  const main: SessionRecord[] = [];
-  const byWorktree = new Map<string, SessionRecord[]>();
-  for (const record of shown) {
-    if (record.pinned) continue;
-    if (record.worktree === null) {
-      main.push(record);
-      continue;
-    }
-    const key = trimSlash(record.worktree.path);
-    const list = byWorktree.get(key);
-    if (list) list.push(record);
-    else byWorktree.set(key, [record]);
-  }
-  const worktreeGroups: SessionGroup[] = [...byWorktree].map(([path, list]) => {
-    const info = listed.get(path)?.info;
-    const recorded = list.find((r) => r.worktree?.branch ?? r.branch);
-    return {
-      key: path,
-      kind: 'worktree',
-      label: basename(path),
-      branch: info ? info.branch : (recorded?.worktree?.branch ?? recorded?.branch ?? null),
-      path,
-      sessions: order(list),
-    };
-  });
-  worktreeGroups.sort((a, b) => {
-    const ia = listed.get(a.key)?.index ?? Number.POSITIVE_INFINITY;
-    const ib = listed.get(b.key)?.index ?? Number.POSITIVE_INFINITY;
-    return ia - ib || a.label.localeCompare(b.label);
-  });
-  const mainBranch = worktrees?.find((w) => w.isMain)?.branch ?? null;
-  const grouped = worktreeGroups.length > 0;
-  const groups: SessionGroup[] = [];
-  if (main.length > 0) groups.push({ key: 'main', kind: 'main', label: 'Main', branch: mainBranch, path: null, sessions: order(main) });
-  groups.push(...worktreeGroups);
-  return { pinned, groups, grouped };
+  return [...order(shown.filter((r) => r.pinned)), ...order(shown.filter((r) => !r.pinned))];
 }
-
-// Whether a project's page needs `git.worktree.list` (its order and branches): only when a session sits in a worktree.
-export const hasWorktreeSessions = (sessions: readonly SessionRecord[]) => sessions.some((r) => r.worktree !== null);
 
 // ---- row text ----------------------------------------------------------------------------------------------------------
 
-// A worktree session's branch (C10's record, else the index's), as its hover card names it; null for a session in the
-// project directory and for a detached worktree.
+// A worktree session's branch (C10's record, else the index's), as its row's ⎇ label and its hover card name it; null
+// for a session in the project directory and for a detached worktree.
 export function rowBranch(record: SessionRecord): string | null {
   if (record.worktree === null) return null;
   return record.worktree.branch ?? record.branch ?? null;

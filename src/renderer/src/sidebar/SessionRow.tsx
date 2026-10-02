@@ -1,7 +1,8 @@
-// One session on a project's page (§5.1 as amended 2026-10-01, W5, D2; Codex's and Claude Desktop's 30px rows): one
-// line of 13px text, the status glyph, the title, a pin mark when pinned, the unread dot and the age, with pin and
-// archive taking the age's place on hover and on keyboard focus. Everything else (branch and worktree, holder or activity, the
-// last answer, the pending request, context) is in the hover card. A click opens its tab; dragging carries its id to a
+// One session in an expanded project (§5.1 as amended 2026-10-01, W5, D2 and W11, I4; Codex's and Claude Desktop's 30px
+// rows): one line of 13px text, the status glyph, the title, a worktree session's ⎇ branch (Codex marks those rows with
+// an environment icon; MAWS names the branch, the flat list having no worktree groups), a pin mark when pinned, the
+// unread dot and the age, with pin and archive taking the age's place on hover and on keyboard focus. Everything else
+// (the worktree's folder, holder or activity, the last answer, the pending request, context) is in the hover card. A click opens its tab; dragging carries its id to a
 // tab strip (`application/x-maws-session`, residue *Tab strip*). A foreign-live session shows no actions (D-12).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -13,7 +14,7 @@ import { glyphFor } from '../attention/glyph';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
-import { sessionAge } from './derive';
+import { rowBranch, sessionAge } from './derive';
 import { SessionHoverCard } from './HoverCard';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
 import { sessionNodeId, useTree } from './tree';
@@ -31,6 +32,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: 1 
   const glyph = glyphFor(record, digest ?? null, pending);
   const selected = tree.selected === id;
   const title = displayTitle(record);
+  const branch = record.worktree === null ? null : (rowBranch(record) ?? 'detached');
   const offered = sessionActionsFor(record);
   const hoverActions = HOVER_ACTIONS.filter((action) => offered.includes(action));
   // While the actions show, the age and the dot give them the row's end.
@@ -63,6 +65,11 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: 1 
       >
         <GlyphMark glyph={glyph} className="w-[14px] shrink-0" />
         <span className={`min-w-0 flex-1 truncate text-ui text-fg ${hoverActions.length > 0 ? 'group-hover/session:pr-7 group-focus-visible/session:pr-7' : ''}`}>{title}</span>
+        {branch !== null && (
+          <span data-testid="row-branch" title={record.worktree?.path} className={`max-w-[40%] shrink-0 truncate text-ui-sm text-fg-faint ${yields}`}>
+            ⎇ {branch}
+          </span>
+        )}
         {/* C12: the memory budget's released mark */}
         <ReleasedMark released={digest?.released} />
         {record.pinned && (

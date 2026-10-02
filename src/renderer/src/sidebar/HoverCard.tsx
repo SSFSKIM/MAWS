@@ -4,7 +4,7 @@
 // last assistant line; then the pending request, if any, through the `requestCard` slot in its `hover` placement, with
 // the originating request fetched once per item through `attention.request` and cached in the attention store. Opening
 // it answers nothing: approval is an explicit click inside the card, and the slot offers it only for read-only tools.
-// The card's body mounts only while it is open, so a page of hundreds of rows subscribes to nothing extra.
+// The card's body mounts only while it is open, so the tree's rows subscribe to nothing extra.
 import { HoverCard as Radix } from 'radix-ui';
 import { useEffect, type ReactNode } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';

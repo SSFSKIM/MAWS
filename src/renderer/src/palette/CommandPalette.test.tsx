@@ -110,15 +110,15 @@ describe('command palette', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('a project reveals it in the sidebar: shown, its page open', async () => {
-    useLayout.getState().setSidebar({ collapsed: true, openProject: null });
+  it('a project reveals it in the sidebar: shown, its row expanded', async () => {
+    useLayout.getState().setSidebar({ collapsed: true, expandedProjects: [] });
     const user = await openAndType(nine.projects[1].name.slice(0, 7));
     expect(options('Projects')).toEqual([nine.projects[1].name]);
     await user.click(within(group('Projects')!).getByRole('option'));
-    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, openProject: nine.projects[1].id });
+    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, expandedProjects: [nine.projects[1].id] });
   });
 
-  it('a project the sidebar’s search hides is revealed: the search clears and the project’s page takes focus', async () => {
+  it('a project the sidebar’s search hides is revealed: the search clears, the project expands and its row takes focus', async () => {
     const project = nine.projects[1];
     const user = userEvent.setup();
     render(<Sidebar />);
@@ -129,10 +129,10 @@ describe('command palette', () => {
     act(() => runAction('palette.open'));
     await user.keyboard(project.name.slice(0, 7));
     await user.click(within(group('Projects')!).getByRole('option'));
-    expect((screen.getByRole('searchbox', { name: `Search ${project.name}` }) as HTMLInputElement).value).toBe('');
-    const page = screen.getByRole('tree', { name: project.name });
-    await vi.waitFor(() => expect(page.contains(document.activeElement)).toBe(true));
-    expect(document.activeElement!.getAttribute('aria-label')).toBe('Quota reset recovery'); // the page's first row
+    expect((screen.getByRole('searchbox', { name: 'Search projects and sessions' }) as HTMLInputElement).value).toBe('');
+    await vi.waitFor(() => expect(document.activeElement).toBe(projectRow()));
+    expect(projectRow()!.getAttribute('aria-expanded')).toBe('true');
+    expect(within(projectRow()!).getByRole('treeitem', { name: 'Quota reset recovery' })).toBeTruthy();
   });
 });
 

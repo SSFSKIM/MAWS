@@ -449,7 +449,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       .toBe(true);
     await page.evaluate(installProbes);
     // By the record's id: the title follows the session's latest prompt (the record's summary), so it changes as the run
-    // goes. W5: the row is on its project's page, opened first.
+    // goes. W11: the row is in its project, expanded first.
     await (await sidebarRow(page, { appSessionId: record!.appId })).click();
     return { launch, page, invoke, record: record! };
   };

@@ -29,7 +29,7 @@ import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { c12LiveSkipReason, lsPin, ownerFileCheck, spend } from './support/c12-live';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { openProject } from './support/sidebar';
+import { newChatIn } from './support/sidebar';
 
 const skip = c12LiveSkipReason() ?? (process.env.MAWS_ENGINE_SOURCE_DIR ? null : 'the custody run needs MAWS_ENGINE_SOURCE_DIR (Concrete Steps, "M4 custody")');
 test.skip(skip !== null, skip ?? '');
@@ -94,7 +94,6 @@ test.afterAll(() => {
 });
 
 const main = (page: Page) => page.locator('[data-region="main"]');
-const sidebar = (page: Page) => page.locator('[data-region="sidebar"]');
 
 async function relaunch(): Promise<MawsLaunch> {
   const maws = await launchMaws({ userData: s.userData, env: { MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: s.config } });
@@ -109,8 +108,7 @@ async function plus(page: Page, first: string): Promise<AppSessionId> {
   if (spent >= MAX_USD) throw new Error(`spend limit: the journals show US$${spent} of US$${MAX_USD}`);
   await invoke(page, 'session.projects.add', { directory: s.repo }); // a relaunch finds it already added
   const known = new Set(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId));
-  await openProject(page, 'repo'); // W5: the "+" beside the name on the project's page
-  await sidebar(page).locator('[data-level-pane="2"]').getByRole('button', { name: 'New session in repo', exact: true }).click();
+  await newChatIn(page, 'repo'); // W11: the "+" on the project's row, on hover
   let id: AppSessionId | undefined;
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !known.has(i.appSessionId))?.appSessionId)).toBeDefined();
   value(await invoke(page, 'session.intent.patch', { appSessionId: id!, patch: { model: 'haiku' } }));

@@ -1,32 +1,31 @@
-// The sidebar (§5.1 as amended 2026-10-01, W5; C5 execution document, M3): a two-level drill-in under one search field.
-// Level one is the project list, most recently active first, with Other sessions at the end; a click on a project slides
-// its page in from the right (a short transform, none under reduced motion), and "‹ Projects" slides back. The open
-// project persists in the `regions` layout key (`openProject`), so a relaunch opens where the person left; the search
-// does not persist. The search filters the level on screen: projects (by name, or holding a matching session) on the
-// list, the open project's sessions on its page. Cross-project attention is the Overview's, the notifier's, the dock
-// badge's and ⌘⇧J's, which read the attention table directly. One context menu serves every row, and each level is one
-// roving tab stop (`tree.ts`). New chat (2026-10-01): a "New chat" row sits first, above the search and both levels.
-import { ContextMenu } from 'radix-ui';
-import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
-import type { WorktreeInfo } from '@shared/sessions/worktree';
-import { FolderIcon, GearIcon, IconButton, PlusIcon } from '../app/IconButton';
+// The sidebar (§5.1 as amended 2026-10-01, W11; C5 execution document, M3): Codex's flat tree under the New chat row and
+// one search field. The project rows, most recently active first, five of them and then "Show more" for the rest, with
+// Other sessions last; each expands in place to its sessions (`ProjectRow.tsx`), and which are expanded persists in the
+// `regions` layout key (`expandedProjects`), so a relaunch shows what the person left; the search and the "Show more"
+// reveals do not persist. The search filters every project (by name, or holding a matching session) and shows each
+// listed project open on its matching sessions without changing what is expanded. Cross-project attention is the
+// Overview's, the notifier's, the dock badge's and ⌘⇧J's, which read the attention table directly. One context menu
+// serves every row, and the tree is one roving tab stop (`tree.ts`).
+import { ContextMenu, DropdownMenu } from 'radix-ui';
+import { Fragment, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
+import type { SessionRecord } from '@shared/graph/session';
+import { FolderIcon, GearIcon, IconButton, PlusIcon, SortIcon } from '../app/IconButton';
 import { useChordHint } from '../app/IconButton'; // C11
-import { ipc } from '../ipc/client';
 import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
+import type { SidebarSort } from '../overview/derive';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { selectProjectOrder, useSessions } from '../stores/sessions';
-import { filterProjectList, hasWorktreeSessions, projectList, projectPage, sessionMatcher, type ProjectKey } from './derive';
+import { filterProjectList, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, type ProjectEntry, type ProjectKey } from './derive';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
-import { ProjectPage } from './ProjectPage';
-import { ProjectRow } from './ProjectRow';
+import { ProjectRow, ShowMoreRow } from './ProjectRow';
 import { registerProjectRevealer } from './reveal';
 import { runAddProject, useAddProjectEnabled } from './project-actions';
 import { Search } from './Search';
 import { SectionHeading } from './SectionHeading';
-import { projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
+import { moreNodeId, projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
 
 export function Sidebar() {
   const sessionsLoaded = useSessions((s) => s.loaded);
@@ -40,23 +39,15 @@ export function Sidebar() {
   );
 }
 
-// The checkouts of a project's repository in git's order (Main first), read when its page shows a worktree session and
-// read again when a worktree the page has not seen appears; null until the answer arrives or when it fails.
-function useWorktrees(directory: string | null, paths: string): readonly WorktreeInfo[] | null {
-  const [answer, setAnswer] = useState<{ directory: string; worktrees: WorktreeInfo[] } | null>(null);
-  useEffect(() => {
-    if (directory === null) return;
-    let live = true;
-    void ipc.invoke('git.worktree.list', { repoRoot: directory }).then(
-      (result) => live && setAnswer(result.ok ? { directory, worktrees: result.value.worktrees } : null),
-      () => live && setAnswer(null),
-    );
-    return () => {
-      live = false;
-    };
-  }, [directory, paths]);
-  return answer?.directory === directory ? answer.worktrees : null;
+// A listed project as the tree shows it: open or not, the sessions it shows and how many more its "Show more" reveals.
+interface ShownProject {
+  entry: ProjectEntry;
+  open: boolean;
+  sessions: SessionRecord[];
+  more: number;
 }
+
+const MORE_PROJECTS = moreNodeId(null);
 
 function SidebarBody() {
   const records = useSessions((s) => s.records);
@@ -71,99 +62,116 @@ function SidebarBody() {
   });
 
   const [query, setQuery] = useState('');
+  const [allProjects, setAllProjects] = useState(false); // the list's own "Show more" (transient)
+  const [more, setMore] = useState<ReadonlySet<ProjectKey>>(new Set()); // projects whose "Show more" was clicked (transient)
   const [focused, setFocused] = useState<string | null>(null);
-  // The page that slides out after "‹ Projects" stays rendered until its transform ends.
-  const [leaving, setLeaving] = useState<ProjectKey | null>(null);
-  const pendingFocus = useRef<string | 'page' | null>(null); // what takes focus once a render shows it
+  const pendingFocus = useRef<string | null>(null); // a tree item to focus once a render shows it
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const container = useRef<HTMLDivElement>(null);
-  const backRef = useRef<HTMLButtonElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
 
   const byId = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const everyEntry = useMemo(() => projectList({ records, digests, projects, rows }), [records, digests, projects, rows]);
-  const entries = useMemo(() => filterProjectList(everyEntry, query, byId), [everyEntry, query, byId]);
   const searching = query.trim() !== '';
+  const matches = useMemo(() => sessionMatcher(query, byId), [query, byId]);
+  const expanded = useMemo(() => new Set(sidebar.expandedProjects), [sidebar.expandedProjects]);
 
-  // The open project, when the list still holds it (a removed project, or Other sessions emptied, shows the list).
-  const openEntry = sidebar.openProject === null ? null : (everyEntry.find((e) => e.key === sidebar.openProject) ?? null);
-  const shownEntry = openEntry ?? (leaving === null ? null : (everyEntry.find((e) => e.key === leaving) ?? null));
-  const shownSessions = shownEntry?.sessions;
-  const worktreePaths = useMemo(
-    () => [...new Set((shownSessions ?? []).flatMap((r) => (r.worktree ? [r.worktree.path] : [])))].sort().join('\n'),
-    [shownSessions],
-  );
-  const worktreeDirectory = shownEntry?.project && shownSessions && hasWorktreeSessions(shownSessions) ? shownEntry.project.directory : null;
-  const worktrees = useWorktrees(worktreeDirectory, worktreePaths);
-  const page = useMemo(
+  // Five project rows, then "Show more" for the rest (Codex's `maxGroups`); Other sessions stays last whatever is folded.
+  // A search lists every project it finds.
+  const { listed, folded } = useMemo(() => {
+    const found = filterProjectList(everyEntry, query, byId);
+    if (searching || allProjects) return { listed: found, folded: 0 };
+    const real = found.filter((e) => e.project !== null);
+    const other = found.filter((e) => e.project === null);
+    return { listed: [...real.slice(0, PROJECTS_FIRST), ...other], folded: Math.max(0, real.length - PROJECTS_FIRST) };
+  }, [everyEntry, query, byId, searching, allProjects]);
+
+  const shown: ShownProject[] = useMemo(
     () =>
-      shownSessions === undefined
-        ? null
-        : projectPage({ sessions: shownSessions, digests, rows, sort: sidebar.sort, matches: sessionMatcher(query, byId), worktrees }),
-    [shownSessions, digests, rows, sidebar.sort, query, byId, worktrees],
+      listed.map((entry) => {
+        const open = searching || expanded.has(entry.key);
+        if (!open) return { entry, open, sessions: [], more: 0 };
+        const all = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches });
+        const count = shownCount(all.length, more.has(entry.key));
+        return { entry, open, sessions: all.slice(0, count), more: Math.min(all.length, SESSIONS_CAP) - count };
+      }),
+    [listed, searching, expanded, digests, rows, sidebar.sort, matches, more],
   );
+  // The list's "Show more" sits after the last project row, before Other sessions.
+  const moreAt = folded > 0 ? shown.filter((p) => p.entry.project !== null).length : -1;
 
-  const projectNodes: TreeNode[] = entries.map((e) => ({ id: projectNodeId(e.key), kind: 'project' as const, key: e.key }));
-  const sessionNodes: TreeNode[] = page
-    ? [...page.pinned, ...page.groups.flatMap((g) => g.sessions)].map((r) => ({ id: sessionNodeId(r.appId), kind: 'session' as const, appSessionId: r.appId }))
-    : [];
-  const nodes = openEntry ? sessionNodes : projectNodes;
+  // The tree items on screen, in order: what the arrow keys walk.
+  const nodes = useMemo(() => {
+    const out: TreeNode[] = [];
+    shown.forEach(({ entry, open, sessions, more: hidden }, i) => {
+      if (i === moreAt) out.push({ id: MORE_PROJECTS, kind: 'more', key: null, parent: null });
+      const id = projectNodeId(entry.key);
+      out.push({ id, kind: 'project', key: entry.key, expanded: open });
+      if (!open) return;
+      out.push(...sessions.map((r): TreeNode => ({ id: sessionNodeId(r.appId), kind: 'session', appSessionId: r.appId, parent: id })));
+      if (hidden > 0) out.push({ id: moreNodeId(entry.key), kind: 'more', key: entry.key, parent: id });
+    });
+    if (moreAt === shown.length) out.push({ id: MORE_PROJECTS, kind: 'more', key: null, parent: null });
+    return out;
+  }, [shown, moreAt]);
   const selectedNode = selected === null ? null : sessionNodeId(selected);
   const tabStop = nodes.some((n) => n.id === focused) ? focused : nodes.some((n) => n.id === selectedNode) ? selectedNode : (nodes[0]?.id ?? null);
 
-  const itemElement = (id: string) => container.current?.querySelector<HTMLElement>(`[data-tree-id="${CSS.escape(id)}"]`) ?? null;
+  const itemElement = (id: string) => scroller.current?.querySelector<HTMLElement>(`[data-tree-id="${CSS.escape(id)}"]`) ?? null;
   const focusItem = (id: string) => {
     const element = itemElement(id);
     if (element) element.focus();
     else pendingFocus.current = id;
   };
-  // What waits for a render takes focus after it: a page just opened on its first row (the selected session's when it is
-  // there) or its back control, a project row after "‹ Projects". `preventScroll`, since the levels sit side by side in
-  // a strip that is moving.
+  // An item not on screen yet (the first row a "Show more" revealed, a revealed project) takes focus, and with it the
+  // scroll, after the render that shows it.
   useEffect(() => {
-    const pending = pendingFocus.current;
-    if (pending === null) return;
-    if (pending === 'page') {
-      if (!openEntry) return;
-      pendingFocus.current = null;
-      const stop = tabStop === null ? null : itemElement(tabStop);
-      (stop ?? backRef.current)?.focus({ preventScroll: true });
-      return;
-    }
-    const element = itemElement(pending);
+    const id = pendingFocus.current;
+    const element = id === null ? null : itemElement(id);
     if (!element) return;
     pendingFocus.current = null;
-    element.focus({ preventScroll: true });
+    element.focus();
   });
 
-  const openProject = (key: ProjectKey) => {
-    setLeaving(null);
-    setFocused(null);
-    pendingFocus.current = 'page';
-    useLayout.getState().setSidebar({ openProject: key });
-  };
-  const back = () => {
-    const key = sidebar.openProject;
-    if (key === null) return;
-    setLeaving(key);
-    setFocused(projectNodeId(key));
-    pendingFocus.current = projectNodeId(key);
-    useLayout.getState().setSidebar({ openProject: null });
-  };
-
-  // A project revealed from outside (`reveal.ts`, the ⌘K palette) opens its page; the search clears so the page is
-  // whole, and the page takes focus after the render that shows it (and that lifts a collapsed sidebar's `inert`).
+  // A project revealed from outside (`reveal.ts`, the ⌘K palette) is expanded there; here the search clears and the
+  // folded projects show, so its row is on screen, and the row takes focus after the render that shows it (and that
+  // lifts a collapsed sidebar's `inert`).
   useEffect(
     () =>
-      registerProjectRevealer(() => {
+      registerProjectRevealer((projectId) => {
         setQuery('');
-        setLeaving(null);
+        setAllProjects(true);
         setFocused(null);
-        pendingFocus.current = 'page';
-        rerender(); // the page may already be open: the focus effect still runs
+        pendingFocus.current = projectNodeId(projectId);
+        rerender(); // the row may be on screen already: the focus effect still runs
       }),
     [],
   );
+
+  const toggleProject = (key: ProjectKey) => {
+    if (searching) return; // a search shows its matches open without changing what is expanded
+    const list = sidebar.expandedProjects;
+    const open = list.includes(key);
+    if (open && more.has(key)) {
+      const next = new Set(more);
+      next.delete(key);
+      setMore(next); // a project opened again shows its first five
+    }
+    useLayout.getState().setSidebar({ expandedProjects: open ? list.filter((k) => k !== key) : [...list, key] });
+  };
+  const showMore = (key: ProjectKey | null) => {
+    if (key === null) {
+      const next = everyEntry.filter((e) => e.project !== null)[PROJECTS_FIRST];
+      setAllProjects(true);
+      if (next) focusItem(projectNodeId(next.key));
+      return;
+    }
+    const group = shown.find((p) => p.entry.key === key);
+    if (!group) return;
+    setMore(new Set(more).add(key));
+    const next = projectSessions({ sessions: group.entry.sessions, digests, rows, sort: sidebar.sort, matches })[group.sessions.length];
+    if (next) focusItem(sessionNodeId(next.appId));
+  };
 
   const onTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     const id = (event.target as HTMLElement).getAttribute('data-tree-id');
@@ -178,18 +186,18 @@ function SidebarBody() {
       case 'open':
         useLayout.getState().openSession(command.appSessionId);
         break;
-      case 'drill':
-        openProject(command.key);
+      case 'toggle':
+        toggleProject(command.key);
         break;
-      case 'back':
-        back();
+      case 'more':
+        showMore(command.key);
         break;
     }
   };
 
-  const open = openEntry !== null;
   const tree = { tabStop, selected, onFocusItem: setFocused };
   const listEmpty = everyEntry.length === 0;
+  const moreProjects = <ShowMoreRow id={MORE_PROJECTS} level={1} onShow={() => showMore(null)} />;
 
   return (
     <TreeContext.Provider value={tree}>
@@ -197,70 +205,39 @@ function SidebarBody() {
         <NewChatRow />
       </div>
       <div className="px-2.5 pt-1">
-        <Search
-          value={query}
-          onChange={setQuery}
-          label={open ? `Search ${openEntry.name}` : 'Search projects and sessions'}
-          onLeave={() => (tabStop ? focusItem(tabStop) : open && backRef.current?.focus())}
-        />
+        <Search value={query} onChange={setQuery} label="Search projects and sessions" onLeave={() => tabStop && focusItem(tabStop)} />
       </div>
       <ContextMenu.Root modal={false} onOpenChange={(isOpen) => !isOpen && setMenuTarget(null)}>
         <ContextMenu.Trigger asChild>
           <div
-            ref={container}
+            ref={scroller}
+            data-testid="sidebar-tree"
             onContextMenu={(event) => {
               const target = menuTargetOf(event.target as Element);
               if (target) setMenuTarget(target);
               else event.preventDefault(); // no row, no menu
             }}
-            className="relative min-h-0 flex-1 overflow-clip"
+            className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
           >
-            <div
-              data-testid="sidebar-levels"
-              data-level={open ? 2 : 1}
-              data-open-project={openEntry?.key}
-              onTransitionEnd={(event) => event.target === event.currentTarget && !open && setLeaving(null)}
-              className="flex h-full w-[200%] transition-transform duration-200 ease-out motion-reduce:transition-none"
-              style={{ transform: open ? 'translateX(-50%)' : 'translateX(0)' }}
-            >
-              <div
-                data-level-pane={1}
-                inert={open}
-                aria-hidden={open || undefined}
-                className="h-full w-1/2 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
-              >
-                <SectionHeading title="Projects">{projects.length > 0 && <AddProjectButton />}</SectionHeading>
-                {listEmpty ? (
-                  <EmptyProjects />
-                ) : entries.length === 0 ? (
-                  <p className="m-0 px-[9px] py-1.5 text-ui-sm text-fg-faint">No projects match</p>
-                ) : (
-                  <div role="tree" aria-label="Projects" onKeyDown={onTreeKeyDown} className="flex flex-col">
-                    {entries.map((entry) => (
-                      <ProjectRow key={entry.key} entry={entry} onOpen={openProject} />
-                    ))}
-                  </div>
-                )}
+            <SectionHeading title="Projects">
+              <SortMenu sort={sidebar.sort} />
+              {projects.length > 0 && <AddProjectButton />}
+            </SectionHeading>
+            {listEmpty ? (
+              <EmptyProjects />
+            ) : listed.length === 0 ? (
+              <p className="m-0 px-[9px] py-1.5 text-ui-sm text-fg-faint">No projects match</p>
+            ) : (
+              <div role="tree" aria-label="Projects" onKeyDown={onTreeKeyDown} className="flex flex-col gap-px">
+                {shown.map((group, i) => (
+                  <Fragment key={group.entry.key}>
+                    {i === moreAt && moreProjects}
+                    <ProjectRow entry={group.entry} open={group.open} sessions={group.sessions} more={group.more} onToggle={toggleProject} onShowMore={showMore} />
+                  </Fragment>
+                ))}
+                {moreAt === shown.length && moreProjects}
               </div>
-              <div
-                data-level-pane={2}
-                inert={!open}
-                aria-hidden={!open || undefined}
-                className="h-full w-1/2 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
-              >
-                {shownEntry && page && (
-                  <ProjectPage
-                    entry={shownEntry}
-                    page={page}
-                    sort={sidebar.sort}
-                    searching={searching}
-                    backRef={backRef}
-                    onBack={back}
-                    onTreeKeyDown={onTreeKeyDown}
-                  />
-                )}
-              </div>
-            </div>
+            )}
           </div>
         </ContextMenu.Trigger>
         <SidebarMenuContent target={menuTarget} />
@@ -269,9 +246,46 @@ function SidebarBody() {
   );
 }
 
-// New chat (2026-10-01): the sidebar's first row, above the search and both levels, as Codex's first nav row sits above
-// its projects (readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:519957-519987, 520284-520293).
-// It starts in the project whose page is open, else the active session's, else in none ("Choose a project").
+const SORTS: { value: SidebarSort; label: string }[] = [
+  { value: 'priority', label: 'Priority' },
+  { value: 'recency', label: 'Recency' },
+];
+
+// The order of each project's sessions, on the Projects heading (W11; it sat on W5's project page).
+function SortMenu({ sort }: { sort: SidebarSort }) {
+  return (
+    <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Trigger asChild>
+        <IconButton label="Sort sessions" className="size-[22px]">
+          <SortIcon className="size-[13px]" />
+        </IconButton>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-36 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+          <DropdownMenu.Label className="px-2 py-1 text-ui-sm text-fg-muted">Sort sessions by</DropdownMenu.Label>
+          <DropdownMenu.RadioGroup value={sort} onValueChange={(value) => useLayout.getState().setSidebar({ sort: value as SidebarSort })}>
+            {SORTS.map(({ value, label }) => (
+              <DropdownMenu.RadioItem
+                key={value}
+                value={value}
+                className="flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover"
+              >
+                <span className="w-3 text-accent">
+                  <DropdownMenu.ItemIndicator>●</DropdownMenu.ItemIndicator>
+                </span>
+                {label}
+              </DropdownMenu.RadioItem>
+            ))}
+          </DropdownMenu.RadioGroup>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+// New chat (2026-10-01): the sidebar's first row, above the search and the tree, as Codex's first nav row sits above its
+// projects (readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:519957-519987, 520284-520293). It
+// starts in the active session's project, else the first expanded one, else in none ("Choose a project").
 function NewChatRow() {
   const canCreate = useSessionCreatorRegistered();
   const chord = useChordHint('session.new');
@@ -281,7 +295,7 @@ function NewChatRow() {
       aria-label={NEW_CHAT}
       disabled={!canCreate}
       title={canCreate ? (chord ? `${NEW_CHAT} · ${chord}` : NEW_CHAT) : 'Not available here'}
-      onClick={() => void createSession(focusedProject({ first: 'page' }))}
+      onClick={() => void createSession(focusedProject())}
       className="group/new flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] text-ui text-fg outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
     >
       <NewChatIcon className="size-[13px] text-fg-muted" />
@@ -334,7 +348,7 @@ function SidebarSkeleton() {
       <div className="mx-0.5 mb-3.5 h-8 rounded-sm border border-border" />
       <SectionHeading title="Projects" />
       {[0, 1, 2, 3, 4, 5].map((i) => (
-        <div key={i} data-testid="skeleton-row" aria-hidden className="flex h-(--row-h) items-center px-[9px]">
+        <div key={i} data-testid="skeleton-row" aria-hidden className="flex h-9 items-center px-[9px]">
           <div className="h-2.5 w-3/5 animate-pulse rounded-sm bg-bg-active motion-reduce:animate-none" />
         </div>
       ))}

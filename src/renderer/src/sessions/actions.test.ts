@@ -48,15 +48,15 @@ describe('the session and project entries', () => {
     expect(Object.values(PROJECT_ACTIONS)).not.toContain('Add directory…');
   });
 
-  // New chat (2026-10-01): ⌘N comes with the session creator, and preselects only a focused project
-  it('⌘N creates in the focused session’s project, else the open project page’s, else in none', async () => {
+  // New chat (2026-10-01): ⌘N comes with the session creator, and preselects only a focused project; W11: the first
+  // expanded project stands in for the drill-in's open page (W12 replaces it with the current project)
+  it('⌘N creates in the focused session’s project, else the first expanded project’s, else in none', async () => {
     useSessions.setState({ projects: new Map([[P2, project('p2', 1)], [P1, project('p1', 0)]]), records: new Map([[A, record(A, { projectId: P2 })]]) });
-    expect(focusedProject(), 'the project list with nothing open: no project').toBeNull();
-    useLayout.getState().setSidebar({ openProject: P1 });
-    expect(focusedProject()).toBe(P1);
+    expect(focusedProject(), 'nothing expanded and no tab: no project').toBeNull();
+    useLayout.getState().setSidebar({ expandedProjects: ['other', 'proj-gone' as ProjectId, P1] });
+    expect(focusedProject(), 'Other sessions and a removed project are no project').toBe(P1);
     useLayout.getState().openTab({ kind: 'session', appSessionId: A });
     expect(focusedProject(), 'the active session’s project first').toBe(P2);
-    expect(focusedProject({ first: 'page' }), 'the sidebar’s own control asks its page first').toBe(P1);
     const created: (ProjectId | null)[] = [];
     offs.push(registerSessionCreator(async (projectId) => (created.push(projectId), null)));
     runAction('session.new');

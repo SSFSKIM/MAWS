@@ -60,7 +60,7 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     const banner = page.locator('[data-banner-host]').getByRole('status').filter({ hasText: 'Memory budget exceeded' });
     value(await invoke(page, 'settings.set', { engine: { statefulMcpServers: ['c12-kernel'] } }));
     await expect(projectRow(page, 'MAWS')).toBeVisible(); // the stub's records are in
-    const row = await sidebarRow(page, RELEASED_TITLE); // W5: on its project's page, opened here
+    const row = await sidebarRow(page, RELEASED_TITLE); // W11: its project expanded here
     await expect(row).toBeVisible();
 
     // The release: at 1000 the host releases the least recently used idle session, at 2000 its process has exited.

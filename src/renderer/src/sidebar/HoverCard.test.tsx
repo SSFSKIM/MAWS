@@ -36,7 +36,7 @@ const needsRow = (title: string) => screen.getByRole('treeitem', { name: title }
 beforeEach(() => {
   resetShellStores();
   fillStores(nine);
-  useLayout.getState().setSidebar({ openProject: 'proj-maws' as ProjectId });
+  useLayout.getState().setSidebar({ expandedProjects: ['proj-maws' as ProjectId] });
   act(() => useAttention.getState().applyChanged({ appSessionId: readOp.appSessionId, items: readOp.items }));
 });
 afterEach(() => {
@@ -133,7 +133,7 @@ describe('a session row’s hover card', () => {
 
   it('a working session: its status, age and context, its activity and its last answer', async () => {
     withMain();
-    useLayout.getState().setSidebar({ openProject: 'proj-claude-usage-menubar' as ProjectId });
+    useLayout.getState().setSidebar({ expandedProjects: ['proj-claude-usage-menubar' as ProjectId] });
     const digest = useSessions.getState().digests.get(idOf('Usage reset countdown'))!;
     act(() => useSessions.getState().applyDigest({ ...digest, context: { percent: 41.4, totalTokens: 414_000, maxTokens: 1_000_000, autoCompactThreshold: null }, revision: digest.revision + 1 }));
     render(<Sidebar />);
@@ -147,7 +147,7 @@ describe('a session row’s hover card', () => {
 
   it('a foreign-live session names its holder', async () => {
     withMain();
-    useLayout.getState().setSidebar({ openProject: 'proj-codex-somersault' as ProjectId });
+    useLayout.getState().setSidebar({ expandedProjects: ['proj-codex-somersault' as ProjectId] });
     render(<Sidebar />);
     const card = await open('Somersault terminal run');
     expect(within(card).getByTestId('hover-activity').textContent).toBe('Terminal · pid 7135');

@@ -14,17 +14,21 @@ describe('layout value shapes', () => {
     expect(LAYOUT_DEFAULTS.regions.overview).toBeNull();
   });
 
-  // W5: version 2's open project replaces version 1's collapsed lists; a stored version 1 keeps its sizes and sort.
-  it('reads a version-1 regions value as version 2, showing the project list', () => {
+  // W11: version 3's expanded projects replace version 2's open page and version 1's collapsed lists; an earlier value
+  // keeps its sizes, sort and Overview rect.
+  it('reads a version-1 or version-2 regions value as version 3', () => {
     const v1 = {
       version: 1,
       sidebar: { width: 240, collapsed: true, sort: 'recency', collapsedProjects: ['proj-a'], collapsedSections: ['pinned'] },
       panel: { width: 320, collapsed: false, maximized: false },
     };
-    expect(StoredRegionsSchema.parse(v1)).toEqual({ version: 2, sidebar: { width: 240, collapsed: true, sort: 'recency', openProject: null }, panel: v1.panel, overview: null });
-    const v2 = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, openProject: 'other' }, overview: { x: 40, y: 12, width: 880, height: 640 } };
-    expect(StoredRegionsSchema.parse(v2)).toEqual(v2);
-    expect(StoredRegionsSchema.safeParse({ ...v2, sidebar: { ...v2.sidebar, collapsedProjects: [] } }).success).toBe(false);
+    expect(StoredRegionsSchema.parse(v1)).toEqual({ version: 3, sidebar: { width: 240, collapsed: true, sort: 'recency', expandedProjects: [] }, panel: v1.panel, overview: null });
+    const v2 = { version: 2, sidebar: { width: 260, collapsed: false, sort: 'priority', openProject: 'other' }, panel: v1.panel, overview: { x: 40, y: 12, width: 880, height: 640 } };
+    expect(StoredRegionsSchema.parse(v2)).toEqual({ version: 3, sidebar: { width: 260, collapsed: false, sort: 'priority', expandedProjects: ['other'] }, panel: v1.panel, overview: v2.overview });
+    expect(StoredRegionsSchema.parse({ ...v2, sidebar: { ...v2.sidebar, openProject: null } }).sidebar.expandedProjects).toEqual([]);
+    const v3 = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, expandedProjects: ['proj-a', 'other'] } };
+    expect(StoredRegionsSchema.parse(v3)).toEqual(v3);
+    expect(StoredRegionsSchema.safeParse({ ...v3, sidebar: { ...v3.sidebar, openProject: null } }).success).toBe(false);
   });
 
   it('accepts the key grammar and nothing else', () => {

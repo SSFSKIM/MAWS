@@ -144,10 +144,10 @@ export function useUnstartedTitle(appSessionId: AppSessionId): UnstartedTitleAns
 
 // ---- New chat's preselection (2026-10-01) -------------------------------------------------------------------------------
 // The project a New chat starts in when a project is focused, so the common case is one step: the session's project in
-// the active tab (of `pane`, else the focused pane; an unstarted tab's chosen one included), or the project whose page
-// the sidebar shows; `first: 'page'` asks the sidebar first (its own New chat control). None from the project list
-// with nothing open: the chat then starts with "Choose a project".
-export function focusedProject(opts: { pane?: 0 | 1; first?: 'tab' | 'page' } = {}): ProjectId | null {
+// the active tab (of `pane`, else the focused pane; an unstarted tab's chosen one included), else the first project
+// expanded in the sidebar (W11: the flat tree has no open page; W12 replaces this with the current project), else none:
+// the chat then starts with "Choose a project".
+export function focusedProject(opts: { pane?: 0 | 1 } = {}): ProjectId | null {
   const { main, regions } = useLayout.getState();
   const { records, projects } = useSessions.getState();
   const fromTab = (): ProjectId | null => {
@@ -157,16 +157,9 @@ export function focusedProject(opts: { pane?: 0 | 1; first?: 'tab' | 'page' } = 
     const record = records.get(tab.appSessionId);
     return record ? record.projectId : unstartedTitleOf(tab.appSessionId).projectId;
   };
-  const fromPage = (): ProjectId | null => {
-    const open = regions.sidebar.openProject;
-    return open !== null && open !== 'other' && projects.has(open as ProjectId) ? (open as ProjectId) : null;
-  };
-  const order = opts.first === 'page' ? [fromPage, fromTab] : [fromTab, fromPage];
-  for (const read of order) {
-    const projectId = read();
-    if (projectId !== null && projects.has(projectId)) return projectId;
-  }
-  return null;
+  const tabProject = fromTab();
+  if (tabProject !== null && projects.has(tabProject)) return tabProject;
+  return (regions.sidebar.expandedProjects.find((key) => key !== 'other' && projects.has(key as ProjectId)) as ProjectId | undefined) ?? null;
 }
 
 // ---- tab retention ------------------------------------------------------------------------------------------------------

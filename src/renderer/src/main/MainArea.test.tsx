@@ -28,10 +28,10 @@ const strips = () => within(main()).getAllByRole('tablist');
 const tabNames = (strip = strips()[0]) => within(strip).queryAllByRole('tab').map((t) => t.getAttribute('aria-label'));
 const tab = (name: string) => within(main()).getByRole('tab', { name });
 const selected = (strip = strips()[0]) => within(strip).getAllByRole('tab').find((t) => t.getAttribute('aria-selected') === 'true')?.getAttribute('aria-label');
-// A session's row, on its project's page (W5: the sidebar drills into one project at a time).
+// A session's row, in its project expanded in place (W11).
 const sidebarRow = (title: string) => {
   const projectId = nine.sessions.find((r) => r.title.text === title)!.projectId ?? 'other';
-  act(() => useLayout.getState().setSidebar({ openProject: projectId as ProjectId }));
+  act(() => useLayout.getState().setSidebar({ expandedProjects: [projectId as ProjectId] }));
   return within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).getByRole('treeitem', { name: title });
 };
 
