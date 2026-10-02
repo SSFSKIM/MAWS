@@ -59,7 +59,7 @@ describe('sidebar recovery routes', () => {
       'session.list': () => ({ sessions: [archived, elsewhere], revision: 1 }),
       'session.update': () => {
         archived.archived = false;
-        useSessions.getState().applyChanged({ record: archived, revision: 2 });
+        useSessions.getState().applyChanged({ record: archived, cause: 'update', revision: 2 });
         return archived;
       },
     });
