@@ -52,6 +52,17 @@ describe('head and tail summary', () => {
     expect(summary.lastAssistantText).toBe(lastText?.slice(0, 200));
   });
 
+  // W13: a session resumed after an update was last written by the newer engine, as its live status says
+  it('takes the latest version that wrote the file', () => {
+    const text =
+      line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/first', version: '2.1.283', timestamp: '2026-09-28T10:00:00.000Z', message: { role: 'user', content: 'Hello' } }) +
+      line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', cwd: '/first', version: '2.1.283', timestamp: '2026-09-28T10:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] } }) +
+      line({ type: 'user', uuid: 'u2', parentUuid: 'a1', cwd: '/first', version: '2.1.287', timestamp: '2026-10-01T10:00:00.000Z', message: { role: 'user', content: 'Again' } }) +
+      line({ type: 'last-prompt', lastPrompt: 'Again', leafUuid: 'u2', sessionId: 'S' });
+    const bytes = Buffer.from(text, 'utf8');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 5 }, '/store/projects/-first/S.jsonl', '-first').engineVersion).toBe('2.1.287');
+  });
+
   it('takes the last title, prompt, branch and relocation in the tail, the first cwd in the head', () => {
     const text =
       line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/first', version: '2.1.283', gitBranch: 'main', entrypoint: 'cli', sessionKind: 'bg', timestamp: '2026-09-28T10:00:00.000Z', message: { role: 'user', content: 'Hello there' } }) +

@@ -3,6 +3,7 @@
 // turn from its retained events and memoised on (version, ui version); the flat list is the concatenation, with
 // loose rows placed after the turn they followed and time separators inserted by the thresholds in time.ts.
 import type { QueueEntry } from '@shared/engine/session-state-store';
+import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
@@ -814,7 +815,9 @@ function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): R
 const supersededByHookRow = (event: Event<'notice.posted'>) => event.key === 'stop-hook-error' || event.text.startsWith('UserPromptSubmit operation blocked by hook:');
 
 function noticeRow(event: SessionEvent, text: string, turnId: TurnId | null): RowOf<'error'> {
-  return { id: rowId.error(event.id), turnId, at: event.at, kind: 'error', severity: 'notice', text, attempt: null, scope: 'notice', lostAttentionCount: null };
+  const row: RowOf<'error'> = { id: rowId.error(event.id), turnId, at: event.at, kind: 'error', severity: 'notice', text, attempt: null, scope: 'notice', lostAttentionCount: null };
+  if (event.kind === 'notice.posted' && event.key === ENGINE_COMPAT_NOTICE_KEY) row.action = 'engine_settings'; // W13: Settings › Engine, beside the notice
+  return row;
 }
 
 // A `!` command's replayed rows: the input message opens the row, the next output message completes it.

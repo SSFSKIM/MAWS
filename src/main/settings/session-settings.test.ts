@@ -53,7 +53,7 @@ describe('the session service reads the settings store', () => {
     const dir = mkdtempSync(join(tmpdir(), 'maws-c11-session-settings-'));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const store = openSettingsStore(join(dir, 'settings.json'));
-    store.update({ gateway: { relayUnreachable: 'wait', offerDirect: false }, engine: { subagentModel: 'haiku', pinnedVersion: '9.9.9' } });
+    store.update({ gateway: { relayUnreachable: 'wait', offerDirect: false }, engine: { subagentModel: 'haiku', memoryBudgetMiB: 4096 } });
     expect(sessionSettingsOf(store.settings)).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'wait' }, engine: { subagentModel: 'haiku' }, permissions: { autoFallback: 'acceptEdits' } });
   });
 });

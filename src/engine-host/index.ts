@@ -1,6 +1,6 @@
 // The engine host (charter §4.1): the utility process that owns the Claude Code processes. It serves C1's ping and the
-// engine host's X2 surface (C3). It imports `electron` only through C1's runHost, and never resolves the engine
-// through PATH (D-1, X6).
+// engine host's X2 surface (C3). It imports `electron` only through C1's runHost. W13 (D-1 as amended 2026-10-01): it
+// runs the user's installed Claude Code, resolved per launch to a real path (binary-info.ts).
 import { hostPing, runHost } from '@shared/host/runtime';
 // C3 start
 import { join } from 'node:path';

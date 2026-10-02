@@ -5,9 +5,7 @@ import { parseJournalRow } from '@shared/wire/journal';
 import {
   buildLaunch,
   CHARTER_PIN,
-  ENGINE_BIN,
   ENGINE_FLAGS,
-  ENGINE_VERSION,
   GATEWAY_AUTH_TOKEN,
   getBinaryConfig,
   LaunchSpecConflict,
@@ -17,7 +15,10 @@ import {
   spawnMeta,
 } from './launch';
 
-const OPTS = { relayUrl: RELAY_URL, engineVersion: ENGINE_VERSION };
+// W13: the binary probe's answer for a launch (launcher.ts passes it): a real path and its `--version`
+const ENGINE_BIN = '/Users/u/.local/share/claude/versions/2.1.287';
+const ENGINE_VERSION = '2.1.287';
+const OPTS = { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION };
 const SETTINGS_FLAG = '--settings';
 
 function spec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
@@ -110,9 +111,7 @@ function settingsOf(args: string[]): Record<string, unknown> {
 }
 
 describe('launch contract builds the X6 command line and environment', () => {
-  it('pins the binary by absolute path and the relay by loopback URL', () => {
-    expect(ENGINE_BIN).toBe('/Users/new/.local/share/claude/versions/2.1.283');
-    expect(ENGINE_VERSION).toBe('2.1.283');
+  it('names the relay by loopback URL and the fixed flag set', () => {
     expect(RELAY_URL).toBe('http://127.0.0.1:8641');
     expect(GATEWAY_AUTH_TOKEN).toBe('claudeusage-local-gateway');
     expect(ENGINE_FLAGS).toEqual([
@@ -206,6 +205,12 @@ describe('launch contract builds the X6 command line and environment', () => {
         TERM: 'dumb',
       });
       for (const key of EXCLUDED_KEYS) expect(env, key).not.toHaveProperty(key);
+    });
+
+    // W13: MAWS's processes never race the user's own updater, whatever the capture holds
+    it('sets DISABLE_AUTOUPDATER=1 under both gateway modes', () => {
+      expect(buildLaunch(spec(), { ...CAPTURED, DISABLE_AUTOUPDATER: '0' }, OPTS).env.DISABLE_AUTOUPDATER).toBe('1');
+      expect(buildLaunch(spec({ gateway: 'direct' }), CAPTURED, OPTS).env.DISABLE_AUTOUPDATER).toBe('1');
     });
 
     // C12 start: the host-facing wire option (C12 M5, the architect's ruling at M3): 2.1.283 sends
@@ -310,30 +315,26 @@ describe('launch contract builds the X6 command line and environment', () => {
   });
 });
 
-// C11's ask (M5): one binary configuration per host, defaulting to the pinned constants; a process already spawned keeps
-// the path its plan carries.
+// C11's ask (M5): one binary configuration per host, the owner's chosen path or null (W13: the installed Claude Code,
+// which binary-info.ts resolves); the plan carries the probe's real path and version, and a built plan keeps them.
 describe('binary configuration', () => {
-  afterEach(() => setBinaryConfig({ binaryPath: null, expectedVersion: ENGINE_VERSION }));
+  afterEach(() => setBinaryConfig({ binaryPath: null }));
 
-  it('defaults to the pinned binary and version, so an unconfigured host builds the same plan as before', () => {
-    expect(getBinaryConfig()).toEqual({ binaryPath: null, expectedVersion: ENGINE_VERSION });
-    const plan = buildLaunch(spec(), CAPTURED, { relayUrl: RELAY_URL });
-    expect(plan.bin).toBe(ENGINE_BIN);
-    expect(plan.engineVersion).toBe(ENGINE_VERSION);
+  it('defaults to no chosen path', () => {
+    expect(getBinaryConfig()).toEqual({ binaryPath: null });
   });
 
-  it('puts a configured path in the plan and the spawn meta row, and the expected version in the plan; a built plan keeps its path', () => {
-    const before = buildLaunch(spec(), CAPTURED, { relayUrl: RELAY_URL });
-    setBinaryConfig({ binaryPath: '/opt/claude/2.1.290', expectedVersion: '2.1.290' });
-    const plan = buildLaunch(spec(), CAPTURED, { relayUrl: RELAY_URL });
+  it('puts the probe’s path and version in the plan and the spawn meta row; a built plan keeps its own', () => {
+    const before = buildLaunch(spec(), CAPTURED, OPTS);
+    const plan = buildLaunch(spec(), CAPTURED, { relayUrl: RELAY_URL, bin: '/opt/claude/2.1.290', engineVersion: '2.1.290' });
     expect(plan.bin).toBe('/opt/claude/2.1.290');
     expect(plan.engineVersion).toBe('2.1.290');
     expect(spawnMeta(plan, { appVersion: 'x' })).toMatchObject({ bin: '/opt/claude/2.1.290', engineVersion: '2.1.290' });
-    expect(before.bin).toBe(ENGINE_BIN);
+    expect(before).toMatchObject({ bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
   });
 
-  it('refuses a relative binary path: the engine is never resolved through PATH', () => {
-    expect(() => setBinaryConfig({ binaryPath: 'claude', expectedVersion: ENGINE_VERSION })).toThrow(/absolute/);
+  it('refuses a relative binary path: a chosen binary is named by absolute path', () => {
+    expect(() => setBinaryConfig({ binaryPath: 'claude' })).toThrow(/absolute/);
     expect(getBinaryConfig().binaryPath).toBeNull();
   });
 });

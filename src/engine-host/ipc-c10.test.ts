@@ -11,6 +11,7 @@ import { HostCommandError, type HostEmit, type HostOn } from '@shared/host/runti
 import { type CommandInput, type CommandName, type CommandOutput, type EventName } from '@shared/ipc/schema';
 import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import { registerEngineIpc, type EngineIpcDeps } from './ipc';
+import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import { FileSessionStateStore } from './store/file-session-state-store';
 
 const REPO_ROOT = resolve(__dirname, '../..');
@@ -38,7 +39,9 @@ function engineHost(deps: Partial<EngineIpcDeps> = {}) {
     if (!checked.ok) throw new Error(`invalid ${name}`);
     emitted.push({ name, payload });
   };
-  const ipc = registerEngineIpc(on, emit, { userData, replayEnabled: true, cwd: REPO_ROOT, ...deps });
+  // W13: the binary the catalogue is keyed by answers the tested version, as the replays were recorded on it
+  const binaryProbe = async () => ({ path: '/x/claude', testedVersion: TESTED_ENGINE_VERSION, version: TESTED_ENGINE_VERSION, ok: true, error: null });
+  const ipc = registerEngineIpc(on, emit, { userData, replayEnabled: true, cwd: REPO_ROOT, binaryProbe, ...deps });
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const value = await handlers.get(name)!(input);
     const checked = validateCommandOutput(name, value);

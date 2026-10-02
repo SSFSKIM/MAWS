@@ -330,6 +330,9 @@ export const DETAIL = {
 // A hook that got in the way (model/hooks.ts; Claude Desktop's words for the blocked prompt and the re-prompt). A reason
 // is the hook's own first line, when it gave one.
 const because = (reason: string | null) => (reason ? ` · ${reason}` : '');
+// W13: the engine host's notice that a newer Claude Code sent what MAWS did not understand links to Settings › Engine
+export const ENGINE_NOTICE = { settings: 'Settings › Engine' } as const;
+
 export const HOOK = {
   blockedPrompt: (reason: string | null) => `A hook blocked your prompt${because(reason)}`,
   editPrompt: 'Edit prompt',

@@ -96,7 +96,7 @@ function held(holder: SessionRecord['holder'], over: Partial<SessionRecord> = {}
 function answerWith(over: Parameters<typeof fakeClient>[0] = {}): void {
   const answers: Parameters<typeof fakeClient>[0] = {
     'fs.holders': () => ({ refreshedAt: '2026-09-29T00:00:00.000Z', holders }),
-    'engine.binaryInfo': { path: PINNED, expectedVersion: '2.1.283', version: '2.1.283', ok: true, error: null },
+    'engine.binaryInfo': { path: PINNED, testedVersion: '2.1.283', version: '2.1.283', ok: true, error: null },
     'session.fork': { status: 'refused', appSessionId: 'f1111111-1111-4111-8111-111111111111', reason: 'busy', message: 'a turn is running' },
     'session.intent.list': { intents: [] },
     'session.deletions.list': { manifests: [] },
@@ -340,9 +340,9 @@ describe('held outcomes and the attach command', () => {
     expect(screen.getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
   });
 
-  it('names the version the job runs when it is not the pinned one', async () => {
+  it('names the version the job runs when it is not the installed one, which attach runs', async () => {
     const { unmount } = renderNotice(held(JOB, { engineVersion: '2.1.284' }));
-    expect(await screen.findByText('Job on 2.1.284; attach runs 2.1.283')).toBeTruthy();
+    expect(await screen.findByText('Job on 2.1.284; attach runs the installed 2.1.283')).toBeTruthy();
     unmount();
     renderNotice(held(JOB));
     await waitFor(() => expect(fake.invoked('engine.binaryInfo').length).toBeGreaterThan(0));

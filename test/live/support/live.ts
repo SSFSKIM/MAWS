@@ -15,7 +15,8 @@ import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import type { JournalRow } from '@shared/wire/journal';
 import { JOURNAL_MAX_BYTES, JournalWriter } from '../../../src/engine-host/journal';
-import { buildLaunch, ENGINE_BIN, ENGINE_VERSION, RELAY_URL, spawnMeta, type LaunchPlan } from '../../../src/engine-host/launch';
+import { buildLaunch, RELAY_URL, spawnMeta, type LaunchPlan } from '../../../src/engine-host/launch';
+import { ENGINE_BIN, ENGINE_VERSION } from '../../support/engine-pin'; // W13: the live harness runs the fixtures' engine
 import { checkRelay } from '../../../src/engine-host/relay-health';
 import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from '../../../src/engine-host/transport';
 
@@ -278,7 +279,7 @@ export interface RawProcess {
 // journal path. Sends nothing on its own: the caller decides what reaches the engine.
 export async function withRawProcess(ctx: LiveContext, spec: LaunchSpec, fn: (p: RawProcess) => Promise<void>): Promise<{ journalPath: string; rows: JournalRow[] }> {
   const captured = await captureShellEnvironment();
-  const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, engineVersion: ENGINE_VERSION });
+  const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
   const journal = new JournalWriter(join(ctx.userData, 'engine-host', 'journal', spec.appSessionId), plan.launchId, { maxBytes: JOURNAL_MAX_BYTES });
   const rows: JournalRow[] = [];
   const stderr: string[] = [];

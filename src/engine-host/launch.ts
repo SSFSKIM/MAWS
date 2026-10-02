@@ -1,15 +1,13 @@
 // X6 in code (charter §4.1, §13 X6, D-19; C3 execution document, Interfaces "X6 — launch spec and the launch
 // function"): the pure function from a LaunchSpec and the captured login-shell environment to the exact process the
-// charter describes: the pinned binary by absolute path, the fixed flag set in order, a constructed environment
-// (allowlist, exclusions, the gateway variables) and the `--settings` JSON with the host's protected keys applied last.
-// Nothing here spawns; `transport.ts` runs the plan.
+// charter describes: the binary by its real path (resolved per launch by binary-info.ts, W13), the fixed flag set in
+// order, a constructed environment (allowlist, exclusions, the gateway variables) and the `--settings` JSON with the
+// host's protected keys applied last. Nothing here spawns; `transport.ts` runs the plan.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionId } from '@shared/graph/ids';
 
-export const ENGINE_BIN = '/Users/new/.local/share/claude/versions/2.1.283'; // pinned; the packaged app later moves this to a setting (C11), never to PATH
-export const ENGINE_VERSION = '2.1.283';
 // C11 start: the dev-only relay override (C11 execution document, M6; ruled 2026-09-29). The relay-down live cases point
 // the host at a loopback forwarder they stop and start, so ClaudeUsage itself is never quit. Read once, when this module
 // loads in the host, and only as `http://127.0.0.1:<port>`; any other value is ignored. Main deletes the variable before
@@ -22,11 +20,11 @@ export function relayUrlFrom(env: Record<string, string | undefined>): string {
 // C11 end
 export const RELAY_URL = relayUrlFrom(process.env); // ClaudeUsage's relay, http://127.0.0.1:8641, unless C11's dev override names a loopback port
 
-// The host's one binary configuration (C11's ask, M5): the pinned path and version by default; C11's `engine.configure`
-// moves the path to a setting, never to PATH. `buildLaunch`, `engine.binaryInfo` and `session.launch`'s binary refusals
-// read it; a process already spawned keeps the path its plan carries.
-export interface BinaryConfig { binaryPath: string | null; expectedVersion: string } // binaryPath null = ENGINE_BIN
-let binaryConfig: BinaryConfig = { binaryPath: null, expectedVersion: ENGINE_VERSION };
+// The host's one binary configuration (C11's ask, M5): the binary path the owner chose in Settings, sent by main through
+// `engine.configure`; null, the installed Claude Code (W13: binary-info.ts resolves it at every launch). The binary
+// probe reads it; a process already spawned keeps the path its plan carries.
+export interface BinaryConfig { binaryPath: string | null }
+let binaryConfig: BinaryConfig = { binaryPath: null };
 
 export function setBinaryConfig(cfg: BinaryConfig): void {
   if (cfg.binaryPath !== null && !isAbsolute(cfg.binaryPath)) throw new Error(`the engine binary path must be absolute, never resolved through PATH: ${cfg.binaryPath}`);
@@ -37,9 +35,6 @@ export function getBinaryConfig(): BinaryConfig {
   return { ...binaryConfig };
 }
 
-export function engineBinaryPath(): string {
-  return binaryConfig.binaryPath ?? ENGINE_BIN;
-}
 export const GATEWAY_AUTH_TOKEN = 'claudeusage-local-gateway'; // D-19: a non-secret marker; the relay substitutes the real token
 export const CHARTER_PIN = '87f8c7881119ea670901205dae35917d3751459c'; // the parent pin this child was authored against
 
@@ -67,7 +62,7 @@ export interface LaunchPlan {
   launchId: string;
   sessionId: SessionId;
   gateway: 'gateway' | 'direct'; // additive to the X6 shape: the spawn meta row and the status read it without re-deriving it from env
-  engineVersion: string; // the version this plan was built for; the spawn meta row records it per session
+  engineVersion: string; // the binary's `--version` at this launch (W13); the spawn meta row records it per session
 }
 
 // An `extraSettings` (or spec field) that would displace something X6 guarantees. `session.launch` answers
@@ -114,6 +109,7 @@ export function buildEnvironment(spec: LaunchSpec, captured: Record<string, stri
   env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING = '1';
   env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1'; // C12: session_state_changed on the wire (a host-facing option, C12 M5 probe)
   env.TERM = 'dumb';
+  env.DISABLE_AUTOUPDATER = '1'; // W13: MAWS's processes never race the user's own updater; Settings › Engine offers the update
   if (spec.subagentModel !== null) env.CLAUDE_CODE_SUBAGENT_MODEL = spec.subagentModel;
   if (spec.gateway === 'gateway') {
     env.ANTHROPIC_BASE_URL = relayUrl;
@@ -188,8 +184,8 @@ export function mintLaunchId(): string {
   return out;
 }
 
-// `engineVersion` defaults to the binary configuration's expected version.
-export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, opts: { relayUrl: string; engineVersion?: string }): LaunchPlan {
+// `bin` and `engineVersion` are the binary probe's answer for this launch (W13): the real path and its `--version`.
+export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, opts: { relayUrl: string; bin: string; engineVersion: string }): LaunchPlan {
   if (spec.resume !== null && !spec.resume.fork && spec.sessionId !== null) {
     throw new LaunchSpecConflict('sessionId', '--session-id never co-occurs with a non-fork --resume; a resumed launch takes the resumed id');
   }
@@ -212,7 +208,7 @@ export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, 
   args.push('--settings', JSON.stringify(flagSettings));
 
   return {
-    bin: engineBinaryPath(),
+    bin: opts.bin,
     args,
     env: buildEnvironment(spec, captured, opts.relayUrl),
     cwd: spec.cwd,
@@ -220,7 +216,7 @@ export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, 
     launchId: mintLaunchId(),
     sessionId,
     gateway: spec.gateway,
-    engineVersion: opts.engineVersion ?? binaryConfig.expectedVersion,
+    engineVersion: opts.engineVersion,
   };
 }
 

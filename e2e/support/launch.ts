@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron, test as base, type ElectronApplication, type Page } from '@playwright/test';
+import { ENGINE_BIN } from '../../test/support/engine-pin'; // W13
 import { writeScratchShellHome } from '../../test/support/shell-home';
 
 export const REPO_ROOT = resolve(__dirname, '../..');
@@ -54,6 +55,9 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   delete env.ELECTRON_RUN_AS_NODE;
   env.MAWS_E2E = '1';
   env.MAWS_USER_DATA = userData;
+  // W13: an e2e run's engine is named, never the user's installed Claude Code: the fixtures' pin unless the runner says
+  // otherwise (a test's `env`, or the Engine setting, still names another)
+  env.MAWS_E2E_ENGINE_BIN ??= ENGINE_BIN;
   // C4 start: an empty engine store (C4 reads the config home the engine would), so the run never reads the owner's
   // ~/.claude; a test's `env` may still name another.
   env.CLAUDE_CONFIG_DIR = join(userData, 'claude-config');

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V7 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
 import { useAttention } from '../stores/attention';
 import { useNotices } from '../stores/notices';
@@ -20,7 +20,7 @@ import { useSessions } from '../stores/sessions';
 
 let b: SettingsBridge;
 
-function renderView(initial: Settings = SETTINGS_DEFAULTS_V7, section: Parameters<typeof SettingsView>[0]['section'] = null) {
+function renderView(initial: Settings = SETTINGS_DEFAULTS_V8, section: Parameters<typeof SettingsView>[0]['section'] = null) {
   b = settingsBridge(initial);
   window.maws = b.bridge;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -54,11 +54,9 @@ describe('settings tab writes one field per row', () => {
     for (const name of ['Engine', 'Gateway', 'Keyboard', 'Appearance', 'Notifications']) expect(screen.getByRole('region', { name })).toBeTruthy();
   });
 
-  it('Engine: the binary, the pin that matches it, the config home, and the subagent model as one field', async () => {
+  it('Engine: the binary, the config home, and the subagent model as one field', async () => {
     renderView();
-    expect(await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.283')).toBeTruthy();
-    expect(within(row('Pinned version')).getByText('matches binary')).toBeTruthy();
-    expect((within(row('Pinned version')).getByRole('button', { name: 'Re-pin…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287')).toBeTruthy(); // W13: the installed binary, no pin
     expect(await within(row('Config home')).findByText('~/.claude')).toBeTruthy();
     expect(within(row('Config home')).getByText('read-only to MAWS')).toBeTruthy();
 
@@ -76,35 +74,26 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ engine: { subagentModel: null } }));
   });
 
-  it('Engine: Change… stores the picked absolute path and configures the host; a mismatch says sessions will refuse', async () => {
+  it('Engine: Change… stores the picked absolute path; main configures the host; no version refuses', async () => {
     renderView();
     b.answers['layout.pickFiles'] = () => ({ files: [{ path: '/opt/claude/2.1.290/claude', name: 'claude', bytes: 10, mediaType: null, data: null }] });
     // C12: main configures the host; the tab awaits settings.engineApplied and re-reads the binary as the host now holds it
     b.answers['engine.binaryInfo'] = () => {
-      const { binaryPath, pinnedVersion } = settings().engine;
-      return binaryPath === null ? BINARY : { ...BINARY, path: binaryPath, expectedVersion: pinnedVersion, version: '2.1.290', ok: pinnedVersion === '2.1.290', error: pinnedVersion === '2.1.290' ? null : 'binary reports 2.1.290, expected 2.1.283' };
+      const { binaryPath } = settings().engine;
+      return binaryPath === null ? BINARY : { ...BINARY, path: binaryPath, version: '2.1.290' };
     };
     fireEvent.click(await within(row('Binary')).findByRole('button', { name: 'Change…' }));
     await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { binaryPath: '/opt/claude/2.1.290/claude' } }]));
     expect(b.calls.find((c) => c.name === 'layout.pickFiles')!.input).toEqual({ kind: 'files', directory: null, multiple: false });
     await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'settings.engineApplied', input: undefined })); // C12
     expect(await within(row('Binary')).findByText('/opt/claude/2.1.290/claude')).toBeTruthy();
-    expect(within(row('Binary')).getByText('does not match the pinned version · sessions will refuse to start until you re-pin')).toBeTruthy();
-    expect(within(row('Pinned version')).getByText('binary reports 2.1.290')).toBeTruthy();
-
-    // Re-pin… names both versions and the re-probe rule, then moves the pin alone
-    fireEvent.click(within(row('Pinned version')).getByRole('button', { name: 'Re-pin…' }));
-    const sheet = await screen.findByRole('dialog', { name: 'Re-pin the engine to 2.1.290?' });
-    expect(sheet.textContent).toContain('The pin moves from 2.1.283 to 2.1.290');
-    expect(sheet.textContent).toContain('Upgrading the engine is a deliberate re-probe: the fixtures and conformance tests were recorded on 2.1.283.');
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Re-pin to 2.1.290' }));
-    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ engine: { pinnedVersion: '2.1.290' } }));
+    expect(within(row('Binary')).queryByText(/re-pin|refuse/)).toBeNull(); // W13: a version never refuses
     const afterWrite = () => b.calls.slice(b.calls.findLastIndex((c) => c.name === 'settings.set') + 1).map((c) => c.name); // C12
     await vi.waitFor(() => expect(afterWrite().slice(0, 2)).toEqual(['settings.engineApplied', 'engine.binaryInfo'])); // C12
     expect(b.calls.map((c) => c.name)).not.toContain('engine.configure'); // C12: main is its only sender
 
-    // Use default puts the binary path back to C3's default
-    fireEvent.click(within(row('Binary')).getByRole('button', { name: 'Use default' }));
+    // Use installed puts the binary path back to the installed Claude Code
+    fireEvent.click(within(row('Binary')).getByRole('button', { name: 'Use installed' }));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ engine: { binaryPath: null } }));
   });
 
@@ -219,7 +208,7 @@ describe('settings tab writes one field per row', () => {
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
       scrolled.push(this.getAttribute('aria-labelledby') ?? '');
     });
-    renderView(SETTINGS_DEFAULTS_V7, 'keyboard');
+    renderView(SETTINGS_DEFAULTS_V8, 'keyboard');
     expect(scrolled.at(-1)).toMatch(/keyboard/);
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
   });
@@ -254,7 +243,7 @@ describe('settings tab: the memory budget rows', () => {
   });
 
   it('Memory budget: a value below 0.5 GB or not a number is refused in words and the field goes back', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V7, engine: { ...SETTINGS_DEFAULTS_V7.engine, memoryBudgetMiB: 6144 } });
+    renderView({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine, memoryBudgetMiB: 6144 } });
     const field = within(row('Limit')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
     expect(field.value).toBe('6.0');
     for (const typed of ['0.4', 'lots']) {
@@ -268,7 +257,7 @@ describe('settings tab: the memory budget rows', () => {
 
   // W7: the switch (settings version 7), on by default; off hides the limit and the stateful servers
   it('Memory budget: a switch, on by default, writes the switch whole; off hides the limit and the stateful servers and says what off means', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V7, engine: { ...SETTINGS_DEFAULTS_V7.engine, memoryBudgetMiB: 6144 } });
+    renderView({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine, memoryBudgetMiB: 6144 } });
     const toggle = within(row('Memory budget')).getByRole('switch', { name: 'Release idle sessions to stay under a memory limit' });
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     expect(row('Limit')).toBeTruthy();

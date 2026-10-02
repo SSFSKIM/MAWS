@@ -15,6 +15,7 @@ export const TERMINAL_TOOL_ID = 'terminal';
 export interface TerminalParams {
   cwd?: string; // default: the session's worktree path, else its directory
   command?: string; // typed into the first shell followed by a newline (C10's attach path)
+  owner?: AppSessionId; // W13: the label a pinned tab with no session files its shell under (Settings › Engine's update)
 }
 
 // The close confirmation lives beside the terminal's identity (the host may ask to close a tab that is not shown);
@@ -199,7 +200,7 @@ function createState({ appSessionId, session, instanceId, params }: PanelToolIni
     ui,
     instanceId,
     params: { ...params },
-    owner: appSessionId ?? session?.appId ?? null,
+    owner: appSessionId ?? session?.appId ?? params?.owner ?? null, // a restored tab has no params
     focusSeen: 0,
   };
   ensureTerminal(state, { appSessionId, session });

@@ -18,7 +18,8 @@ import { registerEngineIpc, type EngineIpc, type EngineIpcDeps } from '../../../
 import { assertConfigHomeSafe, ownerConfigHome, persistingControlOf, type PersistingControl } from './live';
 import { HostHookRegistry } from '../../../src/engine-host/host-hooks';
 import { JOURNAL_MAX_BYTES, JournalWriter } from '../../../src/engine-host/journal';
-import { buildLaunch, RELAY_URL } from '../../../src/engine-host/launch';
+import { buildLaunch, RELAY_URL, setBinaryConfig } from '../../../src/engine-host/launch';
+import { ENGINE_BIN, ENGINE_VERSION } from '../../support/engine-pin'; // W13
 import { journalDir } from '../../../src/engine-host/launcher';
 import { EngineSession } from '../../../src/engine-host/session';
 import { FileSessionStateStore } from '../../../src/engine-host/store/file-session-state-store';
@@ -56,9 +57,11 @@ export class LiveHost {
   // `configHome`: a scratch CLAUDE_CONFIG_DIR every process of this host runs under (null: the owner's own home);
   // `controls`: the persisting controls the case will issue, checked against the home before anything spawns;
   // `fs` (W7): also serve C4's `fs.*` over that scratch home, as the engine host does, `session.events` answering a
-  // session with no stream from it.
-  constructor(deps: Pick<EngineIpcDeps, 'userData'> & Partial<EngineIpcDeps> & { configHome?: string | null; controls?: PersistingControl[]; fs?: boolean }) {
-    const { configHome = null, controls = [], fs: withFs = false, ...ipcDeps } = deps;
+  // session with no stream from it. `binary` (W13): the binary path the host is configured with, as main's
+  // `engine.configure` would send it: the fixtures' pin by default, null for the installed Claude Code.
+  constructor(deps: Pick<EngineIpcDeps, 'userData'> & Partial<EngineIpcDeps> & { configHome?: string | null; controls?: PersistingControl[]; fs?: boolean; binary?: string | null }) {
+    const { configHome = null, controls = [], fs: withFs = false, binary = ENGINE_BIN, ...ipcDeps } = deps;
+    setBinaryConfig({ binaryPath: binary });
     if (withFs && configHome === null) throw new Error('a live host serves fs.* only over a scratch config home');
     assertConfigHomeSafe({ configHome, controls });
     this.controls = new Set(controls);
@@ -184,7 +187,7 @@ export class LiveHost {
 // is the product's code.
 export async function startDirectSession(userData: string, spec: LaunchSpec, hooks: HostHookRegistry): Promise<{ session: EngineSession; events: SessionEvent[] }> {
   const captured = await captureShellEnvironment();
-  const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL });
+  const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION }); // W13: the fixtures' engine
   const session = new EngineSession({
     spec, plan, hooks, appVersion: '0.0.0-live', store: new FileSessionStateStore(userData),
     spawn: (p) => spawnEngine(p, { maxLineChars: MAX_LINE_CHARS }),

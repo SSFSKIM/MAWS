@@ -21,7 +21,7 @@ import { OPERATION_COMMANDS } from '../engine/operations';
 import * as files from './schema/files';
 // C8c end
 // C11 start
-import { SETTINGS_DEFAULTS_V7 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V8 } from '../settings/defaults';
 // C11 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
@@ -250,7 +250,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V7, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V8, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -285,7 +285,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V7, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V8, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -302,7 +302,7 @@ describe('ipc schema validates both directions', () => {
       process: 'starting', exit: null, engineState: 'unknown', activity: null, turn: null, model: { requested: null, resolved: null }, effort: null,
       permissionMode: { requested: 'default', effective: 'default', refusal: null }, prePlanMode: null,
       gateway: { mode: 'gateway', baseUrl: null, verified: 'pending', autoModeServer: 'unknown', localLane: null },
-      subagentModel: null, modelOverrides: {}, engineVersion: null, fileCheckpointing: true, fastMode: { state: null, disabledReason: null },
+      subagentModel: null, modelOverrides: {}, engineVersion: null, fileCheckpointing: true, bin: '/b/claude', fastMode: { state: null, disabledReason: null },
       plugins: [], pluginErrors: [], pluginWarnings: [], backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0,
       queue: { length: 0, paused: false }, keepAlive: [], busy: false, lastUsedAt: '2026-09-28T10:00:00.000Z' /* C12 */, memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, trust: { attested: false, recorded: null } /* C10 */,
     };
@@ -364,14 +364,15 @@ describe('ipc schema validates both directions', () => {
       expect(note('x'.repeat(65_537))).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     });
 
-    it('types the launch answer as launching, relay_unreachable or refused with the five reasons', () => {
+    it('types the launch answer as launching, relay_unreachable or refused with the four reasons', () => {
       expect(validateCommandOutput('session.launch', { status: 'launching', session: status }).ok).toBe(true);
       const health = { url: 'http://127.0.0.1:8641', ok: false, status: null, latencyMs: null, checkedAt: '2026-09-28T10:00:00.000Z', error: 'ECONNREFUSED' };
       expect(validateCommandOutput('session.launch', { status: 'relay_unreachable', health }).ok).toBe(true);
-      for (const reason of ['already_live', 'binary_missing', 'binary_version', 'replay_disabled', 'settings_conflict']) {
+      for (const reason of ['already_live', 'binary_missing', 'replay_disabled', 'settings_conflict']) {
         expect(validateCommandOutput('session.launch', { status: 'refused', reason, message: 'm' }).ok, reason).toBe(true);
       }
       expect(validateCommandOutput('session.launch', { status: 'refused', reason: 'busy', message: 'm' }).ok).toBe(false);
+      expect(validateCommandOutput('session.launch', { status: 'refused', reason: 'binary_version', message: 'm' }).ok).toBe(false); // W13: retired with the pin
     });
 
     it('carries an operation receipt and its completion once, or once more late', () => {
@@ -513,7 +514,7 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('settings.get and settings.changed carry the whole version 3 state', () => {
-      const state = { settings: { ...SETTINGS_DEFAULTS_V7, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      const state = { settings: { ...SETTINGS_DEFAULTS_V8, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -560,11 +561,11 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('engine.configure takes an absolute path or null and answers binaryInfo', () => {
-      expect(validateCommandInput('engine.configure', { binaryPath: null, expectedVersion: '2.1.283' }).ok).toBe(true);
-      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude', expectedVersion: '2.1.283' }).ok).toBe(true);
-      expect(validateCommandInput('engine.configure', { binaryPath: 'claude', expectedVersion: '2.1.283' }).ok).toBe(false);
-      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude' }).ok).toBe(false);
-      const info = { path: '/opt/claude', expectedVersion: '2.1.283', version: null, ok: false, error: 'no executable engine binary at /opt/claude' };
+      expect(validateCommandInput('engine.configure', { binaryPath: null }).ok).toBe(true);
+      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude' }).ok).toBe(true);
+      expect(validateCommandInput('engine.configure', { binaryPath: 'claude' }).ok).toBe(false);
+      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude', expectedVersion: '2.1.283' }).ok).toBe(false); // W13: no expected version
+      const info = { path: '/opt/claude', testedVersion: '2.1.283', version: null, ok: false, error: 'no executable engine binary at /opt/claude' };
       expect(validateCommandOutput('engine.configure', info)).toEqual({ ok: true, value: info });
     });
 

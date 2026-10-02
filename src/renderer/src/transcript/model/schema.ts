@@ -82,7 +82,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     ...base, kind: z.literal('error'), severity: z.enum(['transient', 'error', 'notice']), text: z.string(), attempt: nullable(z.strictObject({ n: z.number(), max: nullable(z.number()) })),
     scope: z.enum(['turn', 'task', 'process', 'transport', 'request', 'api', 'reconnect', 'notice', 'exit', 'hook']), lostAttentionCount: nullable(z.number()),
-    action: z.literal('edit_prompt').optional(),
+    action: z.enum(['edit_prompt', 'engine_settings']).optional(), // W13: engine_settings
   }),
   z.strictObject({ ...base, kind: z.literal('boundary'), boundaryKind: z.enum(['compaction', 'reset', 'retraction', 'rewind']), text: z.string(), detail: nullable(z.string()), hiddenRows: z.number(), revealed: z.boolean() }),
   z.strictObject({ ...base, kind: z.literal('bash'), command: z.string(), stdout: z.string(), stderr: z.string(), exitCode: nullable(z.number()), cwd: nullable(z.string()) }),

@@ -32,6 +32,7 @@ export const SUMMARY_COPY = {
   model: (model: string | null, effort: string | null) => `${model ?? 'model unknown'} · ${effort ?? 'effort unknown'}`,
   review: 'Review',
   sessionInfo: 'Session info',
+  engineVersion: (version: string) => `Claude Code ${version}`, // W13: the version the session last ran on
   // Push state
   notPushed: 'Not pushed',
   ahead: (n: number, upstream: string) => `${n} ahead of ${upstream}`,

@@ -24,6 +24,7 @@ import { BashMode } from './bash-mode';
 import { DECLARED_DIALOG_KINDS, PermissionBroker } from './broker';
 import { cancelAsyncMessage, endSession, getContextUsage, getStatus, initialize, interrupt, REQUEST_TIMEOUT_MS, requestClassOf, setPermissionMode } from './controls';
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
+import { ENGINE_COMPAT_NOTICE_KEY, EngineCompatWatch } from './engine-compat'; // W13
 import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { Normalizer, type NormalizerWarning } from './normalizer';
@@ -118,6 +119,7 @@ export class EngineSession {
   private readonly bashMode: BashMode;
   private readonly ladder: TerminationLadder;
   private readonly clearAndImplement: ClearAndImplementSequence;
+  private readonly compat = new EngineCompatWatch(); // W13: one notice per session process
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
   private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */ };
@@ -418,6 +420,7 @@ export class EngineSession {
       subagentModel: env.CLAUDE_CODE_SUBAGENT_MODEL ?? null,
       modelOverrides: Object.fromEntries(Object.entries(env).filter(([key]) => /^ANTHROPIC_DEFAULT_[A-Z0-9_]+_MODEL$/.test(key))),
       engineVersion: tracked.engineVersion ?? this.plan.engineVersion, fileCheckpointing: env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING === '1',
+      bin: this.plan.bin, // W13: the spawn row's
       fastMode: tracked.fastMode, plugins: tracked.plugins, pluginErrors: tracked.pluginErrors, pluginWarnings: tracked.pluginWarnings,
       backgroundTasks: tracked.backgroundTasks, grants: [...this.grants.allow], mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages,
       pendingRequests: this.broker.live, queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
@@ -448,6 +451,10 @@ export class EngineSession {
       this.lastEventSeq = row.seq;
       this.emit('events', events);
       this.react(events);
+      // W13: the engine's own output that MAWS did not understand, from a version newer than tested, says so once,
+      // after what raised it (the running version is init's, else the probe's at spawn)
+      const compat = direction === 'in' ? this.compat.observe(events, this.tracker.engineVersion ?? this.plan.engineVersion) : null;
+      if (compat !== null) this.notice(ENGINE_COMPAT_NOTICE_KEY, compat);
     }
     return row;
   }

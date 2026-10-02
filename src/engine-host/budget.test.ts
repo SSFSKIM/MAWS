@@ -12,7 +12,7 @@ function row(appSessionId: string, over: Partial<EngineSessionStatus> = {}): Eng
     process: 'ready', exit: null, engineState: 'idle', activity: null, turn: null, model: { requested: null, resolved: null }, effort: null,
     permissionMode: { requested: 'default', effective: 'default', refusal: null }, prePlanMode: null,
     gateway: { mode: 'gateway', baseUrl: null, verified: 'routed', autoModeServer: 'unknown', localLane: null },
-    subagentModel: null, modelOverrides: {}, engineVersion: '2.1.283', fileCheckpointing: true, fastMode: { state: null, disabledReason: null },
+    subagentModel: null, modelOverrides: {}, engineVersion: '2.1.283', fileCheckpointing: true, bin: '/b/claude', fastMode: { state: null, disabledReason: null },
     plugins: [], pluginErrors: [], pluginWarnings: [], backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0,
     queue: { length: 0, paused: false }, keepAlive: [], busy: false, lastUsedAt: '2026-09-29T10:00:00.000Z',
     memory: { rssKiB: 100_000, treeRssKiB: 400_000, sampledAt: '2026-09-29T10:00:10.000Z' }, journalPath: '/j', hostHooks: [], lastEventSeq: 7,

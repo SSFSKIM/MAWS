@@ -28,6 +28,7 @@ export function Environment({ appSessionId, record, directory }: { appSessionId:
           <span className="text-fg-muted">{watchFailure(entry)}</span>
         </Row>
       )}
+      {record.engineVersion !== null && <Row><span className="block truncate text-fg-muted">{SUMMARY_COPY.engineVersion(record.engineVersion)}</span></Row> /* W13 */}
       <Row action={<ToolButton toolId="session-info" label={SUMMARY_COPY.sessionInfo} appSessionId={appSessionId} />}>
         <span className="block truncate text-fg-muted">{SUMMARY_COPY.model(record.model.resolved ?? record.model.requested, record.effort)}</span>
       </Row>

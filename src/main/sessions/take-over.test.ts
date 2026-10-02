@@ -24,7 +24,7 @@ function host(initial: ForeignHolder[], reserved = false, entrypoint: string | u
       const now = reads === null ? holders : reads[Math.min(read++, reads.length - 1)];
       value = { refreshedAt: '2026-10-01T18:00:00.000Z', holders: now.map((holder) => ({ sessionId: S, appSessionId: APP, holder, cwd: '/w', ...(entrypoint === undefined ? {} : { entrypoint }) })) };
     }
-    else if (name === 'engine.binaryInfo') value = { path: '/pinned/claude', expectedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
+    else if (name === 'engine.binaryInfo') value = { path: '/pinned/claude', testedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
     return { ok: true, value } as CommandResult<CommandName>;
   });
   return { calls, dispatch, clear: () => void (holders = []) };

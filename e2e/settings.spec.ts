@@ -5,7 +5,7 @@
 // relaunch over the same profile. The monospace-font case needs the harness's `#probe` page (`pnpm e2e:settings` builds
 // one; under a plain build it skips): a terminal of the product registry drawing Nerd Font private-use glyphs once
 // `appearance.monoFont` names an installed Nerd Font, and boxes again when it is cleared.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -41,18 +41,20 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       const { app, page } = maws;
       // Main migrated C5's file to version 3 on load, keeping its theme, override and notification choices. C12: to
       // version 4, with the memory budget's defaults. W2: to version 5, with the transcript's default width. W3: to
-      // version 6, with acceptEdits as the auto fallback. W7: to version 7, with the memory budget on.
+      // version 6, with acceptEdits as the auto fallback. W7: to version 7, with the memory budget on. W13: to version 8,
+      // with no engine pin.
       expect(readSettings(userData)).toMatchObject({
-        version: 7, // C12: 4; W2: 5; W3: 6; W7: 7
+        version: 8, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
         notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
-        engine: { binaryPath: null, pinnedVersion: '2.1.283', subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */ },
+        engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */ }, // W13: no pinnedVersion
         gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
         usage: { nearLimitPercent: 90 },
         appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
         permissions: { autoFallback: 'acceptEdits' }, // W3
       });
+      expect(readSettings(userData).engine).not.toHaveProperty('pinnedVersion'); // W13
 
       // Settings… sits in the application menu at ⌘, and opens the singleton tab.
       expect(await accelerator(app, 'settings.open')).toBe('Cmd+,');
@@ -172,6 +174,34 @@ test('settings: the transcript width applies to the root --measure, and Narrow r
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();
+  }
+});
+
+// W13 (charter D-1 as amended 2026-10-01): the Binary row is the binary this run resolves (MAWS_E2E_ENGINE_BIN here, a
+// stand-in a version ahead of the fixtures), by its real path, with its probed version and the tested version as
+// information, never a refusal; Update is offered and never clicked, since it would update this Mac's Claude Code.
+test('settings: Engine shows the resolved binary, its version and the tested one, and offers the update', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'maws-w13-engine-'));
+  const stub = join(dir, 'claude');
+  writeFileSync(stub, '#!/bin/sh\necho "2.1.290 (Claude Code)"\n');
+  chmodSync(stub, 0o755);
+  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: stub } });
+  try {
+    const { app, page } = maws;
+    await menu(app, 'settings.open');
+    const binary = panel(page).getByRole('group', { name: 'Binary' });
+    await expect(binary).toContainText(realpathSync(stub));
+    await expect(binary).toContainText('2.1.290');
+    await expect(binary).toContainText("MAWS's fixtures and conformance tests were recorded on Claude Code 2.1.283");
+    await expect(binary.locator('.text-warning')).toHaveCount(0);
+    await expect(binary.getByRole('button', { name: 'Use installed' })).toHaveCount(0);
+    const update = panel(page).getByRole('group', { name: 'Update' });
+    await expect(update.getByRole('button', { name: 'Update Claude Code…' })).toBeVisible();
+    await expect(update).toContainText('New sessions start on the new version; running sessions keep theirs.');
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

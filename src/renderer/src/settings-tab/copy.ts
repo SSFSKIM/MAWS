@@ -17,23 +17,18 @@ export const INDEX = {
 };
 
 export const ENGINE = {
+  // W13 (charter D-1 as amended 2026-10-01): the installed Claude Code by default, never refused for its version
   binary: 'Binary',
   change: 'Change…',
-  useDefault: 'Use default',
-  binaryNote: 'Absolute path, never resolved through PATH. Verified at every launch.',
-  binaryMismatch: 'does not match the pinned version · sessions will refuse to start until you re-pin',
+  useInstalled: 'Use installed',
+  binaryNote: "New sessions start on your installed Claude Code (~/.local/bin/claude, else claude on your shell's PATH), found again at every launch. Running sessions keep the binary they started on.",
+  binaryChosenNote: 'New sessions start on the binary you chose. Running sessions keep the binary they started on.',
+  tested: (version: string) => `MAWS's fixtures and conformance tests were recorded on Claude Code ${version}`,
   binaryReading: 'Reading the binary…',
-  pinned: 'Pinned version',
-  matches: 'matches binary',
-  reports: (version: string) => `binary reports ${version}`,
-  noVersion: 'binary did not report a version',
-  repin: 'Re-pin…',
-  pinnedNote: 'Each session records the version it ran on.',
-  repinTitle: (version: string) => `Re-pin the engine to ${version}?`,
-  repinBody: (from: string, to: string) =>
-    `The pin moves from ${from} to ${to}, and sessions start on ${to}. Upgrading the engine is a deliberate re-probe: the fixtures and conformance tests were recorded on 2.1.283.`,
-  repinConfirm: (version: string) => `Re-pin to ${version}`,
-  cancel: 'Cancel',
+  update: 'Update',
+  updateAction: 'Update Claude Code…',
+  updateNote: 'Runs claude update in a terminal tab. New sessions start on the new version; running sessions keep theirs.',
+  updateChosenNote: 'Runs claude update in a terminal tab. New sessions stay on the binary you chose until Use installed.',
   configHome: 'Config home',
   readOnly: 'read-only to MAWS',
   configHomeNote: 'The engine owns transcripts, settings and trust. MAWS reads them and keeps its own index elsewhere.',
@@ -66,15 +61,6 @@ export const BUDGET_SETTINGS = {
   remove: (name: string) => `Remove ${name}`,
 };
 
-// M4: MAWS's copy of the pinned engine (Interfaces "Engine custody")
-export const CUSTODY_SETTINGS = {
-  label: 'Engine copy',
-  ok: (version: string, sha256: string, copiedAt: string) => `MAWS copy · ${version} · sha256 ${sha256.slice(0, 8)}… · copied ${copiedAt.slice(0, 10)}`,
-  chosen: 'not used while a binary path is chosen',
-  off: 'not kept in this run · launches use the installed binary',
-  reading: 'Checking the copy…',
-  note: "Sessions launch from MAWS's own copy of the pinned version, verified at every start, so the installer's cleanup never removes it. A missing or altered copy refuses launches.",
-};
 // C12 end
 
 export const GATEWAY = {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_DEFAULTS_V7 } from '../../settings/defaults';
+import { SETTINGS_DEFAULTS_V8 } from '../../settings/defaults';
 import { commands, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands
 
-const base = SETTINGS_DEFAULTS_V7;
+const base = SETTINGS_DEFAULTS_V8;
 const issueCodes = (value: unknown) => {
   const parsed = SettingsSchema.safeParse(value);
   return parsed.success ? [] : parsed.error.issues.map((issue) => issue.code);
@@ -23,7 +23,9 @@ describe('settings keymap is a partial record', () => {
     expect(issueCodes({ ...base, keymap: { 'tab.close': 'Cmd J!' } })).toEqual(['invalid_format']);
   });
 
-  it('is version 3 and carries the notification policy', () => {
+  it('is version 8 (W13: no engine pin) and carries the notification policy', () => {
+    expect(SettingsSchema.safeParse({ ...base, version: 7 }).success).toBe(false);
+    expect(SettingsSchema.safeParse({ ...base, engine: { ...base.engine, pinnedVersion: '2.1.283' } }).success).toBe(false);
     expect(SettingsSchema.safeParse({ version: 1, theme: 'light' }).success).toBe(false);
     expect(SettingsSchema.safeParse({ ...base, version: 2 }).success).toBe(false);
     expect(SettingsSchema.safeParse({ ...base, notifications: { enabled: true, sound: false } }).success).toBe(false);
@@ -36,18 +38,10 @@ describe('settings keymap is a partial record', () => {
   });
 });
 
-// C12 start: MAWS's custody of the pinned engine (C12 execution document, Interfaces "X2 additions")
-describe('settings.engineCustody and settings.engineApplied', () => {
-  const manifest = { version: '2.1.283', sha256: 'd8cb1e5c', size: 225036032, source: '/s/2.1.283', copiedAt: '2026-09-29T12:00:00.000Z' };
-  it('custody is the copy with its manifest, a refusal with its message, or null when custody does not run', () => {
-    expect(commands['settings.engineCustody'].output.safeParse({ state: 'ok', path: '/u/engine/2.1.283/claude', manifest }).success).toBe(true);
-    for (const state of ['missing', 'mismatch', 'version']) expect(commands['settings.engineCustody'].output.safeParse({ state, path: '/p', message: 'm' }).success).toBe(true);
-    expect(commands['settings.engineCustody'].output.safeParse(null).success).toBe(true);
-    expect(commands['settings.engineCustody'].output.safeParse({ state: 'ok', path: '/p', message: 'm' }).success).toBe(false);
-    expect(commands['settings.engineCustody'].output.safeParse({ state: 'gone', path: '/p', message: 'm' }).success).toBe(false);
-  });
-  it('both are main’s, and engineApplied answers nothing but its completion', () => {
-    expect(commands['settings.engineCustody'].owner).toBe('main');
+// C12 start (C12 execution document, Interfaces "X2 additions"); W13: settings.engineCustody retired with custody
+describe('settings.engineApplied', () => {
+  it('is main’s, answers nothing but its completion, and custody’s read is gone', () => {
+    expect(commands).not.toHaveProperty('settings.engineCustody');
     expect(commands['settings.engineApplied'].owner).toBe('main');
     expect(commands['settings.engineApplied'].output.safeParse(undefined).success).toBe(true);
   });
