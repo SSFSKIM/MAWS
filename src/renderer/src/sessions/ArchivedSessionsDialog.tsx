@@ -11,6 +11,7 @@ import { cleanupTargetOf } from './CleanupDialog';
 import { openDialog } from './dialogs';
 import { Sheet } from './Sheet';
 import { QUIET, SECONDARY } from './ui';
+import { displayTitle } from './title';
 
 export function ArchivedSessionsDialog({ projectId }: { projectId: ProjectId }) {
   const project = useSessions((s) => s.projects.get(projectId) ?? null);
@@ -45,9 +46,9 @@ export function ArchivedSessionsDialog({ projectId }: { projectId: ProjectId }) 
       ) : (
         <ul aria-label="Archived sessions" className="m-0 flex max-h-[50vh] list-none flex-col overflow-auto p-0">
           {rows.map((r) => (
-            <li key={r.appId} aria-label={r.title.text} className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0">
+            <li key={r.appId} aria-label={displayTitle(r)} className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0">
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-fg">{r.title.text}</span>
+                <span className="truncate text-fg">{displayTitle(r)}</span>
                 <span className="truncate font-mono text-ui-sm text-fg-muted">{r.worktree?.path ?? r.directory}</span>
               </div>
               <button type="button" onClick={() => void unarchive(r.appId)} className={SECONDARY}>

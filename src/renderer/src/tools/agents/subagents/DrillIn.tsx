@@ -19,6 +19,7 @@ import { useTaskGraph } from '../store';
 import { RelayComposer } from './RelayComposer';
 import { agentOfToolUse, refOf, taskOf, useTicker } from './shared';
 import type { SubagentsHandle } from './SubagentsTool';
+import { displayTitle } from '../../../sessions/title';
 
 // The child's source: C6's `ipcSource` in the product; the `#panel` harness sets `HarnessSession.childSource(ref)` here
 // (as C8a's `child` tool mounts it), so the product path stays `ipcSource`.
@@ -51,7 +52,7 @@ interface Props {
 
 export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
   const node = useTaskGraph((s) => s.entries.get(appSessionId)?.graph.tasks.get(taskOf(agentId)));
-  const sessionTitle = ctx.session?.title.text ?? appSessionId;
+  const sessionTitle = displayTitle(ctx.session);
   const title = node ? rowTitle(node) : agentId;
 
   const source = useMemo(() => childSourceFor(appSessionId, agentId), [appSessionId, agentId]);

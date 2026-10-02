@@ -16,6 +16,7 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { cardActivity, cardFooter } from './derive';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
+import { displayTitle } from '../sessions/title';
 
 type PaneIndex = 0 | 1;
 
@@ -42,7 +43,7 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
   const foreign = holderLine(record) !== null;
   const waiting = waitingItem(pending);
   const request = !foreign && waiting?.tier === 1 ? waiting.oldest : null;
-  const title = record.title.text;
+  const title = displayTitle(record);
   const branch = record.branch ?? record.worktree?.branch ?? null;
   const footer = cardFooter(digest);
 

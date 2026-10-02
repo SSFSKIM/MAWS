@@ -24,6 +24,7 @@ import { FOOTER, SWITCH, type Route } from './copy';
 import { switchRefusal } from './routing-facts';
 import { sessionStartOver, type SessionStart, type StartOptions } from './session-start';
 import { useGateway, type GatewayStore, type SwitchConfirm, type SwitchState } from './store';
+import { displayTitle } from '../sessions/title';
 
 export type SwitchOutcome = 'done' | 'cancelled' | 'failed';
 // What the sheet answers: the Direct model chosen (with its display name for the toast, and the effort the launch needs
@@ -254,7 +255,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
 
       await resumeQueue();
       put(id, { ...state, phase: 'done', error: null });
-      deps.toast(SWITCH.toast(record.title.text, target, answer.displayName));
+      deps.toast(SWITCH.toast(displayTitle(record), target, answer.displayName));
       return 'done';
     } catch (error) {
       if (error instanceof Failed) return fail(error.message);

@@ -19,6 +19,7 @@ import { ipc } from '../ipc/client';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { rowBranch, sessionAge } from './derive';
+import { displayTitle } from '../sessions/title';
 
 export function SessionHoverCard({ record, children }: { record: SessionRecord; children: ReactNode }) {
   return (
@@ -27,7 +28,7 @@ export function SessionHoverCard({ record, children }: { record: SessionRecord; 
       <Radix.Portal>
         <Radix.Content
           role="dialog"
-          aria-label={record.title.text}
+          aria-label={displayTitle(record)}
           data-hover-card
           side="right"
           align="start"
@@ -70,7 +71,7 @@ function Body({ appSessionId }: { appSessionId: AppSessionId }) {
     <div className="flex flex-col gap-2 text-ui-sm text-fg">
       <div className="flex min-w-0 items-start gap-2">
         <GlyphMark glyph={glyph} className="w-[14px] shrink-0 leading-[18px]" />
-        <h3 className="m-0 line-clamp-2 min-w-0 text-ui leading-[18px] font-semibold break-words">{record.title.text}</h3>
+        <h3 className="m-0 line-clamp-2 min-w-0 text-ui leading-[18px] font-semibold break-words">{displayTitle(record)}</h3>
       </div>
       <p data-testid="hover-meta" className="m-0 text-fg-muted tabular-nums">
         {meta}

@@ -18,6 +18,7 @@ import { Sheet } from './Sheet';
 import { isStarting, useSetup } from './store';
 import { QUIET, SECONDARY } from './ui';
 import { worktreeRows, type Claim, type WorktreeRow } from './worktree-rows';
+import { displayTitle } from './title';
 
 type Loaded =
   | { kind: 'loading' }
@@ -113,7 +114,7 @@ function Rows({ projectId, repoRoot, rows, onRefresh }: { projectId: ProjectId; 
 function Row({ projectId, repoRoot, row }: { projectId: ProjectId; repoRoot: string; row: WorktreeRow }) {
   const records = useSessions((s) => s.records);
   const [busy, setBusy] = useState(false);
-  const titleOf = (id: AppSessionId) => records.get(id)?.title.text || 'Untitled session';
+  const titleOf = (id: AppSessionId) => displayTitle(records.get(id));
 
   const newSessionHere = async () => {
     setBusy(true);

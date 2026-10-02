@@ -14,6 +14,7 @@ import { requestCloseTab, useUnstartedTitle } from '../keymap/actions-runtime';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
+import { displayTitle } from '../sessions/title';
 
 export const TAB_DRAG_TYPE = 'application/x-maws-tab';
 
@@ -47,7 +48,7 @@ function useSessionLabel(appSessionId: AppSessionId): TabLabel {
   const project = useProjectName(appSessionId);
   const unstarted = useUnstartedTitle(appSessionId);
   if (!record) return { title: unstarted.title, secondary: unstarted.project, glyph: null, fileType: null };
-  return { title: record.title.text, secondary: project, glyph: glyphFor(record, digest ?? null, pending), fileType: null };
+  return { title: displayTitle(record), secondary: project, glyph: glyphFor(record, digest ?? null, pending), fileType: null };
 }
 
 function useTabLabel(tab: TabRef): TabLabel {

@@ -16,6 +16,7 @@ import { archiveSession } from './record-ops';
 import { holderWords } from './holder-words';
 import { Sheet, SheetForm } from './Sheet';
 import { CHOICE, DANGER, PRIMARY } from './ui';
+import { displayTitle } from './title';
 
 interface Identity {
   repoRoot: string;
@@ -123,7 +124,7 @@ export function CleanupDialog({ target }: { target: CleanupTarget }) {
   const idle = occupancy?.idleAppSessionIds ?? [];
   const liveCount = occupancy ? occupancy.self + occupancy.foreign + occupancy.unbound : 0;
   const changes = facts.status ? facts.status.dirty.tracked + facts.status.dirty.untracked : 0;
-  const titleOf = (id: AppSessionId) => records.get(id)?.title.text ?? id;
+  const titleOf = (id: AppSessionId) => displayTitle(records.get(id));
   const liveHolder = (id: AppSessionId) => {
     const process = engine.get(id)?.process;
     if (process !== undefined && process !== 'exited') return 'Working in MAWS';

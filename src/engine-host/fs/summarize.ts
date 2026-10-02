@@ -202,7 +202,10 @@ function firstUserText(records: TranscriptRecord[]): string | null {
       continue;
     }
     if (Array.isArray(content)) {
-      const text = content.find((block): block is { type: 'text'; text: string } => isBlock(block) && block.type === 'text' && typeof block.text === 'string');
+      // W11 (I1): an empty text block (beside an image, say) is no prompt; the record's first block with words is
+      const text = content.find(
+        (block): block is { type: 'text'; text: string } => isBlock(block) && block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '',
+      );
       if (text) return text.text.slice(0, TEXT_CAP);
     }
   }

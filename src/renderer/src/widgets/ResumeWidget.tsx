@@ -16,6 +16,7 @@ import { useSessions, type SessionsState } from '../stores/sessions';
 import { RESUME, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Row, Rows, TextButton } from './parts';
 import { WidgetFrame } from './WidgetFrame';
+import { displayTitle } from '../sessions/title';
 
 const LIMIT = 20;
 const foreign = (record: SessionRecord) => record.holder.kind === 'terminal' || record.holder.kind === 'background_job';
@@ -47,7 +48,7 @@ function ResumeRow({ record, close }: { record: SessionRecord; close(): void }) 
         <span className="flex items-baseline gap-2">
           <GlyphMark glyph={glyph} />
           <span data-title className="min-w-0 truncate">
-            {record.title.text}
+            {displayTitle(record)}
           </span>
         </span>
       }

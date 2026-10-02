@@ -8,6 +8,7 @@ import type { LayoutMain, TabRef } from '@shared/ipc/schema/layout';
 import type { ActionId } from '@shared/keymap/actions';
 import type { Location } from '@shared/sessions/intent';
 import { useLayout } from '../stores/layout';
+import { NEW_CHAT } from '../sessions/title';
 import { useSessions } from '../stores/sessions';
 import { create } from 'zustand';
 import { createHandlerRegistry } from './registry';
@@ -102,7 +103,7 @@ export async function requestCloseTab(id: string): Promise<void> {
 // registered function is called during render and must not call hooks; when what it would answer changes, its
 // registrant calls `unstartedTitlesChanged` (New chat, 2026-10-01: the project row chooses the project after the tab
 // opened). `projectId` is the project the unstarted session is in, for New chat's preselection.
-export const NEW_CHAT = 'New chat';
+export { NEW_CHAT }; // W11: one string, `sessions/title.ts`, for the control and an untitled session's title
 export interface UnstartedTitleAnswer {
   title: string;
   project: string | null;

@@ -21,6 +21,7 @@ import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
+import { displayTitle } from '../sessions/title';
 
 export const usePalette = create<{ open: boolean }>()(() => ({ open: false }));
 export const togglePalette = () => usePalette.setState((s) => ({ open: !s.open }));
@@ -149,7 +150,7 @@ function SessionItem({ record, project, onOpen }: { record: SessionRecord; proje
   return (
     <Command.Item value={`session:${record.appId}`} onSelect={() => onOpen(record.appId, false)} className={ITEM}>
       <GlyphMark glyph={glyphFor(record, digest, pending)} className="w-4 shrink-0" />
-      <span className="truncate">{record.title.text}</span>
+      <span className="truncate">{displayTitle(record)}</span>
       {project && <span className="ml-auto shrink-0 text-ui-sm text-fg-muted">{project.name}</span>}
     </Command.Item>
   );

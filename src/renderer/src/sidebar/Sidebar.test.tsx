@@ -284,6 +284,27 @@ describe('a project’s page', () => {
   });
 });
 
+// W11 (I1): a session launched from MAWS carries its first prompt from the moment its record exists (main seeds it at
+// launch), and a record with no title yet reads "New chat", never a blank row.
+describe('a freshly launched session', () => {
+  beforeEach(() => fillStores(nine));
+
+  it('its row reads its first prompt, and a record without a title reads "New chat"', () => {
+    const base = nine.sessions.find((r) => r.projectId === 'proj-maws')!;
+    const now = new Date().toISOString();
+    const launched = { ...base, appId: '11111111-1111-4111-8111-111111111111' as AppSessionId, engineSessionId: null, title: { text: 'Fix the drag handle', source: 'none' as const }, pinned: false, unread: false, createdAt: now, updatedAt: now };
+    const blank = { ...launched, appId: '22222222-2222-4222-8222-222222222222' as AppSessionId, title: { text: '', source: 'none' as const } };
+    act(() => {
+      useSessions.getState().applyChanged({ record: launched, cause: 'live', revision: 1000 });
+      useSessions.getState().applyChanged({ record: blank, cause: 'live', revision: 1001 });
+    });
+    openPage('proj-maws');
+    render(<Sidebar />);
+    expect(row('Fix the drag handle').textContent).toContain('Fix the drag handle');
+    expect(row('New chat').textContent).toContain('New chat');
+  });
+});
+
 describe('sidebar keyboard', () => {
   beforeEach(() => fillStores(nine));
 

@@ -15,6 +15,7 @@ import { cleanupTargetOf } from './CleanupDialog';
 import { confirm, openDialog } from './dialogs';
 import { archiveSession, forkInPlace } from './record-ops';
 import { resumeSession } from './setup-actions';
+import { displayTitle } from './title';
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
 
@@ -55,7 +56,7 @@ async function archiveProjectSessions(projectId: ProjectId): Promise<void> {
   const refused: string[] = [];
   for (const id of ids) {
     const answer = await archiveSession(id);
-    if ('error' in answer) refused.push(`${sessions.records.get(id)?.title.text ?? id}: ${answer.error}`);
+    if ('error' in answer) refused.push(`${displayTitle(sessions.records.get(id))}: ${answer.error}`);
   }
   if (refused.length > 0) fail(`Not archived: ${refused.join('; ')}`);
 }

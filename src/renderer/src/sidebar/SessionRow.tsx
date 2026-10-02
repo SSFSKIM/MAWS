@@ -17,6 +17,7 @@ import { sessionAge } from './derive';
 import { SessionHoverCard } from './HoverCard';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
 import { sessionNodeId, useTree } from './tree';
+import { displayTitle } from '../sessions/title';
 
 export const SESSION_DRAG_TYPE = 'application/x-maws-session';
 
@@ -29,7 +30,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: 1 
   const nodeId = sessionNodeId(id);
   const glyph = glyphFor(record, digest ?? null, pending);
   const selected = tree.selected === id;
-  const title = record.title.text;
+  const title = displayTitle(record);
   const offered = sessionActionsFor(record);
   const hoverActions = HOVER_ACTIONS.filter((action) => offered.includes(action));
   // While the actions show, the age and the dot give them the row's end.

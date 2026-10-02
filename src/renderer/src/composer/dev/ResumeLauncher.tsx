@@ -12,6 +12,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { useSessions } from '../../stores/sessions';
 import { isResumable, parseExtraSettings, resumeSpec } from './resume-spec';
+import { displayTitle } from '../../sessions/title';
 
 const MODES: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'auto'];
 const control = 'rounded-sm border border-border bg-bg px-1 text-fg';
@@ -59,7 +60,7 @@ export function ResumeLauncher({ client = ipc }: { client?: MawsBridge }) {
       <ul aria-label="Resumable sessions" className="m-0 flex list-none flex-col gap-0.5 p-0">
         {records.map((record) => (
           <li key={record.appId} className="flex min-w-0 items-center gap-3">
-            <span className="min-w-0 truncate text-fg">{record.title.text || record.appId}</span>
+            <span className="min-w-0 truncate text-fg">{displayTitle(record)}</span>
             <span className="min-w-0 flex-1 truncate font-mono">{record.directory}</span>
             {outcomes.has(record.appId) && (
               <output role="status" className="shrink-0 font-mono">
