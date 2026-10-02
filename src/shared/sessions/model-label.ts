@@ -2,8 +2,9 @@
 // high, sonnet xhigh, fable high, sol high), and never "Default", "Default model" or "Default (recommended)". The alias
 // is the catalogue row's value without its `claude/` prefix; the catalogue's `default` row shares Opus's resolved id
 // and comes first (reads.jsonl seq 3), so a resolved id is named by the first row that is not `default`, and `default`
-// itself by the row its resolved model names. Pure.
-import type { Effort } from '@shared/engine/launch-spec';
+// itself by the row its resolved model names. Pure. W9 (H4): moved here from the composer's frame, since the panel's
+// summary names the model by it too (beside Settings, the widgets and the Direct model sheet).
+import type { Effort } from '../engine/launch-spec';
 
 interface Row {
   value: string;

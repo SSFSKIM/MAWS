@@ -8,6 +8,7 @@ import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { WorktreeInfo } from '@shared/sessions/worktree';
 import type { NeedsYouRow } from '../attention/derive';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
+import { branchLabel, recordBranch } from '../sessions/branch-label';
 
 // "Other sessions": the pseudo-project at the end of the list, for sessions without a (known) project.
 export const OTHER_SESSIONS = 'other' as const;
@@ -139,12 +140,13 @@ export function projectPage({ sessions, digests, rows, sort, matches, worktrees 
   }
   const worktreeGroups: SessionGroup[] = [...byWorktree].map(([path, list]) => {
     const info = listed.get(path)?.info;
-    const recorded = list.find((r) => r.worktree?.branch ?? r.branch);
+    const recorded = list.map(recordBranch).find((b) => b !== null) ?? null;
     return {
       key: path,
       kind: 'worktree',
       label: basename(path),
-      branch: info ? info.branch : (recorded?.worktree?.branch ?? recorded?.branch ?? null),
+      // W9 (H2): git's listed branch, "detached" for a detached checkout; before the list answers, a branch recorded
+      branch: branchLabel(recorded, info ? { repository: true, branch: info.branch } : null),
       path,
       sessions: order(list),
     };
@@ -154,7 +156,8 @@ export function projectPage({ sessions, digests, rows, sort, matches, worktrees 
     const ib = listed.get(b.key)?.index ?? Number.POSITIVE_INFINITY;
     return ia - ib || a.label.localeCompare(b.label);
   });
-  const mainBranch = worktrees?.find((w) => w.isMain)?.branch ?? null;
+  const mainInfo = worktrees?.find((w) => w.isMain);
+  const mainBranch = mainInfo ? branchLabel(null, { repository: true, branch: mainInfo.branch }) : null; // W9 (H2)
   const grouped = worktreeGroups.length > 0;
   const groups: SessionGroup[] = [];
   if (main.length > 0) groups.push({ key: 'main', kind: 'main', label: 'Main', branch: mainBranch, path: null, sessions: order(main) });
@@ -168,10 +171,10 @@ export const hasWorktreeSessions = (sessions: readonly SessionRecord[]) => sessi
 // ---- row text ----------------------------------------------------------------------------------------------------------
 
 // A worktree session's branch (C10's record, else the index's), as its hover card names it; null for a session in the
-// project directory and for a detached worktree.
+// project directory and for a worktree whose record names none (W9, H2: the record cannot tell a detached checkout).
 export function rowBranch(record: SessionRecord): string | null {
   if (record.worktree === null) return null;
-  return record.worktree.branch ?? record.branch ?? null;
+  return branchLabel(recordBranch(record));
 }
 
 const MINUTE = 60_000;

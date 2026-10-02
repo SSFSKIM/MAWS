@@ -1,8 +1,8 @@
 // Getting to what needs you (charter §5.7; C5 execution document, M5): ⌘⇧J opens the oldest Needs-you session that is
 // not the one in front of you, in the focused pane (a session tab, never the Overview, because the item wants an
 // answer and the docked card is where scopes live); a notification click arrives from main as `attention.navigate`
-// and opens the same way, recording the item for C6's transcript to jump to; when main could not post an OS
-// notification (`attention.notified { delivery: 'fallback' }`) the page shows a toast in its place.
+// and opens the same way (W9: the item it names is no longer kept for a transcript jump nothing built); when main could
+// not post an OS notification (`attention.notified { delivery: 'fallback' }`) the page shows a toast in its place.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
@@ -24,9 +24,8 @@ function openNextNeedsYou(): void {
   if (next) openInFocusedPane(next.appSessionId);
 }
 
-function navigate({ appSessionId, attentionId }: EventPayload<'attention.navigate'>): void {
+function navigate({ appSessionId }: EventPayload<'attention.navigate'>): void {
   openInFocusedPane(appSessionId as AppSessionId);
-  useLayout.getState().requestFocus(attentionId === null ? null : { appSessionId: appSessionId as AppSessionId, attentionId });
 }
 
 function fallbackToast({ appSessionId, attentionId, delivery }: EventPayload<'attention.notified'>): void {

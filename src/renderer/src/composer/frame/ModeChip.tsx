@@ -19,7 +19,7 @@ export function ModeChip({ binding, onOpen }: { binding: ModeBinding; onOpen?():
         setOpen(next);
       }}
     >
-      <Popover.Trigger aria-label={`Permission mode ${PERMISSION_MODE_LABELS[binding.value ?? 'auto']}${refusal ? ` · ${refusal}` : ''}`} title={refusal ?? binding.disabled ?? 'Permission mode'} className={`${CHIP} font-mono`}>
+      <Popover.Trigger aria-label={`Permission mode ${PERMISSION_MODE_LABELS[binding.value ?? 'auto']}${refusal ? ` · ${refusal}` : ''}`} title={refusal ?? binding.disabled ?? 'Permission mode'} className={CHIP}>
         {refusal && (
           <span aria-hidden className="text-warning">
             ⚠

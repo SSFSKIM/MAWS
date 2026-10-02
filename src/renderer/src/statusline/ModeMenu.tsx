@@ -88,7 +88,7 @@ export function ModeMenu({ binding, onDone }: { binding: ModeBinding; onDone?: (
               onClick={() => choose(option.mode)}
               className={ITEM}
             >
-              <span className="font-mono">{PERMISSION_MODE_LABELS[option.mode]}</span>
+              <span>{PERMISSION_MODE_LABELS[option.mode]}</span>
               <span className="text-ui-sm text-fg-muted">{option.mode === 'auto' && reason !== null && binding.disabled === null ? reason : option.description}</span>
             </button>
           );

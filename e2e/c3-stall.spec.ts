@@ -146,7 +146,7 @@ async function makeDeep(page: Page): Promise<string> {
   if (!known) value(await invoke(page, 'session.projects.add', { directory: repo }));
   const before = new Set(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId));
   await openProject(page, 'deep'); // W5: the "+" beside the name on the project's page
-  await sidebar(page).locator('[data-level-pane="2"]').getByRole('button', { name: 'New session in deep', exact: true }).click();
+  await sidebar(page).locator('[data-level-pane="2"]').getByRole('button', { name: 'New chat in deep', exact: true }).click();
   let id: AppSessionId | undefined;
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !before.has(i.appSessionId))?.appSessionId)).toBeDefined();
   value(await invoke(page, 'session.intent.patch', { appSessionId: id!, patch: { model: 'haiku', permissionMode: 'auto' } }));

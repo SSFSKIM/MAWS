@@ -35,13 +35,13 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     }
   };
 
-  it('a fresh index has user_version 2 and the five tables, in WAL mode', () => {
+  it('a fresh index has user_version 3 and the five tables, in WAL mode', () => {
     const path = join(dir.path, 'index.sqlite');
     const index = open(path);
     expect(index.readOnly).toBe(false);
-    expect(index.applied).toEqual([1, 2]);
-    expect(MIGRATIONS).toHaveLength(2);
-    expect(inspect(path)).toEqual({ version: 2, tables: ['attention_items', 'drafts', 'projects', 'replay_fixtures', 'sessions'], mode: 'wal' });
+    expect(index.applied).toEqual([1, 2, 3]);
+    expect(MIGRATIONS).toHaveLength(3);
+    expect(inspect(path)).toEqual({ version: 3, tables: ['attention_items', 'drafts', 'projects', 'replay_fixtures', 'sessions'], mode: 'wal' });
     // v1 is unshipped, so the removal mark (whole-branch review) is part of it rather than a v2.
     const db = new DatabaseSync(path, { readOnly: true });
     try {
@@ -71,7 +71,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([2]);
+    expect(index.applied).toEqual([2, 3]);
     const routed = (appId: string) => index.sessions.get(appId as AppSessionId)?.gateway.routed;
     expect([routed('discovered'), routed('routed'), routed('direct'), routed('mismatch')]).toEqual([null, true, false, false]);
     // The rebuild touches only the flag: every other column, its values and the project index survive.
@@ -89,6 +89,42 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     } finally {
       db.close();
     }
+  });
+
+  // W9 (H2): `HEAD` and empty are no branch names; rows an earlier summary filled with them are cleared once, and a later
+  // summary naming `HEAD` brings back neither them nor a branch the row held before.
+  it('v3 clears the HEAD and empty branches earlier summaries stored, and a later HEAD summary stores none', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS[0].sql);
+    raw.exec(MIGRATIONS[1].sql);
+    raw.exec('PRAGMA user_version = 2');
+    const insert = raw.prepare('INSERT INTO sessions (app_id, engine_session_id, directory, worktree_path, worktree_branch, branch, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, \'t\', \'t\')');
+    const nonRepo = summary({ gitBranch: 'HEAD', directory: '/tmp/not-a-repo' });
+    const onMain = summary({ gitBranch: 'main' });
+    insert.run('non-repo', nonRepo.sessionId, '/tmp/not-a-repo', null, null, 'HEAD', JSON.stringify(nonRepo));
+    insert.run('empty', summary().sessionId, '/w', '/w/.claude/worktrees/x', '', '', null);
+    insert.run('on-main', onMain.sessionId, '/w', '/w/.claude/worktrees/y', 'HEAD', 'main', JSON.stringify(onMain));
+    raw.close();
+
+    const index = open(path);
+    expect(index.applied).toEqual([3]);
+    const of = (appId: string) => index.sessions.get(appId as AppSessionId)!;
+    expect([of('non-repo').branch, of('empty').branch, of('empty').worktree, of('on-main').branch, of('on-main').worktree]).toEqual([
+      null,
+      null,
+      { path: '/w/.claude/worktrees/x', branch: null },
+      'main',
+      { path: '/w/.claude/worktrees/y', branch: null },
+    ]);
+    expect(index.sessions.summaryOf('non-repo' as AppSessionId)?.gitBranch).toBeNull();
+    expect(index.sessions.summaryOf('on-main' as AppSessionId)?.gitBranch).toBe('main');
+
+    // the index boundary: a summary still naming HEAD (an older host's, a kept one) stores none, and a row that named a
+    // branch does not keep it once the transcript's latest record names HEAD
+    expect(index.sessions.upsertFromSummary(nonRepo).record.branch).toBeNull();
+    expect(index.sessions.upsertFromSummary({ ...onMain, gitBranch: 'HEAD', lastRecordAt: '2026-09-28T11:00:00.000Z' }).record.branch).toBeNull();
+    expect(index.sessions.upsertFromSummary({ ...onMain, gitBranch: 'topic', lastRecordAt: '2026-09-28T12:00:00.000Z' }).record.branch).toBe('topic');
   });
 
   it('opening it again runs no migration and keeps its rows', () => {
@@ -114,9 +150,9 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(true);
-    expect(index.unavailable).toBe('user_version 99 is newer than this app knows (2)');
+    expect(index.unavailable).toBe('user_version 99 is newer than this app knows (3)');
     expect(error).toHaveBeenCalledWith(expect.stringContaining('user_version 99'));
-    const message = 'index unavailable: user_version 99 is newer than this app knows (2)';
+    const message = 'index unavailable: user_version 99 is newer than this app knows (3)';
     expect(() => index.sessions.list()).toThrow(message);
     expect(() => index.sessions.get('x' as AppSessionId)).toThrow(message);
     expect(() => index.sessions.setPinned('x' as AppSessionId, true)).toThrow(message);
@@ -148,13 +184,13 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(false);
-    expect(index.applied).toEqual([1, 2]);
+    expect(index.applied).toEqual([1, 2, 3]);
     const aside = readdirSync(dir.path).filter((name) => /^index\.sqlite\.broken-\d+$/.test(name));
     expect(aside).toHaveLength(1);
     expect(readFileSync(join(dir.path, aside[0]), 'utf8')).toBe(garbage);
     expect(error).toHaveBeenCalledWith(expect.stringContaining(aside[0]));
     expect(existsSync(path)).toBe(true);
-    expect(inspect(path).version).toBe(2);
+    expect(inspect(path).version).toBe(3);
   });
 
   it('a transient failure at open (another connection holds the lock) throws and leaves the file untouched', () => {

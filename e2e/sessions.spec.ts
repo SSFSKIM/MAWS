@@ -98,7 +98,7 @@ async function addProject(page: Page, directory: string): Promise<{ id: string; 
 // creator; the tab opens on the unstarted session's heading.
 async function plus(page: Page, name: string): Promise<string> {
   await openProject(page, name);
-  await page.locator('[data-region="sidebar"] [data-level-pane="2"]').getByRole('button', { name: `New session in ${name}`, exact: true }).click();
+  await page.locator('[data-region="sidebar"] [data-level-pane="2"]').getByRole('button', { name: `New chat in ${name}`, exact: true }).click();
   await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
   const intents = value(await invoke(page, 'session.intent.list', undefined)).intents;
   return intents.at(-1)!.appSessionId;
@@ -582,8 +582,10 @@ test.describe('sessions', () => {
     await expect(chip).toBeVisible();
     await expect(row.getByRole('checkbox', { name: 'Worktree' })).toHaveCount(0);
     await expect(page.getByRole('toolbar', { name: 'Composer tools' }).getByRole('button', { name: /^Location / }), 'the row stands for the toolbar’s location').toHaveCount(0);
-    await editor(page).click();
+    // W9 (H3): the new tab's composer has the keyboard, so typing needs no click (the button that opened it does not keep it)
+    await expect(editor(page)).toBeFocused();
     await page.keyboard.type('hello');
+    await expect(editor(page)).toHaveText('hello');
     const control = page.locator('[data-region="main"] [data-submit-state]');
     await expect(control).toBeDisabled();
     await expect(control).toHaveAttribute('title', 'Choose a project first');
@@ -635,6 +637,19 @@ test.describe('sessions', () => {
     expect(maws.consoleErrors()).toEqual([]);
   });
 
+  test('Overview New chat on an empty board closes the panel and hands typing to the new composer', async () => {
+    const { page, maws } = await begin({ fixtures: [] });
+    await page.getByRole('button', { name: 'Overview', exact: true }).click();
+    const overview = page.getByRole('dialog', { name: 'Overview' });
+    await expect(overview.getByText('Nothing live or unread', { exact: true })).toBeVisible();
+    await overview.getByRole('button', { name: 'New chat', exact: true }).click();
+    await expect(overview).toHaveCount(0);
+    await expect(editor(page), 'W9 (H3): the Overview must not obscure the composer that takes focus').toBeFocused();
+    await page.keyboard.type('a thought from the Overview');
+    await expect(editor(page)).toHaveText('a thought from the Overview');
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
   test('⌘N (File › New chat) from an open session starts a New chat in that session’s project', async () => {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
@@ -656,6 +671,7 @@ test.describe('sessions', () => {
     });
     expect(label, 'File › New chat').toBe('New chat');
     await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible();
+    await expect(editor(page), 'W9 (H3): ⌘N hands the keyboard to the new tab').toBeFocused();
     const created = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!;
     expect(created).toMatchObject({ projectId: project.id, location: { kind: 'directory', path: repo.root } });
     await expect(page.locator('[data-region="main"] [data-project-row]').getByRole('button', { name: `Project ${project.name}` })).toBeVisible();
@@ -673,7 +689,7 @@ test.describe('sessions', () => {
     await page.getByRole('button', { name: 'Add project' }).first().click();
     await expect.poll(async () => value(await invoke(page, 'session.projects.list', undefined)).projects.map((p) => p.directory)).toEqual([repo.root]);
     const [added] = value(await invoke(page, 'session.projects.list', undefined)).projects;
-    await expect(page.getByRole('button', { name: `New session in ${added!.name}`, exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: `New chat in ${added!.name}`, exact: true })).toBeVisible();
     expect(maws.consoleErrors()).toEqual([]);
   });
 
@@ -684,7 +700,7 @@ test.describe('sessions', () => {
     current = { ...first, repos: [repo] };
     const project = await addProject(first.page, repo.root);
     const id = await plus(first.page, project.name);
-    await editor(first.page).click();
+    await expect(editor(first.page), 'W9 (H3): the project page\'s "+" hands the keyboard to the new tab').toBeFocused();
     await first.page.keyboard.type('half a thought');
     // C7 keeps an unstarted session's draft through C10's hook (the intent), written a moment after the typing
     await expect.poll(async () => JSON.stringify(value(await invoke(first.page, 'session.intent.get', { appSessionId: id }))!.draft)).toContain('half a thought');

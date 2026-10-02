@@ -50,7 +50,7 @@ export function ProjectPage({ entry, page, sort, searching, backRef, onBack, onT
         <SortMenu sort={sort} />
         {project && (
           <IconButton
-            label={`New session in ${name}`}
+            label={`New chat in ${name}`}
             disabled={!canCreate}
             onClick={() => void createSession(project.id)}
             className="size-[22px]"
@@ -98,8 +98,8 @@ function Group({ group, entry }: { group: SessionGroup; entry: ProjectEntry }) {
         {project && (
           <button
             type="button"
-            aria-label={`New session in ${group.label}`}
-            title={canCreate ? `New session in ${group.label}` : 'Not available here'}
+            aria-label={`New chat in ${group.label}`}
+            title={canCreate ? `New chat in ${group.label}` : 'Not available here'}
             disabled={!canCreate}
             onClick={create}
             className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted opacity-0 outline-accent group-hover/heading:opacity-100 hover:bg-bg-hover hover:text-fg focus-visible:opacity-100 focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"

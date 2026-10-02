@@ -212,6 +212,25 @@ describe('settings tab writes one field per row', () => {
     expect(scrolled.at(-1)).toMatch(/keyboard/);
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
   });
+
+  // W9 (H1): the stacked layout is the `settings` container's (the e2e settings group measures it in a split pane);
+  // here, that no row keeps a fixed column or a second-column note once the view is narrower than 32rem.
+  it('stacks in a narrow view: every fixed column and second-column note gives way under the settings container', async () => {
+    const { container } = renderView();
+    await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287');
+    const root = container.firstElementChild!;
+    expect(root.classList.contains('@container/settings')).toBe(true);
+    const classes = (el: Element) => [...el.classList];
+    const fixed = [...root.querySelectorAll('*')].filter((el) => classes(el).some((c) => /^grid-cols-\[.*\d+px/.test(c)));
+    // the index beside the body, every Setting row, every key binding row
+    expect(fixed.length).toBe(1 + screen.getAllByRole('group').length + screen.getAllByRole('row').filter((r) => r.querySelector('[role="cell"]')).length);
+    for (const el of fixed) expect(classes(el).some((c) => c.startsWith('@max-lg/settings:grid-cols-'))).toBe(true);
+    for (const el of root.querySelectorAll('.col-start-2')) expect(el.classList.contains('@max-lg/settings:col-start-1')).toBe(true);
+    // label, control, note in reading order, so one column reads label over control over note
+    const binary = row('Binary');
+    expect([...binary.children].map((c) => c.textContent)).toEqual(['Binary', expect.stringContaining('Change…'), expect.stringContaining('New sessions start on your installed Claude Code')]); // W13's note
+    expect(screen.getByRole('navigation', { name: 'Settings sections' }).classList.contains('@max-lg/settings:flex-row')).toBe(true);
+  });
 });
 
 // C12 start: Settings › Engine's memory budget rows (C12 execution document, Interfaces "Settings, version 4"): the

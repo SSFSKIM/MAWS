@@ -13,7 +13,7 @@ import type { Settings } from '@shared/ipc/schema';
 import type { AutoFallback } from '@shared/ipc/schema/settings';
 import type { BinaryInfo } from '@shared/ipc/schema/engine';
 import { isGatewayModel } from '@shared/sessions/models';
-import { DEFAULT_ROW, listName } from '../composer/frame/model-label';
+import { DEFAULT_ROW, listName } from '@shared/sessions/model-label';
 import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
 import { toast } from '../stores/notices';
@@ -122,7 +122,7 @@ function AutoFallback({ settings }: { settings: Settings }) {
         aria-label={ENGINE.autoFallback}
         value={settings.permissions.autoFallback}
         onChange={(e) => void writeSettings({ permissions: { autoFallback: e.target.value as AutoFallback } })}
-        className={`${INPUT} max-w-[200px] font-mono`}
+        className={`${INPUT} max-w-[200px]`}
       >
         {FALLBACKS.map((mode) => (
           <option key={mode} value={mode}>

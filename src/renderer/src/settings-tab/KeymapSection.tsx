@@ -126,8 +126,9 @@ function KeyRow({
 }) {
   return (
     <div role="row" aria-label={row.title} data-recording={recording || undefined} className={`border-t border-border px-2.5 text-ui-sm ${recording ? 'bg-accent-soft' : ''}`}>
-      <div className="grid h-[30px] grid-cols-[minmax(0,1fr)_160px_96px] items-center gap-2.5">
-        <span role="cell" className="truncate">
+      {/* W9 (H1): narrower than 32rem (the Settings view's container) the title stacks over the chord and its action */}
+      <div className="grid h-[30px] grid-cols-[minmax(0,1fr)_160px_96px] items-center gap-2.5 @max-lg/settings:h-auto @max-lg/settings:grid-cols-[minmax(0,1fr)_auto] @max-lg/settings:gap-y-1 @max-lg/settings:py-1.5">
+        <span role="cell" className="truncate @max-lg/settings:col-span-2">
           {row.title}
         </span>
         <span role="cell">

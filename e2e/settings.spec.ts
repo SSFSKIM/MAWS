@@ -205,6 +205,65 @@ test('settings: Engine shows the resolved binary, its version and the tested one
   }
 });
 
+// W9 (H1, the comparative assessment's M-01): ⌘, then ⌘\ at the default window puts Settings in a pane of about 300px.
+// Below 32rem the index is a top row and every row stacks, so the Engine section's controls sit inside the pane and
+// nothing scrolls sideways; back in one pane the index and the label column are as they were.
+test('settings: in a 50/50 split the view stacks inside its pane, and in one pane it keeps its columns', async () => {
+  const maws = await launchMaws();
+  try {
+    const { app, page } = maws;
+    const main = page.locator('[data-region="main"]');
+    await menu(app, 'session.new'); // a second tab, so ⌘\ has one to leave behind
+    await expect(main.getByRole('tab', { name: /New chat/ })).toBeVisible();
+    await menu(app, 'settings.open');
+    await menu(app, 'pane.split');
+    const pane = main.locator('[data-pane="1"]');
+    const settings = pane.getByRole('tabpanel');
+    const engine = settings.getByRole('region', { name: 'Engine' });
+    const change = engine.getByRole('group', { name: 'Binary' }).getByRole('button', { name: 'Change…' });
+    const fallback = engine.getByRole('combobox', { name: 'When auto mode is unavailable' });
+    await expect(change).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath('settings-split.png') });
+
+    const paneBox = (await settings.boundingBox())!; // the pane's section is `display: contents`; its tab panel has the box
+    expect(paneBox.width, 'a 50/50 split at the default window').toBeLessThan(512);
+    for (const control of [change, fallback]) {
+      const box = (await control.boundingBox())!;
+      expect(box.x, 'the control starts inside the pane').toBeGreaterThanOrEqual(paneBox.x);
+      expect(box.x + box.width, 'the control ends inside the pane').toBeLessThanOrEqual(paneBox.x + paneBox.width);
+    }
+    const body = settings.locator('[data-settings-body]');
+    expect(await body.evaluate((el) => el.scrollWidth - el.clientWidth), 'nothing scrolls sideways').toBeLessThanOrEqual(0);
+    // the index is a row above the body; a row's label sits over its control, its note under it
+    const nav = (await settings.getByRole('navigation', { name: 'Settings sections' }).boundingBox())!;
+    expect(nav.y + nav.height).toBeLessThanOrEqual((await body.boundingBox())!.y + 1);
+    const binary = engine.getByRole('group', { name: 'Binary' });
+    const label = (await binary.getByText('Binary', { exact: true }).boundingBox())!;
+    const note = (await binary.getByText(/New sessions start on your installed Claude Code/).boundingBox())!; // W13's note
+    const changeBox = (await change.boundingBox())!;
+    expect(label.y + label.height).toBeLessThanOrEqual(changeBox.y + 1);
+    expect(changeBox.y + changeBox.height).toBeLessThanOrEqual(note.y + 1);
+    const keyRow = settings.getByRole('table', { name: 'Key bindings' }).getByRole('row', { name: 'Next Needs-you', exact: true });
+    const title = (await keyRow.getByRole('cell').first().boundingBox())!;
+    expect(title.y + title.height, 'a key binding stacks its title over its chord').toBeLessThanOrEqual((await keyRow.locator('kbd').boundingBox())!.y + 1);
+
+    // ⌘\ again takes Settings back to the left pane, and the emptied right pane closes the split
+    await menu(app, 'pane.split');
+    await expect(main.locator('[data-pane="1"]')).toHaveCount(0);
+    const whole = main.locator('[data-pane="0"]').getByRole('tabpanel');
+    const wideBinary = whole.getByRole('region', { name: 'Engine' }).getByRole('group', { name: 'Binary' });
+    await expect(wideBinary).toBeVisible();
+    const wideLabel = (await wideBinary.getByText('Binary', { exact: true }).boundingBox())!;
+    const wideChange = (await wideBinary.getByRole('button', { name: 'Change…' }).boundingBox())!;
+    expect(wideLabel.x + wideLabel.width, 'wide: the label column sits left of the control').toBeLessThanOrEqual(wideChange.x);
+    const wideNav = (await whole.getByRole('navigation', { name: 'Settings sections' }).boundingBox())!;
+    expect(wideNav.x + wideNav.width, 'wide: the index is a column at the left').toBeLessThanOrEqual(wideChange.x);
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
 // ---- the powerline glyphs, on the harness's #probe page ------------------------------------------------------------
 
 type Harness = { terminals: { ready(): Promise<string[]>; list(): { id: string; status: string }[]; type(id: string, data: string): Promise<void>; probe(id: string): { cols: number; rows: number; line(row: number): string; lineCount(): number } | null } };

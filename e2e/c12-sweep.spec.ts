@@ -3,7 +3,7 @@
 // engine's runtime exclude block, and bound to a discovered session; one dirty with no session; one whose directory is
 // gone, so git lists it prunable) under a temp config home, with the replay transport and no engine. The
 // dialog opens from the project menu, lists the main checkout and the three with their states and the bound session
-// from main's occupancy; New session here opens an unstarted tab whose Location chip names the worktree, and the
+// from main's occupancy; New chat here opens an unstarted tab whose Location chip names the worktree, and the
 // dialog then shows that checkout busy with Remove… disabled; Remove… on the orphan runs C10's ladder to removal and
 // the dialog, back from the cleanup, reads the repository again without it. Run by `pnpm e2e:c12` (MAWS_C12_E2E=1).
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -39,7 +39,7 @@ async function openWorktrees(page: Page, projectId: string, name: string): Promi
 }
 const rowOf = (dialog: Locator, name: string) => dialog.getByRole('list', { name: 'Worktrees' }).getByRole('listitem', { name, exact: true });
 
-test('Worktrees…: every checkout with its state and bound session; New session here claims one; Remove… on the orphan runs the cleanup ladder and the list is read again', async () => {
+test('Worktrees…: every checkout with its state and bound session; New chat here claims one; Remove… on the orphan runs the cleanup ladder and the list is read again', async () => {
   repo = await ScratchRepo.create({ sentinels: false });
   const orphan = await repo.addManagedWorktree('orphan'); // made by hand: `.claude/` is untracked in the main checkout now
   const gone = await repo.addManagedWorktree('gone');
@@ -79,8 +79,8 @@ test('Worktrees…: every checkout with its state and bound session; New session
   await expect(rowOf(dialog, 'gone').getByText('missing', { exact: true })).toBeVisible();
   await expect(rowOf(dialog, project.name).getByRole('button', { name: 'Remove…' })).toHaveCount(0);
 
-  // New session here on the bound worktree: an unstarted tab whose project chip names it, then that checkout is busy
-  await rowOf(dialog, 'bound').getByRole('button', { name: 'New session here' }).click();
+  // New chat here on the bound worktree: an unstarted tab whose project chip names it, then that checkout is busy
+  await rowOf(dialog, 'bound').getByRole('button', { name: 'New chat here' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Project bound' })).toBeVisible(); // New chat: the project row's chip
   const intent = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!;

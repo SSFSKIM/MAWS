@@ -5,6 +5,7 @@
 // millisecond and a parsed record cannot be fooled by a value inside a torn line.
 import { basename } from 'node:path';
 import type { MessageUuid, SessionId } from '@shared/graph/ids';
+import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
 
@@ -54,7 +55,8 @@ export function summarize(
     // then its earliest copy the windows hold (debt wave 4).
     firstPrompt: firstUserText(headRecords) ?? firstOfType([...headRecords, ...tailRecords], 'last-prompt', 'lastPrompt'),
     lastAssistantText: lastAssistant,
-    gitBranch: firstString(tailReversed, 'gitBranch') ?? firstString(headReversed, 'gitBranch'),
+    // W9 (H2): the latest the windows hold; HEAD (a non-repository or a detached checkout) or empty is no branch
+    gitBranch: branchName(firstString(tailReversed, 'gitBranch') ?? firstString(headReversed, 'gitBranch')),
     engineVersion: firstString(tailReversed, 'version') ?? firstString(headReversed, 'version'), // W13: the latest version that wrote the file
     entrypoint: firstString(headRecords, 'entrypoint') ?? firstString(tailReversed, 'entrypoint'),
     sessionKind,
