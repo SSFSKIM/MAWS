@@ -2,7 +2,8 @@
 // one opaque JSON value per key, the product store for layout (§4.4 as amended: layout is not in C4's index). Written
 // whole through a temporary file and a rename like the settings file; the renderer debounces its own keys, and the
 // window key, which main writes on every move and resize, is debounced here. Values are validated by their readers.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { atomicWriteFileSync } from '../files/atomic-write';
 import { dirname } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LayoutKey } from '@shared/ipc/schema/layout';
@@ -73,10 +74,8 @@ export class LayoutFileStore implements LayoutStore {
   }
 
   private write(): void {
-    const temporary = `${this.file}.${process.pid}.tmp`;
     mkdirSync(dirname(this.file), { recursive: true });
-    writeFileSync(temporary, JSON.stringify(Object.fromEntries(this.values)));
-    renameSync(temporary, this.file);
+    atomicWriteFileSync(this.file, JSON.stringify(Object.fromEntries(this.values)));
   }
 }
 

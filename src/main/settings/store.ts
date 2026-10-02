@@ -1,26 +1,14 @@
-// `settings.json` in `userData`: read once at start, written whole through a temporary file and a rename, so a crash
-// mid-write leaves the previous file rather than half of one. A missing file is a first run; an unreadable or invalid
-// one is replaced by the defaults with a warning (the bad file is overwritten on the next write), never a crash.
-// An earlier version's file (C1's version 1, C5's version 2) is migrated to version 3 here, in the store, and rewritten
-// once; a file that already validates is never rewritten on read. The schema never defaults.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+// A missing settings file is a first run. Startup can display defaults for an unreadable/invalid file, but writes
+// refuse that file rather than replacing it with defaults. Migration persistence failure does not undo migration.
+// Main holds the profile lock; synchronous read-modify-write also keeps multiple store handles from losing patches.
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { SettingsSchema, type Settings, type SettingsPatch, type SettingsState, type ThemeSetting } from '@shared/ipc/schema';
 import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
+import { atomicWriteFileSync } from '../files/atomic-write';
 
 export const DEFAULT_SETTINGS: Settings = SETTINGS_DEFAULTS_V8;
 const defaults = (): Settings => structuredClone(DEFAULT_SETTINGS);
-
-// C11: every step (v1 → v2, C5's, and v2 → v3) is `migrateSettings`; the store rewrites the file when it moved a version.
-function migrate(file: string, raw: unknown): Settings {
-  const settings = migrateSettings(raw);
-  const from = (raw as { version: unknown }).version;
-  if (from !== settings.version) {
-    write(file, settings);
-    console.log(`[settings] migrated ${file} from version ${String(from)} to ${settings.version}`);
-  }
-  return settings;
-}
 
 export type ResolvedTheme = SettingsState['resolvedTheme'];
 
@@ -41,7 +29,7 @@ export function openSettingsStore(file: string): SettingsStore {
       return current;
     },
     update(patch) {
-      const next = SettingsSchema.parse(applySettingsPatch(current, patch)); // C11: the one merge rule
+      const next = SettingsSchema.parse(applySettingsPatch(read(file, true), patch));
       write(file, next);
       current = next;
       return current;
@@ -49,26 +37,39 @@ export function openSettingsStore(file: string): SettingsStore {
   };
 }
 
-function read(file: string): Settings {
+function read(file: string, forUpdate = false): Settings {
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return defaults();
+    if (forUpdate) throw error;
     console.warn(`[settings] cannot read ${file}; using defaults`, error);
     return defaults();
   }
+  let raw: unknown;
+  let settings: Settings;
   try {
-    return migrate(file, JSON.parse(text));
+    raw = JSON.parse(text);
+    settings = migrateSettings(raw);
   } catch (error) {
+    if (forUpdate) throw error;
     console.warn(`[settings] invalid ${file}; using defaults`, error);
     return defaults();
   }
+  const from = (raw as { version: unknown }).version;
+  if (!forUpdate && from !== settings.version) {
+    try {
+      write(file, settings);
+      console.log(`[settings] migrated ${file} from version ${String(from)} to ${settings.version}`);
+    } catch (error) {
+      console.warn(`[settings] cannot persist migration of ${file}; keeping migrated settings in memory`, error);
+    }
+  }
+  return settings;
 }
 
 function write(file: string, settings: Settings): void {
-  const temporary = `${file}.${process.pid}.tmp`;
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(temporary, JSON.stringify(settings));
-  renameSync(temporary, file);
+  atomicWriteFileSync(file, JSON.stringify(settings));
 }

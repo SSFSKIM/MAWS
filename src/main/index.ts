@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, screen } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
+import { startWithProfileLock } from './files/profile-lock';
 import { registerPtyOpenLink } from './pty-links'; // C9
 import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } from './window'; // C9: prepareHarness
 // C3 start (the attention service's imports moved with its start into C4's block: src/main/index/attention-service.ts)
@@ -85,7 +86,7 @@ if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');
 // Only an explicit quit (Cmd+Q, the menu, the Dock) ends the app.
 app.on('window-all-closed', () => {});
 
-app.whenReady().then(() => {
+void startWithProfileLock(app, () => {
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();

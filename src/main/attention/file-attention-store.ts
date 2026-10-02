@@ -2,7 +2,8 @@
 // per session, until C4's index implements the port (the SessionStateStore pattern). Read once, written whole through
 // a temporary file and a rename, one write at a time; an unreadable file is kept aside (never deleted) and the store
 // starts empty with a warning.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename } from 'node:fs/promises';
+import { atomicWriteFile } from '../files/atomic-write';
 import { dirname } from 'node:path';
 import * as z from 'zod';
 import { AttentionItemSchema, type AttentionItem } from '@shared/graph/attention';
@@ -37,10 +38,8 @@ export class FileAttentionStore implements AttentionStore {
     const next = this.chain.then(async () => {
       const state = await this.load();
       change(state.sessions);
-      const temporary = `${this.file}.${process.pid}.tmp`;
       await mkdir(dirname(this.file), { recursive: true });
-      await writeFile(temporary, JSON.stringify(state));
-      await rename(temporary, this.file);
+      await atomicWriteFile(this.file, JSON.stringify(state));
     });
     this.chain = next.catch(() => {});
     return next;

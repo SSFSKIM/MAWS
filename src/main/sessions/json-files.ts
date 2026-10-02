@@ -1,8 +1,8 @@
 // Main's small JSON files under `userData` (C10's intents, bootstrap notes and deletion manifests): one file per id,
 // written temp-then-rename in the same directory so a reader sees a whole file or none, and read back leniently (a
 // file that does not parse is reported and left on disk for a person to look at).
-import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
+import { atomicWriteFile } from '../files/atomic-write';
 import { join } from 'node:path';
 
 // An id names a file here, so it is one plain path component (the ids are UUIDs; anything else is refused).
@@ -15,14 +15,7 @@ export function fileOf(dir: string, id: string): string {
 export async function writeWhole(dir: string, id: string, value: unknown): Promise<void> {
   const target = fileOf(dir, id);
   await mkdir(dir, { recursive: true });
-  const temp = join(dir, `.${id}.${randomUUID()}.tmp`);
-  try {
-    await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`);
-    await rename(temp, target);
-  } catch (error) {
-    await rm(temp, { force: true });
-    throw error;
-  }
+  await atomicWriteFile(target, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 // Every `<id>.json` in `dir` (temp files and anything else ignored), parsed; a file that does not parse is skipped with
