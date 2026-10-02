@@ -2,6 +2,10 @@
 
 /* A row sits in the column it shares with the composer frame (`.thread-column`, app.css; W2) */
 .transcript-row {
+  /* W8: a work-area row's wrapper runs the disclosure motion, which measures its scrollHeight; flow-root keeps its
+     children's margins inside that box (as DisclosureBody's does). Resting heights are unchanged: the virtual item
+     around it is absolutely positioned, so it held those margins already. */
+  display: flow-root;
   font-size: var(--text-prose);
   color: var(--fg);
   outline: none;

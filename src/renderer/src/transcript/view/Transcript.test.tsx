@@ -202,6 +202,22 @@ describe('Transcript', () => {
     expect(document.querySelector(`[data-row-id="${rowId.divider(turn)}"]`)).not.toBeNull();
   });
 
+  it('a jump into a turn whose fold is running calls the fold off, so its target stays in the list (W8)', async () => {
+    const key = await mounted(deniedThenAnswer());
+    const turn = turnId.ofMessage(uuid('u2'));
+    const toggle = () => document.querySelector<HTMLElement>(`[data-row-id="${rowId.divider(turn)}"] button[aria-expanded]`)!;
+    const target = cellId.tool(tool('t2')); // the turn's standalone cell, its own row
+    fireEvent.click(toggle());
+    await waitFor(() => expect(document.querySelector(`[data-cell-id="${target}"]`)).not.toBeNull());
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    act(() => useTranscriptStore.getState().jumpTo(key, target));
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200))); // past the close
+    expect(useTranscriptStore.getState().rows(key).some((row) => row.id === target)).toBe(true);
+    expect(document.querySelector(`[data-cell-id="${target}"]`)).not.toBeNull();
+  });
+
   it('a history that failed to load says why and offers Retry, which hydrates it', async () => {
     let attempts = 0;
     const source: TranscriptSource = {

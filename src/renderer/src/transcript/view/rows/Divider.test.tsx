@@ -72,6 +72,22 @@ describe('divider row', () => {
     expect(store.rows()).toHaveLength(open);
   });
 
+  it('a fold whose turn the store folded meanwhile leaves it folded (W8)', async () => {
+    const store = await storeWith(deniedTurn().events);
+    const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
+    const toggle = () => screen.getByRole('button', { name: /Worked for/ });
+    const before = store.rows().length;
+    fireEvent.click(toggle());
+    view.rerenderRow(rowOf(store.rows(), 'divider'));
+    fireEvent.click(toggle());
+    // The store folds the turn itself inside the 150 ms (a working turn that finishes while the reader follows).
+    act(() => useTranscriptStore.getState().toggleTurn(store.key, rowOf(store.rows(), 'divider').turnId!));
+    expect(store.rows()).toHaveLength(before);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200))); // past the close
+    expect(rowOf(store.rows(), 'divider').expanded).toBe(false);
+    expect(store.rows()).toHaveLength(before);
+  });
+
   it('opens the turn summary popover from its trailing control', async () => {
     const store = await storeWith(deniedTurn().events);
     renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });

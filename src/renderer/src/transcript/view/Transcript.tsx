@@ -218,7 +218,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   }, []);
 
   // A jump (store.jumpTo): the store has already opened what holds the row; scroll it into place, then focus it once
-  // the virtualiser has mounted it.
+  // the virtualiser has mounted it. A fold of its turn still running is called off (W8), or it would take the row away.
   useLayoutEffect(() => {
     if (!jump) return;
     if (!jump.reissued) {
@@ -229,6 +229,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
       return;
     }
     const index = rows.findIndex((row) => row.id === jump.rowId);
+    const turn = index >= 0 ? rows[index].turnId : null;
+    if (turn !== null) motion.unfold(turn);
     if (index >= 0) listRef.current?.scrollToIndex(index, jump.align);
     const frame = requestAnimationFrame(() => {
       const element = document.getElementById(rowElementId(idPrefix, jump.rowId));
@@ -240,7 +242,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
       useTranscriptStore.getState().jumpHandled(storeKey, jump.nonce);
     });
     return () => cancelAnimationFrame(frame);
-  }, [jump, rows, storeKey, idPrefix]);
+  }, [jump, rows, storeKey, idPrefix, motion]);
 
   const followChange = useCallback(
     (next: boolean) => {

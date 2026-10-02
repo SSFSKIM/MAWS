@@ -92,6 +92,43 @@ describe('DisclosureBody', () => {
   });
 });
 
+describe('reduced motion turning on mid-motion', () => {
+  function switchable() {
+    const listeners = new Set<() => void>();
+    const query = {
+      matches: false,
+      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    };
+    vi.stubGlobal('matchMedia', () => query);
+    return (matches: boolean) => {
+      query.matches = matches;
+      act(() => listeners.forEach((listener) => listener()));
+    };
+  }
+
+  it('ends an opening at once', () => {
+    const reduce = switchable();
+    const view = render(<Body open={false} />);
+    view.rerender(<Body open />);
+    expect(body()!.style.transition).toContain('height 300ms');
+    reduce(true);
+    expect(body()!.getAttribute('style')).toBe('display: flow-root;');
+  });
+
+  it('ends a closing at once, its content gone for good', () => {
+    const reduce = switchable();
+    const view = render(<Body open />);
+    view.rerender(<Body open={false} />);
+    expect(body()).not.toBeNull();
+    reduce(true);
+    expect(body()).toBeNull();
+    act(() => vi.advanceTimersByTime(0));
+    reduce(false);
+    expect(body()).toBeNull();
+  });
+});
+
 describe('useDisclosureMotion', () => {
   function Preview({ open }: { open: boolean }) {
     const { ref, mounted } = useDisclosureMotion<HTMLDivElement>(open, { closedHeight: 48 });

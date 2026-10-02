@@ -68,7 +68,13 @@ export function DividerRow({ row }: { row: DividerRowData }) {
         className="transcript-disclosure"
         aria-expanded={open}
         aria-controls={controls || undefined}
-        onClick={() => motion.toggle(turn, row.expanded, () => store.toggleTurn(storeKey, turn))}
+        onClick={() => {
+          const target = !row.expanded;
+          motion.toggle(turn, row.expanded, () => {
+            const current = useTranscriptStore.getState().entries[storeKey]?.rows.find((candidate) => candidate.id === row.id);
+            if (current?.kind === 'divider' && current.expanded !== target) store.toggleTurn(storeKey, turn);
+          });
+        }}
       >
         <Chevron />
         {label}

@@ -61,6 +61,13 @@ export function useDisclosureMotion<T extends HTMLElement>(open: boolean, option
 
   useLayoutEffect(() => {
     const element = ref.current;
+    if (reduced && running.current !== null) {
+      // Reduced motion turned on under a running motion: it ends where it was going, now.
+      clearTimeout(running.current);
+      running.current = null;
+      if (element) clear(element.style);
+      if (!moved.current && full) setTimeout(() => setClosing(false), 0);
+    }
     if (moved.current === open) return;
     moved.current = open;
     if (!element) return;
