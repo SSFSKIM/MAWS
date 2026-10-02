@@ -67,12 +67,58 @@ describe('rollback per resource', () => {
       await h.restart();
       expect(h.host.launches).toEqual([]);
       expect(intentFile(h, id)).toMatchObject({ progress: {
-        worktree: { path: managed('crash'), branch: 'worktree-crash', head: await runGit(repo.root, ['rev-parse', 'HEAD']).then((v) => v.trim()) },
+        worktree: { path: managed('crash'), branch: 'worktree-crash', head: '' },
         lastFailure: { resources: { worktree: { path: managed('crash'), state: 'kept' } } },
       } });
       expect(await h.service.startSession(id, { message: null, options: {} })).toMatchObject({ status: 'starting' });
       expect(await h.settled(id)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });
       expect(h.host.launches.at(-1)).toMatchObject({ cwd: managed('crash') });
+    });
+
+    it('does not adopt a matching checkout another actor created after guards when add refuses and the app quits', async () => {
+      const id = await create(worktree('external'));
+      const add = h.worktrees.add.bind(h.worktrees);
+      let refused = false;
+      vi.spyOn(h.worktrees, 'add').mockImplementation(async (input) => {
+        // A terminal wins the race after session guards, before the service's add guards.
+        await runGit(repo.root, ['worktree', 'add', '-b', 'worktree-external', managed('external'), 'HEAD']);
+        await expect(add(input)).rejects.toThrow('worktree path exists');
+        refused = true;
+        return new Promise(() => {}); // quit before the refusal clears the write-ahead journal
+      });
+      await h.service.startSession(id, { message: MESSAGE, options: {} });
+      await h.until(() => refused);
+      await h.restart();
+      h.host.script = () => REFUSED;
+      expect(await h.service.startSession(id, { message: null, options: {} })).toMatchObject({ status: 'starting' });
+      expect(await h.settled(id)).toMatchObject({ phase: 'failed', outcome: { message: 'binary_missing: no engine binary' } });
+      expect(existsSync(managed('external'))).toBe(true);
+      expect(await repo.hasBranch('worktree-external')).toBe(true);
+      expect(intentFile(h, id)!.progress.worktree).toMatchObject({ head: '' });
+    });
+
+    it('Keep then Retry accepts an unreconciled checkout without acquiring cleanup ownership', async () => {
+      const id = await create(worktree('keep-unconfirmed'));
+      const add = h.worktrees.add.bind(h.worktrees);
+      let created = false;
+      vi.spyOn(h.worktrees, 'add').mockImplementation(async (input) => {
+        await add(input);
+        created = true;
+        return new Promise(() => {});
+      });
+      await h.service.startSession(id, { message: MESSAGE, options: {} });
+      await h.until(() => created);
+      // A changed identity prevents recovery from reconciling the journal.
+      await runGit(managed('keep-unconfirmed'), ['checkout', '-b', 'changed']);
+      await h.restart();
+      expect(intentFile(h, id)!.progress.worktree).toMatchObject({ head: '' });
+      await h.service.resolveRetainedWorktree(id, 'keep');
+      h.host.script = () => REFUSED;
+      expect(await h.service.startSession(id, { message: null, options: {} })).toMatchObject({ status: 'starting' });
+      expect(await h.settled(id)).toMatchObject({ phase: 'failed', outcome: { message: 'binary_missing: no engine binary' } });
+      expect(existsSync(managed('keep-unconfirmed'))).toBe(true);
+      expect(await repo.hasBranch('worktree-keep-unconfirmed')).toBe(true);
+      expect(intentFile(h, id)!.progress.worktree).toMatchObject({ createdHere: false });
     });
 
     it('clears an unconfirmed journal when the app quit before git created anything, so Retry can create', async () => {

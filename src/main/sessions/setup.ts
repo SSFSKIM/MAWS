@@ -276,7 +276,7 @@ async function finishBinding(s: Setup, run: IntentRun, intent: SetupIntent, engi
 // leaves the checkout, so what this attempt created is read back from git and recorded, for rollback to undo.
 async function recordPartialWorktree(s: Setup, run: IntentRun): Promise<void> {
   try {
-    await run.progress({ worktree: await reconcileWorktree(s, run.intent) });
+    await run.progress({ worktree: await reconcileWorktree(s, run.intent, { confirmOwnership: true }) });
   } catch (error) {
     s.log(`could not read back what the failed worktree add left for ${run.appSessionId}: ${messageOf(error)}`);
   }
@@ -308,6 +308,10 @@ export async function removeCreatedWorktree(
   opts: { newBranch: boolean; discard: boolean },
 ): Promise<{ resource: WorktreeResource; removed: boolean }> {
   const resource: WorktreeResource = { path: w.path, branch: w.branch, createdHere: true, state: 'removed', detail: null, branchState: 'none' };
+  // A recovered identity is enough to retry, but never proof that this attempt owns the resources.
+  if (w.head === '' && !opts.discard) {
+    return { resource: { ...resource, state: 'kept', detail: 'worktree ownership is unconfirmed', branchState: opts.newBranch ? 'kept' : 'none' }, removed: false };
+  }
   let expect = { branch: w.branch, head: w.head };
   if (opts.discard) {
     // the human acknowledged the checkout as it is now: its identity is revalidated against git's current answer
