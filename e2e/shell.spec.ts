@@ -389,7 +389,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     test.info().annotations.push({ type: 'notification delivery', description: `${notified.delivery} (${maws.packaged ? 'packaged' : 'dev build'})` });
     console.log(`[shell] attention.notified delivery: ${notified.delivery} (${maws.packaged ? 'packaged' : 'dev build'})`);
     if (notified.delivery === 'fallback') {
-      await expect(page.getByText('Charter + research needs you · Read: docs/charter.md')).toBeVisible();
+      // The toast's text, not the live region's announcement of it (F12 moved ToastHost out of the main region).
+      await expect(page.getByText('Charter + research needs you · Read: docs/charter.md', { exact: true })).toBeVisible();
     }
     expect(await badge()).toBe('4');
     await closeProject(page, 'MAWS'); // W11: a project's counts show while it is collapsed
