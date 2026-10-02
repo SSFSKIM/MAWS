@@ -9,6 +9,7 @@ import type { ActionId } from '@shared/keymap/actions';
 import type { Location } from '@shared/sessions/intent';
 import { markFocusOnMount } from '../stores/composer';
 import { useLayout } from '../stores/layout';
+import { NEW_CHAT } from '../sessions/title';
 import { useSessions } from '../stores/sessions';
 import { create } from 'zustand';
 import { createHandlerRegistry } from './registry';
@@ -106,7 +107,7 @@ export async function requestCloseTab(id: string): Promise<void> {
 // registered function is called during render and must not call hooks; when what it would answer changes, its
 // registrant calls `unstartedTitlesChanged` (New chat, 2026-10-01: the project row chooses the project after the tab
 // opened). `projectId` is the project the unstarted session is in, for New chat's preselection.
-export const NEW_CHAT = 'New chat';
+export { NEW_CHAT }; // W11: one string, `sessions/title.ts`, for the control and an untitled session's title
 export interface UnstartedTitleAnswer {
   title: string;
   project: string | null;
@@ -147,10 +148,10 @@ export function useUnstartedTitle(appSessionId: AppSessionId): UnstartedTitleAns
 
 // ---- New chat's preselection (2026-10-01) -------------------------------------------------------------------------------
 // The project a New chat starts in when a project is focused, so the common case is one step: the session's project in
-// the active tab (of `pane`, else the focused pane; an unstarted tab's chosen one included), or the project whose page
-// the sidebar shows; `first: 'page'` asks the sidebar first (its own New chat control). None from the project list
-// with nothing open: the chat then starts with "Choose a project".
-export function focusedProject(opts: { pane?: 0 | 1; first?: 'tab' | 'page' } = {}): ProjectId | null {
+// the active tab (of `pane`, else the focused pane; an unstarted tab's chosen one included), else the first project
+// expanded in the sidebar (W11: the flat tree has no open page; W12 replaces this with the current project), else none:
+// the chat then starts with "Choose a project".
+export function focusedProject(opts: { pane?: 0 | 1 } = {}): ProjectId | null {
   const { main, regions } = useLayout.getState();
   const { records, projects } = useSessions.getState();
   const fromTab = (): ProjectId | null => {
@@ -160,16 +161,10 @@ export function focusedProject(opts: { pane?: 0 | 1; first?: 'tab' | 'page' } = 
     const record = records.get(tab.appSessionId);
     return record ? record.projectId : unstartedTitleOf(tab.appSessionId).projectId;
   };
-  const fromPage = (): ProjectId | null => {
-    const open = regions.sidebar.openProject;
-    return open !== null && open !== 'other' && projects.has(open as ProjectId) ? (open as ProjectId) : null;
-  };
-  const order = opts.first === 'page' ? [fromPage, fromTab] : [fromTab, fromPage];
-  for (const read of order) {
-    const projectId = read();
-    if (projectId !== null && projects.has(projectId)) return projectId;
-  }
-  return null;
+  const listed = (id: ProjectId | null): id is ProjectId => id !== null && projects.has(id) && !projects.get(id)!.hidden;
+  const tabProject = fromTab();
+  if (listed(tabProject)) return tabProject;
+  return (regions.sidebar.expandedProjects.find((key) => key !== 'other' && listed(key as ProjectId)) as ProjectId | undefined) ?? null;
 }
 
 // ---- tab retention ------------------------------------------------------------------------------------------------------

@@ -455,7 +455,8 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       expect(recorded.of('observeProject')).toContainEqual(project);
       index.projects.hide(project.id);
       await settle();
-      expect(events('session.projects.changed').at(-1)).toMatchObject({ projects: [] });
+      // W11 (I5): the event carries the hidden project, marked, as the list does; the writer stops observing it
+      expect(events('session.projects.changed').at(-1)).toMatchObject({ projects: [{ ...project, hidden: true }] });
       expect(recorded.of('observeProjectRemoved')).toEqual([project.id]);
     } finally {
       tree.dispose();

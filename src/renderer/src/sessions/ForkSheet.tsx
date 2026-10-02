@@ -14,6 +14,7 @@ import { forkSession } from './record-ops';
 import { Sheet, SheetForm } from './Sheet';
 import { CHOICE, FIELD, PRIMARY } from './ui';
 import { defaultWorktreeName } from './useSetupIntent';
+import { displayTitle } from './title';
 
 export function ForkSheet({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
@@ -57,7 +58,7 @@ export function ForkSheet({ appSessionId }: { appSessionId: AppSessionId }) {
   return (
     <Sheet title="Fork to a new worktree">
       <SheetForm canSubmit={valid && !busy} onSubmit={() => void submit()} submitLabel={busy ? 'Forking…' : 'Fork'} submitClass={PRIMARY}>
-        <p className="m-0 text-ui-sm text-fg-muted">from {record.title.text}</p>
+        <p className="m-0 text-ui-sm text-fg-muted">from {displayTitle(record)}</p>
         <label className="flex flex-col gap-1 text-ui-sm text-fg-muted">
           Worktree
           <input

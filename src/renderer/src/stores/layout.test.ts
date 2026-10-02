@@ -185,13 +185,26 @@ describe('region changes before hydration', () => {
     const fake = fakeClient({ 'layout.list': { keys: ['regions'] } });
     const store = createLayoutStore();
     const hydrating = store.getState().hydrate(fake.client, () => true);
-    store.getState().setSidebar({ openProject: 'proj-a' as ProjectId });
+    store.getState().setSidebar({ expandedProjects: ['proj-a' as ProjectId] });
     await new Promise((resolve) => setTimeout(resolve, 0));
     const saved = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 260 } };
     for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'regions' ? saved : null });
     await hydrating;
-    expect(store.getState().regions.sidebar).toEqual({ ...saved.sidebar, openProject: 'proj-a' });
+    expect(store.getState().regions.sidebar).toEqual({ ...saved.sidebar, expandedProjects: ['proj-a'] });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fake.invoked('layout.set')).toContainEqual({ key: 'regions', value: store.getState().regions });
+  });
+
+  it('an updater is replayed over the hydrated sidebar, so an early expansion adds to the saved ones', async () => {
+    const fake = fakeClient({ 'layout.list': { keys: ['regions'] } });
+    const store = createLayoutStore();
+    const hydrating = store.getState().hydrate(fake.client, () => true);
+    store.getState().setSidebar(({ expandedProjects }) => ({ expandedProjects: [...expandedProjects, 'proj-b' as ProjectId] }));
+    expect(store.getState().regions.sidebar.expandedProjects).toEqual(['proj-b']); // against the default, until hydration
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const saved = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, expandedProjects: ['proj-a' as ProjectId] } };
+    for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'regions' ? saved : null });
+    await hydrating;
+    expect(store.getState().regions.sidebar.expandedProjects).toEqual(['proj-a', 'proj-b']);
   });
 });

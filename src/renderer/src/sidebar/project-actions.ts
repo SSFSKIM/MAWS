@@ -1,14 +1,14 @@
 // §5.1's project actions that later children answer (archive sessions, remove project, reveal in Finder, the archived
 // sessions list) and the workspace's "Add project": each rendered disabled until a handler registers (residue
-// *Slots*). The shell answers "New chat" (`createSession`) and "Mark all read" itself. The project-level "Add
-// directory…" is retired (charter 733051f: a project is one directory; a session's additional directories are the
-// composer's chip, §5.4).
+// *Slots*). The shell answers "New chat" (`createSession`), "Resume…" (W11) and "Mark all read" itself. The
+// project-level "Add directory…" is retired (charter 733051f: a project is one directory; a session's additional
+// directories are the composer's chip, §5.4).
 import type { ProjectId } from '@shared/graph/ids';
 import { createHandlerRegistry } from '../keymap/registry';
 
 export const PROJECT_ACTIONS = {
   archiveSessions: 'Archive sessions…',
-  removeProject: 'Remove project…',
+  removeProject: 'Remove from sidebar…', // W11 (I5): also the archive icon on the project row
   revealInFinder: 'Reveal in Finder',
   // C10 start: a project's archived sessions, a dialog list (C5 hides archived rows and gains no section)
   archivedSessions: 'Archived sessions…',

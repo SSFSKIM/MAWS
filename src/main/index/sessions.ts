@@ -17,6 +17,8 @@ import { branchName } from '@shared/sessions/branch';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { Db, Value } from './db';
 import type { SessionRecordPatch } from '@shared/engine/status';
+import { countLines } from '@shared/composer/pasted-framing';
+import { PASTED_BLOCK, pastedPlaceholder } from '@shared/composer/pasted-content';
 import { locate, type ProjectStore } from './projects';
 
 // The home directory as `locate` answers it (realpathed), which discovery never makes a project of; read once.
@@ -76,6 +78,9 @@ export interface LaunchInit {
   model: SessionRecord['model'];
   effort: SessionRecord['effort'];
   permissionMode: SessionRecord['permissionMode'];
+  // W11 (I1): the first message as the composer displays it, seeding `first_prompt` so the row has a title before the
+  // transcript's first summary (which overwrites it); null for a launch without one (a fork without a message)
+  firstPrompt?: string | null;
 }
 
 // What the engine host needs to know of a record's engine id: bound (fs.scan's `known` when a transcript is on disk).
@@ -98,13 +103,25 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 // and `<command-args>`, or a local command's `<local-command-stdout>` (and siblings). A prompt that opens with that markup
 // is projected as the command the person typed, `/<name> <args>`, followed by any words outside the markup; each element
 // goes whole, an unclosed one (a prompt cut at the summary's cap) to the end. Any other prompt is prose and kept as it
-// is, markup-looking words included. Whitespace is collapsed; null when nothing readable remains.
+// is, markup-looking words included. A pasted block reads as its placeholder, `[Pasted text #n +L lines]` (the composer's
+// and the terminal's), or `[Pasted text #n]` when the 200-character cap cut it before its closing tag. Whitespace is
+// collapsed; a prompt the stripping empties falls back to itself, whitespace collapsed (W11, I1: a title is never blank
+// while the prompt has text); null only for a prompt with no text at all.
 const COMMAND_TAGS = 'command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat';
 const OPENS_WITH_MARKUP = new RegExp(`^\\s*<(?:${COMMAND_TAGS})>`);
 const COMMAND_ELEMENT = new RegExp(`<(${COMMAND_TAGS})>([\\s\\S]*?)(?:<\\/\\1>|$)`, 'g');
 
-export function promptTitle(prompt: string): string | null {
+const OPEN_PASTED = /<pasted_content id="[0-9a-f]{4}">[\s\S]*$/;
+
+function pastedPlaceholders(text: string): string {
+  let n = 0;
+  const closed = text.replace(PASTED_BLOCK, (_block, _id: string, body: string) => ` ${pastedPlaceholder(++n, countLines(body))} `);
+  return closed.replace(OPEN_PASTED, () => ` [Pasted text #${++n}] `);
+}
+
+export function promptTitle(raw: string): string | null {
   const collapse = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const prompt = pastedPlaceholders(raw);
   let name = '';
   let args = '';
   const rest = OPENS_WITH_MARKUP.test(prompt)
@@ -115,7 +132,7 @@ export function promptTitle(prompt: string): string | null {
       })
     : prompt;
   const command = name === '' ? '' : `${name.startsWith('/') ? name : `/${name}`} ${args}`;
-  const text = collapse(`${command} ${rest}`);
+  const text = collapse(`${command} ${rest}`) || collapse(prompt);
   return text === '' ? null : text;
 }
 
@@ -232,7 +249,8 @@ export class SessionStore {
         branch,
         custom_title: summary.customTitle,
         ai_title: summary.aiTitle,
-        first_prompt: summary.firstPrompt,
+        // W11 (I1): a summary read before the first prompt reached the file keeps the prompt seeded at launch
+        first_prompt: summary.firstPrompt ?? existing?.first_prompt ?? null,
         engine_version: summary.engineVersion ?? existing?.engine_version ?? null,
         transcript_path: summary.transcriptPath,
         transcript_size: summary.size,
@@ -332,6 +350,7 @@ export class SessionStore {
         pm_requested: init.permissionMode.requested,
         pm_effective: init.permissionMode.effective,
         pm_refusal: init.permissionMode.refusal,
+        first_prompt: init.firstPrompt ?? null,
         created_at: now,
         updated_at: now,
       });

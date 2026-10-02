@@ -13,7 +13,8 @@ export function registerIndexHandlers(index: Index): void {
   // An app session id with no row (an unstarted tab) is an answer, not an error.
   registerMainHandler('session.get', ({ appSessionId }) => index.sessions.get(appSessionId as AppSessionId));
   registerMainHandler('session.update', ({ appSessionId, patch }) => applyPatch(index, appSessionId as AppSessionId, patch as SessionPatch));
-  registerMainHandler('session.projects.list', () => ({ projects: index.projects.list(), revision: index.revision }));
+  // W11 (I5): hidden projects included, marked `hidden`, so the renderer keeps their sessions out of Other sessions
+  registerMainHandler('session.projects.list', () => ({ projects: index.projects.listWithRemoved(), revision: index.revision }));
   registerMainHandler('session.projects.add', ({ directory }) => index.projects.add(directory));
   registerMainHandler('session.projects.addFolder', ({ directory }) => addFolder(index.projects, directory)); // New chat: "Open folder…"
   registerMainHandler('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));

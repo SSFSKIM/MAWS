@@ -86,7 +86,7 @@ const controlIn = (pane: Locator) => pane.locator('[data-submit-state]');
 const editorText = (pane: Locator) => pane.locator('[contenteditable="true"]').innerText();
 
 async function open(page: Page, record: SessionRecord, pane: Locator): Promise<void> {
-  await (await sidebarRow(page, { appSessionId: record.appId })).click(); // W5: on its project's page, opened first
+  await (await sidebarRow(page, { appSessionId: record.appId })).click(); // W11: its project expanded first
   await expect(pane.locator(`[data-composer="${record.appId}"]`)).toBeVisible();
 }
 

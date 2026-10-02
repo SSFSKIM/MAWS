@@ -29,7 +29,7 @@ import { synthesise } from '../test/support/synth-transcript';
 import { invoke, value } from './support/c7-replay';
 import { collectConsoleErrors, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { taskEnded, type TaskEventLike } from './support/c12-task-end';
-import { openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
+import { newChatIn, openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 import {
   captureLoginShell, EVIDENCE, journalSpend, lsPin, ownerFileCheck, prerunScratch, prerunSkipReason, printRun, ptyEngine, recorder, scratchRepo, shoot, stateOf,
   terminalEnv, transcriptFile, transcriptUsdEstimate, trustInScratch, git,
@@ -111,7 +111,7 @@ const digests = async (page: Page) => value(await invoke(page, 'session.digests'
 const digestOf = async (page: Page, id: string) => (await digests(page)).find((d) => d.appSessionId === id) ?? null;
 const records = async (page: Page, includeArchived = false) => value(await invoke(page, 'session.list', { includeArchived })).sessions;
 
-// A session's row (W5: on its project's page, which this opens), once the index lists the record: a fresh launch reads
+// A session's row (W11: its project expanded first), once the index lists the record: a fresh launch reads
 // the store a moment after the window shows.
 async function rowOf(page: Page, id: string): Promise<Locator> {
   await expect.poll(async () => (await records(page, true)).some((r) => r.appId === id), { timeout: 30_000 }).toBe(true);
@@ -159,13 +159,13 @@ async function recordOf(page: Page, sessionId: string, timeout = 30_000): Promis
   return found!;
 }
 
-// A project's session rows in the sidebar (W5: on the project's page, opened from the project list; projects no longer
-// expand in place).
+// A project's session rows in the sidebar (W11: the project expanded in place; at most eight show).
 async function projectRows(page: Page, projectName: string): Promise<string[]> {
+  await showProjectList(page);
   await expect(projectRow(page, projectName)).toBeVisible({ timeout: 30_000 });
   await openProject(page, projectName);
-  return sidebar(page)
-    .locator('[data-level-pane="2"] [role="treeitem"][data-kind="session"]')
+  return projectRow(page, projectName)
+    .locator('[role="treeitem"][data-kind="session"]')
     .evaluateAll((els) => els.map((el) => el.getAttribute('data-menu')!.replace(/^session:/, '')));
 }
 
@@ -254,9 +254,7 @@ test('§10.1 real store, read only', async () => {
     const board = (await openOverview(page)).getByRole('list', { name: 'Overview' });
     await expect(board.getByRole('article').first()).toBeVisible({ timeout: 120_000 });
     const firstCardMs = Date.now() - launchedAt;
-    // The project list by its level rather than its tree's role: a page left open by an earlier run takes the list out
-    // of the accessibility tree (its level is inert while the page shows) but keeps it rendered.
-    const projectList = sidebar(page).locator('[data-level-pane="1"] [data-kind="project"]');
+    const projectList = sidebar(page).locator('[data-kind="project"]');
     await expect(projectList.first()).toBeVisible({ timeout: 120_000 });
     const firstProjectMs = Date.now() - launchedAt;
     // The index settles: the session count stops moving for 5 s.
@@ -277,18 +275,22 @@ test('§10.1 real store, read only', async () => {
     const projects = value(await invoke(page, 'session.projects.list', undefined)).projects;
     const ds = await digests(page);
     const foreign = ds.filter((d) => d.phase === 'foreign').length;
-    const projectRowsShown = await sidebar(page).locator('[data-level-pane="1"] [data-kind="project"][data-menu^="project:"]').count(); // W5: not Other sessions' row
+    await showProjectList(page); // W11: five projects, then the rest behind "Show more"
+    const projectRowsShown = await sidebar(page).locator('[data-kind="project"][data-menu^="project:"]').count(); // not Other sessions' row
     const cards = await board.getByRole('article').count();
-    // W5: session rows live on each project's page, so the foreign glyphs are counted page by page (Other sessions too),
-    // each page reached by its row's id, taken once: the list reorders as the owner's sessions work.
+    // W11: session rows show inside each expanded project (eight at most), so the foreign glyphs are counted project by
+    // project (Other sessions too), each reached by its row's id, taken once: the list reorders as the owner's sessions
+    // work. Each project is collapsed again after its count.
     let foreignGlyphs = 0;
     for (const key of await projectList.evaluateAll((els) => els.map((el) => el.getAttribute('data-tree-id')!))) {
-      await showProjectList(page);
-      await sidebar(page).locator(`[data-level-pane="1"] [data-tree-id="${key}"]`).click();
-      await expect(sidebar(page).getByTestId('sidebar-levels')).toHaveAttribute('data-level', '2');
-      foreignGlyphs += await sidebar(page).locator('[data-level-pane="2"]').getByRole('img', { name: /^Live (in terminal|as background job)$/ }).count();
+      const project = sidebar(page).locator(`[data-kind="project"][data-tree-id="${key}"]`);
+      const line = project.locator('[data-project-line]');
+      const wasOpen = (await project.getAttribute('aria-expanded')) === 'true';
+      if (!wasOpen) await line.click();
+      await expect(project).toHaveAttribute('aria-expanded', 'true');
+      foreignGlyphs += await project.getByRole('img', { name: /^Live (in terminal|as background job)$/ }).count();
+      if (!wasOpen) await line.click();
     }
-    await showProjectList(page);
     await page.screenshot({ path: join(outside, 'prerun-10.1-realstore-light.png') });
     const engineSessions = value(await invoke(page, 'engine.sessions', undefined));
     rec.note('10.1.realstore', {
@@ -338,8 +340,7 @@ async function plus(page: Page, repo: string, first: string, o: { mode?: string;
   await addProject(page, repo);
   const name = repo.split('/').at(-1)!;
   const known = new Set(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId));
-  await openProject(page, name); // W5: the "+" beside the name on the project's page
-  await sidebar(page).locator('[data-level-pane="2"]').getByRole('button', { name: `New chat in ${name}`, exact: true }).click();
+  await newChatIn(page, name); // W11: the "+" on the project's row, on hover
   await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
   let id: AppSessionId | undefined;
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !known.has(i.appSessionId))?.appSessionId)).toBeDefined();

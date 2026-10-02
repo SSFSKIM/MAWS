@@ -15,6 +15,7 @@ import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { BUDGET, reasonWords } from './copy';
 import { useBudget } from './store';
+import { displayTitle } from '../sessions/title';
 
 export function BudgetSheets({ client = ipc }: { client?: MawsBridge }) {
   const sheet = useBudget((s) => s.sheet);
@@ -23,7 +24,7 @@ export function BudgetSheets({ client = ipc }: { client?: MawsBridge }) {
   return sheet.kind === 'blocked' ? <BlockedSessionsSheet /> : <StopSessionSheet key={sheet.appSessionId} appSessionId={sheet.appSessionId} client={client} />;
 }
 
-const titleOf = (appSessionId: AppSessionId) => useSessions.getState().records.get(appSessionId)?.title.text ?? appSessionId;
+const titleOf = (appSessionId: AppSessionId) => displayTitle(useSessions.getState().records.get(appSessionId));
 
 export function BlockedSessionsSheet() {
   const state = useBudget((s) => s.state);
@@ -40,7 +41,7 @@ export function BlockedSessionsSheet() {
       ) : (
         <ul aria-label={BUDGET.blockedTitle} className="m-0 flex max-h-[50vh] list-none flex-col overflow-auto p-0">
           {blocked.map(({ appSessionId, reasons }) => {
-            const title = records.get(appSessionId)?.title.text ?? appSessionId;
+            const title = displayTitle(records.get(appSessionId));
             const status = statuses.get(appSessionId) ?? null;
             return (
               <li key={appSessionId} aria-label={title} className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0">

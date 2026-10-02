@@ -250,7 +250,7 @@ describe('store rows', () => {
 
   it('titles a row by the record\'s projected title, or untitled', () => {
     expect(titleOf(record(A1, { title: { text: 'C', source: 'user' } }))).toBe('C');
-    expect(titleOf(record(A1, { title: { text: '', source: 'none' } }))).toBe('(untitled)');
+    expect(titleOf(record(A1, { title: { text: '', source: 'none' } }))).toBe('New chat');
   });
 
   it.each<[Holder, string | null]>([

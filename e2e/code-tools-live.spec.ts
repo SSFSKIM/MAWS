@@ -100,7 +100,7 @@ test('live: Files, the viewer and Review over this checkout', async () => {
     await hideWindow(maws);
     const { page } = maws;
     const panel = page.locator('[data-region="panel"]');
-    // W5: the row is on its project's page; the page is opened once the stub's records are in.
+    // W11: the row is in its project, expanded once the stub's records are in.
     await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await (await sidebarRow(page, CHARTER)).click();
 
@@ -195,7 +195,7 @@ test('live: Files, the viewer and Review over this checkout', async () => {
 
     await test.step('Files: a session in a worktree has two roots, its directory and the worktree, in record order', async () => {
       if (mainCheckout === worktree) throw new Error(`this run is not in a linked worktree: ${worktree}`);
-      await (await sidebarRow(page, WORKTREE_SESSION)).click(); // W5: in its worktree's group on the project's page
+      await (await sidebarRow(page, WORKTREE_SESSION)).click(); // W11: in its project's flat list, marked by its branch
       await addTool(page, 'Files');
       const roots = panel.locator('[data-tool="files"] [role="treeitem"][data-kind="root"]');
       await expect(roots).toHaveCount(2);
@@ -272,7 +272,7 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
     await expect.poll(async () => (await status())?.process, { timeout: 60_000 }).toBe('ready');
 
     // Open the session, so the transcript (C6's slot, with C8c's registered callbacks) shows the turn's receipt. Its row
-    // by the record's id (W5: on its project's page, opened first), since the title follows the session's prompts.
+    // by the record's id (W11: its project expanded first), since the title follows the session's prompts.
     await (await sidebarRow(page, { appSessionId: record!.appId })).click();
     const prompt = `Use the Edit tool exactly once on ${target} to change the line "${before[lineNo - 1]}" into "${edited}". Change nothing else and do not run any other tool than Read and Edit. Then reply DONE.`;
     const sent = await invoke('session.send', { appSessionId: record!.appId, content: prompt });

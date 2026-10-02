@@ -89,7 +89,7 @@ test('live: the summary over this repository matches git', async () => {
     const summary = panel.getByRole('tabpanel', { name: 'Session overview' });
     const section = (name: string): Locator => summary.getByRole('region', { name });
     const changeLine = summary.getByTestId('change-line');
-    // W5: a session's row is on its project's page, opened first, once the stub's records are in.
+    // W11: a session's row shows in its expanded project, expanded first, once the stub's records are in.
     const open = async (title: string) => {
       await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
       await (await sidebarRow(page, title)).click();

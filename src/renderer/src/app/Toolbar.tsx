@@ -17,6 +17,7 @@ import { Icon, IconButton, PanelIcon, SidebarIcon } from './IconButton';
 import { sidebarWidth, useWindowWidth } from './regions';
 import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from './session-actions';
 import { useSlot } from './slots';
+import { displayTitle } from '../sessions/title';
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
@@ -27,7 +28,7 @@ export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSession
     case 'session':
     case 'agent': {
       const record = records.get(tab.appSessionId);
-      const title = record?.title.text ?? 'New session'; // no record yet: an unstarted session
+      const title = displayTitle(record); // no record yet (an unstarted session) or no title yet: "New chat"
       return { title: tab.kind === 'agent' ? `${title} · agent` : title, branch: branchLabel(recordBranch(record)) }; // W9 (H2)
     }
     case 'file':

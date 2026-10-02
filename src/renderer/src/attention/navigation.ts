@@ -13,6 +13,7 @@ import { activeTab } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { nextNeedsYou } from './derive';
+import { displayTitle } from '../sessions/title';
 
 const openInFocusedPane = (appSessionId: AppSessionId) => useLayout.getState().openTab({ kind: 'session', appSessionId }, { pane: 'focused' });
 
@@ -35,7 +36,8 @@ function fallbackToast({ appSessionId, attentionId, delivery }: EventPayload<'at
   // The item may still sit in the buffer of an outstanding attention snapshot.
   const items = [...(attention.bySession.get(id) ?? []), ...(attention.pendingReplacements?.get(id) ?? [])];
   const summary = items.find((i) => i.id === attentionId)?.summary;
-  const title = useSessions.getState().records.get(id)?.title.text ?? 'A session';
+  const record = useSessions.getState().records.get(id);
+  const title = record ? displayTitle(record) : 'A session';
   useNotices.getState().toast({
     id: `attention:${attentionId}`,
     level: 'warning',

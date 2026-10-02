@@ -133,6 +133,20 @@ describe('head and tail summary', () => {
     expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('! git status');
   });
 
+  // W11 (I1): an empty first text block titled the session blank; the block with words is the prompt
+  it('an empty text block is no prompt: the first block with words is, else the next user record', () => {
+    const text =
+      line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', message: { role: 'user', content: [{ type: 'text', text: '' }, { type: 'text', text: 'Fix the drag handle' }] } }) +
+      line({ type: 'user', uuid: 'u2', parentUuid: 'u1', message: { role: 'user', content: 'later' } });
+    const bytes = Buffer.from(text, 'utf8');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('Fix the drag handle');
+    const blank =
+      line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', message: { role: 'user', content: [{ type: 'text', text: '  ' }] } }) +
+      line({ type: 'user', uuid: 'u2', parentUuid: 'u1', message: { role: 'user', content: 'Then this one' } });
+    const blankBytes = Buffer.from(blank, 'utf8');
+    expect(summarize(blankBytes, blankBytes, { size: blankBytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('Then this one');
+  });
+
   it('a first prompt longer than the head window falls back to the earliest last-prompt the windows hold', () => {
     const big = line({ parentUuid: null, type: 'user', uuid: 'u1', timestamp: '2026-09-29T10:00:00.000Z', cwd: '/d', message: { role: 'user', content: 'y'.repeat(150 * 1024) } });
     const rest =

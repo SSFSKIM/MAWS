@@ -208,6 +208,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
       model: { requested: intent.model, resolved: null },
       effort: intent.effort,
       permissionMode: { requested: mode, effective: mode, refusal: null },
+      firstPrompt: intent.message?.display ?? null, // W11 (I1): the row's title until the transcript's first summary
     });
     if (!created.ok) s.log(`a record already exists under ${appSessionId}; the launch reuses it`);
     run.event('launching', 'Starting');

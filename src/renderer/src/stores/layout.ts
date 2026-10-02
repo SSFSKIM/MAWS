@@ -55,7 +55,9 @@ export interface LayoutState {
   focusPane(i: Pane): void;
   setSplitRatio(r: number): void;
   dropSession(appSessionId: AppSessionId): void; // session.removed
-  setSidebar(patch: Partial<LayoutRegions['sidebar']>): void;
+  // A patch, or an updater for a change that depends on the sidebar it lands on (an early one is replayed over the
+  // hydrated value, not the default it was made against).
+  setSidebar(patch: Partial<LayoutRegions['sidebar']> | ((sidebar: LayoutRegions['sidebar']) => Partial<LayoutRegions['sidebar']>)): void;
   setPanel(patch: Partial<LayoutRegions['panel']>): void;
   setOverviewOpen(open: boolean): void;
   setOverviewRect(rect: LayoutRegions['overview']): void;
@@ -218,7 +220,7 @@ export function createLayoutStore() {
         }
       },
 
-      setSidebar: (patch) => regions((r) => ({ ...r, sidebar: { ...r.sidebar, ...patch } })),
+      setSidebar: (patch) => regions((r) => ({ ...r, sidebar: { ...r.sidebar, ...(typeof patch === 'function' ? patch(r.sidebar) : patch) } })),
       setPanel: (patch) => regions((r) => ({ ...r, panel: { ...r.panel, ...patch } })),
       setOverviewOpen(overviewOpen) {
         // Overview lives over main, so opening it restores main, including when regions are still hydrating.

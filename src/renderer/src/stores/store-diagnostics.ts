@@ -19,6 +19,7 @@ import type { FsScanResult, FsState } from '@shared/ipc/schema/fs';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { Holder } from '@shared/wire/store';
 import { ipc } from '../ipc/client';
+import { displayTitle } from '../sessions/title';
 
 export type ScanStatus =
   | { status: 'idle' }
@@ -211,7 +212,7 @@ export function rowsOf(records: Record<string, SessionRecord>): SessionRecord[] 
 }
 
 export function titleOf(record: SessionRecord): string {
-  return record.title.text === '' ? '(untitled)' : record.title.text;
+  return displayTitle(record);
 }
 
 export function describeHolder(holder: Holder): string | null {

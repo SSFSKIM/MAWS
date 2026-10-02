@@ -124,7 +124,7 @@ test('the shell: the frame docked under a live transcript, the docked approvals,
     const [live, approval, edit] = [await appIdOf(sessions.live), await appIdOf(sessions.approval), await appIdOf(sessions.edit)];
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     const open = async (id: string) => {
-      await (await sidebarRow(page, { appSessionId: id })).click(); // W5: on its project's page, opened first
+      await (await sidebarRow(page, { appSessionId: id })).click(); // W11: its project expanded first
       await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
     };
     const message = pane.getByRole('textbox', { name: 'Message' });

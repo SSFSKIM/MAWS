@@ -19,7 +19,7 @@ import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
-import { openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
+import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
 const AUTO_ROUTED = `${FIXTURES}/pass2/auto-routed.jsonl`;
@@ -94,11 +94,11 @@ async function addProject(page: Page, directory: string): Promise<{ id: string; 
   return { id: project.id, name: project.name };
 }
 
-// "+" on the project's page (W5: the sidebar drills into it, and its rows show there): C5's createSession runs C10's
+// "+" on the project's row (W11: on hover; the project expanded too, so its rows show): C5's createSession runs C10's
 // creator; the tab opens on the unstarted session's heading.
 async function plus(page: Page, name: string): Promise<string> {
   await openProject(page, name);
-  await page.locator('[data-region="sidebar"] [data-level-pane="2"]').getByRole('button', { name: `New chat in ${name}`, exact: true }).click();
+  await newChatIn(page, name);
   await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
   const intents = value(await invoke(page, 'session.intent.list', undefined)).intents;
   return intents.at(-1)!.appSessionId;
@@ -151,8 +151,8 @@ async function startDirect(page: Page, id: string, patch: CommandInput<'session.
   return value(await invoke(page, 'session.start', { appSessionId: id, message, options: {} }));
 }
 
-// A session's row on the sidebar's level on screen (W5: the other level stays rendered while it slides away).
-const row = (page: Page, id: string) => page.locator(`[data-region="sidebar"] [data-level-pane]:not([inert]) [data-menu="session:${id}"]`);
+// A session's row in the sidebar (W11: inside its expanded project).
+const row = (page: Page, id: string) => page.locator(`[data-region="sidebar"] [data-menu="session:${id}"]`);
 
 // Every text a transcript's load-failure alert showed (the alert stays until Retry), from before the first start: a
 // session started through "+" hydrates once the engine host knows it, never failing on an id not yet launched or bound.
@@ -366,7 +366,7 @@ test.describe('sessions', () => {
     await expect.poll(async () => value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === id)?.process ?? 'gone').toMatch(/^(exited|gone)$/);
 
     await showProjectList(page);
-    await projectRow(page, project.name).click({ button: 'right' });
+    await projectLine(projectRow(page, project.name)).click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Archived sessions…' }).click();
     const archived = page.getByRole('dialog', { name: `Archived sessions · ${project.name}` });
     await archived.getByRole('button', { name: 'Unarchive' }).click();
@@ -487,7 +487,7 @@ test.describe('sessions', () => {
     expect(metas.filter((m) => m.event === 'spawn'), 'one retry, never chained').toHaveLength(2);
     expect(metas.filter((m) => m.event === 'init_failed').map((m) => m.code)).toEqual(['no_output', 'no_output']);
     expect(value(await invoke(page, 'session.status', { appSessionId: record.appId }))).toMatchObject({ process: 'exited', exit: { reason: 'crash' } });
-    await (await sidebarRow(page, { appSessionId: record.appId })).click({ button: 'right' }); // W5: on its project's page
+    await (await sidebarRow(page, { appSessionId: record.appId })).click({ button: 'right' }); // W11: in its expanded project
     await expect(page.getByRole('menuitem', { name: 'Resume', exact: true }), 'the row can be resumed again').toBeEnabled();
     await page.keyboard.press('Escape');
   });
@@ -525,7 +525,7 @@ test.describe('sessions', () => {
     expect(value(await invoke(page, 'session.start', { appSessionId: id, message: null, options: {} })), 'the fresh read, whatever the sidebar shows yet').toEqual({ status: 'held', appSessionId: id, holder: job, attach: { jobId: 'e6dcd828', command } });
     await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: id }))!.holder, { timeout: 2_000, message: 'foreign-live in the sidebar within two seconds' }).toEqual(job);
 
-    await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' }); // W5: on its project's page
+    await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' }); // W11: in its expanded project
     await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Attach in a terminal tab']);
     await page.keyboard.press('Escape');
     await row(page, id).click();
@@ -689,7 +689,7 @@ test.describe('sessions', () => {
     await page.getByRole('button', { name: 'Add project' }).first().click();
     await expect.poll(async () => value(await invoke(page, 'session.projects.list', undefined)).projects.map((p) => p.directory)).toEqual([repo.root]);
     const [added] = value(await invoke(page, 'session.projects.list', undefined)).projects;
-    await expect(page.getByRole('button', { name: `New chat in ${added!.name}`, exact: true })).toBeVisible();
+    await expect(projectRow(page, added!.name)).toBeVisible();
     expect(maws.consoleErrors()).toEqual([]);
   });
 
@@ -700,7 +700,7 @@ test.describe('sessions', () => {
     current = { ...first, repos: [repo] };
     const project = await addProject(first.page, repo.root);
     const id = await plus(first.page, project.name);
-    await expect(editor(first.page), 'W9 (H3): the project page\'s "+" hands the keyboard to the new tab').toBeFocused();
+    await expect(editor(first.page), 'W9 (H3): the project row\'s "+" hands the keyboard to the new tab').toBeFocused();
     await first.page.keyboard.type('half a thought');
     // C7 keeps an unstarted session's draft through C10's hook (the intent), written a moment after the typing
     await expect.poll(async () => JSON.stringify(value(await invoke(first.page, 'session.intent.get', { appSessionId: id }))!.draft)).toContain('half a thought');
@@ -724,7 +724,7 @@ test.describe('sessions', () => {
     await untilPhase(page, id, 'ready');
     expect((await setupOf(page, id)).at(-1)!.outcome).toMatchObject({ kind: 'ready', firstTurn: 'sent' });
 
-    // W5: the session's row (on its project's page, opened by "+") waits with the approval glyph; its hover card holds
+    // W5: the session's row (in its project, expanded by the "+" helper) waits with the approval glyph; its hover card holds
     // C7's X4 card in C5's hover placement (registered in C5's requestCard slot), the tool as its heading.
     const entry = row(page, id);
     await expect(entry.getByRole('img', { name: 'Needs approval' })).toBeVisible({ timeout: 20_000 });

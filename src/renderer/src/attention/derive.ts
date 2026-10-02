@@ -5,6 +5,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ForeignHolder, SessionRecord } from '@shared/graph/session';
 import { isActionable, isOpen } from '@shared/attention/kinds';
+import { displayTitle } from '../sessions/title';
 
 // The kinds and the open states are shared with main's notifier and dock badge (`@shared/attention/kinds`).
 export { ACTIONABLE_KINDS, isActionable, isOpen } from '@shared/attention/kinds';
@@ -35,7 +36,7 @@ export function needsYou(bySession: Map<AppSessionId, AttentionItem[]>, records:
     const waiting = waitingItem(items);
     if (waiting) rows.push({ appSessionId, ...waiting });
   }
-  const title = (id: AppSessionId) => records.get(id)?.title.text ?? '';
+  const title = (id: AppSessionId) => displayTitle(records.get(id));
   return rows.sort(
     (a, b) =>
       a.tier - b.tier ||

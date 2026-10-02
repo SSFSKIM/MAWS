@@ -12,7 +12,7 @@ import { expect, test, type ElectronApplication, type Locator, type Page, type T
 import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
 import { formatChord } from '../src/shared/keymap/chord';
 import { launchMaws, type MawsLaunch } from './support/launch';
-import { openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
+import { closeProject, openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const SHELL_ENV = {
   MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json',
@@ -60,34 +60,34 @@ test('shell: sidebar, overview, hover approve, tabs and split, persistence, them
   }
 });
 
-// W5 at scale (many-sessions.json: three projects of 120 sessions, a third of MAWS's in a managed and a sibling
-// worktree): the project list, then a page that renders every session of the project in 30px rows, grouped Main first
-// and then per worktree, scrolling; the hover card names a worktree row's branch and folder; Backspace goes back.
-test('sidebar at scale: two levels, 30px rows, worktree groups, a scrolling page', async () => {
+// W11 at scale (many-sessions.json: three projects of 120 sessions, a third of MAWS's in a managed and a sibling
+// worktree): Codex's flat tree, 36px project rows expanding in place to 30px session rows, five and then eight at most,
+// one flat list with a worktree session marked by its branch; the hover card names the branch and folder; ArrowLeft
+// steps out to the project.
+test('sidebar at scale: the flat tree, 36px project rows, 30px session rows, five then eight', async () => {
   const maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/many-sessions.json', MAWS_SCENARIO_CLOCK: 'manual' } });
   try {
     const { app, page } = maws;
     const sidebar = page.locator('[data-region="sidebar"]');
-    await expect(sidebar.locator('[data-level-pane="1"] [data-kind="project"]')).toHaveCount(3, { timeout: 15_000 });
+    await expect(sidebar.locator('[data-kind="project"]')).toHaveCount(3, { timeout: 15_000 });
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 1360, height: 860 }));
     const heights = (scope: Locator) => scope.evaluateAll((els) => [...new Set(els.map((el) => Math.round(el.getBoundingClientRect().height)))]);
-    expect(await heights(sidebar.locator('[data-level-pane="1"] [data-kind="project"]')), 'project rows are 30px').toEqual([30]);
+    expect(await heights(sidebar.locator('[data-project-line]')), 'project rows are 36px').toEqual([36]);
 
     await openProject(page, 'MAWS');
-    const level = sidebar.locator('[data-level-pane="2"]');
-    const rows = level.locator('[data-kind="session"]');
-    await expect(rows, 'every session of the project, no cap').toHaveCount(120);
+    const maWS = projectRow(page, 'MAWS');
+    const rows = maWS.locator('[data-kind="session"]');
+    await expect(rows, 'five sessions first').toHaveCount(5);
     expect(await heights(rows), 'session rows are 30px').toEqual([30]);
-    const groups = await level.getByRole('group').evaluateAll((els) => els.map((el) => [el.getAttribute('aria-label'), el.querySelectorAll('[data-kind="session"]').length]));
-    expect(groups.map(([label]) => label)).toEqual([expect.stringMatching(/^Main( · .+)?$/), 'MAWS-scale-beta · scale-beta', 'scale-alpha · worktree-scale-alpha']);
-    expect(groups.map(([, count]) => count)).toEqual([80, 20, 20]);
-    expect(await level.evaluate((el) => el.scrollHeight > el.clientHeight), 'the page scrolls').toBe(true);
-    const last = rows.last();
-    await last.scrollIntoViewIfNeeded();
-    await expect(last).toBeInViewport();
+    await expect(maWS.getByRole('group'), 'one flat list: no Main or worktree groups').toHaveCount(1);
+    await maWS.getByRole('treeitem', { name: 'Show more' }).click();
+    await expect(rows, 'eight at most').toHaveCount(8);
+    await expect(maWS.getByRole('treeitem', { name: 'Show more' })).toHaveCount(0);
 
-    const alpha = level.getByRole('group', { name: 'scale-alpha · worktree-scale-alpha' }).locator('[data-kind="session"]').first();
-    await alpha.scrollIntoViewIfNeeded();
+    // A worktree session, found through the search (which lists the project open on its matches).
+    await sidebar.getByRole('searchbox', { name: 'Search projects and sessions' }).fill('scale-alpha');
+    const alpha = maWS.locator('[data-kind="session"]').first();
+    await expect(alpha.getByTestId('row-branch')).toHaveText('⎇ worktree-scale-alpha');
     const title = (await alpha.getAttribute('aria-label'))!;
     const card = page.getByRole('dialog', { name: title });
     await expect(async () => {
@@ -98,9 +98,8 @@ test('sidebar at scale: two levels, 30px rows, worktree groups, a scrolling page
     await expect(card.getByTestId('hover-place')).toHaveText('⎇ worktree-scale-alpha · worktree scale-alpha');
 
     await alpha.focus();
-    await page.keyboard.press('Backspace');
-    await expect(sidebar.getByTestId('sidebar-levels')).toHaveAttribute('data-level', '1');
-    await expect(sidebar.locator('[data-level-pane="1"] [data-kind="project"][aria-label="MAWS"]')).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await expect(maWS).toBeFocused();
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();
@@ -166,8 +165,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
       ['Resize right panel', '380'],
     ]);
 
-    // W5: the project list, most recently active first, with each project's waiting and working counts; no Needs-you or
-    // Pinned section. Each project's page lists its sessions, pinned first.
+    // W11: the project list, most recently active first, with each collapsed project's waiting and working counts; no
+    // Needs-you or Pinned section. Each project expands in place to its sessions, pinned first.
     await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toHaveCount(0);
     expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', 'Other sessions']);
     expect(await rollups(sidebar)).toEqual({ [USAGE_PROJECT]: '●1', codex_somersault: '◐1', MAWS: '◐2●1', 'Other sessions': '' });
@@ -181,9 +180,10 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     const unread: string[] = [];
     for (const [project, rows] of Object.entries(pages)) {
       await openProject(page, project);
-      expect(await treeRows(shownLevel(sidebar)), `${project}'s page`).toEqual(rows);
-      Object.assign(glyphs, await rowGlyphs(shownLevel(sidebar)));
-      unread.push(...(await unreadRows(shownLevel(sidebar))).filter((title): title is string => title !== null));
+      expect(await treeRows(projectRow(page, project)), `${project}'s sessions`).toEqual(rows);
+      Object.assign(glyphs, await rowGlyphs(projectRow(page, project)));
+      unread.push(...(await unreadRows(projectRow(page, project))).filter((title): title is string => title !== null));
+      await closeProject(page, project);
     }
     expect(glyphs, 'every glyph as the glyph table labels it').toEqual({
       'Workstation north star': 'Done',
@@ -320,7 +320,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
       await expect(main.getByText('Charter + research needs you · Read: docs/charter.md')).toBeVisible();
     }
     expect(await badge()).toBe('4');
-    await showProjectList(page);
+    await closeProject(page, 'MAWS'); // W11: a project's counts show while it is collapsed
     await expect(projectRow(page, 'MAWS').getByLabel('3 waiting'), 'the new request counts on its project').toBeVisible();
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (toast)').toEqual([]);
   });
@@ -347,7 +347,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (hover card)').toEqual([]);
     await charterHover.getByRole('button', { name: 'Approve' }).click();
     await expect(charterHover.getByRole('button', { name: 'Approve' })).toHaveCount(0);
-    await showProjectList(page);
+    await closeProject(page, 'MAWS');
     await expect(projectRow(page, 'MAWS').getByLabel('2 waiting')).toBeVisible();
     await expect(board.getByRole('article', { name: 'Charter + research' }).getByTestId('card-activity')).toHaveText('Continuing');
     await expect.poll(badge).toBe('3');
@@ -488,7 +488,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     expect(await tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research · MAWS']);
   });
 
-  await test.step('Item 6: sizes, the open project, the collapsed panel', async () => {
+  await test.step('Item 6: sizes, the expanded project, the collapsed panel', async () => {
     await dragBy(page, sidebar.getByRole('separator', { name: 'Resize sidebar' }), -60);
     await expect(sidebar.getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '240');
     const panelResizer = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
@@ -503,11 +503,11 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
 
     await expect
       .poll(async () => {
-        const regions = (await layoutGet(page, 'regions')) as { sidebar: { width: number; openProject: string | null }; panel: { width: number; collapsed: boolean } };
+        const regions = (await layoutGet(page, 'regions')) as { sidebar: { width: number; expandedProjects: string[] }; panel: { width: number; collapsed: boolean } };
         const main = (await layoutGet(page, 'main.tabs')) as { panes: unknown[] };
-        return [regions.sidebar.width, regions.panel.width, regions.panel.collapsed, regions.sidebar.openProject, main.panes.length];
+        return [regions.sidebar.width, regions.panel.width, regions.panel.collapsed, regions.sidebar.expandedProjects.includes(usageProjectId), main.panes.length];
       }, { message: 'the layout is written back' })
-      .toEqual([240, 320, true, usageProjectId, 2]);
+      .toEqual([240, 320, true, true, 2]);
     expect((await layoutList(page)).sort()).toEqual(['main.tabs', 'panel.pinned', 'regions', 'window.main']);
   });
 
@@ -525,9 +525,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
 async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void> {
   const { app, page } = maws;
   const sidebar = page.locator('[data-region="sidebar"]');
-  // W5: the sidebar opens on the project page it showed at quit.
-  await expect(sidebar.getByRole('heading', { level: 2, name: USAGE_PROJECT })).toBeVisible({ timeout: 10_000 });
-  await expect(sidebar.getByTestId('sidebar-levels')).toHaveAttribute('data-level', '2');
+  // W11: the sidebar opens with the projects expanded at quit.
+  await expect(projectRow(page, USAGE_PROJECT)).toHaveAttribute('aria-expanded', 'true', { timeout: 10_000 });
   // W5: the app opens to the last active tab; the Overview stays closed until asked for.
   await expect(page.locator('[data-region="main"]').getByRole('dialog', { name: 'Overview' })).toHaveCount(0);
 
@@ -535,7 +534,7 @@ async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void>
   await expect.poll(() => tabLabels(page, 'Left pane tabs'), { message: 'the tabs and the split are back' }).toEqual(saved.left);
   expect(await tabLabels(page, 'Right pane tabs')).toEqual(saved.right);
   await expect(sidebar.getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '240');
-  expect(await treeRows(shownLevel(sidebar))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
+  expect(await treeRows(projectRow(page, USAGE_PROJECT))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
   await expect(page.locator('[data-region="panel"]').getByRole('separator')).toHaveCount(0);
   expect((await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0, 'the panel stays collapsed').toBe(0);
   await page.waitForTimeout(500); // past the 250 ms write-back: hydration must not have rewritten anything
@@ -606,14 +605,14 @@ const layoutList = async (page: Page) => {
 
 const treeRows = (scope: Locator) => scope.locator('[data-kind="session"]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
 
-// W5: the sidebar's level on screen (the other stays rendered, inert, while it slides away), the project list's rows,
-// and each project's counts as they read (◐ waiting, ● working).
-const shownLevel = (sidebar: Locator) => sidebar.locator('[data-level-pane]:not([inert])');
-const projectRows = (sidebar: Locator) => sidebar.locator('[data-level-pane="1"] [data-kind="project"]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
+// W11: the project rows, and each collapsed project's counts as they read on its line (◐ waiting, ● working).
+const projectRows = (sidebar: Locator) => sidebar.locator('[data-kind="project"]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
 const rollups = (sidebar: Locator) =>
   sidebar
-    .locator('[data-level-pane="1"] [data-kind="project"]')
-    .evaluateAll((els) => Object.fromEntries(els.map((el) => [el.getAttribute('aria-label'), Array.from(el.querySelectorAll('[aria-label$=" waiting"], [aria-label$=" working"]')).map((n) => n.textContent).join('')])));
+    .locator('[data-kind="project"]')
+    .evaluateAll((els) =>
+      Object.fromEntries(els.map((el) => [el.getAttribute('aria-label'), Array.from(el.querySelectorAll('[data-project-line] [aria-label$=" waiting"], [data-project-line] [aria-label$=" working"]')).map((n) => n.textContent).join('')])),
+    );
 
 const rowGlyphs = (sidebar: Locator) =>
   sidebar
@@ -643,7 +642,7 @@ const tabLabels = (page: Page, strip: string) =>
 
 const selectedTab = (page: Page, strip: string) => page.getByRole('tablist', { name: strip }).locator('[role="tab"][aria-selected="true"]').getAttribute('aria-label');
 
-// Hovers a session's row (on its project's page, W5) with the pointer and returns its open hover card. The hover is
+// Hovers a session's row (its project expanded, W11) with the pointer and returns its open hover card. The hover is
 // retried from a neutral point: now and then, right after a Radix menu has closed, Chromium keeps the synthetic pointer's
 // hover state stale and the row sees no pointerenter although it is the hit target (a fresh move in fixes it).
 async function hoverRow(page: Page, title: string): Promise<Locator> {

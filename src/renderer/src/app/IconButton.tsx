@@ -85,8 +85,8 @@ export const FolderIcon = ({ className }: { className?: string }) => (
     <path d="M2 4h5l1.5 2H14v7H2z" />
   </Icon>
 );
-export const SearchIcon = () => (
-  <Icon>
+export const SearchIcon = ({ className }: { className?: string }) => (
+  <Icon className={className}>
     <circle cx="7" cy="7" r="4.5" />
     <path d="m10.5 10.5 3 3" />
   </Icon>

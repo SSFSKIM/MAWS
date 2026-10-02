@@ -12,6 +12,7 @@ import { closeDialog } from './dialogs';
 import { deleteOutcomeWords, deleteSession, useRecord } from './record-ops';
 import { Sheet, SheetForm } from './Sheet';
 import { CHOICE, DANGER } from './ui';
+import { displayTitle } from './title';
 
 type Preview = CommandOutput<'session.deletions.preview'>;
 
@@ -60,7 +61,7 @@ export function DeleteDialog({ appSessionId }: { appSessionId: AppSessionId }) {
   };
 
   return (
-    <Sheet title={`Delete “${record.title.text}”?`}>
+    <Sheet title={`Delete “${displayTitle(record)}”?`}>
       <SheetForm canSubmit={acknowledged && !busy} onSubmit={() => void submit()} submitLabel={live ? 'Stop and delete' : 'Delete'} submitClass={DANGER}>
         <p className="m-0 font-mono text-ui-sm break-all text-fg-muted">{record.worktree?.path ?? record.directory}</p>
         <p className="m-0 text-fg-muted">{preview ? deletionWords(preview) : 'Reading what would move…'}</p>

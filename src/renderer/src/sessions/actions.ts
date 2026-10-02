@@ -15,6 +15,7 @@ import { cleanupTargetOf } from './CleanupDialog';
 import { confirm, openDialog } from './dialogs';
 import { archiveSession, forkInPlace } from './record-ops';
 import { resumeSession } from './setup-actions';
+import { displayTitle } from './title';
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
 
@@ -29,10 +30,11 @@ async function removeProject(projectId: ProjectId): Promise<void> {
   const project = sessions.projects.get(projectId);
   if (!project) return;
   const count = [...sessions.records.values()].filter((r) => r.projectId === projectId && !r.archived).length;
+  // W11 (I5): the project row's archive icon and the menu's "Remove from sidebar…"; nothing is deleted
   const yes = await confirm({
-    title: `Remove ${project.name}?`,
-    body: `${count} ${count === 1 ? 'session stays' : 'sessions stay'} on disk and in the terminal; the project leaves the sidebar until you add it again.`,
-    confirmLabel: 'Remove project',
+    title: `Remove ${project.name} from the sidebar?`,
+    body: `Its ${count} ${count === 1 ? 'session stays' : 'sessions stay'} on disk and in the terminal. Show the project again from Hidden projects… at the end of the sidebar's list.`,
+    confirmLabel: 'Remove from sidebar',
     destructive: false,
   });
   if (!yes) return;
@@ -55,7 +57,7 @@ async function archiveProjectSessions(projectId: ProjectId): Promise<void> {
   const refused: string[] = [];
   for (const id of ids) {
     const answer = await archiveSession(id);
-    if ('error' in answer) refused.push(`${sessions.records.get(id)?.title.text ?? id}: ${answer.error}`);
+    if ('error' in answer) refused.push(`${displayTitle(sessions.records.get(id))}: ${answer.error}`);
   }
   if (refused.length > 0) fail(`Not archived: ${refused.join('; ')}`);
 }

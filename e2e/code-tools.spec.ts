@@ -397,7 +397,7 @@ async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scrat
   try {
     maws = await launchMaws({ env: scratch.env });
     const { page } = maws;
-    // W5: the row is on its project's page; the page is opened once the stub's records are in.
+    // W11: the row is in its project, expanded once the stub's records are in.
     await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await (await sidebarRow(page, CHARTER)).click();
     const panel = page.locator('[data-region="panel"]');

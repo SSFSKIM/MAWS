@@ -39,6 +39,7 @@ import { PermissionBody } from './variants/Permission';
 import { PlanBody } from './variants/Plan';
 import { QuestionBody } from './variants/Question';
 import type { CardKeys, Placement } from './variants/types';
+import { displayTitle } from '../sessions/title';
 
 export type { Placement } from './variants/types';
 
@@ -296,7 +297,7 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
         <div className="flex flex-col gap-1">
           <h3 className="m-0 text-ui font-semibold">{title}</h3>
           {subtitle && <Muted>{subtitle}</Muted>}
-          {hover && <Muted>{[project, record?.title.text, `waiting ${needsYouAge(item, now)}`].filter(Boolean).join(' · ')}</Muted>}
+          {hover && <Muted>{[project, record ? displayTitle(record) : null, `waiting ${needsYouAge(item, now)}`].filter(Boolean).join(' · ')}</Muted>}
         </div>
       )}
       {failed && (

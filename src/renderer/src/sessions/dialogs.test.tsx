@@ -343,6 +343,20 @@ describe('dialogs', () => {
     expect(fake.invoked('session.list')[0]).toEqual({ includeArchived: true });
   });
 
+  // W11 (I5): the projects removed from the sidebar, each shown again by adding its directory
+  it('the hidden projects list shows a project again through session.projects.add', async () => {
+    const hidden = project('p2', 1, { name: 'old-repo', directory: '/Users/someone/work/old-repo', hidden: true });
+    withMain({ 'session.projects.add': () => ({ ...hidden, hidden: undefined }) });
+    useSessions.setState({ projects: new Map([[hidden.id, hidden], ['p1' as ProjectId, project('p1', 0, { name: 'maws' })]]), projectsVersion: useSessions.getState().projectsVersion + 1 });
+    render(<SessionDialogs />);
+    act(() => openDialog({ kind: 'hiddenProjects' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Hidden projects' });
+    expect(within(dialog).getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual(['old-repo']);
+    expect(within(dialog).getByText('~/work/old-repo')).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Show again' }));
+    expect(fake.invoked('session.projects.add')).toEqual([{ directory: '/Users/someone/work/old-repo' }]);
+  });
+
   it("an interrupted delete offers 'Finish deleting' and 'Keep' in the session's tab", async () => {
     withMain({ 'session.deletions.keep': () => undefined });
     useSetup.getState().applyDeletions([{ appSessionId: IDLE1, engineSessionId: null, paths: ['/a', '/b', '/c'], trashed: ['/a'], createdAt: '2026-09-29T10:00:00.000Z' }]);

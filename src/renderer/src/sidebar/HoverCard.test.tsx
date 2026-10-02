@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -11,6 +11,7 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { formatAge, projectList } from './derive';
 import { RequestPreview } from './RequestPreview';
 import { useLayout } from '../stores/layout';
 import { Sidebar } from './Sidebar';
@@ -36,7 +37,7 @@ const needsRow = (title: string) => screen.getByRole('treeitem', { name: title }
 beforeEach(() => {
   resetShellStores();
   fillStores(nine);
-  useLayout.getState().setSidebar({ openProject: 'proj-maws' as ProjectId });
+  useLayout.getState().setSidebar({ expandedProjects: ['proj-maws' as ProjectId] });
   act(() => useAttention.getState().applyChanged({ appSessionId: readOp.appSessionId, items: readOp.items }));
 });
 afterEach(() => {
@@ -133,7 +134,7 @@ describe('a session row’s hover card', () => {
 
   it('a working session: its status, age and context, its activity and its last answer', async () => {
     withMain();
-    useLayout.getState().setSidebar({ openProject: 'proj-claude-usage-menubar' as ProjectId });
+    useLayout.getState().setSidebar({ expandedProjects: ['proj-claude-usage-menubar' as ProjectId] });
     const digest = useSessions.getState().digests.get(idOf('Usage reset countdown'))!;
     act(() => useSessions.getState().applyDigest({ ...digest, context: { percent: 41.4, totalTokens: 414_000, maxTokens: 1_000_000, autoCompactThreshold: null }, revision: digest.revision + 1 }));
     render(<Sidebar />);
@@ -147,7 +148,7 @@ describe('a session row’s hover card', () => {
 
   it('a foreign-live session names its holder', async () => {
     withMain();
-    useLayout.getState().setSidebar({ openProject: 'proj-codex-somersault' as ProjectId });
+    useLayout.getState().setSidebar({ expandedProjects: ['proj-codex-somersault' as ProjectId] });
     render(<Sidebar />);
     const card = await open('Somersault terminal run');
     expect(within(card).getByTestId('hover-activity').textContent).toBe('Terminal · pid 7135');
@@ -178,6 +179,59 @@ describe('a session row’s hover card', () => {
     await userEvent.setup().unhover(needsRow('Charter + research'));
     const main = await open('Fix sidebar drag');
     expect(within(main).getByTestId('hover-place').textContent).toBe('⎇ master');
+  });
+});
+
+// W11 (I6): a project row's card, in the same shell: the name, the path home-abbreviated, the counts, the last activity
+// and the worktrees git lists, read when the card opens and never before.
+describe('a project’s hover card', () => {
+  const projectLine = (name: string) => screen.getByRole('treeitem', { name }).querySelector<HTMLElement>('[data-project-line]')!;
+  const info = (path: string, branch: string | null, isMain = false) => ({ repoRoot: '/Users/new/Developer/GitHub/MAWS', path, branch, head: 'abc', isMain, locked: false, prunable: false, managed: path.includes('/.claude/') });
+
+  it('names the project, its path, its counts and last activity, and lists its worktrees read on open', async () => {
+    fake = fakeClient({
+      'git.worktree.list': {
+        repoRoot: '/Users/new/Developer/GitHub/MAWS',
+        commonDir: '/Users/new/Developer/GitHub/MAWS/.git',
+        worktrees: [info('/Users/new/Developer/GitHub/MAWS', 'master', true), info('/Users/new/Developer/GitHub/MAWS/.claude/worktrees/accept-one', 'worktree-accept-one')],
+      },
+    });
+    window.maws = fake.client;
+    useLayout.getState().setSidebar({ expandedProjects: [] });
+    render(<Sidebar />);
+    expect(fake.invoked('git.worktree.list')).toEqual([]); // nothing read while closed
+    await userEvent.setup().hover(projectLine('MAWS'));
+    const card = await screen.findByRole('dialog', { name: 'MAWS' });
+    const maws = nine.projects.find((p) => p.id === 'proj-maws')!;
+    expect(within(card).getByRole('heading', { name: 'MAWS' })).toBeTruthy();
+    expect(within(card).getByTestId('project-path').textContent).toBe(maws.directory.replace(/^\/Users\/[^/]+/, '~'));
+    expect(within(card).getByTestId('project-path').getAttribute('title')).toBe(maws.directory);
+    expect(within(card).getByTestId('project-counts').textContent).toBe('4 sessions · 3 waiting · 1 working'); // the 3 s request included
+    const s = useSessions.getState();
+    const last = projectList({ records: s.records, digests: s.digests, projects: [...s.projects.values()], rows: [] }).find((e) => e.key === 'proj-maws')!.lastActivity!;
+    const age = formatAge(Date.now() - last);
+    expect(within(card).getByTestId('project-activity').textContent).toBe(age === 'now' ? 'Active now' : `Last active ${age} ago`);
+    const worktrees = await within(card).findByRole('list', { name: 'Worktrees' });
+    expect(within(worktrees).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['⎇ mastermain checkout', '⎇ worktree-accept-oneaccept-one']);
+    expect(fake.invoked('git.worktree.list')).toEqual([{ repoRoot: maws.directory }]);
+  });
+
+  it('opens on the project row’s keyboard focus, says nothing of worktrees outside a repository, and Other sessions has none', async () => {
+    fake = fakeClient();
+    window.maws = fake.client;
+    render(<Sidebar />);
+    act(() => screen.getByRole('treeitem', { name: 'codex_somersault' }).focus());
+    const card = await screen.findByRole('dialog', { name: 'codex_somersault' });
+    expect(within(card).getByTestId('project-counts').textContent).toBe('3 sessions · 1 waiting · 0 working');
+    expect(within(card).getByText('Reading…')).toBeTruthy();
+    await act(() => fake.fail('git.worktree.list', 'not a repository'));
+    expect(within(card).queryByText('Reading…')).toBeNull();
+    expect(within(card).queryByRole('list', { name: 'Worktrees' })).toBeNull();
+    act(() => screen.getByRole('treeitem', { name: 'codex_somersault' }).blur());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'codex_somersault' })).toBeNull());
+    act(() => screen.getByRole('treeitem', { name: 'Other sessions' }).focus());
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(screen.queryByRole('dialog', { name: 'Other sessions' })).toBeNull();
   });
 });
 

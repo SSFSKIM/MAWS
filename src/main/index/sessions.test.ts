@@ -49,6 +49,45 @@ describe('session records in the index', () => {
     expect(index.sessions.upsertFromSummary(summary({ directory: dir.path })).record.projectId).not.toBeNull();
   });
 
+  // W11 (I1): a launched session has a title before its transcript is summarised, and after a `/clear` once the next
+  // message's summary arrives; between the two it is empty (the renderer reads "New chat").
+  describe('the first prompt seeded at launch', () => {
+    it('titles the record until the first summary with a prompt overwrites it; a summary without one keeps it', () => {
+      const { record } = index.sessions.createForLaunch({ ...LAUNCH, firstPrompt: 'Fix the  drag handle' });
+      expect(record.title).toEqual({ text: 'Fix the drag handle', source: 'none' });
+      const s = summary({ customTitle: null, aiTitle: null, firstPrompt: null });
+      index.sessions.bindEngineId(record.appId, s.sessionId);
+      index.sessions.upsertFromSummary(s);
+      expect(titleOf(record.appId)).toEqual({ text: 'Fix the drag handle', source: 'none' });
+      index.sessions.upsertFromSummary({ ...s, firstPrompt: 'Fix the drag handle, as written to disk', size: 300 });
+      expect(titleOf(record.appId)).toEqual({ text: 'Fix the drag handle, as written to disk', source: 'none' });
+      index.sessions.upsertFromSummary({ ...s, firstPrompt: 'Fix the drag handle, as written to disk', aiTitle: 'Drag handle fix', size: 400 });
+      expect(titleOf(record.appId)).toEqual({ text: 'Drag handle fix', source: 'generated' });
+    });
+
+    it('a launch without a message seeds nothing, and `/clear` then a message titles from the new transcript', () => {
+      const { record } = index.sessions.createForLaunch({ ...LAUNCH, firstPrompt: null });
+      expect(record.title).toEqual({ text: '', source: 'none' });
+      const a = summary({ customTitle: null, aiTitle: null, firstPrompt: 'First topic' });
+      index.sessions.bindEngineId(record.appId, a.sessionId);
+      index.sessions.upsertFromSummary(a);
+      expect(titleOf(record.appId)).toEqual({ text: 'First topic', source: 'none' });
+      const b = sessionIdFor(81);
+      expect(index.sessions.bindEngineId(record.appId, b).title).toEqual({ text: '', source: 'none' });
+      index.sessions.upsertFromSummary(summary({ sessionId: b, customTitle: null, aiTitle: null, firstPrompt: 'Second topic' }));
+      expect(titleOf(record.appId)).toEqual({ text: 'Second topic', source: 'none' });
+    });
+
+    it('a pasted block titles as its placeholder, cut or whole', () => {
+      const block = (body: string) => `<pasted_content id="ab12">\n${body}\n</pasted_content id="ab12">`;
+      expect(promptTitle(`Review this\n\n${block('one\ntwo\nthree')}\n`)).toBe('Review this [Pasted text #1 +3 lines]');
+      expect(promptTitle(`${block('a')}\n\nand ${block('b\nc')}`)).toBe('[Pasted text #1 +1 lines] and [Pasted text #2 +2 lines]');
+      expect(promptTitle(`Review this\n\n<pasted_content id="ab12">\nline one\nline two, cut at the c`)).toBe('Review this [Pasted text #1]');
+      const { record } = index.sessions.createForLaunch({ ...LAUNCH, firstPrompt: 'Review this [Pasted text #1 +3 lines]' });
+      expect(record.title.text).toBe('Review this [Pasted text #1 +3 lines]');
+    });
+  });
+
   it('upsertFromSummary twice with the same summary creates one row and answers created: false the second time', () => {
     const s = summary();
     const first = index.sessions.upsertFromSummary(s);
@@ -137,8 +176,10 @@ describe('session records in the index', () => {
       expect(promptTitle(`${command('review', 'PR 12')}\n  Look at the   sidebar drag first`)).toBe('/review PR 12 Look at the sidebar drag first');
       expect(promptTitle('<command-name>/init</command-name>\n<command-message>init is analyzing your codebase…')).toBe('/init'); // cut at the cap
       expect(promptTitle('<command-name>/fix-issue</command-name>\n<command-args>the parser dr')).toBe('/fix-issue the parser dr');
-      // A local command's output alone has nothing readable: the empty title.
-      expect(promptTitle('<local-command-stdout>Set model to opus</local-command-stdout>')).toBeNull();
+      // A local command's output alone has nothing readable once stripped: the prompt as written, never a blank title
+      // (W11, I1).
+      expect(promptTitle('<local-command-stdout>Set model to opus</local-command-stdout>')).toBe('<local-command-stdout>Set model to opus</local-command-stdout>');
+      expect(promptTitle('  \n ')).toBeNull();
       // Prose that mentions the markup is prose.
       expect(promptTitle('Why does the sidebar show <command-name> in some titles?')).toBe('Why does the sidebar show <command-name> in some titles?');
       expect(promptTitle('Why does <div> wrap here?')).toBe('Why does <div> wrap here?');

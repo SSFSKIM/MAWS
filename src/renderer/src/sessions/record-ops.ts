@@ -16,10 +16,14 @@ import { holderWords } from './holder-words';
 import { useSetup } from './store';
 import { confirm } from './dialogs'; // W7
 import { resumeSession } from './setup-actions'; // W7
+import { displayTitle } from './title';
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
 
-export const titleOf = (appSessionId: AppSessionId): string => useSessions.getState().records.get(appSessionId)?.title.text ?? 'this session';
+export const titleOf = (appSessionId: AppSessionId): string => {
+  const record = useSessions.getState().records.get(appSessionId);
+  return record ? displayTitle(record) : 'this session';
+};
 
 // A record that leaves the sidebar (archived or deleted) takes its tabs along.
 export function dropTabs(appSessionId: AppSessionId): void {

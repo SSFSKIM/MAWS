@@ -7,20 +7,20 @@ import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario } from '../../../../test/support/scenario';
 import { holderLine, needsYou, waitingItem } from '../attention/derive';
 import { orderProjects } from '../overview/derive';
-import type { WorktreeInfo } from '@shared/sessions/worktree';
 import {
   filterProjectList,
   formatAge,
-  hasWorktreeSessions,
   needsYouAge,
   OTHER_SESSIONS,
   projectList,
-  projectPage,
+  projectSessions,
   rowBranch,
+  SESSIONS_CAP,
   sessionAge,
   sessionMatcher,
+  shownCount,
   type ProjectListInput,
-  type ProjectPageInput,
+  type ProjectSessionsInput,
 } from './derive';
 
 const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'));
@@ -73,6 +73,32 @@ describe('the project list', () => {
     ]);
   });
 
+  // W11 (I6): the project card's last activity, its sessions' latest movement (archived ones included)
+  it('carries each project’s last activity, null without a session', () => {
+    const a = project('a', 0, { createdAt: '2026-09-01T00:00:00Z' });
+    const b = project('b', 1);
+    const recs = new Map([
+      ['old' as AppSessionId, record('old', { projectId: a.id, archived: true, updatedAt: '2026-09-28T12:00:00Z' })],
+      ['new' as AppSessionId, record('new', { projectId: a.id, updatedAt: '2026-09-27T12:00:00Z' })],
+    ]);
+    const list = projectList({ records: recs, digests: new Map(), projects: [a, b], rows: [] });
+    expect(list.map((e) => [e.name, e.lastActivity])).toEqual([
+      ['a', Date.parse('2026-09-28T12:00:00Z')],
+      ['b', null],
+    ]);
+  });
+
+  // W11 (I5): a project removed from the sidebar takes its sessions with it, never to Other sessions
+  it('lists a hidden project’s sessions nowhere', () => {
+    const hidden = new Set(['proj-maws' as never]);
+    const list = projectList({ ...base, projects: projects.filter((p) => p.id !== 'proj-maws'), hidden });
+    expect(list.map((e) => [e.name, e.sessions.length])).toEqual([
+      ['claude-usage-menubar', 3],
+      ['codex_somersault', 3],
+      ['Other sessions', 1],
+    ]);
+  });
+
   it('places a project without sessions by when it was added, and leaves Other sessions out when it is empty', () => {
     const fresh = project('fresh', 5, { createdAt: '2026-09-30T00:00:00Z' });
     const list = projectList({ ...base, records: new Map([...records].filter(([, r]) => r.projectId !== null)), projects: [...projects, fresh] });
@@ -89,70 +115,27 @@ describe('the project list', () => {
   });
 });
 
-describe('a project’s page', () => {
+// W11 (I4, as the owner corrected it): one flat list per expanded project, five rows then "Show more" to eight.
+describe('an expanded project’s sessions', () => {
   const maws = () => projectList(base).find((e) => e.key === 'proj-maws')!;
-  const page = (over: Partial<ProjectPageInput> = {}) =>
-    projectPage({ sessions: maws().sessions, digests, rows, sort: 'priority', matches: everyone, worktrees: null, ...over });
+  const list = (over: Partial<ProjectSessionsInput> = {}) => projectSessions({ sessions: maws().sessions, digests, rows, sort: 'priority', matches: everyone, ...over });
 
-  it('puts pinned sessions on top and, without a worktree session, one flat Main list', () => {
-    const p = page();
-    expect(titles(p.pinned)).toEqual(['Workstation north star']);
-    expect(p.grouped).toBe(false);
-    expect(p.groups.map((g) => [g.label, titles(g.sessions)])).toEqual([['Main', ['Fix sidebar drag', 'Sidebar interaction pass', 'Charter + research']]]);
-  });
-
-  it('sorts by recency when asked, and filters by the search', () => {
+  it('puts pinned sessions on top, then the rest in the chosen sort, worktree sessions among them', () => {
+    expect(titles(list())).toEqual(['Workstation north star', 'Fix sidebar drag', 'Sidebar interaction pass', 'Charter + research']);
     const usage = projectList(base).find((e) => e.key === 'proj-claude-usage-menubar')!;
-    const recency = projectPage({ sessions: usage.sessions, digests, rows, sort: 'recency', matches: everyone, worktrees: null });
-    expect(titles(recency.groups[0].sessions)).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
-    const searched = page({ matches: sessionMatcher('sidebar', byId) });
-    expect(titles(searched.groups[0].sessions)).toEqual(['Fix sidebar drag', 'Sidebar interaction pass']);
-    expect(searched.pinned).toEqual([]);
+    expect(titles(projectSessions({ sessions: usage.sessions, digests, rows, sort: 'recency', matches: everyone }))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
+    const recs = [record('m', { projectId: 'p' as never }), record('w', { projectId: 'p' as never, worktree: { path: '/r/.claude/worktrees/w', branch: 'worktree-w' } })];
+    expect(projectSessions({ sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone }).map((r) => r.appId).sort()).toEqual(['m', 'w']);
   });
 
-  it('groups Main first, then each worktree in the listed order with the listed branch, then worktrees not listed', () => {
-    const at = (path: string, branch: string | null) => ({ worktree: { path, branch }, branch: 'stale' });
-    const recs = [
-      record('m', { projectId: 'p' as never }),
-      record('b1', { projectId: 'p' as never, ...at('/r/.claude/worktrees/beta', 'worktree-beta') }),
-      record('a1', { projectId: 'p' as never, ...at('/sib/alpha', null) }),
-      record('a2', { projectId: 'p' as never, ...at('/sib/alpha/', null), pinned: true }),
-      record('z1', { projectId: 'p' as never, ...at('/gone/zeta', 'zeta') }),
-    ];
-    const info = (path: string, branch: string | null, isMain = false): WorktreeInfo => ({ repoRoot: '/r', path, branch, head: 'h', isMain, locked: false, prunable: false, managed: path.includes('/.claude/') });
-    const worktrees = [info('/r', 'main', true), info('/sib/alpha', 'alpha'), info('/r/.claude/worktrees/beta', 'worktree-beta')];
-    const p = projectPage({ sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone, worktrees });
-    const ids = (list: { appId: AppSessionId }[]) => list.map((r) => r.appId);
-    expect(p.grouped).toBe(true);
-    expect(ids(p.pinned)).toEqual(['a2']);
-    expect(p.groups.map((g) => [g.kind, g.label, g.branch, g.path, ids(g.sessions)])).toEqual([
-      ['main', 'Main', 'main', null, ['m']],
-      ['worktree', 'alpha', 'alpha', '/sib/alpha', ['a1']],
-      ['worktree', 'beta', 'worktree-beta', '/r/.claude/worktrees/beta', ['b1']],
-      ['worktree', 'zeta', 'zeta', '/gone/zeta', ['z1']],
-    ]);
-    // Before the list answers: the worktrees by folder name, each with the branch its sessions recorded.
-    const unlisted = projectPage({ sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone, worktrees: null });
-    expect(unlisted.groups.map((g) => [g.label, g.branch])).toEqual([
-      ['Main', null],
-      ['alpha', 'stale'],
-      ['beta', 'worktree-beta'],
-      ['zeta', 'zeta'],
-    ]);
-    expect(hasWorktreeSessions(recs)).toBe(true);
-    expect(hasWorktreeSessions([recs[0]])).toBe(false);
-    // W9 (H2): a checkout git lists without a branch is detached, Main's included
-    const detached = projectPage({ sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone, worktrees: [info('/r', null, true), info('/sib/alpha', null)] });
-    expect(detached.groups.slice(0, 2).map((g) => [g.label, g.branch])).toEqual([
-      ['Main', 'detached'],
-      ['alpha', 'detached'],
-    ]);
+  it('filters by the search, pinned sessions included', () => {
+    expect(titles(list({ matches: sessionMatcher('sidebar', byId) }))).toEqual(['Fix sidebar drag', 'Sidebar interaction pass']);
   });
 
-  it('renders every session of a large project: no page cap', () => {
-    const p = project('p', 0);
-    const recs = Array.from({ length: 250 }, (_, i) => record(`s${i}`, { projectId: p.id }));
-    expect(projectPage({ sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone, worktrees: null }).groups[0].sessions).toHaveLength(250);
+  it('shows five, then eight at most after "Show more", never more', () => {
+    expect([shownCount(3, false), shownCount(5, false), shownCount(250, false)]).toEqual([3, 5, 5]);
+    expect([shownCount(3, true), shownCount(6, true), shownCount(250, true)]).toEqual([3, 6, 8]);
+    expect(SESSIONS_CAP).toBe(8);
   });
 });
 

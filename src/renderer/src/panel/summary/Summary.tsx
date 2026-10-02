@@ -15,6 +15,7 @@ import { Environment } from './Environment';
 import { PushState } from './PushState';
 import { Sources } from './Sources';
 import { Subagents } from './Subagents';
+import { displayTitle } from '../../sessions/title';
 
 export interface SummaryProps {
   appSessionId: AppSessionId | null;
@@ -46,7 +47,7 @@ function SessionSummary({ appSessionId, record }: { appSessionId: AppSessionId; 
     <div className="px-4 pt-3">
       <h2 className="flex items-baseline justify-between gap-3 pb-1 text-ui font-medium text-fg">
         {SUMMARY_COPY.title}
-        <span className="min-w-0 truncate text-ui-sm font-normal text-fg-muted">{record.title.text}</span>
+        <span className="min-w-0 truncate text-ui-sm font-normal text-fg-muted">{displayTitle(record)}</span>
       </h2>
       <Environment appSessionId={appSessionId} record={record} directory={directory} />
       <PushState directory={directory} />

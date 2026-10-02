@@ -12,6 +12,7 @@ import { closeDialog, openDialog } from './dialogs';
 import { archiveSession } from './record-ops';
 import { Sheet, SheetForm } from './Sheet';
 import { PRIMARY } from './ui';
+import { displayTitle } from './title';
 
 export const isManagedWorktree = (path: string) => path.includes('/.claude/worktrees/');
 
@@ -44,7 +45,7 @@ export function ArchiveDialog({ appSessionId }: { appSessionId: AppSessionId }) 
   };
 
   return (
-    <Sheet title={`Archive “${record.title.text}”?`}>
+    <Sheet title={`Archive “${displayTitle(record)}”?`}>
       <SheetForm focusSubmit canSubmit={!busy} onSubmit={() => void submit()} submitLabel="Archive" submitClass={PRIMARY}>
         <p className="m-0 text-fg-muted">
           Ends its engine process and hides it{project ? ` from ${project}` : ''}. The transcript stays where Claude Code keeps it; resume it from Archived sessions or with claude

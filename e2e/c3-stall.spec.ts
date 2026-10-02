@@ -15,7 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, value } from './support/c7-replay';
 import { journalSpend, ownerFileCheck, scratchRepo, stateOf } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { openProject, sidebarRow } from './support/sidebar';
+import { newChatIn, sidebarRow } from './support/sidebar';
 
 const ON = process.env.MAWS_C3_STALL === '1';
 test.skip(!ON, 'the C3 stall reproduction goes only under MAWS_C3_STALL=1');
@@ -55,13 +55,12 @@ const sh = (cmd: string, args: string[], timeout = 20_000): string => {
 };
 
 const main = (page: Page) => page.locator('[data-region="main"]');
-const sidebar = (page: Page) => page.locator('[data-region="sidebar"]');
 async function statusOrNull(page: Page, id: string): Promise<EngineSessionStatus | null> {
   const r = await invoke(page, 'session.status', { appSessionId: id as AppSessionId });
   return r.ok ? r.value : null;
 }
 
-// A session's row (W5: on its project's page, which this opens), once the index lists the record: a fresh launch reads
+// A session's row (W11: its project expanded first), once the index lists the record: a fresh launch reads
 // the store a moment after the window shows.
 async function rowOf(page: Page, id: string): Promise<Locator> {
   await expect.poll(async () => value(await invoke(page, 'session.list', { includeArchived: true })).sessions.some((r) => r.appId === id), { timeout: 30_000 }).toBe(true);
@@ -145,8 +144,7 @@ async function makeDeep(page: Page): Promise<string> {
   const known = value(await invoke(page, 'session.projects.list', undefined)).projects.some((p) => p.directory === repo);
   if (!known) value(await invoke(page, 'session.projects.add', { directory: repo }));
   const before = new Set(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId));
-  await openProject(page, 'deep'); // W5: the "+" beside the name on the project's page
-  await sidebar(page).locator('[data-level-pane="2"]').getByRole('button', { name: 'New chat in deep', exact: true }).click();
+  await newChatIn(page, 'deep'); // W11: the "+" on the project's row, on hover
   let id: AppSessionId | undefined;
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !before.has(i.appSessionId))?.appSessionId)).toBeDefined();
   value(await invoke(page, 'session.intent.patch', { appSessionId: id!, patch: { model: 'haiku', permissionMode: 'auto' } }));

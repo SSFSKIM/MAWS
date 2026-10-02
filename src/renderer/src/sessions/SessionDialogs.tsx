@@ -8,6 +8,7 @@ import { ArchiveDialog } from './ArchiveDialog';
 import { ArchivedSessionsDialog } from './ArchivedSessionsDialog';
 import { CleanupDialog } from './CleanupDialog';
 import { DeleteDialog } from './DeleteDialog';
+import { HiddenProjectsDialog } from './HiddenProjectsDialog'; // W11
 import { closeDialog, useDialogs } from './dialogs';
 import { ForkSheet } from './ForkSheet';
 import { deleteOutcomeWords, deleteSession } from './record-ops';
@@ -36,6 +37,8 @@ export function SessionDialogs() {
       return <CleanupDialog key={open.target.path} target={open.target} />;
     case 'archived':
       return <ArchivedSessionsDialog key={open.projectId} projectId={open.projectId} />;
+    case 'hiddenProjects': // W11 (I5): the sidebar's "Hidden projects…"
+      return <HiddenProjectsDialog />;
     // C12 start: the project menu's Worktrees… (a cleanup it opens returns here, mounting it afresh)
     case 'worktrees':
       return <WorktreesDialog key={open.projectId} projectId={open.projectId} />;
