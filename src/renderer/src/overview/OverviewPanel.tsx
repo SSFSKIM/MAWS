@@ -117,6 +117,14 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
   );
 
   const close = () => useLayout.getState().setOverviewOpen(false);
+  const sessionCreated = () => {
+    // Completion belongs to this panel's lifetime, not a replacement opened after it was dismissed.
+    if (!panel.current) return;
+    // The creator may outlive acting's task. Its new composer owns focus: neither the opener nor a pane-focus rAF
+    // should take it back. Pending creation must not mark unrelated layout changes as actions inside this panel.
+    restoreFocus.current = false;
+    close();
+  };
 
   const begin = (kind: Gesture['kind'], event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0 || (kind === 'move' && (event.target as HTMLElement).closest('button'))) return;
@@ -188,7 +196,7 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
         </button>
       </div>
       <div className="min-h-0 flex-1">
-        <Overview paneIndex={paneIndex} />
+        <Overview paneIndex={paneIndex} onSessionCreated={sessionCreated} />
       </div>
       <div
         aria-hidden

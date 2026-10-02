@@ -637,6 +637,19 @@ test.describe('sessions', () => {
     expect(maws.consoleErrors()).toEqual([]);
   });
 
+  test('Overview New chat on an empty board closes the panel and hands typing to the new composer', async () => {
+    const { page, maws } = await begin({ fixtures: [] });
+    await page.getByRole('button', { name: 'Overview', exact: true }).click();
+    const overview = page.getByRole('dialog', { name: 'Overview' });
+    await expect(overview.getByText('Nothing live or unread', { exact: true })).toBeVisible();
+    await overview.getByRole('button', { name: 'New chat', exact: true }).click();
+    await expect(overview).toHaveCount(0);
+    await expect(editor(page), 'W9 (H3): the Overview must not obscure the composer that takes focus').toBeFocused();
+    await page.keyboard.type('a thought from the Overview');
+    await expect(editor(page)).toHaveText('a thought from the Overview');
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
   test('⌘N (File › New chat) from an open session starts a New chat in that session’s project', async () => {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();

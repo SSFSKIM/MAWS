@@ -1,16 +1,24 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { useEffect, useRef } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { Toolbar } from '../app/Toolbar';
+import { registerSessionCreator } from '../keymap/actions-runtime';
+import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { OverviewLayer, placeRect } from './OverviewPanel';
 
 const nine = scenarioFile('nine-sessions');
+const NEW = 'app-overview-created' as AppSessionId;
+const disposers: (() => void)[] = [];
+const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
 const requests: Record<string, SessionEvent> = Object.assign({}, ...nine.attention.map((a) => a.requests));
 
@@ -36,11 +44,40 @@ function World() {
   );
 }
 
+// The mounted composer's boundary: register a real focus target and focus its editor on the next frame, as Tiptap does.
+// A selected tab is present too, so a late panel handoff to focusPaneElement would take the keyboard away again.
+function NewComposer({ focusFrame }: { focusFrame: () => void }) {
+  const main = useLayout((s) => s.main);
+  const shown = activeTab(main);
+  const mounted = shown?.kind === 'session' && shown.appSessionId === NEW;
+  const editor = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!mounted) return;
+    return registerFocusTarget(NEW, {
+      focusEditor: () => editor.current?.focus(),
+      focusFrame: () => {
+        focusFrame();
+        requestAnimationFrame(() => editor.current?.focus());
+      },
+      insertText: () => {},
+    });
+  }, [mounted, focusFrame]);
+  return mounted ? (
+    <div id="pane-0">
+      <button type="button" role="tab" aria-selected="true">
+        New chat
+      </button>
+      <input ref={editor} aria-label="Message" />
+    </div>
+  ) : null;
+}
+
 const panel = () => screen.getByRole('dialog', { name: 'Overview' });
 const button = () => screen.getByRole('button', { name: /^Overview/ });
 
 beforeEach(() => {
   resetShellStores();
+  resetComposerStore();
   fillStores(nine);
   sized('clientWidth', AREA.width);
   sized('clientHeight', AREA.height);
@@ -48,6 +85,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  disposers.splice(0).forEach((off) => off());
+  vi.restoreAllMocks();
   delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
   delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
   delete (window as { maws?: MawsBridge }).maws;
@@ -113,6 +152,87 @@ describe('the floating Overview', () => {
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Charter + research') });
     expect(useLayout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Settings idle probe')}`, `session:${idOf('Charter + research')}`]);
     expect(useLayout.getState().overviewOpen).toBe(false);
+  });
+
+  it('a delayed New chat closes the panel without restoring its opener, leaving the new composer with the keyboard', async () => {
+    const user = userEvent.setup();
+    fillStores(scenarioFile('empty'));
+    let resolve!: (id: AppSessionId | null) => void;
+    disposers.push(registerSessionCreator(() => new Promise((done) => {
+      resolve = done;
+    })));
+    const focusFrame = vi.fn();
+    render(
+      <>
+        <World />
+        <NewComposer focusFrame={focusFrame} />
+      </>,
+    );
+    const opener = screen.getByRole('button', { name: 'Somewhere else' });
+    opener.focus();
+    act(() => useLayout.getState().setOverviewOpen(true));
+    const restoreOpener = vi.spyOn(opener, 'focus');
+    await user.click(within(panel()).getByRole('button', { name: 'New chat' }));
+    await act(nextTask); // IPC outlives the panel's task-scoped capture flag
+    expect(useLayout.getState().overviewOpen).toBe(true);
+    expect(focusFrame).not.toHaveBeenCalled();
+    // Even while the creator is pending, a layout change from elsewhere must not close the panel.
+    act(() => useLayout.getState().openSession(idOf('Charter + research')));
+    expect(useLayout.getState().overviewOpen).toBe(true);
+    await act(async () => resolve(NEW));
+    expect(useLayout.getState().overviewOpen).toBe(false);
+    expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
+    await act(nextFrame);
+    expect(restoreOpener).not.toHaveBeenCalled();
+    expect(focusFrame).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Message' }));
+  });
+
+  it('a New chat completed after its panel was dismissed does not close a reopened Overview or restore its opener', async () => {
+    const user = userEvent.setup();
+    fillStores(scenarioFile('empty'));
+    let resolve!: (id: AppSessionId | null) => void;
+    disposers.push(registerSessionCreator(() => new Promise((done) => {
+      resolve = done;
+    })));
+    render(<World />);
+    const opener = screen.getByRole('button', { name: 'Somewhere else' });
+    opener.focus();
+    act(() => useLayout.getState().setOverviewOpen(true));
+    await user.click(within(panel()).getByRole('button', { name: 'New chat' }));
+    await act(nextTask);
+    act(() => useLayout.getState().setOverviewOpen(false));
+    expect(document.activeElement).toBe(opener); // this deliberate close still restores focus normally
+    act(() => useLayout.getState().setOverviewOpen(true));
+    const reopened = panel();
+    const restoreOpener = vi.spyOn(opener, 'focus');
+    await act(async () => resolve(NEW));
+    await act(nextFrame);
+    expect(restoreOpener).not.toHaveBeenCalled();
+    expect(useLayout.getState().overviewOpen).toBe(true);
+    expect(panel()).toBe(reopened);
+    expect(document.activeElement).toBe(reopened);
+  });
+
+  it('a delayed New chat that answers null leaves the panel open and focus where it was', async () => {
+    const user = userEvent.setup();
+    fillStores(scenarioFile('empty'));
+    let resolve!: (id: AppSessionId | null) => void;
+    disposers.push(registerSessionCreator(() => new Promise((done) => {
+      resolve = done;
+    })));
+    render(<World />);
+    act(() => useLayout.getState().setOverviewOpen(true));
+    const create = within(panel()).getByRole('button', { name: 'New chat' });
+    await user.click(create);
+    await act(nextTask);
+    expect(document.activeElement).toBe(create);
+    await act(async () => resolve(null));
+    await act(nextFrame);
+    expect(useLayout.getState().overviewOpen).toBe(true);
+    expect(panel()).toBeTruthy();
+    expect(document.activeElement).toBe(create);
+    expect(activeTab(useLayout.getState().main)).toBeNull();
   });
 
   // Opening changes the layout even when the active tab stays the same (the tab is activated again, or moves pane).

@@ -20,7 +20,7 @@ type PaneIndex = 0 | 1;
 const NEXT = new Set(['ArrowDown', 'ArrowRight']);
 const PREVIOUS = new Set(['ArrowUp', 'ArrowLeft']);
 
-export function Overview({ paneIndex }: { paneIndex: PaneIndex }) {
+export function Overview({ paneIndex, onSessionCreated }: { paneIndex: PaneIndex; onSessionCreated?: () => void }) {
   const sessions = useSessions(
     useShallow((s) => ({ loaded: s.loaded, records: s.records, recordsVersion: s.recordsVersion, digests: s.digests, projects: selectProjectOrder(s), indexing: s.indexing })),
   );
@@ -48,7 +48,7 @@ export function Overview({ paneIndex }: { paneIndex: PaneIndex }) {
   };
 
   if (!sessions.loaded || !attention.loaded) return null;
-  if (groups.length === 0) return <EmptyBoard indexing={sessions.indexing} />;
+  if (groups.length === 0) return <EmptyBoard indexing={sessions.indexing} onSessionCreated={onSessionCreated} />;
 
   const list = (
     <div ref={board} role="list" aria-label="Overview" className="flex min-h-0 flex-1 flex-col gap-6 overflow-auto px-6 py-5">
@@ -83,7 +83,7 @@ function IndexingNote({ indexing, className = '' }: { indexing: { scanned: numbe
   );
 }
 
-function EmptyBoard({ indexing }: { indexing: { scanned: number; total: number } | null }) {
+function EmptyBoard({ indexing, onSessionCreated }: { indexing: { scanned: number; total: number } | null; onSessionCreated?: () => void }) {
   const canCreate = useSessionCreatorRegistered();
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 text-ui text-fg-muted">
@@ -92,7 +92,9 @@ function EmptyBoard({ indexing }: { indexing: { scanned: number; total: number }
         type="button"
         disabled={!canCreate}
         title={canCreate ? undefined : 'Not available here'}
-        onClick={() => void createSession(focusedProject())}
+        onClick={async () => {
+          if ((await createSession(focusedProject())) !== null) onSessionCreated?.();
+        }}
         className="rounded-sm border border-border-strong px-2.5 py-1 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
       >
         {NEW_CHAT}
