@@ -183,6 +183,29 @@ describe('replacing an unstarted tab', () => {
     }
   });
 
+  it('a draft that started while its guard decided is left alone: its tab, its agent tab and its panel survive', async () => {
+    const store = createLayoutStore();
+    let started = false;
+    let answer!: (discarded: boolean) => void;
+    const off = registerReplaceGuard({ unstarted: (id) => id === NEW && !started, discard: () => new Promise<boolean>((resolve) => (answer = resolve)) });
+    try {
+      store.getState().openSession(A);
+      store.getState().openSession(NEW, { how: 'tab' });
+      store.getState().openSession(B);
+      started = true; // its record arrived
+      store.getState().openTab({ kind: 'agent', appSessionId: NEW, agentId: 'agent-1' as never }, { activate: false });
+      store.getState().setPanelTabs(NEW, { tabs: [{ id: 'files-1', toolId: 'files', pinned: false }], activeTabId: 'files-1' });
+      answer(true);
+      await settled();
+      const ids = shown(store).panes[0].tabs.map((t) => t.id);
+      expect(ids).toContain(`session:${NEW}`);
+      expect(ids).toContain(`agent:${NEW}:agent-1`);
+      expect(store.getState().panelBySession.has(NEW)).toBe(true);
+    } finally {
+      off();
+    }
+  });
+
   it('declined, the unstarted tab stays and the session opens in a tab of its own', async () => {
     const { store, off, tabs } = unstartedShown(false);
     try {

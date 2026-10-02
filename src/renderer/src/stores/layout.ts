@@ -259,8 +259,10 @@ export function createLayoutStore() {
         const draft = draftInTheWay(get().main);
         main((m) => model.openSession(m, appSessionId, { ...opts, how: draftInTheWay(m) ? 'tab' : opts.how, set: setOfSession(appSessionId) }));
         if (draft === null || guard === null) return;
+        // A draft that started while its guard decided (its record arrived) is a live session now: its tabs, history and
+        // panel stay.
         void guard.discard(draft).then((discarded) => {
-          if (discarded) get().dropSession(draft.appSessionId);
+          if (discarded && guard.unstarted(draft.appSessionId)) get().dropSession(draft.appSessionId);
         });
       },
       setCurrentProject: (projectId) => main((m) => model.switchSet(m, projectId ?? NO_PROJECT)),
