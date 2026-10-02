@@ -461,6 +461,61 @@ describe('child source provenance', () => {
     await expect(snapshot).resolves.toEqual([...disk, finished]);
   });
 
+  it.each(['completed', 'failed'] as const)('preserves a %s child through a later parent exit, including refreshed snapshots', async (status) => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const done = finish(AGENT, '2026-09-28T10:00:08.000Z', status);
+    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null }, { id: 'later-exit' });
+    const fake = fakeClient();
+    const source = childSource(fake);
+    const off = source.subscribe(() => {});
+    onTestFinished(off);
+    const first = source.snapshot();
+    answer(fake, 'session.events', { events: [...parent, done], lastSeq: 9, complete: true });
+    await flush();
+    // The parent exit arrives after provenance was decided but before disk hydration completes.
+    fake.emit('session.eventBatch', batch([exit]));
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    expect(rowsOf(applyEvents(createState(null, AGENT), await first)).find((row) => row.kind === 'divider')).toMatchObject({ state: status });
+    const refreshed = source.snapshot();
+    answer(fake, 'session.events', { events: [...parent, done, exit], lastSeq: 10, complete: true });
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await expect(refreshed).resolves.toEqual([...disk, done]);
+
+    const resumed = { ...parent.find((event) => event.kind === 'subagent.started')!, id: 'resumed' as EventId };
+    const stopped = { ...exit, id: 'resumed-exit' as EventId };
+    const again = source.snapshot();
+    fake.emit('session.eventBatch', batch([resumed, stopped]));
+    // A read captured before the resume must not overwrite the new run's exit.
+    answer(fake, 'session.events', { events: [...parent, done, exit], lastSeq: 10, complete: true });
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    expect(rowsOf(applyEvents(createState(null, AGENT), await again)).find((row) => row.kind === 'divider')).toMatchObject({ state: 'stopped' });
+  });
+
+  it('bounds an incomplete child backfill when an already-errored follower emits no state on retry', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => vi.useRealTimers());
+    const fake = fakeClient();
+    const source = childSource(fake);
+    const off = source.subscribe(() => {});
+    onTestFinished(off);
+    const snapshot = source.snapshot();
+    let outcome: unknown = 'pending';
+    void snapshot.then(() => { outcome = 'resolved'; }, (error: unknown) => { outcome = error; });
+    answer(fake, 'session.events', { events: [], lastSeq: 0, complete: true });
+    await vi.advanceTimersByTimeAsync(0);
+    answer(fake, 'fs.agentEvents', { events: [], complete: false });
+    await vi.advanceTimersByTimeAsync(150_000);
+    expect(outcome).toBeInstanceOf(Error);
+    expect((outcome as Error).message).toMatch(/timed out.*child transcript/i);
+    expect(fake.calls.filter((call) => call.name === 'fs.agentEvents')).toHaveLength(1);
+    off();
+    expect(fake.listeners.get('fs.followState')?.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('waits for an incomplete empty child backfill before applying the parent completion', async () => {
     const { parent, child } = live();
     const disk = onDisk(child);

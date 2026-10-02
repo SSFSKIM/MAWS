@@ -40,6 +40,7 @@ const ownOf = (agentId: AgentId) => (event: SessionEvent) => event.agentId === a
 // signs are listened for before the first read, so one that arrives while the refusal is on its way is not missed.
 export const KNOWN_WAIT_MS = 150_000; // C10's launch watchdog: a launch that reports nothing for this long has failed
 const UNKNOWN_SESSION = 'unknown app session';
+const CHILD_BACKFILL_WAIT_MS = 30_000;
 
 // What a snapshot's wait hears from its subscription: the batches it receives for the session (a sign, without a second
 // `session.eventBatch` listener) and its end (the key detached: the wait gives up at once).
@@ -238,13 +239,14 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   const liveForm = (event: SessionEvent) => event.seq !== null;
   // An exit ends the child only if it follows the child's start in the stream that carried it: an exit the parent's
   // snapshot holds, by its position there; any other exit, once a start has been seen (the snapshot's or a batch's).
-  // A replay or backfill batch can carry an exit of an earlier run, which says nothing about a child started since.
+  // An explicit child finish survives parent exits until another child start clears it. A replay or backfill batch
+  // can carry an exit of an earlier run, which says nothing about a child started since.
   let startAt = -1; // the child's start in the parent's snapshot
   let startedInStream = false;
   const exitsAt = new Map<EventId, number>(); // the parent's snapshot's exits, by position
   const endsChild = (event: SessionEvent) => {
     if (finishes(event)) return true;
-    if (!exits(event)) return false;
+    if (!exits(event) || (ended !== null && finishes(ended))) return false;
     const at = exitsAt.get(event.id);
     return at === undefined ? startAt >= 0 || startedInStream : startAt >= 0 && at > startAt;
   };
@@ -327,7 +329,9 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         if (exits(event)) exitsAt.set(event.id, i);
         if (starts(event) || finishes(event) || exits(event)) lifecycleSeen.add(event.id);
       });
-      const end = parent.findLastIndex((event, i) => finishes(event) || (started >= 0 && i > started && exits(event)));
+      const finished = parent.findLastIndex(finishes);
+      // Once this run has its own outcome, a later parent exit cannot replace it with stopped.
+      const end = finished > started ? finished : parent.findLastIndex((event, i) => started >= 0 && i > started && exits(event));
       // A batch heard during the read is newer than the snapshot; never restore its superseded completion.
       if (revision === lifecycleRevision) ended = end > started || (started < 0 && end >= 0) ? parent[end] : null;
       if (started >= 0 && end < started && liveForm(parent[started]) && !onDisk()) {
@@ -337,7 +341,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       if (!onDisk()) decide('disk');
       // An incomplete snapshot is not terminal history. Listen before reading so a completed backfill during the
       // round trip is not missed; re-read on its following state, never spin on a reloading/error follower.
-      let changed: boolean;
+      let changed = false;
       let failure: string | null = null;
       let wake: (() => void) | null = null;
       const signal = () => { changed = true; wake?.(); };
@@ -347,6 +351,12 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         if (state.state === 'following' || state.state === 'error' || state.state === 'stopped') signal();
       });
       for (const subscriber of attached) subscriber.ended.signal.addEventListener('abort', signal);
+      // Reusing an already-errored follower may emit no state at all. Bound this hydration, not each wake,
+      // without claiming to know the follower's unexposed phase or failure.
+      const timer = setTimeout(() => {
+        failure = 'Timed out waiting for child transcript backfill';
+        signal();
+      }, CHILD_BACKFILL_WAIT_MS);
       try {
         for (;;) {
           changed = false;
@@ -360,6 +370,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
           if (failure !== null) throw new Error(failure);
         }
       } finally {
+        clearTimeout(timer);
         offFollow();
         for (const subscriber of attached) subscriber.ended.signal.removeEventListener('abort', signal);
       }
