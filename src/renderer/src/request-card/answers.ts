@@ -18,6 +18,10 @@ export type VariantState =
   | { kind: 'elicitation'; action: 'accept'; content: Record<string, unknown> | null } // null: a url-mode accept, no content
   | { kind: 'elicitation'; action: 'decline' | 'cancel' };
 
+// Engine-provided question text is a dictionary key, never an inherited object property.
+export const questionValue = <T,>(values: Record<string, T>, question: string): T | undefined =>
+  Object.hasOwn(values, question) ? values[question] : undefined;
+
 const blank = (text: string | undefined) => text === undefined || text.trim() === '';
 
 // Per question: the chosen options, then the Other text verbatim, joined `', '` (the terminal's multi-select join); a
@@ -25,9 +29,10 @@ const blank = (text: string | undefined) => text === undefined || text.trim() ==
 // operator submits past a blank question: an absent answer is unanswered, and no answer at all reads "The user did not
 // answer the questions." (2.1.283 `cli.pretty.js` 163990-164045, AskUserQuestion's `call` and its tool result).
 export function questionAnswers(state: Extract<VariantState, { kind: 'question' }>): Record<string, string> {
-  const answers: Record<string, string> = {};
+  const answers: Record<string, string> = Object.create(null);
   for (const { question } of state.questions) {
-    const parts = [...(state.selected[question] ?? []), ...(blank(state.other[question]) ? [] : [state.other[question]])];
+    const other = questionValue(state.other, question);
+    const parts = [...(questionValue(state.selected, question) ?? []), ...(blank(other) ? [] : [other])];
     if (parts.length > 0) answers[question] = parts.join(', ');
   }
   return answers;

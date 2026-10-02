@@ -72,6 +72,8 @@ export interface ViewerStore {
 }
 
 const views = new Map<string, ViewState>();
+export const existingViewState = (tabId: string): ViewState | undefined => views.get(tabId);
+
 export function viewState(tabId: string): ViewState {
   let view = views.get(tabId);
   if (!view) views.set(tabId, (view = { editor: null, editorAt: null, codeScroll: 0, renderedScroll: 0, ratio: null, ratioPending: false }));
@@ -126,6 +128,7 @@ export function createViewerStore(client: MawsBridge) {
     const prune = () => {
       const open = new Set(allTabs(useLayout.getState().main).map((tab) => tab.id)); // W12: every project's tab set
       for (const tabId of get().entries.keys()) if (!open.has(tabId) && !mounted.get(tabId)) remove(tabId);
+      for (const tabId of views.keys()) if (!get().entries.has(tabId)) views.delete(tabId);
       const idle = [...get().entries.keys()].filter((tabId) => !mounted.get(tabId)).sort((a, b) => (used.get(a) ?? 0) - (used.get(b) ?? 0));
       while (get().entries.size > VIEWER_ENTRIES_MAX && idle.length > 0) remove(idle.shift()!);
     };

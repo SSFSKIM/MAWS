@@ -132,8 +132,8 @@ export function splitPatch(patch: string): PatchFile[] {
           oldPath = unquote(line.slice('rename from '.length));
           kind = 'renamed';
         } else if (line.startsWith('rename to ')) newPath = unquote(line.slice('rename to '.length));
-        else if (line.startsWith('--- ')) oldPath = stripPrefix(unquote(line.slice(4))) ?? oldPath;
-        else if (line.startsWith('+++ ')) newPath = stripPrefix(unquote(line.slice(4))) ?? newPath;
+        else if (line.startsWith('--- ')) oldPath = stripPrefix(takeQuoted(line.slice(4))?.path ?? line.slice(4).split('\t', 1)[0]) ?? oldPath;
+        else if (line.startsWith('+++ ')) newPath = stripPrefix(takeQuoted(line.slice(4))?.path ?? line.slice(4).split('\t', 1)[0]) ?? newPath;
       }
     }
     if (header.some((line) => line.startsWith('Binary files ') || line === 'GIT binary patch')) kind = 'binary';

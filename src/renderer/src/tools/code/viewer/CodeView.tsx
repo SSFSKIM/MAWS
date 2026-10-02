@@ -12,7 +12,7 @@ import { useEffect, useRef } from 'react';
 import { codeHighlightStyle, codeThemeDark, codeThemeLight } from './code-theme';
 import { jumpTarget } from './kinds';
 import { languageFor, languageNameFor } from './languages';
-import { useViewer, viewState, type ViewerEntry } from './viewer-store';
+import { existingViewState, useViewer, viewState, type ViewerEntry } from './viewer-store';
 
 export const FLASH_MS = 2000;
 export const FLASH_CLASS = 'cm-flash-line';
@@ -101,8 +101,11 @@ export default function CodeView({ entry, wrap }: { entry: ViewerEntry; wrap: bo
       themes.disconnect();
       if (flashTimer.current !== null) clearTimeout(flashTimer.current);
       flashTimer.current = null;
-      const state = view.state.update({ effects: flash.of(null) }).state; // a flash does not outlive its view
-      Object.assign(viewState(tabId), { editor: state, editorAt: applied.current, codeScroll: view.scrollDOM.scrollTop, ratio: ratioOf(view.scrollDOM) });
+      const saved = existingViewState(tabId);
+      if (saved) {
+        const state = view.state.update({ effects: flash.of(null) }).state; // a flash does not outlive its view
+        Object.assign(saved, { editor: state, editorAt: applied.current, codeScroll: view.scrollDOM.scrollTop, ratio: ratioOf(view.scrollDOM) });
+      }
       view.destroy();
       editor.current = null;
     };

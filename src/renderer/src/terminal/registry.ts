@@ -548,7 +548,7 @@ export class TerminalRegistry {
   private nudgeRepaint(entry: Entry, ptyId: PtyId, cols: number, rows: number): void {
     void this.deps.ipc.invoke('pty.resize', { ptyId, cols, rows: rows - 1 });
     setTimeout(() => {
-      if (entry.info.ptyId === ptyId && entry.info.status === 'running') void this.deps.ipc.invoke('pty.resize', { ptyId, cols, rows });
+      if (entry.info.ptyId === ptyId && entry.info.status === 'running' && entry.size) void this.deps.ipc.invoke('pty.resize', { ptyId, ...entry.size });
     }, RESIZE_DEBOUNCE_MS);
   }
 

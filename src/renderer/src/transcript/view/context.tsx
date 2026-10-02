@@ -62,7 +62,7 @@ export interface TranscriptContextValue {
 }
 
 const TranscriptContext = createContext<TranscriptContextValue>({
-  storeKey: '', variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'transcript',
+  storeKey: '', variant: 'session', actions: DEFAULT_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'transcript',
 });
 
 export const TranscriptProvider = TranscriptContext.Provider;
@@ -84,3 +84,9 @@ export function useDisclosure(id: string): [boolean, () => void] {
 
 // A fresh Disclosures per mounted transcript.
 export const useDisclosures = () => useState(() => new Disclosures())[0];
+
+// A standalone Markdown surface supplies its own session-bound file action without inventing a transcript store.
+export function TranscriptActionsProvider({ actions, children }: { actions: Partial<TranscriptActions>; children: ReactNode }) {
+  const context = useTranscriptContext();
+  return <TranscriptProvider value={{ ...context, actions: { ...context.actions, ...actions } }}>{children}</TranscriptProvider>;
+}

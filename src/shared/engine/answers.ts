@@ -3,6 +3,15 @@
 import * as z from 'zod';
 import { PLAN_OUTCOMES } from '../graph/enums';
 
+// Question text may be any string, including __proto__. Zod's record parser drops that key; validate the own
+// entries instead, then define them with fromEntries (never the prototype setter), preserving the wire object shape.
+const QuestionAnswersSchema = z.preprocess(
+  (value) => value !== null && typeof value === 'object' && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+    ? Object.entries(value)
+    : null,
+  z.array(z.tuple([z.string(), z.string()])).transform((entries) => Object.fromEntries(entries)),
+);
+
 export const RequestAnswerSchema = z.discriminatedUnion('kind', [
   z
     .strictObject({
@@ -14,7 +23,7 @@ export const RequestAnswerSchema = z.discriminatedUnion('kind', [
     })
     // C5's hover card sends `{ kind: 'permission', decision: 'deny' }` (ledger d.17): a denial has no scope
     .refine((a) => (a.decision === 'allow') === (a.scope !== undefined), { path: ['scope'], message: 'scope is required for allow and absent for deny' }),
-  z.strictObject({ kind: z.literal('question'), answers: z.record(z.string(), z.string()) }), // keyed by question text; multi-select joined ', '
+  z.strictObject({ kind: z.literal('question'), answers: QuestionAnswersSchema }), // keyed by question text; multi-select joined ', '
   z.strictObject({ kind: z.literal('plan'), outcome: z.enum(PLAN_OUTCOMES), feedback: z.string().nullable() }),
   z.strictObject({ kind: z.literal('dialog'), behavior: z.enum(['completed', 'cancelled']), result: z.unknown().optional() }),
   z.strictObject({ kind: z.literal('elicitation'), action: z.enum(['accept', 'decline', 'cancel']), content: z.unknown().optional() }),

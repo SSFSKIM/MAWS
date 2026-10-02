@@ -16,6 +16,20 @@ describe('RequestAnswerSchema', () => {
     }
   });
 
+  it('preserves every own question key, including __proto__, through repeated parsing and JSON', () => {
+    const answers = { constructor: 'Red', toString: 'Blue', ['__proto__']: 'Green' };
+    const once = RequestAnswerSchema.parse({ kind: 'question', answers });
+    const twice = RequestAnswerSchema.parse(JSON.parse(JSON.stringify(once)));
+    expect(twice).toEqual({ kind: 'question', answers });
+    if (twice.kind !== 'question') throw new Error('question');
+    expect(Object.hasOwn(twice.answers, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(twice.answers)).toBe(Object.prototype);
+  });
+
+  it.each([null, [], [['Which?', 'Red']], 'Red', { Which: 1 }, { ['__proto__']: 1 }])('rejects malformed question answers %j', (answers) => {
+    expect(RequestAnswerSchema.safeParse({ kind: 'question', answers }).success).toBe(false);
+  });
+
   it('types the other four kinds strictly', () => {
     expect(RequestAnswerSchema.safeParse({ kind: 'question', answers: { 'Which?': 'Red' } }).success).toBe(true);
     expect(RequestAnswerSchema.safeParse({ kind: 'plan', outcome: 'clear_and_implement', feedback: null }).success).toBe(true);

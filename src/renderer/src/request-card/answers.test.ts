@@ -1,3 +1,4 @@
+import { answerOf, EMPTY_DRAFT, pick, setOther, skip, toggle } from './question-steps';
 import { describe, expect, it } from 'vitest';
 import { RequestAnswerSchema } from '@shared/engine/answers';
 import { loadJournal } from '../../../../test/support/fixtures';
@@ -13,6 +14,21 @@ const recorded = (() => {
   const row = loadJournal('pass1', 'question-roundtrip').find((r) => r.seq === 138)!;
   return (row.frame as { response: { response: { updatedInput: { answers: Record<string, string> } } } }).response.response.updatedInput.answers;
 })();
+
+describe('question text keys', () => {
+  it.each(['constructor', 'toString', '__proto__'])('starts blank, picks, toggles, skips and keeps Other for %s', (text) => {
+    const q = { ...color, question: text, multiSelect: true };
+    expect(answerOf(EMPTY_DRAFT, q)).toBeNull();
+    const chosen = toggle(EMPTY_DRAFT, q, q.options[0].label, true);
+    expect(answerOf(chosen, q)).toBe(q.options[0].label);
+    expect(answerOf(pick(EMPTY_DRAFT, q, 'Blue'), q)).toBe('Blue');
+    expect(answerOf(setOther(chosen, q, 'custom'), q)).toBe(`${q.options[0].label}, custom`);
+    expect(answerOf(skip(chosen, q, 1), q)).toBeNull();
+    const answers = questionAnswers({ ...setOther(EMPTY_DRAFT, q, 'custom'), kind: 'question', questions: [q] });
+    expect(Object.hasOwn(answers, text)).toBe(true);
+    expect(answers[text]).toBe('custom');
+  });
+});
 
 describe('toAnswer validates against RequestAnswerSchema for every variant', () => {
   const states: [VariantState, unknown][] = [

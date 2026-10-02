@@ -13,7 +13,7 @@ import { Checkbox, RadioGroup } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import type { Question } from '@shared/graph/events';
 import { useAttention } from '../../stores/attention';
-import { questionAnswers, toAnswer } from '../answers';
+import { questionAnswers, questionValue, toAnswer } from '../answers';
 import { CardButton, Controls } from '../controls';
 import { SandboxedPreview } from '../preview/SandboxedPreview';
 import { advance, answerOf, EMPTY_DRAFT, goTo, pick, setOther, skip, toggle, type QuestionDraft } from '../question-steps';
@@ -70,8 +70,8 @@ interface StepProps {
 }
 
 function SingleSelect({ question, draft, disabled, onPick, onOther, onEnter }: StepProps) {
-  const selected = draft.selected[question.question] ?? [];
-  const other = draft.other[question.question] ?? null;
+  const selected = questionValue(draft.selected, question.question) ?? [];
+  const other = questionValue(draft.other, question.question) ?? null;
   const value = other !== null ? OTHER : (selected[0] ?? '');
   const preview = question.options.find((o) => o.label === selected[0])?.preview ?? null;
   const hasPreviews = question.options.some((o) => o.preview !== null);
@@ -105,8 +105,8 @@ function SingleSelect({ question, draft, disabled, onPick, onOther, onEnter }: S
 }
 
 function MultiSelect({ question, draft, disabled, onToggle, onOther, onEnter }: StepProps) {
-  const selected = draft.selected[question.question] ?? [];
-  const other = draft.other[question.question] ?? null;
+  const selected = questionValue(draft.selected, question.question) ?? [];
+  const other = questionValue(draft.other, question.question) ?? null;
   return (
     <div role="group" aria-label={question.question} className="flex flex-col gap-1">
       {question.options.map((option, i) => (
@@ -183,9 +183,9 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
       digit: (n) => {
         const option = question.options[n - 1];
         if (option) {
-          if (question.multiSelect) onToggle(option.label, !(draft.selected[question.question] ?? []).includes(option.label));
+          if (question.multiSelect) onToggle(option.label, !(questionValue(draft.selected, question.question) ?? []).includes(option.label));
           else onPick(option.label);
-        } else if (n === question.options.length + 1) onOther(draft.other[question.question] ?? '');
+        } else if (n === question.options.length + 1) onOther(questionValue(draft.other, question.question) ?? '');
       },
     });
   });

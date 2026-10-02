@@ -13,6 +13,8 @@ import { useAttention } from '../stores/attention';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
 import { resetShellStores } from '../test-support/shell-stores';
+import { useLayout } from '../stores/layout';
+import { currentSet } from '../stores/layout-model';
 import { ipcSource, useTranscriptStore } from '../transcript';
 import { builder, uuid } from '../transcript/model/test-events';
 import { HEADINGS as PREVIEW_HEADINGS } from '../sidebar/RequestPreview';
@@ -93,7 +95,7 @@ const skippedQuestion = fixtureRequest('pass3', 'question-deny', 108); // the pr
 // question-roundtrip's form with its previews dropped: picks must still wait for Next
 const withoutPreviews = { ...question, questions: (question as Extract<RequestEvent, { kind: 'question.requested' }>).questions.map((q) => ({ ...q, options: q.options.map((o) => ({ ...o, preview: null })) })) } as RequestEvent;
 const elicitation = fixtureRequest('pass2', 'dialogs', 41);
-const plan: RequestEvent = { ...permission(), kind: 'plan.requested', plan: '# Plan\n\n1. Split the parser\n2. Test it', input: {} } as never;
+const plan = { ...permission(), kind: 'plan.requested', plan: '# Plan\n\n1. Split the parser\n2. Test it', input: {} } as Extract<RequestEvent, { kind: 'plan.requested' }>;
 
 it('reads C5’s kind lines and button-like inputs, the same objects, not copies', () => {
   expect(HEADINGS).toBe(PREVIEW_HEADINGS);
@@ -238,6 +240,23 @@ describe('edit prompt restores the initiating prompt', () => {
 });
 
 describe('request card placements and delivery states', () => {
+  it('opens links and files from a standalone plan in the requesting session', async () => {
+    mount({ ...plan, plan: '[Website](https://example.com)\n\n[Source](/r/app.ts#L7)' } as RequestEvent, 'docked');
+    fireEvent.click(await screen.findByRole('link', { name: 'Website' }));
+    expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://example.com/' }]);
+    fireEvent.click(screen.getByTitle('/r/app.ts'));
+    expect(currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/r/app.ts', line: 7, appSessionId: APP }));
+  });
+
+  it.each(['constructor', 'toString', '__proto__'])('renders and submits a question named %s', async (text) => {
+    if (question.kind !== 'question.requested') throw new Error('question fixture');
+    mount({ ...question, questions: [{ ...question.questions[0], question: text }] }, 'inline');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Red' }));
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { [text]: 'Red' } }]));
+  });
+
   // W4: one question at a time, every answer sent as the one reply (question-roundtrip seq 138).
   it('the question card steps through the questions and submits every answer as question-roundtrip seq 138 recorded', async () => {
     mount(question, 'inline');

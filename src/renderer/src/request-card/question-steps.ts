@@ -3,7 +3,7 @@
 // store (`drafts`, keyed by the item), not in the card, so a remount or a move between placements (docked, inline, the
 // Overview card) resumes at the same question with the same picks. Pure.
 import type { Question } from '@shared/graph/events';
-import { questionAnswers } from './answers';
+import { questionAnswers, questionValue } from './answers';
 
 export interface QuestionDraft {
   step: number; // the question shown
@@ -16,7 +16,7 @@ export const EMPTY_DRAFT: QuestionDraft = { step: 0, reached: 0, selected: {}, o
 
 // The question's answer as the reply would carry it, or null while it has none.
 export const answerOf = (draft: QuestionDraft, question: Question): string | null =>
-  questionAnswers({ kind: 'question', questions: [question], selected: draft.selected, other: draft.other })[question.question] ?? null;
+  questionValue(questionAnswers({ kind: 'question', questions: [question], selected: draft.selected, other: draft.other }), question.question) ?? null;
 
 export function goTo(draft: QuestionDraft, step: number, count: number): QuestionDraft {
   const to = Math.max(0, Math.min(count - 1, step));
@@ -36,7 +36,7 @@ export const pick = (draft: QuestionDraft, question: Question, label: string): Q
 
 // A multi-select toggle, the labels kept in the options' order.
 export function toggle(draft: QuestionDraft, question: Question, label: string, on: boolean): QuestionDraft {
-  const chosen = draft.selected[question.question] ?? [];
+  const chosen = questionValue(draft.selected, question.question) ?? [];
   const next = on ? question.options.map((o) => o.label).filter((l) => l === label || chosen.includes(l)) : chosen.filter((l) => l !== label);
   return { ...draft, selected: { ...draft.selected, [question.question]: next } };
 }

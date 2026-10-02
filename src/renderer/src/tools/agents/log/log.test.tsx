@@ -222,6 +222,17 @@ describe('log tool: openLog and openFullLog', () => {
     selectTab.mockRestore();
   });
 
+  it('reveals the panel when the same log is opened after collapse', () => {
+    let id = '';
+    act(() => { id = openLog(A, PATH, 'shell'); });
+    act(() => useLayout.getState().setPanel({ collapsed: true }));
+    expect(useLayout.getState().regions.panel.collapsed).toBe(true);
+    act(() => { expect(openLog(A, PATH, 'shell')).toBe(id); });
+    expect(logTabs(A)).toHaveLength(1);
+    expect(useLayout.getState().regions.panel.collapsed).toBe(false);
+    expect(panelOf(A)?.activeTabId).toBe(id);
+  });
+
   it('a null path always opens a new tab in the no-file state', () => {
     act(() => void openLog(A, null, 'Ran npm test'));
     act(() => void openLog(A, null, 'Ran npm test'));
