@@ -1,0 +1,548 @@
+R6 - "CLAUDE MODS": WHAT THEY ARE AND WHETHER MAWS CAN HONOUR THEM (2026-10-01)
+I read the sources statically. I ran no app, no engine and no probe: ~/.claude and the apps are read-only, and a probe
+session would write transcripts under ~/.claude. Citation keys:
+  B283  ~/claude-code-bundle/2.1.283/ (cli.pretty.js; modules/ = the embedded assets; SPEC/ = the spec library)
+  S287  line N of `strings -n 6 ~/.local/share/claude/versions/2.1.287` (reproducible). This is the engine MAWS runs:
+        ~/.local/bin/claude -> versions/2.1.287 (readlink, 2026-10-01).
+  D     ~/claude-desktop-re/readable/app-2.16120.0/
+  DP    ~/.claude/plugins/cache/doperpowers/doperpowers/7.131.1/ (the owner's installed plugin, user scope)
+  M     /Users/new/Developer/GitHub/MAWS/
+
+================================================================================================
+BOTTOM LINE
+- A "mod" is a Claude Code plugin whose hooks/hooks.json names a hooks module: TypeScript or JavaScript exporting
+  register(on), run by the engine inside its own hooks worker. Mods are not a separate format. The phrase "Claude Mods"
+  appears nowhere in either engine build.
+- There is no "Desktop mod" distinct from a "terminal mod". One plugin draws on whichever surface asks. The hook reads
+  e.surface ("terminal", "desktop", "vscode", "mobile") and builds from that surface's element table.
+- Claude Desktop does not load, sandbox or toggle mods. The engine does all of that. Desktop 2.16120.0 added one thing:
+  a client of a new engine wire protocol, the remote UI surface protocol. Over it Desktop attaches as surface "desktop",
+  asks the engine to run the ui.render hooks for each place it draws, and draws the plain-data tree it gets back.
+- That protocol is part of the engine's stream-json control channel. MAWS already owns that channel, so MAWS can be a
+  "desktop" surface too, with no patching (D-1 holds). The engine MAWS runs (2.1.287) has the protocol, and since 2.1.286
+  the function-hooks gate defaults to on.
+- In MAWS today, the owner's own mods (doperpowers: to-human view, agents pane, kairos switch) already load and run their
+  engine-side hooks. Their UI never appears: MAWS never asks ui_render, and the ui_* pushes they cause are dropped as
+  frame.unknown.
+- Recommendation: honour mods by implementing the remote-surface protocol, in slices. First a probe plus decoding the
+  notice pushes (about 1.5 days). Then the non-transcript sites: panes, band, footer, presses (about 3 to 4 days).
+  Then the transcript sites (about 4 to 6 days). Defer Client surface modules. Charter D-9 has to be ruled on first:
+  this is an extension surface.
+
+================================================================================================
+1. THE SOURCE OF THE CLAIM
+
+1.1 Where the skill lives
+- `find ~/.claude -iname '*plugin-authoring*'` and `grep -rl plugin-authoring ~/.claude --include=*.md --include=*.json`
+  both return nothing. The skill is not on disk; it ships inside the engine.
+- Built-in plugin registration: B283 cli.pretty.js:392359. The `plugin-authoring` chunk is 575087-575407; the skill
+  object is at 575402-575405. Its isAvailable is the function-hooks gate, `s = () => Ule()` (575385). It is registered
+  for every entrypoint except "local-agent" (392358).
+- The skill body is an embedded asset, SKILL-4y8qrz28.md (cli.pretty.js:589320), extracted as
+  B283 modules/SKILL-4y8qrz28.md. Its long form is modules/reference-1517da35.md. Its API declaration is
+  modules/claude-code.d.ts-8ef3f324.txt (13,819 lines). 2.1.287 carries the same description string (S287:292124) and
+  menu text (S287:292125).
+
+1.2 What it says (quotes)
+- Description, SKILL:3: "Make a mod: a live pane, band, status line, toast or hook inside Claude Code (terminal or
+  desktop Code tab), written as a plugin of function hooks that hot-reloads in this session."
+- SKILL:22: "A hooks module exports `register(on, options)`. ... The module runs in an environment of its own, with no
+  DOM and no Node: `$` reaches everything outside it. JSX compiles against the global `h`, and the elements come from
+  the drawing surface's own table, `const { Box, Text, Button } = $.ui.resolve(e)`, where `e.surface` is `terminal`,
+  `desktop`, `vscode` or `mobile`."
+- SKILL:6-12: a mod is three files in `${CLAUDE_DEV_MODS_DIR}/<mod-name>/`:
+  - `.claude-plugin/plugin.json`
+  - `hooks/hooks.json` = `{ "modules": ["./register.tsx"] }`
+  - `hooks/register.tsx`
+  plus an optional `types/index.d.ts` contract.
+- reference.md:9-11: "A mod is three files written directly ... A plugin is a folder with a `.claude-plugin/plugin.json`
+  manifest. Its function hooks live in one hooks module".
+- reference.md:68, on testing across surfaces: "write the body once and loop it over `['terminal', 'desktop'] as const`
+  so the test shows the plugin does not depend on one surface".
+- d.ts:3 (header): "EARLY ACCESS: this surface may change between releases without notice."
+
+1.3 The words the owner used
+- "Claude Mods": 0 hits in B283 cli.pretty.js and 0 in S287.
+- `mods/`, `mod.json`, `.claude/mods`: no engine hits.
+- The only "mods" places in the engine:
+  - the per-session dev-mods folder `<configHome>/dev-mods/<sessionId>` (SPEC/27-hooks.md:5700-5708; S287:192421)
+  - the consent dialog's header "Mods" (S287:353489; SPEC/27-hooks.md:5720-5726)
+- Verdict: the skill does describe one mechanism covering the terminal and the Desktop Code tab. But "mods" is the
+  skill's name for function-hook plugins, not a separate Desktop customization system.
+
+1.4 The owner already runs mods
+- DP/hooks/hooks.json:2-5 has the description "mods (function hooks, under CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1): the
+  to-human view of the transcript and the kairos button in the prompt footer ..." and `"modules": ["./mods/register.tsx"]`.
+- DP/hooks/mods/README.md documents three mods:
+  - to-human (:8-113): rewrites UserMessage, AssistantMessage, ToolUse, ToolGroup, ToolResult and TurnDuration; adds an
+    AbovePrompt band; its need-input buttons fill the prompt.
+  - agents (:115-158): a footer button and a subagents Pane.
+  - kairos (:160-180): a SessionMode switch.
+- Hook sites in the code:
+  - to-human.tsx:632, 656, 673, 788, 815, 838, 846; $.prompt.read and $.prompt.fill at :896-898
+  - agents.tsx:679, 695, 709
+  - kairos.tsx:49, 65
+- ~/.claude/settings.json:11 sets `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: "1"` in its env block.
+- ~/.claude/dev-mods/ holds two (empty) session folders.
+
+================================================================================================
+2. CLAUDE DESKTOP'S SIDE (app-2.16120.0)
+
+2.1 Discovery and manifest: none of Desktop's own
+- Desktop hands plugins to the bundled engine as --plugin-dir entries (D main-process/index.chunk-Nnw-A1di.js:
+  60423-60445; the "Passing N plugin(s) to SDK" log at 60521-60526). It leaves ~/.claude plugins "to the CLI's own
+  loader" (60487-60490).
+- The engine reads hooks.json `modules` exactly as it does in the terminal. Desktop has no mod directory, no mod
+  manifest field and no mod marketplace.
+- Desktop's claude.ai custom-plugin upload validator rejects mods: HOOKS_MODULE_NOT_ACCEPTED "Hooks modules aren't
+  accepted yet" (D web/app/v1/64dda983af411348fa6e83eb9045c98eb57d1f2a96ede4bb-BghfbCBQ.js:3215-3218). See also
+  HOOKS_MODULE_INVALID (3207-3210).
+
+2.2 What Desktop added: the EngineSurface IPC service
+- New in this build: CHANGES-app-2.9939.2..app-2.16120.0.md:30 (log tag `engine-surface`), :60 (service
+  `EngineSurface`), :64 (its 17 methods and 5 events).
+- Declaration: D ipc-services.md:79-101 and main-process/index.chunk-kXuYPTnM.js:309451. The origin is checked against
+  claude.ai and app://localhost (309421-309450).
+- Implementation: createEngineSurfaceImpl, main-process/index.chunk-C8jv8hmh.js:1091-1151.
+- Methods: uiRender, uiPress, uiInput, uiSelect, uiClientModule, uiClientPress, uiMessage, uiAttach, uiDetach, uiPanes,
+  uiPaneShow, uiPaneFocus, uiClose, uiScroll, uiFocus, uiPinnedStatus, uiHostAnswer.
+- Events: uiNotified, uiPanesChanged, uiScrolled, uiFocused, uiHostAsked.
+- Each method forwards to the engine as the snake-case control request, for example `subtype: "ui_render"`
+  (index.chunk-C8jv8hmh.js:956-971) and `subtype: "ui_attach"` (521-529).
+- It attaches with `surface: "desktop"` (532) and `answers: ["ui_copy","ui_prompt_read","ui_prompt_fill",
+  "ui_prompt_suggest"]` (530). The client id is `desktop-<webContents.id>` (index.chunk-Bc6OOGaP.js:109).
+
+2.3 When it is on: no Settings toggle, only an engine capability
+- Main serves a session's surface only if that session's system/init `capabilities` include "ui_surface_v1"
+  (index.chunk-Nnw-A1di.js:48906-48909, 80074-80097).
+- The renderer checks the same word (web/app/v1/c7413d7a0-8PCXThsA.js:427-431, used at cf6ae6197-NvQqGhz6.js:3749-3772)
+  and lazily loads the "engine_surface_mounts" chunk (c3efc6f9e-DE2CAAdU.js:14-50).
+- I found no settings string for mods or for engine UI (searched ui-strings.json, ui-strings-web.json, i18n-web.json).
+  Turning a mod on or off is turning its plugin on or off.
+
+2.4 What Desktop draws (web/app/v1/c95e4d2cf-BLkI1oZK.js, the "engine surface mounts" chunk)
+- Mount table (10450-10474):
+  - EngineAboveBand, EngineFooterStrip, EngineSpinnerAsker
+  - EngineQuestionCards, EngineToolGroupDrawing
+  - epitaxyEngineUserBubble, epitaxyEngineAssistantText, epitaxyEngineToolRow, epitaxyEngineToolResult
+  - PluginPane, PluginPaneOpener, EnginePanesBridge
+  - EngineNoticesBridge, EngineNoticeView
+  - EngineHostBridge (the clipboard and composer answers)
+  - EngineDraftPaint, EngineComposerHost, EngineComposerPluginRow
+  - EnginePageViewport, EngineAttachment, withEngineSurfaceScope
+- Render sites Desktop asks for, with grep anchors:
+
+  | Site | Anchor in c95e4d2cf |
+  |---|---|
+  | UserMessage | 2051, 7960 |
+  | AssistantMessage | 6536, 6561 |
+  | ToolUse | 7526 |
+  | ToolResult | 7885, 7895 |
+  | ToolGroup | 7798 |
+  | AskUserQuestion | 7332, 7462 |
+  | CommandOutput | 2070, 6575 |
+  | Spinner | 10398 |
+  | SessionMode | 8688 |
+  | AbovePrompt | 9956 |
+  | Pane | 10073 |
+
+- Elements, switched at 261-306 and 589-616: Box, Text, Button, Input, Select, Link, Code, Markdown, Svg, Client, and
+  `engine` (draw the component Desktop would have drawn itself).
+- Notice pushes:
+  - ui_toast and ui_status become notices (main-process/index.chunk-Nnw-A1di.js:374-418).
+  - Pinned status: one line per plugin, 32 per session (index.chunk-Bc6OOGaP.js:55-87).
+  - ui_panes, ui_scroll and ui_focus pushes: index.chunk-Nnw-A1di.js:468-513.
+  - ui_invalidate: 48910-48923.
+  - ui_log becomes a transcript `hook_notice` under the plugin's name (web/app/v1/c06cf64bb-pCbmHaLy.js:5783-5800,
+    9301-9320).
+- User-facing strings, all in c95e4d2cf. Desktop says "plugin", never "mod":
+  - "Plugin status lines" (8957) and "{count, plural, one {more plugin status line} other {more plugin status lines}}"
+    (8937-8939)
+  - "Nothing to show yet" and "{plugin} has not drawn in this pane" (10032-10038)
+  - "Plugin panes" (10191)
+
+2.5 Sandboxing on Desktop
+- The engine sends only plain data, validated before it crosses:
+  - Text is plain text: "Plain text: draw it as a text node, never as markup" (S287:263972, 263974, 263978).
+  - Links are https or http://localhost (S287:264573).
+  - Svg source is bounded to 128 KiB and 4096 px (S287:264577).
+  - The tree is "as the hooks engine validated it" (S287:264579).
+- Code runs on the surface only for `Client` surface modules. Desktop runs them in an iframe with
+  sandbox="allow-scripts", srcdoc, referrerpolicy=no-referrer and allow="" (c95e4d2cf:2438-2444, 2557-2566). Imports
+  come from an importmap of Blob URLs plus the engine-served runtime (2392-2422), under a CSP meta (2428-2429).
+- Svg is drawn in an iframe with sandbox="" (c95e4d2cf:3643-3649).
+- The mod's own code never runs in Desktop. It runs in the engine's hooks worker: "no DOM and no Node" (SKILL:22;
+  SPEC/27-hooks.md:4719-4721), "with your permissions" (SPEC/27-hooks.md:5726).
+
+2.6 Hook points Desktop exposes
+- None of its own. Every hook name is an engine event (ui.render, ui.press, ui.input, ui.select, ui.message, ui.scroll,
+  ui.focus, ui.close, and the rest in §3). Desktop adds no hook names.
+- What is surface-specific is which render sites and elements a surface draws. The engine's table (B283
+  cli.pretty.js:473759; the same in S287:328416):
+  - Drawn on every surface: AskUserQuestion, UserMessage, AssistantMessage, ToolUse, ToolResult, ToolGroup,
+    CommandOutput, Pane.
+  - Terminal and desktop only: Spinner, SessionMode, PromptHint, AbovePrompt.
+  - Terminal only: ToolProgress, TurnDuration, InfoNotice.
+- Elements by surface (d.ts:3397-3470):
+  - desktop: Box, Text, Button, Input, Select, Svg, Link, Code, Markdown, Client
+  - only the terminal has Raster and Image
+  - mobile has no Input, Select or Client
+  - vscode has no Client
+- The permission dialog is engine-only: no render site. A plugin adds context with $.ui.notice (d.ts:8021-8023).
+
+2.7 Desktop's own built-in mod (switched off)
+- Desktop has code to load a bundled "conversation" plugin (asides) with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: "1"`:
+  index.chunk-Nnw-A1di.js:12257-12271, 12852-12858, 60431-60436, 60508-60518.
+- It is hard-wired off in this build (`conversationPlugin: false`, 63122), and the folder is absent from
+  /Applications/Claude.app/Contents/Resources.
+
+================================================================================================
+3. THE CLI'S SIDE
+
+3.1 Packaging: one plugin format with two hook kinds
+- hooks/hooks.json has `hooks`, the classic command-hook matchers, and `modules`, at most one hooks module path. It must
+  have one or both (SPEC/27-hooks.md:1536-1559).
+- Module files must be .ts, .tsx, .jsx, .js, .mjs, .cjs, .mts or .cts, and each is an ES module (reference.md:14).
+- A refused key records an earlier design: "hooks.json `surface` is gone: name the module in the Client element"
+  (SPEC/27-hooks.md:1552).
+- Classic hooks: 33 events, from settings.json `hooks`, plugin hooks.json, managed policy and the session
+  (SPEC/27-hooks.md:167-181, 1564-1690).
+
+3.2 Function-hook events. The full contract is the d.ts; this is the map.
+- Engine events (d.ts EngineEventOf, 3543-4234):
+  - tools: tool.call, tool.check, tool.describe
+  - UI: ui.render, ui.resolve, ui.press, ui.input, ui.select, ui.message, ui.scroll, ui.focus
+  - agents: agent.offer, agent.spawn
+  - prompt: prompt.submit, prompt.fill, prompt.suggest, prompt.edit, prompt.section, prompt.context, prompt.attachment
+  - commands and config: command.run, command.describe, config.set, config.describe
+  - other: skill.prompt, attribution.text
+  - session: session.start, session.receive, session.send, session.compact, session.attach, session.detach,
+    session.measure, session.end
+  - plugin.register, engine.create
+  - turn: turn.start, turn.step (streaming), turn.complete
+- Every settings hook event is also hookable as `classic.<Event>`, for example classic.SessionStart
+  (d.ts:1060-1067; reference.md:27).
+- The `$` API (d.ts OpEventOf, 6015 onward):
+  - model.complete, model.classify, model.fork
+  - audio.play, audio.speak
+  - mcp.call
+  - session.*
+  - turn.abort
+  - prompt.read
+  - tool.list, tool.register
+  - command.list, command.register
+  - config.list
+  - agent.list, agent.register
+  - ui.toast, ui.status, ui.log, ui.notice, ui.invalidate, ui.open, ui.close, ui.panes, ui.copy, ui.blit
+  - plus $.fs, $.process, $.store, $.state and $.clock (reference.md:98-111)
+- Runtime: one worker thread, "hooks", hosts every plugin; each module runs in a vm context. Each hook has a time
+  budget, and a failed hook is skipped (SPEC/27-hooks.md:4713-4760; reference.md:65-68, 100-108).
+
+3.3 Gate
+- 2.1.283 to 2.1.285: GrowthBook flag `tengu_plugin_hooks_modules`, default false, and the env var
+  CLAUDE_CODE_ENABLE_FUNCTION_HOOKS overrides it (B283 cli.pretty.js:72589; SPEC/27-hooks.md:5638-5681; the same code
+  in the 2.1.284 and 2.1.285 binaries).
+- 2.1.286 and 2.1.287: `var RYe="tengu_plugin_hooks_modules";var mUt=!0;var YJ=()=>k(RYe,mUt)` (S287:332577). The
+  default is now ON, and this accessor no longer reads the env var. The var still appears in the engine's env-name
+  lists (S287:326351, 330319).
+- Built-in plugins' modules load regardless of the flag (SPEC/27-hooks.md:5671-5681).
+
+3.4 Where mods load from
+- installed plugins
+- `--plugin-dir`
+- `CLAUDE_CODE_PLUGIN_DIRS`: process env, or the env block of ~/.claude/settings.json, never a project's. This is the
+  route "where no flag can be given (a session the desktop app or an SDK host starts)" (reference.md:61).
+- skills folders (~/.claude/skills/<name>, .claude/skills/<name>) (reference.md:61)
+- the session's dev-mods folder, after the person consents (SKILL:16; SPEC/27-hooks.md:5700-5737)
+
+Hot reload and errors:
+- Interactive sessions watch these folders. SDK and desktop hosts watch only with CLAUDE_CODE_PLUGIN_DIR_WATCH=1, and
+  then "its reload lines reaching the host as `ui_log` messages" (reference.md:62).
+- In a stream-json run, a failed function hook goes to the debug log only (reference.md:67).
+
+3.5 The dev-mods consent dialog (the "Mods" dialog)
+- Header "Mods". Question "Enable hot reloading for this session?" Choices "Not now" and "Enable for this session".
+  Body: "Mods in ... load ... and reload when their files change. They run with your permissions."
+  (SPEC/27-hooks.md:5716-5728; S287:151514-151515, 353489)
+- It is person-only, and off where nobody can be asked, as under `claude -p` (SKILL:16).
+- Refused when any of these holds: hooks_modules_off, all_hooks_disabled, sideload_disabled, local_dirs_blocked,
+  managed_hooks_only, hooks_disabled_in_settings, safe_mode, bare_mode, untrusted (SPEC/27-hooks.md:5710-5716).
+
+3.6 Tooling
+- `claude plugin validate`, `claude plugin test`, `/plugin-types` (reference.md:3-5, 40-45, 68;
+  SPEC/27-hooks.md:5683-5697). There is no `mod` command.
+
+3.7 The remote-surface wire protocol. This is what Desktop speaks and what MAWS would speak.
+- Arrival: grepping the binaries for "ui_surface_v1" gives 0 hits in 2.1.283 and 2.1.284, and 2 hits each in 2.1.285,
+  2.1.286 and 2.1.287. The protocol arrived in 2.1.285, installed 2026-09-29. The 2.1.283 bundle has only the subtype
+  table (cli.pretty.js:725382). Every schema line is marked @internal.
+- Capability: system/init `capabilities` includes "ui_surface_v1" when the gate is on and the session is not on a
+  remote transport (S287:353067 `TRn`; 353683). When the gate is off, every ui_* request is refused with "Unsupported
+  control request subtype" (S287:353067 `Roo`, 353733, 353400).
+- Host to engine control requests (S287:134161-134175; validation messages 287504-287519; semantics 264584-264685):
+  - ui_attach: {surface: desktop|mobile|vscode, client_id, viewport?, answers?}. Joins the roster and raises
+    session.attach (S287:264588).
+  - ui_detach
+  - ui_render: {surface, client_id?, component, instance_id, props, viewport?, on_screen?, content_rows?, keyed?}.
+    Runs the ui.render chain and answers {tree, hooked, props core was handed, client_modules}. With no module loaded it
+    answers {tree:{type:"engine",ref:0}, hooked:false} without running anything. The host re-asks on ui_invalidate
+    (S287:264578, 264602-264609).
+  - ui_press, ui_input, ui_select: name an element by {plugin, handle} (S287:264617, 264656, 264669)
+  - ui_panes, ui_pane_show, ui_pane_focus, ui_close (S287:264676-264687)
+  - ui_scroll, ui_focus: Pane or AbovePrompt only
+  - ui_prompt_edit
+  - ui_client_module, ui_client_press, ui_message: Client frames, "the desktop's alone today" (S287:264627-264645;
+    d.ts:3455-3460)
+- Engine to host system pushes:
+  - ui_invalidate, ui_log, ui_toast, ui_status (S287:142651-142654, 263970-263979)
+  - ui_panes, ui_scroll, ui_focus (S287:263998-264008)
+- Engine to host control requests: ui_copy, ui_prompt_read, ui_prompt_fill, ui_prompt_suggest. They go only to a client
+  whose ui_attach named them under `answers`, with a 5 s timeout (S287:264587, 264714-264740).
+- Surface names: the wire accepts only desktop, mobile and vscode. The surface is "What the client declared, a rendering
+  fact and not a trust signal" (S287:264584).
+
+3.8 Mods vs plugins
+- Mods are plugins. There is no new manifest and no `mod` command. The only new location is the per-session dev-mods
+  folder, and it is loaded as a plugin directory.
+
+================================================================================================
+4. WHAT MAWS ALREADY HONOURS
+
+4.1 Mods already load in MAWS sessions (expected from the source; not probed)
+- MAWS launches with `--setting-sources user,project,local` and `--include-hook-events`
+  (M src/engine-host/launch.ts:48-59).
+- It passes CLAUDE_* env through (launch.ts:84-107) and sets CLAUDE_CODE_ENTRYPOINT=sdk-ts (launch.ts:112). Built-in
+  plugins are skipped only for the "local-agent" entrypoint, and modules have no entrypoint gate (SPEC/27-hooks.md:5638-
+  5681; B283 cli.pretty.js:392358).
+- The engine is 2.1.287: the gate defaults on, and the owner's settings also set the env var.
+- So installed plugins' hooks modules load, the owner's doperpowers modules among them, and every engine-side hook runs.
+
+4.2 Hook visibility
+- MAWS shows settings and plugin command hooks from hook_started and hook_response frames. It hides successes and shows
+  failures as notices (M src/renderer/src/transcript/model/hooks.ts:47-60; derive.ts:451-459;
+  src/engine-host/fs/backfill.ts:389-392).
+- Function hooks emit no such frames. A failing mod in a stream-json session goes only to the engine's debug log
+  (reference.md:67), so MAWS cannot show it today.
+
+4.3 ui_* frames today
+- ui_toast, ui_status, ui_log, ui_invalidate and ui_panes are system subtypes. They fall to the default branch:
+  `frame.unknown`, journaled and never shown (M src/engine-host/normalizer-system.ts:155-156).
+- MAWS records init `capabilities` (normalizer.ts:222; src/shared/graph/events.ts:98), so "ui_surface_v1" would land in
+  the graph.
+- All protocol fixtures are 2.1.283. All 123 init frames carry ["interrupt_receipt_v1","interrupt_cancel_queued_v1",
+  "msg_lifecycle_v1","mcp_read_resource_v1","mcp_tool_ui_meta_v1"], without ui_surface_v1
+  (spikes/protocol-probe/fixtures).
+
+4.4 Host hooks are unrelated
+- M src/engine-host/host-hooks.ts:1-4 is the SDK `hook_callback` mechanism (initialize.hooks). No production launch uses
+  it (docs/charter.md:346). It is not the mods mechanism.
+
+4.5 Charter
+- D-1 (docs/charter.md:26) forbids patching. Honouring mods needs no patch: it is control requests on the wire MAWS
+  already owns.
+- D-5 (:30): "owner-specific workflow as later plugins".
+- D-9 (:34): "No extension surface in P0 ... a plugin API for side-panel tabs and commands mirroring Claude Code's own
+  plugin host shape ranks above app-specific tools".
+- :80: the to-human lane "arrives with the renderer extension API".
+- :89: the extension model.
+- :608: the extension model is deferred.
+
+4.6 Which Desktop hook points MAWS already sees
+
+| Desktop handles | What reaches MAWS today | What MAWS does with it |
+|---|---|---|
+| ui_toast, ui_status (EngineNoticesBridge) | Same frames on stdout | frame.unknown, dropped |
+| ui_log (transcript hook_notice) | Same frame | frame.unknown, dropped |
+| ui_panes push (EnginePanesBridge) | Arrives when a plugin opens a pane, e.g. the agents pane | frame.unknown, dropped |
+| ui_invalidate | Arrives | frame.unknown, dropped |
+| Every ui.render site (band, footer, panes, transcript rows, spinner, question cards) | Nothing: MAWS never sends ui_render, so the engine never runs those hooks for MAWS | — |
+
+Engine-side effects MAWS sees through existing events:
+- tool.call denies or rewrites: tool results and permission_denials.
+- tool.check: the can_use_tool request cards.
+- prompt.submit rewrites: the replayed user message.
+- $.prompt.submit: a turn with plugin origin.
+- $.command.register: commands_changed (normalizer-system.ts:54).
+- $.tool.register: init tools (mcp__<plugin>__<name>).
+- $.agent.register: init agents.
+- classic.*: same timing as settings hooks, but no hook frames.
+
+================================================================================================
+5. ASSESSMENT
+
+(a) What a Desktop mod is
+A "mod" is an ordinary Claude Code plugin: .claude-plugin/plugin.json plus hooks/hooks.json, whose `modules` entry names
+a TypeScript module exporting register(on). The engine runs that module in its own sandboxed hooks worker, with no DOM
+and no Node. Through on(event, matcher, ($, e, next) => ...) the module can:
+- block, rewrite or answer tool calls, prompts, prompt sections, commands and subagents
+- register tools, agents and slash commands
+- run timers, model calls, file and process work
+- draw UI by returning plain-data element trees from ui.render for named render sites (transcript rows, the band above
+  the prompt, the footer mode slot, the spinner, side panes), plus toasts, status lines and log lines
+"Desktop mod" is a misnomer: the same plugin draws on every surface. Claude Desktop 2.16120.0 is one surface. It attaches
+to the engine over the remote-surface control protocol (new in engine 2.1.285), asks ui_render for each place it draws,
+renders the validated tree natively, and runs only `Client` sub-modules in a sandboxed iframe.
+
+(b) Hook points and capabilities, with MAWS status
+Key: AS-IS = runs in MAWS today with no change. DECODE = needs only decoding of a push MAWS already receives. SURFACE =
+needs MAWS to attach and ask ui_render (desktop surface). NO = MAWS cannot do it, or should not.
+
+| Hook point or capability | What a mod gets | MAWS |
+|---|---|---|
+| tool.call, tool.check, tool.describe | deny, rewrite, answer or describe tools | AS-IS |
+| prompt.submit, prompt.section, prompt.context, prompt.attachment, skill.prompt, attribution.text | rewrite what the model reads | AS-IS |
+| session.*, turn.start, turn.step, turn.complete, engine.create, plugin.register | lifecycle | AS-IS |
+| classic.<any settings hook event> | settings-hook stdin and reply | AS-IS |
+| $.tool.register, $.agent.register, agent.offer, agent.spawn | tools and agent types | AS-IS |
+| $.command.register, command.run | slash commands answering {text} | AS-IS: command list and LocalCommand row; a custom CommandOutput drawing is SURFACE |
+| $.model, $.fs, $.process, $.store, $.state, $.clock, $.prompt.submit, $.audio | background work | AS-IS |
+| $.ui.toast | ui_toast push | DECODE: to the toast host |
+| $.ui.status | ui_status push (one pinned line per plugin) | DECODE: to the status line |
+| $.ui.log | ui_log push (dim transcript notice) | DECODE: to a transcript notice |
+| ui.render, site AbovePrompt | band above the composer | SURFACE |
+| ui.render, sites SessionMode and PromptHint | footer mode slot and hint row | SURFACE |
+| ui.render, site Spinner | the working indicator | SURFACE |
+| ui.render, site Pane; $.ui.open, close, panes; ui.close | side panes, roster pushes | SURFACE |
+| ui.render, sites UserMessage, AssistantMessage, ToolUse, ToolResult, ToolGroup, CommandOutput, AskUserQuestion | rewrite or redraw transcript rows and the question card | SURFACE |
+| ui.press, ui.input, ui.select, ui.focus, ui.scroll; $.ui.focus and $.ui.scroll pushes | interaction | SURFACE |
+| $.ui.invalidate | ui_invalidate push | SURFACE (re-ask mounted instances) |
+| $.prompt.read, $.prompt.fill, $.prompt.suggest, prompt.edit | composer access | SURFACE: answer ui_prompt_*, send ui_prompt_edit |
+| $.ui.copy | ui_copy | SURFACE: answer ui_copy |
+| Svg element | vector leaf | SURFACE: data: img or a sandbox="" frame |
+| Client element (surface modules) | plugin JavaScript running on the surface | Possible, defer (see d) |
+| ToolProgress, TurnDuration, InfoNotice sites; Raster, Image, $.ui.blit | terminal only | NO: not asked of a desktop surface |
+| permission dialog | engine-only, no render site | NO: unchanged |
+| Desktop's EngineSurface IPC, its claude.ai pages, its "conversation" asides plugin | Desktop-private | NO: nothing for a mod to call; MAWS speaks to the engine directly |
+
+(c) Where each kind would attach in MAWS
+- AS-IS: nothing to build. Worth a line in the docs and in the plugins widget: hooks modules run in MAWS sessions as in
+  the terminal.
+- DECODE:
+  - New system frame schemas: src/shared/wire/frames.ts
+  - Mapping in src/engine-host/normalizer-system.ts, replacing the frame.unknown default for ui_toast, ui_status and
+    ui_log
+  - New X1 events: src/shared/graph/events.ts
+  - Consumers:
+    - toasts: src/renderer/src/app/ToastHost.tsx
+    - pinned plugin status: src/renderer/src/statusline/
+    - ui_log as a notice row: src/renderer/src/transcript/model/derive.ts beside hooks.ts
+  - Also surface init plugin_errors and plugin_warnings, which MAWS already carries (charter :703).
+- SURFACE, engine host:
+  - Add the ui_* subtypes and response schemas to the control catalogue: src/engine-host/controls.ts and
+    src/shared/wire/control.ts.
+  - Send ui_attach {surface: "desktop", client_id: "maws-<windowId>", viewport, answers} once init carries
+    ui_surface_v1: src/engine-host/session.ts, beside the initialize handshake.
+  - Answer ui_copy and ui_prompt_*: src/engine-host/normalizer-controls.ts:88 currently turns unknown engine requests
+    into frame.unknown.
+  - Map ui_invalidate, ui_panes, ui_scroll and ui_focus to events.
+  - Add an X2 command set for renderer asks: src/engine-host/ipc.ts and rpc.ts.
+- SURFACE, renderer:
+  - One element renderer, for example src/renderer/src/engine-surface/: Box and Text as Ink-style flex in character
+    cells of the code font, then Button, Input, Select, Link, Code (Shiki), Markdown (Streamdown), Svg, and `engine`
+    meaning "draw MAWS's own".
+  - Pane: a PanelTool "plugin-pane" per roster entry in the X5 host (src/renderer/src/panel/host.ts, PanelHost.tsx).
+  - AbovePrompt: a band slot in src/renderer/src/composer/Composer.tsx above frame/Frame.tsx.
+  - SessionMode and PromptHint: frame/Toolbar.tsx or the status line.
+  - Prompt read, fill and suggest: src/renderer/src/composer/editor/controller.ts.
+  - AskUserQuestion: src/renderer/src/request-card/.
+  - Transcript sites: src/renderer/src/transcript/view/rows/Row.tsx (User.tsx, AssistantText.tsx, Cell.tsx, Group.tsx,
+    LocalCommand.tsx). Each needs an adapter that builds the engine-shaped props (d.ts RenderPropsOf, 8420 onward) and
+    the instance_id: message uuid or tool_use_id.
+  - Spinner: the live activity and thinking row.
+- NO: the Desktop-private items above. Also Raster, Image, blit and the terminal-only sites.
+
+(d) Risks
+1. "A mod written for Desktop's DOM or IPC" does not exist.
+   - Mods never touch Desktop's DOM or IPC. They return plain data the engine validated (S287:264579).
+   - The real fidelity risk: Box and Text use Ink's cell-based flex vocabulary (d.ts:738-790; viewport in character
+     cells, d.ts:8994-9000). MAWS must lay these out acceptably in DOM, as Desktop does.
+   - A mod can branch on e.surface === "desktop". By claiming "desktop", MAWS inherits whatever the mod assumes about
+     Claude Desktop's layout. "desktop" is still the right claim: the wire accepts only desktop, mobile and vscode, and
+     desktop has the richest table, the one mods are tested against.
+2. Sandboxing.
+   - Plain-data elements are safe if drawn as text nodes and allow-listed props. The engine's own rules: text never
+     markup; https and http://localhost links; Markdown links https, http or file only (S287:264575).
+   - Svg needs a data: img or a sandbox="" frame. MAWS's CSP already allows data: images (M src/main/csp.ts:12-17).
+   - `Client` modules execute plugin-authored JavaScript in MAWS's renderer. They need Desktop's
+     sandbox="allow-scripts" srcdoc frame, a CSP that admits the importmap of blob: scripts inside the frame, and a
+     reimplementation of Desktop's private boot and frame protocol (c95e4d2cf:2380-2450, 2550-2575). That protocol is
+     not documented outside Desktop's code. Defer.
+   - The mod's engine-side power ($.fs, $.process, model calls) is the engine's existing plugin trust: "They run with
+     your permissions" (SPEC/27-hooks.md:5726). MAWS adds no privilege by drawing. It should label what a plugin drew,
+     as Desktop does ("Plugin panes", "{plugin} has not drawn in this pane").
+3. ~/.claude stays read-only.
+   - Honouring mods writes nothing there. The engine reads plugins itself, and enabling or disabling a mod is enabling
+     or disabling its plugin through the engine (MAWS's plugins widget and reload_plugins).
+   - A MAWS-side "don't draw plugin UI" preference belongs in MAWS's userData. It simply skips ui_attach.
+   - The dev-mods consent and its folder are the engine's writes, made at the person's consent. MAWS neither causes nor
+     performs them.
+4. Protocol churn.
+   - Everything is @internal and "EARLY ACCESS ... may change between releases without notice" (d.ts:3).
+   - The protocol is 5 days old (2.1.285), and the gate default flipped in 2.1.286.
+   - Under D-1 as amended, MAWS runs whatever engine is installed. The defences:
+     - gate on the versioned word "ui_surface_v1"
+     - validate every frame with zod
+     - fall back to MAWS's own drawing whenever an answer is missing or malformed (the `engine` node is that contract)
+     - never fail a session over it
+     - record 2.1.287 fixtures: today's are all 2.1.283
+5. Transcript model mismatch (the largest design cost).
+   - MAWS's presentation model folds commentary into the work area and groups activity its own way (X3; owner decision
+     T2 in docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md:289-293).
+   - Mods hooking AssistantMessage or ToolGroup assume the engine's row model. The owner's to-human mod hides and folds
+     rows across runs (README.md:27-42).
+   - MAWS must choose a mapping, for example a mod's tree replaces the row's body and an empty tree hides it, and
+     reconcile it with virtualization and its own folding.
+6. Cost.
+   - Every mounted instance is re-asked on each ui_invalidate, at most once per 100 ms per plugin (S287:263970).
+   - Ask only virtualized, visible rows. Report on_screen, which is coalesced to the frame. Stop asking a component that
+     answered hooked:false until the next invalidate (S287:264607).
+   - With no modules loaded, answers are free (S287:264602).
+7. Scope.
+   - D-9 says no extension surface in P0. Implementing the remote surface is the extension model arriving through the
+     engine, so it needs the owner's ruling and a dated Decision Log entry.
+   - It also partly answers D-9 as written: Claude Code's own plugin host shape, side panes and commands. Its UI half is
+     available to MAWS for the price of a renderer.
+
+(e) Recommendation and size
+
+Honour mods by becoming a "desktop" surface of the engine's remote-surface protocol. Do not build a "Desktop manifest":
+none exists. Take it in slices. Estimates are agent-days.
+
+| Slice | Content | Size |
+|---|---|---|
+| R0 | A 2.1.287 probe recording fixtures: init capabilities; ui_attach, ui_render and ui_press round trips against a scratch test plugin loaded with --plugin-dir from spikes/, not ~/.claude; ui_toast, ui_status, ui_log, ui_panes and ui_invalidate pushes; whether the "Mods" consent reaches an SDK host | 0.5 |
+| R1 | DECODE: toast, status and log pushes to MAWS's toasts, status line and transcript notices; plugin load errors shown | about 1 |
+| R2 | SURFACE core: attach; the element renderer without Client; Pane as panel tabs; the AbovePrompt band; SessionMode and PromptHint; press, input and select; close, scroll and focus; invalidate; answers to ui_prompt_read, ui_prompt_fill, ui_prompt_suggest and ui_copy | 3 to 4 |
+| R3 | SURFACE transcript sites: UserMessage, AssistantMessage, ToolUse, ToolResult, ToolGroup, CommandOutput, AskUserQuestion, Spinner, with the engine-props adapter and the mapping onto X3 | 4 to 6 |
+
+What each slice delivers:
+- R1 is free of design risk and is useful at once: the owner's mods' toasts and status lines appear.
+- R2 brings the owner's agents pane and kairos switch into MAWS.
+- R3 brings the owner's to-human view into MAWS through their own mod. That is charter §3's to-human lane (:80) without
+  MAWS-specific code.
+
+Defer:
+- Client surface modules (Desktop-private frame protocol; about 2 to 3 days if ever)
+- mobile and vscode surfaces
+- terminal-only elements
+
+Total: about 9 to 12 agent-days. The first useful cut, R0 to R2, is about 5.
+
+Order:
+- R0 and R1 now. They are inside current scope: they decode frames MAWS already receives.
+- R2 as a charter child once the owner rules on D-9.
+- R3 after R2 lands and the protocol has held across a couple of engine releases.
+
+Alternatives:
+- Only document that engine-side hooks already apply. This is right if the owner keeps D-9 closed for P0. The owner's
+  own mods are mostly UI, so they would stay invisible in MAWS.
+- Wait. This is reasonable only if churn worries outweigh value. The capability word lets MAWS ship R2 safely now.
+
+(f) Not verified in this session, and what settles it
+- That a MAWS (sdk-ts, -p stream-json) session's init carries "ui_surface_v1" on 2.1.287, and that ui_* pushes arrive
+  without any ui_attach. Inferred from S287:353683 and the "push from a headless session" descriptions. Settled by R0.
+- That 2.1.286 and later fully ignore CLAUDE_CODE_ENABLE_FUNCTION_HOOKS. Only the accessor's literal text was read. The
+  owner's env sets it anyway.
+- That the dev-mods consent reaches an SDK host. It goes through a person-only question (S287:353491). SKILL:16 says it
+  is off where nobody can be asked.
+- Desktop's element-to-DOM layout details. Only the switch sites were read, not each element's styling.
