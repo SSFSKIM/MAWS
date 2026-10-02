@@ -262,6 +262,25 @@ Direction: after the fundamentals: a side pane over a forked child (the C10 fork
 
 **F7. Output-style tags → extension (ruling recorded).** See §1 item 5.
 
+### G. Motion and the thinking indicator (owner's notes after the first look, 2026-10-01)
+
+**T1. The thinking indicator in the CLI's words, with Codex's shimmer.**
+Owner: "when we show 'thinking', let's copy claude cli's style: 'thinking with xhigh effort ~min ~seconds', or 'deep in thought with xhigh effort…', with yellow color change when the thinking gets longer. we also should apply the animation for 'thinking…' from Codex (it has light gradation animation for Thinking…)".
+Today: the live label is the fixed word "Thinking" (`transcript/model/copy.ts:132, 215`; `view/rows/Thinking.tsx`), "Thought for {t}" after; no effort, no elapsed time while live, no colour escalation, no shimmer.
+Reference, measured: the CLI's spinner (`~/claude-code-bundle/2.1.283/cli.pretty.js:521212-521226`): "thinking" under 10 s, "still thinking" from 10 s, "thinking more" from 20 s, "thinking some more" from 30 s, "deep in thought" from 45 s, then "thought for {n}s" when done; the line carries an `effortSuffix` ("with xhigh effort") and the elapsed time, and the spinner's colour follows stall and duration tiers (`Ro = [10 s, 45 s, 300 s]`, the `Sn` component from :521226); reduced motion is honoured. Codex: the "Thinking" disclosure label (`r1-codex.txt` §8) carries a light left-to-right gradient shimmer while live (find the class in `~/codex-app-src/readable/chatgpt-26.928.40906/renderer/`, the animation keyframes beside it).
+Direction: the live thinking row and the work area's active label read "{Thinking|Still thinking|Thinking more|Thinking some more|Deep in thought} with {effort} effort · {m}m {s}s", effort from the session's effective effort (W3's `effective-effort.ts`), elapsed from the block's start, the colour stepping to warning at the CLI's 45 s tier (tokens, not literals), Codex's shimmer on the text while live, static under reduced motion; "Thought for {t}" after, unchanged.
+
+**T2. Intermediate messages fold with the work (shot: "Working for 2m 36s").**
+Owner: "message in between still shows like a thought and only final message is displayed like actual message: is this because of claude mods or our problem?"
+Answer: ours, by design, copied from Codex. The C6 rule (plan line 43, charter §5.3 "answer first"): the answer is the assistant text after the last tool use; text between tool uses is commentary, rendered inside the work area and folded with it. Codex does the same: its "agent-activity" group holds commentary, tools and reasoning, and only the final "assistant-item" sits outside, full contrast, never collapsed (`r1-codex.txt` §8, LT:6357-6440). Claude Desktop renders every assistant text as a message. The engine does not mark text blocks as intermediate; the classification is MAWS's.
+Open (owner's call): keep Codex's rule as is; or keep the fold but render commentary at the answer's weight inside it; or Claude Desktop's reading, every text block a message outside the fold with only tool rows folded.
+
+**T3. Smooth expand and collapse.**
+Owner: "when expanding tool use summary, working summary, let the expansion be smooth animation instead of discrete open and close."
+Today: disclosures (the work divider, activity groups, cells, thinking, plan, receipt) toggle by mounting and unmounting their body; no height or opacity transition.
+Reference: Codex animates expand and collapse with height and opacity and a translateY(-8px), 150 ms exit (`r1-codex.txt` §8, C:26630-26680); the enter values are in the same region.
+Direction: one shared disclosure primitive (height animation measured from scrollHeight, opacity, Codex's timings, `prefers-reduced-motion` static) used by every transcript disclosure and the sidebar's level slide; the virtualiser's row heights follow the animation's end state.
+
 ## 3. Waves
 
 Each wave is one worker in an isolated worktree off master, one commit per item, `pnpm verify`, a bounded review on opus with findings fixed by a separate worker, merge; the e2e load rule and the attribution rule apply as always. Waves are listed in the recommended order with the reason; none is dispatched until the owner says so. Items that need a charter amendment get it in the same wave, written by the architect before dispatch.
@@ -275,6 +294,7 @@ Each wave is one worker in an isolated worktree off master, one commit per item,
 | **W5 Sidebar, top bar and Overview** (landed 2026-10-01, d6ddf6d6; ran in parallel with W4) | D1, D2, D4, the top bar above the tabs (Overview button; the usage pill slot that W6 fills) | The largest structural change; the charter D-2/§5.1/§5.2 entries; the index change for sibling worktrees sits in main | W2 (row type scale); the D1/D2/D4 decisions |
 | **W6 Usage** (landed 2026-10-01, dc639473, read-only half; ran in parallel with W7) | E1, retiring the Accounts tab | Half of it is in the ClaudeUsage repo; the top-bar usage pill and popover are built against the new API and read files until it lands | the ClaudeUsage control route; the E1 decisions |
 | **W7 Sessions and custody** (landed 2026-10-01, 8768e5bf; ran in parallel with W5 and W6) | F1, F2, F3 | Needs the F1 reproduction first; the take-over action and the budget toggle are independent | the F1/F2 decisions; the budget default |
+| **W8 Motion and thinking** | T1, T3, and T2 as the owner rules | Owner's notes after the first look; all in the transcript's view layer, so it waits for debt 7A to land | 7A; the T2 ruling |
 | Record only | F4, F5 (card copy), F6 (P1), F7 | Rulings and inventory; F5's card copy can ride W4 | |
 
 Acceptance for the whole initiative (the parent's own, beyond the items): the owner sits with the app beside Codex desktop and Claude Desktop on the same session and reports no proportion, type, bubble, composer or selector difference they want changed; a turn under the owner's hooks renders its answer as the answer, live and after reload; a steer sits where it was delivered; AskUserQuestion steps and leaves a one-widget receipt; the sidebar reaches any session of the owner's 276 projects in two clicks; the menu bar routes.
