@@ -37,7 +37,7 @@ import { focusedSession } from './ComposerAppKeys';
 import { newestUserUuid, rowPrefill, type UserRow } from './edit-prefill';
 import { bodiesByPlaceholder, prefillToDoc } from './editor/recall';
 import { serializeDraft } from './editor/serialize';
-import { submitSerialized, type Dispatch } from './editor/submit';
+import { precheck, submitSerialized, type Dispatch } from './editor/submit';
 import type { ContentBlock } from '@shared/graph/events';
 
 // ---- the fork seam (C10 registers; null until then) ------------------------------------------------------------------
@@ -324,6 +324,7 @@ function reconcileRewind(client: MawsBridge, appSessionId: AppSessionId, flight:
 
 async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Promise<RewindOutcome> {
   const edit = editOf(appSessionId)!;
+  if (!precheck(serialized(appSessionId, edit))) return 'stale';
   const flight = dispose(appSessionId);
   const generation = flight.generation;
   const current = () => flights.get(appSessionId)?.generation === generation;

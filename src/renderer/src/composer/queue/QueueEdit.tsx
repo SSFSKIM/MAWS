@@ -65,7 +65,7 @@ export function QueueEdit({ content, sessionId, cwd, onSave, onCancel }: QueueEd
 
   const save = async () => {
     if (saving.current || !editor) return;
-    const s = serializeDraft(editor.getJSON(), { sessionId, cwd });
+    const s = serializeDraft(editor.getJSON(), { sessionId, cwd, literal: true });
     if (s.empty) return setError('A queued message cannot be empty · Delete it instead');
     const refusal = sendSizeRefusal(s.content);
     if (refusal) return setError(refusal);

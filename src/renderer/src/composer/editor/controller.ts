@@ -19,7 +19,7 @@ import { slashWidget } from '../mentions/widgets';
 import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
 import { atomId, attachmentsOf, emptyDoc, isMultiline, mentionNode, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
-import { createDraftWriter, docOfDraft, isEmptyDoc, type DraftWriter } from './drafts';
+import { createDraftWriter, docOfDraft, isEmptyDoc, registerLiveDraft, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
 import { historyNavigation, recallDoc, recallEntries, type HistoryNav, type Recall } from './history';
@@ -101,13 +101,22 @@ export function ipcDrafts(client: MawsBridge, appSessionId: AppSessionId): Draft
 export const TYPED_DECIDE_MS = 300;
 // C11 end
 
+// A pending submission belongs to the session, not the mounted tab. A remount joins its outcome and locked document;
+// only the initiating flight writes the stored draft, even if no editor remains mounted.
+interface Submission { doc: ComposerDoc; done: Promise<boolean> }
+const submissions = new Map<AppSessionId, Submission>();
+
 export class EditorController {
   private inputs: ControllerInputs;
   private editor: TiptapEditor | null = null;
   private readonly writer: DraftWriter;
   private silent = false;
   private busy = false;
-  private loaded = false; // the stored draft has been read (a change before then must not write over it)
+  private loaded = false;
+  private revision = 0; // local edits and submission invalidate pending restoration
+  private lifetime = 0;
+  private live = false;
+  private attachmentEpoch = 0;
   private nav: HistoryNav = { index: null, draft: null };
   private recalls: Recall[] = [];
   private listed: HistoryEntry[] = [];
@@ -164,6 +173,7 @@ export class EditorController {
     this.view.setCommandEmpty(mode === 'send' || serializeDraft(doc, { sessionId: null, cwd: '' }).empty);
     this.inputs.onDocChange?.(doc);
     if (this.silent || !transaction.docChanged) return;
+    this.revision += 1;
     if (this.nav.index !== null) this.nav = historyNavigation(this.nav, 'edit', 0, doc).nav;
     this.writer.change(doc);
   }
@@ -190,10 +200,19 @@ export class EditorController {
 
   // The draft is restored unless something was typed or prefilled first; a pending write is flushed on unmount.
   mount(): () => void {
-    let live = true;
+    this.live = true;
+    const lifetime = ++this.lifetime;
+    const revision = this.revision;
+    const off = registerLiveDraft(this.inputs.appSessionId, () => this.loaded || this.revision > 0 ? this.editor?.getJSON() : undefined);
+    const flight = submissions.get(this.inputs.appSessionId);
+    if (flight) {
+      this.setDoc(flight.doc, { silently: true, caret: null });
+      void this.followSubmission(flight);
+    }
     void this.drafts.load().then((draft) => {
+      if (!this.live || this.lifetime !== lifetime) return;
       const doc = docOfDraft(draft);
-      if (live && doc && this.editor && isEmptyDoc(this.editor.getJSON())) {
+      if (this.revision === revision && !this.busy && doc && this.editor && isEmptyDoc(this.editor.getJSON())) {
         this.setDoc(doc, { silently: true, caret: null });
         this.inputs.onRestore?.(doc);
       }
@@ -201,7 +220,9 @@ export class EditorController {
     });
     void this.refreshHistory();
     return () => {
-      live = false;
+      this.live = false;
+      this.attachmentEpoch += 1;
+      off();
       this.writer.flush();
     };
   }
@@ -224,7 +245,9 @@ export class EditorController {
   async submit(): Promise<void> {
     const editor = this.editor;
     const { appSessionId, sessionId, cwd, disabled } = this.inputs;
-    if (!editor || disabled !== null || this.busy) return;
+    if (!editor || disabled !== null || this.busy || submissions.has(appSessionId)) return;
+    this.revision += 1;
+    this.attachmentEpoch += 1;
     const s = serializeDraft(editor.getJSON(), { sessionId, cwd });
     if (s.empty) return;
     // C11 start: a typed `/<name> <args>` naming a registered widget is the widget's (a registered widget wins over the
@@ -267,24 +290,44 @@ export class EditorController {
     }
     // C11 end
     const target = memoryTargetOf(useComposerStore.getState(), appSessionId);
-    const focused = editor.isFocused; // read-only while in flight drops focus; it comes back with the cleared editor
+    const doc = editor.getJSON();
+    const onSubmit = this.inputs.onSubmit;
+    this.writer.cancel(); // an unstarted session refuses draft writes while its start runs
+    let settle!: (accepted: boolean) => void;
+    const flight: Submission = { doc, done: new Promise((resolve) => { settle = resolve; }) };
+    submissions.set(appSessionId, flight);
+    const following = this.followSubmission(flight);
+    let accepted = false;
+    try {
+      // Keep C10's synchronous start gate: it owns the first message before another event can close the tab.
+      accepted = await (onSubmit ? onSubmit(s) : submitSerialized(this.client, appSessionId, s, 'send', target));
+    } catch (error) {
+      warn(error instanceof Error ? error.message : String(error));
+    }
+    if (accepted) {
+      if (this.drafts.clearsOnSend?.() ?? true) this.drafts.save(null);
+    } else {
+      this.writer.change(doc);
+      if (!this.live) this.writer.flush();
+    }
+    submissions.delete(appSessionId);
+    settle(accepted);
+    await following;
+  }
+
+  private async followSubmission(flight: Submission): Promise<void> {
+    const lifetime = this.lifetime;
+    const focused = this.editor?.isFocused;
+    this.revision += 1;
     this.busy = true;
     this.view.setBusy(true);
-    editor.setEditable(false);
-    this.writer.cancel(); // no draft write runs while a submission is in flight (an unstarted session's start forbids one)
-    let accepted: boolean;
-    try {
-      accepted = await (this.inputs.onSubmit ? this.inputs.onSubmit(s) : submitSerialized(this.client, appSessionId, s, 'send', target));
-    } finally {
-      this.busy = false;
-      this.view.setBusy(false);
-      editor.setEditable(this.inputs.disabled === null);
-    }
-    if (!accepted) {
-      this.writer.change(editor.getJSON()); // the kept text is written again after the pause
-      return;
-    }
-    if (this.drafts.clearsOnSend?.() ?? true) this.drafts.save(null);
+    this.editor?.setEditable(false);
+    const accepted = await flight.done;
+    if (!this.live || this.lifetime !== lifetime) return;
+    this.busy = false;
+    this.view.setBusy(false);
+    this.editor?.setEditable(this.inputs.disabled === null);
+    if (!accepted) return;
     this.nav = { index: null, draft: null };
     this.setDoc(emptyDoc(), { silently: true, caret: focused ? 'end' : null });
     void this.refreshHistory();
@@ -341,6 +384,7 @@ export class EditorController {
   }
 
   private insertPasted(text: string, name: string): void {
+    if (this.busy) return;
     this.editor
       ?.chain()
       .focus()
@@ -349,6 +393,7 @@ export class EditorController {
   }
 
   private insertMention(path: string): void {
+    if (this.busy) return;
     const id = mentionPath(path, this.inputs.cwd);
     this.editor
       ?.chain()
@@ -358,6 +403,7 @@ export class EditorController {
   }
 
   private setAttachments(next: Attachment[]): void {
+    if (this.busy) return;
     const editor = this.editor;
     if (editor) editor.view.dispatch(editor.state.tr.setDocAttribute('attachments', markPersisted(next)));
   }
@@ -366,9 +412,10 @@ export class EditorController {
     if (this.editor) this.setAttachments([...attachmentsOf(this.editor.getJSON()), attachment]);
   }
 
-  private async attachImage(name: string, blob: Blob, mediaType: string): Promise<void> {
+  private async attachImage(name: string, blob: Blob, mediaType: string, epoch: number): Promise<void> {
     try {
       const out = await downscaleImage(blob, mediaType);
+      if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
       const refusal = imageRefusal(name, out.bytes);
       if (refusal) return warn(refusal);
       this.addAttachment({ id: atomId('attachment'), kind: 'image', name, mediaType: out.mediaType, bytes: out.bytes, data: out.data, persisted: true });
@@ -380,15 +427,23 @@ export class EditorController {
   // `at`: the document position a drop landed on (FileHandler answers 0 when it could not tell, never a place a chip
   // can go, so the caret stays where it is then); mentions and read-in text go there, attachments to the strip.
   async addFiles(files: File[], at?: number): Promise<void> {
+    if (this.busy || !this.live) return;
+    const epoch = this.attachmentEpoch;
     if (at !== undefined && at > 0 && this.editor) this.editor.commands.setTextSelection(at);
     for (const file of files) {
+      if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
       const action = classifyFile(file, this.client.pathForFile(file));
-      if (action.kind === 'image') await this.attachImage(file.name, file, file.type);
-      else if (action.kind === 'pdf')
-        this.addAttachment({ id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.size, data: await fileBase64(file), persisted: true });
-      else if (action.kind === 'mention') this.insertMention(action.path);
-      else if (action.kind === 'text') this.insertPasted(await file.text(), file.name);
-      else warn(action.reason);
+      if (action.kind === 'image') await this.attachImage(file.name, file, file.type, epoch);
+      else if (action.kind === 'pdf') {
+        const data = await fileBase64(file);
+        if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
+        this.addAttachment({ id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.size, data, persisted: true });
+      } else if (action.kind === 'mention') this.insertMention(action.path);
+      else if (action.kind === 'text') {
+        const text = await file.text();
+        if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
+        this.insertPasted(text, file.name);
+      } else warn(action.reason);
     }
   }
 
@@ -399,25 +454,29 @@ export class EditorController {
       focus: () => void editor().commands.focus(),
       submit: () => void this.submit(),
       insertText: (text) => {
+        if (this.busy) return;
         if (editor().isFocused) editor().chain().insertContent(text).run();
         else editor().chain().focus('end').insertContent(text).run();
       },
       doc: () => editor().getJSON(),
       serialize: () => serializeDraft(editor().getJSON(), { sessionId: this.inputs.sessionId, cwd: this.inputs.cwd }),
-      clear: () => this.setDoc(emptyDoc(), { silently: false, caret: null }),
+      clear: () => { if (!this.busy) this.setDoc(emptyDoc(), { silently: false, caret: null }); },
       removeAttachment: (id) => this.setAttachments(attachmentsOf(editor().getJSON()).filter((a) => a.id !== id)),
       attachPicked: async (files) => {
+        if (this.busy || !this.live) return;
+        const epoch = this.attachmentEpoch;
         for (const file of files) {
+          if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
           if (file.data === null) this.insertMention(file.path);
           else if (file.mediaType === 'application/pdf')
             this.addAttachment({ id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.bytes, data: file.data, persisted: true });
           else {
             const bytes = Uint8Array.from(atob(file.data), (c) => c.charCodeAt(0));
-            await this.attachImage(file.name, new Blob([bytes], { type: file.mediaType ?? '' }), file.mediaType ?? '');
+            await this.attachImage(file.name, new Blob([bytes], { type: file.mediaType ?? '' }), file.mediaType ?? '', epoch);
           }
         }
       },
-      openSlash: () => void editor().chain().focus().insertContentAt(1, '/').run(),
+      openSlash: () => { if (!this.busy) editor().chain().focus().insertContentAt(1, '/').run(); },
       openWidget: (name, args = '' /* C11: the argument a widget opens with */) => this.openWidget(name, args),
     };
   }

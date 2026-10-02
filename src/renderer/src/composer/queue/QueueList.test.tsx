@@ -195,3 +195,13 @@ describe('queue list renders every entry state', () => {
     expect(container.innerHTML).toBe('');
   });
 });
+
+
+it.each(['# Heading', '! x'])('keeps the literal queued prompt %s when saving its real editor', async (content) => {
+  const { client, invoke } = bridge();
+  render(<QueueList appSessionId={APP} busy={false} queue={queue([entry('q-1', { content })])} sessionId={null} cwd="/repo" client={client} />);
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Edit' }));
+  const box = await screen.findByRole('textbox', { name: 'Edit queued message' });
+  await act(async () => void box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  expect(invoke).toHaveBeenCalledWith('session.queue.edit', { appSessionId: APP, queueId: 'q-1', content });
+});

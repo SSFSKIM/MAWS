@@ -6,6 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { StartOptions } from '@shared/ipc/schema/session';
 import type { FirstMessage, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
+import { isEmptyDoc, liveDraftDoc } from '../composer/editor/drafts';
 import { pickDirectModel } from '../gateway/direct-model'; // debt wave 4: the direct route's model refusal
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
@@ -195,7 +196,8 @@ export function isEmptyDraft(draft: SetupIntent['draft']): boolean {
   if (draft.attachments.length > 0) return false;
   const hasContent = (node: unknown): boolean => {
     if (typeof node !== 'object' || node === null) return false;
-    const { type, text, content } = node as { type?: unknown; text?: unknown; content?: unknown };
+    const { type, text, content, attrs } = node as { type?: unknown; text?: unknown; content?: unknown; attrs?: { attachments?: unknown } };
+    if (type === 'doc' && Array.isArray(attrs?.attachments) && attrs.attachments.length > 0) return true;
     if (type === 'text') return typeof text === 'string' && text.trim().length > 0;
     if (type !== undefined && type !== 'doc' && type !== 'paragraph' && type !== 'hardBreak') return true; // an atom (mention, pasted)
     return Array.isArray(content) && content.some(hasContent);
@@ -213,7 +215,8 @@ export async function beforeCloseUnstarted(appSessionId: AppSessionId): Promise<
     toast({ level: 'info', text: 'Starting…', actions: [], dismissible: true });
     return 'kept';
   }
-  if (!isEmptyDraft(intent.draft) || intent.message !== null) {
+  const liveDoc = liveDraftDoc(appSessionId);
+  if (!(liveDoc === undefined ? isEmptyDraft(intent.draft) : isEmptyDoc(liveDoc)) || intent.message !== null) {
     const discard = await confirm({ title: 'Discard this unstarted session?', body: 'Its draft will be lost.', confirmLabel: 'Discard', destructive: true });
     if (!discard) return 'kept';
   }

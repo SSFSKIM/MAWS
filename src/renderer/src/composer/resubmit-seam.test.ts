@@ -561,3 +561,15 @@ describe('the transcript decides an uncertain rewind', () => {
     expect(entryShowsRewind(transcript(), uuid('u2'))).toBe(false);
   });
 });
+
+
+it('refuses an oversized replacement before changing the conversation with a rewind', async () => {
+  editing({ text: 'x'.repeat(1024 * 1024 + 1) });
+  const sending = sendInlineEdit(client, A);
+  expect(rewinds).toEqual([]);
+  expect(await sending).toBe('stale');
+  expect(record().state).toBe('idle');
+  expect(edit()?.text.length).toBe(1024 * 1024 + 1);
+  expect(sends()).toEqual([]);
+  expect(toasts().some((text) => text.includes('Message too large'))).toBe(true);
+});

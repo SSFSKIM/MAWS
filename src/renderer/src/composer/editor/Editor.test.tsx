@@ -1,4 +1,4 @@
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { closeWidgetDialog, useWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -376,3 +376,75 @@ describe('a registered widget named at Enter opens with its argument', () => {
   });
 });
 // C11 end
+
+
+describe('draft and submission races', () => {
+  it.each(['clear', 'send'])('does not restore an old draft after the user chose to %s while loading', async (action) => {
+    let loaded!: (draft: Draft | null) => void;
+    const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn() };
+    const handle = createRef<EditorHandle>();
+    render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={async () => true} />);
+    act(() => handle.current!.insertText('new thought'));
+    await act(async () => { if (action === 'clear') handle.current!.clear(); else handle.current!.submit(); });
+    expect(handle.current!.serialize().empty).toBe(true);
+    await act(async () => loaded({ doc: docOf([paragraph(textNode('old thought'))]), attachments: [], updatedAt: '2026-10-02T00:00:00.000Z' }));
+    expect(handle.current!.serialize().empty).toBe(true);
+  });
+
+  it('refuses picked attachments while a submission is pending', async () => {
+    let answer!: (accepted: boolean) => void;
+    const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} />);
+    await act(async () => handle.current!.insertText('send me'));
+    await act(async () => handle.current!.submit());
+    await act(async () => handle.current!.attachPicked([{ path: '/repo/late.pdf', name: 'late.pdf', mediaType: 'application/pdf', bytes: 3, data: 'YWJj' }]));
+    expect(handle.current!.doc().attrs?.attachments).toEqual([]);
+    await act(async () => answer(true));
+    expect(handle.current!.serialize().empty).toBe(true);
+  });
+
+  it.each([true, false])('owns a pending submission across tab remounts (accepted=%s)', async (accepted) => {
+    let answer!: (accepted: boolean) => void;
+    const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+    let stored: Draft | null = { doc: docOf([paragraph(textNode('send once'))]), attachments: [], updatedAt: '2026-10-02T00:00:00.000Z' };
+    const port: DraftPort = { load: async () => stored, save: (draft) => { stored = draft; } };
+    const handle = createRef<EditorHandle>();
+    const view = () => <Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} />;
+    const first = render(view());
+    await waitFor(() => expect(handle.current!.serialize().display).toBe('send once'));
+    await act(async () => handle.current!.submit());
+    first.unmount();
+    const second = render(view());
+    await waitFor(() => expect(handle.current!.serialize().display).toBe('send once'));
+    await act(async () => handle.current!.submit());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(contentOf(second.container).getAttribute('contenteditable')).toBe('false');
+    await act(async () => answer(accepted));
+    expect(handle.current!.serialize().display).toBe(accepted ? '' : 'send once');
+    expect(contentOf(second.container).getAttribute('contenteditable')).toBe('true');
+    if (accepted) expect(stored).toBeNull();
+  });
+});
+
+
+it.each([false, true])('ignores a PDF read started before submission that finishes after acceptance=%s', async (finishSendFirst) => {
+  let answer!: (accepted: boolean) => void;
+  let read!: (bytes: ArrayBuffer) => void;
+  const file = new File(['abc'], 'late.pdf', { type: 'application/pdf' });
+  vi.spyOn(file, 'arrayBuffer').mockImplementation(() => new Promise((resolve) => { read = resolve; }));
+  const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+  const { port } = drafts(null);
+  const handle = createRef<EditorHandle>();
+  const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} />);
+  await act(async () => handle.current!.insertText('send me'));
+  fireEvent.drop(container.querySelector('[data-key-sink]')!, { dataTransfer: { files: [file] } });
+  expect(file.arrayBuffer).toHaveBeenCalledOnce();
+  await act(async () => handle.current!.submit());
+  if (finishSendFirst) await act(async () => answer(true));
+  await act(async () => read(new Uint8Array([97, 98, 99]).buffer));
+  expect(handle.current!.doc().attrs?.attachments).toEqual([]);
+  if (!finishSendFirst) await act(async () => answer(true));
+  expect(handle.current!.serialize().empty).toBe(true);
+});
