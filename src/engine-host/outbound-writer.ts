@@ -32,12 +32,14 @@ export function writeFailedMeta(frame: StdinFrame, message: string): Record<stri
 }
 
 export interface WriteOptions {
+  signal?: AbortSignal;
   preface?: Record<string, unknown>[];
   flushed?: () => void;
 }
 
 interface InFlight {
   settled: boolean;
+  abort: () => void;
   fail: (message: string) => void;
 }
 
@@ -73,10 +75,12 @@ export class OutboundWriter {
     return new Promise((resolve) => this.idleWaiters.push(resolve));
   }
 
-  // Settles every unsettled write as `write_failed` (the process is gone, so no out row may follow its exit row); a
-  // transport answer that arrives later for one of them is ignored.
+  // Stops delivery before settling every unsettled write as `write_failed`. The process may still be alive
+  // after stdout EOF; releasing the gate must never let a queued or partial frame finish after failure.
   failPending(message: string): void {
-    for (const entry of [...this.inFlight]) entry.fail(message);
+    const pending = [...this.inFlight];
+    for (const entry of pending) entry.abort();
+    for (const entry of pending) entry.fail(message);
   }
 
   // Writes the frame; on success journals `preface` rows (meta rows that describe this frame, e.g. the broker's
@@ -85,8 +89,11 @@ export class OutboundWriter {
   // journal itself fails while live, the write rejects with that error after a `transport_error { journal_failed }`.
   write(frame: StdinFrame, opts: WriteOptions = {}): Promise<void> {
     return new Promise<void>((resolve, reject) => {
+      const controller = new AbortController();
+      const signal = opts.signal ? AbortSignal.any([controller.signal, opts.signal]) : controller.signal;
       const entry: InFlight = {
         settled: false,
+        abort: () => controller.abort(),
         fail: (message) => {
           if (entry.settled) return;
           const failure = this.settle(entry, () => this.journal.row('meta', writeFailedMeta(frame, message)));
@@ -94,7 +101,7 @@ export class OutboundWriter {
         },
       };
       this.inFlight.add(entry);
-      this.transport.write(frame).then(
+      this.transport.write(frame, signal).then(
         () => {
           if (entry.settled) return;
           const failure = this.settle(entry, () => {

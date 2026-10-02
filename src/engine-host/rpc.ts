@@ -53,9 +53,10 @@ interface Pending {
   resolve: (envelope: ResponseEnvelope) => void;
   reject: (error: ControlError) => void;
   timer: ReturnType<typeof setTimeout> | null;
-  arm: ((timeoutMs: number, since?: string) => void) | null; // (re)starts the deadline, once the request was written
+  arm: ((timeoutMs: number, since?: string) => void) | null; // (re)starts the deadline, including the time spent waiting to write
   onAbort: (() => void) | null;
   signal: AbortSignal | undefined;
+  writeAbort: AbortController;
 }
 
 export interface LateResponse {
@@ -121,8 +122,9 @@ export class ControlClient {
     const frame: StdinFrame = { type: 'control_request', request_id: requestId, request: { subtype, ...payload } };
     const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS[opts.klass ?? (isOutboundSubtype(subtype) ? requestClassOf(subtype) : 'mutate')];
 
+    const writeAbort = new AbortController();
     const settled = new Promise<ResponseEnvelope>((resolve, reject) => {
-      const entry: Pending = { subtype, resolve, reject, timer: null, arm: null, onAbort: null, signal: opts.signal };
+      const entry: Pending = { subtype, resolve, reject, timer: null, arm: null, onAbort: null, signal: opts.signal, writeAbort };
       this.pendingTable.set(requestId, entry);
       if (opts.signal) {
         entry.onAbort = () => this.cancel(requestId);
@@ -131,15 +133,6 @@ export class ControlClient {
     });
     settled.catch(() => {}); // the caller's await below observes the rejection; never an unhandled rejection here
 
-    try {
-      await this.writer.write(frame);
-    } catch (error) {
-      const entry = this.take(requestId);
-      const message = error instanceof Error ? error.message : String(error);
-      const failure = new ControlError(subtype, requestId, `${subtype} not written: ${message}`, 'write_failed');
-      entry?.reject(failure);
-      throw failure;
-    }
     const entry = this.pendingTable.get(requestId);
     if (entry) {
       entry.arm = (ms, since) => {
@@ -148,6 +141,7 @@ export class ControlClient {
           setTimeout(() => {
             const timedOut = this.take(requestId);
             if (!timedOut) return;
+            timedOut.writeAbort.abort();
             this.park(requestId, subtype);
             this.writeCancel(requestId);
             timedOut.reject(new ControlTimeout(subtype, requestId, ms, since));
@@ -156,14 +150,26 @@ export class ControlClient {
       };
       entry.arm(timeoutMs);
     }
-    opts.onWritten?.(requestId); // after the deadline is armed, so the callback may extend it
+    // The deadline covers the write queue and backpressure, not just the response.
+    const written = this.writer.write(frame, { signal: writeAbort.signal }).then(() => {
+      // onIdle may already have correlated a held response and removed the pending entry.
+      if (!writeAbort.signal.aborted) opts.onWritten?.(requestId);
+    }, (error: unknown) => {
+      const pending = this.take(requestId);
+      const message = error instanceof Error ? error.message : String(error);
+      const failure = new ControlError(subtype, requestId, `${subtype} not written: ${message}`, 'write_failed');
+      pending?.reject(failure);
+      throw failure;
+    });
 
+    void written.catch(() => {}); // timeout/cancellation can return before the write settles
     const envelope = await settled;
+    await written; // a held response cannot turn a failed write into a successful exchange
     if (envelope.subtype === 'error') throw new ControlError(subtype, requestId, envelope.error, envelope.error_code ?? null);
     return { envelope, requestId };
   }
 
-  // Restarts a written, still pending request's deadline: `timeoutMs` from now, its timeout saying what it counted from
+  // Restarts a still pending request's deadline: `timeoutMs` from now, its timeout saying what it counted from
   // (the session's initialize while the engine streams SessionStart hook frames). False when there is none to restart.
   extendDeadline(requestId: RequestId, timeoutMs: number, since: string): boolean {
     const entry = this.pendingTable.get(requestId);
@@ -177,6 +183,7 @@ export class ControlClient {
   cancel(requestId: RequestId): void {
     const entry = this.take(requestId);
     if (!entry) return;
+    entry.writeAbort.abort();
     this.park(requestId, entry.subtype);
     this.writeCancel(requestId);
     entry.reject(new ControlCancelled(entry.subtype, requestId));
@@ -240,6 +247,7 @@ export class ControlClient {
     this.closed = reason;
     for (const [requestId, entry] of [...this.pendingTable]) {
       this.take(requestId);
+      entry.writeAbort.abort();
       entry.reject(new ControlError(entry.subtype, requestId as RequestId, `${entry.subtype} unanswered: ${reason}`, 'exited'));
     }
     for (const late of this.lateTable.values()) clearTimeout(late.timer);

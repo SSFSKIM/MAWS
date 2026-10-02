@@ -36,6 +36,20 @@ describe('x2 deadlines fit the bridge', () => {
       expect(events).toEqual([{ appSessionId: APP, opId, command: 'session.generateTitle', late: false, outcome: { ok: true, value: { title: 'Protocol probe' } } }]);
     });
 
+    it('a response released by writer idle still answers the receipt before a correlated completion', async () => {
+      const { table, events, respond, client } = setup();
+      client.writer.onIdle(() => respond('generate_session_title', { title: 'Already answered' }));
+      let receipt: { opId: string } | undefined;
+      void table.start(APP, 'session.generateTitle', client, 'generate_session_title', { description: 'fast', persist: false })
+        .then((value) => { receipt = value; });
+      // Drain the write and response continuations, but not the completion's macrotask.
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(receipt).toEqual({ opId: 'LAUNCHOP-1' });
+      expect(events).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(events).toEqual([{ appSessionId: APP, opId: receipt!.opId, command: 'session.generateTitle', late: false, outcome: { ok: true, value: { title: 'Already answered' } } }]);
+    });
+
     it('the MCP commands complete with value null; an engine error completes engine_error with its code', async () => {
       const { table, events, respond, client } = setup();
       const toggle = await table.start(APP, 'session.mcpToggle', client, 'mcp_toggle', { serverName: 'github', enabled: false });

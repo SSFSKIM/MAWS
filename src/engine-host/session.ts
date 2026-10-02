@@ -629,6 +629,8 @@ export class EngineSession {
   // and the write's own row is journaled only when the write settles; such frames wait in `held` (in memory: stdout is
   // never paused, so the child can always write) and are processed, in arrival order, right after that row.
   private async readLoop(transport: EngineTransport): Promise<void> {
+    let processExited = false;
+    void transport.exited.then(() => { processExited = true; });
     for await (const item of transport.frames) {
       this.heard();
       if (this.writer?.busy || this.held.length > 0) this.held.push(item);
@@ -654,6 +656,10 @@ export class EngineSession {
       }
     }
     this.drainHeld(true);
+    // EOF also wins when an aborted write releases the gate: no more frames can
+    // report its stalled_write problem, and a live child still needs the ladder.
+    await Promise.resolve(); // an exit can close stdout and settle exited in the same turn
+    if (!processExited) void this.terminate(false);
   }
 
   private drainHeld(force = false): void {
@@ -718,6 +724,10 @@ export class EngineSession {
         return;
       case 'replay_unrecorded_read': // not a problem: the replay answered a read its fixture never recorded (no event)
         this.record('meta', { event: 'replay_unrecorded_read', message: problem.message, ...(problem.read ?? {}) });
+        return;
+      case 'stalled_write':
+        this.record('meta', { event: 'transport_error', message: problem.message, code: 'stalled_write' });
+        void this.terminate(false); // stdin was aborted; let the engine flush before forced cleanup
         return;
       case 'line_budget':
         this.record('meta', { event: 'transport_error', message: problem.message, code: 'line_budget', length: problem.length });
