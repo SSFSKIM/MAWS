@@ -257,8 +257,11 @@ export function createLayoutStore() {
         );
       },
       setCurrentProject: (projectId) => main((m) => model.switchSet(m, projectId ?? NO_PROJECT)),
+      // Called on every records change, so nothing is set (and no subscriber woken) when nothing moves.
       refileTabs() {
-        if (get().hydrated) main((m) => model.refile(m, setOfTab));
+        if (!get().hydrated) return;
+        const next = model.refile(get().main, setOfTab);
+        if (next !== get().main) set({ main: next });
       },
       closeTab(id) {
         const found = model.locateTab(get().main, id);
