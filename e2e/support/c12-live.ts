@@ -6,6 +6,7 @@
 // run lists as stateful), the owner-file check and the pin's `ls -l`, an independent `ps` read of each engine tree, and
 // spend from the journals' `result.total_cost_usd`. Never the owner's ~/.claude or ~/.claude.json, which are only read
 // by the owner-file check.
+import { isolatedGitEnv } from '../../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -63,7 +64,7 @@ export function c12Scratch(): C12Scratch {
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), text);
     }
-    const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=C12', '-c', 'user.email=c12@localhost', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, stdio: 'ignore' });
+    const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=C12', '-c', 'user.email=c12@localhost', '-c', 'commit.gpgsign=false', ...args], { env: isolatedGitEnv(), cwd: dir, stdio: 'ignore' });
     git('init', '-q');
     git('add', '-A');
     git('commit', '-q', '--allow-empty', '-m', 'C12 sentinels');

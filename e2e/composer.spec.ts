@@ -11,6 +11,7 @@
 // edit-and-resubmit runs there too, with the session's transcript above its composer (a bubble's Edit is the way in):
 // the replay holds a `rewind_conversation` answer back past C3's 8 s bound, or withholds it, and the engine host's
 // own journal says how many rewinds and prompts were written.
+import { isolatedGitEnv } from '../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -53,7 +54,7 @@ test.beforeAll(() => {
   writeFileSync(join(repo, 'src/a.ts'), 'export const a = 1;\n');
   writeFileSync(join(repo, 'src/main.ts'), 'export {};\n');
   writeFileSync(join(repo, 'docs/a b.md'), '# notes\n');
-  const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=MAWS e2e', '-c', 'user.email=e2e@example.test', ...args], { cwd: repo, stdio: 'ignore' });
+  const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=MAWS e2e', '-c', 'user.email=e2e@example.test', ...args], { env: isolatedGitEnv(), cwd: repo, stdio: 'ignore' });
   git('init', '-q');
   git('add', '.');
   git('commit', '-q', '-m', 'init');

@@ -42,7 +42,7 @@ for (const [id, pin] of byRecency) {
   kept.set(id, pin);
 }
 
-fs.rmSync(target, { recursive: true, force: true });
+// Refresh only the files below that this script authors; synthetic neighbours belong to their authors.
 fs.mkdirSync(path.join(target, 'history'), { recursive: true });
 const write = (name: string, text: string) => fs.writeFileSync(path.join(target, name), text);
 write('accounts.json', `${JSON.stringify(redacted, null, 2)}\n`);

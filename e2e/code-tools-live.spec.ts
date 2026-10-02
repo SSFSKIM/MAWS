@@ -9,6 +9,8 @@
 // The second case removes its scratch clone and config dir after the run, keeping the turn's journal, unless
 // MAWS_CODE_LIVE_KEEP=1 keeps them too. Run on purpose only:
 //   pnpm build && MAWS_CODE_LIVE=1 pnpm exec playwright test e2e/code-tools-live.spec.ts
+import { withProbeFile } from '../test/support/probe-file';
+import { isolatedGitEnv } from '../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -36,7 +38,7 @@ const skip = skipReason();
 test.skip(skip !== null, skip ?? '');
 test.describe.configure({ timeout: 300_000 });
 
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: isolatedGitEnv() }).trim();
 const REFUSAL = "path outside the session's directories";
 const WORKTREE_SESSION = 'Fix sidebar drag'; // the scenario record pointed at the main checkout with this worktree
 
@@ -93,125 +95,127 @@ test('live: Files, the viewer and Review over this checkout', async () => {
   inWorktree.worktree = { path: worktree, branch: git(REPO_ROOT, 'branch', '--show-current') || null };
   writeFileSync(join(scratch, 'scenario.json'), JSON.stringify(scenario));
   const root = realpathSync(REPO_ROOT);
-  const probe = join(root, 'c8c-live-probe.txt'); // untracked, so Review has something to list; removed below
-  writeFileSync(probe, 'one\ntwo\n');
-  const maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: `stub:${join(scratch, 'scenario.json')}`, MAWS_SCENARIO_CLOCK: 'manual', MAWS_HARNESS: '0' } });
   try {
-    await hideWindow(maws);
-    const { page } = maws;
-    const panel = page.locator('[data-region="panel"]');
-    // W11: the row is in its project, expanded once the stub's records are in.
-    await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
-    await (await sidebarRow(page, CHARTER)).click();
+    await withProbeFile(root, 'one\ntwo\n', async (probe) => {
+      const maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: `stub:${join(scratch, 'scenario.json')}`, MAWS_SCENARIO_CLOCK: 'manual', MAWS_HARNESS: '0' } });
+      try {
+        await hideWindow(maws);
+        const { page } = maws;
+        const panel = page.locator('[data-region="panel"]');
+        // W11: the row is in its project, expanded once the stub's records are in.
+        await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+        await (await sidebarRow(page, CHARTER)).click();
 
-    await test.step('Files: one root for the repository', async () => {
-      await addTool(page, 'Files');
-      const roots = panel.locator('[data-tool="files"] [role="treeitem"][data-kind="root"]');
-      await expect(roots).toHaveCount(1);
-      await expect(roots).toHaveAttribute('data-path', root);
-      observed.roots = await roots.evaluateAll((rows) => rows.map((r) => `${r.getAttribute('data-path')} · ${r.textContent}`));
-      await roots.click();
-      await panel.locator(`[data-path="${root}/docs"]`).click();
-    });
+        await test.step('Files: one root for the repository', async () => {
+          await addTool(page, 'Files');
+          const roots = panel.locator('[data-tool="files"] [role="treeitem"][data-kind="root"]');
+          await expect(roots).toHaveCount(1);
+          await expect(roots).toHaveAttribute('data-path', root);
+          observed.roots = await roots.evaluateAll((rows) => rows.map((r) => `${r.getAttribute('data-path')} · ${r.textContent}`));
+          await roots.click();
+          await panel.locator(`[data-path="${root}/docs"]`).click();
+        });
 
-    await test.step('docs/charter.md renders, with its Source', async () => {
-      await panel.locator(`[data-path="${root}/docs/charter.md"]`).click();
-      const viewer = page.locator(`[data-file-viewer][data-path="${root}/docs/charter.md"]`);
-      await expect(viewer.locator('[data-markdown-view] h1').first()).toBeVisible({ timeout: 10_000 });
-      observed.charterHeading = await viewer.locator('[data-markdown-view] h1').first().textContent();
-      await viewer.getByRole('button', { name: 'Source' }).click();
-      await expect(viewer.locator('[data-code-view] .cm-line').first()).toContainText('#');
-      await viewer.getByRole('button', { name: 'Rendered' }).click();
-      await expect(viewer.locator('[data-markdown-view] h1').first()).toBeVisible();
-    });
+        await test.step('docs/charter.md renders, with its Source', async () => {
+          await panel.locator(`[data-path="${root}/docs/charter.md"]`).click();
+          const viewer = page.locator(`[data-file-viewer][data-path="${root}/docs/charter.md"]`);
+          await expect(viewer.locator('[data-markdown-view] h1').first()).toBeVisible({ timeout: 10_000 });
+          observed.charterHeading = await viewer.locator('[data-markdown-view] h1').first().textContent();
+          await viewer.getByRole('button', { name: 'Source' }).click();
+          await expect(viewer.locator('[data-code-view] .cm-line').first()).toContainText('#');
+          await viewer.getByRole('button', { name: 'Rendered' }).click();
+          await expect(viewer.locator('[data-markdown-view] h1').first()).toBeVisible();
+        });
 
-    await test.step('src/main/ipc/router.ts is highlighted', async () => {
-      for (const dir of ['src', 'src/main', 'src/main/ipc']) await panel.locator(`[data-path="${root}/${dir}"]`).click();
-      await panel.locator(`[data-path="${root}/src/main/ipc/router.ts"]`).click();
-      const viewer = page.locator(`[data-file-viewer][data-path="${root}/src/main/ipc/router.ts"]`);
-      await expect(viewer.locator('[data-code-view]')).toHaveAttribute('data-language', 'TypeScript');
-      await expect
-        .poll(() =>
-          viewer.evaluate((el) => {
-            const probe = document.createElement('span');
-            probe.style.color = 'var(--code-keyword)';
-            el.append(probe);
-            const want = getComputedStyle(probe).color;
-            probe.remove();
-            return Array.from(el.querySelectorAll<HTMLElement>('.cm-content span')).some((s) => s.textContent === 'import' && getComputedStyle(s).color === want);
-          }),
-        )
-        .toBe(true);
-    });
+        await test.step('src/main/ipc/router.ts is highlighted', async () => {
+          for (const dir of ['src', 'src/main', 'src/main/ipc']) await panel.locator(`[data-path="${root}/${dir}"]`).click();
+          await panel.locator(`[data-path="${root}/src/main/ipc/router.ts"]`).click();
+          const viewer = page.locator(`[data-file-viewer][data-path="${root}/src/main/ipc/router.ts"]`);
+          await expect(viewer.locator('[data-code-view]')).toHaveAttribute('data-language', 'TypeScript');
+          await expect
+            .poll(() =>
+              viewer.evaluate((el) => {
+                const probe = document.createElement('span');
+                probe.style.color = 'var(--code-keyword)';
+                el.append(probe);
+                const want = getComputedStyle(probe).color;
+                probe.remove();
+                return Array.from(el.querySelectorAll<HTMLElement>('.cm-content span')).some((s) => s.textContent === 'import' && getComputedStyle(s).color === want);
+              }),
+            )
+            .toBe(true);
+        });
 
-    await test.step('Review Uncommitted matches git diff HEAD --numstat plus the untracked files', async () => {
-      const numstat = git(root, 'diff', 'HEAD', '--numstat').split('\n').filter(Boolean).map((l) => l.split('\t'));
-      const added = numstat.reduce((sum, [a]) => sum + (a === '-' ? 0 : Number(a)), 0);
-      const removed = numstat.reduce((sum, [, r]) => sum + (r === '-' ? 0 : Number(r)), 0);
-      const untracked = git(root, 'status', '--porcelain', '--untracked-files=all').split('\n').filter((l) => l.startsWith('??')).length;
-      const files = numstat.length + untracked;
-      const expected = `${files} ${files === 1 ? 'file' : 'files'} changed · +${added} −${removed} · Uncommitted`;
-      await addTool(page, 'Review');
-      await expect(panel.locator('[data-review-header]')).toHaveText(expected, { timeout: 15_000 });
-      await expect(panel.locator('[role="option"] button[data-path="c8c-live-probe.txt"]')).toHaveAttribute('data-kind', 'untracked');
-      observed.review = { header: expected, numstat: numstat.length, untracked };
-    });
+        await test.step('Review Uncommitted matches git diff HEAD --numstat plus the untracked files', async () => {
+          const numstat = git(root, 'diff', 'HEAD', '--numstat').split('\n').filter(Boolean).map((l) => l.split('\t'));
+          const added = numstat.reduce((sum, [a]) => sum + (a === '-' ? 0 : Number(a)), 0);
+          const removed = numstat.reduce((sum, [, r]) => sum + (r === '-' ? 0 : Number(r)), 0);
+          const untracked = git(root, 'status', '--porcelain', '--untracked-files=all').split('\n').filter((l) => l.startsWith('??')).length;
+          const files = numstat.length + untracked;
+          const expected = `${files} ${files === 1 ? 'file' : 'files'} changed · +${added} −${removed} · Uncommitted`;
+          await addTool(page, 'Review');
+          await expect(panel.locator('[data-review-header]')).toHaveText(expected, { timeout: 15_000 });
+          await expect(panel.locator(`[role="option"] button[data-path="${basename(probe)}"]`)).toHaveAttribute('data-kind', 'untracked');
+          observed.review = { header: expected, numstat: numstat.length, untracked };
+        });
 
-    await test.step('G3: This branch is the three-dot diff against the main worktree’s branch (C10’s git.worktree.branch)', async () => {
-      const current = git(root, 'branch', '--show-current');
-      const base = git(mainCheckout, 'symbolic-ref', '--short', 'HEAD');
-      const chip = panel.locator('[data-chip="branch"]');
-      if (current === base) {
-        await expect(chip).toHaveAttribute('title', `Session runs on ${current}, the main worktree's branch`);
-        await expect(chip).toBeDisabled();
-        observed.thisBranch = { current, base, disabled: await chip.getAttribute('title') };
-        return;
+        await test.step('G3: This branch is the three-dot diff against the main worktree’s branch (C10’s git.worktree.branch)', async () => {
+          const current = git(root, 'branch', '--show-current');
+          const base = git(mainCheckout, 'symbolic-ref', '--short', 'HEAD');
+          const chip = panel.locator('[data-chip="branch"]');
+          if (current === base) {
+            await expect(chip).toHaveAttribute('title', `Session runs on ${current}, the main worktree's branch`);
+            await expect(chip).toBeDisabled();
+            observed.thisBranch = { current, base, disabled: await chip.getAttribute('title') };
+            return;
+          }
+          await expect(chip).toBeEnabled({ timeout: 10_000 });
+          await chip.click();
+          await expect(panel.locator('[data-review-footer]')).toHaveText(`${current} · Since ${base}`);
+          const numstat = git(root, 'diff', `${base}...HEAD`, '--numstat').split('\n').filter(Boolean).map((l) => l.split('\t'));
+          const added = numstat.reduce((sum, [a]) => sum + (a === '-' ? 0 : Number(a)), 0);
+          const removed = numstat.reduce((sum, [, r]) => sum + (r === '-' ? 0 : Number(r)), 0);
+          if (numstat.length === 0) await expect(panel.locator('[data-review-empty]')).toHaveText(`Nothing on ${current} beyond ${base}`, { timeout: 15_000 });
+          else await expect(panel.locator('[data-review-header]')).toHaveText(`${numstat.length} ${numstat.length === 1 ? 'file' : 'files'} changed · +${added} −${removed} · This branch`, { timeout: 15_000 });
+          observed.thisBranch = { current, base, files: numstat.length, added, removed };
+          await panel.locator('[data-chip="uncommitted"]').click(); // back, for the steps below
+        });
+
+        await test.step('the viewer follows an edit made outside MAWS', async () => {
+          await panel.locator(`[role="option"] button[data-path="${basename(probe)}"]`).click();
+          await panel.locator('[data-open-file]').click();
+          const viewer = page.locator(`[data-file-viewer][data-path="${probe}"]`);
+          await expect(viewer.locator('.cm-content')).toContainText('two');
+          const written = Date.now();
+          writeFileSync(probe, 'one\ntwo\nthree, written outside MAWS\n');
+          await expect(viewer.locator('.cm-content')).toContainText('three, written outside MAWS', { timeout: 5_000 });
+          observed.followMs = Date.now() - written;
+          // And the boundary: a path outside the session's directories is refused.
+          const refused = await page.evaluate(async (appSessionId) => window.maws.invoke('files.read', { appSessionId, path: '/etc/hosts' } as never), charter.appId);
+          expect(refused).toEqual({ ok: false, error: { code: 'internal', message: REFUSAL } });
+        });
+
+        await test.step('Files: a session in a worktree has two roots, its directory and the worktree, in record order', async () => {
+          if (mainCheckout === worktree) throw new Error(`this run is not in a linked worktree: ${worktree}`);
+          await (await sidebarRow(page, WORKTREE_SESSION)).click(); // W11: in its project's flat list, marked by its branch
+          await addTool(page, 'Files');
+          const roots = panel.locator('[data-tool="files"] [role="treeitem"][data-kind="root"]');
+          await expect(roots).toHaveCount(2);
+          const shown = await roots.evaluateAll((rows) => rows.map((r) => ({ path: r.getAttribute('data-path'), role: r.querySelector('span.text-fg-faint')?.textContent ?? null })));
+          expect(shown).toEqual([
+            { path: mainCheckout, role: 'directory' },
+            { path: worktree, role: 'worktree' },
+          ]);
+          observed.worktreeRoots = shown;
+        });
+        expect(maws.consoleErrors()).toEqual([]);
+      } finally {
+        test.info().annotations.push({ type: 'observed', description: JSON.stringify(observed) });
+        console.log(`[c8c-live] checkout ${JSON.stringify(observed)}`);
+        await maws.cleanup();
       }
-      await expect(chip).toBeEnabled({ timeout: 10_000 });
-      await chip.click();
-      await expect(panel.locator('[data-review-footer]')).toHaveText(`${current} · Since ${base}`);
-      const numstat = git(root, 'diff', `${base}...HEAD`, '--numstat').split('\n').filter(Boolean).map((l) => l.split('\t'));
-      const added = numstat.reduce((sum, [a]) => sum + (a === '-' ? 0 : Number(a)), 0);
-      const removed = numstat.reduce((sum, [, r]) => sum + (r === '-' ? 0 : Number(r)), 0);
-      if (numstat.length === 0) await expect(panel.locator('[data-review-empty]')).toHaveText(`Nothing on ${current} beyond ${base}`, { timeout: 15_000 });
-      else await expect(panel.locator('[data-review-header]')).toHaveText(`${numstat.length} ${numstat.length === 1 ? 'file' : 'files'} changed · +${added} −${removed} · This branch`, { timeout: 15_000 });
-      observed.thisBranch = { current, base, files: numstat.length, added, removed };
-      await panel.locator('[data-chip="uncommitted"]').click(); // back, for the steps below
     });
-
-    await test.step('the viewer follows an edit made outside MAWS', async () => {
-      await panel.locator('[role="option"] button[data-path="c8c-live-probe.txt"]').click();
-      await panel.locator('[data-open-file]').click();
-      const viewer = page.locator(`[data-file-viewer][data-path="${probe}"]`);
-      await expect(viewer.locator('.cm-content')).toContainText('two');
-      const written = Date.now();
-      writeFileSync(probe, 'one\ntwo\nthree, written outside MAWS\n');
-      await expect(viewer.locator('.cm-content')).toContainText('three, written outside MAWS', { timeout: 5_000 });
-      observed.followMs = Date.now() - written;
-      // And the boundary: a path outside the session's directories is refused.
-      const refused = await page.evaluate(async (appSessionId) => window.maws.invoke('files.read', { appSessionId, path: '/etc/hosts' } as never), charter.appId);
-      expect(refused).toEqual({ ok: false, error: { code: 'internal', message: REFUSAL } });
-    });
-
-    await test.step('Files: a session in a worktree has two roots, its directory and the worktree, in record order', async () => {
-      if (mainCheckout === worktree) throw new Error(`this run is not in a linked worktree: ${worktree}`);
-      await (await sidebarRow(page, WORKTREE_SESSION)).click(); // W11: in its project's flat list, marked by its branch
-      await addTool(page, 'Files');
-      const roots = panel.locator('[data-tool="files"] [role="treeitem"][data-kind="root"]');
-      await expect(roots).toHaveCount(2);
-      const shown = await roots.evaluateAll((rows) => rows.map((r) => ({ path: r.getAttribute('data-path'), role: r.querySelector('span.text-fg-faint')?.textContent ?? null })));
-      expect(shown).toEqual([
-        { path: mainCheckout, role: 'directory' },
-        { path: worktree, role: 'worktree' },
-      ]);
-      observed.worktreeRoots = shown;
-    });
-    expect(maws.consoleErrors()).toEqual([]);
   } finally {
-    test.info().annotations.push({ type: 'observed', description: JSON.stringify(observed) });
-    console.log(`[c8c-live] checkout ${JSON.stringify(observed)}`);
-    await maws.cleanup();
-    rmSync(probe, { force: true });
     rmSync(scratch, { recursive: true, force: true });
   }
 });

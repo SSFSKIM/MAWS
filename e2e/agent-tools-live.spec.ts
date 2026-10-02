@@ -15,6 +15,7 @@
 //   pnpm exec electron-vite build -c e2e/support/dev-surface.vite.config.mjs
 //   MAWS_C8B_LIVE=1 pnpm exec playwright test e2e/agent-tools-live.spec.ts
 // MAWS_C8B_LIVE_STEPS=i,ii,… runs a subset (setup always runs); MAWS_C8B_LIVE_KEEP=1 keeps the scratch clone and home.
+import { isolatedGitEnv } from '../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -71,7 +72,7 @@ type Status = {
 type Invoke = (name: string, input: Record<string, unknown>) => Promise<unknown>;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: isolatedGitEnv() }).trim();
 
 // ---- the in-page probe ---------------------------------------------------------------------------------------------------
 // Installed once per page: DOM readers for the three tools (the selectors the harness's agentsProbes reads) and a

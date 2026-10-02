@@ -2,7 +2,7 @@
 // app over C3's replay transport and C9's real PTY host, answered through MAWS_E2E_QUIT_ANSWER (no native dialog). The
 // busy work is a replayed session with background tasks and no turn (pass3/engine-turn-release.jsonl, held after its
 // first turn at the fixture's next `user` write with two background `sleep`s running) and a terminal running
-// `sleep 30`:
+// `sleep 3600`:
 //   - a quit asks with both parts named, and `cancel` keeps the app;
 //   - `when_idle` shows the banner and quits once the replayed tasks settle (the fixture's next turn, then the engine's
 //     own follow-up turn after `background_tasks_changed []`) and the terminal's command ends (^C);
@@ -90,8 +90,8 @@ test('quit names a replayed session’s background work and a busy terminal; can
       return s.turn === null && s.backgroundTasks.length;
     }).toBe(2);
 
-    // the terminal: /bin/sh running sleep 30 in the foreground (C9's real PTY host)
-    const { ptyId } = value(await invoke(page, 'pty.spawn', { appSessionId: id as AppSessionId, label: 'c12-quit', cwd: repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: 'sleep 30' }));
+    // Keep the terminal busy beyond this test's 120 s timeout; only the explicit Ctrl-C below releases it.
+    const { ptyId } = value(await invoke(page, 'pty.spawn', { appSessionId: id as AppSessionId, label: 'c12-quit', cwd: repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: 'sleep 3600' }));
     await expect.poll(async () => value(await invoke(page, 'pty.foreground', { ptyId })).busy).toBe(true);
 
     // a quit asks with both parts named; cancel keeps the app
