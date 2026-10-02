@@ -17,6 +17,10 @@ import { connectAttention } from '../attention/navigation';
 import { useNotices } from '../stores/notices';
 import { connectKeys } from '../keymap/dispatcher';
 import { Sheet } from '../sessions/Sheet';
+import { SessionDialogs } from '../sessions/SessionDialogs';
+import { beforeCloseUnstarted } from '../sessions/setup-actions';
+import { closeDialog } from '../sessions/dialogs';
+import { ID, intent, putIntent, resetSetupStore } from '../test-support/setup-intents';
 import { useState } from 'react';
 import { Shell } from './Shell';
 import { registerSlot, resetSlots } from './slots';
@@ -483,4 +487,45 @@ it.each([false, true])('Escape dismisses a triggerless sheet back to its opener 
   expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Name' }));
   await user.keyboard('{Escape}');
   await vi.waitFor(() => expect(document.activeElement).toBe(opener));
+});
+
+it('Delete on an arrow-focused inactive draft tab restores focus after the real discard guard', async () => {
+  const user = userEvent.setup();
+  resetSetupStore();
+  const previousBridge = window.maws;
+  const fake = fakeClient({ 'session.intent.discard': { leftover: null } });
+  window.maws = fake.client;
+  offs.push(() => { window.maws = previousBridge; closeDialog(); resetSetupStore(); });
+  offs.push(registerCloseGuard('session', async (ref) => ref.kind === 'session' && await beforeCloseUnstarted(ref.appSessionId) === 'closed'));
+  putIntent(intent({ draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'keep my draft' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));
+  useLayout.getState().openTab({ kind: 'session', appSessionId: ID });
+  useLayout.getState().openTab({ kind: 'file', path: '/survivor.ts', line: null, appSessionId: null });
+  render(<><Shell /><SessionDialogs /></>);
+  const survivor = screen.getByRole('tab', { name: /survivor.ts/ });
+  act(() => survivor.focus());
+  await user.keyboard('{ArrowLeft}');
+  const draft = screen.getByRole('tab', { name: 'New chat' });
+  expect(document.activeElement).toBe(draft);
+  expect(draft.getAttribute('aria-selected')).toBe('false');
+  await user.keyboard('{Delete}');
+  await user.click(await screen.findByRole('button', { name: 'Discard', exact: true }));
+  await vi.waitFor(() => expect(screen.queryByRole('tab', { name: 'New chat' })).toBeNull());
+  expect(fake.invoked('session.intent.discard')).toEqual([{ appSessionId: ID }]);
+  await vi.waitFor(() => expect(document.activeElement).toBe(survivor));
+});
+
+it('middle-closing the active left tab preserves the surviving right editor focus', async () => {
+  registerSlot('fileTab', () => <input aria-label="File content" />);
+  useLayout.getState().openTab({ kind: 'file', path: '/left-survivor.ts', line: null, appSessionId: null });
+  useLayout.getState().openTab({ kind: 'file', path: '/left-close.ts', line: null, appSessionId: null });
+  useLayout.getState().openTab({ kind: 'file', path: '/right.ts', line: null, appSessionId: null }, { pane: 'other' });
+  render(<Shell />);
+  const editor = within(screen.getByRole('region', { name: 'Right pane' })).getByRole('textbox');
+  act(() => editor.focus());
+  fireEvent(screen.getByRole('tab', { name: /left-close.ts/ }), new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+  await vi.waitFor(() => expect(screen.queryByRole('tab', { name: /left-close.ts/ })).toBeNull());
+  // Drain the close handoff frame before checking that it did not move focus.
+  await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+  expect(screen.getByRole('tab', { name: /left-survivor.ts/ }).getAttribute('aria-selected')).toBe('true');
+  expect(document.activeElement).toBe(editor);
 });

@@ -94,12 +94,17 @@ async function guardAllows(ref: TabRef): Promise<boolean> {
 export const isUnstarted = (appSessionId: AppSessionId): boolean => !useSessions.getState().records.has(appSessionId);
 
 export async function requestCloseTab(id: string): Promise<void> {
-  const ref = findTab(useLayout.getState().main, id);
-  if (!ref || !(await guardAllows(ref))) return;
   const before = useLayout.getState().main;
+  const ref = findTab(before, id);
+  if (!ref) return;
   const pane = currentSet(before).panes.findIndex((p) => p.tabs.some((t) => t.id === id));
-  const focusedTab = document.activeElement?.closest('[data-tab-id]')?.getAttribute('data-tab-id');
-  const restore = pane !== -1 && (currentSet(before).panes[pane].activeTabId === id || focusedTab === id);
+  // Capture DOM ownership before a guard's sheet displaces focus. Selection alone does not own
+  // the keyboard: a middle-close in one pane must leave the other pane's editor alone.
+  const focused = document.activeElement;
+  const focusedTab = focused?.closest('[data-tab-id]')?.getAttribute('data-tab-id');
+  const focusedContent = focused?.closest('[role="tabpanel"]')?.closest('[data-pane]')?.getAttribute('data-pane');
+  const restore = pane !== -1 && (focusedTab === id || (focusedContent === String(pane) && currentSet(before).panes[pane].activeTabId === id));
+  if (!(await guardAllows(ref))) return;
   // An unstarted tab and its intent disappear without a reopen entry; other tabs close normally.
   if (ref.kind === 'session' && isUnstarted(ref.appSessionId)) {
     useLayout.getState().dropSession(ref.appSessionId);
