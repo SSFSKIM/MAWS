@@ -40,6 +40,7 @@ export interface AttentionServiceDeps {
 }
 
 export interface AttentionService {
+  readonly restoredIds: ReadonlySet<AttentionId>; // accepted persisted items, marked before their change is emitted
   readonly ready: Promise<void>; // the persisted items are loaded (pending while every load attempt fails)
   list(): AttentionItem[];
   settled(): Promise<void>; // every change so far has reached the store
@@ -59,6 +60,7 @@ const noRequest = { requestId: null, toolUseId: null, taskId: null, agentId: nul
 
 export function startAttentionService(deps: AttentionServiceDeps): AttentionService {
   const log = deps.log ?? ((message: string) => console.warn(`[attention] ${message}`));
+  const restoredIds = new Set<AttentionId>();
   const sessions = new Map<AppSessionId, SessionState>();
   const forgotten = new Set<AppSessionId>(); // archived during this run: nothing persisted may bring them back
 
@@ -223,6 +225,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       const state = stateOf(id);
       for (const item of items) {
         if (BROKER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || state.retiredKinds.has(item.kind) || state.derived.has(item.id)) continue;
+        restoredIds.add(item.id);
         state.derived.set(item.id, item);
       }
       if (JSON.stringify(merged(state)) !== JSON.stringify(items)) owed.set(id, 'replace'); // the store holds what was dropped
@@ -267,6 +270,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   return {
     ready,
+    restoredIds,
     list,
     settled: async () => {
       await attempt;

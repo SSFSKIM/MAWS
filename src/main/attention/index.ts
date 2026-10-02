@@ -4,6 +4,7 @@
 // to a page that is listening or keeps it for `attention.pendingNavigate`; any page load or window close makes the page
 // un-announced again.
 import { app, BrowserWindow } from 'electron';
+import type { AttentionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
@@ -11,7 +12,7 @@ import type { SessionReadModel } from '../sessions/read-model';
 import { createNavigationRelay } from './navigation';
 import { startNotifier } from './notifier';
 
-export function startAttention(model: SessionReadModel, deps: { ready: Promise<void>; settings(): Settings; openWindow(): BrowserWindow }): () => void {
+export function startAttention(model: SessionReadModel, deps: { restoredIds: ReadonlySet<AttentionId>; settings(): Settings; openWindow(): BrowserWindow }): () => void {
   const relay = createNavigationRelay(emit);
   registerMainHandler('attention.pendingNavigate', () => ({ navigate: relay.take() }));
   const watch = (win: BrowserWindow) => {
@@ -28,11 +29,6 @@ export function startAttention(model: SessionReadModel, deps: { ready: Promise<v
     win.show();
     win.focus();
   };
-  // Hydration is not a new arrival: seed the notifier only after persisted attention is visible.
-  let stopped = false;
-  let stopNotifier: (() => void) | undefined;
-  void deps.ready.then(() => {
-    if (!stopped) stopNotifier = startNotifier(model, { isFocused, focusWindow, navigate: relay.deliver, settings: deps.settings, emit });
-  });
-  return () => { stopped = true; stopNotifier?.(); };
+  // Listen immediately, including during store retries; only restored arrivals are silent.
+  return startNotifier(model, { restoredIds: deps.restoredIds, isFocused, focusWindow, navigate: relay.deliver, settings: deps.settings, emit });
 }

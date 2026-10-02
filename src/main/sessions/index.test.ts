@@ -22,7 +22,7 @@ import { startSessions } from '.';
 // The source is real: after the renderer disappears, a disk advance must stay unread.
 describe('visibility belongs to the reporting renderer', () => {
   afterEach(() => { handlers.clear(); interceptors.clear(); });
-  it.each(['destroyed', 'render-process-gone', 'did-start-loading'])('releases visibility on %s, and a replacement page may report it again', (event) => {
+  it.each(['destroyed', 'render-process-gone', 'did-start-navigation'])('releases visibility on %s, and a replacement page may report it again', (event) => {
     const dir = tempDir();
     const index = new Index(join(dir.path, 'index.sqlite'));
     const disk = summary();
@@ -38,12 +38,27 @@ describe('visibility belongs to the reporting renderer', () => {
     const visible = handlers.get('session.setVisible')!;
     try {
       visible({ appSessionId: appId, visible: true }, { sender });
-      sender.emit(event);
+      sender.emit(event, { url: 'file:///index.html', isMainFrame: true, isSameDocument: false, frame: null });
       listeners.get('fs.sessionChanged')!({ summary: { ...disk, size: disk.size + 100, leafUuid: 'new-leaf', lastRecordAt: '2026-10-02T12:00:00Z' } });
       expect(index.sessions.get(appId)?.unread).toBe(true);
       visible({ appSessionId: appId, visible: true }, { sender });
       expect(index.sessions.get(appId)?.unread).toBe(false);
     } finally { sessions.stop(); index.close(); dir.dispose(); }
+  });
+
+  it.each([
+    { name: 'subframe', isMainFrame: false, isSameDocument: false },
+    { name: 'same-document', isMainFrame: true, isSameDocument: true },
+  ])('retains visibility during $name navigation and loading', ({ isMainFrame, isSameDocument }) => {
+    const visibility = vi.fn();
+    const sessions = startSessions({ env: {}, packaged: false, appRoot: process.cwd(), hosts, indexSource: { start: () => () => {}, onSetVisible: visibility } });
+    const sender = Object.assign(new EventEmitter(), { isDestroyed: () => false }) as unknown as MainContext['sender'];
+    try {
+      handlers.get('session.setVisible')!({ appSessionId: 'app', visible: true }, { sender });
+      sender.emit('did-start-navigation', { url: 'file:///index.html#preview', isMainFrame, isSameDocument, frame: null });
+      sender.emit('did-start-loading');
+      expect(visibility.mock.calls).toEqual([['app', true]]);
+    } finally { sessions.stop(); }
   });
 
   it('does not let one window hide a session still visible in another', () => {
