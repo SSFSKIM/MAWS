@@ -139,4 +139,24 @@ export function summarize(p,label){
 
 // One turn of the no-tools prompt, then a quiet wait for pushes that trail the result (turn.complete's, spaced toasts).
 export async function promptTurn(p,ms=6000){const result=await p.turn(PROMPT);await delay(ms);return result;}
+
+// Question 4's arms: mods-pushes's run with the switch given another way. The initialize answer's and the init's
+// capabilities, the pushes, and one unattached ui_render of the band (refused as an unsupported subtype when the switch
+// is off, S287 `Roo`).
+export async function gateArm(name,{settings={},vars={},globalConfig={},question}){
+ const run=scratchRun(name.replace(/^mods-/,''),{settings,globalConfig});
+ try{
+  return await launch(name,run,{vars,provenance:{question}},async p=>{
+   const init=success(await p.init(initPayload(run.cwd)),'initialize');
+   p.note({event:'initialize_capabilities',capabilities:init.capabilities??null});
+   await promptTurn(p);
+   const render=await p.request('ui_render',{surface:'desktop',component:'AbovePrompt',instance_id:'above-prompt',props:{hasSurvey:false,isWorking:false,maxRows:12,bodyColumns:100,scroll:{offset:0,bodyRows:12},view:{}},viewport:{columns:100,rows:30}});
+   p.note({event:'ui_render_band_unattached',response:render});
+   const s=summarize(p,name);
+   p.note({event:'gate_observation',arm:{settings,vars,globalConfig},initializeCapabilities:init.capabilities??null,initCapabilities:s.capabilities,hasUiSurface:s.hasUiSurface,pushes:s.pushes.map(x=>x.subtype),renderAnswer:render.subtype==='success'?{hooked:render.response?.hooked,tree:render.response?.tree}:{error:render.error}});
+   check(p,'one turn answered',s.answer!==null);
+   await endAsStop(p);
+  });
+ }finally{removeRun(run);}
+}
 export {records,slug,execFileSync};
