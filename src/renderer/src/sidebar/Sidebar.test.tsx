@@ -17,6 +17,7 @@ import { fillStores, resetShellStores, scenarioFile } from '../test-support/shel
 import type { ProjectKey } from './derive';
 import { registerProjectAction } from './project-actions';
 import { useResumePicker } from './ResumePicker';
+import { revealProject } from './reveal';
 import { Sidebar } from './Sidebar';
 
 const nine = scenarioFile('nine-sessions');
@@ -510,6 +511,20 @@ describe('sidebar states', () => {
     expect(screen.getAllByTestId('skeleton-row')).toHaveLength(6);
     act(() => useAttention.setState({ loaded: true }));
     expect(screen.queryAllByTestId('skeleton-row')).toHaveLength(0);
+  });
+
+  it('a project revealed while the sidebar still loads is listed and focused once it loads, past the first five', () => {
+    const extra = (n: number): ProjectRecord => ({ ...nine.projects[0], id: `proj-x${n}` as ProjectId, name: `extra-${n}`, directory: `/x/extra-${n}`, order: 10 + n, createdAt: `2026-08-0${n}T00:00:00.000Z` });
+    fillStores({ ...nine, projects: [...nine.projects, extra(1), extra(2), extra(3), extra(4)] }, { loaded: false });
+    render(<Sidebar />);
+    act(() => revealProject('proj-x2' as ProjectId)); // the sixth project: folded under "Show more" on a plain load
+    act(() => {
+      useSessions.setState({ loaded: true });
+      useAttention.setState({ loaded: true });
+    });
+    expect(projectRows()).toContain('extra-2');
+    expect(document.activeElement).toBe(row('extra-2'));
+    expect(row('extra-2').getAttribute('aria-expanded')).toBe('true');
   });
 
   it('an empty workspace reads "No projects yet" with Add project, and the New chat row above opens a chat in no project', async () => {
