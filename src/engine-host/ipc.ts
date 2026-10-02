@@ -10,7 +10,7 @@ import { AUTO_MODE_REFUSAL_CODES, type AutoModeRefusalCode } from '@shared/graph
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { canYield } from '@shared/engine/status'; // W7
-import type { SessionStateStore } from '@shared/engine/session-state-store';
+import { SendContentSchema, type QueueState, type QueueEntry, type SessionStateStore } from '@shared/engine/session-state-store';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import { HostCommandError, type HostEmit, type HostOn } from '@shared/host/runtime';
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
@@ -28,6 +28,7 @@ import { setBinaryConfig } from './launch';
 import { memoryAppend, MemoryAppendBudgetSpent } from './memory-append';
 import { OperationTable } from './operations';
 import { ProcessTable } from './process-table';
+import { QueueEntryError } from './queue';
 import { checkRelay as checkRelayHealth, RELAY_HEALTH_TIMEOUT_MS } from './relay-health';
 import { rewind, rewindFiles } from './rewind';
 import { ControlError, ControlTimeout, type ControlClient } from './rpc';
@@ -276,8 +277,45 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     if (session) return session.queue.state;
     throw unknownSession(appSessionId);
   });
-  handle('session.queue.edit', async ({ appSessionId, queueId, content }) => sessionOf(appSessionId).queue.edit(queueId, content));
-  handle('session.queue.remove', async ({ appSessionId, queueId }) => sessionOf(appSessionId).queue.remove(queueId));
+  // Retained prompts are editable before a new process exists. Serialize read/modify/save pairs per id so
+  // concurrent edits/removals cannot restore one another's old snapshots; do not run recovery merely to edit.
+  const queueEdits = new Map<string, Promise<unknown>>();
+  function editQueue<T>(appSessionId: string, live: (session: EngineSession) => Promise<T>, saved: (queue: QueueState) => T): Promise<T> {
+    assertSafeAppSessionId(appSessionId);
+    const previous = queueEdits.get(appSessionId) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(async () => {
+      const id = appSessionId as AppSessionId;
+      const session = table.get(id);
+      if (session?.queue.recovered) return live(session);
+      if (!(await store.exists(id))) throw unknownSession(appSessionId);
+      const { corrupt, ...queue } = await store.loadQueue(id);
+      if (corrupt !== null) throw new QueueEntryError(`The saved queue could not be read; kept at ${corrupt}`);
+      const result = saved(queue);
+      await store.saveQueue(id, queue);
+      emit('session.queue', { appSessionId: id, ...queue });
+      return result;
+    });
+    queueEdits.set(appSessionId, next);
+    void next.finally(() => { if (queueEdits.get(appSessionId) === next) queueEdits.delete(appSessionId); }).catch(() => {});
+    return next;
+  }
+  function savedEntry(queue: QueueState, queueId: string): QueueEntry {
+    const entry = queue.entries.find((e) => e.queueId === queueId);
+    if (!entry || entry.state !== 'queued') throw new QueueEntryError('This message is not queued');
+    return entry;
+  }
+  handle('session.queue.edit', async ({ appSessionId, queueId, content }) => editQueue(appSessionId,
+    (session) => session.queue.edit(queueId, content), (queue) => {
+      const entry = savedEntry(queue, queueId);
+      entry.content = SendContentSchema.parse(content);
+      entry.uncertain = false;
+      return entry;
+    }));
+  handle('session.queue.remove', async ({ appSessionId, queueId }) => editQueue(appSessionId,
+    (session) => session.queue.remove(queueId), (queue) => {
+      const entry = savedEntry(queue, queueId);
+      queue.entries = queue.entries.filter((e) => e !== entry);
+    }));
   handle('session.queue.promote', async ({ appSessionId, queueId, priority }) => sessionOf(appSessionId).queue.promote(queueId, { priority: priority ?? 'now' }));
   handle('session.queue.hold', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).queue.hold(messageUuid as MessageUuid))); // W1
   handle('session.queue.setPaused', async ({ appSessionId, paused }) => sessionOf(appSessionId).queue.setPaused(paused));
@@ -356,7 +394,12 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   );
   handle('session.rewindFiles', async ({ appSessionId, userMessageUuid, dryRun }) => bounded(() => rewindFiles(sessionOf(appSessionId), { userMessageUuid: userMessageUuid as never, dryRun })));
   handle('session.setCwd', async ({ appSessionId, path, trust }) =>
-    bounded(() => controls.setCwd(ready(appSessionId).client, trust ? { path, trust_accepted: true, trusted_directory: trust.directory } : { path })),
+    bounded(async () => {
+      const { session, client } = ready(appSessionId);
+      const response = await controls.setCwd(client, trust ? { path, trust_accepted: true, trusted_directory: trust.directory } : { path });
+      if (response.status === 'ok') session.noteCwd(response.cwd);
+      return response;
+    }),
   );
   handle('session.renameSession', async ({ appSessionId, title }) => bounded(async () => void (await controls.renameSession(ready(appSessionId).client, { title, source: 'host' }))));
 

@@ -231,6 +231,7 @@ export class EngineSession {
       canWrite: () => this.processState === 'ready',
       cancel: async (messageUuid) => (await cancelAsyncMessage(this.readyClient(), { message_uuid: messageUuid })).cancelled === true, // W1
       onChange: (queue) => {
+        this.clearAndImplement.setPaused(queue.paused);
         this.emit('queue', queue);
         this.touch();
       },
@@ -286,6 +287,7 @@ export class EngineSession {
   async interrupt(opts: { cancelEngineQueued: boolean; holdEngineQueued?: boolean }): Promise<{ stillQueued: string[]; cancelled: string[] }> {
     const client = this.readyClient();
     this.markUsed(); // C12
+    this.clearAndImplement.setPaused(true);
     await this.queue.pause('interrupt');
     if (opts.holdEngineQueued) await this.queue.holdAll();
     const response: InterruptResponse = await interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued });
@@ -375,6 +377,12 @@ export class EngineSession {
     this.touch();
   }
 
+  // set_cwd can succeed without another system/init (pass2/trust-no-attestation).
+  noteCwd(cwd: string): void {
+    this.tracker.engineCwd = cwd;
+    this.touch();
+  }
+
   // The process's control client (null before spawn), for the per-subtype calls later milestones build on (M4's
   // rewind, M5's reads); every request it writes goes through the session's journal and inbound gate.
   get control(): ControlClient | null {
@@ -410,7 +418,7 @@ export class EngineSession {
     const status: EngineSessionStatus = {
       appSessionId: this.spec.appSessionId, engineSessionId, pid: this.transport?.pid ?? null, launchId: this.plan.launchId, launchedAt: this.launchedAt,
       taskListId: env.CLAUDE_CODE_TASK_LIST_ID ?? engineSessionId ?? null, // C8's ask: the list the engine's task tools read (SPEC 20)
-      cwd: this.spec.cwd, pendingPlan: this.clearAndImplement.pendingPlan,
+      cwd: this.tracker.engineCwd ?? this.spec.cwd, pendingPlan: this.clearAndImplement.pendingPlan,
       process: this.processState, exit: this.exitInfo, engineState: tracked.engineState, activity: tracked.activity,
       // every open turn was opened by a turn.started the tracker saw, so its id is that event's
       turn: turn && turnId ? { id: turnId, origin: turn.origin, startedAt: turn.startedAt, acceptedAt: turn.acceptedAt, userMessageUuids: [...turn.userMessageUuids] } : null,
@@ -423,7 +431,7 @@ export class EngineSession {
       bin: this.plan.bin, // W13: the spawn row's
       fastMode: tracked.fastMode, plugins: tracked.plugins, pluginErrors: tracked.pluginErrors, pluginWarnings: tracked.pluginWarnings,
       backgroundTasks: tracked.backgroundTasks, grants: [...this.grants.allow], mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages,
-      pendingRequests: this.broker.live, queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
+      pendingRequests: this.broker.live + (this.client?.pending ?? 0), queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
       keepAlive: [], busy: this.busy, lastUsedAt: this.lastUsedAt, // C12: keepAlive from the hard reasons below
       memory: tracked.memory,
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
@@ -494,7 +502,10 @@ export class EngineSession {
     // frames while any of its writes is in flight and journals them after the write's own row.
     const writer = new OutboundWriter(transport, { row: (direction, frame) => this.record(direction, frame) });
     this.writer = writer;
-    writer.onIdle(() => this.drainHeld());
+    writer.onIdle(() => {
+      this.drainHeld();
+      this.touch(); // outstanding controls protect liveness even when their out rows produce no graph event
+    });
     writer.onJournalFailure((error) => {
       // the journal no longer records what was sent: end the process as for a transport error
       this.log(`journal write failed: ${error.message}; ending the process`);
@@ -786,7 +797,7 @@ export class EngineSession {
         this.queue.onTurnEnded(event).catch((error: unknown) => this.log(`queue release failed: ${messageOf(error)}`));
         if ((event.origin === 'human' || event.origin === null) && this.processState === 'ready') void this.verifyGateway();
         if (this.processState === 'ready') void this.sampleContext();
-        this.clearAndImplement.turnEnded();
+        this.clearAndImplement.turnEnded(!event.isError && event.result === 'success');
       } else if (event.kind === 'command.lifecycle') {
         this.queue.onLifecycle(event);
         this.clearAndImplement.commandLifecycle(event.commandUuid, event.state);
@@ -924,11 +935,15 @@ export class EngineSession {
     const queueSettled = this.handshakeDone ? this.queue.onProcessExited(reason) : Promise.resolve();
     queueSettled.catch((error: unknown) => this.log(`queue not settled at exit: ${messageOf(error)}`));
     const release = reason === 'budget' ? this.release : null; // C12
-    this.record('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost, peakTreeRssKiB: this.tracker.peakTreeRssKiB, budget: release /* C12 */ });
+    try {
+      this.record('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost, peakTreeRssKiB: this.tracker.peakTreeRssKiB, budget: release /* C12 */ });
+    } catch (error) {
+      this.log(`exit not journaled: ${messageOf(error)}`);
+    }
     this.exitInfo = { code: exit.code, signal: exit.signal, reason, at: new Date().toISOString(), release };
     this.setProcess('exited');
     this.journalClosed = true;
-    void this.journal.close();
+    void this.journal.close().catch((error: unknown) => this.log(`journal not closed: ${messageOf(error)}`));
     const summary: ExitSummary = { code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost };
     // `exited` (and so `stop()`) settles once the exit's store writes have landed, so an archive's `forget` is the last
     // write and nothing recreates the state file after it (fix-wave follow-up)

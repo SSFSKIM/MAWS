@@ -31,6 +31,7 @@ export function launchSpec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
 export const handshakeResponder = (overrides: Responder = {}): Responder => ({
   initialize: () => ({ response: INIT_RESPONSE }),
   get_status: () => ({ response: ROUTED_STATUS }),
+  get_context_usage: () => ({ error: 'Context sampling is not available in this scripted scenario' }),
   apply_flag_settings: () => ({}),
   set_permission_mode: (r) => ({ response: { mode: r.mode } }),
   ...overrides,

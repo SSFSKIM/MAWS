@@ -9,6 +9,7 @@ import { loadEngineJournal } from '../../test/support/fixtures';
 import { buildLaunch, RELAY_URL } from './launch';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13
 import { Normalizer } from './normalizer';
+import { evaluate } from './budget';
 import { getUsage, REQUEST_TIMEOUT_MS, rewindConversation } from './controls';
 import { ProcessTable } from './process-table';
 import { EngineSession, FIRST_OUTPUT_MS, HostHookRegistry, SESSION_START_HOOK_MS, type EngineSessionOptions } from './session';
@@ -41,6 +42,7 @@ type Responder = Record<string, (request: Record<string, unknown>) => { response
 const defaultResponder = (overrides: Responder = {}): Responder => ({
   initialize: () => ({ response: INIT_RESPONSE }),
   get_status: () => ({ response: ROUTED_STATUS }),
+  get_context_usage: () => ({ error: 'Context sampling is not available in this scripted scenario' }),
   apply_flag_settings: () => ({}),
   set_permission_mode: (r) => ({ response: { mode: r.mode } }),
   ...overrides,
@@ -99,7 +101,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     const { session, transport, journal, events } = setup({ spec: { trust: { accepted: true, directory: '/tmp/maws-session' } } });
     expect(session.status()).toMatchObject({ process: 'starting', cwd: '/tmp/maws-session', pendingPlan: null }); // from the reservation onward
     await session.start();
-    expect(shape(journal)).toEqual(['meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'out:control_request/get_context_usage']); // the ready read for `ctx` (debt wave 3)
+    expect(shape(journal)).toEqual(['meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'out:control_request/get_context_usage', 'in:control_response']); // the ready read for `ctx` (debt wave 3)
     expect(transport.requestsOf('initialize')[0]!.request).toEqual({
       subtype: 'initialize', supportedDialogKinds: ['auto_mode_server_fallback', 'refusal_fallback_prompt'], perTaskStopAffordance: true, workspaceTrust: { accepted: true, directory: '/tmp/maws-session' },
     });
@@ -171,7 +173,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
   it('a resume journals reconnect rows, re-applies the grant snapshot before ready, and reports the grants', async () => {
     const { session, journal, transport, events } = setup({ spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as LaunchSpec['sessionId'] & string, fork: false }, sessionId: null }, session: { grants: { allow: ['Bash(touch granted.txt)'] } } });
     await session.start();
-    expect(shape(journal)).toEqual(['meta:reconnect', 'meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'meta:reconnect', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'out:control_request/apply_flag_settings', 'in:control_response', 'out:control_request/get_context_usage']); // then the ready read
+    expect(shape(journal)).toEqual(['meta:reconnect', 'meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'meta:reconnect', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'out:control_request/apply_flag_settings', 'in:control_response', 'out:control_request/get_context_usage', 'in:control_response']); // then the ready read
     expect(transport.requestsOf('apply_flag_settings')[0]!.request).toEqual({ subtype: 'apply_flag_settings', settings: { permissions: { allow: ['Bash(touch granted.txt)'] } } });
     expect(events.map((e) => e.kind === 'session.reconnect' && e.phase)).toEqual(['attempting', 'reconnected']);
     expect(session.status()).toMatchObject({ process: 'ready', grants: ['Bash(touch granted.txt)'], keepAlive: [] });
@@ -582,7 +584,7 @@ describe('a stop before the process is spawned (whole-branch review)', () => {
 describe('late answers after the deadline (debt wave 3 review)', () => {
   it("a host-issued read answering late posts no notice (nobody saw an error); a late mutation still says it may have applied", async () => {
     vi.useFakeTimers();
-    const { session, transport, journal } = setup();
+    const { session, transport, journal } = setup({ responder: defaultResponder({ get_context_usage: () => null }) });
     const starting = session.start();
     await vi.advanceTimersByTimeAsync(0);
     await starting;
@@ -1457,3 +1459,115 @@ describe('EngineSession (C12): the stop precedence, busy, lastUsedAt, keepAlive 
   });
 });
 // C12 end
+
+
+describe('F2 session lifecycle regressions', () => {
+  const result = { type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' } };
+  async function staged(responder: Responder = {}) {
+    const t = setup({ responder: defaultResponder({ ...responder, interrupt: () => ({ response: { still_queued: [], cancelled: [] } }) }) });
+    await t.session.start();
+    await t.session.send('plan it');
+    t.transport.push({ type: 'control_request', request_id: 'p-f2', request: { subtype: 'can_use_tool', tool_name: 'ExitPlanMode', input: { plan: 'Build it' }, tool_use_id: 'toolu_f2' } });
+    await flush();
+    await t.session.answer('p-f2' as RequestId, { kind: 'plan', outcome: 'clear_and_implement', feedback: null });
+    return t;
+  }
+  const prompts = (t: ScriptedTransport) => t.writes.filter((w) => w.type === 'user').map((w) => w.message.content);
+
+  it('Stop holds a staged clear continuation through the interrupted result until Resume', async () => {
+    const { session, transport } = await staged();
+    await session.interrupt({ cancelEngineQueued: true, holdEngineQueued: true });
+    transport.push({ ...result, subtype: 'error_during_execution', is_error: true, terminal_reason: 'aborted_streaming' });
+    await flush();
+    expect(session.queue.isPaused).toBe(true);
+    expect(prompts(transport)).toEqual(['plan it']);
+    await session.queue.setPaused(false);
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    const clear = transport.writes.find((w) => w.type === 'user' && w.message.content === '/clear')!;
+    transport.push({ ...result, user_message_uuids: ['uuid' in clear ? clear.uuid : ''] });
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear', 'Implement this plan:\n\nBuild it']);
+    transport.exit(0);
+    await session.exited;
+  });
+
+  it('Stop during mode restoration blocks /clear even when the delayed control succeeds', async () => {
+    const { session, transport } = await staged({ set_permission_mode: () => null });
+    transport.push(result);
+    await flush();
+    await session.interrupt({ cancelEngineQueued: true, holdEngineQueued: true });
+    transport.answer('set_permission_mode', { mode: 'auto' });
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it']);
+    await session.queue.setPaused(false);
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    transport.exit(0);
+    await session.exited;
+  });
+
+  it('Stop after /clear holds a successful completion until Resume', async () => {
+    const { session, transport } = await staged();
+    transport.push(result);
+    await flush();
+    const clear = transport.writes.find((w) => w.type === 'user' && w.message.content === '/clear')!;
+    await session.interrupt({ cancelEngineQueued: true, holdEngineQueued: true });
+    transport.push({ type: 'command_lifecycle', command_uuid: 'uuid' in clear ? clear.uuid : '', state: 'completed', uuid: 'clear-done', session_id: 's' });
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    await session.queue.setPaused(false);
+    expect(prompts(transport)).toEqual(['plan it', '/clear', 'Implement this plan:\n\nBuild it']);
+    transport.exit(0);
+    await session.exited;
+  });
+
+  it.each(['cancelled', 'discarded', 'refused'])('a %s clear never starts implementation and surfaces the reason', async (state) => {
+    const { session, transport, events } = await staged();
+    transport.push(result);
+    await flush();
+    const clear = transport.writes.find((w) => w.type === 'user' && w.message.content === '/clear')!;
+    transport.push({ type: 'command_lifecycle', command_uuid: 'uuid' in clear ? clear.uuid : '', state, uuid: `clear-${state}`, session_id: 's' });
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    expect(events.filter((e) => e.kind === 'notice.posted').some((e) => JSON.stringify(e).includes(state))).toBe(true);
+    expect(session.status().pendingPlan).toBe('Build it');
+    transport.push(result); // a later result cannot revive the failed sequence
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    transport.exit(0);
+    await session.exited;
+  });
+
+  it('ENOSPC at process exit still closes the journal, releases lifecycle and settles exited', async () => {
+    const { session, transport, journal, logs } = setup();
+    await session.start();
+    vi.spyOn(journal, 'row').mockImplementation(() => { throw new Error('ENOSPC'); });
+    transport.exit(1);
+    await flush();
+    expect(session.lifecycle).toBe('exited');
+    expect(journal.closed).toBe(true);
+    await expect(session.exited).resolves.toMatchObject({ code: 1, reason: 'crash' });
+    expect(logs.some((s) => s.includes('ENOSPC'))).toBe(true);
+  });
+
+  it('an unanswered title control request blocks budget release despite an unchanged event cursor', async () => {
+    const { session, transport } = setup({ responder: defaultResponder({ get_context_usage: () => ({ error: 'not available' }) }) });
+    await session.start();
+    await flush();
+    session.recordMemory({ sampledAt: new Date().toISOString(), treeRssKiB: 1000, rssKiB: 1000 });
+    const before = session.status();
+    const request = session.control!.request('generate_session_title', { description: 'name this', persist: true }, { timeoutMs: 60_000 });
+    const settled = request.catch(() => {});
+    await flush();
+    const status = session.status();
+    expect(status.lastEventSeq).toBe(before.lastEventSeq);
+    expect(status.pendingRequests).toBeGreaterThan(0);
+    expect(status.keepAlive).toContain('pending_request');
+    expect(evaluate({ rows: [status], policy: { enabled: true, limitKiB: 1, statefulMcpServers: [] }, quiet: new Set([status.appSessionId]), releasing: null, previousOverWithoutCandidate: false }).release).toBeNull();
+    transport.exit(0);
+    await session.exited;
+    await settled;
+    expect(session.status().pendingRequests).toBe(0);
+  });
+});

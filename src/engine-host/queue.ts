@@ -115,7 +115,7 @@ export class MessageQueue {
     this.checkContent(content);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
     const entry: QueueEntry = { queueId: randomUUID(), appSessionId: this.deps.appSessionId, content, createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
-    const submitNow = !this.busy && this.queuedCount === 0; // FIFO: a send never overtakes an entry already waiting
+    const submitNow = !this.paused && !this.busy && this.queuedCount === 0; // FIFO: a send never overtakes an entry already waiting
     this.entries.push(entry);
     if (!submitNow) {
       try {

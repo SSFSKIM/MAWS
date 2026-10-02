@@ -1007,3 +1007,17 @@ describe('holdAll, the plain stop’s hold (W1)', () => {
     }
   });
 });
+
+
+describe('F2 paused queue admission', () => {
+  it('a send into an empty interrupted queue stays persisted until Resume', async () => {
+    const t = await harness();
+    await t.queue.pause('interrupt');
+    const sent = await t.queue.send('after Stop');
+    expect(sent.disposition).toBe('queued');
+    expect(t.writes).toEqual([]);
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: true, entries: [{ content: 'after Stop', state: 'queued' }] });
+    await t.queue.setPaused(false);
+    expect(t.writes.map((w) => w.message.content)).toEqual(['after Stop']);
+  });
+});

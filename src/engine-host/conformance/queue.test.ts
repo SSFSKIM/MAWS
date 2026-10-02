@@ -169,7 +169,7 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect(s.session.queue.state.steers).toBeUndefined();
   });
 
-  it('pass1/queue-and-interrupt cut to the queued prompt (seq 146, 150) and the interrupt (190-192), plus one recorded send: the submission the engine cancels before it started (seq 191) retires there with its own notice, so the next send goes at once', async () => {
+  it('pass1/queue-and-interrupt cut to the queued prompt (seq 146, 150) and the interrupt (190-192), plus one recorded send: the submission the engine cancels before it started (seq 191) retires there with its own notice, so the next send waits for Resume', async () => {
     const againRow = { seq: 9_002, direction: 'out' as const, at: '2026-09-28T10:00:00.000Z', frame: { type: 'user', uuid: 'recorded-again', message: { role: 'user', content: 'again' }, parent_tool_use_id: null, origin: { kind: 'human' } } };
     const cut = (rows: JournalRow[]) => [...rows.filter((r) => r.seq <= 3 || [146, 150, 190, 191, 192].includes(r.seq)), againRow];
     let afterInterrupt: { cancelled: number; busy: boolean; entries: QueueEntry[]; disposition: string | null } | null = null;
@@ -179,12 +179,14 @@ describe('queue release never follows an engine-initiated turn', () => {
         void session.interrupt({ cancelEngineQueued: true }).then(async (result) => {
           afterInterrupt = { cancelled: result.cancelled.length, busy: session.queue.busy, entries: session.queue.state.entries, disposition: null };
           afterInterrupt.disposition = (await session.send('again')).disposition;
+          expect(session.queue.isPaused).toBe(true);
+          await session.queue.setPaused(false);
           transport.kill('SIGTERM');
         });
       }
     }, { edit: cut });
     expect(metaRows(run.journal.rows, 'replay_mismatch')).toEqual([]);
-    expect(afterInterrupt).toEqual({ cancelled: 1, busy: false, entries: [], disposition: 'sent' });
+    expect(afterInterrupt).toEqual({ cancelled: 1, busy: false, entries: [], disposition: 'queued' });
     const [submitted] = userOuts(run.journal.rows);
     const cancelled = run.journal.rows.findIndex((r) => (r.frame as { type?: string; state?: string; command_uuid?: string }).type === 'command_lifecycle' && (r.frame as { state: string }).state === 'cancelled');
     expect((run.journal.rows[cancelled]!.frame as { command_uuid: string }).command_uuid).toBe(submitted!.uuid);

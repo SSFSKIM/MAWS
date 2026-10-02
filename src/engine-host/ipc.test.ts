@@ -789,3 +789,42 @@ describe('session.stop { ifIdle } stops only a process that could end without lo
     expect((await stopping).skipped).toBeUndefined();
   });
 });
+
+
+describe('F2 persisted queue and cwd regressions', () => {
+  it('edits and removes retained prompts without launching a session, preserving the pause', async () => {
+    const store = new FileSessionStateStore(userData);
+    const id = 'app-retained' as AppSessionId;
+    await store.saveQueue(id, { entries: [{ queueId: 'q1', appSessionId: id, content: 'old', createdAt: '2026-10-02T00:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false }], paused: true, pauseReason: 'interrupt' });
+    const host = engineHost({ store });
+    expect(host.ipc.table.get(id)).toBeUndefined();
+    expect(await host.call('session.queue.edit', { appSessionId: id, queueId: 'q1', content: 'revised' })).toMatchObject({ content: 'revised', uncertain: false });
+    expect(await host.call('session.queue.list', { appSessionId: id })).toMatchObject({ paused: true, pauseReason: 'interrupt', entries: [{ content: 'revised' }] });
+    await host.call('session.queue.remove', { appSessionId: id, queueId: 'q1' });
+    expect(await store.loadQueue(id)).toMatchObject({ entries: [], paused: true, pauseReason: 'interrupt' });
+    expect(host.ipc.table.get(id)).toBeUndefined();
+    for (const name of ['session.queue.edit', 'session.queue.remove'] as const) {
+      await expect(host.handlers.get(name)!({ appSessionId: '../escape', queueId: 'q1', content: 'bad' })).rejects.toThrow();
+    }
+  });
+
+  it('set_cwd success without replacement init changes status and the subsequent bash cwd; needs_trust does not', async () => {
+    // pass2/trust-no-attestation seq 11 and 18: no replacement system/init follows success.
+    const fixture = readFileSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/pass2/trust-no-attestation.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { seq: number; frame: { response: { response: Record<string, unknown> } } });
+    const denied = fixture.find((r) => r.seq === 11)!.frame.response.response;
+    const accepted = fixture.find((r) => r.seq === 18)!.frame.response.response;
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ set_cwd: (r) => ({ response: r.trust_accepted ? accepted : denied }) })) });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    expect(await host.call('session.setCwd', { appSessionId: id, path: accepted.cwd as string, trust: null })).toMatchObject({ status: 'needs_trust' });
+    expect(host.ipc.table.get(id)!.status().cwd).toBe('/tmp/maws-ipc');
+    await host.call('session.setCwd', { appSessionId: id, path: accepted.cwd as string, trust: { accepted: true, directory: accepted.cwd as string } });
+    await host.call('session.bash', { appSessionId: id, command: 'pwd' });
+    expect(transport.writes.find((w) => w.type === 'bash_command')).toMatchObject({ command: 'pwd', cwd: accepted.cwd });
+    expect(host.ipc.table.get(id)!.status().cwd).toBe(accepted.cwd);
+    transport.exit(0);
+    await host.ipc.table.get(id)!.exited;
+  });
+});
