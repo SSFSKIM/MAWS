@@ -4,9 +4,10 @@
 // "Jump to latest" must resume follow mode. The others pin follow mode, the divider collapse, the theme switch, the
 // denial jump (acceptance item 4), the child transcript (acceptance item 9) and expanded old work over every fixture.
 // Runs only under `pnpm e2e:transcript`, which builds with MAWS_HARNESS=1 first (playwright.config.ts).
+import { join } from 'node:path';
 import { expect, test as base, type Page } from '@playwright/test';
 import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api';
-import { launchMaws, type MawsLaunch } from './support/launch';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 const test = base.extend<{ harness: MawsLaunch }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
@@ -250,6 +251,66 @@ test('collapsing a divider keeps its position', async ({ harness }) => {
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// W8 (T3): a group opens and closes as Codex's disclosures do, its height running through the values between closed and
+// open (300 ms opening, 150 ms closing) rather than jumping, the row below following it frame by frame and flush with it
+// at the end, and its cells unmounted once it has closed.
+test('a group’s height moves through its disclosure rather than jumping, and the row below follows it', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await load(page, 'synthetic/500');
+  const turnId = await openTurn(page);
+  const groupRowId = await page.evaluate((id) => {
+    const groups = Array.from(document.querySelectorAll(`[data-kind="group"][data-turn-id="${id}"]`));
+    const group = groups.find((element) => Number(element.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')) >= 2);
+    return group?.closest('[data-row-id]')?.getAttribute('data-row-id') ?? null;
+  }, turnId);
+  expect(groupRowId, `turn ${TURN} shows a group of at least two cells`).not.toBeNull();
+  // Clicks the group's header and samples, every frame for 600 ms, the row's height and the next row's top.
+  const sample = () =>
+    page.evaluate(async (id) => {
+      const row = document.querySelector<HTMLElement>(`[data-row-id="${id}"]`)!;
+      const next = () => document.querySelector<HTMLElement>(`[data-index="${Number(row.dataset.index) + 1}"]`)!;
+      const before = row.getBoundingClientRect().height;
+      const heights: number[] = [];
+      const gaps: number[] = [];
+      const started = performance.now();
+      row.querySelector<HTMLElement>('button[aria-expanded]')!.click();
+      while (performance.now() - started < 600) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const box = row.getBoundingClientRect();
+        heights.push(box.height);
+        gaps.push(next().getBoundingClientRect().top - box.bottom);
+      }
+      return { before, heights, gaps, cells: row.querySelectorAll('[data-group-cells]').length };
+    }, groupRowId!);
+  const between = (values: number[], a: number, b: number) => values.filter((value) => value > Math.min(a, b) + 1 && value < Math.max(a, b) - 1);
+
+  const opened = await sample();
+  const open = opened.heights.at(-1)!;
+  console.log(`group motion, opening: ${JSON.stringify({ from: opened.before, to: open, heights: opened.heights.map(Math.round), gaps: opened.gaps.map(Math.round) })}`);
+  expect(open - opened.before, 'the group opened').toBeGreaterThan(40);
+  expect(between(opened.heights, opened.before, open).length, 'heights between closed and open while it opens').toBeGreaterThanOrEqual(2);
+  expect(opened.heights.every((height, i) => i === 0 || height >= opened.heights[i - 1] - 1), 'it only grows').toBe(true);
+  expect(Math.abs(opened.gaps.at(-1)!), 'the row below sits flush at the end').toBeLessThanOrEqual(1);
+  expect(opened.cells).toBe(1);
+
+  const closed = await sample();
+  console.log(`group motion, closing: ${JSON.stringify({ from: closed.before, to: closed.heights.at(-1), heights: closed.heights.map(Math.round), gaps: closed.gaps.map(Math.round) })}`);
+  expect(closed.before).toBeCloseTo(open, 0);
+  expect(closed.heights.at(-1), 'back to its closed height').toBeCloseTo(opened.before, 0);
+  expect(between(closed.heights, open, opened.before).length, 'heights between open and closed while it closes').toBeGreaterThanOrEqual(1);
+  expect(Math.abs(closed.gaps.at(-1)!), 'the row below sits flush at the end').toBeLessThanOrEqual(1);
+  expect(closed.cells, 'its cells unmounted once closed').toBe(0);
+
+  // Under reduced motion the same click jumps: the first frame already has the end height.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const jumped = await sample();
+  expect(jumped.heights[0]).toBeCloseTo(open, 0);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 test('theme switch re-themes highlighted code without reload', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);
@@ -323,6 +384,69 @@ test('an answered question reads as one compact receipt that stays in view when 
   const box = (await widget.boundingBox())!;
   expect(box.width, 'a compact widget, 480 px at most').toBeLessThanOrEqual(480);
   expect(box.height, 'two lines').toBeLessThan(72);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// W8 (T1): a streaming thinking block's label in the CLI's words (tier, effort, time) and colour (the warning colour
+// from 20 s), under Codex's shimmer, static under reduced motion. With MAWS_W8_SHOTS=1 it also writes the screenshots
+// the wave hands back (docs/doperpowers/plans/shots/w8-thinking-*.png), in both themes.
+test('a streaming thinking block reads the CLI’s tier, effort and time under the shimmer, warm from 20 s', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.setEffort('xhigh'));
+  const cases = [
+    { fixture: 'events/thinking-live', shot: 'deep', text: /^Deep in thought with xhigh effort · (5\ds|1m \d\ds)$/, warm: true }, // 50 s in at load
+    { fixture: 'events/thinking-live-group', shot: 'still', text: /^(Still thinking|Thinking more) with xhigh effort · [12]\ds$/, warm: false }, // 12 s in
+  ];
+  for (const { fixture, shot, text, warm } of cases) {
+    await loadAll(page, fixture);
+    const label = page.locator('[data-kind="thinking"] [data-shimmer]');
+    await expect(label).toHaveText(text);
+    for (const theme of ['light', 'dark'] as const) {
+      await page.evaluate((value) => (document.documentElement.dataset.theme = value), theme);
+      const style = await label.evaluate((element) => {
+        const computed = getComputedStyle(element);
+        // The warning colour as the label mixes it: wholly the theme's --warning, read in the same colour space.
+        const probe = document.createElement('span');
+        probe.style.backgroundColor = 'color-mix(in oklab, var(--warning) 100%, var(--fg))';
+        element.parentElement!.append(probe);
+        const warning = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return {
+          animation: `${computed.animationName} ${computed.animationDuration} ${computed.animationTimingFunction} ${computed.animationDelay} ${computed.animationIterationCount}`,
+          clip: computed.backgroundClip, fill: computed.webkitTextFillColor, colour: computed.backgroundColor, warning, image: computed.backgroundImage,
+        };
+      });
+      expect(style.animation, `${fixture} ${theme}: Codex's sweep`).toBe('transcript-shimmer 4s steps(48) 0.6s infinite');
+      expect(style.clip, 'drawn through the text').toBe('text');
+      expect(style.image, 'the highlight band').toContain('linear-gradient');
+      if (warm) expect(style.colour, `${fixture} ${theme}: the warning colour past 20 s`).toBe(style.warning);
+      else expect(style.colour, `${fixture} ${theme}: not yet the warning colour`).not.toBe(style.warning);
+      if (process.env.MAWS_W8_SHOTS === '1') {
+        // The sweep held where its band is over the text (0.4 s into a pass that starts at 0.6 s), released after.
+        await label.evaluate((element) => {
+          const sweep = element.getAnimations()[0];
+          sweep.pause();
+          sweep.currentTime = 1000;
+        });
+        const turn = page.locator('[data-kind="user"], [data-kind="divider"], [data-kind="cell"], [data-kind="thinking"]');
+        const boxes = (await turn.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().toJSON() as DOMRect))).filter((box) => box.height > 0);
+        const top = Math.min(...boxes.map((box) => box.top)) - 12;
+        const bottom = Math.max(...boxes.map((box) => box.bottom)) + 12;
+        const left = Math.min(...boxes.map((box) => box.left)) - 12;
+        const right = Math.max(...boxes.map((box) => box.right)) + 12;
+        await page.screenshot({ path: join(REPO_ROOT, `docs/doperpowers/plans/shots/w8-thinking-${shot}-${theme}.png`), clip: { x: left, y: top, width: right - left, height: bottom - top } });
+        await label.evaluate((element) => element.getAnimations()[0].play());
+      }
+    }
+    await page.evaluate(() => (document.documentElement.dataset.theme = 'light'));
+  }
+  // Reduced motion: the same words and colour, no sweep.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const still = await page.locator('[data-kind="thinking"] [data-shimmer]').evaluate((element) => [getComputedStyle(element).animationName, getComputedStyle(element).backgroundImage]);
+  expect(still).toEqual(['none', 'none']);
   expect(harness.consoleErrors()).toEqual([]);
 });
 

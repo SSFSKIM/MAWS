@@ -7,7 +7,7 @@
 // reader where it was), `followOnAppend` (a reader at the end stays pinned as rows arrive), measured rows in normal
 // DOM order, and browser scroll anchoring off because the virtualiser owns it. Follow mode is a mode: entered at the
 // end, left only by a scroll upward, and while following every structural change keeps the end pinned.
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { measureElement, useVirtualizer } from '@tanstack/react-virtual';
 import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import 'katex/dist/katex.min.css';
 import 'streamdown/styles.css';
@@ -18,6 +18,7 @@ import { withQueueTail } from '../model/derive';
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS, listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
+import { WorkMotion } from './motion';
 import { RowView } from './rows/Row';
 import './transcript.css';
 
@@ -54,9 +55,20 @@ export interface TranscriptListProps {
 export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id }: TranscriptListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
+  // A row's size as last measured, by id, which stays its first guess (W8): the virtualiser keeps a measurement only
+  // where it differs from the guess, so a group measured closed at exactly its closed guess would be guessed at the open
+  // 280 px the moment it opens, and the rows below would jump there and back while the disclosure motion starts it
+  // from its closed height.
+  const measured = useRef(new Map<string, number>());
   // New functions invalidate the virtualiser's measurements, so they change only with the rows.
   const getItemKey = useCallback((index: number) => rows[index].id, [rows]);
-  const estimateSize = useCallback((index: number) => estimateRow(rows[index]), [rows]);
+  const estimateSize = useCallback((index: number) => measured.current.get(rows[index].id) ?? estimateRow(rows[index]), [rows]);
+  const measure = useCallback((element: Element, entry: ResizeObserverEntry | undefined, instance: Parameters<typeof measureElement>[2]) => {
+    const size = measureElement(element, entry, instance);
+    const id = element.getAttribute('data-row-id');
+    if (id !== null) measured.current.set(id, size);
+    return size;
+  }, []);
 
   // React Compiler skips this component (the hook returns functions it cannot memoise); the list memoises by hand.
   // eslint-disable-next-line react-hooks/incompatible-library -- see above
@@ -65,6 +77,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     getScrollElement: () => scrollRef.current,
     getItemKey, // stable X3 ids; index keys are what breaks prepend and re-derivation
     estimateSize,
+    measureElement: measure,
     overscan: OVERSCAN,
     anchorTo: 'end',
     followOnAppend: true,
@@ -142,6 +155,7 @@ export interface TranscriptProps {
   // prompts whose waiting or dropped bubble is not shown (held back into that queue)
   tail?: readonly Row[];
   withdrawn?: ReadonlySet<string>;
+  effort?: string | null; // W8, additive: the effort the session runs at, which the live thinking label names
 }
 
 const NO_ROWS: Row[] = [];
@@ -171,7 +185,7 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const derived = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const rows = useMemo(() => withQueueTail(derived, withdrawn, tail), [derived, withdrawn, tail]);
@@ -181,6 +195,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
   const disclosures = useDisclosures();
+  const [motion] = useState(() => new WorkMotion());
   const idPrefix = `transcript${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
 
   useEffect(() => {
@@ -203,7 +218,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   }, []);
 
   // A jump (store.jumpTo): the store has already opened what holds the row; scroll it into place, then focus it once
-  // the virtualiser has mounted it.
+  // the virtualiser has mounted it. A fold of its turn still running is called off (W8), or it would take the row away.
   useLayoutEffect(() => {
     if (!jump) return;
     if (!jump.reissued) {
@@ -214,6 +229,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
       return;
     }
     const index = rows.findIndex((row) => row.id === jump.rowId);
+    const turn = index >= 0 ? rows[index].turnId : null;
+    if (turn !== null) motion.unfold(turn);
     if (index >= 0) listRef.current?.scrollToIndex(index, jump.align);
     const frame = requestAnimationFrame(() => {
       const element = document.getElementById(rowElementId(idPrefix, jump.rowId));
@@ -225,7 +242,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
       useTranscriptStore.getState().jumpHandled(storeKey, jump.nonce);
     });
     return () => cancelAnimationFrame(frame);
-  }, [jump, rows, storeKey, idPrefix]);
+  }, [jump, rows, storeKey, idPrefix, motion]);
 
   const followChange = useCallback(
     (next: boolean) => {
@@ -238,8 +255,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   // Every row reads this context: it changes only with the props, never with the rows.
   const context = useMemo<TranscriptContextValue>(
-    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null }),
-    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory],
+    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, effort, motion }),
+    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, effort, motion],
   );
 
   return (

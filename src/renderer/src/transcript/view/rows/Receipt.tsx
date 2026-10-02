@@ -5,10 +5,11 @@
 // tall with a scrolling body, gone on leave; a click on the row or the popover opens Review at that file, ⌘-click the
 // file itself. Undo asks `canUndo` once per receipt (the answer is kept in the store with the undo state, so a remount
 // neither asks again nor forgets an undo); a refusal disables Undo with the reason as its tooltip; a null `reapply`
-// hides Reapply.
+// hides Reapply. W8: the files past the first three open and close through the shared disclosure motion.
 import { HoverCard, Tooltip } from 'radix-ui';
 import { useEffect, type MouseEvent } from 'react';
 import { RECEIPT_APPLIED, useTranscriptStore, type ReceiptUndo } from '../../../stores/transcript';
+import { DisclosureBody } from '../../../ui/disclosure';
 import { DETAIL, displayPath, RECEIPT } from '../../model/copy';
 import type { ChangedFile, Row, RowId, TurnId } from '../../model/rows';
 import { EditDiff } from '../cells/EditDetail';
@@ -26,7 +27,15 @@ export function ReceiptRow({ row }: { row: ReceiptRowData }) {
   // The engine's own working directory first (its latest session.started or init), else the session record's.
   const directory = useTranscriptStore((s) => s.entries[storeKey]?.state.cwd ?? null) ?? sessionDirectory ?? null;
   const turnId = row.turnId!;
-  const files = all ? row.files : row.files.slice(0, SHOWN);
+  const list = (files: ChangedFile[]) => (
+    <ul className="transcript-receipt-files">
+      {files.map((file) => (
+        <li key={file.path}>
+          <FileRow file={file} turnId={turnId} path={displayPath(file.path, directory)} />
+        </li>
+      ))}
+    </ul>
+  );
   return (
     <section className="transcript-receipt" aria-label="Change receipt">
       <div className="transcript-receipt-top">
@@ -38,13 +47,8 @@ export function ReceiptRow({ row }: { row: ReceiptRowData }) {
           {RECEIPT.review}
         </button>
       </div>
-      <ul className="transcript-receipt-files">
-        {files.map((file) => (
-          <li key={file.path}>
-            <FileRow file={file} turnId={turnId} path={displayPath(file.path, directory)} />
-          </li>
-        ))}
-      </ul>
+      {list(row.files.slice(0, SHOWN))}
+      <DisclosureBody open={all}>{list(row.files.slice(SHOWN))}</DisclosureBody>
       {row.files.length > SHOWN && (
         <button type="button" className="transcript-quiet-button transcript-receipt-more" onClick={toggleAll}>
           {all ? RECEIPT.collapse : RECEIPT.showMore(row.files.length - SHOWN)}

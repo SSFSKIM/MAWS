@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { cellId } from '../../model/keys';
@@ -50,7 +50,41 @@ describe('divider row', () => {
     const work = expanded.slice(expanded.indexOf(divider) + 1).filter((row) => row.kind !== 'time');
     expect(work.map((row) => row.kind)).toEqual(['cell', 'cell', 'assistant_text']);
     expect(screen.getByRole('button', { name: /Worked for/ }).getAttribute('aria-controls')).toBe(work.slice(0, 2).map((row) => `t-${row.id}`).join(' '));
+    // W8: a fold reads closed at once and leaves the list once its rows have closed (the 150 ms close).
     fireEvent.click(screen.getByRole('button', { name: /Worked for/ }));
+    expect(screen.getByRole('button', { name: /Worked for/ }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('button', { name: /Worked for/ }).hasAttribute('aria-controls')).toBe(false);
+    await waitFor(() => expect(store.rows()).toHaveLength(before));
+  });
+
+  it('a second click while a fold runs takes it back, and the turn stays open (W8)', async () => {
+    const store = await storeWith(deniedTurn().events);
+    const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
+    const toggle = () => screen.getByRole('button', { name: /Worked for/ });
+    fireEvent.click(toggle());
+    view.rerenderRow(rowOf(store.rows(), 'divider'));
+    const open = store.rows().length;
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200))); // past the 150 ms close
+    expect(store.rows()).toHaveLength(open);
+  });
+
+  it('a fold whose turn the store folded meanwhile leaves it folded (W8)', async () => {
+    const store = await storeWith(deniedTurn().events);
+    const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
+    const toggle = () => screen.getByRole('button', { name: /Worked for/ });
+    const before = store.rows().length;
+    fireEvent.click(toggle());
+    view.rerenderRow(rowOf(store.rows(), 'divider'));
+    fireEvent.click(toggle());
+    // The store folds the turn itself inside the 150 ms (a working turn that finishes while the reader follows).
+    act(() => useTranscriptStore.getState().toggleTurn(store.key, rowOf(store.rows(), 'divider').turnId!));
+    expect(store.rows()).toHaveLength(before);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200))); // past the close
+    expect(rowOf(store.rows(), 'divider').expanded).toBe(false);
     expect(store.rows()).toHaveLength(before);
   });
 

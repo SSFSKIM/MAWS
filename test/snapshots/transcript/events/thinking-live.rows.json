@@ -1,0 +1,73 @@
+[
+  {
+    "at": "2026-10-01T12:00:00.010Z",
+    "id": "time:turn:u-think-1",
+    "kind": "time",
+    "label": "Oct 1, 2026 12:00 PM",
+    "turnId": "turn:u-think-1"
+  },
+  {
+    "at": "2026-10-01T12:00:00.010Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:u-think-1",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-think-1",
+    "placeholders": [],
+    "steer": false,
+    "text": "Should the list anchor to the reader’s row or to its end?",
+    "turnId": "turn:u-think-1"
+  },
+  {
+    "at": "2026-10-01T12:00:00.010Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": null,
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-think-1",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-01T12:00:00.000Z",
+    "state": "working",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": null,
+      "denials": [],
+      "durationMs": null,
+      "model": null,
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": null,
+      "toolCalls": 0,
+      "usage": null
+    },
+    "toolCalls": 0,
+    "turnId": "turn:u-think-1"
+  },
+  {
+    "at": "2026-10-01T12:00:01.000Z",
+    "durationMs": null,
+    "id": "think:msg_think_1:0",
+    "kind": "thinking",
+    "live": true,
+    "messageUuid": null,
+    "text": "Weighing where the anchor should sit: the reader’s row keeps their place, the end keeps the stream in view.",
+    "turnId": "turn:u-think-1"
+  }
+]

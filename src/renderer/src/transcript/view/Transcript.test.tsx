@@ -182,6 +182,42 @@ describe('Transcript', () => {
     for (const id of controls) expect(document.getElementById(id), `#${id} is in the DOM`).not.toBeNull();
   });
 
+  // W8 (T3): the divider's click moves the work area: its rows grow in from nothing, and a fold closes them away
+  // before the turn leaves the list.
+  it('the divider’s click grows the work area’s rows in, and a fold closes them before the turn folds', async () => {
+    await mounted(deniedThenAnswer());
+    const turn = turnId.ofMessage(uuid('u2'));
+    const toggle = () => document.querySelector<HTMLElement>(`[data-row-id="${rowId.divider(turn)}"] button[aria-expanded]`)!;
+    const work = () => document.querySelector<HTMLElement>(`[data-turn-id="${turn}"][data-kind="cell"]`);
+    expect(work()).toBeNull();
+    fireEvent.click(toggle());
+    await waitFor(() => expect(work()).not.toBeNull());
+    expect(work()!.style.transition).toContain('height 300ms');
+    await waitFor(() => expect(work()!.getAttribute('style')).toBeNull()); // at rest
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(work()!.style.height).toBe('0px'); // closing, still in the list
+    expect(work()!.style.transition).toContain('height 150ms');
+    await waitFor(() => expect(work()).toBeNull()); // the turn folded
+    expect(document.querySelector(`[data-row-id="${rowId.divider(turn)}"]`)).not.toBeNull();
+  });
+
+  it('a jump into a turn whose fold is running calls the fold off, so its target stays in the list (W8)', async () => {
+    const key = await mounted(deniedThenAnswer());
+    const turn = turnId.ofMessage(uuid('u2'));
+    const toggle = () => document.querySelector<HTMLElement>(`[data-row-id="${rowId.divider(turn)}"] button[aria-expanded]`)!;
+    const target = cellId.tool(tool('t2')); // the turn's standalone cell, its own row
+    fireEvent.click(toggle());
+    await waitFor(() => expect(document.querySelector(`[data-cell-id="${target}"]`)).not.toBeNull());
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    act(() => useTranscriptStore.getState().jumpTo(key, target));
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200))); // past the close
+    expect(useTranscriptStore.getState().rows(key).some((row) => row.id === target)).toBe(true);
+    expect(document.querySelector(`[data-cell-id="${target}"]`)).not.toBeNull();
+  });
+
   it('a history that failed to load says why and offers Retry, which hydrates it', async () => {
     let attempts = 0;
     const source: TranscriptSource = {

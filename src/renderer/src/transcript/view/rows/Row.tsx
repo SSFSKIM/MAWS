@@ -1,11 +1,15 @@
 // One X3 row → its component, in the transcript's reading column (W2: the `.thread-column` the composer frame shares).
 // The wrapper carries the row's element id (the divider's aria-controls names work-area rows by it), its kind and turn
 // for tests and the harness, and is focusable so a jump can land on it. A row of a rewound branch the reader revealed
-// is muted and marked not in context.
+// is muted and marked not in context. W8: a work-area row's wrapper runs the shared disclosure motion when its divider
+// opens or folds the work area (motion.ts).
+import { useState, useSyncExternalStore, type ReactNode, type Ref } from 'react';
 import { useTranscriptStore } from '../../../stores/transcript';
+import { useDisclosureMotion } from '../../../ui/disclosure';
 import { NOT_IN_CONTEXT } from '../../model/copy';
-import type { Row } from '../../model/rows';
-import { rowElementId, useTranscriptContext } from '../context';
+import type { Row, TurnId } from '../../model/rows';
+import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
+import { inWorkArea } from '../motion';
 import { AgentMessageRow } from './AgentMessage';
 import { AssistantTextRow } from './AssistantText';
 import { BashRow } from './Bash';
@@ -50,12 +54,29 @@ function body(row: Row) {
 const opensTurn = (row: Row) => row.kind === 'user' || (row.kind === 'divider' && row.origin !== 'human'); // engine and peer turns open with their divider
 
 export function RowView({ row }: { row: Row }) {
+  return inWorkArea(row) ? <WorkRowView row={row} turn={row.turnId!} /> : <RowFrame row={row}>{body(row)}</RowFrame>;
+}
+
+// A work-area row: it grows in when its divider has just opened the work area and closes away while the divider folds it.
+function WorkRowView({ row, turn }: { row: Row; turn: TurnId }) {
+  const motion = useWorkMotion();
+  const folding = useSyncExternalStore(motion.subscribe, () => motion.isFolding(turn));
+  const [appear] = useState(() => motion.isOpening(turn));
+  const { ref, mounted } = useDisclosureMotion<HTMLDivElement>(!folding, { appear });
+  return (
+    <RowFrame row={row} frameRef={ref}>
+      {mounted && body(row)}
+    </RowFrame>
+  );
+}
+
+function RowFrame({ row, frameRef, children }: { row: Row; frameRef?: Ref<HTMLDivElement>; children: ReactNode }) {
   const { idPrefix, storeKey } = useTranscriptContext();
   const muted = useTranscriptStore((state) => row.turnId !== null && (state.entries[storeKey]?.state.hidden?.turns.includes(row.turnId) ?? false));
   return (
-    <div id={rowElementId(idPrefix, row.id)} className="thread-column transcript-row" data-kind={row.kind} data-turn-id={row.turnId ?? undefined} data-muted={muted ? '' : undefined} tabIndex={-1}>
+    <div ref={frameRef} id={rowElementId(idPrefix, row.id)} className="thread-column transcript-row" data-kind={row.kind} data-turn-id={row.turnId ?? undefined} data-muted={muted ? '' : undefined} tabIndex={-1}>
       {muted && opensTurn(row) && <div className="transcript-not-in-context">{NOT_IN_CONTEXT}</div>}
-      {body(row)}
+      {children}
     </div>
   );
 }

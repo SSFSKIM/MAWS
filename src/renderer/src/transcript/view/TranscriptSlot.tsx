@@ -6,8 +6,11 @@
 // W1: a session's transcript also shows the messages held in MAWS's queue at its tail, dimmed with "Sends when this
 // turn ends", and hides the bubble of a steer held back into that queue. It attaches C7's queue store itself, as the
 // composer does, so a session transcript shown without its composer reads the live queue.
+// W8: a session's transcript names the effort the session runs at in its live thinking label, the effort the model
+// selector shows (W3's `useShownEffort`); a child's names none.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useEffect, useMemo } from 'react';
+import { useShownEffort } from '../../composer/effective-effort';
 import { attachQueue, EMPTY_QUEUE, useQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { heldRow } from '../model/derive';
@@ -37,6 +40,7 @@ export function TranscriptSlot({ appSessionId, agentId, className }: TranscriptS
   const queue = useQueueStore((state) => (agentId === undefined ? (state.bySession.get(appSessionId) ?? EMPTY_QUEUE) : EMPTY_QUEUE));
   const tail = useMemo(() => queue.entries.filter((entry) => entry.state === 'queued' && !entry.uncertain).map(heldRow), [queue.entries]);
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
+  const effort = useShownEffort(appSessionId);
   return (
     <Transcript
       source={source}
@@ -48,6 +52,7 @@ export function TranscriptSlot({ appSessionId, agentId, className }: TranscriptS
       sessionDirectory={sessionDirectory}
       tail={tail}
       withdrawn={withdrawn}
+      effort={agentId === undefined ? effort : null}
     />
   );
 }

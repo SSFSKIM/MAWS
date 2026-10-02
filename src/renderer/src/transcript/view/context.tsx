@@ -5,6 +5,7 @@
 import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { Cell, Row, Spill, SubagentRef, TurnId } from '../model/rows';
 import { ipcLoadSpill, ipcOpenExternal } from '../source/ipc';
+import { WorkMotion } from './motion';
 
 export interface TranscriptActions {
   openSubagent(ref: SubagentRef): void; // C8: Subagents tool with that agent selected
@@ -56,6 +57,8 @@ export interface TranscriptContextValue {
   disclosures: Disclosures;
   idPrefix: string; // unique per mounted transcript: row element ids are `<idPrefix>-<rowId>`
   sessionDirectory?: string | null; // additive: where the session runs (its record's), for a shell call that names no cwd
+  effort?: string | null; // additive (W8): the effort the session runs at, which the live thinking label names; null when unknown
+  motion?: WorkMotion; // additive (W8): the work area's fold as motion, one per mounted transcript
 }
 
 const TranscriptContext = createContext<TranscriptContextValue>({
@@ -68,6 +71,9 @@ export const useActions = () => useContext(TranscriptContext).actions;
 export const rowElementId = (idPrefix: string, rowId: string) => `${idPrefix}-${rowId}`;
 // The list's scroll container: the one mounted element a divider's aria-controls can name (its rows are virtual).
 export const listElementId = (idPrefix: string) => `${idPrefix}-list`;
+
+const NO_MOTION = new WorkMotion(); // a row rendered outside a Transcript (the row tests)
+export const useWorkMotion = () => useContext(TranscriptContext).motion ?? NO_MOTION;
 
 // One disclosure of this transcript: [open, toggle].
 export function useDisclosure(id: string): [boolean, () => void] {

@@ -3,14 +3,17 @@
 // `data-status`, so the line's text is the label alone. A standalone denied cell is itself focusable (tabindex -1,
 // scroll-margin) so the divider's count can land on it.
 import { useTranscriptStore } from '../../../stores/transcript';
+import { DisclosureBody } from '../../../ui/disclosure';
 import type { Cell, TurnId } from '../../model/rows';
 import { useTranscriptContext } from '../context';
 import { Chevron, CodeText, LineCounts } from '../rows/parts';
+import { LiveThinkingLabel } from '../rows/ThinkingLabel';
 import { CellDetailView } from './CellDetail';
 
 const EDIT_COUNTS = / \+(\d+) −(\d+)$/;
 
 function Label({ cell }: { cell: Cell }) {
+  if (cell.toolName === 'thinking' && cell.status === 'running') return <LiveThinkingLabel startedAt={cell.startedAt} />; // W8
   const counts = cell.detail.kind === 'edit' ? EDIT_COUNTS.exec(cell.label) : null;
   if (!counts) return <CodeText text={cell.label} />;
   return (
@@ -37,7 +40,9 @@ export function CellLine({ cell, turnId, focusable = false }: { cell: Cell; turn
         </span>
         <Chevron />
       </button>
-      {cell.expanded && <CellDetailView cell={cell} turnId={turnId} />}
+      <DisclosureBody open={cell.expanded}>
+        <CellDetailView cell={cell} turnId={turnId} />
+      </DisclosureBody>
     </div>
   );
 }
