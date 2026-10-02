@@ -496,7 +496,7 @@ describe('child source provenance', () => {
 
   it('bounds an incomplete child backfill when an already-errored follower emits no state on retry', async () => {
     vi.useFakeTimers();
-    onTestFinished(() => vi.useRealTimers());
+    onTestFinished(() => { vi.useRealTimers(); });
     const fake = fakeClient();
     const source = childSource(fake);
     const off = source.subscribe(() => {});

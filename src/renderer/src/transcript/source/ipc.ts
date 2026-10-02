@@ -341,7 +341,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       if (!onDisk()) decide('disk');
       // An incomplete snapshot is not terminal history. Listen before reading so a completed backfill during the
       // round trip is not missed; re-read on its following state, never spin on a reloading/error follower.
-      let changed = false;
+      let changed: boolean;
       let failure: string | null = null;
       let wake: (() => void) | null = null;
       const signal = () => { changed = true; wake?.(); };
