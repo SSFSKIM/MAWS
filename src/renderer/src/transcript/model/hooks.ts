@@ -8,6 +8,10 @@
 // What blocks, on 2.1.283 (cli.pretty.js 919426-919470): exit code 2 (the wire's `hook_response` reads `outcome:
 // "error"`, `exit_code: 2`, the reason on stderr), or JSON on stdout with `decision: "block"` or `continue: false` (the
 // wire reads `outcome: "success"`; the reason is `reason`, or `stopReason`).
+//
+// After a reload the same events come from disk (C4's backfill, debt wave 7), which keeps a blocking error's text but
+// not how the hook signalled it: the backfill states it in the exit-2 form, so a notice reads the same either way
+// (events/hooks-blocking-disk against pass3/hooks-blocking).
 import type { SessionEvent } from '@shared/graph/events';
 import { HOOK } from './copy';
 import type { Row } from './rows';

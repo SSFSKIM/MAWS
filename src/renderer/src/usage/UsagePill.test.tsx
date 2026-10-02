@@ -283,6 +283,7 @@ describe('the usage popover’s actions through ClaudeUsage’s control route', 
     controls = available();
     let panel = await openPanel();
     expect(hintOf(panel)).toBeNull();
+    expect(panel.querySelector('[data-controls-notice]')?.getAttribute('aria-live')).toBe('polite'); // mounted while empty, so a notice is announced
     const disabled = (p: HTMLElement) => ['Route requests here', 'Remove account…', 'Add account…'].flatMap((name) => within(p).getAllByRole('button', { name })).map((b) => (b as HTMLButtonElement).disabled);
     expect(disabled(panel)).toEqual(Array(4 + 5 + 1).fill(false)); // Route on the four accounts that are not routing
     closePanel();
@@ -376,6 +377,7 @@ describe('the usage popover’s actions through ClaudeUsage’s control route', 
     await settle();
     const again = reopened();
     expect(hintOf(again)).toBe('4@example.test is at its limit');
+    expect(again.querySelector('[data-controls-hint]')!.closest('[aria-live]')?.getAttribute('aria-live')).toBe('polite'); // screen readers announce the refusal
     expect(card(again, '3@example.test').textContent).toContain('Routing here');
     expect(useUsage.getState().snapshot!.drainTarget).toBe(ROUTING.drainTarget);
   });

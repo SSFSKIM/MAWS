@@ -11,7 +11,7 @@ import { rowId } from '../../model/keys';
 import { serializeRows } from '../../model/serialize';
 import type { Row } from '../../model/rows';
 import { api, builder, request, tool, uuid } from '../../model/test-events';
-import { DEFAULT_ACTIONS } from '../context';
+import { DEFAULT_ACTIONS, Disclosures } from '../context';
 import { renderRow, rowOf, spyActions, storeWith } from './test-support';
 
 afterEach(cleanup);
@@ -55,16 +55,24 @@ describe('plan row', () => {
       Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
     });
   }
-  async function planRow(plan: string) {
+  async function planRow(plan: string, disclosures?: Disclosures) {
     const b = builder();
     b.turn('u1');
     b.toolUse('p1', 'ExitPlanMode', { plan });
     b.result('p1', 'approved');
     b.end(['u1']);
     const store = await expanded(b.events);
-    renderRow(rowOf(store.rows(), 'plan'), { storeKey: store.key });
-    const region = screen.getByRole('region', { name: 'Plan' });
-    return { region, body: region.querySelector<HTMLElement>('[data-plan-body]')! };
+    const row = rowOf(store.rows(), 'plan');
+    const mount = () => {
+      renderRow(row, { storeKey: store.key, disclosures });
+      const region = screen.getByRole('region', { name: 'Plan' });
+      return { region, body: region.querySelector<HTMLElement>('[data-plan-body]')! };
+    };
+    const remount = () => {
+      cleanup();
+      return mount();
+    };
+    return { ...mount(), remount };
   }
 
   it('Show more follows the rendered height: a one-line plan that renders taller than 144 px is bounded and opens', async () => {
@@ -77,6 +85,20 @@ describe('plan row', () => {
     expect(within(region).getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(within(region).getByRole('button', { name: 'Show less' }));
     expect(body.dataset.open).toBeUndefined();
+  });
+
+  // The open state lives in the transcript's disclosures and outlives the row; the measurement is the mount's own. A
+  // plan the virtualiser unmounts while open and mounts again keeps its Show less, and closing it measures again.
+  it('an open plan remounted over the same disclosures still offers Show less, and closing it measures again', async () => {
+    renderedPlanHeight(400);
+    const { region, remount } = await planRow('# A plan with one tall diagram', new Disclosures());
+    fireEvent.click(within(region).getByRole('button', { name: 'Show more' }));
+    const again = remount();
+    expect(again.body.dataset.open).toBe('');
+    fireEvent.click(within(again.region).getByRole('button', { name: 'Show less' }));
+    expect(again.body.dataset.open).toBeUndefined();
+    expect(again.body.dataset.overflows).toBe('');
+    expect(within(again.region).getByRole('button', { name: 'Show more' }).getAttribute('aria-expanded')).toBe('false');
   });
 
   it('a twelve-step plan that renders within 144 px offers no Show more', async () => {

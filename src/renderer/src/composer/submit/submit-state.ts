@@ -58,6 +58,7 @@ export const isBusy = (status: EngineSessionStatus | null, entries: readonly Que
 export const SENDS_AT_NEXT_STEP = 'Sends at the next step';
 export const SENDS_AT_TURN_END = 'Sends when this turn ends';
 export const SEND_NOW_DETAIL = 'Stops the running turn, then sends this';
+export const SENDS_NOW = 'Sends this now'; // a held row's Send now with no turn running (a paused queue at idle)
 const busyMenu = (enabled: boolean): SubmitMenuItem[] => [
   { id: 'queue', label: 'Queue', detail: SENDS_AT_NEXT_STEP, chord: 'Enter', enabled },
   { id: 'hold', label: 'Hold until the turn ends', detail: SENDS_AT_TURN_END, chord: '⌥Enter', enabled },

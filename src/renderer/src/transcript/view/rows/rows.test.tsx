@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { loadEventFixture } from '../../../../../../test/support/fixtures';
 import { api, BASH_RESULT, builder, uuid } from '../../model/test-events';
 import type { Row } from '../../model/rows';
 import { renderRow, rowOf, storeWith } from './test-support';
@@ -28,6 +29,17 @@ describe('hook notice row (W1)', () => {
     expect(container.textContent).toContain('A hook blocked your prompt · No.');
     fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
     expect(actions.editPrompt).toHaveBeenCalledWith(expect.objectContaining({ kind: 'user', messageUuid: uuid('u1'), text: 'BLOCKME please' }));
+  });
+
+  // After a reload the notice comes from disk (C4's backfill: the blocked prompt's `informational` record as its own
+  // turn, the prompt from "Original prompt:"), and Edit prompt still hands that prompt back.
+  it('reloaded from disk, a blocked prompt’s notice still offers Edit prompt with the prompt the hook blocked', async () => {
+    const store = await storeWith(loadEventFixture('hooks-blocking-disk'));
+    const notice = store.rows().find((row): row is Extract<Row, { kind: 'error' }> => row.kind === 'error' && row.action === 'edit_prompt')!;
+    const { actions, container } = renderRow(notice, { storeKey: store.key });
+    expect(container.textContent).toContain('A hook blocked your prompt · BLOCKED_BY_TEST_HOOK');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
+    expect(actions.editPrompt).toHaveBeenCalledWith(expect.objectContaining({ kind: 'user', messageUuid: 'f2dd3a2b-d9d4-488b-b222-3498876dab20', text: 'BLOCKME please reply TWO' }));
   });
 
   it('an empty thinking block still streaming is a plain label with nothing to open', async () => {

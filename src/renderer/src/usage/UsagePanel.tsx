@@ -117,11 +117,15 @@ export function UsagePanel() {
         {model && available && <span className="ml-auto text-ui-sm text-fg-muted">{USAGE.updated(ago(Math.max(0, now - Date.parse(model.updatedAt))))}</span>}
       </div>
       {available && model!.rows.length > 0 && <p className="m-0 mt-2 text-ui-sm text-fg-muted">{USAGE.note}</p>}
-      {controls.unavailable && (
-        <p id={hint} data-controls-hint className="m-0 mt-2 text-ui-sm text-fg-muted">
-          {controls.unavailable}
-        </p>
-      )}
+      {/* The notice is a polite live region, so a refusal is announced: the region stays mounted while the notice comes
+          and goes, and empty it takes no room (the hint's margin collapses through it as before). */}
+      <div aria-live="polite" data-controls-notice>
+        {controls.unavailable && (
+          <p id={hint} data-controls-hint className="m-0 mt-2 text-ui-sm text-fg-muted">
+            {controls.unavailable}
+          </p>
+        )}
+      </div>
 
       <div className="mt-1">{accounts}</div>
 

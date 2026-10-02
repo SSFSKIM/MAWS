@@ -7,6 +7,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { connectKeys } from '../../keymap/dispatcher';
 import { useNotices } from '../../stores/notices';
 import type { SessionQueue } from '../../stores/queue';
+import { SEND_NOW_DETAIL, SENDS_NOW } from '../submit/submit-state';
 import { PAUSED_COPY, QueueList, UNCERTAIN_TEXT } from './QueueList';
 
 const APP = 'app-1' as AppSessionId;
@@ -34,7 +35,7 @@ afterEach(() => {
 describe('queue list renders every entry state', () => {
   it('lists held entries with Send now (now), Send at the next step (next), Edit and Delete; the running turn is not listed', async () => {
     const { client, invoke } = bridge();
-    render(<QueueList appSessionId={APP} queue={queue([entry('q-0', { state: 'released' }), entry('q-1'), entry('q-2', { content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBO' } }, { type: 'text', text: 'look' }] })])} sessionId={null} cwd="/repo" client={client} />);
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-0', { state: 'released' }), entry('q-1'), entry('q-2', { content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBO' } }, { type: 'text', text: 'look' }] })])} sessionId={null} cwd="/repo" client={client} />);
     const list = screen.getByRole('region', { name: 'Queued messages' });
     expect(within(list).getByText('2 held until the turn ends')).toBeTruthy();
     expect(within(list).queryByText('message q-0')).toBeNull();
@@ -50,11 +51,23 @@ describe('queue list renders every entry state', () => {
     expect(invoke).toHaveBeenCalledWith('session.queue.remove', { appSessionId: APP, queueId: 'q-1' });
   });
 
+  // A held row waits for the running turn, so its Send now stops that turn first; a paused queue at idle has no turn to
+  // stop, and the same promote just sends.
+  it('titles a held row’s Send now by whether a turn runs', () => {
+    const { client } = bridge();
+    const view = (busy: boolean) => <QueueList appSessionId={APP} busy={busy} queue={queue([entry('q-1')], { paused: !busy, pauseReason: busy ? null : 'interrupt' })} sessionId={null} cwd="/repo" client={client} />;
+    const { rerender } = render(view(true));
+    expect(screen.getByRole('button', { name: 'Send now' }).getAttribute('title')).toBe(SEND_NOW_DETAIL);
+    rerender(view(false));
+    expect(screen.getByRole('button', { name: 'Send now' }).getAttribute('title')).toBe(SENDS_NOW);
+    expect(SENDS_NOW).toBe('Sends this now');
+  });
+
   // W1: Enter while a turn runs writes a `next` steer; until the engine takes it, it is a row with Send now and Hold.
   it('lists pending steers first with Send now (an interrupt) and Hold until the turn ends', async () => {
     const { client, invoke } = bridge({ 'session.queue.hold': { ok: true, value: entry('q-9') }, 'session.interrupt': { ok: true, value: { stillQueued: [], cancelled: [] } } });
     const steer = { messageUuid: 'm-1' as never, content: 'look at b too', createdAt: '2026-09-29T10:00:00.000Z' };
-    render(<QueueList appSessionId={APP} queue={queue([entry('q-1')], { steers: [steer] })} sessionId={null} cwd="/repo" client={client} />);
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1')], { steers: [steer] })} sessionId={null} cwd="/repo" client={client} />);
     const list = screen.getByRole('region', { name: 'Queued messages' });
     expect(within(list).getByRole('banner').textContent).toBe('1 at the next step · 1 held until the turn ends');
     const [row] = within(list).getAllByRole('listitem');
@@ -70,7 +83,7 @@ describe('queue list renders every entry state', () => {
 
   it('edits a queued entry inline and writes the re-serialised content; Escape cancels', async () => {
     const { client, invoke } = bridge();
-    render(<QueueList appSessionId={APP} queue={queue([entry('q-1')])} sessionId={null} cwd="/repo" client={client} />);
+    render(<QueueList appSessionId={APP} busy={false} queue={queue([entry('q-1')])} sessionId={null} cwd="/repo" client={client} />);
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Edit' }));
     const box = await screen.findByRole('textbox', { name: 'Edit queued message' });
@@ -96,6 +109,7 @@ describe('queue list renders every entry state', () => {
     render(
       <QueueList
         appSessionId={APP}
+        busy={false}
         queue={queue([entry('q-u', { uncertain: true }), entry('q-s', { state: 'submitting', submittedAt: now.toISOString() })], { paused: true, pauseReason: 'uncertain' })}
         sessionId={null}
         cwd="/repo"
@@ -129,7 +143,7 @@ describe('queue list renders every entry state', () => {
       [null, 'Queue paused'],
     ];
     for (const [pauseReason, copy] of cases) {
-      const { unmount } = render(<QueueList appSessionId={APP} queue={queue([entry('q-1')], { paused: true, pauseReason })} sessionId={null} cwd="/repo" client={client} />);
+      const { unmount } = render(<QueueList appSessionId={APP} busy={false} queue={queue([entry('q-1')], { paused: true, pauseReason })} sessionId={null} cwd="/repo" client={client} />);
       expect(screen.getByRole('region', { name: 'Queued messages' }).querySelector('header')!.textContent).toBe(`1 held until the turn ends · ${copy}Resume`);
       unmount();
     }
@@ -137,7 +151,7 @@ describe('queue list renders every entry state', () => {
 
   it('keeps a row whose action the host refused, and says so', async () => {
     const { client } = bridge({ 'session.queue.remove': { ok: false, error: { code: 'internal', message: 'entry is in flight' } } });
-    render(<QueueList appSessionId={APP} queue={queue([entry('q-1')])} sessionId={null} cwd="/repo" client={client} />);
+    render(<QueueList appSessionId={APP} busy={false} queue={queue([entry('q-1')])} sessionId={null} cwd="/repo" client={client} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['entry is in flight']));
     expect(screen.getByText('message q-1')).toBeTruthy();
@@ -148,7 +162,7 @@ describe('queue list renders every entry state', () => {
     const now = new Date('2026-09-29T10:00:00.000Z');
     vi.setSystemTime(now);
     const { client } = bridge();
-    const { container } = render(<QueueList appSessionId={APP} queue={queue([entry('q-s', { state: 'submitting', submittedAt: now.toISOString() })])} sessionId={null} cwd="/repo" client={client} />);
+    const { container } = render(<QueueList appSessionId={APP} busy={false} queue={queue([entry('q-s', { state: 'submitting', submittedAt: now.toISOString() })])} sessionId={null} cwd="/repo" client={client} />);
     expect(container.innerHTML).toBe(''); // every Send passes through submitting: no empty box flashes
     await act(async () => void vi.advanceTimersByTime(299));
     expect(container.innerHTML).toBe('');
@@ -161,7 +175,7 @@ describe('queue list renders every entry state', () => {
     const first = new Date('2026-09-29T10:00:00.000Z');
     vi.setSystemTime(first);
     const { client } = bridge();
-    const at = (entries: QueueEntry[]) => <QueueList appSessionId={APP} queue={queue(entries)} sessionId={null} cwd="/repo" client={client} />;
+    const at = (entries: QueueEntry[]) => <QueueList appSessionId={APP} busy={false} queue={queue(entries)} sessionId={null} cwd="/repo" client={client} />;
     const { rerender } = render(at([entry('q-s', { state: 'submitting', submittedAt: first.toISOString() })]));
     await act(async () => void vi.advanceTimersByTime(300));
     expect(screen.queryByText('Sending…')).toBeTruthy();
@@ -177,7 +191,7 @@ describe('queue list renders every entry state', () => {
 
   it('renders nothing when nothing waits', () => {
     const { client } = bridge();
-    const { container } = render(<QueueList appSessionId={APP} queue={queue([entry('q-0', { state: 'released' })], { paused: true, pauseReason: 'interrupt' })} sessionId={null} cwd="/repo" client={client} />);
+    const { container } = render(<QueueList appSessionId={APP} busy={false} queue={queue([entry('q-0', { state: 'released' })], { paused: true, pauseReason: 'interrupt' })} sessionId={null} cwd="/repo" client={client} />);
     expect(container.innerHTML).toBe('');
   });
 });

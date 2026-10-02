@@ -7,6 +7,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { DEFAULT_ACTIONS, registerRequestRenderer, registerTranscriptActions, TranscriptSlot, useTranscriptStore } from '../index';
 import { BASH_RESULT, builder, request, tool } from '../model/test-events';
@@ -34,6 +35,7 @@ afterEach(() => {
   cleanup();
   for (const dispose of disposers.splice(0)) dispose();
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
+  resetQueueStore();
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -60,6 +62,7 @@ describe('registerTranscriptActions', () => {
 
 describe('TranscriptSlot', () => {
   const APP = 'app-slot' as AppSessionId;
+  const EMPTY = { entries: [], paused: false, pauseReason: null, steers: [], withdrawn: [] };
   function history(): SessionEvent[] {
     const b = builder();
     b.turn('u1', 'Open the file');
@@ -75,7 +78,9 @@ describe('TranscriptSlot', () => {
           ? { ok: true, value: { events: history(), lastSeq: 3, complete: true } }
           : name === 'session.appEvents'
             ? { ok: true, value: { events: [] } }
-            : { ok: false, error: { code: 'internal', message: 'unexpected' } },
+            : name === 'session.queue.list'
+              ? { ok: true, value: EMPTY }
+              : { ok: false, error: { code: 'internal', message: 'unexpected' } },
       ),
     );
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
@@ -117,7 +122,7 @@ describe('TranscriptSlot', () => {
     const records = useSessions.getState().records;
     act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: { path: '/w/project-wt', branch: 'wt' } } as unknown as SessionRecord]]) }));
     onTestFinished(() => useSessions.setState({ records }));
-    const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
+    const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
     render(<TranscriptSlot appSessionId={id} />);
     await waitFor(() => expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live'));
@@ -150,6 +155,42 @@ describe('TranscriptSlot', () => {
     act(() => useTranscriptStore.getState().expandAll(key, { cells: true }));
     await waitFor(() => expect(document.querySelector('.transcript-shell')).not.toBeNull());
     expect(document.querySelector('.transcript-shell-meta')).toBeNull();
+    expect(invoke.mock.calls.map(([name]) => name)).not.toContain('session.queue.list'); // a child's transcript has no queue
+  });
+
+  // The held tail and the withdrawn-steer filter read C7's queue store, which the slot attaches itself: a session's
+  // transcript shown without its composer follows the queue as it changes, and lets it go when it unmounts.
+  it('attaches the session’s queue itself: mounted alone, its held tail follows the queue’s events', async () => {
+    const id = 'app-slot-queue' as AppSessionId;
+    const b = builder();
+    b.turn('u1', 'Start the work');
+    b.text('m1', 0, 'Working on it.');
+    const held = (queueId: string, content: string) => ({ queueId, appSessionId: id, content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
+    const listeners = new Set<(payload: unknown) => void>();
+    const invoke = vi.fn((name: string) =>
+      Promise.resolve({
+        ok: true,
+        value: name === 'session.queue.list' ? { ...EMPTY, entries: [held('q-1', 'Then run the tests')] } : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true },
+      }),
+    );
+    const on = vi.fn((name: string, listener: (payload: unknown) => void) => {
+      if (name !== 'session.queue') return () => {};
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    });
+    (window as { maws?: MawsBridge }).maws = { invoke, on } as unknown as MawsBridge;
+    const { unmount } = render(<TranscriptSlot appSessionId={id} />);
+    const heldTexts = () => [...document.querySelectorAll('[data-pending="held"]')].map((bubble) => bubble.querySelector('[data-bubble]')?.textContent);
+    await waitFor(() => expect(heldTexts()).toEqual(['Then run the tests']));
+    expect(invoke).toHaveBeenCalledWith('session.queue.list', { appSessionId: id });
+
+    act(() => listeners.forEach((listener) => listener({ appSessionId: id, ...EMPTY, entries: [held('q-1', 'Then run the tests'), held('q-2', 'And commit')] })));
+    await waitFor(() => expect(heldTexts()).toEqual(['Then run the tests', 'And commit']));
+    act(() => listeners.forEach((listener) => listener({ appSessionId: id, ...EMPTY, entries: [held('q-2', 'And commit')] })));
+    await waitFor(() => expect(heldTexts()).toEqual(['And commit']));
+
+    unmount();
+    expect(listeners.size).toBe(0); // the last attachment let the queue go
   });
 
   it('docks the latest registered request renderer in a pending request’s slot; its disposer restores the previous one, then the placeholder', async () => {
@@ -157,7 +198,7 @@ describe('TranscriptSlot', () => {
     b.turn('u1', 'Ask me');
     b.toolUse('q1', 'AskUserQuestion', { questions: [] });
     b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [] });
-    const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
+    const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
     render(<TranscriptSlot appSessionId={'app-slot-request' as AppSessionId} />);
     const slot = () => document.querySelector<HTMLElement>('[data-kind="request_slot"]');

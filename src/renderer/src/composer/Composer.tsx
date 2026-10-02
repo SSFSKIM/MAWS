@@ -371,7 +371,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
           </button>
         </p>
       )}
-      {!unstarted && <QueueList appSessionId={appSessionId} queue={queue} sessionId={sessionId} cwd={cwd} client={client} />}
+      {!unstarted && <QueueList appSessionId={appSessionId} queue={queue} busy={isBusy(status, queue.entries)} sessionId={sessionId} cwd={cwd} client={client} />}
       {rewoundEdit && <ResubmitLine resubmit={resubmit} onSend={() => void sendInlineEdit(client, appSessionId)} onLeave={() => cancelInlineEdit(appSessionId)} />}
       {swap.notice && <RequestCard key={swap.notice.id} item={swap.notice} request={null} placement="docked" paneIndex={paneIndex} />}
       <Frame
