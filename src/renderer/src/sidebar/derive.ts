@@ -41,14 +41,15 @@ export interface ProjectEntry {
   name: string;
   sessions: SessionRecord[]; // not archived, unsorted
   rollup: { waiting: number; working: number };
+  lastActivity: number | null; // W11 (I6): the latest movement of any of its sessions, archived ones included; null without one
 }
 
 const OTHER_NAME = 'Other sessions';
 
-// Every listed project, then Other sessions when it holds anything, each with its sessions and its waiting (◐) and
-// working (●) counts; a hidden project's sessions are in neither. Projects are sorted by recency of activity: the latest movement of any of their sessions (archived ones
-// included, so archiving does not demote a project), a project without sessions by when it was added; ties by the
-// project order, then the name.
+// Every listed project, then Other sessions when it holds anything, each with its sessions, its waiting (◐) and working
+// (●) counts and its last activity; a hidden project's sessions are in neither. Projects are sorted by recency of
+// activity: the latest movement of any of their sessions (archived ones included, so archiving does not demote a
+// project), a project without sessions by when it was added; ties by the project order, then the name.
 export function projectList({ records, digests, projects, rows, hidden }: ProjectListInput): ProjectEntry[] {
   const byId = new Map(projects.map((p) => [p.id, p]));
   const waiting = new Set(rows.map((row) => row.appSessionId));
@@ -62,13 +63,15 @@ export function projectList({ records, digests, projects, rows, hidden }: Projec
     if (!record.archived) entry.live.push(record);
   }
   const entryOf = (key: ProjectKey, project: ProjectRecord | null): ProjectEntry => {
-    const sessions = grouped.get(key)?.live ?? [];
+    const group = grouped.get(key);
+    const sessions = group?.live ?? [];
     return {
       key,
       project,
       name: project?.name ?? OTHER_NAME,
       sessions,
       rollup: { waiting: sessions.filter((r) => waiting.has(r.appId)).length, working: sessions.filter((r) => isWorking(digests.get(r.appId))).length },
+      lastActivity: group && Number.isFinite(group.activity) ? group.activity : null,
     };
   };
   const activityOf = (key: ProjectKey, project: ProjectRecord) => grouped.get(key)?.activity ?? Date.parse(project.createdAt);

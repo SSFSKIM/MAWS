@@ -6,8 +6,9 @@
 // disclosure motion (`ui/disclosure.tsx`, Codex's group motion at :377892-377927), no slide. Expanded, its sessions in
 // one flat list of 30px rows (pinned first, worktree sessions marked by their ⎇ branch), their titles under the
 // project's name as Codex's leading slot sets them (:437865-437867), at most five, then "Show more" to eight; a gap
-// after the group (Codex's `pb-2`, :377821). "Other sessions" is the same row without actions or a context menu. The
-// pre-W5 group (`ProjectGroup.tsx` at 6d50bf26^) is the template.
+// after the group (Codex's `pb-2`, :377821). A project's hover card is `ProjectHoverCard.tsx` (I6). "Other sessions" is
+// the same row without actions, a context menu or a card. The pre-W5 group (`ProjectGroup.tsx` at 6d50bf26^) is the
+// template.
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -15,6 +16,8 @@ import { ArchiveIcon, FolderIcon, Icon, PlusIcon } from '../app/IconButton';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { DisclosureBody } from '../ui/disclosure';
 import type { ProjectEntry, ProjectKey } from './derive';
+import { focusVisible } from './HoverCard';
+import { ProjectHoverCard } from './ProjectHoverCard';
 import { runProjectAction, useProjectActionEnabled } from './project-actions';
 import { SessionRow } from './SessionRow';
 import { moreNodeId, projectNodeId, useTree } from './tree';
@@ -36,6 +39,35 @@ export function ProjectRow({ entry, open, sessions, more, onToggle, onShowMore }
   const [kept, setKept] = useState({ sessions, more });
   if (open && (kept.sessions !== sessions || kept.more !== more)) setKept({ sessions, more });
   const shown = open ? { sessions, more } : kept;
+  // The hover card (I6) hangs on the line, so a pointer over the expanded sessions does not open it; keyboard focus sits
+  // on the treeitem, which opens it (a focus the pointer caused does not, as on every card).
+  const [card, setCard] = useState(false);
+
+  const line = (
+    <div
+      data-project-line
+      onClick={() => onToggle(key)}
+      className="group/line flex h-9 cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] select-none hover:bg-bg-hover group-focus-visible/project:outline-2 group-focus-visible/project:-outline-offset-2 group-focus-visible/project:outline-accent"
+    >
+      {open ? <FolderOpenIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} /> : <FolderIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} />}
+      <span className={`min-w-0 flex-1 truncate text-ui ${project ? 'text-fg' : 'text-fg-muted'}`}>{name}</span>
+      {!open && (rollup.waiting > 0 || rollup.working > 0) && (
+        <span className="flex shrink-0 items-center gap-[7px] group-hover/line:hidden group-focus-visible/project:hidden">
+          {rollup.waiting > 0 && (
+            <span aria-label={`${rollup.waiting} waiting`} className="text-ui-sm text-warning tabular-nums">
+              ◐{rollup.waiting}
+            </span>
+          )}
+          {rollup.working > 0 && (
+            <span aria-label={`${rollup.working} working`} className="text-ui-sm text-accent tabular-nums">
+              ●{rollup.working}
+            </span>
+          )}
+        </span>
+      )}
+      {project ? <ProjectActions projectId={project.id} name={name} /> : <span aria-hidden className="size-[22px] shrink-0" />}
+    </div>
+  );
 
   return (
     <div
@@ -48,32 +80,21 @@ export function ProjectRow({ entry, open, sessions, more, onToggle, onShowMore }
       data-tree-id={nodeId}
       data-kind="project"
       data-menu={project ? `project:${project.id}` : undefined}
-      onFocus={(event) => event.target === event.currentTarget && tree.onFocusItem(nodeId)}
+      onFocus={(event) => {
+        if (event.target !== event.currentTarget) return;
+        tree.onFocusItem(nodeId);
+        if (project && focusVisible(event.currentTarget)) setCard(true);
+      }}
+      onBlur={(event) => event.target === event.currentTarget && setCard(false)}
       className="group/project outline-none"
     >
-      <div
-        data-project-line
-        onClick={() => onToggle(key)}
-        className="group/line flex h-9 cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] select-none hover:bg-bg-hover group-focus-visible/project:outline-2 group-focus-visible/project:-outline-offset-2 group-focus-visible/project:outline-accent"
-      >
-        {open ? <FolderOpenIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} /> : <FolderIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} />}
-        <span className={`min-w-0 flex-1 truncate text-ui ${project ? 'text-fg' : 'text-fg-muted'}`}>{name}</span>
-        {!open && (rollup.waiting > 0 || rollup.working > 0) && (
-          <span className="flex shrink-0 items-center gap-[7px] group-hover/line:hidden group-focus-visible/project:hidden">
-            {rollup.waiting > 0 && (
-              <span aria-label={`${rollup.waiting} waiting`} className="text-ui-sm text-warning tabular-nums">
-                ◐{rollup.waiting}
-              </span>
-            )}
-            {rollup.working > 0 && (
-              <span aria-label={`${rollup.working} working`} className="text-ui-sm text-accent tabular-nums">
-                ●{rollup.working}
-              </span>
-            )}
-          </span>
-        )}
-        {project ? <ProjectActions projectId={project.id} name={name} /> : <span aria-hidden className="size-[22px] shrink-0" />}
-      </div>
+      {project ? (
+        <ProjectHoverCard entry={{ ...entry, project }} open={card} onOpenChange={setCard}>
+          {line}
+        </ProjectHoverCard>
+      ) : (
+        line
+      )}
       <DisclosureBody open={open} role="group" aria-label={name} className="pt-px pb-2">
         {shown.sessions.map((record) => (
           <SessionRow key={record.appId} record={record} level={2} />

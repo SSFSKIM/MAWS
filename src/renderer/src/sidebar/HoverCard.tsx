@@ -1,12 +1,15 @@
-// A session row's hover card (§5.1 as amended 2026-10-01, W5; residue *Hover card*): a Radix HoverCard opening after
-// 300 ms of hover or on focus, to the right of the sidebar. It says what the one-line row leaves out: the status and
-// age, the context used, the branch and worktree, who holds a foreign-live session or what a working one does, and the
-// last assistant line; then the pending request, if any, through the `requestCard` slot in its `hover` placement, with
-// the originating request fetched once per item through `attention.request` and cached in the attention store. Opening
-// it answers nothing: approval is an explicit click inside the card, and the slot offers it only for read-only tools.
-// The card's body mounts only while it is open, so the tree's rows subscribe to nothing extra.
+// The sidebar's hover cards (§5.1 as amended 2026-10-01, W5 and W11; residue *Hover card*). `SidebarHoverCard` is the
+// shell every row's card shares: a Radix HoverCard opening after 300 ms of hover or on keyboard focus (never on a focus
+// the pointer caused: a click focuses its row, and a card for it would cover the main area unasked), closing 150 ms
+// after the pointer leaves, to the right of the sidebar, 342px wide; its content mounts only while open. A session
+// row's card (`SessionHoverCard`) says what the one-line row leaves out: the status and age, the context used, the
+// branch and worktree, who holds a foreign-live session or what a working one does, and the last assistant line; then
+// the pending request, if any, through the `requestCard` slot in its `hover` placement, with the originating request
+// fetched once per item through `attention.request` and cached in the attention store. Opening it answers nothing:
+// approval is an explicit click inside the card, and the slot offers it only for read-only tools. The project row's
+// card is `ProjectHoverCard.tsx`.
 import { HoverCard as Radix } from 'radix-ui';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, type FocusEvent, type ReactNode } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -21,14 +24,24 @@ import { useSessions } from '../stores/sessions';
 import { rowBranch, sessionAge } from './derive';
 import { displayTitle } from '../sessions/title';
 
-export function SessionHoverCard({ record, children }: { record: SessionRecord; children: ReactNode }) {
+export interface SidebarHoverCardProps {
+  label: string; // the card's accessible name
+  children: ReactNode; // the trigger: one element that takes a ref and props
+  content: ReactNode; // rendered only while open
+  open?: boolean; // controlled, for a trigger whose keyboard focus sits elsewhere (a project row's line, its treeitem focused)
+  onOpenChange?(open: boolean): void;
+}
+
+export function SidebarHoverCard({ label, children, content, open, onOpenChange }: SidebarHoverCardProps) {
   return (
-    <Radix.Root openDelay={300} closeDelay={150}>
-      <Radix.Trigger asChild>{children}</Radix.Trigger>
+    <Radix.Root openDelay={300} closeDelay={150} open={open} onOpenChange={onOpenChange}>
+      <Radix.Trigger asChild onFocus={guardPointerFocus}>
+        {children}
+      </Radix.Trigger>
       <Radix.Portal>
         <Radix.Content
           role="dialog"
-          aria-label={displayTitle(record)}
+          aria-label={label}
           data-hover-card
           side="right"
           align="start"
@@ -36,11 +49,29 @@ export function SessionHoverCard({ record, children }: { record: SessionRecord; 
           collisionPadding={8}
           className="z-50 w-[342px] rounded-md border border-border-strong bg-bg-overlay p-4"
         >
-          <Body appSessionId={record.appId} />
+          {content}
         </Radix.Content>
       </Radix.Portal>
     </Radix.Root>
   );
+}
+
+// Radix skips its open for a prevented focus event: a focus that is not `:focus-visible` is the pointer's.
+function guardPointerFocus(event: FocusEvent<HTMLElement>): void {
+  if (!focusVisible(event.currentTarget)) event.preventDefault();
+}
+
+// `:focus-visible`, where the engine knows it (happy-dom does not: there every focus counts as the keyboard's).
+export function focusVisible(element: HTMLElement): boolean {
+  try {
+    return element.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+}
+
+export function SessionHoverCard({ record, children }: { record: SessionRecord; children: ReactNode }) {
+  return <SidebarHoverCard label={displayTitle(record)} content={<Body appSessionId={record.appId} />}>{children}</SidebarHoverCard>;
 }
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;

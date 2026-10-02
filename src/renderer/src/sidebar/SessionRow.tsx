@@ -54,12 +54,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: 1 
           event.dataTransfer.setData(SESSION_DRAG_TYPE, id);
           event.dataTransfer.effectAllowed = 'copyMove';
         }}
-        onFocus={(event) => {
-          if (event.target === event.currentTarget) tree.onFocusItem(nodeId);
-          // The hover card opens on keyboard focus only: a page opened with the pointer focuses its first row, and a
-          // card for it would cover the main area unasked. Radix skips its open for a prevented focus event.
-          if (!focusVisible(event.currentTarget)) event.preventDefault();
-        }}
+        onFocus={(event) => event.target === event.currentTarget && tree.onFocusItem(nodeId)} // the card's shell guards a pointer's focus
         onClick={() => useLayout.getState().openSession(id)}
         className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[7px] rounded-sm px-[9px] outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
       >
@@ -83,15 +78,6 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: 1 
       </div>
     </SessionHoverCard>
   );
-}
-
-// `:focus-visible`, where the engine knows it (happy-dom does not: there every focus counts as the keyboard's).
-function focusVisible(element: HTMLElement): boolean {
-  try {
-    return element.matches(':focus-visible');
-  } catch {
-    return true;
-  }
 }
 
 type HoverAction = 'pin' | 'archive';

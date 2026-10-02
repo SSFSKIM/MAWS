@@ -73,6 +73,21 @@ describe('the project list', () => {
     ]);
   });
 
+  // W11 (I6): the project card's last activity, its sessions' latest movement (archived ones included)
+  it('carries each project’s last activity, null without a session', () => {
+    const a = project('a', 0, { createdAt: '2026-09-01T00:00:00Z' });
+    const b = project('b', 1);
+    const recs = new Map([
+      ['old' as AppSessionId, record('old', { projectId: a.id, archived: true, updatedAt: '2026-09-28T12:00:00Z' })],
+      ['new' as AppSessionId, record('new', { projectId: a.id, updatedAt: '2026-09-27T12:00:00Z' })],
+    ]);
+    const list = projectList({ records: recs, digests: new Map(), projects: [a, b], rows: [] });
+    expect(list.map((e) => [e.name, e.lastActivity])).toEqual([
+      ['a', Date.parse('2026-09-28T12:00:00Z')],
+      ['b', null],
+    ]);
+  });
+
   // W11 (I5): a project removed from the sidebar takes its sessions with it, never to Other sessions
   it('lists a hidden project’s sessions nowhere', () => {
     const hidden = new Set(['proj-maws' as never]);
