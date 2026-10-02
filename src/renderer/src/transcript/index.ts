@@ -31,7 +31,8 @@ export { classifyTool } from './model/classify';
 // lineage, and applying to the store's state would make its next batch throw).
 export { applyEvents, createState, type TranscriptState } from './model/reduce';
 export { rowsOf, turnSummary } from './model/derive';
-export { dividerCopy } from './model/copy';
+export { dividerCopy, PLUGIN } from './model/copy'; // R1: PLUGIN, a plugin's words (the toast host's and the summary's)
+export { pluginLines, type PluginLine } from './model/plugins'; // R1: the panel summary's Plugins block
 export { serializeRows } from './model/serialize';
 
 // C7: the request card and queued rows render markdown through the same sanitising pipeline (one renderer).

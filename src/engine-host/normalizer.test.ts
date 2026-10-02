@@ -594,3 +594,73 @@ describe('normaliser: context.sample (debt wave 3)', () => {
     expect(feed(make(), [outRow(request), answer(rest)])[0]).toMatchObject({ kind: 'context.sample', autoCompactThreshold: null });
   });
 });
+
+// R1 (charter D-9 as amended 2026-10-01): the engine's remote-surface pushes and init's plugin load issues, over the R0
+// fixtures recorded on the installed 2.1.287 (pass3/mods-*), and over a synthetic init (no fixture loads a broken plugin).
+describe('normaliser: plugin pushes and load issues (R1)', () => {
+  const pluginEvents = (events: SessionEvent[]) => events.filter((e) => e.kind.startsWith('plugin.'));
+  const replay = (name: string) => {
+    const n = make({ sessionId: null });
+    const events: SessionEvent[] = [];
+    for (const row of loadJournal('pass3', name)) for (const e of n.push(row)) events.push(SessionEventSchema.parse(e));
+    return events;
+  };
+
+  it('pass3/mods-pushes: the session.start pushes before the initialize answer, the turn.complete pair after the result, in arrival order', () => {
+    const events = replay('mods-pushes');
+    expect(pluginEvents(events).map((e) => [e.seq, e.kind, 'text' in e ? e.text : null])).toEqual([
+      [4, 'plugin.log', 'MODS_PROBE_LOG start surface=null interactive=false'],
+      [5, 'plugin.status', 'MODS_PROBE_STATUS start'],
+      [6, 'plugin.toast', 'MODS_PROBE_TOAST start'],
+      [30, 'plugin.log', 'MODS_PROBE_LOG turn'],
+      [31, 'plugin.status', 'MODS_PROBE_STATUS turn'],
+    ]);
+    expect(pluginEvents(events).every((e) => 'plugin' in e && e.plugin === 'mods-probe' && e.sessionId === '43dea5ed-a8db-41ca-8424-75ab7a3450a6' && e.parentToolUseId === null)).toBe(true);
+    expect(only(events, 'plugin.toast')).toMatchObject([{ timeoutMs: 4000 }]);
+    // the turn's log and status arrive after its result: the turn has ended, so they sit after it, not in it
+    expect(kinds(events).indexOf('turn.ended')).toBeLessThan(events.findIndex((e) => e.seq === 30));
+    expect(only(events, 'frame.unknown')).toEqual([]);
+  });
+
+  it('pass3/mods-consent: the invalidate a mod load sends carries its render event; the turn toast arrives too', () => {
+    const events = replay('mods-consent');
+    expect(only(events, 'plugin.invalidate').map((e) => [e.seq, e.event])).toEqual([[12, 'ui.render']]);
+    expect(only(events, 'plugin.toast').map((e) => e.text)).toEqual(expect.arrayContaining(['MODS_PROBE_TOAST start', 'MODS_PROBE_TOAST turn']));
+    expect(only(events, 'plugin.log').map((e) => e.text)).toContain("loaded from this session's mods folder");
+  });
+
+  it("a status of null or '' is the plugin's line removed; a toast without a time takes the engine's default", () => {
+    const sys = (subtype: string, extra: Record<string, unknown>) => inRow({ type: 'system', subtype, plugin: 'p', session_id: 'sess-1', uuid: `u-${subtype}`, ...extra });
+    const events = feed(make(), [sys('ui_status', { text: null }), sys('ui_status', {}), sys('ui_status', { text: '' }), sys('ui_toast', { text: 'hey' }), sys('ui_invalidate', {})]);
+    expect(events.map((e) => [e.kind, 'text' in e ? e.text : null])).toEqual([['plugin.status', ''], ['plugin.status', ''], ['plugin.status', ''], ['plugin.toast', 'hey'], ['plugin.invalidate', null]]);
+    expect(only(events, 'plugin.toast')[0]).toMatchObject({ timeoutMs: 4000 });
+    expect(only(events, 'plugin.invalidate')[0]).toMatchObject({ event: null });
+  });
+
+  it("a push without its plugin is not understood: the transport's invalid_frame, never a nameless plugin line", () => {
+    const events = feed(make(), [inRow({ type: 'system', subtype: 'ui_log', text: 'x', session_id: 'sess-1' })]);
+    expect(events).toMatchObject([{ kind: 'error.raised', code: 'invalid_frame' }]);
+  });
+
+  it("init's plugin errors then warnings become plugin.load_issue inside the turn the init opens; 2.1.287's nulls and a child's init make none", () => {
+    const issues = {
+      plugin_errors: [{ plugin: 'broken@market', type: 'hook-load-failed', message: 'hooks module failed to compile' }, { plugin: 'inline[0]', type: 'path-not-found', message: 'missing', path: '/x' }],
+      plugin_warnings: [{ plugin: 'shadowed@market', type: 'shadowed-folder', message: 'commands/ shadowed by the manifest' }],
+    };
+    const events = feed(make(), [inRow({ ...initFrame, ...issues })]);
+    expect(kinds(events)).toEqual(['session.init', 'turn.started', 'plugin.load_issue', 'plugin.load_issue', 'plugin.load_issue']);
+    expect(only(events, 'plugin.load_issue').map(({ plugin, level, message }) => ({ plugin, level, message }))).toEqual([
+      { plugin: 'broken@market', level: 'error', message: 'hooks module failed to compile' },
+      { plugin: 'inline[0]', level: 'error', message: 'missing' },
+      { plugin: 'shadowed@market', level: 'warning', message: 'commands/ shadowed by the manifest' },
+    ]);
+    expect(kinds(feed(make(), [inRow({ ...initFrame, plugin_errors: null, plugin_warnings: null })]))).toEqual(['session.init', 'turn.started']);
+    const child = feed(make(), [inRow({ ...initFrame, ...issues, parent_tool_use_id: 'toolu_parent' })]);
+    expect(kinds(child)).toEqual(['session.init']);
+  });
+
+  it("a human turn's init carries its issues into that turn, after the turn opened", () => {
+    const events = feed(make(), [outRow(userOut('u-1')), startedIn('u-1'), inRow({ ...initFrame, plugin_warnings: [{ plugin: 'p', type: 't', message: 'm' }] })]);
+    expect(kinds(events)).toEqual(['user.message', 'command.lifecycle', 'turn.started', 'session.init', 'plugin.load_issue']);
+  });
+});

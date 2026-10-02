@@ -444,3 +444,82 @@ describe('the queue tail', () => {
     expect(withQueueTail(rows, new Set(), [])).toBe(rows);
   });
 });
+
+// R1 (charter D-9 as amended 2026-10-01): what a plugin says through the engine.
+describe('plugins: log lines, load issues and pinned status lines', () => {
+  const errors = (list: Row[]) => list.filter((row): row is Extract<Row, { kind: 'error' }> => row.kind === 'error');
+
+  it('a log line is a dim notice under the plugin’s name at its arrival position, in view when its turn folds, and no work of the turn', () => {
+    const b = builder();
+    b.emit('plugin.log', { plugin: 'mods-probe', text: 'before any turn' });
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    b.emit('plugin.log', { plugin: 'mods-probe', text: 'during the work' });
+    b.text('m1', 0, 'Done');
+    b.end(['u1']);
+    b.emit('plugin.log', { plugin: 'mods-probe', text: 'after the turn' });
+    const expanded = rows(b.events);
+    expect(kinds(expanded)).toEqual(['time', 'error', 'user', 'divider', 'cell', 'error', 'assistant_text', 'error']);
+    expect(errors(expanded).map(({ text, severity, scope, turnId: turn }) => ({ text, severity, scope, turn }))).toEqual([
+      { text: 'mods-probe: before any turn', severity: 'notice', scope: 'plugin', turn: null },
+      { text: 'mods-probe: during the work', severity: 'notice', scope: 'plugin', turn: turnId.ofMessage(uuid('u1')) },
+      { text: 'mods-probe: after the turn', severity: 'notice', scope: 'plugin', turn: null },
+    ]);
+    expect(find(expanded, 'assistant_text')).toMatchObject({ phase: 'answer' }); // the log line after the work is not work
+    const folded = rowsOf(reduce(b.events)); // the completed turn folds its work area; the plugin's line stays
+    expect(kinds(folded)).toEqual(['time', 'error', 'user', 'divider', 'error', 'assistant_text', 'error']);
+  });
+
+  it('a turn whose only rows are a plugin’s gets no work divider', () => {
+    const b = builder();
+    b.turn('u1');
+    b.emit('plugin.log', { plugin: 'p', text: 'prompt seen' });
+    b.text('m1', 0, 'Hi');
+    b.end(['u1']);
+    expect(kinds(rows(b.events))).toEqual(['time', 'user', 'error', 'assistant_text']);
+  });
+
+  it('a load issue every init repeats is one notice per session, named by the plugin: an error, or a dim notice for a warning', () => {
+    const b = builder();
+    const issues = () => {
+      b.emit('plugin.load_issue', { plugin: 'broken@market', level: 'error', message: 'hooks module failed to compile' });
+      b.emit('plugin.load_issue', { plugin: 'shadowed@market', level: 'warning', message: 'commands/ shadowed by the manifest' });
+    };
+    b.turn('u1');
+    issues();
+    b.text('m1', 0, 'One');
+    b.end(['u1']);
+    b.turn('u2');
+    issues();
+    b.emit('plugin.load_issue', { plugin: 'broken@market', level: 'error', message: 'a different failure' });
+    b.text('m2', 0, 'Two');
+    b.end(['u2']);
+    expect(errors(rows(b.events)).map(({ text, severity, turnId: turn }) => [text, severity, turn])).toEqual([
+      ['Plugin broken@market failed to load · hooks module failed to compile', 'error', turnId.ofMessage(uuid('u1'))],
+      ['Plugin shadowed@market warned while loading · commands/ shadowed by the manifest', 'notice', turnId.ofMessage(uuid('u1'))],
+      ['Plugin broken@market failed to load · a different failure', 'error', turnId.ofMessage(uuid('u2'))],
+    ]);
+  });
+
+  it('a status line is state, never a row: the most recent last, \'\' clears it, the process exiting clears them all, and the rows keep their identity', () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Hi');
+    b.end(['u1']);
+    let state = reduce(b.events);
+    const before = rowsOf(state);
+    const more = builder('2026-09-28T10:01:00.000Z');
+    const status = (plugin: string, text: string) => more.emit('plugin.status', { plugin, text }, { id: `s-${more.events.length}` });
+    status('alpha', 'one');
+    status('beta', 'two');
+    status('alpha', 'three');
+    state = applyEvents(state, more.events);
+    expect(rowsOf(state)).toBe(before);
+    expect([...state.pluginStatus].map(([plugin, line]) => [plugin, line.text])).toEqual([['beta', 'two'], ['alpha', 'three']]);
+    state = applyEvents(state, [{ ...more.events[0]!, id: 's-clear' as never, text: '' } as SessionEvent]);
+    expect([...state.pluginStatus.keys()]).toEqual(['beta']);
+    state = applyEvents(state, [{ ...more.events[0]!, id: 'exit' as never, kind: 'process.exited', code: 0, signal: null, reason: 'stop', lostAttentionCount: 0, budget: null } as unknown as SessionEvent]);
+    expect(state.pluginStatus.size).toBe(0);
+  });
+});

@@ -8,8 +8,8 @@ import { replayFixture, type ConformanceRun } from './harness';
 
 // A `system` subtype or frame type the fixtures may carry without an X1 mapping. Empty: every fixture frame maps to
 // an event or to a "none" row of the table, and a new subtype in a future recording fails here, never silently.
-// R0 (2026-10-01, the mods probe on 2.1.287): the engine's remote-surface pushes, unmapped until R1 decodes them.
-const UNKNOWN_ALLOWLIST: ReadonlySet<string> = new Set(['system/ui_log', 'system/ui_status', 'system/ui_toast', 'system/ui_invalidate']);
+// (R0 admitted the remote-surface pushes here on 2026-10-01; R1 maps them to `plugin.*`.)
+const UNKNOWN_ALLOWLIST: ReadonlySet<string> = new Set();
 
 // Outbound requests the probe issued that the engine refused, or that the recording ended before answering.
 const EXPECTED_REQUEST_FAILURES: Record<string, { subtype: string; code: string }[]> = {
@@ -576,7 +576,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'session_state_changed', // C12: pass3/launch-env-state-events, under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1
       'informational', 'notification', // W1: pass3/hooks-blocking (a blocked prompt's informational, the stop-hook-error notification)
       'compact_boundary', // W1: pass3/compact
-      'ui_log', 'ui_status', 'ui_toast', 'ui_invalidate', // R0: pass3/mods-* on 2.1.287, the remote-surface pushes (allowlisted as unknown until R1)
+      'ui_log', 'ui_status', 'ui_toast', 'ui_invalidate', // R0: pass3/mods-* on 2.1.287, the remote-surface pushes (R1 maps them to plugin.*)
     ].sort());
   });
 
@@ -595,7 +595,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'context.sample', // debt wave 3: a get_context_usage answer (pass1/reads seq 57, pass3/context-sample)
       'session.state', // C12: pass3/launch-env-state-events (running, requires_action, running, idle)
       'boundary.compaction', // W1: pass3/compact seq 43
-      'frame.unknown', // R0: pass3/mods-* carry the ui_* pushes the table does not map yet (UNKNOWN_ALLOWLIST)
+      'plugin.log', 'plugin.status', 'plugin.toast', 'plugin.invalidate', // R1: pass3/mods-* (no fixture carries a plugin load error or warning)
     ].sort());
     void kinds;
   });

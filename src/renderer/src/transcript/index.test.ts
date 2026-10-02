@@ -7,7 +7,7 @@ import type { TranscriptState } from './index';
 describe('public surface', () => {
   it('exports exactly the frozen runtime names', () => {
     expect(Object.keys(surface).sort()).toEqual(
-      ['DEFAULT_ACTIONS', 'Markdown', 'registerBubbleEditor' /* W3 */, 'registerRequestRenderer', 'SUBAGENT_GLYPHS', 'SubagentGlyph', 'Transcript', 'TranscriptSlot', 'registerTranscriptActions', 'registeredActions', 'useRegisteredActions', 'applyEvents', 'createState', 'classifyTool', 'dividerCopy', 'glyphFor', 'ipcRewind', 'ipcSource', 'replaySource', 'rowsOf', 'serializeRows', 'turnActivity', 'turnSummary', 'useTranscriptStore'].sort(),
+      ['DEFAULT_ACTIONS', 'Markdown', 'registerBubbleEditor' /* W3 */, 'registerRequestRenderer', 'SUBAGENT_GLYPHS', 'SubagentGlyph', 'Transcript', 'TranscriptSlot', 'registerTranscriptActions', 'registeredActions', 'useRegisteredActions', 'applyEvents', 'createState', 'classifyTool', 'dividerCopy', 'glyphFor', 'ipcRewind', 'ipcSource', 'replaySource', 'rowsOf', 'serializeRows', 'turnActivity', 'turnSummary', 'useTranscriptStore', 'PLUGIN', 'pluginLines' /* R1 */].sort(),
     );
   });
 

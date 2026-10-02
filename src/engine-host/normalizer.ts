@@ -35,7 +35,7 @@ import {
 import type { JournalRow } from '@shared/wire/journal';
 import { bashPartOf, denialKindOf, engineUserMarkerOf, spillPathOf, stringOrNull, tokenUsageOf, type Attribution, type EventSink } from './normalizer-support';
 import { mapInboundCancel, mapInboundRequest, mapOutboundResponse, type InboundEntry } from './normalizer-controls';
-import { mapSystemFrame, type TaskRegistry } from './normalizer-system';
+import { mapSystemFrame, pluginLoadIssues, type TaskRegistry } from './normalizer-system';
 import type { SafeguardVerdict } from '@shared/graph/enums';
 
 export interface NormalizerWarning {
@@ -223,10 +223,16 @@ export class Normalizer {
       outputStyle: frame.output_style ?? null,
     }, attribution);
     if (attribution.parentToolUseId !== null) return;
-    if (this.state.pendingEcho !== null) return; // the `!` echo's own lifecycle (pass2/bash-context-echoed seq 12): opens nothing, marks nothing
-    if (this.state.currentTurn) return; // a human turn: its `started` lifecycle opened it and marked acceptance
-    this.state.currentTurn = { origin: 'engine', userMessageUuids: [], startedAt: out.at, acceptedAt: out.at };
-    out.emit({ kind: 'turn.started', userMessageUuid: null, origin: 'engine' }, attribution);
+    // Opens an engine turn only when no turn is open (a human turn: its `started` lifecycle opened it and marked
+    // acceptance) and no `!` echo awaits its receipt (the echo's own lifecycle, pass2/bash-context-echoed seq 12: opens
+    // nothing, marks nothing).
+    if (this.state.pendingEcho === null && !this.state.currentTurn) {
+      this.state.currentTurn = { origin: 'engine', userMessageUuids: [], startedAt: out.at, acceptedAt: out.at };
+      out.emit({ kind: 'turn.started', userMessageUuid: null, origin: 'engine' }, attribution);
+    }
+    // R1: the plugins that failed to load or warned, inside the turn the init belongs to; every init repeats them, and
+    // a child's init (returned above) carries its parent's
+    for (const issue of pluginLoadIssues(frame)) out.emit(issue, attribution);
   }
 
   private streamEvent(frame: StreamEventFrame, out: Emitter, attribution: Attribution): void {

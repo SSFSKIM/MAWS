@@ -4,7 +4,7 @@
 // path reaches the engine host through `engine.configure`, which main alone pushes, and this section awaits
 // `settings.engineApplied`), the engine's config home (read-only to MAWS), the subagent model new sessions launch with,
 // and (W3) the mode a session takes when the engine refuses auto. W7: the memory budget's switch, whose rows show only
-// while it is on.
+// while it is on. R1: one information line on what MAWS shows of a plugin.
 import { useQueryClient } from '@tanstack/react-query';
 import { useId } from 'react';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
@@ -86,6 +86,9 @@ export function EngineSection({ settings }: { settings: Settings }) {
         </button>
       </Setting>
       <ConfigHome />
+      <Setting label={ENGINE.plugins}>
+        <span className="text-ui-sm text-fg-muted">{ENGINE.pluginsNote}</span>
+      </Setting>
       <SubagentModel settings={settings} />
       <AutoFallback settings={settings} /> {/* W3 */}
       {/* C12 start: the memory budget and the stateful MCP servers (settings v4); W7: behind its switch (settings v7) */}

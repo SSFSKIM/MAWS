@@ -1,10 +1,32 @@
 [
   {
-    "at": "2026-10-02T03:34:37.222Z",
-    "id": "time:turn:80012f27-e058-42ad-aa93-7c43452708d0",
+    "at": "2026-10-02T03:34:28.520Z",
+    "id": "time:error:replay:journal:13:0",
     "kind": "time",
     "label": "Oct 2, 2026 3:34 AM",
-    "turnId": "turn:80012f27-e058-42ad-aa93-7c43452708d0"
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T03:34:28.520Z",
+    "attempt": null,
+    "id": "error:replay:journal:13:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_LOG start surface=null interactive=false",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T03:34:28.552Z",
+    "attempt": null,
+    "id": "error:replay:journal:16:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: loaded from this session's mods folder",
+    "turnId": null
   },
   {
     "at": "2026-10-02T03:34:37.222Z",
@@ -31,6 +53,17 @@
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
     "turnId": "turn:80012f27-e058-42ad-aa93-7c43452708d0"
+  },
+  {
+    "at": "2026-10-02T03:34:38.434Z",
+    "attempt": null,
+    "id": "error:replay:journal:43:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_LOG turn",
+    "turnId": null
   },
   {
     "at": "2026-10-02T03:34:44.721Z",

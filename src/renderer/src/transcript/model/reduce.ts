@@ -123,18 +123,29 @@ export interface TranscriptState {
   // latest throws, since a fork would read registries its predecessor never filled; M2 review ruling).
   current: TurnId | null;
   cwd: string | null; // additive (debt wave 4): the session's working directory, from its latest session.started or session.init
+  // Additive (R1): each plugin's pinned status line (`plugin.status`), the most recently set last; '' removes a plugin's
+  // line, and the session's process exiting removes them all (the plugins ran in it). A new map on every change.
+  pluginStatus: ReadonlyMap<string, PluginStatus>;
   placement: Map<EventId, TurnId | null>;
-  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId> };
+  // `pluginIssues` (R1): the load issues already retained, by plugin, level and message, so an issue every init repeats
+  // makes one notice per session.
+  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string> };
   memo: Map<TurnId, MemoEntry>;
   lineage: { latest: TranscriptState | null };
+}
+
+// R1: a plugin's pinned line and when it was set.
+export interface PluginStatus {
+  text: string;
+  at: string;
 }
 
 export function createState(sessionId: SessionId | null, agentId: AgentId | null): TranscriptState {
   return {
     sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
     ui: { expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
-    current: null, cwd: null, placement: new Map(),
-    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map() },
+    current: null, cwd: null, pluginStatus: new Map(), placement: new Map(),
+    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set() },
     memo: new Map(),
     lineage: { latest: null },
   };
@@ -600,8 +611,23 @@ function apply(batch: Batch, event: SessionEvent): void {
       if (!pushRouted(owner)) batch.loose(event);
       return;
     }
-    case 'notice.posted': {
+    case 'notice.posted':
+    case 'plugin.log': { // R1: a plugin's log line, a notice at its arrival position
       if (!pushRouted(null)) batch.loose(event);
+      return;
+    }
+    case 'plugin.load_issue': { // R1: every init repeats its plugins' issues; one notice each per session
+      const key = `${event.plugin}\u0000${event.level}\u0000${event.message}`;
+      if (index.pluginIssues.has(key)) return;
+      index.pluginIssues.add(key);
+      if (!pushRouted(null)) batch.loose(event);
+      return;
+    }
+    case 'plugin.status': { // R1: the plugin's one pinned line, moved to the end as the most recent; '' removes it
+      const next = new Map(state.pluginStatus);
+      next.delete(event.plugin);
+      if (event.text !== '') next.set(event.plugin, { text: event.text, at: event.at });
+      state.pluginStatus = next;
       return;
     }
     case 'session.reconnect':
@@ -618,6 +644,7 @@ function apply(batch: Batch, event: SessionEvent): void {
       // unknown (C4's synthesised end of a holder-less transcript whose last turn never ended on disk: the process was
       // not seen to go) is no evidence of a stop, so such a turn closes by the superseding start's rule.
       if (event.kind === 'process.exited') {
+        if (state.pluginStatus.size > 0) state.pluginStatus = new Map(); // R1: the plugins' lines went with the process
         for (const id of state.order) {
           const turn = state.turns.get(id)!;
           if (turn.state !== 'open' || !turn.accepted) continue;

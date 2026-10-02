@@ -1,8 +1,8 @@
 // The resting card shown when no tab is selected (mockup 01's "Session overview", under rulings 2 and 5): Environment,
-// Push state, Subagents, Background work and Sources, then the footer; with no session shown, the footer alone. The
-// card holds the git watch on the session's directory for as long as it is mounted (a selected tab unmounts it, so a
-// session with a tool open costs no watcher of the card's), and shows its sections once their persisted expansion is
-// read, so a collapsed section never opens for a frame.
+// Plugins while a plugin pins a status line (R1), Push state, Subagents, Background work and Sources, then the footer;
+// with no session shown, the footer alone. The card holds the git watch on the session's directory for as long as it is
+// mounted (a selected tab unmounts it, so a session with a tool open costs no watcher of the card's), and shows its
+// sections once their persisted expansion is read, so a collapsed section never opens for a frame.
 import { useEffect, type FunctionComponent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -12,6 +12,7 @@ import { useSummary } from '../../stores/summary';
 import { COPY, SUMMARY_COPY } from '../copy';
 import { BackgroundWork } from './BackgroundWork';
 import { Environment } from './Environment';
+import { Plugins } from './Plugins';
 import { PushState } from './PushState';
 import { Sources } from './Sources';
 import { Subagents } from './Subagents';
@@ -50,6 +51,7 @@ function SessionSummary({ appSessionId, record }: { appSessionId: AppSessionId; 
         <span className="min-w-0 truncate text-ui-sm font-normal text-fg-muted">{displayTitle(record)}</span>
       </h2>
       <Environment appSessionId={appSessionId} record={record} directory={directory} />
+      <Plugins appSessionId={appSessionId} />
       <PushState directory={directory} />
       <Subagents appSessionId={appSessionId} />
       <BackgroundWork appSessionId={appSessionId} />

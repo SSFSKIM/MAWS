@@ -292,6 +292,23 @@ describe('summary card', () => {
     expect(fake.invoked('layout.set')).toEqual([{ key: 'summary.sections', value: { version: 1, collapsed: ['sources'] } }]);
   });
 
+  // R1: the engine's `ui_status`, one pinned line per plugin
+  it('lists each plugin’s pinned status line after Environment, by plugin name, and drops the section when the last line clears', async () => {
+    const at = '2026-10-01T10:00:00.000Z';
+    const status = (n: number, plugin: string, text: string) => ({ id: `${A}:L:${n}:0`, sessionId: 's', at, seq: n, agentId: null, parentToolUseId: null, kind: 'plugin.status', plugin, text }) as SessionEvent;
+    let push: (batch: SessionEvent[]) => void = () => {};
+    const source = { subscribe: (listener: (batch: SessionEvent[]) => void) => ((push = listener), () => {}), snapshot: () => Promise.resolve([status(1, 'zeta', 'watching'), status(2, 'mods-probe', 'MODS_PROBE_STATUS start'), status(3, 'mods-probe', 'MODS_PROBE_STATUS turn')]) };
+    await act(() => useTranscriptStore.getState().attach(A, source));
+    await mount();
+    const card = screen.getByRole('tabpanel');
+    expect(within(card).getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['Environment', 'Plugins', 'Push state', 'Subagents', 'Background work', 'Sources']);
+    expect(within(section('Plugins')).getAllByText(/ · /).map((line) => line.textContent)).toEqual(['mods-probe · MODS_PROBE_STATUS turn', 'zeta · watching']);
+    act(() => push([status(4, 'zeta', '')]));
+    expect(within(section('Plugins')).getAllByText(/ · /).map((line) => line.textContent)).toEqual(['mods-probe · MODS_PROBE_STATUS turn']);
+    act(() => push([status(5, 'mods-probe', '')]));
+    expect(screen.queryByRole('region', { name: 'Plugins' })).toBeNull();
+  });
+
   it('a registered tool’s summary component fills its section in place of the baseline', async () => {
     const { tool } = probeTool('subagents', { title: 'Subagents', summary: ({ appSessionId, open }) => <button type="button" onClick={() => open()}>custom {appSessionId}</button> });
     offs.push(registerPanelTool(tool));

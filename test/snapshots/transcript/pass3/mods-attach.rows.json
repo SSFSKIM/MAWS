@@ -1,10 +1,21 @@
 [
   {
-    "at": "2026-10-02T03:31:50.044Z",
-    "id": "time:turn:30e3fc77-8870-4fca-8a14-65115d301cc6",
+    "at": "2026-10-02T03:31:50.003Z",
+    "id": "time:error:replay:journal:4:0",
     "kind": "time",
     "label": "Oct 2, 2026 3:31 AM",
-    "turnId": "turn:30e3fc77-8870-4fca-8a14-65115d301cc6"
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T03:31:50.003Z",
+    "attempt": null,
+    "id": "error:replay:journal:4:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_LOG start surface=null interactive=false",
+    "turnId": null
   },
   {
     "at": "2026-10-02T03:31:50.044Z",
@@ -31,6 +42,17 @@
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
     "turnId": "turn:30e3fc77-8870-4fca-8a14-65115d301cc6"
+  },
+  {
+    "at": "2026-10-02T03:31:51.690Z",
+    "attempt": null,
+    "id": "error:replay:journal:42:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_LOG turn",
+    "turnId": null
   },
   {
     "at": "2026-10-02T03:31:58.056Z",

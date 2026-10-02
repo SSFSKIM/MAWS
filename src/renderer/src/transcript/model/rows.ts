@@ -57,7 +57,7 @@ export type Row = RowBase &
       }
     | {
         kind: 'error'; severity: 'transient' | 'error' | 'notice'; text: string; attempt: { n: number; max: number | null } | null;
-        scope: 'turn' | 'task' | 'process' | 'transport' | 'request' | 'api' | 'reconnect' | 'notice' | 'exit' | 'hook'; lostAttentionCount: number | null;
+        scope: 'turn' | 'task' | 'process' | 'transport' | 'request' | 'api' | 'reconnect' | 'notice' | 'exit' | 'hook' | 'plugin'; lostAttentionCount: number | null; // R1: 'plugin', a plugin's log line (a dim notice) or load issue
         action?: 'edit_prompt' | 'engine_settings'; // W1: a hook blocked the turn's own prompt; the row offers Edit prompt (that prompt back into the composer). W13: a newer engine sent what MAWS did not understand; the row opens Settings › Engine
       }
     | { kind: 'boundary'; boundaryKind: 'compaction' | 'reset' | 'retraction' | 'rewind'; text: string; detail: string | null; hiddenRows: number; revealed: boolean }

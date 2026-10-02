@@ -195,6 +195,9 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-divider-summary { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: var(--radius-sm); color: var(--fg-muted); }
 .transcript-divider-summary:hover { color: var(--fg); background: var(--bg-hover); }
 .transcript-divider-summary svg { width: 12px; height: 12px; }
+/* R1: a plugin's most recent status line under a working divider, aligned with its label (the chevron and the gap) */
+.transcript-divider:has(+ .transcript-plugin-status) { padding-bottom: 0; }
+.transcript-plugin-status { margin: 0; padding: 0 0 14px 19px; overflow: hidden; color: var(--fg-faint); font-size: var(--text-ui-sm); white-space: nowrap; text-overflow: ellipsis; }
 .transcript-popover {
   max-width: 420px;
   padding: 10px 12px;
@@ -402,6 +405,8 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-error[data-severity="transient"] .transcript-error-mark { color: var(--warning); }
 .transcript-error[data-severity="error"] { color: var(--danger); }
 .transcript-error[data-severity="notice"] .transcript-error-mark { color: var(--info); }
+/* R1: a plugin's log line (and an advisory load warning) is a dim notice under the plugin's name */
+.transcript-error[data-scope="plugin"][data-severity="notice"], .transcript-error[data-scope="plugin"][data-severity="notice"] .transcript-error-mark { color: var(--fg-faint); }
 .transcript-error-action { flex-shrink: 0; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--fg); font-size: var(--text-ui-sm); }
 .transcript-error-action:hover { background: var(--bg-hover); }
 

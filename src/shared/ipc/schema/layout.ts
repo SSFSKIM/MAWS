@@ -150,7 +150,7 @@ export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelP
 // C8a start: the panel summary's collapsed sections (C8a execution document, Interfaces *Layout key
 // `summary.sections`*), written by `stores/summary.ts`; an absent key means every section expanded. Outside the
 // `panel.` namespace on purpose: C5's hydration reads every `panel.<x>` key as a session's list.
-export const SUMMARY_SECTIONS = ['environment', 'push', 'subagents', 'background', 'sources'] as const;
+export const SUMMARY_SECTIONS = ['environment', 'push', 'subagents', 'background', 'sources', 'plugins' /* R1 */] as const;
 export type SummarySection = (typeof SUMMARY_SECTIONS)[number];
 export const SummarySectionsSchema = z.strictObject({ version: z.literal(1), collapsed: z.array(z.enum(SUMMARY_SECTIONS)) });   // key `summary.sections`
 export type SummarySections = z.infer<typeof SummarySectionsSchema>;

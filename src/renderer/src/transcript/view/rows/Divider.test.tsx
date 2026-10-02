@@ -128,3 +128,33 @@ describe('divider row', () => {
     });
   });
 });
+
+// R1: while a turn works, the most recent status line a plugin pinned reads under its divider, the label untouched.
+describe('a plugin’s status line under the working divider', () => {
+  const statusOf = (b: ReturnType<typeof builder>, plugin: string, text: string) => b.emit('plugin.status', { plugin, text });
+
+  it('shows the most recent line across plugins while the turn works, clears with an empty text, and leaves the label alone', async () => {
+    const b = deniedTurn(false);
+    statusOf(b, 'alpha', 'indexing 3/9');
+    statusOf(b, 'beta', 'watching 2 files');
+    const store = await storeWith(b.events);
+    const divider = rowOf(store.rows(), 'divider');
+    expect(divider.state).toBe('working');
+    const view = renderRow(divider, { storeKey: store.key });
+    const line = () => view.container.querySelector('.transcript-plugin-status');
+    expect(line()?.textContent).toBe('beta · watching 2 files');
+    expect(screen.getByRole('button', { name: /Working for/ }).textContent).not.toContain('watching');
+    act(() => store.push([{ ...b.events.at(-1)!, id: 'clear-beta' as never, text: '' } as never]));
+    expect(line()?.textContent).toBe('alpha · indexing 3/9');
+    act(() => store.push([{ ...b.events.at(-2)!, id: 'clear-alpha' as never, text: '' } as never]));
+    expect(line()).toBeNull();
+  });
+
+  it('shows nothing under a completed turn’s divider', async () => {
+    const b = deniedTurn(true);
+    statusOf(b, 'alpha', 'idle');
+    const store = await storeWith(b.events);
+    const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
+    expect(view.container.querySelector('.transcript-plugin-status')).toBeNull();
+  });
+});

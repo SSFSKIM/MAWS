@@ -4,12 +4,14 @@
 // such cell (the store's jumpTo expands and scrolls); a trailing control opens the turn summary popover (§19: the
 // auto-mode verdict appears there, never on a cell line). A working turn's duration ticks. W8: a click opens or folds
 // the work area through the shared disclosure motion (motion.ts); a fold reads closed from the click on, while its rows
-// close, and the store folds the turn when they have.
+// close, and the store folds the turn when they have. R1: while the turn works, the most recent status line a plugin
+// pinned (the engine's `ui_status`) reads under the divider, muted and on one line, the label itself untouched.
 import { Popover } from 'radix-ui';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ticks, useTranscriptStore, workingDurationMs, type TranscriptEntry } from '../../../stores/transcript';
 import { dividerCopy, turnSummaryCopy } from '../../model/copy';
 import { isPersistentRow, turnPhrases } from '../../model/derive';
+import { latestPluginLine } from '../../model/plugins';
 import type { CellId, Row, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { Chevron } from './parts';
@@ -62,27 +64,41 @@ export function DividerRow({ row }: { row: DividerRowData }) {
   const label = dividerCopy({ state: row.state, origin: row.origin, durationMs, toolCalls: row.toolCalls, denied: 0, autoDenied: 0 });
   const firstOf = (disposition: 'denied' | 'auto_denied') => row.summary.denials.find((denial) => denial.disposition === disposition)?.cellId ?? null;
   return (
-    <div className="transcript-divider">
-      <button
-        type="button"
-        className="transcript-disclosure"
-        aria-expanded={open}
-        aria-controls={controls || undefined}
-        onClick={() => {
-          const target = !row.expanded;
-          motion.toggle(turn, row.expanded, () => {
-            const current = useTranscriptStore.getState().entries[storeKey]?.rows.find((candidate) => candidate.id === row.id);
-            if (current?.kind === 'divider' && current.expanded !== target) store.toggleTurn(storeKey, turn);
-          });
-        }}
-      >
-        <Chevron />
-        {label}
-      </button>
-      {row.denied > 0 && <CountLink count={row.denied} noun="denied" cell={firstOf('denied')} turnId={row.turnId!} storeKey={storeKey} />}
-      {row.autoDenied > 0 && <CountLink count={row.autoDenied} noun="auto-denied" cell={firstOf('auto_denied')} turnId={row.turnId!} storeKey={storeKey} />}
-      <TurnSummary row={row} durationMs={durationMs} />
-    </div>
+    <>
+      <div className="transcript-divider">
+        <button
+          type="button"
+          className="transcript-disclosure"
+          aria-expanded={open}
+          aria-controls={controls || undefined}
+          onClick={() => {
+            const target = !row.expanded;
+            motion.toggle(turn, row.expanded, () => {
+              const current = useTranscriptStore.getState().entries[storeKey]?.rows.find((candidate) => candidate.id === row.id);
+              if (current?.kind === 'divider' && current.expanded !== target) store.toggleTurn(storeKey, turn);
+            });
+          }}
+        >
+          <Chevron />
+          {label}
+        </button>
+        {row.denied > 0 && <CountLink count={row.denied} noun="denied" cell={firstOf('denied')} turnId={row.turnId!} storeKey={storeKey} />}
+        {row.autoDenied > 0 && <CountLink count={row.autoDenied} noun="auto-denied" cell={firstOf('auto_denied')} turnId={row.turnId!} storeKey={storeKey} />}
+        <TurnSummary row={row} durationMs={durationMs} />
+      </div>
+      {row.state === 'working' && <PluginStatusLine storeKey={storeKey} />}
+    </>
+  );
+}
+
+// R1: a string, so the divider re-renders only when the line itself changes.
+function PluginStatusLine({ storeKey }: { storeKey: string }) {
+  const line = useTranscriptStore((state) => latestPluginLine(state.entries[storeKey]?.state.pluginStatus));
+  if (line === null) return null;
+  return (
+    <p className="transcript-plugin-status" title={line}>
+      {line}
+    </p>
   );
 }
 

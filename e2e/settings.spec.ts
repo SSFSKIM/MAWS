@@ -198,6 +198,7 @@ test('settings: Engine shows the resolved binary, its version and the tested one
     const update = panel(page).getByRole('group', { name: 'Update' });
     await expect(update.getByRole('button', { name: 'Update Claude Code…' })).toBeVisible();
     await expect(update).toContainText('New sessions start on the new version; running sessions keep theirs.');
+    await expect(panel(page).getByRole('group', { name: 'Plugins' })).toContainText('Plugin hooks run in MAWS sessions as in the terminal'); // R1
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();
