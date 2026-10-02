@@ -1,8 +1,8 @@
 // §5.1's project actions that later children answer (archive sessions, remove project, reveal in Finder, the archived
 // sessions list) and the workspace's "Add project": each rendered disabled until a handler registers (residue
-// *Slots*). The shell answers "New session" (`createSession`) and "Mark all read" itself. The project-level "Add
-// directory…" is retired (charter 733051f: a project is one directory; a session's additional directories are the
-// composer's chip, §5.4).
+// *Slots*). The shell answers "New chat" (`createSession`), "Resume…" (W11) and "Mark all read" itself. The
+// project-level "Add directory…" is retired (charter 733051f: a project is one directory; a session's additional
+// directories are the composer's chip, §5.4).
 import type { ProjectId } from '@shared/graph/ids';
 import { createHandlerRegistry } from '../keymap/registry';
 

@@ -15,6 +15,7 @@ import { useSessions } from '../stores/sessions';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import type { ProjectKey } from './derive';
 import { registerProjectAction } from './project-actions';
+import { useResumePicker } from './ResumePicker';
 import { Sidebar } from './Sidebar';
 
 const nine = scenarioFile('nine-sessions');
@@ -37,6 +38,7 @@ const toggle = (user: ReturnType<typeof userEvent.setup>, name: string) => user.
 beforeEach(() => resetShellStores());
 afterEach(() => {
   cleanup();
+  useResumePicker.setState({ projectId: null });
   offs.splice(0).forEach((off) => off());
   delete (window as { maws?: MawsBridge }).maws;
 });
@@ -304,6 +306,69 @@ describe('an expanded project', () => {
     await toggle(user, 'MAWS');
     await toggle(user, 'MAWS');
     expect(sessionRows(row('MAWS'))).toHaveLength(5);
+  });
+});
+
+// W11 (I7, as the owner corrected it): the Resume… picker opens from the project row's search icon and its context menu,
+// lists the project's sessions as `claude --resume` does, and opens one.
+describe('the Resume… picker', () => {
+  beforeEach(() => {
+    fillStores(nine);
+    const maws = nine.projects.find((p) => p.id === 'proj-maws')!;
+    window.maws = fakeClient({
+      'git.worktree.list': { repoRoot: maws.directory, commonDir: `${maws.directory}/.git`, worktrees: [{ repoRoot: maws.directory, path: maws.directory, branch: 'master', head: 'abc', isMain: true, locked: false, prunable: false, managed: false }] },
+    }).client;
+  });
+  const picker = () => screen.getByRole('dialog', { name: 'Resume session' });
+  const options = () => within(picker()).queryAllByRole('option').map((o) => o.querySelector('span')!.textContent);
+
+  it('opens from the row’s search icon on the project, searches, and Enter opens the session', async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    const button = within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' });
+    expect(button.title).toBe('Resume a session…');
+    await user.click(button);
+    expect(expanded()).toEqual([]); // the click does not toggle the row
+    expect(within(picker()).getByTestId('resume-scope').textContent).toBe('MAWS');
+    expect(options().sort()).toEqual(['Charter + research', 'Fix sidebar drag', 'Sidebar interaction pass', 'Workstation north star']);
+    expect(within(picker()).getAllByRole('option')[0].querySelectorAll('span')[1].textContent).toMatch(/^(now|\d+[mhdw] ago)( · [^·]+)?$/); // age · branch
+    await user.keyboard('drag');
+    expect(options()).toEqual(['Fix sidebar drag']);
+    await user.keyboard('{Enter}');
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Fix sidebar drag') });
+    expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
+  });
+
+  it('⌃A widens to every project, ⌘Enter opens in a new tab, Esc closes', async () => {
+    const user = userEvent.setup();
+    act(() => useLayout.getState().openSession(idOf('Charter + research')));
+    render(<Sidebar />);
+    await user.click(within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' }));
+    await user.keyboard('{Control>}a{/Control}');
+    expect(within(picker()).getByRole('button', { name: /^All projects/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(picker()).getByTestId('resume-scope').textContent).toBe('All projects');
+    expect(options()).toContain('Quota reset recovery');
+    expect(options()).toContain('Terminal workflow notes');
+    await user.keyboard('quota{Meta>}{Enter}{/Meta}');
+    const panes = useLayout.getState().main.panes;
+    expect(panes[0].tabs.map((t) => (t.kind === 'session' ? t.appSessionId : t.id))).toEqual([idOf('Charter + research'), idOf('Quota reset recovery')]);
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: idOf('Quota reset recovery') });
+    await user.click(within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' }));
+    expect(within(picker()).getByRole('button', { name: /^All projects/ }).getAttribute('aria-pressed')).toBe('false'); // a fresh picker
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Resume session' })).toBeNull();
+  });
+
+  it('⌃B keeps the checkout’s branch; the project’s context menu offers Resume… too', async () => {
+    const user = userEvent.setup();
+    fillStores({ ...nine, sessions: nine.sessions.map((r) => (r.projectId === 'proj-maws' ? { ...r, branch: r.title.text === 'Fix sidebar drag' ? 'master' : 'feature' } : r)) });
+    render(<Sidebar />);
+    fireEvent.contextMenu(row('MAWS'));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent).slice(0, 2)).toEqual(['New chat', 'Resume…']);
+    await user.click(within(menu).getByRole('menuitem', { name: 'Resume…' }));
+    await user.keyboard('{Control>}b{/Control}');
+    await waitFor(() => expect(options()).toEqual(['Fix sidebar drag']));
   });
 });
 

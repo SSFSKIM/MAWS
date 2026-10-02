@@ -10,6 +10,7 @@ import { ipc } from '../ipc/client';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { useSessions } from '../stores/sessions';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
+import { openResumePicker } from './ResumePicker';
 
 export type MenuTarget = { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId };
 
@@ -66,7 +67,11 @@ function ProjectItems({ projectId }: { projectId: ProjectId }) {
   return (
     <>
       <Item enabled={canCreate} onSelect={() => void createSession(projectId)}>
-        New session
+        New chat
+      </Item>
+      {/* W11 (I7): the project's Resume… picker, as the row's search icon opens it */}
+      <Item enabled onSelect={() => openResumePicker(projectId)}>
+        Resume…
       </Item>
       <Item enabled={unread.length > 0} onSelect={() => void markAllRead(unread)}>
         Mark all read

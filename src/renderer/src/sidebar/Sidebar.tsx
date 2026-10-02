@@ -23,6 +23,7 @@ import { openDialog } from '../sessions/dialogs';
 import { filterProjectList, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, type ProjectEntry, type ProjectKey } from './derive';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
 import { ProjectRow, ShowMoreRow } from './ProjectRow';
+import { ResumePickerHost } from './ResumePicker';
 import { registerProjectRevealer } from './reveal';
 import { runAddProject, useAddProjectEnabled } from './project-actions';
 import { Search } from './Search';
@@ -255,6 +256,7 @@ function SidebarBody() {
         </ContextMenu.Trigger>
         <SidebarMenuContent target={menuTarget} />
       </ContextMenu.Root>
+      <ResumePickerHost />
     </TreeContext.Provider>
   );
 }
