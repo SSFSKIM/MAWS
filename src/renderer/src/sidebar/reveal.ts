@@ -16,8 +16,9 @@ export function registerProjectRevealer(fn: (projectId: ProjectId) => void): () 
 }
 
 export function revealProject(projectId: ProjectId): void {
-  const { regions, setSidebar } = useLayout.getState();
-  const expanded = regions.sidebar.expandedProjects;
-  setSidebar({ collapsed: false, ...(expanded.includes(projectId) ? {} : { expandedProjects: [...expanded, projectId] }) });
+  useLayout.getState().setSidebar(({ expandedProjects }) => ({
+    collapsed: false,
+    expandedProjects: expandedProjects.includes(projectId) ? expandedProjects : [...expandedProjects, projectId],
+  }));
   revealer?.(projectId);
 }

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge, ProjectRecord } from '@shared/ipc/schema';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerSessionAction } from '../app/session-actions';
 import { registerSessionCreator } from '../keymap/actions-runtime';
@@ -82,6 +83,18 @@ describe('the project list', () => {
     expect(expanded()).toEqual(['proj-codex-somersault']);
     expect(row('MAWS').getAttribute('aria-expanded')).toBe('false');
     await waitFor(() => expect(sessionRows(row('MAWS'))).toEqual([])); // once the close has run
+  });
+
+  it('a click before the layout hydrates expands over the saved expansions, not in place of them', async () => {
+    const user = userEvent.setup();
+    act(() => useLayout.setState({ hydrated: false }));
+    render(<Sidebar />);
+    await toggle(user, 'MAWS');
+    expect(expanded()).toEqual(['proj-maws']);
+    const saved = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, expandedProjects: ['proj-codex-somersault'] } };
+    const client = fakeClient({ 'layout.list': { keys: ['regions'] }, 'layout.get': ({ key }: { key: string }) => ({ value: key === 'regions' ? saved : null }), 'layout.set': undefined }).client;
+    await act(() => useLayout.getState().hydrate(client, () => true));
+    expect(expanded()).toEqual(['proj-codex-somersault', 'proj-maws']);
   });
 
   it('opens what the layout says, and passes over a project that is gone', () => {

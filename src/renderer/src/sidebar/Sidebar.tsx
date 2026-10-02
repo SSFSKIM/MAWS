@@ -155,14 +155,17 @@ function SidebarBody() {
 
   const toggleProject = (key: ProjectKey) => {
     if (searching) return; // a search shows its matches open without changing what is expanded
-    const list = sidebar.expandedProjects;
-    const open = list.includes(key);
+    const open = sidebar.expandedProjects.includes(key);
     if (open && more.has(key)) {
       const next = new Set(more);
       next.delete(key);
       setMore(next); // a project opened again shows its first five
     }
-    useLayout.getState().setSidebar({ expandedProjects: open ? list.filter((k) => k !== key) : [...list, key] });
+    // Closes or opens the row as seen, over whatever list it lands on (a click before the layout hydrates is replayed
+    // over the saved expansions).
+    useLayout.getState().setSidebar(({ expandedProjects: list }) => ({
+      expandedProjects: open ? list.filter((k) => k !== key) : list.includes(key) ? list : [...list, key],
+    }));
   };
   const showMore = (key: ProjectKey | null) => {
     if (key === null) {
