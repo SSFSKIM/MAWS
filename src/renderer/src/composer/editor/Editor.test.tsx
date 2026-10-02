@@ -508,7 +508,7 @@ it.each([
   await act(async () => {});
   const afterCompletion = handle.current!.serialize().display;
   mounted.unmount(); // Flush the replacement draft, then prove persistence on another mount.
-  mounted = render(view());
+  render(view());
   await act(async () => {});
   expect(whilePending).toBe('original submission');
   expect(queued).toEqual(prefill);
