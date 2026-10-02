@@ -105,7 +105,7 @@ describe('the project list', () => {
     await user.click(row('Other sessions'));
     expect(useLayout.getState().regions.sidebar.openProject).toBe('other');
     expect(sessionRows(pageTree('Other sessions'))).toEqual(['Terminal workflow notes']);
-    expect(screen.queryByRole('button', { name: /New session in/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /New chat in/ })).toBeNull();
   });
 });
 
@@ -267,10 +267,10 @@ describe('a project’s page', () => {
     expect(groups.map((g) => sessionRows(g))).toEqual([['Sidebar interaction pass'], ['Charter + research'], ['Fix sidebar drag']]);
     expect(sessionRows(pageTree('MAWS'))[0]).toBe('Workstation north star'); // pinned, above the groups
     const user = userEvent.setup();
-    await user.click(within(groups[1]).getByRole('button', { name: 'New session in MAWS-sibling' }));
+    await user.click(within(groups[1]).getByRole('button', { name: 'New chat in MAWS-sibling' }));
     expect(creator).toHaveBeenCalledWith('proj-maws', { kind: 'existingWorktree', repoRoot: '/Users/new/Developer/GitHub/MAWS', path: '/Users/new/Developer/GitHub/MAWS-sibling' });
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: 'app-new-wt' });
-    await user.click(within(groups[0]).getByRole('button', { name: 'New session in Main' }));
+    await user.click(within(groups[0]).getByRole('button', { name: 'New chat in Main' }));
     expect(creator).toHaveBeenLastCalledWith('proj-maws');
   });
 
@@ -334,7 +334,7 @@ describe('new sessions from the sidebar', () => {
 
   it('"+" is disabled with "Not available here" while no creator is registered', () => {
     render(<Sidebar />);
-    const plus = within(row('MAWS')).getByRole('button', { name: 'New session in MAWS' }) as HTMLButtonElement;
+    const plus = within(row('MAWS')).getByRole('button', { name: 'New chat in MAWS' }) as HTMLButtonElement;
     expect(plus.disabled).toBe(true);
     expect(plus.title).toBe('Not available here');
   });
@@ -344,13 +344,13 @@ describe('new sessions from the sidebar', () => {
     const creator = vi.fn(async () => 'app-new-1' as AppSessionId);
     offs.push(registerSessionCreator(creator));
     render(<Sidebar />);
-    await user.click(within(row('MAWS')).getByRole('button', { name: 'New session in MAWS' }));
+    await user.click(within(row('MAWS')).getByRole('button', { name: 'New chat in MAWS' }));
     expect(creator).toHaveBeenCalledWith('proj-maws');
     expect(useLayout.getState().regions.sidebar.openProject).toBeNull(); // the "+" does not open the page
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: 'app-new-1' });
     expect(useSessions.getState().unstarted.get('app-new-1' as AppSessionId)?.projectId).toBe('proj-maws');
     openPage('proj-maws');
-    await user.click(within(screen.getByRole('heading', { name: 'MAWS' }).parentElement!).getByRole('button', { name: 'New session in MAWS' }));
+    await user.click(within(screen.getByRole('heading', { name: 'MAWS' }).parentElement!).getByRole('button', { name: 'New chat in MAWS' }));
     expect(creator).toHaveBeenCalledTimes(2);
     expect(sessionRows(pageTree('MAWS'))).toHaveLength(4);
   });

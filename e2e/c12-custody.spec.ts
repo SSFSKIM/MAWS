@@ -110,7 +110,7 @@ async function plus(page: Page, first: string): Promise<AppSessionId> {
   await invoke(page, 'session.projects.add', { directory: s.repo }); // a relaunch finds it already added
   const known = new Set(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId));
   await openProject(page, 'repo'); // W5: the "+" beside the name on the project's page
-  await sidebar(page).locator('[data-level-pane="2"]').getByRole('button', { name: 'New session in repo', exact: true }).click();
+  await sidebar(page).locator('[data-level-pane="2"]').getByRole('button', { name: 'New chat in repo', exact: true }).click();
   let id: AppSessionId | undefined;
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !known.has(i.appSessionId))?.appSessionId)).toBeDefined();
   value(await invoke(page, 'session.intent.patch', { appSessionId: id!, patch: { model: 'haiku' } }));

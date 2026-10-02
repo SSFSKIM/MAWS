@@ -42,8 +42,8 @@ export function ProjectRow({ entry, onOpen }: { entry: ProjectEntry; onOpen(key:
         <button
           type="button"
           tabIndex={-1}
-          aria-label={`New session in ${name}`}
-          title={canCreate ? `New session in ${name}` : 'Not available here'}
+          aria-label={`New chat in ${name}`}
+          title={canCreate ? `New chat in ${name}` : 'Not available here'}
           disabled={!canCreate}
           onClick={(event) => {
             event.stopPropagation();

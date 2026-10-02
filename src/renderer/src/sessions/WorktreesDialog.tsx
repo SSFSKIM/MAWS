@@ -152,7 +152,7 @@ function Row({ projectId, repoRoot, row }: { projectId: ProjectId; repoRoot: str
               onClick={() => void newSessionHere()}
               className={SECONDARY}
             >
-              New session here
+              New chat here
             </button>
             <button type="button" disabled={!row.removable} title={row.claim ?? undefined} onClick={remove} className={QUIET}>
               Remove…

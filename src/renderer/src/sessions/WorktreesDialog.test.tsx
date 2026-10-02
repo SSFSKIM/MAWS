@@ -79,7 +79,7 @@ describe('Worktrees… dialog', () => {
     expect(within(rows[1]!).getByRole('button', { name: 'Bound work' })).toBeTruthy();
     expect(within(rows[2]!).getByText('dirty · 3 changes')).toBeTruthy();
     expect(within(rows[2]!).getByText('No session')).toBeTruthy();
-    expect(within(rows[3]!).getByRole('button', { name: 'New session here' }).hasAttribute('disabled')).toBe(true);
+    expect(within(rows[3]!).getByRole('button', { name: 'New chat here' }).hasAttribute('disabled')).toBe(true);
     expect(fake.invoked('git.worktree.list')).toEqual([{ repoRoot: REPO }]);
   });
 
@@ -91,11 +91,11 @@ describe('Worktrees… dialog', () => {
     expect(within(row).getByRole('button', { name: 'Remove…' }).hasAttribute('disabled')).toBe(true);
   });
 
-  it('New session here creates an unstarted session, sets its location to the checkout, opens its tab and closes the dialog', async () => {
+  it('New chat here creates an unstarted session, sets its location to the checkout, opens its tab and closes the dialog', async () => {
     const offCreator = registerSessionCreator(async () => NEW);
     try {
       const row = await rowNamed(await open(), 'orphan');
-      await userEvent.click(within(row).getByRole('button', { name: 'New session here' }));
+      await userEvent.click(within(row).getByRole('button', { name: 'New chat here' }));
       await waitFor(() => expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: NEW, patch: { location: { kind: 'existingWorktree', repoRoot: REPO, path: at('orphan') } } }]));
       await waitFor(() => expect(useDialogs.getState().open).toBeNull());
       expect(useLayout.getState().main.panes.flatMap((p) => p.tabs).some((t) => t.kind === 'session' && t.appSessionId === NEW)).toBe(true);

@@ -98,7 +98,7 @@ async function addProject(page: Page, directory: string): Promise<{ id: string; 
 // creator; the tab opens on the unstarted session's heading.
 async function plus(page: Page, name: string): Promise<string> {
   await openProject(page, name);
-  await page.locator('[data-region="sidebar"] [data-level-pane="2"]').getByRole('button', { name: `New session in ${name}`, exact: true }).click();
+  await page.locator('[data-region="sidebar"] [data-level-pane="2"]').getByRole('button', { name: `New chat in ${name}`, exact: true }).click();
   await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
   const intents = value(await invoke(page, 'session.intent.list', undefined)).intents;
   return intents.at(-1)!.appSessionId;
@@ -676,7 +676,7 @@ test.describe('sessions', () => {
     await page.getByRole('button', { name: 'Add project' }).first().click();
     await expect.poll(async () => value(await invoke(page, 'session.projects.list', undefined)).projects.map((p) => p.directory)).toEqual([repo.root]);
     const [added] = value(await invoke(page, 'session.projects.list', undefined)).projects;
-    await expect(page.getByRole('button', { name: `New session in ${added!.name}`, exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: `New chat in ${added!.name}`, exact: true })).toBeVisible();
     expect(maws.consoleErrors()).toEqual([]);
   });
 

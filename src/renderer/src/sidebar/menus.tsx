@@ -66,7 +66,7 @@ function ProjectItems({ projectId }: { projectId: ProjectId }) {
   return (
     <>
       <Item enabled={canCreate} onSelect={() => void createSession(projectId)}>
-        New session
+        New chat
       </Item>
       <Item enabled={unread.length > 0} onSelect={() => void markAllRead(unread)}>
         Mark all read
