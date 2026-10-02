@@ -96,14 +96,15 @@ export function scratchConfigHome(): string {
   return dir;
 }
 
-// The provenance every pass-3 fixture C3 exports carries first (M6).
+// The provenance every pass-3 fixture C3 exports carries first (M6); another child's probe passes its own.
 export const PROVENANCE = { charter: 'docs/charter.md', child: 'C3', pin: '87f8c7881119ea670901205dae35917d3751459c' } as const;
+export type Provenance = { readonly charter: string; readonly child: string; readonly pin: string } & Readonly<Record<string, string>>;
 
 // A live journal as a checked-in fixture: the provenance meta row first, at seq 0 so every live row keeps its seq (a
 // pin written against the live journal reads the same against the fixture), then the whole file through the probe's
 // redaction, the `spawn` row included.
-export function exportFixture(journalText: string, env: Record<string, string> = stringEnv(process.env), at = new Date().toISOString()): string {
-  const provenance = JSON.stringify({ seq: 0, direction: 'meta', at, frame: { event: 'provenance', ...PROVENANCE } });
+export function exportFixture(journalText: string, env: Record<string, string> = stringEnv(process.env), at = new Date().toISOString(), fields: Provenance = PROVENANCE): string {
+  const provenance = JSON.stringify({ seq: 0, direction: 'meta', at, frame: { event: 'provenance', ...fields } });
   const body = journalText.endsWith('\n') ? journalText : `${journalText}\n`;
   return redactJournal(`${provenance}\n${body}`, env);
 }

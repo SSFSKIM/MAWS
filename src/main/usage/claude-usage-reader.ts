@@ -88,6 +88,7 @@ export class ClaudeUsageReader {
     if (this.floor) clearInterval(this.floor);
     this.debounce = null;
     this.floor = null;
+    void this.requests.close().catch((error: unknown) => this.log(`gateway-requests.jsonl not closed: ${messageOf(error)}`)); // debt wave 7: the ledger holds it open
   }
 
   // `settings.usage`: the snapshot with `pinsFor` for these ids, which later `settings.usageChanged` events also carry.

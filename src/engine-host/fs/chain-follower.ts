@@ -21,7 +21,7 @@ export interface Skeleton {
   type: string;
   isProgress: boolean;
   startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
-  endsTurn: boolean; // a `system/turn_duration` record, the one disk record that ends a turn (backfill's `turn.ended`)
+  endsTurn: boolean; // a `system/turn_duration` record (backfill's `turn.ended`); not a blocked prompt's record, also written for a steer dropped mid-turn
   own: boolean; // W7: written by an SDK-entrypoint process, MAWS's (`entrypoint: 'sdk-ts'`, pass3/w7-collision)
   timestamp: string | null;
   offset: number; // byte position of the line (leading NULs included); re-reading [offset, offset + length) yields the record
