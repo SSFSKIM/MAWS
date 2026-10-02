@@ -207,7 +207,8 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
 // the parent's `process.exited`), so a drill-in opened before the child's first event still follows the live stream;
 // disk otherwise (it ended, or the parent is disk-backed). The parent's report that the child ended joins the child's
 // slice, where it closes the child's open turn (reduce.ts). A live child that ends switches to disk and signals a
-// reset, so the store rebuilds the key from the disk transcript. Disk is final.
+// reset, so the store rebuilds the key from the disk transcript. Disk provenance is final, but lifecycle is not:
+// the same agent id can resume, and a parent relaunch can stop its disk follower.
 //
 // The same events reach `session.eventBatch` in two forms, the live journal's (with their row's `seq`) and the disk
 // transcript's (`seq: null`, ruling 5 of the wave-2 ledger), under different ids, so id deduplication cannot merge
@@ -216,6 +217,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
 interface Subscriber {
   listener: (events: SessionEvent[]) => void;
   held: SessionEvent[][]; // batches that arrived before the provenance was decided
+  ended: AbortController;
 }
 
 function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: AgentId): TranscriptSource {
@@ -223,6 +225,9 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   let ended: SessionEvent | null = null; // the parent's report that the child ended, for the disk slice
   const resets = new Set<() => void>();
   const subscribers = new Set<Subscriber>();
+  const lifecycleSeen = new Set<EventId>();
+  let lifecycleRevision = 0;
+  let resetPending = false;
   // For local agents the engine's task id and the sidecar's agent id carry the same string (C1 Interfaces, observed in
   // the fixtures); X1 keeps them as two types, so the comparison is on the strings.
   const names = (taskId: string) => taskId === (agentId as string);
@@ -251,18 +256,25 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       return;
     }
     const passed: SessionEvent[] = [];
-    let end: SessionEvent | null = null;
+    let changedEnd = false;
     for (const event of events) {
-      if (starts(event)) startedInStream = true;
       const ends = endsChild(event);
-      if ((own(event) && liveForm(event) === (provenance === 'live')) || finishes(event) || (provenance === 'live' && ends)) passed.push(event);
-      if (ends && provenance === 'live') end ??= event;
+      if ((starts(event) || ends) && !lifecycleSeen.has(event.id)) {
+        lifecycleSeen.add(event.id);
+        lifecycleRevision++;
+        if (starts(event)) {
+          startedInStream = true;
+          ended = null;
+        } else {
+          ended = event;
+          changedEnd = true;
+        }
+      }
+      if ((own(event) && liveForm(event) === (provenance === 'live')) || (provenance === 'live' && ends)) passed.push(event);
     }
     if (passed.length > 0) subscriber.listener(passed);
-    if (end && provenance === 'live') {
-      ended ??= end;
-      toDisk();
-    }
+    // On disk too, a newly observed finish must follow the complete backfill, not overtake it in a batch.
+    if (changedEnd && ended !== null) toDisk();
   };
   const decide = (chosen: 'live' | 'disk') => {
     provenance = chosen;
@@ -272,7 +284,10 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   // never receive that batch a second time.
   const toDisk = () => {
     decide('disk');
+    if (resetPending) return;
+    resetPending = true;
     queueMicrotask(() => {
+      resetPending = false;
       for (const listener of [...resets]) listener();
     });
   };
@@ -280,37 +295,74 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
     key: `${appSessionId}:${agentId}`,
     agentId,
     subscribe(listener) {
-      const subscriber: Subscriber = { listener, held: [] };
+      const subscriber: Subscriber = { listener, held: [], ended: new AbortController() };
       subscribers.add(subscriber);
       const off = client.on('session.eventBatch', (batch) => {
         if (batch.appSessionId === appSessionId) receive(subscriber, batch.events);
       });
+      const offFollow = client.on('fs.followState', (state) => {
+        // Both resume and the index's live-status handling stop all session followers. The child's stopped event
+        // comes after its entry was removed, unlike parent status (which can precede the index's queued unfollow).
+        if (state.appSessionId === appSessionId && state.agentId === agentId && state.state === 'stopped' && provenance === 'disk') toDisk();
+      });
       return () => {
         subscribers.delete(subscriber);
+        subscriber.ended.abort();
         off();
+        offFollow();
       };
     },
     async snapshot() {
+      const attached = [...subscribers];
+      const detached = () => attached.length > 0 && attached.every((subscriber) => !subscribers.has(subscriber));
+      const revision = lifecycleRevision;
       const onDisk = () => provenance === 'disk'; // read after the await: the child may have ended meanwhile
-      if (!onDisk()) {
-        const parent = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null })).events;
-        const started = parent.findLastIndex(starts);
-        startAt = started;
-        parent.forEach((event, i) => {
-          if (exits(event)) exitsAt.set(event.id, i);
-        });
-        // What ended the child: a finish after its start (or anywhere, when the snapshot never started it), or the
-        // parent's exit after its start (mounted after a crash).
-        const end = parent.findLastIndex((event, i) => finishes(event) || (started >= 0 && i > started && exits(event)));
-        if (end > started || (started < 0 && end >= 0)) ended ??= parent[end];
-        if (started >= 0 && end < started && liveForm(parent[started]) && !onDisk()) {
-          decide('live');
-          return parent.filter((event) => own(event) && liveForm(event));
-        }
+      // Even disk provenance must refresh lifecycle: a closed/reopened child may have resumed unobserved.
+      const parent = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null })).events;
+      if (detached()) return [];
+      const started = parent.findLastIndex(starts);
+      startAt = started;
+      exitsAt.clear();
+      parent.forEach((event, i) => {
+        if (exits(event)) exitsAt.set(event.id, i);
+        if (starts(event) || finishes(event) || exits(event)) lifecycleSeen.add(event.id);
+      });
+      const end = parent.findLastIndex((event, i) => finishes(event) || (started >= 0 && i > started && exits(event)));
+      // A batch heard during the read is newer than the snapshot; never restore its superseded completion.
+      if (revision === lifecycleRevision) ended = end > started || (started < 0 && end >= 0) ? parent[end] : null;
+      if (started >= 0 && end < started && liveForm(parent[started]) && !onDisk()) {
+        decide('live');
+        return parent.filter((event) => own(event) && liveForm(event));
       }
       if (!onDisk()) decide('disk');
-      const disk = valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId })).events;
-      return ended === null ? disk : [...disk, ended];
+      // An incomplete snapshot is not terminal history. Listen before reading so a completed backfill during the
+      // round trip is not missed; re-read on its following state, never spin on a reloading/error follower.
+      let changed = false;
+      let failure: string | null = null;
+      let wake: (() => void) | null = null;
+      const signal = () => { changed = true; wake?.(); };
+      const offFollow = client.on('fs.followState', (state) => {
+        if (state.appSessionId !== appSessionId || state.agentId !== agentId) return;
+        if (state.state === 'error') failure = state.message ?? 'Child transcript backfill failed';
+        if (state.state === 'following' || state.state === 'error' || state.state === 'stopped') signal();
+      });
+      for (const subscriber of attached) subscriber.ended.signal.addEventListener('abort', signal);
+      try {
+        for (;;) {
+          changed = false;
+          const disk = valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId }));
+          if (detached()) return [];
+          if (disk.complete) return ended === null ? disk.events : [...disk.events, ended];
+          if (failure !== null) throw new Error(failure);
+          if (!changed) await new Promise<void>((resolve) => { wake = resolve; });
+          wake = null;
+          if (detached()) return [];
+          if (failure !== null) throw new Error(failure);
+        }
+      } finally {
+        offFollow();
+        for (const subscriber of attached) subscriber.ended.signal.removeEventListener('abort', signal);
+      }
     },
     onReset(listener) {
       resets.add(listener);

@@ -384,6 +384,9 @@ describe('child source provenance', () => {
     call.answered = true;
     call.answer({ ok: true, value } as never);
   };
+  const followState = (state: 'following' | 'stopped' | 'error'): EventPayload<'fs.followState'> => ({
+    appSessionId: APP, agentId: AGENT, state, chainLength: 0, leafUuid: null, gap: null, skippedLines: 0, message: null,
+  });
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const dividerOf = (key: string) => useTranscriptStore.getState().rows(key).find((row): row is Extract<Row, { kind: 'divider' }> => row.kind === 'divider')!;
 
@@ -458,6 +461,123 @@ describe('child source provenance', () => {
     await expect(snapshot).resolves.toEqual([...disk, finished]);
   });
 
+  it('waits for an incomplete empty child backfill before applying the parent completion', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const done = finish(AGENT, '2026-09-28T10:00:09.000Z', 'completed');
+    const fake = fakeClient();
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: [...parent, done], lastSeq: 9, complete: true });
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: [], complete: false });
+    await flush();
+    expect(useTranscriptStore.getState().entries[CHILD_KEY].phase).toBe('hydrating');
+    fake.emit('session.eventBatch', batch(disk));
+    fake.emit('fs.followState', followState('following'));
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await hydrated;
+    expect(dividerOf(CHILD_KEY).state).toBe('completed');
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual([...disk, done].map((e) => e.id));
+  });
+
+  it('reacquires a mounted disk child after both parent relaunch unfollows, including a late index stop', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    const history = { events: parent.map((e) => ({ ...e, seq: null })), lastSeq: 0, complete: true };
+    answer(fake, 'session.events', history);
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk.slice(0, 2), complete: true });
+    await hydrated;
+    // Resume stops all followers; no other child consumer restarts this one.
+    fake.emit('fs.followState', followState('stopped'));
+    await flush();
+    expect(fake.calls.filter((c) => c.name === 'session.events')).toHaveLength(2);
+    answer(fake, 'session.events', history);
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk.slice(0, 3), complete: true });
+    await flush();
+    fake.emit('session.eventBatch', batch([...child.slice(3), ...disk.slice(3)]));
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.map((e) => e.id));
+    // The index's separately queued unfollow arrives after the first re-acquisition.
+    fake.emit('fs.followState', followState('stopped'));
+    await flush();
+    answer(fake, 'session.events', history);
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await flush();
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.map((e) => e.id));
+    fake.emit('fs.followState', { ...followState('stopped'), agentId: null });
+    fake.emit('fs.followState', { ...followState('stopped'), appSessionId: 'another' as AppSessionId });
+    await flush();
+    expect(fake.calls.filter((c) => c.name === 'fs.agentEvents')).toHaveLength(3);
+    useTranscriptStore.getState().detach(CHILD_KEY);
+    expect(fake.listeners.get('fs.followState')?.size).toBe(0);
+  });
+
+  it('refreshes a disk child completion after an unobserved same-agent resume', async () => {
+    // pass3/relay-to-child.jsonl seq 517 task_notification, seq 548 task_started: the same task id resumes.
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const done = finish(AGENT, '2026-09-28T10:00:09.000Z', 'completed');
+    const fake = fakeClient();
+    const source = childSource(fake);
+    const first = source.snapshot();
+    answer(fake, 'session.events', { events: [...parent, done], lastSeq: 517, complete: true });
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await expect(first).resolves.toEqual([...disk, done]);
+    const resumed = { ...parent.find((e) => e.kind === 'subagent.started')!, id: 'resumed' as EventId, seq: 548 };
+    const second = source.snapshot();
+    expect(fake.calls.at(-1)?.name).toBe('session.events');
+    answer(fake, 'session.events', { events: [...parent, done, resumed], lastSeq: 548, complete: true });
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    const events = await second;
+    expect(events).toEqual(disk);
+    const state = applyEvents(createState(null, AGENT), events);
+    expect(rowsOf(state).find((row) => row.kind === 'divider')).toMatchObject({ state: 'working' });
+  });
+
+  it('does not restore an old completion when a same-agent start arrives during the parent read', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const done = finish(AGENT, '2026-09-28T10:00:09.000Z', 'completed');
+    const fake = fakeClient();
+    const source = childSource(fake);
+    const off = source.subscribe(() => {});
+    const history = { events: [...parent, done], lastSeq: 517, complete: true };
+    const first = source.snapshot();
+    answer(fake, 'session.events', history);
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await first;
+    const second = source.snapshot();
+    fake.emit('session.eventBatch', batch([{ ...parent.find((e) => e.kind === 'subagent.started')!, id: 'resumed' as EventId, seq: 548 }]));
+    answer(fake, 'session.events', history); // the response was captured before the new start
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await expect(second).resolves.toEqual(disk);
+    off();
+  });
+
+  it('stops requesting incomplete backfill when its attachment is detached', async () => {
+    const fake = fakeClient();
+    const source = childSource(fake);
+    const off = source.subscribe(() => {});
+    const snapshot = source.snapshot();
+    answer(fake, 'session.events', { events: [], lastSeq: 0, complete: true });
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: [], complete: false });
+    await flush();
+    off();
+    await expect(snapshot).resolves.toEqual([]);
+    expect(fake.calls.filter((c) => c.name === 'fs.agentEvents')).toHaveLength(1);
+    expect(fake.listeners.get('fs.followState')?.size).toBe(0);
+  });
+
   it('a drill-in opened before the child’s first event follows the live stream and never reads fs.agentEvents while the child runs', async () => {
     const { parent, child } = live();
     const fake = fakeClient();
@@ -487,7 +607,9 @@ describe('child source provenance', () => {
     fake.emit('session.eventBatch', batch([finished]));
     expect(divider().state).toBe('completed'); // delivered into the slice before the reset
     await flush();
-    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'fs.agentEvents']); // the reset still follows the batch that ended the child
+    answer(fake, 'session.events', { events: [...parent, ...child, finished], lastSeq: 10, complete: true });
+    await flush();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'session.events', 'fs.agentEvents']); // reset refreshes lifecycle too
     answer(fake, 'fs.agentEvents', { events: disk, complete: true });
     await flush();
     expect(useTranscriptStore.getState().entries[CHILD_KEY].phase).toBe('live');
@@ -607,7 +729,9 @@ describe('child source provenance', () => {
     await Promise.resolve(); // the reset follows the batch that carried the end
     expect(useTranscriptStore.getState().entries[CHILD_KEY]).toMatchObject({ phase: 'hydrating' });
     expect(useTranscriptStore.getState().rows(CHILD_KEY)).toEqual([]); // the live id form is gone
-    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'fs.agentEvents']);
+    answer(fake, 'session.events', { events: [...parent, exit], lastSeq: 10, complete: true });
+    await flush();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'session.events', 'fs.agentEvents']);
     fake.emit('session.eventBatch', batch(disk.slice(2, 3))); // the disk follower, buffered until the backfill lands
     answer(fake, 'fs.agentEvents', { events: disk, complete: true });
     await flush();
@@ -632,6 +756,8 @@ describe('child source provenance', () => {
     const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null /* C12 */ }, { id: 'exit' });
     fake.emit('session.eventBatch', batch([exit]));
     await Promise.resolve(); // reset: now hydrating from disk
+    answer(fake, 'session.events', { events: [...parent, exit], lastSeq: 10, complete: true });
+    await flush();
     // Pending live-form batches still in flight, interleaved with the disk follower's, while the backfill is pending.
     fake.emit('session.eventBatch', batch([child[2], disk[2]]));
     fake.emit('session.eventBatch', batch([child[3]]));
@@ -749,7 +875,9 @@ describe('child source provenance', () => {
       await flush();
       expect(resets).toHaveBeenCalledTimes(1);
       const again = source.snapshot();
-      expect(fake.calls.at(-1)?.name).toBe('fs.agentEvents'); // disk from here on
+      answer(fake, 'session.events', { events: [...parent, ...ending(AGENT, '2026-09-28T10:00:11.000Z')], lastSeq: 10, complete: true });
+      await flush();
+      expect(fake.calls.at(-1)?.name).toBe('fs.agentEvents'); // disk provenance, refreshed lifecycle
       answer(fake, 'fs.agentEvents', { events: onDisk(child), complete: true });
       await again;
     }
