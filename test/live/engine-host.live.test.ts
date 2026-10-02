@@ -22,7 +22,7 @@ import { ChainFollower } from '../../src/engine-host/fs/chain-follower'; // W7: 
 import { FsFileReader } from '../../src/engine-host/fs/follow';
 import { HolderRegistry } from '../../src/engine-host/fs/holders';
 import { resolveStorePaths } from '../../src/engine-host/fs/paths';
-import { exportFixture, frameInventory, LiveLedger, liveGate, liveSpec, redactJournal, scratchConfigHome, turnAttribution, withRawProcess, type LiveContext } from './support/live';
+import { exportFixture, frameInventory, LiveLedger, liveGate, liveSpec, redactJournal, scratchConfigHome, turnAttribution, withRawProcess, type LiveContext, type Provenance } from './support/live';
 import { LiveHost, startDirectSession } from './support/live-host';
 
 const REPO_ROOT = resolve(__dirname, '../..');
@@ -1136,6 +1136,74 @@ describe('engine host live', () => {
     expect(records.filter((r) => r.type === 'system' && r.subtype === 'informational').map((r) => r.preventContinuation)).toEqual([true]);
   }, LONG_CASE_MS);
 
+  // Debt wave 7 (C4): W1's blocking hooks with the forms flipped, for the disk records C4's backfill reads a hook that
+  // got in the way from: a Stop hook that blocks the first stop of each session by exiting 2 (its reason on stderr), and
+  // a UserPromptSubmit hook that blocks by JSON (`decision: block`), once with the original prompt kept and once with
+  // `suppressOriginalPrompt`; then an ordinary prompt, to see where the next turn hangs on the chain after a block.
+  it('debt wave 7: blocking hooks, forms flipped', async (ctx) => {
+    const g = live(ctx);
+    const configHome = scratchConfigHome();
+    const gate = join(configHome, 'prompt-gate.sh');
+    const stopOnce = join(configHome, 'stop-once.sh');
+    writeFileSync(
+      gate,
+      `#!/bin/sh\n# block by JSON a prompt naming BLOCKQUIET (suppressing the prompt) or BLOCKME\ninput=$(cat)\nif printf '%s' "$input" | grep -q BLOCKQUIET; then echo '{"decision":"block","reason":"QUIET_BLOCK","hookSpecificOutput":{"hookEventName":"UserPromptSubmit","suppressOriginalPrompt":true}}'; exit 0; fi\nif printf '%s' "$input" | grep -q BLOCKME; then echo '{"decision":"block","reason":"BLOCKED_BY_JSON_HOOK"}'; exit 0; fi\nexit 0\n`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      stopOnce,
+      `#!/bin/sh\n# block the first stop of each session by exiting 2, let every later one through\ninput=$(cat)\nsid=$(printf '%s' "$input" | sed -n 's/.*"session_id" *: *"\\([^"]*\\)".*/\\1/p')\nmarker="$(dirname "$0")/stop-fired-$sid"\nif [ ! -e "$marker" ]; then : > "$marker"; echo 'REPROMPT_BY_EXIT_2' >&2; exit 2; fi\nexit 0\n`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(configHome, 'settings.json'), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: gate }] }], Stop: [{ hooks: [{ type: 'command', command: stopOnce }] }] } }, null, 2)}\n`);
+    let journalPath = '';
+    let engineSessionId = '';
+    let events: SessionEvent[] = [];
+    await withHost(g, 'DW7 hooks flipped', async (host) => {
+      const spec = liveSpec(g.scratch());
+      const { status } = await host.launch(spec);
+      journalPath = status.journalPath;
+      engineSessionId = spec.sessionId!;
+      const s = sessionView(host, spec);
+      const names: Record<string, string> = {};
+      for (const [name, prompt] of [['ONE', 'Reply ONE'], ['BLOCKME', 'BLOCKME please reply TWO'], ['BLOCKQUIET', 'BLOCKQUIET please reply THREE'], ['FOUR', 'Reply FOUR']] as const) {
+        const sent = await s.send(prompt);
+        names[sent.messageUuid!] = name;
+        await host.waitFor(() => mainTurnsEnded(s.events()).find((t) => t.userMessageUuids.includes(sent.messageUuid!)), `a result naming ${name}`, TURN_MS);
+        await w1Quiet(host, s.id, 5_000, TURN_MS);
+      }
+      events = s.events();
+      for (const line of w1Timeline(events, names)) console.log(`   ${line}`);
+    }, new LiveHost({ userData: g.userData, configHome }));
+    exportTo('hooks-flipped', journalPath, g, DW7_PROVENANCE);
+    const records = exportTranscript('dw7-hooks-flipped', configHome, engineSessionId, g);
+    // on the wire, as W1 saw the other forms: the exit-2 Stop hook reads `error` with exit 2, the JSON prompt blocks `success`
+    const finished = ofKind(events, 'hook.finished');
+    expect(finished.map((e) => [e.hookEvent, e.outcome, e.exitCode])).toEqual([
+      ['UserPromptSubmit', 'success', 0], ['Stop', 'error', 2], ['Stop', 'success', 0],
+      ['UserPromptSubmit', 'success', 0], ['UserPromptSubmit', 'success', 0],
+      ['UserPromptSubmit', 'success', 0], ['Stop', 'success', 0],
+    ]);
+    expect(finished[1]!.stderr).toBe('REPROMPT_BY_EXIT_2\n');
+    expect(finished[3]!.stdout).toBe('{"decision":"block","reason":"BLOCKED_BY_JSON_HOOK"}\n');
+    // observed (test/fixtures/transcripts/dw7-hooks-flipped.jsonl): an exit-2 Stop block is a meta user record
+    // "Stop hook feedback:\n[<command>]: <stderr>" and a stop_hook_summary listing it, with no hook_blocking_error
+    // attachment (the engine writes that for a JSON block only); a JSON prompt block's informational carries the reason
+    // with no command, and "Original prompt:" only when the hook did not suppress it; the next prompt hangs on the
+    // last block's informational record
+    const feedback = records.filter((r) => r.type === 'user' && r.isMeta === true && String(r.message?.content).startsWith('Stop hook feedback:'));
+    expect(feedback.map((r) => r.message?.content)).toEqual([`Stop hook feedback:\n[${stopOnce}]: REPROMPT_BY_EXIT_2\n`]);
+    expect(records.filter((r) => r.attachment?.type === 'hook_blocking_error')).toEqual([]);
+    const informational = records.filter((r) => r.type === 'system' && r.subtype === 'informational');
+    expect(informational.map((r) => r.content)).toEqual([
+      'UserPromptSubmit operation blocked by hook:\nBLOCKED_BY_JSON_HOOK\n\nOriginal prompt: BLOCKME please reply TWO',
+      'UserPromptSubmit operation blocked by hook:\nQUIET_BLOCK',
+    ]);
+    expect(records.filter((r) => r.type === 'user' && JSON.stringify(r.message?.content).includes('BLOCK'))).toEqual([]);
+    const four = records.find((r) => r.type === 'user' && r.message?.content === 'Reply FOUR');
+    expect(four?.parentUuid).toBe(informational[1]!.uuid);
+  }, LONG_CASE_MS);
+
   // "Hold until the turn ends" on a pending `next` steer: cancel_async_message withdraws it from the engine's queue. No
   // X2 command wraps the control, so the case drives the session's control client raw. The engine reads the steer's
   // uuid from `message_uuid`; the first request is sent in the shape src/shared/wire/control.ts declares
@@ -1535,12 +1603,12 @@ describe('engine host live', () => {
 
 // A live journal as a pass-3 fixture candidate: redacted, provenance first, written under the run's userData for a
 // look by eye before it is copied into spikes/protocol-probe/fixtures/pass3/.
-function exportTo(name: string, journalPath: string, ctx: LiveContext): void {
+function exportTo(name: string, journalPath: string, ctx: LiveContext, provenance?: Provenance): void {
   if (!journalPath) return;
   const dir = join(ctx.userData, 'exports');
   mkdirSync(dir, { recursive: true });
   const dest = join(dir, `${name}.jsonl`);
-  writeFileSync(dest, exportFixture(readFileSync(journalPath, 'utf8')));
+  writeFileSync(dest, exportFixture(readFileSync(journalPath, 'utf8'), undefined, undefined, provenance));
   exports.push(`${name}: ${dest} (from ${journalPath}; ${readdirSync(dir).length} exported so far)`);
 }
 
@@ -1616,6 +1684,9 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // W7: the charter's blob at the wave's base (d5a6549e), the pin its fixtures carry.
 const W7_PIN = '560ec98bc0b47b5055e87fb4bf0d4c455a11a0e4';
+
+// Debt wave 7: the provenance its C4 probe carries, the charter's blob at the wave's base (4c500ca0).
+const DW7_PROVENANCE: Provenance = { charter: 'docs/charter.md', child: 'C4', wave: 'debt wave 7', pin: '936cd8baf7376705e41a6fd1f73f15adedf556d6' };
 
 // W7: the follower events that change what the view shows: a retraction, a notice.
 const flipOrNotice = (e: SessionEvent) => e.kind === 'boundary.retraction' || e.kind === 'notice.posted';

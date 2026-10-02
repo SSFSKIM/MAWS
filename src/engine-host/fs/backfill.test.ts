@@ -2,11 +2,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
-import type { AgentId, ParentToolUseId, SessionId } from '@shared/graph/ids';
+import type { AgentId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
 import { FIXTURE_DIR, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
 import { recordedReceiptRecord } from '../../../test/support/agents-events';
-import { createBackfillContext, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, endsTurn, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 const SESSION = 'S' as SessionId;
 const SIDECAR_DIR = join(FIXTURE_DIR, 'subagent-sidecars');
@@ -251,6 +251,60 @@ describe('a /compact on disk', () => {
     ]);
     expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual([messages[2].messageUuid]); // the command's turn only
     expect(records.slice(at, at + 5).map((record) => startsTurn(record))).toEqual([false, false, false, true, false]);
+  });
+});
+
+// Debt wave 7: a hook that got in the way, read back from disk as the hook events the live stream has for it. Two
+// recorded runs: W1's (a Stop hook blocking by JSON, a UserPromptSubmit hook exiting 2) and the same hooks with the forms
+// flipped (a Stop hook exiting 2, UserPromptSubmit hooks blocking by JSON, once with `suppressOriginalPrompt`).
+describe('a hook that got in the way, from disk', () => {
+  const hookEvents = (events: SessionEvent[]) =>
+    events.filter((e) => e.kind === 'hook.started' || e.kind === 'hook.finished').map((e) => (e.kind === 'hook.finished' ? [e.kind, e.hookId, e.hookEvent, e.outcome, e.exitCode, e.stdout, e.stderr] : [e.kind, e.hookId, e.hookEvent]));
+  const blockedTurn = (events: SessionEvent[], uuid: string) => events.filter((e) => e.id === uuid || e.id.startsWith(`${uuid}#`)).map((e) => e.kind);
+
+  it('w1-hooks-blocking: the Stop hook’s feedback and the blocked prompt’s informational record carry the blocking hooks', () => {
+    const records = loadTranscriptFixture('w1-hooks-blocking');
+    const events = mapAll(currentChain(records).chain);
+    const FEEDBACK = '3f29bb18-ea4f-4eb4-a015-49679d4e10c8'; // line 24, the meta "Stop hook feedback:" record
+    const BLOCKED = 'f2dd3a2b-d9d4-488b-b222-3498876dab20'; // line 31, the system informational record
+    expect(hookEvents(events)).toEqual([
+      ['hook.started', FEEDBACK, 'Stop'],
+      ['hook.finished', FEEDBACK, 'Stop', 'error', 2, '', 'Say REPROMPTED and stop'], // a JSON reason, as it is
+      ['hook.started', BLOCKED, 'UserPromptSubmit'],
+      ['hook.finished', BLOCKED, 'UserPromptSubmit', 'error', 2, '', 'BLOCKED_BY_TEST_HOOK\n'], // `[<command>]: ` dropped
+    ]);
+    expect(only(events, 'user.message').find((e) => e.messageUuid === FEEDBACK)).toMatchObject({ isSynthetic: true }); // still no bubble
+    expect(blockedTurn(events, BLOCKED)).toEqual(['turn.started', 'user.message', 'hook.started', 'hook.finished', 'turn.ended']);
+    expect(only(events, 'user.message').find((e) => e.messageUuid === BLOCKED)).toMatchObject({ content: 'BLOCKME please reply TWO', isSynthetic: false, origin: null });
+    expect(only(events, 'turn.ended').find((e) => e.userMessageUuids.includes(BLOCKED as MessageUuid))).toMatchObject({ numTurns: 0, terminalReason: null, isError: false });
+    // the blocked prompt's record ends its turn, so a follow of this holder-less transcript synthesises no exit
+    expect(records.filter((record) => endsTurn(record)).map((record) => record.uuid)).toEqual([BLOCKED]);
+    expect(records.filter((record) => startsTurn(record)).map((record) => record.uuid)).not.toContain(BLOCKED);
+  });
+
+  it('dw7-hooks-flipped: an exit-2 Stop block loses its command prefix, a JSON prompt block keeps its reason, a suppressed prompt shows none', () => {
+    const records = loadTranscriptFixture('dw7-hooks-flipped');
+    const events = mapAll(currentChain(records).chain);
+    const FEEDBACK = '5b8e4920-0aa4-4bb7-b298-11b6e56e06b4'; // line 24
+    const BLOCKED = '8b14220a-e8e9-49f7-a532-94409b48642b'; // line 31
+    const QUIET = '110096ee-942e-4117-8ce1-8a874b0e86ce'; // line 35, `suppressOriginalPrompt`
+    expect(hookEvents(events).filter(([kind]) => kind === 'hook.finished')).toEqual([
+      ['hook.finished', FEEDBACK, 'Stop', 'error', 2, '', 'REPROMPT_BY_EXIT_2\n'],
+      ['hook.finished', BLOCKED, 'UserPromptSubmit', 'error', 2, '', 'BLOCKED_BY_JSON_HOOK'],
+      ['hook.finished', QUIET, 'UserPromptSubmit', 'error', 2, '', 'QUIET_BLOCK'],
+    ]);
+    expect(blockedTurn(events, QUIET)).toEqual(['turn.started', 'hook.started', 'hook.finished', 'turn.ended']); // nothing on disk names the prompt
+    expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual(['60842001-6fbc-4b9d-988d-035e5f61b3c8', BLOCKED, QUIET, '185c31b3-7310-4148-899e-fd576ad53957']);
+  });
+
+  it('leaves every other meta record and informational record as before', () => {
+    const user = (content: string, isMeta: boolean) => rec({ type: 'user', uuid: 'm1', parentUuid: null, isMeta, timestamp: at(0), message: { role: 'user', content } });
+    const info = (content: string) => rec({ type: 'system', subtype: 'informational', uuid: 'i1', parentUuid: null, timestamp: at(0), content, level: 'warning' });
+    expect(kinds(mapAll([user('Stop hook feedback:\nnot meta', false)]))).toEqual(['turn.started', 'user.message']);
+    expect(kinds(mapAll([user('Some other reminder', true)]))).toEqual(['user.message']);
+    expect(kinds(mapAll([info('Operation stopped by hook: no')]))).toEqual(['frame.unknown']);
+    expect(kinds(mapAll([info('UserPromptExpansion operation blocked by hook:\n[x]: no\n\nOriginal prompt: /cmd')]))).toEqual(['frame.unknown']);
+    expect(endsTurn(info('Operation stopped by hook: no'))).toBe(false);
   });
 });
 

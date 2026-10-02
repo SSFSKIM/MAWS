@@ -59,7 +59,8 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const w3 = ['w3-auto-fallback']; // W3: the host's fallback after a refused auto (set_permission_mode acceptEdits, get_settings on Haiku)
     const w4 = ['w4-question-none', 'w4-question-partial']; // W4: a two-question AskUserQuestion answered with one question, then none, left out (the stepper's Skip)
     const w7 = ['w7-collision', 'w7-take-over']; // W7: a terminal resuming a session MAWS holds (the transcript and registry records beside it), and "Take over here" against one (meta rows only)
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7].sort());
+    const wave7 = ['hooks-flipped']; // debt wave 7: W1's blocking hooks with the forms flipped (an exit-2 Stop block, JSON prompt blocks), for the disk records beside it
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {

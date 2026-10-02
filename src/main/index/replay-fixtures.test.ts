@@ -47,7 +47,8 @@ describe('replay fixtures in the index', () => {
     expect(journals.find((f) => f.path.endsWith('pass2/workflow.jsonl'))).toMatchObject({ name: 'workflow', lastPlayedAt: null });
     expect(journals.find((f) => f.name === 'subagent')?.sessionId).toBe('9a1d4262-0b43-46ad-acb9-5982f31d209c');
     const w1 = ['w1-compact', 'w1-hooks-blocking', 'w1-steer-next-cancelled', 'w1-steer-next-disk', 'w1-steer-next-interrupted', 'w1-steer-next-then-now', 'w1-terminal-queued']; // W1's disk records under a scratch config home
-    expect(transcripts.map((f) => f.name).sort()).toEqual(['interrupt-marker', 'rewind-real', 'rewind-terminal', 'sdk-unended', 'subagent-parent', 'torn-tail', ...w1].sort());
+    const wave7 = ['dw7-hooks-flipped']; // debt wave 7: blocking hooks with W1's forms flipped
+    expect(transcripts.map((f) => f.name).sort()).toEqual(['interrupt-marker', 'rewind-real', 'rewind-terminal', 'sdk-unended', 'subagent-parent', 'torn-tail', ...w1, ...wave7].sort());
     expect(transcripts.find((f) => f.name === 'subagent-parent')?.sessionId).toBe('9a1d4262-0b43-46ad-acb9-5982f31d209c');
     for (const fixture of fixtures) expect(existsSync(fixture.path), fixture.path).toBe(true);
 

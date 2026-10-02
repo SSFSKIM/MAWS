@@ -161,6 +161,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     const bash = parseBash(content);
     turn(origin);
     events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: bashStripped(content, bash), isReplay: false, isSynthetic: isMeta, origin, bash });
+    if (record.isMeta === true) hookFeedback(content, uuid, base, events);
     // The real completion of a background agent: the notification naming the tool use that started it.
     if (notification !== null && notification.toolUseId !== null) {
       const started = ctx.seenToolUses.get(notification.toolUseId) ?? startPendingSubagent(ctx, notification.toolUseId, base, events);
@@ -325,9 +326,86 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
     case 'local_command':
       events.push({ ...base(), kind: 'notice.posted', level: 'info', text: typeof record.content === 'string' ? record.content : '', key: 'local_command' });
       return;
-    default:
-      events.push({ ...base(), kind: 'frame.unknown', frameType: 'transcript:system', subtype });
+    case 'informational': {
+      const blocked = blockedPrompt(record);
+      if (blocked === null) break;
+      // The blocked prompt's turn as the live stream has it: the prompt (from the record's "Original prompt:"; none when
+      // the hook suppressed it, though a queue operation before the record may still hold its text, left unread as the
+      // hook asked), the hook that blocked it, and the end of a turn that ran nothing (num_turns 0).
+      const uuid = record.uuid as MessageUuid;
+      ctx.lastTurnUserUuid = uuid;
+      events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin: null });
+      if (blocked.prompt !== null) events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: blocked.prompt, isReplay: false, isSynthetic: false, origin: null, bash: null });
+      blockingHook(uuid, 'UserPromptSubmit', blocked.blockingError, base, events);
+      events.push({
+        ...base(),
+        kind: 'turn.ended',
+        result: 'success',
+        isError: false,
+        terminalReason: null,
+        resultText: blocked.text,
+        durationMs: 0,
+        numTurns: 0,
+        costUsd: 0,
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null },
+        permissionDenials: [],
+        errors: [],
+        userMessageUuids: [uuid],
+        origin: null,
+        resultIndex: null,
+        isEchoReceipt: false,
+      });
+      return;
+    }
   }
+  events.push({ ...base(), kind: 'frame.unknown', frameType: 'transcript:system', subtype });
+}
+
+// Debt wave 7 (W1's hook notices after a reload): disk carries no hook events, so a hook that got in the way is read
+// from what the engine writes instead, as the hook events the live stream has for it (pass3/hooks-blocking seq 30 and
+// 57, pass3/hooks-flipped seq 30, 65 and 82; the same runs on disk: test/fixtures/transcripts/w1-hooks-blocking.jsonl
+// lines 24 and 31, dw7-hooks-flipped.jsonl lines 24, 31 and 35).
+//
+// On disk the engine keeps a blocking error's text (`blockingError`: the hook's JSON `reason`, or `[<command>]: <stderr>`
+// when it exited 2), not how the hook signalled it, nor its exit code, output or hook id. The finish is stated in the
+// form the hook protocol defines a blocking error by, exit code 2 with the reason on stderr, which C6's hook notice
+// reads as blocking (model/hooks.ts) whichever way the hook blocked live; the `[<command>]: ` prefix is dropped, since
+// live stderr carries the reason alone. The record's uuid stands in for the hook id.
+function blockingHook(hookId: string, hookEvent: string, blockingError: string, base: Base, events: SessionEvent[]): void {
+  const stderr = blockingError.replace(COMMAND_PREFIX, '');
+  events.push({ ...base(), kind: 'hook.started', hookId, hookName: hookEvent, hookEvent });
+  events.push({ ...base(), kind: 'hook.finished', hookId, hookName: hookEvent, hookEvent, outcome: 'error', exitCode: 2, stdout: '', stderr });
+}
+
+const COMMAND_PREFIX = /^\[[^\n]*?\]: /;
+
+// A Stop hook that blocked (re-prompting Claude) leaves, per blocking hook, a meta user record `<Event> hook
+// feedback:\n<blockingError>` whichever way it blocked (2.1.283's `ffn`, the one formatter for Stop, TeammateIdle,
+// TaskCreated and TaskCompleted blocks). Its `hook_blocking_error` attachment is written only for a JSON block, and the
+// `stop_hook_summary` record's `hookErrors` also lists non-blocking failures, so neither is read.
+const HOOK_FEEDBACK = /^(\w+) hook feedback:\n([\s\S]*)$/;
+function hookFeedback(content: string, uuid: MessageUuid, base: Base, events: SessionEvent[]): void {
+  const match = HOOK_FEEDBACK.exec(content);
+  if (match !== null) blockingHook(uuid, match[1], match[2], base, events);
+}
+
+// A prompt a UserPromptSubmit hook blocked leaves no user record, only a system `informational` record:
+// `UserPromptSubmit operation blocked by hook:\n<blockingError>` and, unless the hook suppressed it, `\n\nOriginal
+// prompt: <prompt>` (2.1.283 cli.pretty.js 525245-525248). The first such separator splits them.
+const BLOCKED_PROMPT = 'UserPromptSubmit operation blocked by hook:\n';
+const ORIGINAL_PROMPT = '\n\nOriginal prompt: ';
+function blockedPrompt(record: TranscriptRecord): { text: string; blockingError: string; prompt: string | null } | null {
+  if (record.type !== 'system' || record.subtype !== 'informational' || typeof record.content !== 'string' || !record.content.startsWith(BLOCKED_PROMPT)) return null;
+  const text = record.content;
+  const rest = text.slice(BLOCKED_PROMPT.length);
+  const at = rest.indexOf(ORIGINAL_PROMPT);
+  return at < 0 ? { text, blockingError: rest, prompt: null } : { text, blockingError: rest.slice(0, at), prompt: rest.slice(at + ORIGINAL_PROMPT.length) };
+}
+
+// A record that ends a turn: `system/turn_duration`, and a blocked prompt's record, whose turn ran nothing. The
+// follower's unended-turn rule reads turn ends by it.
+export function endsTurn(record: TranscriptRecord): boolean {
+  return (record.type === 'system' && record.subtype === 'turn_duration') || blockedPrompt(record) !== null;
 }
 
 // A prompt that opens a turn: a `user` record, not `isMeta`, not an interrupt marker, whose content is text or blocks
