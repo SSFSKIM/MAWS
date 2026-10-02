@@ -11,6 +11,7 @@
 //   pnpm build && MAWS_CODE_LIVE=1 pnpm exec playwright test e2e/code-tools-live.spec.ts
 import { withProbeFile } from '../test/support/probe-file';
 import { isolatedGitEnv } from '../test/support/git-env';
+import { gitEnv } from '../src/main/git/runner';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -38,7 +39,8 @@ const skip = skipReason();
 test.skip(skip !== null, skip ?? '');
 test.describe.configure({ timeout: 300_000 });
 
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: isolatedGitEnv() }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: gitEnv(process.env) }).trim();
+const fixtureGit = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: isolatedGitEnv() }).trim();
 const REFUSAL = "path outside the session's directories";
 const WORKTREE_SESSION = 'Fix sidebar drag'; // the scenario record pointed at the main checkout with this worktree
 
@@ -226,7 +228,7 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
   const config = join(scratch, 'claude-config');
   execFileSync('/bin/mv', [scratchConfigHome(), config]);
   const clone = join(scratch, 'maws');
-  git(scratch, 'clone', '--quiet', REPO_ROOT, clone);
+  fixtureGit(scratch, 'clone', '--quiet', REPO_ROOT, clone);
   const engineEnv: Record<string, string> = { TERM: 'xterm-256color', LANG: process.env.LANG ?? 'en_US.UTF-8' };
   for (const key of ['PATH', 'HOME', 'USER', 'SHELL', 'TMPDIR']) if (process.env[key]) engineEnv[key] = process.env[key]!;
   Object.assign(engineEnv, { CLAUDE_CONFIG_DIR: config, ANTHROPIC_BASE_URL: RELAY_URL, ANTHROPIC_AUTH_TOKEN: GATEWAY_AUTH_TOKEN });

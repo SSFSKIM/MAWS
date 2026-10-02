@@ -5,6 +5,7 @@
 // that is not a repository), not from the real index, which reads the owner's ~/.claude. Run on purpose only:
 //   pnpm build && MAWS_PANEL_LIVE=1 pnpm exec playwright test e2e/panel-live.spec.ts
 import { isolatedGitEnv } from '../test/support/git-env';
+import { gitEnv } from '../src/main/git/runner';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,7 +17,8 @@ import { sidebarOf, sidebarRow } from './support/sidebar';
 test.skip(process.env.MAWS_PANEL_LIVE !== '1', 'the live check runs only under MAWS_PANEL_LIVE=1');
 
 const ASSUMED_REPOSITORY = 'SSFSKIM/MAWS'; // used only when this checkout has no GitHub remote of its own
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: isolatedGitEnv() }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: gitEnv(process.env) }).trim();
+const fixtureGit = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: isolatedGitEnv() }).trim();
 const tryGit = (cwd: string, ...args: string[]) => {
   try {
     return git(cwd, ...args);
@@ -70,8 +72,8 @@ test('live: the summary over this repository matches git', async () => {
     description: derived ? `${repository}, from this checkout's origin (${origin})` : `${repository}, assumed: this checkout has ${origin ? `a non-GitHub origin (${origin})` : 'no origin remote'}`,
   });
   const clone = join(scratch, 'clone');
-  git(scratch, 'clone', '--quiet', '--branch', branch, REPO_ROOT, clone);
-  git(clone, 'remote', 'set-url', 'origin', `https://github.com/${repository}.git`);
+  fixtureGit(scratch, 'clone', '--quiet', '--branch', branch, REPO_ROOT, clone);
+  fixtureGit(clone, 'remote', 'set-url', 'origin', `https://github.com/${repository}.git`);
   const plain = join(scratch, 'not-a-repository');
   mkdirSync(plain);
 
@@ -120,8 +122,8 @@ test('live: the summary over this repository matches git', async () => {
       observed.openOnGitHub = (await app.evaluate(() => (globalThis as { __opened?: string[] }).__opened))?.[0];
 
       writeFileSync(join(clone, 'panel-live-note.txt'), 'scratch\n');
-      git(clone, 'add', 'panel-live-note.txt');
-      git(clone, '-c', 'user.name=MAWS e2e', '-c', 'user.email=e2e@maws.invalid', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'scratch');
+      fixtureGit(clone, 'add', 'panel-live-note.txt');
+      fixtureGit(clone, '-c', 'user.name=MAWS e2e', '-c', 'user.email=e2e@maws.invalid', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'scratch');
       await expect(section('Push state')).toContainText(expectedPush(clone));
       observed.cloneAhead = { push: expectedPush(clone), revList: git(clone, 'rev-list', '--count', '@{u}..HEAD') };
       await expect(changeLine).toHaveText('Clean');

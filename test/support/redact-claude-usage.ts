@@ -44,13 +44,20 @@ for (const [id, pin] of byRecency) {
 
 // Refresh only the files below that this script authors; synthetic neighbours belong to their authors.
 fs.mkdirSync(path.join(target, 'history'), { recursive: true });
+const previousAccounts = fs.existsSync(path.join(target, 'accounts.json'))
+  ? JSON.parse(fs.readFileSync(path.join(target, 'accounts.json'), 'utf8')) as Account[] : [];
 const write = (name: string, text: string) => fs.writeFileSync(path.join(target, name), text);
 write('accounts.json', `${JSON.stringify(redacted, null, 2)}\n`);
 write('pins.json', `${JSON.stringify({ drainTarget: pinsFile.drainTarget, drainTargetIsManual: pinsFile.drainTargetIsManual, pins: Object.fromEntries(kept) }, null, 2)}\n`);
 if (fs.existsSync(path.join(source, 'gateway.json'))) write('gateway.json', read('gateway.json'));
-for (const account of accounts) {
-  const file = path.join('history', `${account.uuid}.jsonl`);
-  if (!fs.existsSync(path.join(source, file))) continue;
+else fs.rmSync(path.join(target, 'gateway.json'), { force: true });
+const currentIds = new Set(accounts.map((account) => account.uuid));
+for (const uuid of new Set([...previousAccounts, ...accounts].map((account) => account.uuid))) {
+  const file = path.join('history', `${uuid}.jsonl`);
+  if (!currentIds.has(uuid) || !fs.existsSync(path.join(source, file))) {
+    fs.rmSync(path.join(target, file), { force: true });
+    continue;
+  }
   const rows = read(file).split('\n').filter((line) => line.trim() !== '');
   write(file, `${rows.slice(-HISTORY_ROWS).join('\n')}\n`);
 }

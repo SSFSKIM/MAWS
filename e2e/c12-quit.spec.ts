@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, launchReady, value } from './support/c7-replay';
-import { launchMaws, REPO_ROOT } from './support/launch';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 test.skip(process.env.MAWS_C12_E2E !== '1', 'the quit e2e runs under pnpm e2e:c12 (MAWS_C12_E2E=1)');
 
@@ -73,11 +73,12 @@ test('quit names a replayed session’s background work and a busy terminal; can
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-c12-quit-')));
   const repo = join(root, 'repo');
   const config = join(root, 'claude-config');
-  mkdirSync(repo);
-  const engineId = seedRecord(config, repo);
-  const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_E2E_QUIT_ANSWER: 'cancel' } });
-  const lines = stderrOf(maws.app);
+  let maws: MawsLaunch | undefined;
   try {
+    mkdirSync(repo);
+    const engineId = seedRecord(config, repo);
+    maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_E2E_QUIT_ANSWER: 'cancel' } });
+    const lines = stderrOf(maws.app);
     const { app, page } = maws;
     let id = '';
     await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '')).not.toBe('');
@@ -130,8 +131,20 @@ test('quit names a replayed session’s background work and a busy terminal; can
     testInfo.annotations.push({ type: 'quit after the last busy thing ended', description: `${exitAt - ended} ms` });
     expect(exitAt - ended).toBeLessThan(10_000);
   } finally {
-    await maws.cleanup();
-    rmSync(root, { recursive: true, force: true });
+    try {
+      if (maws) {
+        // Assertion failures can leave either cancel or when_idle armed while sleep is still running.
+        // Let the ordinary close path stop both hosts instead of waiting for that hour-long command.
+        const { app } = maws;
+        await answerWith(app, 'quit').catch(() => {
+          const child = app.process();
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        });
+        await maws.cleanup();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
