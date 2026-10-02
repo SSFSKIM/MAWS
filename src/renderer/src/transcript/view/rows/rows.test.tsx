@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTranscriptStore } from '../../../stores/transcript';
+import { registerAction } from '../../../keymap/actions-runtime'; // W13
+import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import { loadEventFixture } from '../../../../../../test/support/fixtures';
 import { api, BASH_RESULT, builder, uuid } from '../../model/test-events';
 import type { Row } from '../../model/rows';
@@ -15,6 +17,30 @@ describe('time separator', () => {
     const separator = screen.getByRole('separator');
     expect(separator.getAttribute('aria-label')).toBe('Today 1:12 AM');
     expect(separator.textContent).toBe('Today 1:12 AM');
+  });
+});
+
+// W13: the engine host's notice that a Claude Code newer than tested sent what MAWS did not understand
+describe('engine compatibility notice row (W13)', () => {
+  it('reads as a notice and opens Settings › Engine; any other notice offers nothing', async () => {
+    const text = 'Claude Code 2.1.287 is newer than the version MAWS was verified against (2.1.283); some events were not understood';
+    const b = builder();
+    b.turn('u1', 'hello');
+    b.emit('notice.posted', { level: 'warning', text, key: ENGINE_COMPAT_NOTICE_KEY });
+    b.emit('notice.posted', { level: 'warning', text: 'Something else', key: 'gateway:mismatch' });
+    const store = await storeWith(b.events);
+    const [compat, other] = store.rows().filter((row): row is Extract<Row, { kind: 'error' }> => row.kind === 'error' && row.scope === 'notice');
+    expect(compat).toMatchObject({ severity: 'notice', text, action: 'engine_settings' });
+    expect(other!.action).toBeUndefined();
+    const opened = vi.fn();
+    const off = registerAction('settings.open', opened);
+    try {
+      renderRow(compat!, { storeKey: store.key });
+      fireEvent.click(screen.getByRole('button', { name: 'Settings › Engine' }));
+      expect(opened).toHaveBeenCalledExactlyOnceWith(0); // the Engine section's place in the Settings index
+    } finally {
+      off();
+    }
   });
 });
 

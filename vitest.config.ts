@@ -24,6 +24,7 @@ const RENDERER_NODE_TESTS = 'src/renderer/src/terminal/**/*.node.test.ts';
 // suite keeps 5 s, so a real hang still fails fast.
 const TIMING_TIMEOUTS = { testTimeout: 30_000, hookTimeout: 30_000 };
 const TIMING_NODE_TESTS = [
+  'src/engine-host/binary-info.test.ts', // W13: every case runs real stand-in binaries for --version
   'src/engine-host/fs/follow.test.ts',
   'src/engine-host/fs/sidecars.test.ts', // its retry cases wait out the retry schedule against a real writer
   'src/engine-host/fs/watcher.test.ts',

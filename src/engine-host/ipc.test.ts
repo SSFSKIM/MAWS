@@ -511,7 +511,8 @@ describe('catalog answers and publishes from handshake state through the host (C
 // C11 start: the host's binary configuration through `engine.configure` (C11 execution document, M1; C3's BinaryConfig).
 // W13: the real probe over a scratch home whose ~/.local/bin/claude links to an installed version, and a chosen binary
 // elsewhere; each prints its own version, and the plan carries the real path and the version the probe answered.
-describe('engine.configure answers binaryInfo and buildLaunch uses the resolved binary', () => {
+// Real stand-in binaries answer --version, so the cases get the timing projects' 30 s under a loaded machine.
+describe('engine.configure answers binaryInfo and buildLaunch uses the resolved binary', { timeout: 30_000 }, () => {
   let root: string;
   let INSTALLED: string;
   let CONFIGURED: string;
