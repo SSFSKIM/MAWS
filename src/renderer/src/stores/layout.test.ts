@@ -114,6 +114,26 @@ describe('layout store actions', () => {
     expect(store.getState().regions.panel).toEqual({ ...LAYOUT_DEFAULTS.regions.panel, collapsed: true });
   });
 
+  it.each([false, true])('opening Overview restores the main region without changing panel width or collapsed=%s', (collapsed) => {
+    const store = createLayoutStore();
+    store.getState().setPanel({ maximized: true, width: 444, collapsed });
+    const before = store.getState();
+    store.getState().setOverviewOpen(true);
+    expect(store.getState().overviewOpen).toBe(true);
+    expect(store.getState().regions).toEqual({ ...before.regions, panel: { width: 444, collapsed, maximized: false } });
+    expect(store.getState().main).toBe(before.main);
+  });
+
+  it('closing Overview does not restore a maximized panel', () => {
+    const store = createLayoutStore();
+    store.getState().setOverviewOpen(true);
+    store.getState().setPanel({ maximized: true });
+    const before = store.getState().regions;
+    store.getState().setOverviewOpen(false);
+    expect(store.getState().overviewOpen).toBe(false);
+    expect(store.getState().regions).toBe(before);
+  });
+
   // W5: the floating Overview's rect persists with the regions; whether it is open does not (the app opens on the tabs).
   it('keeps the Overview’s rect in the regions and its open state outside them', () => {
     const store = createLayoutStore();
@@ -146,6 +166,21 @@ describe('tab changes before hydration', () => {
 
 // W5: a project opened in the sidebar before the persisted regions arrive stays open, and the result is written back.
 describe('region changes before hydration', () => {
+  it('opening Overview before the regions arrive restores main over the saved maximized panel and persists it', async () => {
+    const fake = fakeClient({ 'layout.list': { keys: ['regions'] } });
+    const store = createLayoutStore();
+    const hydrating = store.getState().hydrate(fake.client, () => true);
+    store.getState().setOverviewOpen(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const saved = { ...LAYOUT_DEFAULTS.regions, panel: { width: 444, collapsed: false, maximized: true } };
+    for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'regions' ? saved : null });
+    await hydrating;
+    const restored = { ...saved, panel: { ...saved.panel, maximized: false } };
+    expect(store.getState().overviewOpen).toBe(true);
+    expect(store.getState().regions).toEqual(restored);
+    expect(fake.invoked('layout.set')).toContainEqual({ key: 'regions', value: restored });
+  });
+
   it('are replayed over the hydrated regions', async () => {
     const fake = fakeClient({ 'layout.list': { keys: ['regions'] } });
     const store = createLayoutStore();

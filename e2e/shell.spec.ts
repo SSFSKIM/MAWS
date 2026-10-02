@@ -219,10 +219,33 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await assertToolbarPlacement(page);
     await page.screenshot({ path: testInfo.outputPath('toolbar-light.png') });
     await expect(overviewButton).toHaveAccessibleName('Overview, 3 waiting');
+    // The global toggle must restore main, not open an invisible dialog inside its zero-width/inert column.
+    const panel = page.locator('[data-region="panel"]');
+    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+    await expect(main).toHaveJSProperty('inert', true);
+    await expect(main).toHaveCSS('width', '0px');
+    await expect(overviewButton).toBeEnabled();
     await overviewButton.click();
+    await expect(main).toHaveJSProperty('inert', false);
+    await expect.poll(async () => (await main.boundingBox())!.width).toBeGreaterThan(0);
+    await expect(panel.getByRole('button', { name: 'Maximize right panel' })).toBeVisible();
+    await expect(page.getByRole('separator', { name: 'Resize right panel' })).toHaveAttribute('aria-valuenow', '380');
     await expect(overview).toBeVisible();
     await expect(overviewButton).toHaveAttribute('aria-pressed', 'true');
     await expect(overview, 'focus moves onto the panel, not a card (Esc on a card declines its request)').toBeFocused();
+    await overview.getByRole('button', { name: 'Close Overview' }).click(); // usable, not merely mounted
+    await expect(overview).toHaveCount(0);
+    await expect(overviewButton).toHaveAttribute('aria-pressed', 'false');
+    await overviewButton.click();
+
+    // Menu/chord opening is not a toggle: an already-open Overview hidden by maximize is restored and refocused.
+    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+    await expect(main).toHaveJSProperty('inert', true);
+    await menu(app, 'tab.overview');
+    await expect(main).toHaveJSProperty('inert', false);
+    await expect(overview).toBeVisible();
+    await expect(overview).toBeFocused();
+    await expect(overviewButton).toHaveAttribute('aria-pressed', 'true');
     // Dragged by its header (a real pointer), it moves and its rect persists in `regions`.
     const header = overview.locator('[data-overview-header]');
     const before = (await overview.boundingBox())!;

@@ -92,6 +92,21 @@ describe('layout persistence', () => {
     expect(sets()).toEqual([{ key: 'regions', value: { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 240 } } }]);
   });
 
+  it('opening Overview restores and persists only the regions, with the normal write delay', async () => {
+    const regions = { ...LAYOUT_DEFAULTS.regions, panel: { width: 444, collapsed: false, maximized: true } };
+    const { store, hydrate, sets } = setup({ regions });
+    await hydrate();
+    store.getState().setOverviewOpen(true);
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS - 1);
+    expect(sets()).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(sets()).toEqual([{ key: 'regions', value: { ...regions, panel: { ...regions.panel, maximized: false } } }]);
+    store.getState().setOverviewOpen(false);
+    store.getState().setOverviewOpen(true);
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    expect(sets()).toHaveLength(1); // open/close stays transient when no region needs restoring
+  });
+
   it('debounces each key on its own', async () => {
     const { store, hydrate, sets } = setup();
     await hydrate();

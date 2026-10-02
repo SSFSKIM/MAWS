@@ -224,7 +224,11 @@ export function createLayoutStore() {
 
       setSidebar: (patch) => regions((r) => ({ ...r, sidebar: { ...r.sidebar, ...patch } })),
       setPanel: (patch) => regions((r) => ({ ...r, panel: { ...r.panel, ...patch } })),
-      setOverviewOpen: (overviewOpen) => set({ overviewOpen }),
+      setOverviewOpen(overviewOpen) {
+        // Overview lives over main, so opening it restores main, including when regions are still hydrating.
+        if (overviewOpen) regions((r) => r.panel.maximized ? { ...r, panel: { ...r.panel, maximized: false } } : r);
+        set({ overviewOpen });
+      },
       setOverviewRect: (overview) => regions((r) => ({ ...r, overview })),
       setPanelTabPinned(appSessionId, tabId, pinned) {
         const own = get().panelBySession.get(appSessionId) ?? { tabs: [], activeTabId: null };

@@ -35,7 +35,15 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     }),
     registerAction('tab.reopen', () => layout().reopenClosed()),
     // W5: ⌘0, the View menu and the palette open the floating Overview, or bring focus back to it when it is open.
-    registerAction('tab.overview', () => (layout().overviewOpen ? focusOverview() : layout().setOverviewOpen(true))),
+    registerAction('tab.overview', () => {
+      const before = layout();
+      before.setOverviewOpen(true);
+      if (before.overviewOpen) {
+        // An already-open dialog cannot take focus until React removes main's inert state.
+        if (before.regions.panel.maximized) requestAnimationFrame(focusOverview);
+        else focusOverview();
+      }
+    }),
     registerAction('tab.select', (n) => {
       if (n !== null) layout().selectTab(n);
     }),
