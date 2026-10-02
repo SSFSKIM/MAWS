@@ -32,7 +32,7 @@ import type {
   SystemUiStatusFrame,
   SystemUiToastFrame,
 } from '@shared/wire/frames';
-import { boolOr, compact, stringOrNull } from './normalizer-support';
+import { taskUsageOf, boolOr, compact, stringOrNull } from './normalizer-support';
 
 // What the task frames share across a session: the type each task was started with (a `task_notification` carries
 // none), the workflow name, and the tool use → agent map child frames are attributed through.
@@ -152,7 +152,7 @@ export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemM
       const f = frame as SystemTaskNotificationFrame;
       const outputFile = emptyToNull(f.output_file);
       if (tasks.taskTypes.get(f.task_id) === 'local_agent') {
-        return one({ kind: 'subagent.finished', taskId: asTaskId(f.task_id), status: f.status, summary: f.summary, outputFile, reason: f.reason ?? null }, f.task_id as AgentId);
+        return one(compact({ kind: 'subagent.finished', taskId: asTaskId(f.task_id), status: f.status, summary: f.summary, outputFile, reason: f.reason ?? null, usage: taskUsageOf(f.usage) }), f.task_id as AgentId);
       }
       return one({ kind: 'task.notification', taskId: asTaskId(f.task_id), toolUseId: (f.tool_use_id ?? null) as ToolUseId | null, status: f.status, summary: f.summary, outputFile, reason: f.reason ?? null });
     }

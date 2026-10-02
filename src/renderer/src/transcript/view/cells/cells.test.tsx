@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadJournal } from '../../../../../../test/support/fixtures';
+import { reviewsOf } from '../../../tools/session-info/lane';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
 import { cellId } from '../../model/keys';
@@ -334,4 +335,15 @@ describe('safeguard verdict (§19)', () => {
     }, 'cell:t1');
     expect(plain.cell.textContent).not.toMatch(/auto mode/i);
   });
+});
+
+// The actual skipped entry must stay visibly distinct from a completed review.
+it('labels plan-outcomes seq 120 as skipped, not reviewed', async () => {
+  const store = await storeWith(journalToEvents(loadJournal('pass3', 'plan-outcomes')));
+  expect(reviewsOf(useTranscriptStore.getState().entries[store.key]?.state)).toEqual({ evaluated: 0, flagged: 0 });
+  const id = 'cell:toolu_01MmVYiQCVuXfxjFDLabEtVL' as Cell['id'];
+  useTranscriptStore.getState().expandAll(store.key);
+  useTranscriptStore.getState().toggleCell(store.key, id);
+  const view = renderRow(rowHolding(store.rows(), id), { storeKey: store.key });
+  expect(view.container.querySelector('[data-verdict="skipped"]')?.textContent).toBe('Auto mode · review skipped');
 });

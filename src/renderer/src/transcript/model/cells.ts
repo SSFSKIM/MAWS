@@ -1,6 +1,7 @@
 // Tool records → X3 cells (C6 execution document, "X3 — rows, cells and detail"): the detail variant per tool, the
 // status, the label from the copy table and the classification with its overrides. derive.ts collects the records
 // while walking a turn's events and folds the cells into groups.
+import type { SafeguardVerdict } from '@shared/graph/enums';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { TaskId, ToolUseId } from '@shared/graph/ids';
 import { classifyTool, MCP_TOOL, tableRowOf, type ClassifyContext } from './classify';
@@ -13,7 +14,7 @@ type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 export interface ToolRecord {
   use: Event<'tool.use'>;
   result: Event<'tool.result'> | null;
-  safeguard: 'not_evaluated' | 'not_flagged' | 'flagged';
+  safeguard: SafeguardVerdict;
   elapsedSeconds: number;
   humanDecision: boolean;
   backgroundTaskId: TaskId | null;

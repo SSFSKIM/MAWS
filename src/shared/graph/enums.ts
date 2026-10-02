@@ -35,8 +35,8 @@ export type AttentionState = (typeof ATTENTION_STATES)[number];
 export const AttentionStateSchema = z.enum(ATTENTION_STATES);
 
 // Server-lane auto-mode verdict, from `stream_event` `message_delta.safeguard_results[].status.tool_uses[<tool_use_id>]`
-// (`{type: 'evaluated', outcome: 'not_flagged'}` in the pass-2 fixtures). `not_evaluated` when no verdict named the tool use.
-export const SAFEGUARD_VERDICTS = ['not_evaluated', 'not_flagged', 'flagged'] as const;
+// `skipped` is explicit (pass3/plan-outcomes seq 120); `not_evaluated` means no verdict named the tool use.
+export const SAFEGUARD_VERDICTS = ['not_evaluated', 'skipped', 'not_flagged', 'flagged'] as const;
 export type SafeguardVerdict = (typeof SAFEGUARD_VERDICTS)[number];
 export const SafeguardVerdictSchema = z.enum(SAFEGUARD_VERDICTS);
 

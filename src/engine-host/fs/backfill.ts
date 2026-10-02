@@ -9,7 +9,7 @@ import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
 import { INTERRUPT_MARKER } from '../normalizer-support';
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
-export const SPILL_MARKER = /(?:Full output saved to|were saved to|was saved to):? (\/\S+?\.(?:txt|json))\b/;
+export const SPILL_MARKER = /(?:Full output saved to|were saved to|was saved to):? (\/[^\r\n]+\.(?:txt|json))(?=[.;\s]|$)/;
 
 const TEXT_CAP = 200;
 const EPOCH = '1970-01-01T00:00:00.000Z';

@@ -43,7 +43,7 @@ export function autoModeLane(status: EngineSessionStatus, entry: LaneModelEntry,
 // holds no turn yet (nothing to count is not "0 evaluated").
 export function reviewsOf(state: TranscriptState | undefined): Reviews | null {
   if (!state || state.order.length === 0) return null;
-  const verdicts = new Map<string, 'not_flagged' | 'flagged'>();
+  const verdicts = new Map<string, 'skipped' | 'not_flagged' | 'flagged'>();
   const note = (event: SessionEvent) => {
     if (event.kind === 'tool.safeguard') verdicts.set(event.toolUseId, event.verdict);
     else if (event.kind === 'tool.result' && event.safeguard !== 'not_evaluated') verdicts.set(event.toolUseId, event.safeguard);
@@ -52,6 +52,6 @@ export function reviewsOf(state: TranscriptState | undefined): Reviews | null {
     turn.events.forEach(note);
     for (const child of turn.children.values()) child.forEach(note);
   }
-  const all = [...verdicts.values()];
+  const all = [...verdicts.values()].filter((v) => v !== 'skipped');
   return { evaluated: all.length, flagged: all.filter((v) => v === 'flagged').length };
 }

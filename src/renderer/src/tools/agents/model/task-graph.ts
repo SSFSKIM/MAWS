@@ -44,7 +44,7 @@ export interface TaskNode {
   stopping: boolean; // stopping: session.stopTask sent, no terminal event yet
   startedAt: string | null; // the start event's `at`; null when the task was only ever seen in a snapshot or on disk
   endedAt: string | null; // task.updated.patch.endTime as ISO, else the terminal event's `at`
-  usage: { totalTokens: number; toolUses: number; durationMs: number } | null; // subagent.progress, latest
+  usage: { totalTokens: number; toolUses: number; durationMs: number } | null; // latest progress or final completion report
   lastToolName: string | null;
   activity: string | null; // the latest subagent.progress description: what the agent is doing now ("Reading one.txt"), not its dispatch description
   summary: string | null; // the engine's, as sent (a handed-back agent's is a pointer to its report: outcomeSummary)
@@ -284,6 +284,7 @@ function applyEvent(draft: Draft, e: SessionEvent): void {
     }
     case 'subagent.finished':
       applyTerminal(draft, e.taskId, e.status, e);
+      if (e.usage) draft.patch(e.taskId, { usage: e.usage });
       return;
     case 'task.notification':
       applyTerminal(draft, e.taskId, e.status, e);
