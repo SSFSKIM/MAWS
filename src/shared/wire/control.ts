@@ -90,6 +90,7 @@ export const InitializeResponseSchema = z.looseObject({
   session_state: z.string().optional(),
   hooks_applied: z.boolean().optional(),
   workspace_trust_recorded: z.boolean().optional(),
+  capabilities: z.array(z.string()).optional(), // R2: ["ui_surface_v1"] on 2.1.285+ with function hooks on (pass3/mods-pushes seq 7)
 });
 export type InitializeResponse = z.infer<typeof InitializeResponseSchema>;
 
@@ -356,3 +357,71 @@ export type GetSessionCostResponse = z.infer<typeof GetSessionCostResponseSchema
 export const GetBinaryVersionResponseSchema = z.looseObject({ version: z.string() });
 export type GetBinaryVersionResponse = z.infer<typeof GetBinaryVersionResponseSchema>;
 // C3 end
+
+// R2 start: the remote-surface control requests (charter D-9 as amended 2026-10-01; the waves plan's R2 rulings),
+// typed from pass3/mods-surface-* (2.1.287) and the engine's validation messages (r6 §3.7). Requests go out snake_case
+// with `surface: "desktop"` and the host's `client_id`; responses are loose and their required fields those every
+// fixture answer carries. A replay that never recorded an attach, a roster read or a render answers `{}` (the replay's
+// surface reads), so those three take every field as optional and the host fills the defaults.
+
+export interface UiViewportWire { columns: number; rows: number; isFullscreen?: boolean }
+export interface UiKeyedWire { plugin: string; key: string; top: number; bottom: number }
+export interface UiAttachRequest { surface: 'desktop'; client_id: string; viewport?: UiViewportWire; answers?: string[] }
+export interface UiDetachRequest { client_id: string }
+export interface UiRenderRequest { surface: 'desktop'; client_id: string; component: string; instance_id: string; props: Record<string, unknown>; viewport?: UiViewportWire; content_rows?: number; keyed?: UiKeyedWire[] }
+export interface UiPressRequest { plugin: string; handle: number; key?: string; href?: string; surface: 'desktop'; client_id: string }
+export interface UiInputRequest { plugin: string; handle: number; kind: 'change' | 'submit'; value: string; key?: string; component?: string; instance_id?: string; surface: 'desktop'; client_id: string }
+export interface UiSelectRequest { plugin: string; handle: number; value: string; key?: string; component?: string; instance_id?: string; surface: 'desktop'; client_id: string }
+export interface UiPanesRequest { client_id: string }
+export interface UiPaneShowRequest { id: string; surface: 'desktop'; client_id: string }
+export interface UiPaneFocusRequest { id: string | null; surface: 'desktop'; client_id: string }
+export interface UiCloseRequest { id: string; surface: 'desktop'; client_id: string }
+export interface UiScrollRequest { component: string; instance_id: string; offset: number; by: number; body_rows: number; content_rows: number; keyed?: UiKeyedWire[]; surface: 'desktop'; client_id: string }
+export interface UiFocusRequest { component: string; instance_id: string; is_held: boolean; element: { plugin: string; key: string } | null; by: 'person' | 'auto'; surface: 'desktop'; client_id: string }
+export interface UiPromptEditRequest { text: string; cursor: number; key?: { key: string; ctrl?: true; shift?: true; meta?: true }; by: 'person' | 'app'; surface: 'desktop'; client_id: string }
+
+export const UiAttachResponseSchema = z.looseObject({ surfaces: z.array(z.string()).optional() }); // `{surfaces:["desktop"]}`
+export const UiDetachResponseSchema = z.looseObject({ detached: z.boolean().optional(), surfaces: z.array(z.string()).optional() });
+// `{tree, props, rewritten, hooked}`; an unhooked site `{tree:{type:"engine",ref:0}, hooked:false}` (pass3/mods-attach seq 19)
+export const UiRenderResponseSchema = z.looseObject({
+  tree: z.unknown().optional(),
+  props: z.record(z.string(), z.unknown()).optional(),
+  rewritten: z.boolean().optional(),
+  hooked: z.boolean().optional(),
+  client_modules: z.record(z.string(), z.string()).optional(),
+});
+export type UiRenderResponse = z.infer<typeof UiRenderResponseSchema>;
+// `{handled:true, element:"press"}`, `{handled:false}` for a handle no element holds; input and select add `value`
+export const UiPressResponseSchema = z.looseObject({ handled: z.boolean(), element: z.string().optional() });
+export const UiInputResponseSchema = z.looseObject({ handled: z.boolean(), element: z.string().optional(), value: z.string().optional() });
+// The roster as the read answers it and the push carries it (pass3/mods-surface-panes seq 25, 19).
+export const UiPaneWireSchema = z.looseObject({
+  id: z.string(), title: z.string(), plugin: z.string(),
+  close_on_escape: z.boolean().optional(), hold_toasts: z.boolean().optional(), rows: z.number().int().optional(), columns: z.number().int().optional(),
+});
+export type UiPaneWire = z.infer<typeof UiPaneWireSchema>;
+export const UiPanesResponseSchema = z.looseObject({
+  panes: z.array(UiPaneWireSchema).optional(),
+  shown_id: z.string().nullish(), focused_id: z.string().nullish(), focus_requested_id: z.string().nullish(),
+});
+export type UiPanesResponse = z.infer<typeof UiPanesResponseSchema>;
+export const UiPaneShowResponseSchema = z.looseObject({ shown_id: z.string().nullish() });
+export const UiPaneFocusResponseSchema = z.looseObject({ focused_id: z.string().nullish() });
+export const UiCloseResponseSchema = z.looseObject({ closed: z.boolean() });
+// `{moved:true, offset:13}`; `follow_end` while the window still follows its end; `deny` says why nothing moved
+export const UiScrollResponseSchema = z.looseObject({ moved: z.boolean(), offset: z.number().int().optional(), deny: z.string().optional(), follow_end: z.boolean().optional() });
+export const UiFocusResponseSchema = z.looseObject({ moved: z.boolean(), element: z.looseObject({ plugin: z.string(), key: z.string() }).nullish(), deny: z.string().optional() });
+// `{text, cursor}`, the box as the engine adopted it (pass3/mods-surface-prompt-access seq 19); `runs` when a hook painted it
+export const UiPromptEditResponseSchema = z.looseObject({ text: z.string().optional(), cursor: z.number().optional(), runs: z.array(z.unknown()).optional() });
+
+// The engine's requests to a client whose attach named them under `answers`, each `{subtype, surface, client_id, …}`
+// (pass3/mods-surface-copy seq 19, mods-surface-prompt-access seq 22, 27, 36); unanswered for 5 s, the engine resolves
+// the plugin's call as refused (`no-clipboard`, the empty box, not filled, not shown).
+export const UiCopyRequestSchema = z.looseObject({ subtype: z.literal('ui_copy'), text: z.string(), plugin: z.string().optional() });
+export const UiPromptReadRequestSchema = z.looseObject({ subtype: z.literal('ui_prompt_read') });
+export const UiPromptFillRequestSchema = z.looseObject({ subtype: z.literal('ui_prompt_fill'), text: z.string(), mode: z.enum(['replace', 'append', 'insert']).optional() });
+export const UiPromptSuggestRequestSchema = z.looseObject({ subtype: z.literal('ui_prompt_suggest'), text: z.string() });
+export const SURFACE_REQUEST_SUBTYPES = ['ui_copy', 'ui_prompt_read', 'ui_prompt_fill', 'ui_prompt_suggest'] as const;
+export type SurfaceRequestSubtype = (typeof SURFACE_REQUEST_SUBTYPES)[number];
+export const isSurfaceRequest = (subtype: string): subtype is SurfaceRequestSubtype => (SURFACE_REQUEST_SUBTYPES as readonly string[]).includes(subtype);
+// R2 end

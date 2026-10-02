@@ -1,0 +1,90 @@
+[
+  {
+    "at": "2026-10-02T06:45:51.571Z",
+    "id": "time:error:replay:journal:26:0",
+    "kind": "time",
+    "label": "Oct 2, 2026 6:45 AM",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:51.571Z",
+    "attempt": null,
+    "id": "error:replay:journal:26:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_READ {\"text\":\"MAWS draft\",\"cursor\":10}",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:51.573Z",
+    "attempt": null,
+    "id": "error:replay:journal:35:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_FILL {\"isFilled\":true,\"text\":\"MAWS draft\",\"cursor\":10}",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:51.574Z",
+    "attempt": null,
+    "id": "error:replay:journal:40:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_SUGGEST {\"isShown\":true}",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:51.574Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:c1839e99-a849-4fe9-9f23-24d9a48874ea",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "c1839e99-a849-4fe9-9f23-24d9a48874ea",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply with exactly MODS_PROBE_OK",
+    "turnId": "turn:c1839e99-a849-4fe9-9f23-24d9a48874ea"
+  },
+  {
+    "at": "2026-10-02T06:45:52.786Z",
+    "blockIndex": 1,
+    "id": "text:msg_011Cfcxe8RBKTXHA6jmoobRD:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "MODS_PROBE_OK",
+    "messageUuid": "6ebf5789-bc8f-4316-95eb-b8b89e3d7b92",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:c1839e99-a849-4fe9-9f23-24d9a48874ea"
+  },
+  {
+    "at": "2026-10-02T06:45:52.872Z",
+    "attempt": null,
+    "id": "error:replay:journal:71:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_OPEN turn {\"isPlaced\":true}",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:57.393Z",
+    "attempt": null,
+    "id": "error:replay:journal:81:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

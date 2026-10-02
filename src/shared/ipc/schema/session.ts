@@ -50,6 +50,9 @@ import { SetupEventSchema, SetupResourcesSchema, StartOutcomeSchema } from '../.
 import { TrustStateSchema } from '../../sessions/trust';
 // C10 end
 import type { CommandSpec } from './common';
+// R2 start
+import { PaneRosterSchema, RenderAnswerSchema, ScrollSiteSchema, SURFACE_SITES, SurfaceAnswerSchema, SurfaceElementSchema, SurfaceViewportSchema } from '../../engine/surface';
+// R2 end
 
 // C3 start
 const input = <S extends z.ZodRawShape>(shape: S) => z.strictObject({ appSessionId: AppSessionIdSchema, ...shape });
@@ -489,6 +492,49 @@ const newChatCommands = {
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // New chat end ----------------------------------------------------------------------------------------------------------
 
+// R2 start (charter D-9 as amended 2026-10-01; the waves plan's R2 rulings) ---------------------------------------------
+// The renderer's asks of the engine's remote surface, owner engine-host, each a control round trip on the session's
+// attached client (`ui_*` with `surface: "desktop"` and the host's client id) under the bounded 8 s budget, except
+// `session.ui.answer`, which writes the renderer's answer to one of the engine's requests (`plugin.ask`) at once. An
+// element is named by the `plugin` and `handle` its latest drawing carried (`press`), and by its `key`, site and instance
+// so a field redrawn under typing is re-resolved. A session not attached (no `ui_surface_v1`) answers `internal`.
+const ElementRefSchema = z.strictObject({ plugin: z.string(), handle: z.number().int() });
+const KeyedSchema = z.array(z.strictObject({ plugin: z.string(), key: z.string(), top: z.number().int().nonnegative(), bottom: z.number().int().nonnegative() })).max(512);
+const r2Commands = {
+  'session.ui.render': host(
+    input({ component: z.enum(SURFACE_SITES), instanceId: z.string().min(1).max(256), props: z.record(z.string(), z.unknown()), viewport: SurfaceViewportSchema.optional(), contentRows: z.number().int().nonnegative().optional(), keyed: KeyedSchema.optional() }),
+    RenderAnswerSchema,
+  ),
+  'session.ui.press': host(input({ ...ElementRefSchema.shape, key: z.string().optional(), href: z.string().max(2048).optional() }), z.strictObject({ handled: z.boolean(), element: z.string().nullable() })),
+  'session.ui.input': host(
+    input({ ...ElementRefSchema.shape, kind: z.enum(['change', 'submit']), value: z.string().max(16_384), key: z.string().optional(), component: z.enum(SURFACE_SITES).optional(), instanceId: z.string().optional() }),
+    z.strictObject({ handled: z.boolean(), element: z.string().nullable(), value: z.string().nullable() }),
+  ),
+  'session.ui.select': host(
+    input({ ...ElementRefSchema.shape, value: z.string().max(16_384), key: z.string().optional(), component: z.enum(SURFACE_SITES).optional(), instanceId: z.string().optional() }),
+    z.strictObject({ handled: z.boolean(), element: z.string().nullable(), value: z.string().nullable() }),
+  ),
+  'session.ui.focus': host(
+    input({ component: ScrollSiteSchema, instanceId: z.string().max(256), isHeld: z.boolean(), element: SurfaceElementSchema.nullable(), by: z.enum(['person', 'auto']) }),
+    z.strictObject({ moved: z.boolean(), element: SurfaceElementSchema.nullable(), deny: z.string().nullable() }),
+  ),
+  'session.ui.scroll': host(
+    input({ component: ScrollSiteSchema, instanceId: z.string().max(256), offset: z.number().int().nonnegative(), by: z.number().int(), bodyRows: z.number().int().nonnegative(), contentRows: z.number().int().nonnegative(), keyed: KeyedSchema.optional() }),
+    z.strictObject({ moved: z.boolean(), offset: z.number().int().nullable(), deny: z.string().nullable(), followEnd: z.boolean() }),
+  ),
+  'session.ui.panes': host(input({}), PaneRosterSchema),
+  'session.ui.paneShow': host(input({ id: z.string() }), z.strictObject({ shownId: z.string().nullable() })),
+  'session.ui.paneFocus': host(input({ id: z.string().nullable() }), z.strictObject({ focusedId: z.string().nullable() })),
+  'session.ui.close': host(input({ id: z.string() }), z.strictObject({ closed: z.boolean() })),
+  'session.ui.promptEdit': host(
+    input({ text: z.string().max(1_000_000), cursor: z.number().int().nonnegative(), key: z.strictObject({ key: z.string().min(1).max(32), ctrl: z.literal(true).optional(), shift: z.literal(true).optional(), meta: z.literal(true).optional() }).optional(), by: z.enum(['person', 'app']) }),
+    z.void(),
+  ),
+  'session.ui.answer': host(input({ requestId: RequestIdSchema, answer: SurfaceAnswerSchema }), z.strictObject({ outcome: z.enum(['delivered', 'not_pending']) })),
+} as const;
+export const R2_SESSION_COMMANDS = Object.keys(r2Commands) as (keyof typeof r2Commands)[];
+// R2 end ----------------------------------------------------------------------------------------------------------------
+
 export const commands = {
   ...c3Commands, // C3
   ...c4Commands, // C4
@@ -496,6 +542,7 @@ export const commands = {
   ...c7Commands, // C7
   ...c10Commands, // C10
   ...newChatCommands, // New chat
+  ...r2Commands, // R2
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

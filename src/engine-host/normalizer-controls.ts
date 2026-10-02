@@ -7,7 +7,7 @@ import * as z from 'zod';
 import type { EventPayload, Question } from '@shared/graph/events';
 import { QuestionSchema } from '@shared/graph/events';
 import type { AgentId, ParentToolUseId, RequestId, ToolUseId } from '@shared/graph/ids';
-import { CanUseToolRequestSchema, ElicitationRequestSchema, HookCallbackRequestSchema, RequestUserDialogRequestSchema } from '@shared/wire/control';
+import { CanUseToolRequestSchema, ElicitationRequestSchema, HookCallbackRequestSchema, RequestUserDialogRequestSchema, UiCopyRequestSchema, UiPromptFillRequestSchema, UiPromptReadRequestSchema, UiPromptSuggestRequestSchema } from '@shared/wire/control';
 import type { ControlRequestFrame, ControlResponseFrame } from '@shared/wire/frames';
 import { compact, stringOrNull, type Attribution, type EventSink } from './normalizer-support';
 
@@ -82,6 +82,27 @@ export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFr
       const toolUseId = (req.tool_use_id ?? null) as ToolUseId | null;
       remember({ kind: 'dialog', toolUseId, callbackId: null });
       out.emit({ kind: 'dialog.requested', requestId, dialogKind: req.dialog_kind, payload: req.payload, toolUseId }, attribution); // the wire `payload` value, untouched (C7 validates it per kind)
+      return;
+    }
+    // R2: the engine's requests to the attached surface, answered by the renderer through `session.ui.answer` (or by
+    // the host's refusal when no window does in time); our answer makes no event, the request alone is the record
+    case 'ui_copy': {
+      const req = UiCopyRequestSchema.parse(request);
+      out.emit({ kind: 'plugin.ask', requestId, ask: 'copy', plugin: req.plugin ?? null, text: req.text, mode: null }, attribution);
+      return;
+    }
+    case 'ui_prompt_read':
+      UiPromptReadRequestSchema.parse(request);
+      out.emit({ kind: 'plugin.ask', requestId, ask: 'prompt_read', plugin: null, text: null, mode: null }, attribution);
+      return;
+    case 'ui_prompt_fill': {
+      const req = UiPromptFillRequestSchema.parse(request);
+      out.emit({ kind: 'plugin.ask', requestId, ask: 'prompt_fill', plugin: null, text: req.text, mode: req.mode ?? 'replace' }, attribution);
+      return;
+    }
+    case 'ui_prompt_suggest': {
+      const req = UiPromptSuggestRequestSchema.parse(request);
+      out.emit({ kind: 'plugin.ask', requestId, ask: 'prompt_suggest', plugin: null, text: req.text, mode: null }, attribution);
       return;
     }
     default:

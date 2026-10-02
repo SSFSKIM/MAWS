@@ -20,6 +20,9 @@ export const commands = [
   'session.intent.release', 'session.intent.discard', 'session.intent.resolveWorktree', 'session.start',
   'session.fork', 'session.archive', 'session.takeOver' /* W7 */, 'session.delete', 'session.rename', 'session.revealPath',
   'session.deletions.list', 'session.deletions.keep', 'session.deletions.preview', 'session.projects.addFolder' /* New chat */,
+  // R2: the engine's remote surface
+  'session.ui.render', 'session.ui.press', 'session.ui.input', 'session.ui.select', 'session.ui.focus', 'session.ui.scroll',
+  'session.ui.panes', 'session.ui.paneShow', 'session.ui.paneFocus', 'session.ui.close', 'session.ui.promptEdit', 'session.ui.answer',
 ] as const;
 
 export const events = [

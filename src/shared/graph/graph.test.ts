@@ -80,7 +80,7 @@ describe('graph schemas accept and reject', () => {
 
     it('lists every event kind once and the union covers each', () => {
       expect(new Set(EVENT_KINDS).size).toBe(EVENT_KINDS.length);
-      expect(EVENT_KINDS).toHaveLength(54); // R1: the five plugin.* kinds
+      expect(EVENT_KINDS).toHaveLength(58); // R1: the five plugin.* kinds; R2: the surface's four
       const covered = SessionEventSchema.options.map((option) => option.shape.kind.value).sort();
       expect(covered).toEqual([...EVENT_KINDS].sort());
     });
@@ -167,6 +167,10 @@ describe('graph schemas accept and reject', () => {
         'plugin.log': { plugin: 'mods-probe', text: 'line' },
         'plugin.invalidate': { event: 'ui.render' },
         'plugin.load_issue': { plugin: 'p@market', level: 'warning', message: 'shadowed folder' },
+        'plugin.panes': { panes: [{ id: 'mods-probe-pane', title: 'Probe pane', plugin: 'mods-probe', closeOnEscape: false, holdToasts: false, rows: null, columns: null }], shownId: 'mods-probe-pane', focusedId: null, focusRequestedId: null }, // R2
+        'plugin.scroll': { component: 'Pane', instanceId: 'mods-probe-pane', offset: 16, followEnd: true },
+        'plugin.focus': { component: 'Pane', instanceId: 'mods-probe-pane', plugin: 'mods-probe', key: 'pick' },
+        'plugin.ask': { requestId: 'r-1', ask: 'prompt_fill', plugin: null, text: 'MODS_PROBE_FILL', mode: 'replace' },
         'frame.unknown': { frameType: 'wibble', subtype: null },
       };
       expect(Object.keys(samples).sort()).toEqual([...EVENT_KINDS].sort());

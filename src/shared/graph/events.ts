@@ -15,6 +15,7 @@ import {
   TaskIdSchema,
   ToolUseIdSchema,
 } from './ids';
+import { PaneRosterSchema, PromptFillModeSchema, SURFACE_ASKS } from '../engine/surface'; // R2
 
 // An API content block, unknown keys kept.
 export const ContentBlockSchema = z.looseObject({ type: z.string() });
@@ -81,6 +82,9 @@ export const EVENT_KINDS = [
   // remote-surface pushes, a drawn tree the engine says may be stale (carried, unused until R2), and a load error or
   // warning from `system/init`
   'plugin.toast', 'plugin.status', 'plugin.log', 'plugin.invalidate', 'plugin.load_issue',
+  // the remote surface (R2): the pane roster, a plugin's move of a site's window or focus ring, and a request the engine
+  // sends the surface (the clipboard, the composer's read, fill and suggest), which the renderer answers through X2
+  'plugin.panes', 'plugin.scroll', 'plugin.focus', 'plugin.ask',
   // retention of the unknown
   'frame.unknown',
 ] as const;
@@ -224,6 +228,16 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('plugin.log', { plugin: z.string(), text: z.string() }),
   event('plugin.invalidate', { event: nullableString() }),
   event('plugin.load_issue', { plugin: z.string(), level: z.enum(['error', 'warning']), message: z.string() }),
+  // R2 (charter D-9 as amended 2026-10-01): `plugin.panes` is the roster from the engine's `ui_panes` push and from the
+  // host's roster read (`ui_panes` answered), camelCased (shared/engine/surface.ts PaneRosterSchema). `plugin.scroll` and
+  // `plugin.focus` are a plugin's own moves of a site's window (`followEnd`: keep the end in view) and focus ring (the
+  // element by its plugin and key). `plugin.ask` is the engine's request to this surface, `requestId` the engine's id,
+  // which `session.ui.answer` answers within the engine's 5 s: `copy` with the text and the asking plugin, `prompt_read`,
+  // `prompt_fill` with the text and where it goes, `prompt_suggest` with the suggestion.
+  event('plugin.panes', { ...PaneRosterSchema.shape }),
+  event('plugin.scroll', { component: z.string(), instanceId: z.string(), offset: z.number().int(), followEnd: z.boolean() }),
+  event('plugin.focus', { component: z.string(), instanceId: z.string(), plugin: z.string(), key: z.string() }),
+  event('plugin.ask', { requestId: RequestIdSchema, ask: z.enum(SURFACE_ASKS), plugin: nullableString(), text: nullableString(), mode: PromptFillModeSchema.nullable() }),
   event('frame.unknown', { frameType: z.string(), subtype: nullableString() }),
 ]);
 

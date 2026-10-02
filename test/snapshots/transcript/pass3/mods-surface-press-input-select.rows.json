@@ -1,0 +1,112 @@
+[
+  {
+    "at": "2026-10-02T06:45:11.416Z",
+    "id": "time:error:replay:journal:19:0",
+    "kind": "time",
+    "label": "Oct 2, 2026 6:45 AM",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:11.416Z",
+    "attempt": null,
+    "id": "error:replay:journal:19:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_PRESS 1",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:11.421Z",
+    "attempt": null,
+    "id": "error:replay:journal:28:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_INPUT hel",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:11.424Z",
+    "attempt": null,
+    "id": "error:replay:journal:32:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_INPUT hello",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:11.426Z",
+    "attempt": null,
+    "id": "error:replay:journal:36:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_SUBMIT hello",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:11.521Z",
+    "attempt": null,
+    "id": "error:replay:journal:46:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_OPEN press {\"isPlaced\":true}",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:11.527Z",
+    "attempt": null,
+    "id": "error:replay:journal:53:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "plugin",
+    "severity": "notice",
+    "text": "mods-probe: MODS_PROBE_SELECT two",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-02T06:45:11.623Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:41f4f8e7-a3f4-4904-805d-932784a18e0d",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "41f4f8e7-a3f4-4904-805d-932784a18e0d",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply with exactly MODS_PROBE_OK",
+    "turnId": "turn:41f4f8e7-a3f4-4904-805d-932784a18e0d"
+  },
+  {
+    "at": "2026-10-02T06:45:13.452Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfcxbC3dfKoQvZq4pRggX:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "MODS_PROBE_OK",
+    "messageUuid": "4fcfbd7e-877f-414e-b092-795c07730b80",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:41f4f8e7-a3f4-4904-805d-932784a18e0d"
+  },
+  {
+    "at": "2026-10-02T06:45:17.984Z",
+    "attempt": null,
+    "id": "error:replay:journal:95:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]
