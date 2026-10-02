@@ -9,7 +9,7 @@ import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { cellOf, editCounts, filePathOf, type ToolRecord, type TurnContext } from './cells';
 import { hookNotice, type HookRecord } from './hooks';
-import { agentMessageCopy, boundaryCopy, groupSummary, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
+import { agentMessageCopy, boundaryCopy, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
 import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
@@ -101,10 +101,11 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // it, Codex's persistent unit), a hook that got in the way, the answer, a boundary (compaction, reset, retraction:
 // charter §5.3, the visible transcript stays true to the model's context), a slash command's output and an answered
 // question's receipt (W4, the owner's ruling: what the human answered stays in view; T3's receipts outlive the fold
-// too). The divider folds everything else, so a turn of a local command alone (`/compact`: its boundary and its output)
-// has no work and no "Worked for 0s" divider. A question still counts as work for where the answer starts (WORK_ROWS).
+// too), and what a plugin said in the transcript (R1: its log lines and load issues, as the terminal keeps them). The
+// divider folds everything else, so a turn of a local command alone (`/compact`: its boundary and its output) has no
+// work and no "Worked for 0s" divider. A question still counts as work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && row.phase === 'answer') || (row.kind === 'error' && row.scope === 'hook');
+  row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && row.phase === 'answer') || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin'));
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
@@ -479,6 +480,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'notice.posted':
         if (!supersededByHookRow(event)) items.push({ kind: 'row', row: noticeRow(event, event.text, turn.id) });
         break;
+      case 'plugin.log':
+      case 'plugin.load_issue':
+        items.push({ kind: 'row', row: pluginRow(event, turn.id) });
+        break;
       default:
         break;
     }
@@ -522,11 +527,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push(item);
     }
   }
-  // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary. A hook
-  // and a notice are not the model's work: under MessageDisplay and Stop hooks every final text is followed by hook
-  // events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
+  // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary. A hook,
+  // a notice and what a plugin said (R1) are not the model's work: under MessageDisplay and Stop hooks every final text
+  // is followed by hook events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
   const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error']);
-  const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && item.row.severity === 'notice'));
+  const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin')));
   const lastWork = resolved.map(isWork).lastIndexOf(true);
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
   // engine took into this turn, at its delivery position; a hook that got in the way; the answer; a boundary; a slash
@@ -820,6 +825,15 @@ function noticeRow(event: SessionEvent, text: string, turnId: TurnId | null): Ro
   return row;
 }
 
+// R1: a plugin's log line (a dim notice under its name) or a load issue from init (an error, or a notice for a warning),
+// at its arrival position.
+function pluginRow(event: Event<'plugin.log'> | Event<'plugin.load_issue'>, turnId: TurnId | null): RowOf<'error'> {
+  const base = { id: rowId.error(event.id), turnId, at: event.at, kind: 'error' as const, attempt: null, scope: 'plugin' as const, lostAttentionCount: null };
+  if (event.kind === 'plugin.log') return { ...base, severity: 'notice', text: PLUGIN.log(event.plugin, event.text) };
+  if (event.level === 'error') return { ...base, severity: 'error', text: PLUGIN.loadError(event.plugin, event.message) };
+  return { ...base, severity: 'notice', text: PLUGIN.loadWarning(event.plugin, event.message) };
+}
+
 // A `!` command's replayed rows: the input message opens the row, the next output message completes it.
 function bashRowOf(input: Event<'user.message'>, turnId: TurnId | null): RowOf<'bash'> {
   const command = input.bash?.part === 'input' ? input.bash.command : '';
@@ -866,6 +880,10 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         break;
       case 'notice.posted':
         if (!supersededByHookRow(event)) rows.push(noticeRow(event, event.text, null));
+        break;
+      case 'plugin.log':
+      case 'plugin.load_issue':
+        rows.push(pluginRow(event, null));
         break;
       case 'session.reconnect': {
         const id: RowId = episode?.id ?? rowId.reconnect(event.id);

@@ -3,11 +3,18 @@
 // second while the reader, scrolled far up, expands old work; the reader must not be moved, frames must hold, and
 // "Jump to latest" must resume follow mode. The others pin follow mode, the divider collapse, the theme switch, the
 // denial jump (acceptance item 4), the child transcript (acceptance item 9) and expanded old work over every fixture.
+// R1 adds one case in the product app: a mod's pushes (pass3/mods-pushes) replayed through C3's replay transport into a
+// session tab, showing its toast, its log lines in the transcript and its status line in the panel summary.
 // Runs only under `pnpm e2e:transcript`, which builds with MAWS_HARNESS=1 first (playwright.config.ts).
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test as base, type Page } from '@playwright/test';
 import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api';
+import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { sidebarRow } from './support/sidebar';
 
 const test = base.extend<{ harness: MawsLaunch }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
@@ -716,4 +723,62 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
   console.log(`expanded fixtures: ${JSON.stringify(report)}`);
   test.info().annotations.push({ type: 'expanded fixtures', description: JSON.stringify(report) });
   for (const kind of WORK_KINDS) expect(seen.get(kind) ?? 0, `some fixture renders a ${kind} row`).toBeGreaterThan(0);
+});
+
+// R1 (charter D-9 as amended 2026-10-01): a mod's toast, log lines and status line, from the pushes R0 recorded on the
+// installed 2.1.287 (a session.start log, status and toast before the initialize answer; a turn.complete log and status
+// after the turn's result), replayed through the replay transport into the product app's session tab. A scratch config
+// home holds one transcript for a scratch directory, so C4 indexes a record the sidebar shows; no engine runs.
+test('a mod’s toast, log lines and status line show in the session (R1, pass3/mods-pushes)', async () => {
+  test.setTimeout(120_000);
+  const fixture = 'spikes/protocol-probe/fixtures/pass3/mods-pushes.jsonl';
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-r1-mods-')));
+  const repo = join(root, 'repo');
+  const config = join(root, 'claude-config');
+  mkdirSync(repo);
+  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  const engineId = randomUUID();
+  const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'a session with a mod' }, uuid: randomUUID(), timestamp: '2026-10-01T10:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.287' };
+  writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(first)}\n`);
+  const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
+  try {
+    const { page } = maws;
+    // Every toast text the page shows, whenever it shows (the toast leaves after its 4 s)
+    await page.evaluate(() => {
+      const seen: string[] = [];
+      (window as unknown as { __toasts: string[] }).__toasts = seen;
+      new MutationObserver(() => {
+        for (const toast of Array.from(document.querySelectorAll('[role="region"][aria-label^="Notifications"] li'))) {
+          const text = toast.textContent ?? '';
+          if (!seen.includes(text)) seen.push(text);
+        }
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
+    let id = '';
+    await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '')).not.toBe('');
+    await (await sidebarRow(page, { appSessionId: id })).click();
+    const pane = page.locator('[data-region="main"] [data-pane="0"]');
+    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+
+    await launchReady(page, id, fixture, { cwd: repo }); // the fixture answers initialize after the session.start pushes (seq 4-7)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __toasts: string[] }).__toasts), { timeout: 20_000 }).toContainEqual(expect.stringContaining('mods-probe: MODS_PROBE_TOAST start'));
+    value(await invoke(page, 'session.send', { appSessionId: id as never, content: 'Reply with exactly MODS_PROBE_OK' })); // as recorded (seq 9); the replay holds at it
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).turn, { timeout: 20_000 }).toBeNull();
+
+    // the log lines, dim notices under the plugin's name, at their arrival positions: before the turn and after it
+    const notices = pane.locator('.transcript-error[data-scope="plugin"]');
+    await expect(notices).toHaveText(['mods-probe: MODS_PROBE_LOG start surface=null interactive=false', 'mods-probe: MODS_PROBE_LOG turn']);
+    const order = await pane.locator('[data-row-id]').evaluateAll((rows) => rows.map((row) => row.querySelector('[data-kind]')?.getAttribute('data-kind')).filter((kind) => kind !== 'time'));
+    expect(order.slice(0, 2)).toEqual(['error', 'user']);
+    expect(order.at(-1)).toBe('error');
+    // the status line, its latest text, in the panel summary's Plugins section
+    const plugins = page.locator('[data-region="panel"]').getByRole('region', { name: 'Plugins' });
+    await expect(plugins).toContainText('mods-probe · MODS_PROBE_STATUS turn');
+    await expect(plugins).not.toContainText('MODS_PROBE_STATUS start');
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

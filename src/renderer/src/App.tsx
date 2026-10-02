@@ -2,6 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { Shell } from './app/Shell';
 import { connectScenarioSessionCreator } from './app/scenario-session-creator';
+import { connectPluginToasts } from './app/plugin-toasts'; // R1
 import { connectAttention } from './attention/navigation';
 import { registerShellActions } from './app/shell-actions';
 import { ipc } from './ipc/client';
@@ -71,6 +72,7 @@ export function App() {
   useEffect(() => persistLayout(ipc), []); // C5: changed layout keys back to main
   useEffect(() => registerShellActions(), []); // C5: the frame's action handlers
   useEffect(() => connectAttention(), []); // C5: ⌘⇧J, notification clicks and the fallback toast
+  useEffect(() => connectPluginToasts(), []); // R1: a plugin's toast, for a session this window shows
   useEffect(() => connectKeys(), []); // C5: renderer-sink chords, bound to the element that holds focus
   useEffect(() => connectActions(), []); // C5: menu actions in, the enabled set out
   useEffect(() => connectScenarioSessionCreator(), []); // C5: the stub's session creator in launch mode scenario

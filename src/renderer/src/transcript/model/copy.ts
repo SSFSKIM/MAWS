@@ -342,6 +342,17 @@ export const HOOK = {
   cancelled: (name: string) => `Hook ${name} was cancelled`,
 } as const;
 
+// R1: what a plugin says through the engine (charter D-9 as amended 2026-10-01), always under its name: a log line (the
+// terminal's dim notice under the plugin's name), a toast and a pinned status line as MAWS shows them, and a load
+// error or warning from the session's init.
+export const PLUGIN = {
+  log: (plugin: string, text: string) => `${plugin}: ${text}`,
+  toast: (plugin: string, text: string) => `${plugin}: ${text}`,
+  status: (plugin: string, text: string) => `${plugin} · ${text}`,
+  loadError: (plugin: string, message: string) => `Plugin ${plugin} failed to load${because(message)}`,
+  loadWarning: (plugin: string, message: string) => `Plugin ${plugin} warned while loading${because(message)}`,
+} as const;
+
 // A spilled result's loader (residue *Spilled results*).
 const sizeCopy = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${Number((bytes / (1024 * 1024)).toFixed(1))} MB`);
 export const SPILL = {
