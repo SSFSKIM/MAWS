@@ -430,9 +430,9 @@ describe('worktree service over scratch repositories', () => {
       await service.remove({ repoRoot: repo.root, path: w.path, expect: { branch: w.branch, head: w.head }, discard: false });
       await service.deleteBranch({ repoRoot: repo.root, branch: 'worktree-all', expect: { head: w.head }, acknowledgeUnmerged: false });
       const subcommands = new Set(spawn.mock.calls.map(([, args]) => (args as string[])[2]));
-      expect([...subcommands].sort()).toEqual(['branch', 'check-ref-format', 'rev-list', 'rev-parse', 'show-ref', 'status', 'symbolic-ref', 'worktree']);
-      const mutations = spawn.mock.calls.map(([, args]) => (args as string[]).slice(2)).filter((a) => a[0] === 'branch' || (a[0] === 'worktree' && a[1] !== 'list'));
-      expect(mutations.map((a) => a.slice(0, 2).join(' '))).toEqual(['worktree add', 'worktree remove', 'worktree prune', 'branch -D']);
+      expect([...subcommands].sort()).toEqual(['check-ref-format', 'rev-list', 'rev-parse', 'show-ref', 'status', 'symbolic-ref', 'update-ref', 'worktree']);
+      const mutations = spawn.mock.calls.map(([, args]) => (args as string[]).slice(2)).filter((a) => a[0] === 'update-ref' || (a[0] === 'worktree' && a[1] !== 'list'));
+      expect(mutations.map((a) => a.slice(0, 2).join(' '))).toEqual(['worktree add', 'worktree remove', 'worktree prune', 'update-ref --no-deref']);
       // C12: add appended the engine's runtime block (never removed by MAWS); the ladder wrote nothing else there
       expect(readFileSync(exclude, 'utf8')).toBe(`${before ?? ''}${before && !before.endsWith('\n') ? '\n' : ''}${RUNTIME_EXCLUDE_BLOCK}`);
     });

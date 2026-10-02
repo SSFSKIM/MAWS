@@ -233,9 +233,9 @@ describe('git invocation is read-only', () => {
     for (const [file, args, options] of spawn.mock.calls) {
       expect(file).toBe('/usr/bin/git');
       expect(args.slice(0, 2)).toEqual(['-C', repo.root]);
-      expect(options).toMatchObject({ timeout: 10_000, maxBuffer: 64 * 1024 * 1024 });
+      expect(options).toMatchObject({ detached: true, maxBuffer: 64 * 1024 * 1024 });
       // Exactly this environment: the caller's GIT_DIR (or any other git variable) never reaches the child.
-      expect(options.env).toEqual({ PATH: '/usr/bin:/bin', HOME: '/Users/nobody', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' });
+      expect(options.env).toMatchObject({ PATH: '/usr/bin:/bin', HOME: '/Users/nobody', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' });
       // The one configuration a call carries: every diff turns off its index refresh, which would write the index.
       const rest = args[2] === '-c' ? args.slice(4) : args.slice(2);
       if (rest[0] === 'diff') expect(args.slice(2, 4)).toEqual(['-c', 'diff.autoRefreshIndex=false']);

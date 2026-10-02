@@ -218,7 +218,15 @@ export class WorktreeService {
     if (!status.merged && !acknowledgeUnmerged) {
       return { refused: 'unmerged', detail: `${status.ahead} ${status.ahead === 1 ? 'commit' : 'commits'} not on ${status.base}` };
     }
-    await this.git(status.repoRoot, ['branch', '-D', '--', branch]);
+    try {
+      // Compare-and-delete under the ref lock: a newer tip survives even when unmerged deletion was allowed.
+      await this.git(status.repoRoot, ['update-ref', '--no-deref', '-d', `refs/heads/${branch}`, expect.head]);
+    } catch (error) {
+      if (error instanceof GitCommandError && /cannot lock ref/.test(error.stderr)) {
+        return { refused: 'changed', detail: `${branch} changed or is locked; refresh before deleting` };
+      }
+      throw error;
+    }
     return { deleted: true, wasMerged: status.merged };
   }
 

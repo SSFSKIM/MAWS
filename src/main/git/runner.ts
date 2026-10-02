@@ -1,17 +1,14 @@
-// How the git service runs `git` (C4 execution document, Interfaces "Git service"; residue *Git invocation and
-// watcher*). One `execFile` per call against `MAWS_GIT` or `/usr/bin/git`, `-C <directory>` first, with exactly the
-// environment below: `GIT_OPTIONAL_LOCKS=0` keeps `git status` from refreshing the index (the service is read-only even in
-// side effects), `GIT_TERMINAL_PROMPT=0` makes a credential question fail instead of hanging, `LC_ALL=C` fixes the
-// messages this file matches, and nothing else of the caller's environment (a GIT_DIR, a GIT_INDEX_FILE) reaches git.
-// Which subcommands run is the service's business; this file only runs them and names the failures.
-import { execFile as nodeExecFile, type ExecFileException } from 'node:child_process';
+// Git runs with a constructed environment, bounded output and a process-group timeout. Command selection belongs
+// to the services; executable configuration and cancellation policy belong here (charter §4.5).
+import { spawn, type ChildProcess, type ExecFileException } from 'node:child_process';
 
 export const GIT_TIMEOUT_MS = 10_000;
+const KILL_GRACE_MS = 500;
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 export interface GitExecOptions {
   env: NodeJS.ProcessEnv;
-  timeout: number;
+  detached: true;
   maxBuffer: number;
   encoding: 'utf8';
 }
@@ -21,7 +18,7 @@ export type ExecFileFn = (
   args: string[],
   options: GitExecOptions,
   callback: (error: ExecFileException | null, stdout: string, stderr: string) => void,
-) => unknown;
+) => ChildProcess | void;
 
 export type GitRun = (directory: string, args: string[]) => Promise<string>;
 
@@ -47,25 +44,94 @@ export function gitBinary(env: NodeJS.ProcessEnv): string {
   return env.MAWS_GIT || '/usr/bin/git';
 }
 
-export function gitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+// Command-scope config outranks repository/global config without trusting any caller-supplied GIT_* variables.
+// Reads cannot run fsmonitor or hooks. Diff's --no-ext-diff/--no-textconv additionally disable named diff drivers.
+// Pagers and transport executables are disabled for every invocation: MAWS never fetches, pushes or authenticates.
+// GIT_ALLOW_PROTOCOL (empty allowlist) wins even over protocol.<name>.allow=always, including lazy object fetches.
+// Reset safe.directory's allowlist, not the ownership check: opening a repo is not permission to trust another owner.
+export function gitEnv(env: NodeJS.ProcessEnv, checkout = false): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   if (env.PATH !== undefined) out.PATH = env.PATH;
   if (env.HOME !== undefined) out.HOME = env.HOME;
-  return { ...out, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' };
+  const config = [
+    ['core.fsmonitor', 'false'],
+    ['credential.helper', ''],
+    ['log.showSignature', 'false'], // stash list uses log; signature verification would spawn gpg/ssh-keygen
+    ['safe.directory', ''],
+    ...(!checkout ? [['core.hooksPath', '/dev/null']] : []),
+  ];
+  config.forEach(([key, value], i) => {
+    out[`GIT_CONFIG_KEY_${i}`] = key;
+    out[`GIT_CONFIG_VALUE_${i}`] = value;
+  });
+  return {
+    ...out, GIT_CONFIG_COUNT: String(config.length), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C',
+    GIT_PAGER: 'cat', GIT_EXTERNAL_DIFF: '/usr/bin/false', GIT_SSH_COMMAND: '/usr/bin/false', GIT_ALLOW_PROTOCOL: '',
+  };
 }
 
 export function createGitRunner(options: { env?: NodeJS.ProcessEnv; execFile?: ExecFileFn } = {}): GitRun {
   const env = options.env ?? process.env;
   const binary = gitBinary(env);
-  const execOptions: GitExecOptions = { env: gitEnv(env), timeout: GIT_TIMEOUT_MS, maxBuffer: MAX_BUFFER, encoding: 'utf8' };
-  const run = options.execFile ?? (nodeExecFile as unknown as ExecFileFn);
+  const run = options.execFile ?? execGit;
   return (directory, args) =>
     new Promise((resolve, reject) => {
-      run(binary, ['-C', directory, ...args], execOptions, (error, stdout, stderr) => {
+      // Only trusted worktree creation runs checkout hooks/filters. Read callers never acquire that privilege.
+      const checkout = args[0] === 'worktree' && args[1] === 'add';
+      const execOptions: GitExecOptions = { env: gitEnv(env, checkout), detached: true, maxBuffer: MAX_BUFFER, encoding: 'utf8' };
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        try { signalGroup(child, 'SIGTERM'); } catch (error) { reject(error); }
+        // Do not cancel this when Git exits: a hook may have closed its pipes and outlived its parent.
+        setTimeout(() => {
+          try {
+            signalGroup(child, 'SIGKILL');
+            reject(new GitTimeoutError(`git ${args[0]} timed out after ${GIT_TIMEOUT_MS / 1000} s in ${directory}`));
+          } catch (error) { reject(error); }
+        }, KILL_GRACE_MS);
+      }, GIT_TIMEOUT_MS);
+      const child = run(binary, ['-C', directory, ...args], execOptions, (error, stdout, stderr) => {
+        clearTimeout(timer);
+        if (timedOut) return; // recovery may start only after the whole group has received SIGKILL
         if (!error) resolve(stdout);
         else reject(failure(error, stderr, binary, directory, args[0]));
       });
     });
+}
+
+// execFile does not forward `detached` to spawn. Use spawn directly so Git really leads a new process group.
+const execGit: ExecFileFn = (file, args, options, callback) => {
+  const child = spawn(file, args, { env: options.env, detached: options.detached, stdio: ['ignore', 'pipe', 'pipe'] });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  let outBytes = 0;
+  let errBytes = 0;
+  let failure: ExecFileException | null = null;
+  const collect = (chunks: Buffer[], chunk: Buffer, bytes: number) => {
+    if (failure) return;
+    if (bytes > options.maxBuffer) {
+      failure = Object.assign(new Error('Git output exceeds buffer limit'), { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' });
+      signalGroup(child, 'SIGKILL');
+    } else chunks.push(chunk);
+  };
+  child.stdout.on('data', (chunk: Buffer) => collect(stdout, chunk, outBytes += chunk.length));
+  child.stderr.on('data', (chunk: Buffer) => collect(stderr, chunk, errBytes += chunk.length));
+  child.on('error', (error) => { failure = error; });
+  child.on('close', (code, signal) => {
+    if (!failure && (code !== 0 || signal !== null)) {
+      failure = Object.assign(new Error(`Git exited with ${signal ?? code}`), { code: code ?? undefined, signal: signal ?? undefined });
+    }
+    callback(failure, Buffer.concat(stdout).toString(options.encoding), Buffer.concat(stderr).toString(options.encoding));
+  });
+  return child;
+};
+
+function signalGroup(child: ChildProcess | void, signal: NodeJS.Signals): void {
+  if (child?.pid === undefined) return;
+  try { process.kill(-child.pid, signal); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+  }
 }
 
 function failure(error: ExecFileException, stderr: string, binary: string, directory: string, subcommand: string): Error {
