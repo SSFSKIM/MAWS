@@ -808,6 +808,48 @@ describe('F2 persisted queue and cwd regressions', () => {
     }
   });
 
+  it.each(['edit', 'remove'] as const)('an acknowledged saved queue %s survives overlapping launch recovery', async (mutation) => {
+    const store = new FileSessionStateStore(userData);
+    const id = 'app-recover-edit' as AppSessionId;
+    await store.saveQueue(id, { entries: [{ queueId: 'q1', appSessionId: id, content: 'old', createdAt: '2026-10-02T00:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false }], paused: true, pauseReason: 'interrupt' });
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ initialize: () => null })) });
+    const host = engineHost({ store, spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+    await until(() => transport.requestsOf('initialize').length === 1, 'initialize');
+    const session = host.ipc.table.get(id)!;
+    let finishSave!: () => void;
+    const held = new Promise<void>((resolve) => { finishSave = resolve; });
+    let saveStarted!: () => void;
+    const saving = new Promise<void>((resolve) => { saveStarted = resolve; });
+    const save = store.saveQueue.bind(store);
+    vi.spyOn(store, 'saveQueue').mockImplementationOnce(async (sessionId, queue) => {
+      saveStarted();
+      await held; // the mutation has read the old queue, but has not yet committed it
+      await save(sessionId, queue);
+    });
+    const changing = mutation === 'edit'
+      ? host.call('session.queue.edit', { appSessionId: id, queueId: 'q1', content: 'revised' })
+      : host.call('session.queue.remove', { appSessionId: id, queueId: 'q1' });
+    await saving;
+    let recoveryStarted!: () => void;
+    const recovering = new Promise<void>((resolve) => { recoveryStarted = resolve; });
+    const recover = session.queue.recover.bind(session.queue);
+    vi.spyOn(session.queue, 'recover').mockImplementation(() => {
+      recoveryStarted();
+      return recover();
+    });
+    transport.answer('initialize', INIT_RESPONSE);
+    await recovering; // without transaction coordination this queues a stale file load before the edit's save
+    finishSave();
+    await changing;
+    await until(() => session.lifecycle === 'ready', 'recovered launch');
+    const expected = { entries: mutation === 'edit' ? [expect.objectContaining({ content: 'revised', uncertain: false })] : [], paused: true, pauseReason: 'interrupt' };
+    expect(session.queue.state).toMatchObject(expected);
+    expect(await store.loadQueue(id)).toMatchObject(expected);
+    transport.exit(0);
+    await session.exited;
+  });
+
   it('set_cwd success without replacement init changes status and the subsequent bash cwd; needs_trust does not', async () => {
     // pass2/trust-no-attestation seq 11 and 18: no replacement system/init follows success.
     const fixture = readFileSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/pass2/trust-no-attestation.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { seq: number; frame: { response: { response: Record<string, unknown> } } });

@@ -14,7 +14,7 @@ const TERMINAL_LIFECYCLE = new Set(['completed', 'cancelled', 'discarded', 'refu
 
 // `delivered` settles when the deny response's write settles: the operation is staged before the write so a `result`
 // racing the write continuation finds it, and the sequence waits on delivery before sending anything (M3 review).
-interface ClearAndImplement { phase: 'awaiting_result' | 'restoring_mode' | 'ready_to_clear' | 'awaiting_clear' | 'ready_to_implement'; plan: string; clearUuid: MessageUuid | null; delivered: Promise<boolean> }
+interface ClearAndImplement { phase: 'awaiting_result' | 'restoring_mode' | 'ready_to_clear' | 'awaiting_clear' | 'ready_to_implement' | 'writing_implementation'; plan: string; clearUuid: MessageUuid | null; delivered: Promise<boolean> }
 
 type AnswerOutcome = 'delivered' | 'not_pending' | 'write_failed';
 
@@ -108,8 +108,15 @@ export class ClearAndImplementSequence {
       clear.phase = 'awaiting_clear';
       void this.writeUser('/clear', uuid).catch((error: unknown) => this.fail(clear, `not written: ${messageOf(error)}`));
     } else if (clear.phase === 'ready_to_implement') {
-      this.clear = null;
-      this.writeUser(`Implement this plan:\n\n${clear.plan}`).catch((error: unknown) => this.host.log(`plan prompt not written: ${messageOf(error)}`));
+      // Keep the queue held until the out row registers the prompt with the normalizer. A further resume or
+      // queue save must not write a second implementation while this write is in flight.
+      clear.phase = 'writing_implementation';
+      void this.writeUser(`Implement this plan:\n\n${clear.plan}`)
+        .catch((error: unknown) => this.host.log(`plan prompt not written: ${messageOf(error)}`))
+        .finally(() => {
+          if (this.clear === clear) this.clear = null;
+          this.host.touch();
+        });
     }
   }
 

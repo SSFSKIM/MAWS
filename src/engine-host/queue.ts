@@ -15,6 +15,7 @@
 // with the queue so the composer can offer "Hold until the turn ends": `hold` withdraws it from the engine
 // (`cancel_async_message`, pass3/steer-next-cancelled) and appends it to the app queue, remembering its uuid.
 import { randomUUID } from 'node:crypto';
+import { queueTransaction } from './store/queue-transaction';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { SendContentSchema, WITHDRAWN_MAX, type PendingSteer, type QueueEntry, type QueuePauseReason, type QueueState, type SendContent, type SessionStateStore } from '@shared/engine/session-state-store';
@@ -95,20 +96,22 @@ export class MessageQueue {
   // Loads the persisted queue for a new process: a `submitting` entry (the host or the app died between the persist and
   // the acknowledgement) becomes the uncertain head of a paused queue; a `released` entry is retired `interrupted`.
   async recover(): Promise<void> {
-    const loaded = await this.deps.store.loadQueue(this.deps.appSessionId);
-    this.entries = loaded.entries;
-    this.paused = loaded.paused;
-    this.pauseReason = loaded.paused ? (loaded.pauseReason ?? null) : null; // C7
-    this.steers = []; // W1: a pending steer lived in the engine process that is gone
-    this.withdrawn = loaded.withdrawn ?? [];
-    this.loaded = true;
-    if (loaded.corrupt !== null) {
-      // the state file was unreadable and kept aside: never a silent empty queue (M4 review)
-      if (!this.paused) this.pauseFor('state_corrupt'); // C7: through pauseFor
-      this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session started without them.`);
-    }
-    this.settleAfterExit();
-    await this.persist(); // rejects: a recovery that cannot be saved is an initialization failure
+    await queueTransaction(this.deps.store, this.deps.appSessionId, async () => {
+      const loaded = await this.deps.store.loadQueue(this.deps.appSessionId);
+      this.entries = loaded.entries;
+      this.paused = loaded.paused;
+      this.pauseReason = loaded.paused ? (loaded.pauseReason ?? null) : null; // C7
+      this.steers = []; // W1: a pending steer lived in the engine process that is gone
+      this.withdrawn = loaded.withdrawn ?? [];
+      this.loaded = true;
+      if (loaded.corrupt !== null) {
+        // the state file was unreadable and kept aside: never a silent empty queue (M4 review)
+        if (!this.paused) this.pauseFor('state_corrupt'); // C7: through pauseFor
+        this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session started without them.`);
+      }
+      this.settleAfterExit();
+      await this.persist(); // rejects: a recovery that cannot be saved is an initialization failure
+    });
   }
 
   async send(content: SendContent): Promise<{ entry: QueueEntry; disposition: 'sent' | 'queued' }> {

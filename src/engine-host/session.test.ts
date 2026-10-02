@@ -1463,8 +1463,8 @@ describe('EngineSession (C12): the stop precedence, busy, lastUsedAt, keepAlive 
 
 describe('F2 session lifecycle regressions', () => {
   const result = { type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' } };
-  async function staged(responder: Responder = {}) {
-    const t = setup({ responder: defaultResponder({ ...responder, interrupt: () => ({ response: { still_queued: [], cancelled: [] } }) }) });
+  async function staged(responder: Responder = {}, opts: { session?: Partial<EngineSessionOptions>; transport?: TransportOpts } = {}) {
+    const t = setup({ ...opts, responder: defaultResponder({ ...responder, interrupt: () => ({ response: { still_queued: [], cancelled: [] } }) }) });
     await t.session.start();
     await t.session.send('plan it');
     t.transport.push({ type: 'control_request', request_id: 'p-f2', request: { subtype: 'can_use_tool', tool_name: 'ExitPlanMode', input: { plan: 'Build it' }, tool_use_id: 'toolu_f2' } });
@@ -1503,6 +1503,93 @@ describe('F2 session lifecycle regressions', () => {
     await session.queue.setPaused(false);
     await flush();
     expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    transport.exit(0);
+    await session.exited;
+  });
+
+  it.each(['before', 'after'])('a pre-Stop save settling %s delayed mode restoration cannot resume the sequence', async (restoreOrder) => {
+    const store = new MemorySessionStateStore();
+    const { session, transport } = await staged({ set_permission_mode: () => null }, { session: { store } });
+    transport.push(result);
+    await flush();
+    let finishSave!: () => void;
+    const saveHeld = new Promise<void>((resolve) => { finishSave = resolve; });
+    const save = store.saveQueue.bind(store);
+    vi.spyOn(store, 'saveQueue').mockImplementationOnce(async (id, queue) => {
+      await save(id, queue);
+      await saveHeld;
+    });
+    const sending = session.send('ordinary prompt'); // captures an unpaused queue while mode restore is pending
+    await session.interrupt({ cancelEngineQueued: true, holdEngineQueued: true });
+    if (restoreOrder === 'after') {
+      transport.answer('set_permission_mode', { mode: 'auto' });
+      await flush();
+    }
+    finishSave();
+    await sending;
+    if (restoreOrder === 'before') {
+      transport.answer('set_permission_mode', { mode: 'auto' });
+      await flush();
+    }
+    expect(session.queue.isPaused).toBe(true);
+    expect(prompts(transport)).toEqual(['plan it']);
+    await session.queue.setPaused(false);
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    transport.exit(0);
+    await session.exited;
+  });
+
+  it('Resume keeps ordinary prompts queued until the delayed implementation write and its turn finish', async () => {
+    let finishWrite!: () => void;
+    const held = new Promise<void>((resolve) => { finishWrite = resolve; });
+    const { session, transport, journal } = await staged({}, { transport: {
+      holdWrite: (frame) => frame.type === 'user' && frame.message.content === 'Implement this plan:\n\nBuild it' ? held : null,
+    } });
+    await session.send('ordinary prompt');
+    const planPrompt = transport.writes.find((w) => w.type === 'user')!;
+    transport.push({ ...result, user_message_uuids: ['uuid' in planPrompt ? planPrompt.uuid : ''] });
+    await flush();
+    const clear = transport.writes.find((w) => w.type === 'user' && w.message.content === '/clear')!;
+    await session.interrupt({ cancelEngineQueued: true, holdEngineQueued: true });
+    transport.push({ ...result, user_message_uuids: ['uuid' in clear ? clear.uuid : ''] });
+    await flush();
+    await session.queue.setPaused(false);
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    expect(session.queue.state.entries).toMatchObject([{ content: 'ordinary prompt', state: 'queued' }]);
+    finishWrite();
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear', 'Implement this plan:\n\nBuild it']);
+    const implementation = journal.rows.find((r) => r.direction === 'out' && (r.frame as { message?: { content?: string } }).message?.content === 'Implement this plan:\n\nBuild it')!;
+    transport.push({ ...result, user_message_uuids: [(implementation.frame as { uuid: string }).uuid] });
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear', 'Implement this plan:\n\nBuild it', 'ordinary prompt']);
+    transport.exit(0);
+    await session.exited;
+  });
+
+  it('a failed delayed implementation write releases its hold so the queue can be resumed', async () => {
+    let failWrite!: (error: Error) => void;
+    const held = new Promise<void>((_resolve, reject) => { failWrite = reject; });
+    const { session, transport } = await staged({}, { transport: {
+      holdWrite: (frame) => frame.type === 'user' && frame.message.content === 'Implement this plan:\n\nBuild it' ? held : null,
+    } });
+    await session.send('ordinary prompt');
+    const planPrompt = transport.writes.find((w) => w.type === 'user')!;
+    transport.push({ ...result, user_message_uuids: ['uuid' in planPrompt ? planPrompt.uuid : ''] });
+    await flush();
+    const clear = transport.writes.find((w) => w.type === 'user' && w.message.content === '/clear')!;
+    await session.interrupt({ cancelEngineQueued: true, holdEngineQueued: true });
+    transport.push({ ...result, user_message_uuids: ['uuid' in clear ? clear.uuid : ''] });
+    await flush();
+    await session.queue.setPaused(false);
+    await flush();
+    expect(prompts(transport)).toEqual(['plan it', '/clear']);
+    failWrite(new Error('EPIPE'));
+    await flush();
+    await session.queue.setPaused(false);
+    expect(prompts(transport)).toEqual(['plan it', '/clear', 'ordinary prompt']);
     transport.exit(0);
     await session.exited;
   });

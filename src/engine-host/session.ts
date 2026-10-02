@@ -231,7 +231,8 @@ export class EngineSession {
       canWrite: () => this.processState === 'ready',
       cancel: async (messageUuid) => (await cancelAsyncMessage(this.readyClient(), { message_uuid: messageUuid })).cancelled === true, // W1
       onChange: (queue) => {
-        this.clearAndImplement.setPaused(queue.paused);
+        // Save announcements carry historical snapshots; only the current queue may release a continuation.
+        this.clearAndImplement.setPaused(this.queue.isPaused);
         this.emit('queue', queue);
         this.touch();
       },

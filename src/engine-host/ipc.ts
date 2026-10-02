@@ -35,6 +35,7 @@ import { ControlError, ControlTimeout, type ControlClient } from './rpc';
 import type { EngineSession } from './session';
 import { SessionStream } from './session-stream';
 import { FileSessionStateStore } from './store/file-session-state-store';
+import { queueTransaction } from './store/queue-transaction';
 import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from './transport';
 // C4 start
 import type { SessionEvent } from '@shared/graph/events';
@@ -279,11 +280,9 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   });
   // Retained prompts are editable before a new process exists. Serialize read/modify/save pairs per id so
   // concurrent edits/removals cannot restore one another's old snapshots; do not run recovery merely to edit.
-  const queueEdits = new Map<string, Promise<unknown>>();
   function editQueue<T>(appSessionId: string, live: (session: EngineSession) => Promise<T>, saved: (queue: QueueState) => T): Promise<T> {
     assertSafeAppSessionId(appSessionId);
-    const previous = queueEdits.get(appSessionId) ?? Promise.resolve();
-    const next = previous.catch(() => {}).then(async () => {
+    return queueTransaction(store, appSessionId as AppSessionId, async () => {
       const id = appSessionId as AppSessionId;
       const session = table.get(id);
       if (session?.queue.recovered) return live(session);
@@ -295,9 +294,6 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       emit('session.queue', { appSessionId: id, ...queue });
       return result;
     });
-    queueEdits.set(appSessionId, next);
-    void next.finally(() => { if (queueEdits.get(appSessionId) === next) queueEdits.delete(appSessionId); }).catch(() => {});
-    return next;
   }
   function savedEntry(queue: QueueState, queueId: string): QueueEntry {
     const entry = queue.entries.find((e) => e.queueId === queueId);
