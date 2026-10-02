@@ -1,6 +1,7 @@
 // C8a's end-to-end support (C8a execution document, M4): the scratch git repository the summary's cases read through
 // C4's real git service, the scenario file derived from C5's nine-sessions.json, and the theme scan in C5's smoke's
 // manner (its helpers live inside `e2e/shell.spec.ts`, which is C5's; the two below are the same probe, restated).
+import { isolatedGitEnv } from '../../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,17 +19,6 @@ export interface ScratchRepository {
   cleanup(): void;
 }
 
-// Isolated from the machine's git configuration, so hooks, signing or a default branch name cannot change the facts.
-const GIT_ENV = {
-  ...process.env,
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_NOSYSTEM: '1',
-  GIT_AUTHOR_NAME: 'MAWS e2e',
-  GIT_AUTHOR_EMAIL: 'e2e@maws.invalid',
-  GIT_COMMITTER_NAME: 'MAWS e2e',
-  GIT_COMMITTER_EMAIL: 'e2e@maws.invalid',
-};
-
 // `main` with three commits, the second pushed to a local bare `origin` and tracked (`git branch -u origin/main`), the
 // third not pushed; then one tracked file edited by one appended line and one untracked file. So the summary reads
 // `⎇ main`, `+1 −0 across 2 files · 1 untracked` and `1 ahead of origin/main`, and no "Open on GitHub" (a local remote).
@@ -36,7 +26,7 @@ export function scratchRepository(): ScratchRepository {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-panel-repo-')));
   const dir = join(root, 'repo');
   const origin = join(root, 'origin.git');
-  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: GIT_ENV, encoding: 'utf8' }).trim();
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8' }).trim();
   git(root, 'init', '--quiet', '--bare', '-b', 'main', origin);
   mkdirSync(dir);
   git(dir, 'init', '--quiet', '-b', 'main');

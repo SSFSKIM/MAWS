@@ -6,6 +6,7 @@
 // harness pages (the stub of C10's intent inside C5's own session pane; a stub widget registered as C11 will). Nothing
 // here asserts a look: it drives each state to where the mockup shows it and photographs it. Run on purpose only:
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && MAWS_C7_SHOTS=1 MAWS_ENGINE_REPLAY=1 pnpm exec playwright test e2e/c7-shots.spec.ts
+import { isolatedGitEnv } from '../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -37,7 +38,7 @@ test.beforeAll(() => {
   repo = join(scratch, 'repo');
   mkdirSync(join(repo, 'src'), { recursive: true });
   writeFileSync(join(repo, 'src/a.ts'), 'export const a = 1;\n');
-  const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=MAWS e2e', '-c', 'user.email=e2e@example.test', ...args], { cwd: repo, stdio: 'ignore' });
+  const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=MAWS e2e', '-c', 'user.email=e2e@example.test', ...args], { env: isolatedGitEnv(), cwd: repo, stdio: 'ignore' });
   git('init', '-q');
   git('add', '.');
   git('commit', '-q', '-m', 'init');

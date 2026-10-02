@@ -5,6 +5,7 @@
 // themes, the pinned engine run as a terminal would run it (`claude -p`, and interactively in a PTY that can stay live),
 // and spend from every journal and every terminal run. Never the owner's ~/.claude or ~/.claude.json, which are only
 // read by the owner-file check (and, for the real-store case alone, by the app itself, read only).
+import { isolatedGitEnv } from '../../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -117,7 +118,7 @@ export const lsPin = (): string => execFileSync('/bin/ls', ['-l', ENGINE_BIN], {
 // ---- scratch repositories --------------------------------------------------------------------------------------------
 
 const gitIn = (dir: string, ...args: string[]) =>
-  execFileSync('/usr/bin/git', ['-c', 'user.name=C12', '-c', 'user.email=c12@localhost', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8' }).trim();
+  execFileSync('/usr/bin/git', ['-c', 'user.name=C12', '-c', 'user.email=c12@localhost', '-c', 'commit.gpgsign=false', ...args], { env: isolatedGitEnv(), cwd: dir, encoding: 'utf8' }).trim();
 export const git = gitIn;
 
 // A repository under the scratch root with the given files committed on `main` (made once; a rerun keeps it).

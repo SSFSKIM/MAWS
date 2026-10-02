@@ -9,26 +9,14 @@ import { mkdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { isolatedGitEnv } from './git-env';
+
 const GIT = '/usr/bin/git';
 
-function isolatedEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(process.env)) if (!key.startsWith('GIT_')) env[key] = value;
-  return {
-    ...env,
-    GIT_CONFIG_GLOBAL: '/dev/null',
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_AUTHOR_NAME: 'MAWS Fixture',
-    GIT_AUTHOR_EMAIL: 'fixture@maws.invalid',
-    GIT_COMMITTER_NAME: 'MAWS Fixture',
-    GIT_COMMITTER_EMAIL: 'fixture@maws.invalid',
-    GIT_TERMINAL_PROMPT: '0',
-  };
-}
 
 export function runGit(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(GIT, ['-C', cwd, ...args], { env: isolatedEnv(), encoding: 'utf8' }, (error, stdout, stderr) => {
+    execFile(GIT, ['-C', cwd, ...args], { env: isolatedGitEnv(), encoding: 'utf8' }, (error, stdout, stderr) => {
       if (error) reject(new Error(`git ${args.join(' ')} failed in ${cwd}: ${stderr || error.message}`));
       else resolve(stdout);
     });

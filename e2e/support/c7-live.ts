@@ -5,8 +5,11 @@
 // relay: one interactively in a PTY so the terminal writes its `history.jsonl` into the scratch home, the rest with
 // `-p`), the launch the Diagnostics launcher would make (`resumeSpec`, spread from `launchDefaults`), and journal
 // readers over `status.journalPath`. Never the owner's `~/.claude` or `~/.claude.json`.
+import { hasCompletedReply, waitForSeedTranscript } from '../../test/support/live-seed';
+import { relaySkipReason } from '../../test/support/relay-health';
+import { isolatedGitEnv } from '../../test/support/git-env';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
@@ -29,9 +32,7 @@ export function liveSkipReason(): string | null {
   if (!existsSync(ENGINE_BIN)) return `engine binary missing at ${ENGINE_BIN}`;
   const version = execFileSync(ENGINE_BIN, ['--version'], { encoding: 'utf8', timeout: 15_000 }).trim();
   if (!version.startsWith(ENGINE_VERSION)) return `engine reports ${version}, expected ${ENGINE_VERSION}`;
-  const code = execFileSync('/usr/bin/curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', `${RELAY_URL}/api/hello`], { encoding: 'utf8' }).trim();
-  if (code !== '200') return `relay at ${RELAY_URL} answered ${code}: start ClaudeUsage`;
-  return null;
+  return relaySkipReason(RELAY_URL);
 }
 
 // The run's scratch: a config home (C3's, with its empty user settings layer) and a root for the repositories under
@@ -66,7 +67,7 @@ function scratchRepo(root: string, name: string): string {
   if (existsSync(dir)) return dir;
   mkdirSync(dir);
   writeFileSync(join(dir, 'one.txt'), 'ONE\n');
-  const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=Live', '-c', 'user.email=live@localhost', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, stdio: 'ignore' });
+  const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=Live', '-c', 'user.email=live@localhost', '-c', 'commit.gpgsign=false', ...args], { env: isolatedGitEnv(), cwd: dir, stdio: 'ignore' });
   git('init', '-q');
   git('add', 'one.txt');
   git('commit', '-qm', 'seed');
@@ -112,8 +113,15 @@ const ANSI = /\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]/g
 // the scratch home's `.claude.json` first.
 export async function terminalSession(s: LiveScratch, name: string, repo: string, prompt: string, marker: string): Promise<ScratchSession> {
   const prior = known(s)[name];
-  if (prior) return prior;
+  if (prior) {
+    const transcript = join(s.config, 'projects', prior.cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${prior.sessionId}.jsonl`);
+    if (!existsSync(transcript) || !hasCompletedReply(readFileSync(transcript, 'utf8'), prompt, marker)) throw new Error(`saved seed ${name} has no completed assistant turn`);
+    return prior;
+  }
   const cwd = scratchRepo(s.root, repo);
+  const dir = join(s.config, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'));
+  const existing = new Set(existsSync(dir) ? readdirSync(dir) : []);
+  let sessionId: string;
   const claudeJson = join(s.config, '.claude.json');
   const state = (existsSync(claudeJson) ? JSON.parse(readFileSync(claudeJson, 'utf8')) : {}) as Record<string, unknown> & { projects?: Record<string, unknown> };
   writeFileSync(claudeJson, JSON.stringify({ ...state, hasCompletedOnboarding: true, theme: 'light', projects: { ...state.projects, [cwd]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } } }, null, 2));
@@ -133,8 +141,7 @@ export async function terminalSession(s: LiveScratch, name: string, repo: string
     term.write(prompt);
     await pause(500);
     term.write('\r');
-    await waitFor(new RegExp(marker), 120_000, 'the reply');
-    await pause(2_000);
+    sessionId = await waitForSeedTranscript(dir, existing, prompt, marker);
     term.write('/exit');
     await pause(500);
     term.write('\r');
@@ -143,11 +150,7 @@ export async function terminalSession(s: LiveScratch, name: string, repo: string
     term.kill();
     writeFileSync(join(s.root, `${name}.terminal.txt`), screen.replace(ANSI, ''));
   }
-  const dir = join(s.config, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'));
-  const newest = readdirSync(dir)
-    .filter((f) => f.endsWith('.jsonl'))
-    .sort((a, b) => statSync(join(dir, b)).mtimeMs - statSync(join(dir, a)).mtimeMs)[0]!;
-  return remember(s, { name, cwd, sessionId: newest.replace(/\.jsonl$/, ''), costUsd: null, how: 'claude (interactive, in a PTY)' });
+  return remember(s, { name, cwd, sessionId, costUsd: null, how: 'claude (interactive, in a PTY)' });
 }
 
 // The record C4 discovered for an engine session in the scratch home.

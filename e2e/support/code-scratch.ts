@@ -4,21 +4,12 @@
 // tree is: `git diff HEAD --numstat` sums to +4 −0 over two files and `git status --porcelain` lists five entries,
 // three untracked. The scenario is C8a's `panelScenario` (C5's nine-sessions.json with *Charter + research* pointed at
 // the repository), so the session under test is that record.
+import { isolatedGitEnv } from '../../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CHARTER, panelScenario } from './panel-support';
-
-const GIT_ENV = {
-  ...process.env,
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_NOSYSTEM: '1',
-  GIT_AUTHOR_NAME: 'MAWS e2e',
-  GIT_AUTHOR_EMAIL: 'e2e@maws.invalid',
-  GIT_COMMITTER_NAME: 'MAWS e2e',
-  GIT_COMMITTER_EMAIL: 'e2e@maws.invalid',
-};
 
 // A 1×1 PNG.
 const DOT_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -60,7 +51,7 @@ export function buildCodeScratch(): CodeScratch {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-code-')));
   const dir = join(root, 'repo');
   const origin = join(root, 'origin.git');
-  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: GIT_ENV, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
   const write = (relative: string, content: string | Buffer) => {
     const path = join(dir, relative);
     mkdirSync(join(path, '..'), { recursive: true });

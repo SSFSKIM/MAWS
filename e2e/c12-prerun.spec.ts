@@ -14,6 +14,7 @@
 // The real-store case is the one read-only observation of the owner's store: it copies launchMaws's environment
 // (MAWS_E2E=1 kept, so Chromium stays on a mock keychain) and deletes only CLAUDE_CONFIG_DIR; it launches no engine and
 // mutates no session, commits only counts and timing, and keeps its screenshot under the scratch root.
+import { hookStartedCommand, terminalPwdCommand } from '../test/support/prerun-commands';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -483,7 +484,7 @@ function sentinelRepo(): string {
   }
   const settings = {
     permissions: { allow: ['Bash(echo C12_SENTINEL:*)'] },
-    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `touch ${join(scratch.root, 'hooks')}/started-$PPID` }] }] },
+    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: hookStartedCommand(scratch.root) }] }] },
     enableAllProjectMcpServers: true,
     enableWorkflows: true,
     extraKnownMarketplaces: { 'c12-market': { source: { source: 'directory', path: market } } },
@@ -811,7 +812,7 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       await screen.click();
       // the shell's own answer, typed into the tab (the terminal renders on a canvas, so its text is read from a file)
       const pwdFile = join(scratch.root, `terminal-pwd-${Date.now().toString(36)}.txt`);
-      await page.keyboard.type(`pwd > ${pwdFile}\n`);
+      await page.keyboard.type(terminalPwdCommand(pwdFile));
       await expect.poll(() => (existsSync(pwdFile) ? readFileSync(pwdFile, 'utf8').trim() : ''), { timeout: 15_000 }).toBe(worktree);
       out.terminal = { ptyCwd: ptys.find((p) => p.appSessionId === id)?.cwd, pwdTypedInTheTab: readFileSync(pwdFile, 'utf8').trim(), screenshots: await shoot(page, '10.4-terminal') };
     });

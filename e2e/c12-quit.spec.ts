@@ -2,7 +2,7 @@
 // app over C3's replay transport and C9's real PTY host, answered through MAWS_E2E_QUIT_ANSWER (no native dialog). The
 // busy work is a replayed session with background tasks and no turn (pass3/engine-turn-release.jsonl, held after its
 // first turn at the fixture's next `user` write with two background `sleep`s running) and a terminal running
-// `sleep 30`:
+// `sleep 3600`:
 //   - a quit asks with both parts named, and `cancel` keeps the app;
 //   - `when_idle` shows the banner and quits once the replayed tasks settle (the fixture's next turn, then the engine's
 //     own follow-up turn after `background_tasks_changed []`) and the terminal's command ends (^C);
@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, launchReady, value } from './support/c7-replay';
-import { launchMaws, REPO_ROOT } from './support/launch';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 test.skip(process.env.MAWS_C12_E2E !== '1', 'the quit e2e runs under pnpm e2e:c12 (MAWS_C12_E2E=1)');
 
@@ -73,11 +73,12 @@ test('quit names a replayed session’s background work and a busy terminal; can
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-c12-quit-')));
   const repo = join(root, 'repo');
   const config = join(root, 'claude-config');
-  mkdirSync(repo);
-  const engineId = seedRecord(config, repo);
-  const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_E2E_QUIT_ANSWER: 'cancel' } });
-  const lines = stderrOf(maws.app);
+  let maws: MawsLaunch | undefined;
   try {
+    mkdirSync(repo);
+    const engineId = seedRecord(config, repo);
+    maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_E2E_QUIT_ANSWER: 'cancel' } });
+    const lines = stderrOf(maws.app);
     const { app, page } = maws;
     let id = '';
     await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '')).not.toBe('');
@@ -90,8 +91,8 @@ test('quit names a replayed session’s background work and a busy terminal; can
       return s.turn === null && s.backgroundTasks.length;
     }).toBe(2);
 
-    // the terminal: /bin/sh running sleep 30 in the foreground (C9's real PTY host)
-    const { ptyId } = value(await invoke(page, 'pty.spawn', { appSessionId: id as AppSessionId, label: 'c12-quit', cwd: repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: 'sleep 30' }));
+    // Keep the terminal busy beyond this test's 120 s timeout; only the explicit Ctrl-C below releases it.
+    const { ptyId } = value(await invoke(page, 'pty.spawn', { appSessionId: id as AppSessionId, label: 'c12-quit', cwd: repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: 'sleep 3600' }));
     await expect.poll(async () => value(await invoke(page, 'pty.foreground', { ptyId })).busy).toBe(true);
 
     // a quit asks with both parts named; cancel keeps the app
@@ -130,8 +131,20 @@ test('quit names a replayed session’s background work and a busy terminal; can
     testInfo.annotations.push({ type: 'quit after the last busy thing ended', description: `${exitAt - ended} ms` });
     expect(exitAt - ended).toBeLessThan(10_000);
   } finally {
-    await maws.cleanup();
-    rmSync(root, { recursive: true, force: true });
+    try {
+      if (maws) {
+        // Assertion failures can leave either cancel or when_idle armed while sleep is still running.
+        // Let the ordinary close path stop both hosts instead of waiting for that hour-long command.
+        const { app } = maws;
+        await answerWith(app, 'quit').catch(() => {
+          const child = app.process();
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        });
+        await maws.cleanup();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

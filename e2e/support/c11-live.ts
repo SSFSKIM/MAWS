@@ -5,6 +5,7 @@
 // server written into the scratch; user and project memory files), the loopback forwarder the relay-down cases stop and
 // start (MAWS_RELAY_URL, ruled 2026-09-29: ClaudeUsage itself is never quit), and an observations file. Never the
 // owner's ~/.claude or ~/.claude.json; the owner's ClaudeUsage data directory is read only.
+import { isolatedGitEnv } from '../../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { connect, createServer, type Server, type Socket } from 'node:net';
@@ -77,7 +78,7 @@ export function c11Scratch(): C11Scratch {
     };
     writeFileSync(join(dir, '.claude', 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
     writeFileSync(join(dir, '.mcp.json'), `${JSON.stringify({ mcpServers: { c11probe: { type: 'stdio', command: process.execPath, args: [join(root, 'mcp-server.cjs')] } } }, null, 2)}\n`);
-    const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=Live', '-c', 'user.email=live@localhost', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, stdio: 'ignore' });
+    const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=Live', '-c', 'user.email=live@localhost', '-c', 'commit.gpgsign=false', ...args], { env: isolatedGitEnv(), cwd: dir, stdio: 'ignore' });
     git('init', '-q');
     git('add', '.');
     git('commit', '-qm', 'seed');
