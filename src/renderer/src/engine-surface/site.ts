@@ -1,0 +1,62 @@
+// A render site as React holds it (R2): whether the session is attached as the engine's desktop surface (the status's
+// `uiSurface` while its process is ready), the instance's answer, and the connection that re-asks a session's mounted
+// instances when the engine invalidates them and forgets a session's answers when its surface goes.
+import { useEffect, useMemo } from 'react';
+import type { SurfaceSite, SurfaceViewport } from '@shared/engine/surface';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { MawsBridge } from '@shared/ipc/schema';
+import { ipc } from '../ipc/client';
+import { useSessions } from '../stores/sessions';
+import { forgetSession, invalidateSession, retainSite, setSiteProps, siteKey, useSurfaceAnswers, type SiteAnswer } from './registry';
+
+// Attached and live: the only state in which a site asks the engine.
+export function useSurfaceAttached(appSessionId: AppSessionId | null): boolean {
+  return useSessions((s) => {
+    if (appSessionId === null) return false;
+    const status = s.engine.get(appSessionId);
+    return status?.process === 'ready' && status.uiSurface !== undefined;
+  });
+}
+
+export interface SiteOptions {
+  appSessionId: AppSessionId | null;
+  component: SurfaceSite;
+  instanceId: string;
+  props: Record<string, unknown>;
+  viewport?: SurfaceViewport;
+  enabled?: boolean; // the site is on screen (default true)
+  client?: MawsBridge;
+}
+
+// The instance's latest answer while the session is attached, else null (draw MAWS's own).
+export function useSurfaceSite({ appSessionId, component, instanceId, props, viewport, enabled = true, client = ipc }: SiteOptions): SiteAnswer | null {
+  const attached = useSurfaceAttached(appSessionId);
+  const on = enabled && attached && appSessionId !== null;
+  const address = useMemo(() => (appSessionId === null ? null : { appSessionId, component, instanceId }), [appSessionId, component, instanceId]);
+  const propsKey = JSON.stringify([props, viewport ?? null]);
+  useEffect(() => (on && address ? retainSite(client, address) : undefined), [on, address, client]);
+  useEffect(() => {
+    if (on && address) setSiteProps(address, props, viewport);
+    // `props` and `viewport` are read through their key, so an equal object built anew asks nothing
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [on, address, propsKey]);
+  return useSurfaceAnswers((s) => (on && address ? (s.answers.get(siteKey(address)) ?? null) : null));
+}
+
+// Live batches only (never a snapshot): an invalidate re-asks the session's mounted instances; a session whose status
+// no longer carries the surface forgets its answers.
+export function connectEngineSurface(client: MawsBridge = ipc): () => void {
+  const attached = new Set<string>();
+  const offEvents = client.on('session.eventBatch', ({ appSessionId, events }) => {
+    if (events.some((event) => event.kind === 'plugin.invalidate')) invalidateSession(appSessionId as AppSessionId);
+  });
+  const offStatus = client.on('session.status', ({ appSessionId, status }) => {
+    const now = status.process === 'ready' && status.uiSurface !== undefined;
+    if (now) attached.add(appSessionId);
+    else if (attached.delete(appSessionId)) forgetSession(appSessionId as AppSessionId);
+  });
+  return () => {
+    offEvents();
+    offStatus();
+  };
+}
