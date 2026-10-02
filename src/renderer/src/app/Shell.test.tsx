@@ -508,7 +508,7 @@ it('Delete on an arrow-focused inactive draft tab restores focus after the real 
   expect(document.activeElement).toBe(draft);
   expect(draft.getAttribute('aria-selected')).toBe('false');
   await user.keyboard('{Delete}');
-  await user.click(await screen.findByRole('button', { name: 'Discard', exact: true }));
+  await user.click(await screen.findByRole('button', { name: 'Discard' }));
   await vi.waitFor(() => expect(screen.queryByRole('tab', { name: 'New chat' })).toBeNull());
   expect(fake.invoked('session.intent.discard')).toEqual([{ appSessionId: ID }]);
   await vi.waitFor(() => expect(document.activeElement).toBe(survivor));
