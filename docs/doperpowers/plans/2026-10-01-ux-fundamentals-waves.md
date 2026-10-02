@@ -319,6 +319,7 @@ To be written by the architect as dated §19 entries when the corresponding wave
 - 2026-10-01 (owner): the ClaudeUsage control route is built by a worker on a branch of the owner's repo for their review (`maws-control-route`); MAWS's Route, Add, Reconnect and Remove wire to it behind `usage/controls.ts` and stay disabled until the route answers (E1). Architect's simplification: files for display, the API for readiness and actions.
 - 2026-10-01 (owner, after r5): the question card always waits for Next, no auto-advance on single-select (B4; Claude Desktop's behaviour). Architect: one central permission-mode label map for every user-facing mode.
 - 2026-10-01 (owner, after the sitting's first look): the Overview button and the usage pill live in the title-bar toolbar, not in a second row under it (D4, E1); W5's bar is removed.
+- 2026-10-01 (owner): New chat, as the Codex app's: a general unstarted tab, the project (and worktree or not) chosen in the composer's location chip, with Open folder…; offered at the top of both sidebar levels, the tab strip's "+", ⌘N and the palette. Architect's default: preselect the focused project.
 - Closed (B5): whether the panel was closed when Review failed no longer matters; opening Review now un-collapses a hidden panel either way.
 
 ## 7. Outcomes
