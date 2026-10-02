@@ -29,6 +29,14 @@ describe('submitState covers the five states, the caret menu and the unstarted r
     expect(row({ status: null, intent, mode: 'memory' })[3]).toBe('Available once the session starts');
   });
 
+  // New chat (2026-10-01): Send waits for the project row's choice, whatever is typed
+  it('holds a New chat with no project chosen with "Choose a project first"', () => {
+    const intent = { starting: false, messageHeld: false, noProject: true };
+    expect(row({ status: null, intent })).toEqual(['send', 'Send', false, 'Choose a project first', false]);
+    expect(row({ status: null, intent, mode: 'bash' })[3]).toBe('Choose a project first');
+    expect(row({ status: null, intent: { ...intent, starting: true } })[1]).toBe('Starting…');
+  });
+
   it("shows C10's setup phase as the disabled-state reason while the setup runs, ahead of the held message", () => {
     const intent = { starting: false, messageHeld: true };
     expect(row({ status: null, intent: { ...intent, phase: 'Creating worktree one…' } })).toEqual(['send', 'Starting…', false, 'Creating worktree one…', false]);

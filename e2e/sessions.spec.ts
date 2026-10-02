@@ -10,7 +10,7 @@
 // under MAWS_E2E `layout.pickFiles` answers from `MAWS_E2E_PICK_PATHS` or as cancelled (main's pick seam).
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
@@ -563,6 +563,103 @@ test.describe('sessions', () => {
     await page.keyboard.press('Escape');
     await store.removeRegistryRecord(pid);
     expect(launched.maws.consoleErrors()).toEqual([]);
+  });
+
+  // New chat (2026-10-01, the owner's request after Codex): the sidebar's New chat from the project list opens a tab with
+  // no project; the composer's project row chooses one (or a new folder, or none) before the first send.
+  test('New chat from the project list: "Choose a project" with Send disabled; a project enables Send with its branch and the Worktree checkbox; New project adds a folder; no project runs at home', async () => {
+    const { page, maws, trustedRepos } = await begin({ fixtures: [], trusted: 2 });
+    assertPickSeamBuilt(maws);
+    const [first, second] = trustedRepos as [ScratchRepo, ScratchRepo];
+    const alpha = await addProject(page, first.root);
+    await showProjectList(page);
+    await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'New chat', exact: true })).toBeVisible();
+    const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: null, location: null });
+    const row = page.locator('[data-region="main"] [data-project-row]');
+    const chip = row.getByRole('button', { name: 'Choose a project' });
+    await expect(chip).toBeVisible();
+    await expect(row.getByRole('checkbox', { name: 'Worktree' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Composer tools' }).getByRole('button', { name: /^Location / }), 'the row stands for the toolbar’s location').toHaveCount(0);
+    await editor(page).click();
+    await page.keyboard.type('hello');
+    const control = page.locator('[data-region="main"] [data-submit-state]');
+    await expect(control).toBeDisabled();
+    await expect(control).toHaveAttribute('title', 'Choose a project first');
+    await page.screenshot({ path: test.info().outputPath('new-chat-choose-a-project.png') });
+
+    // the chip's menu: search, the projects most recently active first, New project, Don't work in a project
+    await chip.click();
+    const menu = page.getByRole('dialog', { name: 'Choose a project' });
+    await expect(menu.getByPlaceholder('Search projects')).toBeVisible();
+    await expect(menu.getByRole('option')).toHaveText([alpha.name, 'New project', "Don't work in a project"]);
+    await page.screenshot({ path: test.info().outputPath('new-chat-project-menu.png') });
+    await menu.getByRole('option', { name: alpha.name }).click();
+    await expect(page.getByRole('heading', { name: `New chat in ${alpha.name}` })).toBeVisible();
+    await expect(page.getByRole('tab', { name: `New chat · ${alpha.name}` }), 'the tab names the project too').toBeVisible();
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: alpha.id, location: { kind: 'directory', path: first.root } });
+    await expect(row.getByRole('button', { name: `Project ${alpha.name}` })).toBeVisible();
+    await expect(row.getByLabel('Branch main')).toBeVisible();
+    const worktree = row.getByRole('checkbox', { name: 'Worktree' });
+    await expect(worktree).not.toBeChecked();
+    await expect(control).toBeEnabled();
+    await page.screenshot({ path: test.info().outputPath('new-chat-project-chosen.png') });
+    await page.evaluate(() => (document.documentElement.dataset.theme = 'dark')); // both themes render the row (tokens only)
+    await expect(row.getByRole('button', { name: `Project ${alpha.name}` })).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath('new-chat-project-chosen-dark.png') });
+    await page.evaluate(() => (document.documentElement.dataset.theme = 'light'));
+    await checkWorktree(page, id, first.root); // a new worktree `<project>-<4 hex>` for the first send
+    await worktree.click();
+    await expect(worktree).not.toBeChecked();
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))!.location).toEqual({ kind: 'directory', path: first.root });
+
+    // New project: the native folder dialog (main's e2e seam) and the folder becomes a project, chosen
+    await maws.app.evaluate((_electron, dir) => void (process.env.MAWS_E2E_PICK_PATHS = dir), second.root);
+    await row.getByRole('button', { name: `Project ${alpha.name}` }).click();
+    await menu.getByRole('option', { name: 'New project' }).click();
+    const addedOf = async () => value(await invoke(page, 'session.projects.list', undefined)).projects.find((p) => p.directory === second.root);
+    await expect.poll(async () => (await addedOf())?.directory).toBe(second.root);
+    const added = (await addedOf())!;
+    await expect(page.getByRole('heading', { name: `New chat in ${added.name}` })).toBeVisible();
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: added.id, location: { kind: 'directory', path: second.root } });
+
+    // Don't work in a project: the home directory, the chip says so, no checkbox, and Send goes
+    await row.getByRole('button', { name: `Project ${added.name}` }).click();
+    await menu.getByRole('option', { name: "Don't work in a project" }).click();
+    await expect(row.getByRole('button', { name: 'Project No project' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'New chat', exact: true })).toBeVisible();
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: null, location: { kind: 'directory', path: realpathSync(homedir()) } });
+    await expect(row.getByRole('checkbox', { name: 'Worktree' })).toHaveCount(0);
+    await expect(control).toBeEnabled();
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
+  test('⌘N (File › New chat) from an open session starts a New chat in that session’s project', async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const sid = '5e551011-0000-4000-8000-0000000000aa';
+    await store.addTranscript(repo.root, sid, [{ type: 'user', uuid: `u-${sid}`, parentUuid: null, cwd: repo.root, sessionId: sid, timestamp: '2026-09-29T10:00:00.000Z', message: { role: 'user', content: 'an open session' } }]);
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+    current = { ...launched, repos: [repo] };
+    const { page, maws } = launched;
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
+    const open = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!;
+    const project = value(await invoke(page, 'session.projects.list', undefined)).projects.find((p) => p.id === open.projectId)!;
+    expect(project.directory).toBe(repo.root);
+    await (await sidebarRow(page, { appSessionId: open.appId })).click();
+    await expect(page.getByRole('tab', { name: new RegExp(`^an open session`) })).toHaveAttribute('aria-selected', 'true');
+    const label = await maws.app.evaluate(({ Menu }) => {
+      const item = Menu.getApplicationMenu()?.getMenuItemById('session.new');
+      item?.click();
+      return item?.label ?? null;
+    });
+    expect(label, 'File › New chat').toBe('New chat');
+    await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible();
+    const created = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!;
+    expect(created).toMatchObject({ projectId: project.id, location: { kind: 'directory', path: repo.root } });
+    await expect(page.locator('[data-region="main"] [data-project-row]').getByRole('button', { name: `Project ${project.name}` })).toBeVisible();
+    expect(maws.consoleErrors()).toEqual([]);
   });
 
   test("Add project picks through main's e2e seam: cancelled when MAWS_E2E_PICK_PATHS is unset, the listed directory when set; no native panel", async () => {

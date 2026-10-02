@@ -60,6 +60,50 @@ describe('session service', () => {
       expect(intent.location).toEqual({ kind: 'directory', path: h.work });
     });
 
+    // New chat (2026-10-01): an intent with no project chosen has no location until the project row patches one
+    describe('a New chat with no project chosen', () => {
+      it('is created with no project and no location, and an unknown project is no project', async () => {
+        const { intent } = await h.service.create({ projectId: null, location: null });
+        expect(intent).toMatchObject({ projectId: null, location: null, trust: 'unanswered', trustKey: null });
+        const gone = await h.service.create({ projectId: 'not-a-project' as never, location: null });
+        expect(gone.intent).toMatchObject({ projectId: null, location: null });
+      });
+
+      it('refuses a start with "Choose a project first", hands the message back, and creates nothing', async () => {
+        const { appSessionId: id } = await h.service.create({ projectId: null, location: null });
+        const outcome = await h.service.startSession(id, { message: OK_MESSAGE, options: { trust: 'accepted' } });
+        expect(outcome).toEqual({ status: 'invalid', appSessionId: id, field: 'location', message: 'Choose a project first' });
+        expect(intentFile(h, id)).toMatchObject({ message: null, location: null, trust: 'unanswered', trustKey: null });
+        expect(h.host.launches).toEqual([]);
+        expect(h.index.sessions.get(id)).toBeNull();
+      });
+
+      it('takes a project alone: its directory becomes the location; another project moves it there and resets the trust decision', async () => {
+        const first = h.index.projects.add(h.work);
+        const second = h.index.projects.add(h.dir('second'));
+        const { appSessionId: id } = await h.service.create({ projectId: null, location: null });
+        expect(await h.service.patch(id, { projectId: first.id })).toMatchObject({ projectId: first.id, location: { kind: 'directory', path: h.work } });
+        expect(await h.service.patch(id, { trust: 'accepted' })).toMatchObject({ trust: 'accepted', trustKey: h.work });
+        expect(await h.service.patch(id, { projectId: second.id })).toMatchObject({ projectId: second.id, location: { kind: 'directory', path: second.directory }, trust: 'unanswered', trustKey: null });
+      });
+
+      it('"Don\'t work in a project" (null) runs in the home directory; an unknown project is refused naming the field', async () => {
+        const project = h.index.projects.add(h.work);
+        const { appSessionId: id } = await h.service.create({ projectId: project.id, location: null });
+        expect(await h.service.patch(id, { projectId: null })).toMatchObject({ projectId: null, location: { kind: 'directory', path: h.env.HOME } });
+        await expect(h.service.patch(id, { projectId: 'not-a-project' as never })).rejects.toMatchObject({ reason: 'invalid', field: 'projectId' });
+      });
+
+      it('takes a project with a location (the Worktree checkbox), checked as any location is', async () => {
+        const project = h.index.projects.add(h.work);
+        const { appSessionId: id } = await h.service.create({ projectId: null, location: null });
+        await expect(h.service.patch(id, { projectId: project.id, location: { kind: 'directory', path: join(h.root, 'missing') } })).rejects.toMatchObject({ reason: 'invalid', field: 'location' });
+        expect(intentFile(h, id)).toMatchObject({ projectId: null, location: null });
+        const other = h.dir('other');
+        expect(await h.service.patch(id, { projectId: project.id, location: { kind: 'directory', path: other } })).toMatchObject({ projectId: project.id, location: { kind: 'directory', path: other } });
+      });
+    });
+
     it('patch checks the location and additional directories and refuses each with the field named', async () => {
       const id = await create();
       await expect(h.service.patch(id, { location: { kind: 'directory', path: join(h.root, 'missing') } })).rejects.toMatchObject({ reason: 'invalid', field: 'location' });

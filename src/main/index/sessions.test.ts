@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -37,6 +39,15 @@ describe('session records in the index', () => {
   });
 
   const titleOf = (appId: AppSessionId) => index.sessions.get(appId)!.title;
+
+  // New chat (2026-10-01): "Don't work in a project" runs in the home directory, which discovery makes no project of,
+  // so its session lists under Other sessions; a folder inside it is a project as any other
+  it('discovery makes no project of the home directory', () => {
+    const { record } = index.sessions.upsertFromSummary(summary({ directory: realpathSync(homedir()) }));
+    expect(record.projectId).toBeNull();
+    expect(index.projects.list()).toEqual([]);
+    expect(index.sessions.upsertFromSummary(summary({ directory: dir.path })).record.projectId).not.toBeNull();
+  });
 
   it('upsertFromSummary twice with the same summary creates one row and answers created: false the second time', () => {
     const s = summary();
