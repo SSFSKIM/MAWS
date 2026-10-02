@@ -35,6 +35,7 @@ function wanted(item: AttentionItem, settings: Settings): boolean {
 }
 
 export interface NotifierDeps {
+  restoredIds?: ReadonlySet<AttentionId>; // live provenance set: hydration is silent, but still counts in the badge
   isFocused(): boolean; // whether a MAWS window has focus; false with no window
   focusWindow(): void; // brings the window forward, re-creating it if none is open
   navigate(navigation: AttentionNavigate): void; // the navigation relay: emits `attention.navigate` to a listening page, or queues it
@@ -98,6 +99,7 @@ export function startNotifier(model: SessionReadModel, deps: NotifierDeps): () =
     for (const item of items) {
       if (seen.has(item.id)) continue;
       seen.add(item.id);
+      if (deps.restoredIds?.has(item.id)) continue;
       if (item.state !== 'pending' || !isActionable(item) || !inNeedsYou(appSessionId)) continue;
       if (deps.isFocused() || !wanted(item, deps.settings())) continue;
       post(item);

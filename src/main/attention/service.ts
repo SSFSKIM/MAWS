@@ -15,6 +15,7 @@ import type { AppSessionId, AttentionId, RequestId, TaskId, ToolUseId } from '@s
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
 import type { AttentionStore } from './store';
+import type { HostSupervisor } from '../hosts/supervisor';
 
 // SPEC 45.25.4 `qpn`: the terminal reasons that are hard failures (an interrupt is not one).
 export const HARD_FAILURE_REASONS: ReadonlySet<string> = new Set([
@@ -29,6 +30,7 @@ export const interruptedSummary = (n: number) => `Session interrupted, ${n} ${n 
 type Dispatch = (owner: 'engine-host', name: 'session.pendingRequest', input: CommandInput<'session.pendingRequest'>) => Promise<{ ok: true; value: unknown } | { ok: false; error: { message: string } }>;
 
 export interface AttentionServiceDeps {
+  onState: HostSupervisor['onState'];
   onEvent: <N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void) => () => void; // HostSupervisor.onEvent
   dispatch: Dispatch; // HostSupervisor.dispatch
   store: AttentionStore;
@@ -38,6 +40,7 @@ export interface AttentionServiceDeps {
 }
 
 export interface AttentionService {
+  readonly restoredIds: ReadonlySet<AttentionId>; // accepted persisted items, marked before their change is emitted
   readonly ready: Promise<void>; // the persisted items are loaded (pending while every load attempt fails)
   list(): AttentionItem[];
   settled(): Promise<void>; // every change so far has reached the store
@@ -57,6 +60,7 @@ const noRequest = { requestId: null, toolUseId: null, taskId: null, agentId: nul
 
 export function startAttentionService(deps: AttentionServiceDeps): AttentionService {
   const log = deps.log ?? ((message: string) => console.warn(`[attention] ${message}`));
+  const restoredIds = new Set<AttentionId>();
   const sessions = new Map<AppSessionId, SessionState>();
   const forgotten = new Set<AppSessionId>(); // archived during this run: nothing persisted may bring them back
 
@@ -189,6 +193,15 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     deps.onEvent('session.eventBatch', ({ appSessionId, events }) => onEvents(appSessionId, events)),
     deps.onEvent('session.status', ({ appSessionId, status }) => onHeld(appSessionId, status)),
     deps.onEvent('session.forgotten', ({ appSessionId }) => retireSession(appSessionId)),
+    deps.onState('engine-host', (host) => {
+      if (host.state === 'ready') return;
+      // A dead host cannot retire its broker or release held messages. Durable errors stay.
+      for (const [id, state] of sessions) {
+        state.broker = [];
+        retireDerived(state, new Set(['held_peer_message']));
+        changed(id, state);
+      }
+    }),
   ];
 
   const list = () => [...sessions.values()].flatMap(merged);
@@ -212,6 +225,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       const state = stateOf(id);
       for (const item of items) {
         if (BROKER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || state.retiredKinds.has(item.kind) || state.derived.has(item.id)) continue;
+        restoredIds.add(item.id);
         state.derived.set(item.id, item);
       }
       if (JSON.stringify(merged(state)) !== JSON.stringify(items)) owed.set(id, 'replace'); // the store holds what was dropped
@@ -256,6 +270,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   return {
     ready,
+    restoredIds,
     list,
     settled: async () => {
       await attempt;

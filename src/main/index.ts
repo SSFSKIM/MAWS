@@ -111,6 +111,7 @@ void startWithProfileLock(app, () => {
   // cannot read the index); an archive the index records retires the session's attention.
   const attention = startIndexAttention(index, {
     onEvent: (name, listener) => hosts.onEvent(name, listener),
+    onState: (owner, listener) => hosts.onState(owner, listener),
     dispatch: hosts.dispatch,
     emit,
     register: registerMainHandler,
@@ -320,7 +321,7 @@ void startWithProfileLock(app, () => {
   openWindow();
 
   // ---- C5: notifications, dock badge and the quit guard ----
-  startAttention(sessions.model, { settings: () => settings.state().settings, openWindow });
+  startAttention(sessions.model, { restoredIds: attention.restoredIds, settings: () => settings.state().settings, openWindow });
   // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
   const quitGuard = installQuitGuard(sessions.model, {
     // C12 start

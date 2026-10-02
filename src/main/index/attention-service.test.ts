@@ -46,6 +46,7 @@ describe('attention persists through the index and retires on the archive path',
         listeners.set(name, [...(listeners.get(name) ?? []), listener]);
         return () => listeners.set(name, (listeners.get(name) ?? []).filter((l) => l !== listener));
       }) as AttentionServiceDeps['onEvent'],
+      onState: () => () => {},
       dispatch: vi.fn(async () => ({ ok: true as const, value: { event: null } })),
       emit: (name, payload) => void (name === 'attention.changed' && changed.push(payload as EventPayload<'attention.changed'>)),
       register: () => {},
