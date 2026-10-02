@@ -13,4 +13,3 @@ export function isolatedGitEnv(): NodeJS.ProcessEnv {
     GIT_TERMINAL_PROMPT: '0',
   };
 }
-
