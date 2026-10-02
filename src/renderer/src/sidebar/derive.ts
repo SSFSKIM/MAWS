@@ -47,7 +47,7 @@ export interface ProjectEntry {
 
 const OTHER_NAME = 'Other sessions';
 
-// Every listed project, then Other sessions (also the recovery route for project-less archives), each with its sessions, its waiting (◐) and working
+// Every listed project, then Other sessions when nonempty, each with its sessions, its waiting (◐) and working
 // (●) counts and its last activity; a hidden project's sessions are in neither. Projects are sorted by recency of
 // activity: the latest movement of any of their sessions (archived ones included, so archiving does not demote a
 // project), a project without sessions by when it was added; ties by the project order, then the name.
@@ -81,7 +81,7 @@ export function projectList({ records, digests, projects, rows, hidden }: Projec
     .sort((a, b) => b.activity - a.activity || a.entry.project!.order - b.entry.project!.order || a.entry.name.localeCompare(b.entry.name))
     .map(({ entry }) => entry);
   const other = entryOf(OTHER_SESSIONS, null);
-  return [...listed, other];
+  return other.sessions.length > 0 ? [...listed, other] : listed;
 }
 
 // The list while searching: the projects whose name matches, and those holding a session that matches.
