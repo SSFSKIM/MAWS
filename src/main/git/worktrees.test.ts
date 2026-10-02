@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'; // C12: mkdtempSync, realpathSync, statSync
 import { tmpdir } from 'node:os'; // C12
 import { join } from 'node:path';
@@ -404,6 +405,99 @@ describe('worktree service over scratch repositories', () => {
       await expect(service.deleteBranch({ repoRoot: repo.root, branch: 'worktree-u', expect: { head }, acknowledgeUnmerged: true })).resolves.toMatchObject({ refused: 'missing' });
     });
 
+    it.each([[false, 7], [true, 7], [true, 40]] as const)('deletes the expected tip and only its branch config (acknowledgeUnmerged=%s, abbrev=%s)', async (acknowledgeUnmerged, abbrev) => {
+      const head = await repo.head();
+      await repo.git('branch', 'topic/cleanup');
+      await repo.git('config', 'core.abbrev', String(abbrev));
+      await repo.git('config', 'branch.topic/cleanup.remote', '.');
+      await repo.git('config', 'branch.topic/cleanup.merge', 'refs/heads/main');
+      await repo.git('config', 'branch.topic/cleanup.description', 'delete this config');
+      await repo.git('config', 'branch.main.description', 'keep this config');
+
+      await expect(service.deleteBranch({ repoRoot: repo.root, branch: 'topic/cleanup', expect: { head }, acknowledgeUnmerged })).resolves.toEqual({ deleted: true, wasMerged: true });
+      expect(await repo.hasBranch('topic/cleanup')).toBe(false);
+      expect((await repo.git('config', '--get-regexp', '^branch\\.')).trim()).toBe('branch.main.description keep this config');
+    });
+
+    it.each(['opaque deletion output\n', 'Deleted branch victim (was 0000000).\n'])('refuses an unreadable deletion OID without inventing a recovery target (%s)', async (output) => {
+      const head = await repo.head();
+      await repo.git('branch', 'victim');
+      const run = createGitRunner({ env: repo.serviceEnv() });
+      const deleting = new WorktreeService({
+        holders: { dispatch: host.dispatch, sessions: { list: () => [] } },
+        git: async (directory, args) => {
+          const real = await run(directory, args);
+          return (args[0] === 'branch' && args.includes('-D')) || args[0] === 'update-ref' ? output : real;
+        },
+      });
+
+      const result = await deleting.deleteBranch({ repoRoot: repo.root, branch: 'victim', expect: { head }, acknowledgeUnmerged: true });
+      expect(result).toMatchObject({ refused: 'changed' });
+      expect('detail' in result && result.detail).toContain(output.trim());
+      expect(await repo.hasBranch('victim')).toBe(false);
+    });
+
+    it('refuses a deletion OID that became ambiguous without recreating at a guessed tip', async () => {
+      const head = await repo.head();
+      await repo.git('branch', 'victim');
+      await repo.git('config', 'core.abbrev', '4');
+      const run = createGitRunner({ env: repo.serviceEnv() });
+      let output = '';
+      const deleting = new WorktreeService({
+        holders: { dispatch: host.dispatch, sessions: { list: () => [] } },
+        git: async (directory, args) => {
+          const real = await run(directory, args);
+          if ((args[0] === 'branch' && args.includes('-D')) || args[0] === 'update-ref') {
+            output = real;
+            // Add a real object with the printed prefix after deletion. It was unambiguous when Git printed it,
+            // but a subsequent lookup must now see both objects, not guess the commit.
+            const prefix = real.match(/\(was ([0-9a-f]+)\)/)?.[1] ?? head.slice(0, 4);
+            let content: string;
+            for (let i = 0; ; i++) {
+              content = `collision ${i}\n`;
+              if (createHash('sha1').update(`blob ${Buffer.byteLength(content)}\0${content}`).digest('hex').startsWith(prefix)) break;
+            }
+            const file = await repo.fixture.write('.git/collision-blob', content);
+            await repo.git('hash-object', '-w', file);
+            expect((await repo.git('rev-parse', `--disambiguate=${prefix}`)).trim().split('\n')).toHaveLength(2);
+          }
+          return real;
+        },
+      });
+
+      const result = await deleting.deleteBranch({ repoRoot: repo.root, branch: 'victim', expect: { head }, acknowledgeUnmerged: true });
+      expect(result).toMatchObject({ refused: 'changed' });
+      expect('detail' in result && result.detail).toContain(output.trim());
+      expect(await repo.hasBranch('victim')).toBe(false);
+    });
+
+    it('resolves the printed deletion OID as an object prefix, not a hex-looking branch name', async () => {
+      const head = await repo.head();
+      await repo.git('branch', 'victim');
+      const tip = (await repo.git('commit-tree', 'HEAD^{tree}', '-p', head, '-m', 'moved work')).trim();
+      const run = createGitRunner({ env: repo.serviceEnv() });
+      let alias = '';
+      const deleting = new WorktreeService({
+        holders: { dispatch: host.dispatch, sessions: { list: () => [] } },
+        git: async (directory, args) => {
+          if ((args[0] === 'branch' && args.includes('-D')) || args[0] === 'update-ref') {
+            await repo.git('update-ref', 'refs/heads/victim', tip, head);
+            const output = await run(directory, args);
+            alias = output.match(/\(was ([0-9a-f]+)\)/)?.[1] ?? '';
+            await repo.git('branch', alias, head);
+            return output;
+          }
+          return run(directory, args);
+        },
+      });
+
+      const result = await deleting.deleteBranch({ repoRoot: repo.root, branch: 'victim', expect: { head }, acknowledgeUnmerged: true });
+      expect(alias).not.toBe('');
+      expect(result).toMatchObject({ refused: 'changed' });
+      expect(await repo.head('refs/heads/victim')).toBe(tip);
+      expect(await repo.head(`refs/heads/${alias}`)).toBe(head);
+    });
+
     it('walks the ladder for a hand-made worktree with no record: remove only, then later the branch; the state follows', async () => {
       const outside = repo.scratchDir();
       const path = await repo.addWorktreeAt(join(outside, 'anything'), 'hand/made');
@@ -430,9 +524,9 @@ describe('worktree service over scratch repositories', () => {
       await service.remove({ repoRoot: repo.root, path: w.path, expect: { branch: w.branch, head: w.head }, discard: false });
       await service.deleteBranch({ repoRoot: repo.root, branch: 'worktree-all', expect: { head: w.head }, acknowledgeUnmerged: false });
       const subcommands = new Set(spawn.mock.calls.map(([, args]) => (args as string[])[2]));
-      expect([...subcommands].sort()).toEqual(['check-ref-format', 'rev-list', 'rev-parse', 'show-ref', 'status', 'symbolic-ref', 'update-ref', 'worktree']);
-      const mutations = spawn.mock.calls.map(([, args]) => (args as string[]).slice(2)).filter((a) => a[0] === 'update-ref' || (a[0] === 'worktree' && a[1] !== 'list'));
-      expect(mutations.map((a) => a.slice(0, 2).join(' '))).toEqual(['worktree add', 'worktree remove', 'worktree prune', 'update-ref --no-deref']);
+      expect([...subcommands].sort()).toEqual(['branch', 'check-ref-format', 'rev-list', 'rev-parse', 'show-ref', 'status', 'symbolic-ref', 'worktree']);
+      const mutations = spawn.mock.calls.map(([, args]) => (args as string[]).slice(2)).filter((a) => a[0] === 'branch' || (a[0] === 'worktree' && a[1] !== 'list'));
+      expect(mutations.map((a) => a.slice(0, 2).join(' '))).toEqual(['worktree add', 'worktree remove', 'worktree prune', 'branch -d']);
       // C12: add appended the engine's runtime block (never removed by MAWS); the ladder wrote nothing else there
       expect(readFileSync(exclude, 'utf8')).toBe(`${before ?? ''}${before && !before.endsWith('\n') ? '\n' : ''}${RUNTIME_EXCLUDE_BLOCK}`);
     });

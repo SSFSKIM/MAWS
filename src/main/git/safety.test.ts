@@ -15,6 +15,7 @@ describe('Git safety regressions', () => {
   it.each([false, true])('refuses a branch advanced after validation (acknowledgeUnmerged=%s)', async (acknowledgeUnmerged) => {
     const head = (await repo.git('rev-parse', 'HEAD')).trim();
     await repo.git('branch', 'victim');
+    await repo.git('config', 'branch.victim.description', 'original config');
     const tip = (await repo.git('commit-tree', 'HEAD^{tree}', '-p', head, '-m', 'unmerged work')).trim();
     const run = createGitRunner({ env: repo.serviceEnv() });
     let raced = false;
@@ -22,7 +23,7 @@ describe('Git safety regressions', () => {
       holders: { dispatch: new FakeHolderHost().dispatch, sessions: { list: () => [] } },
       git: async (directory, args) => {
         // Move the real ref at the mutation boundary, after every service-side read.
-        if ((args[0] === 'branch' && args.includes('-D')) || args[0] === 'update-ref') {
+        if ((args[0] === 'branch' && (args.includes('-d') || args.includes('-D'))) || args[0] === 'update-ref') {
           await repo.git('update-ref', 'refs/heads/victim', tip, head);
           raced = true;
         }
@@ -31,8 +32,98 @@ describe('Git safety regressions', () => {
     });
     const result = await service.deleteBranch({ repoRoot: repo.root, branch: 'victim', expect: { head }, acknowledgeUnmerged });
     expect(raced).toBe(true);
-    expect(result).toMatchObject({ refused: 'changed' });
+    expect(result).toMatchObject({ refused: acknowledgeUnmerged ? 'changed' : 'unmerged' });
     expect((await repo.git('rev-parse', 'refs/heads/victim')).trim()).toBe(tip);
+    if (acknowledgeUnmerged) {
+      expect('detail' in result && result.detail).toMatch(/config.*dropped/i);
+      await expect(repo.git('config', '--get', 'branch.victim.description')).rejects.toThrow();
+    } else {
+      expect((await repo.git('config', '--get', 'branch.victim.description')).trim()).toBe('original config');
+    }
+  });
+
+  it.each([false, true])('preserves a branch checked out after validation (acknowledgeUnmerged=%s)', async (acknowledgeUnmerged) => {
+    const head = (await repo.git('rev-parse', 'HEAD')).trim();
+    await repo.git('branch', 'victim');
+    await repo.git('config', 'branch.victim.description', 'original config');
+    const path = repo.path('raced-checkout');
+    const run = createGitRunner({ env: repo.serviceEnv() });
+    let raced = false;
+    const service = new WorktreeService({
+      holders: { dispatch: new FakeHolderHost().dispatch, sessions: { list: () => [] } },
+      git: async (directory, args) => {
+        if ((args[0] === 'branch' && (args.includes('-d') || args.includes('-D'))) || args[0] === 'update-ref') {
+          await repo.git('worktree', 'add', path, 'victim');
+          raced = true;
+        }
+        return run(directory, args);
+      },
+    });
+
+    const result = await service.deleteBranch({ repoRoot: repo.root, branch: 'victim', expect: { head }, acknowledgeUnmerged });
+    expect(raced).toBe(true);
+    expect(result).toMatchObject({ refused: 'checked_out' });
+    expect('detail' in result && result.detail).toContain(path);
+    expect((await repo.git('rev-parse', 'refs/heads/victim')).trim()).toBe(head);
+    expect((await repo.git('config', '--get', 'branch.victim.description')).trim()).toBe('original config');
+  });
+
+  it.each([false, true])('recreates a raced merged tip rather than reporting the wrong deletion (acknowledgeUnmerged=%s)', async (acknowledgeUnmerged) => {
+    const tip = (await repo.git('rev-parse', 'HEAD')).trim();
+    await repo.write('second.txt', 'second\n');
+    await repo.git('add', 'second.txt');
+    await repo.git('commit', '-qm', 'second');
+    const head = (await repo.git('rev-parse', 'HEAD')).trim();
+    await repo.git('branch', 'victim');
+    await repo.git('config', 'branch.victim.description', 'original config');
+    const run = createGitRunner({ env: repo.serviceEnv() });
+    let raced = false;
+    const service = new WorktreeService({
+      holders: { dispatch: new FakeHolderHost().dispatch, sessions: { list: () => [] } },
+      git: async (directory, args) => {
+        if ((args[0] === 'branch' && (args.includes('-d') || args.includes('-D'))) || args[0] === 'update-ref') {
+          await repo.git('update-ref', 'refs/heads/victim', tip, head);
+          raced = true;
+        }
+        return run(directory, args);
+      },
+    });
+
+    const result = await service.deleteBranch({ repoRoot: repo.root, branch: 'victim', expect: { head }, acknowledgeUnmerged });
+    expect(raced).toBe(true);
+    expect(result).toMatchObject({ refused: 'changed' });
+    expect('detail' in result && result.detail).toMatch(/config.*dropped/i);
+    expect((await repo.git('rev-parse', 'refs/heads/victim')).trim()).toBe(tip);
+    await expect(repo.git('config', '--get', 'branch.victim.description')).rejects.toThrow();
+  });
+
+  it('never overwrites a concurrently created branch when recreating a raced deletion', async () => {
+    const head = (await repo.git('rev-parse', 'HEAD')).trim();
+    await repo.git('branch', 'victim');
+    const tip = (await repo.git('commit-tree', 'HEAD^{tree}', '-p', head, '-m', 'moved work')).trim();
+    const concurrent = (await repo.git('commit-tree', 'HEAD^{tree}', '-p', head, '-m', 'concurrent branch')).trim();
+    const run = createGitRunner({ env: repo.serviceEnv() });
+    let created = false;
+    const service = new WorktreeService({
+      holders: { dispatch: new FakeHolderHost().dispatch, sessions: { list: () => [] } },
+      git: async (directory, args) => {
+        if ((args[0] === 'branch' && args.includes('-D')) || args[0] === 'update-ref') {
+          await repo.git('update-ref', 'refs/heads/victim', tip, head);
+          const output = await run(directory, args);
+          await repo.git('branch', 'victim', concurrent);
+          created = true;
+          return output;
+        }
+        return run(directory, args);
+      },
+    });
+
+    const result = await service.deleteBranch({ repoRoot: repo.root, branch: 'victim', expect: { head }, acknowledgeUnmerged: true });
+    expect(created).toBe(true);
+    expect(result).toMatchObject({ refused: 'changed' });
+    expect('detail' in result && result.detail).toContain(tip);
+    expect('detail' in result && result.detail).toMatch(/config.*dropped/i);
+    expect((await repo.git('rev-parse', 'refs/heads/victim')).trim()).toBe(concurrent);
   });
 
   it('reads status without executing a repository fsmonitor hook', async () => {

@@ -218,16 +218,54 @@ export class WorktreeService {
     if (!status.merged && !acknowledgeUnmerged) {
       return { refused: 'unmerged', detail: `${status.ahead} ${status.ahead === 1 ? 'commit' : 'commits'} not on ${status.base}` };
     }
+    let output: string;
     try {
-      // Compare-and-delete under the ref lock: a newer tip survives even when unmerged deletion was allowed.
-      await this.git(status.repoRoot, ['update-ref', '--no-deref', '-d', `refs/heads/${branch}`, expect.head]);
+      // Git checks worktree occupancy again at deletion and removes branch.<name> config. Without acknowledgement,
+      // -d also refuses a newly unmerged tip; update-ref CAS has neither of these branch-deletion semantics.
+      output = await this.git(status.repoRoot, ['branch', acknowledgeUnmerged ? '-D' : '-d', '--', branch]);
     } catch (error) {
-      if (error instanceof GitCommandError && /cannot lock ref/.test(error.stderr)) {
-        return { refused: 'changed', detail: `${branch} changed or is locked; refresh before deleting` };
+      if (error instanceof GitCommandError) {
+        if (/checked out at|used by worktree at/.test(error.stderr)) return { refused: 'checked_out', detail: error.stderr.trim() };
+        if (/not fully merged/.test(error.stderr)) return { refused: 'unmerged', detail: error.stderr.trim() };
+        if (/cannot lock ref|not found/.test(error.stderr)) return { refused: 'changed', detail: error.stderr.trim() };
       }
       throw error;
     }
+    // A moved tip can still pass -d when it is merged, so verify the actual deletion in both acknowledgement states.
+    const deletedHead = await this.deletedHead(status.repoRoot, branch, output);
+    if (deletedHead === null) {
+      return {
+        refused: 'changed',
+        detail: `Git reported deleting ${branch}, but its deleted commit could not be identified unambiguously; the branch was not recreated and branch config may have been dropped. Git said:\n${output.trim()}`,
+      };
+    }
+    if (deletedHead !== expect.head) {
+      const movement = `expected ${branch} at ${short(expect.head)}, but Git deleted ${deletedHead} after the branch moved`;
+      try {
+        // No -f: a branch created concurrently must never be overwritten. No auto-configured upstream, either.
+        await this.git(status.repoRoot, ['branch', '--no-track', '--', branch, deletedHead]);
+      } catch (error) {
+        return { refused: 'changed', detail: `${movement}; could not recreate the branch: ${error instanceof Error ? error.message : String(error)}. Branch config was dropped by deletion.` };
+      }
+      return { refused: 'changed', detail: `${movement}; recreated the branch at that commit. Branch config was dropped by deletion.` };
+    }
     return { deleted: true, wasMerged: status.merged };
+  }
+
+  // Deletion reports an object-ID abbreviation, not revision syntax: a hex-looking branch/tag cannot redirect it.
+  // Reject ambiguity even if only one of the matching objects is a commit; never guess what Git deleted.
+  private async deletedHead(root: string, branch: string, output: string): Promise<string | null> {
+    const match = output.trim().match(/^Deleted branch (.+) \(was ([0-9a-f]{4,64})\)\.$/);
+    if (match === null || match[1] !== branch) return null;
+    try {
+      const candidates = (await this.git(root, ['rev-parse', `--disambiguate=${match[2]}`])).trim().split('\n');
+      const oid = candidates[0];
+      if (candidates.length !== 1 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) return null;
+      return (await this.resolve(root, `${oid}^{commit}`)) === oid ? oid : null;
+    } catch (error) {
+      if (error instanceof GitCommandError) return null;
+      throw error;
+    }
   }
 
   // The main worktree's root: the parent of the common dir when that is a `.git` directory (linked worktrees share
