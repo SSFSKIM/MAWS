@@ -10,7 +10,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { HostEmit } from '@shared/host/runtime';
 import type { SubagentLookup } from './backfill';
-import { ChainFollower, type FileReader, type FollowState } from './chain-follower';
+import { ChainFollower, type ChainFollowerOptions, type FileReader, type FollowState } from './chain-follower';
 import { isMissing } from './sidecars';
 
 // How long a snapshot request waits for a fresh follower's backfill before answering with what it has: long enough
@@ -81,6 +81,7 @@ export interface FollowOptions {
   sessionId: SessionId;
   agent: { agentId: AgentId; parentToolUseId: ParentToolUseId | null } | null;
   reader: FileReader;
+  isOwnRecord?: ChainFollowerOptions['isOwnRecord'];
   subagents?: SubagentLookup;
   holders?: () => number; // the session's live holders now, for the terminal-rewind rule
   pinned?: () => boolean; // W7: a foreign process holds the session now (MAWS's branch stays in view)
@@ -126,7 +127,7 @@ export class Follow {
             return; // the watcher's re-summary carries head and tail facts to main
         }
       },
-      { subagents: options.subagents, holders: options.holders, pinned: options.pinned },
+      { subagents: options.subagents, holders: options.holders, pinned: options.pinned, isOwnRecord: options.isOwnRecord },
     );
     this.started = this.follower.start();
   }

@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { appendFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import { WorkflowJournalRowSchema } from '@shared/wire/store';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
 import { SessionEventSchema } from '@shared/graph/events';
 import { FIXTURE_DIR } from '../../../test/support/fixtures';
@@ -50,6 +51,46 @@ describe('workflow runs are read from the snapshot and the journal', () => {
     expect((await reader.list(sessionDir))[0].snapshot?.agentCount).toBe(2);
     await writeFile(snapshot, '{"runId":"wf_7cacbb2d-902","agentCou');
     expect((await reader.list(sessionDir))[0].snapshot?.agentCount).toBe(2);
+  });
+
+  it('parses only appended journal rows across progress ticks, and invalidates rewrites and replacements', async () => {
+    const rows = Array.from({ length: 5000 }, (_, n) => JSON.stringify({ type: 'started', agentId: `a${n}` }) + '\n').join('');
+    const path = await fixture.addSidecar(S1, `subagents/workflows/${RUN}/journal.jsonl`, rows);
+    const snapshot = await fixture.addSidecar(S1, `workflows/${RUN}.json`, disk(`${RUN}.json`));
+    const reader = new WorkflowReader();
+    const parses = vi.spyOn(WorkflowJournalRowSchema, 'safeParse');
+    try {
+      expect((await reader.read(sessionDir, RUN)).journal).toHaveLength(5000);
+      parses.mockClear();
+      for (let tick = 0; tick < 20; tick++) {
+        await writeFile(snapshot, JSON.stringify({ runId: RUN, durationMs: tick }));
+        expect((await reader.read(sessionDir, RUN)).snapshot?.durationMs).toBe(tick);
+      }
+      expect(parses).toHaveBeenCalledTimes(0); // previously 100,000 historical row parses
+      await appendFile(path, '{"type":"result","agentId":"a0"}\n');
+      expect((await reader.read(sessionDir, RUN)).journal).toHaveLength(5001);
+      expect(parses).toHaveBeenCalledTimes(1);
+      await writeFile(path, '{"type":"launched"}\n');
+      expect((await reader.read(sessionDir, RUN)).journal).toEqual([{ type: 'launched' }]);
+      await writeFile(path, '{"type":"started "}\n'); // same size, changed mtime; unknown types remain readable
+      await utimes(path, new Date(1000), new Date(1000));
+      expect((await reader.read(sessionDir, RUN)).journal).toEqual([{ type: 'started ' }]);
+      await writeFile(`${path}.new`, '{"type":"result"}\n');
+      await rename(`${path}.new`, path);
+      expect((await reader.read(sessionDir, RUN)).journal).toEqual([{ type: 'result' }]);
+      await rm(path);
+      expect((await reader.read(sessionDir, RUN)).journal).toEqual([]);
+    } finally {
+      parses.mockRestore();
+    }
+  });
+
+  it('repairs a torn journal tail without duplicating the completed rows', async () => {
+    const path = await fixture.addSidecar(S1, `subagents/workflows/${RUN}/journal.jsonl`, '{"type":"launched"}\n{"type":"star');
+    const reader = new WorkflowReader();
+    expect((await reader.read(sessionDir, RUN)).journal).toEqual([{ type: 'launched' }]);
+    await appendFile(path, 'ted"}\n');
+    expect((await reader.read(sessionDir, RUN)).journal).toEqual([{ type: 'launched' }, { type: 'started' }]);
   });
 
   it('lists nothing for a session with no workflows', async () => {

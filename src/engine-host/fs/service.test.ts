@@ -9,6 +9,8 @@ import { validateEventPayload } from '@shared/ipc/validate';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { Discovery, type ListedTranscript } from './discovery';
 import { FsService, READ_LISTS_CAP, START_SCAN_FALLBACK_MS } from './service';
+import { SubagentReader } from './subagents';
+import { WorkflowReader } from './workflows';
 import { DEBOUNCE_MS, SETTLE_MS, type WatchFn } from './watcher';
 
 const S1 = '11111111-1111-4111-8111-111111111111' as SessionId;
@@ -42,7 +44,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
   });
 
   // Every payload is checked against its X2 schema, as the host runtime would before posting it.
-  const start = async (watch?: WatchFn, startScanFallbackMs?: number) => {
+  const start = async (watch?: WatchFn, startScanFallbackMs?: number, reconcileMs?: number) => {
     service = new FsService({
       paths: fixture.paths,
       emit: (name, payload) => {
@@ -52,6 +54,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       },
       watch,
       startScanFallbackMs,
+      reconcileMs,
     });
     await service.start();
     return service;
@@ -61,6 +64,83 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
   // The timed pins measure steady-state latency: FSEvents starts its stream asynchronously and a write in its first
   // milliseconds is only caught by the settle rescan (watcher.ts), so their clocks start once that has run.
   const settled = () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS + DEBOUNCE_MS + 50));
+
+  it.each(['rescan', 'timer'] as const)('reconciles missed agent and workflow sidecars on %s, including removed workflows', async (trigger) => {
+    await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
+    const listeners = new Map<string, (event: string, filename: string | null) => void>();
+    const watch: WatchFn = (path, _options, listener) => {
+      listeners.set(path, listener);
+      return Object.assign(new EventEmitter(), { close: vi.fn() });
+    };
+    const fs = await start(watch, undefined, trigger === 'timer' ? 100 : 30_000);
+    await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+    await fs.eventsSnapshot(A1, null);
+    await fs.workflows(A1); // empty view that needs invalidation
+    await settled();
+    clear();
+    await fixture.addSidecar(S1, 'subagents/agent-child.jsonl', user('child', null, '/work/a', 'child'));
+    await fixture.addSidecar(S1, 'subagents/agent-child.meta.json', { agentType: 'general-purpose', description: 'missed', toolUseId: 'tool-1', spawnDepth: 1 });
+    const workflow = await fixture.addSidecar(S1, 'workflows/wf-missed.json', { runId: 'wf-missed', status: 'running', workflowProgress: [] });
+    const fire = () => { if (trigger === 'rescan') listeners.get(fixture.paths.projects)!('rename', null); };
+    fire();
+    await expect.poll(() => events('fs.subagentsChanged').at(-1)?.agents[0]?.meta?.description, { timeout: 2_000 }).toBe('missed');
+    await expect.poll(() => events('fs.workflowChanged').some((e) => e.runId === 'wf-missed'), { timeout: 2_000 }).toBe(true);
+    await expect.poll(() => events('session.eventBatch').flatMap((b) => b.events).filter((e) => e.kind === 'workflow.progress').length, { timeout: 2_000 }).toBe(1);
+    clear();
+    await rm(workflow);
+    fire();
+    await expect.poll(() => events('fs.workflowChanged').some((e) => e.runId === 'wf-missed'), { timeout: 2_000 }).toBe(true);
+    expect((await fs.workflows(A1)).runs).toEqual([]);
+  });
+
+  it.each(['rescan', 'timer'] as const)('keeps bound but unopened history lazy during %s sidecar reconciliation', async (trigger) => {
+    const bindings = [S1, S2, S3].map((sessionId, i) => ({ sessionId, appSessionId: `app-${i + 1}` as AppSessionId }));
+    for (const { sessionId } of bindings) await fixture.addTranscript('/work/a', sessionId, [user('u1', null, '/work/a', 'first')]);
+    const listeners = new Map<string, (event: string, filename: string | null) => void>();
+    const watch: WatchFn = (path, _options, listener) => {
+      listeners.set(path, listener);
+      return Object.assign(new EventEmitter(), { close: vi.fn() });
+    };
+    // Pass through to the real readers: these calls enumerate/parse sidecars and populate their caches.
+    const agents = vi.spyOn(SubagentReader.prototype, 'list');
+    const workflows = vi.spyOn(WorkflowReader.prototype, 'list');
+    const runs = vi.spyOn(WorkflowReader.prototype, 'read');
+    try {
+      const fs = await start(watch, undefined, trigger === 'timer' ? 100 : 30_000);
+      await fs.bind(bindings);
+      await fs.workflows(A1); // requested but not followed, initially empty
+      await fs.eventsSnapshot(bindings[1].appSessionId, null); // followed without an explicit sidecar request
+      await settled(); // includes the startup settle rescan with the whole index bound
+      const historyDir = fixture.transcriptPath(S3).slice(0, -'.jsonl'.length);
+      expect(agents.mock.calls.flat()).not.toContain(historyDir);
+      expect(workflows.mock.calls.flat()).not.toContain(historyDir);
+
+      clear();
+      agents.mockClear();
+      workflows.mockClear();
+      runs.mockClear();
+      for (const { sessionId } of bindings) {
+        await fixture.addSidecar(sessionId, 'subagents/agent-child.jsonl', user('child', null, '/work/a', 'child'));
+        await fixture.addSidecar(sessionId, 'workflows/wf-missed.json', { runId: 'wf-missed', status: 'running', workflowProgress: [] });
+        await fixture.addSidecar(sessionId, 'subagents/workflows/wf-missed/journal.jsonl', '');
+      }
+      if (trigger === 'rescan') listeners.get(fixture.paths.projects)!('rename', null);
+      for (const { appSessionId } of bindings.slice(0, 2)) {
+        await expect.poll(() => events('fs.subagentsChanged').some((e) => e.appSessionId === appSessionId && e.agents.length === 1)).toBe(true);
+        await expect.poll(() => events('fs.workflowChanged').some((e) => e.appSessionId === appSessionId && e.runId === 'wf-missed')).toBe(true);
+      }
+      await expect.poll(() => events('session.eventBatch').some((b) => b.appSessionId === bindings[1].appSessionId && b.events.some((e) => e.kind === 'workflow.progress'))).toBe(true);
+      await settled(); // let the complete rescan/timer pass finish, including any historical work
+      expect(agents.mock.calls.flat()).not.toContain(historyDir);
+      expect(workflows.mock.calls.flat()).not.toContain(historyDir);
+      expect(runs.mock.calls.map(([dir]) => dir)).not.toContain(historyDir);
+    } finally {
+      service?.stop();
+      agents.mockRestore();
+      workflows.mockRestore();
+      runs.mockRestore();
+    }
+  });
 
   async function threeSessions() {
     await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
@@ -559,10 +639,10 @@ describe('filesystem state service: a contested session (W7)', () => {
   const batches = () => events('session.eventBatch').flatMap((b) => b.events);
   const settled = () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS + DEBOUNCE_MS + 50));
   const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-  const record = (type: 'user' | 'assistant', uuid: string, parentUuid: string | null, entrypoint: 'sdk-ts' | 'cli', timestamp: string) =>
-    JSON.stringify({ type, uuid, parentUuid, cwd: '/work/a', entrypoint, timestamp, message: { role: type, content: type === 'user' ? `${uuid} asks` : [{ type: 'text', text: `${uuid} says` }] } });
+  const record = (type: 'user' | 'assistant', uuid: string, parentUuid: string | null, entrypoint: 'sdk-ts' | 'cli', timestamp: string, pid?: number) =>
+    JSON.stringify({ type, uuid, parentUuid, cwd: '/work/a', entrypoint, timestamp, pid, message: { role: type, content: type === 'user' ? `${uuid} asks` : [{ type: 'text', text: `${uuid} says` }] } });
 
-  it("reports the foreign process's first write once, keeps MAWS's branch in view while it holds the session, and re-folds when it exits", async () => {
+  it.each(['cli', 'sdk-ts'] as const)("reports the foreign %s process's first write once, keeps MAWS's branch in view, and re-folds when it exits", async (foreignEntrypoint) => {
     const old = '2026-09-28T10:00:00.000Z';
     const path = await fixture.addTranscript('/work/a', S1, [record('user', 'u1', null, 'sdk-ts', old), record('assistant', 'a1', 'u1', 'sdk-ts', old), record('user', 'h1', 'a1', 'cli', old), record('assistant', 'h2', 'h1', 'cli', old)]);
     service = new FsService({
@@ -589,23 +669,23 @@ describe('filesystem state service: a contested session (W7)', () => {
     // the terminal resumes the id: a holder, a contest; the history it once wrote (h1, h2) is not a write now
     child = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
     const pid = child.pid!;
-    await fixture.addRegistryRecord(pid, { sessionId: S1, kind: 'interactive', entrypoint: 'cli', cwd: '/work/a', startedAt: Date.now() });
+    await fixture.addRegistryRecord(pid, { sessionId: S1, kind: 'interactive', entrypoint: foreignEntrypoint, cwd: '/work/a', startedAt: Date.now() });
     await expect.poll(() => events('fs.holderChanged').length, { timeout: 1_000, interval: 10 }).toBe(1);
     expect(events('fs.holderChanged')[0]).toMatchObject({ sessionId: S1, appSessionId: A1, holder: { kind: 'terminal', pid } });
     expect(service.heldElsewhere(A1)).toBe(true);
     await pause(50); // the contest's baseline
 
     const now = () => new Date().toISOString();
-    await fixture.appendLines(path, [record('user', 'm1', 'h2', 'sdk-ts', now())]); // MAWS writes: not foreign
+    await fixture.appendLines(path, [record('user', 'm1', 'h2', 'sdk-ts', now(), foreignEntrypoint === 'sdk-ts' ? process.pid : undefined)]); // MAWS writes: not foreign
     await pause(300);
     expect(events('fs.foreignWrite')).toEqual([]);
-    await fixture.appendLines(path, [record('user', 't1', 'h2', 'cli', now())]); // the terminal's sibling of m1
+    await fixture.appendLines(path, [record('user', 't1', 'h2', foreignEntrypoint, now())]); // the terminal's sibling of m1
     await expect.poll(() => events('fs.foreignWrite').length, { timeout: 1_000, interval: 10 }).toBe(1);
     expect(events('fs.foreignWrite')[0]).toEqual({ sessionId: S1, appSessionId: A1, holder: { kind: 'terminal', pid } });
     // MAWS's branch stays in view: one held-back notice, no retraction of m1
     await expect.poll(() => batches().filter((e) => e.kind === 'notice.posted' && e.key === 'transcript_branch_held').length, { timeout: 1_000, interval: 10 }).toBe(1);
     expect(batches().filter((e) => e.kind === 'boundary.retraction')).toEqual([]);
-    await fixture.appendLines(path, [record('assistant', 't2', 't1', 'cli', now())]);
+    await fixture.appendLines(path, [record('assistant', 't2', 't1', foreignEntrypoint, now())]);
     await pause(300);
     expect(events('fs.foreignWrite')).toHaveLength(1); // once per contest
 

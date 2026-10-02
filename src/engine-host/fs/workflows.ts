@@ -5,7 +5,7 @@
 // run, the same shape the wire's `workflow_progress` carries, so a followed session gets one `workflow.progress` per
 // snapshot change. Read-only: files are read, never written.
 import { createHash } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+import { open, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionEvent } from '@shared/graph/events';
 import type { EventId, SessionId, TaskId } from '@shared/graph/ids';
@@ -17,6 +17,22 @@ const SNAPSHOT_FILE = /^(.+)\.json$/;
 
 export class WorkflowReader {
   private readonly snapshots = new Map<string, WorkflowSnapshot>(); // last whole snapshot, by path
+  private readonly journals = new Map<string, JournalCache>();
+  private readonly journalWork = new Map<string, Promise<WorkflowJournalRow[]>>();
+
+  private readJournal(path: string): Promise<WorkflowJournalRow[]> {
+    const previous = this.journalWork.get(path) ?? Promise.resolve([]);
+    const work = previous.catch(() => []).then(async () => {
+      const cached = await readJournal(path, this.journals.get(path));
+      if (cached === null) this.journals.delete(path);
+      else this.journals.set(path, cached);
+      return cached?.result ?? [];
+    });
+    this.journalWork.set(path, work);
+    const release = () => { if (this.journalWork.get(path) === work) this.journalWork.delete(path); };
+    void work.then(release, release);
+    return work;
+  }
 
   // Every run named by a snapshot or a journal directory, ordered by run id.
   async list(sessionDir: string): Promise<WorkflowRun[]> {
@@ -31,7 +47,7 @@ export class WorkflowReader {
   async read(sessionDir: string, runId: string): Promise<WorkflowRun> {
     const [snapshot, journal] = await Promise.all([
       this.readSnapshot(join(sessionDir, 'workflows', `${runId}.json`)),
-      readJournal(join(sessionDir, 'subagents', 'workflows', runId, 'journal.jsonl')),
+      this.readJournal(join(sessionDir, 'subagents', 'workflows', runId, 'journal.jsonl')),
     ]);
     return { runId, snapshot, journal };
   }
@@ -83,14 +99,47 @@ function snapshotTime(snapshot: WorkflowSnapshot): string {
   return new Date(0).toISOString();
 }
 
-async function readJournal(path: string): Promise<WorkflowJournalRow[]> {
-  let text: string;
+interface JournalCache {
+  ino: number;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  offset: number; // after the last newline; an unsealed tail is re-read when the file changes
+  rows: WorkflowJournalRow[];
+  result: WorkflowJournalRow[];
+}
+
+async function readJournal(path: string, cached?: JournalCache): Promise<JournalCache | null> {
+  let file;
   try {
-    text = await readFile(path, 'utf8');
+    file = await open(path, 'r');
   } catch (error) {
-    if (isMissing(error)) return [];
+    if (isMissing(error)) return null;
     throw error;
   }
+  try {
+    const { ino, size, mtimeMs, ctimeMs } = await file.stat();
+    if (cached?.ino === ino && cached.size === size && cached.mtimeMs === mtimeMs && cached.ctimeMs === ctimeMs) return cached;
+    // The engine appends journals. Replacement, truncation and an in-place same-size rewrite restart the fold.
+    const append = cached?.ino === ino && size > cached.size;
+    const from = append ? cached.offset : 0;
+    const bytes = Buffer.alloc(size - from);
+    let filled = 0;
+    while (filled < bytes.length) {
+      const { bytesRead } = await file.read(bytes, filled, bytes.length - filled, from + filled);
+      if (bytesRead === 0) break;
+      filled += bytesRead;
+    }
+    const end = bytes.subarray(0, filled).lastIndexOf(0x0a) + 1;
+    const rows = [...(append ? cached.rows : []), ...parseJournal(bytes.subarray(0, end).toString('utf8'))];
+    const tail = parseJournal(bytes.subarray(end, filled).toString('utf8'));
+    return { ino, size: from + filled, mtimeMs, ctimeMs, offset: from + end, rows, result: tail.length === 0 ? rows : [...rows, ...tail] };
+  } finally {
+    await file.close();
+  }
+}
+
+function parseJournal(text: string): WorkflowJournalRow[] {
   const rows: WorkflowJournalRow[] = [];
   for (const line of text.split('\n')) {
     if (line.trim() === '') continue;
