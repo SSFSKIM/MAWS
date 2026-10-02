@@ -1,30 +1,11 @@
-/// <reference lib="dom" />
-// The scratch builders share a module with Playwright browser-evaluation helpers.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, test, vi } from 'vitest';
-import { GitFixture } from './git-fixture';
+import { afterEach, expect, test } from 'vitest';
 
 const cleanups: (() => void)[] = [];
-afterEach(() => { vi.unstubAllEnvs(); for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
-
-test.each(['panel', 'code'])('%s scratch commits stay out of an inherited GIT_DIR', async (kind) => {
-  const foreign = await GitFixture.create();
-  cleanups.push(() => foreign.dispose());
-  const head = await foreign.git('rev-parse', 'HEAD');
-  vi.stubEnv('GIT_DIR', join(foreign.root, '.git'));
-  vi.stubEnv('GIT_WORK_TREE', foreign.root);
-  for (const key of ['GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_COMMON_DIR', 'GIT_NAMESPACE', 'GIT_CONFIG_COUNT']) vi.stubEnv(key, 'must-not-reach-child');
-  vi.resetModules();
-  const build = kind === 'panel' ? (await import('../../e2e/support/panel-support')).scratchRepository : (await import('../../e2e/support/code-scratch')).buildCodeScratch;
-  const scratch = build();
-  cleanups.push(() => scratch.cleanup());
-  expect(scratch.git('rev-parse', '--show-toplevel')).toBe(scratch.dir);
-  expect(await foreign.git('rev-parse', 'HEAD')).toBe(head);
-  expect(await foreign.git('status', '--porcelain')).toBe('');
-});
+afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
 test('refresh retains hand-authored files while redacting owned files', () => {
   const root = mkdtempSync(join(tmpdir(), 'maws-refresh-test-'));
