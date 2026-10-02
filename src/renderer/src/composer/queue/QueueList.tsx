@@ -3,11 +3,12 @@
 // while a turn runs: the engine delivers them at the next step), each with Send now (an interrupt: the engine then
 // starts what it holds, pass3/steer-next-interrupted) and Hold until the turn ends (`session.queue.hold`). Then one row
 // per app-queue entry in C3's states. A `queued` (held) entry reads as one line with Send now (promote with priority
-// `now`), a caret with Send at the next step (priority `next`), Edit (inline, through `session.queue.edit`) and Delete.
-// An `uncertain` entry is the paused queue's head and says it may not have been delivered, with Resume, Edit and
-// Delete. A `submitting` entry is in flight: after 300 ms it reads Sending…, with nothing to act on. A `released` entry
-// is the running turn and is not listed. While paused (and no uncertain entry explains why) the header says why, from
-// the host's pause reason, with Resume. Failures keep the row and toast.
+// `now`; titled by whether a turn runs, since at idle it just sends), a caret with Send at the next step (priority
+// `next`), Edit (inline, through `session.queue.edit`) and Delete. An `uncertain` entry is the paused queue's head and
+// says it may not have been delivered, with Resume, Edit and Delete. A `submitting` entry is in flight: after 300 ms it
+// reads Sending…, with nothing to act on. A `released` entry is the running turn and is not listed. While paused (and
+// no uncertain entry explains why) the header says why, from the host's pause reason, with Resume. Failures keep the
+// row and toast.
 import { DropdownMenu } from 'radix-ui';
 import { useEffect, useState } from 'react';
 import type { QueueEntry, QueuePauseReason, SendContent } from '@shared/engine/session-state-store';
@@ -16,7 +17,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { toast } from '../../stores/notices';
 import type { SessionQueue } from '../../stores/queue';
-import { SENDS_AT_NEXT_STEP, SENDS_AT_TURN_END, SEND_NOW_DETAIL, steerPriority } from '../submit/submit-state';
+import { SENDS_AT_NEXT_STEP, SENDS_AT_TURN_END, SENDS_NOW, SEND_NOW_DETAIL, steerPriority } from '../submit/submit-state';
 import { entryDisplay } from './entry-text';
 import { QueueEdit } from './QueueEdit';
 
@@ -43,6 +44,7 @@ const ITEM = 'flex cursor-default flex-col rounded-sm px-2 py-1 outline-none sel
 export interface QueueListProps {
   appSessionId: AppSessionId;
   queue: SessionQueue;
+  busy: boolean; // a turn runs (`isBusy`): a held row's Send now stops it first, else it just sends
   sessionId: string | null; // the engine session id, for an edit's pasted tags
   cwd: string;
   client?: MawsBridge;
@@ -107,7 +109,7 @@ function SubmittingRow({ entry }: { entry: QueueEntry }) {
   );
 }
 
-export function QueueList({ appSessionId, queue, sessionId, cwd, client = ipc }: QueueListProps) {
+export function QueueList({ appSessionId, queue, busy, sessionId, cwd, client = ipc }: QueueListProps) {
   const actions = useQueueActions(appSessionId, client);
   const [editing, setEditing] = useState<string | null>(null);
   const lasting = useLastingSubmissions(queue.entries);
@@ -194,7 +196,7 @@ export function QueueList({ appSessionId, queue, sessionId, cwd, client = ipc }:
               ) : (
                 <>
                   <span className="min-w-0 flex-1 truncate text-fg">{entryDisplay(entry.content)}</span>
-                  <button type="button" className={BUTTON} title={SEND_NOW_DETAIL} disabled={disabled(entry)} onClick={() => void actions.promote(entry.queueId, 'interrupt_and_send')}>
+                  <button type="button" className={BUTTON} title={busy ? SEND_NOW_DETAIL : SENDS_NOW} disabled={disabled(entry)} onClick={() => void actions.promote(entry.queueId, 'interrupt_and_send')}>
                     Send now
                   </button>
                   <DropdownMenu.Root modal={false}>
