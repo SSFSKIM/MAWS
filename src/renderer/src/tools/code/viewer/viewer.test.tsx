@@ -20,7 +20,7 @@ import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } fr
 import { FLASH_CLASS } from './CodeView';
 import { FileViewer } from './FileViewer';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
-import { useViewer, VIEWER_ENTRIES_MAX } from './viewer-store';
+import { existingViewState, useViewer, VIEWER_ENTRIES_MAX } from './viewer-store';
 import { currentSet } from '../../../stores/layout-model';
 
 const text = { encoding: 'utf8' as const };
@@ -100,6 +100,7 @@ type Served = string | { text: string; mime?: string } | { base64: string; bytes
 
 function serve(files: Record<string, Served>, gate?: (offset: number) => Promise<void>) {
   return installFakeMain(async (name, input) => {
+    if (name === 'layout.openExternal') return ok();
     if (name === 'files.watch' || name === 'files.unwatch') return ok();
     if (name === 'files.openExternal') return ok({ opened: true, message: null });
     if (name !== 'files.read') return fail(`unexpected ${name}`);
@@ -220,6 +221,27 @@ describe('viewer', () => {
     expect(screen.queryByRole('heading', { name: 'Title' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Rendered' }));
     expect((await screen.findByRole('heading', { name: 'Title' })).tagName).toBe('H1');
+  });
+
+  it('opens links and path chips from standalone file Markdown', async () => {
+    const main = serve({ '/r/README.md': '[Website](https://example.com)\n\n[Source](/r/app.ts#L7)' });
+    useLayout.getState().openTab({ kind: 'file', path: '/r/README.md', line: null, appSessionId: A });
+    useLayout.getState().openTab({ kind: 'session', appSessionId: B });
+    render(<FileViewer tab={fileTab('/r/README.md')} />);
+    fireEvent.click(await screen.findByRole('link', { name: 'Website' }));
+    expect(main.callsOf('layout.openExternal')).toEqual([{ url: 'https://example.com/' }]);
+    fireEvent.click(screen.getByTitle('/r/app.ts'));
+    expect(currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/r/app.ts', line: 7, appSessionId: A }));
+  });
+
+  it('does not retain the editor document after its parent releases a closed tab', async () => {
+    serve({ '/r/closed.ts': 'const closedDocument = 1;' });
+    const tab = fileTab('/r/closed.ts');
+    const view = render(<FileViewer tab={tab} />);
+    await waitFor(() => expect(codeText()).toContain('closedDocument'));
+    view.unmount();
+    expect(useViewer.getState().entries.has(tab.id)).toBe(false);
+    expect(existingViewState(tab.id)).toBeUndefined();
   });
 
   it('opens a markdown file sent to a line as its Source, where the line exists', async () => {

@@ -356,6 +356,19 @@ describe('terminal registry reattaches without a gap', () => {
     ]);
   });
 
+  it('finishes a lossy repaint at the pane size fitted after adoption', async () => {
+    const { registry, id, renderer } = await adoptHeld({ checkpoint: null, replay: bytes('x\r\ny\r\n'), replayFrom: 0, nextOffset: 132 });
+    renderer.fitSize = { cols: 120, rows: 40 };
+    registry.mount(id, parent());
+    await settle();
+    expect(renderer.resizes.at(-1)).toEqual([120, 40]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ipc.inputs('pty.resize').at(-1)).toEqual({ ptyId: 'pty-live', cols: 120, rows: 40 });
+    FakeResizeObserver.trigger();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ipc.inputs('pty.resize').at(-1)).toEqual({ ptyId: 'pty-live', cols: 120, rows: 40 });
+  });
+
   it('is lossy with no checkpoint', async () => {
     const { handle, renderer } = await adoptHeld({ checkpoint: null, replay: bytes('x\r\ny\r\n'), replayFrom: 0, nextOffset: 132 });
     expect(renderer.resets).toBe(1);

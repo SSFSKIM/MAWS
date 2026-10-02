@@ -86,6 +86,20 @@ describe('patch splitting', () => {
     expect(files[1].header).toBe('diff --git a/src/big.ts b/src/big.ts\nindex 858a0a6..4a55494 100644\n--- a/src/big.ts\n+++ b/src/big.ts');
   });
 
+  it.each([
+    ['my notes.md', 'my notes.md'],
+    ['my notes.md ', 'my notes.md '],
+    ['tab\tname.md', '"tab\\tname.md"'],
+  ])('joins the patch for %s to numstat without the tab delimiter', (path, encoded) => {
+    const prefixed = (prefix: string) => encoded.startsWith('"') ? `"${prefix}/${encoded.slice(1)}` : `${prefix}/${encoded}`;
+    const patch = `diff --git ${prefixed('a')} ${prefixed('b')}\n--- ${prefixed('a')}\t\n+++ ${prefixed('b')}\t\n@@ -1 +1 @@\n-old\n+new\n`;
+    const rows = gitScopeFiles({ scope: 'uncommitted', repoRoot: '/repo', status: null,
+      files: [{ path, oldPath: null, insertions: 1, deletions: 1, binary: false }],
+      patch: new Map(splitPatch(patch).map((file) => [file.path, file])),
+    });
+    expect(rows[0].hunks).toEqual(['@@ -1 +1 @@\n-old\n+new']);
+  });
+
   it('reads a new and a deleted file', () => {
     const patch = [
       'diff --git a/src/new.ts b/src/new.ts',
@@ -357,6 +371,32 @@ describe('review store', () => {
     store.getState().refresh(target);
     await tick();
     expect(diffOf(store.getState(), target)).toEqual({ status: 'error', message: 'unknown revision' });
+    off();
+  });
+
+  it('ignores an original file read that resolves after its refreshed replacement', async () => {
+    const reads: ((patch: string) => void)[] = [];
+    const main = installFakeMain(async (name, input) => {
+      if (name !== 'git.diff') return ok();
+      if (!input.path) return ok({ patch: 'x'.repeat(REVIEW_SCOPE_BYTES_CAP + 1), files: APP_FILES });
+      const patch = await new Promise<string>((resolve) => reads.push(resolve));
+      return ok({ patch, files: APP_FILES });
+    });
+    const store = createReviewStore(main.bridge);
+    const target = { directory: DIR, scope: 'uncommitted', base: null } as const;
+    const off = store.getState().hold(target);
+    await tick();
+    store.getState().loadFile(target, 'src/app.ts');
+    store.getState().refresh(target);
+    await tick();
+    store.getState().loadFile(target, 'src/app.ts');
+    const patch = (value: string) => `diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-before\n+${value}\n`;
+    reads[1](patch('new'));
+    await tick();
+    expect(fileDiffOf(store.getState(), target, 'src/app.ts')).toMatchObject({ status: 'ok', file: { hunks: ['@@ -1 +1 @@\n-before\n+new'] } });
+    reads[0](patch('old'));
+    await tick();
+    expect(fileDiffOf(store.getState(), target, 'src/app.ts')).toMatchObject({ status: 'ok', file: { hunks: ['@@ -1 +1 @@\n-before\n+new'] } });
     off();
   });
 

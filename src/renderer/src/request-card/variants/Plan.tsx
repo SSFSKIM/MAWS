@@ -3,11 +3,13 @@
 // Clear context and implement behind one confirmation, since it resets the conversation.
 import { useEffect, useRef, useState } from 'react';
 import { Markdown } from '../../transcript';
+import { TranscriptActionsProvider } from '../../transcript/view/context';
+import { openFile } from '../../tools/code/open-file';
 import { toAnswer } from '../answers';
 import { CardButton, CardTextarea, Controls, Muted } from '../controls';
 import type { VariantProps } from './types';
 
-export function PlanBody({ request, busy, submit, bindKeys }: VariantProps<'plan.requested'>) {
+export function PlanBody({ item, request, busy, submit, bindKeys }: VariantProps<'plan.requested'>) {
   const [expanded, setExpanded] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null); // null: the feedback box is closed
   const [confirming, setConfirming] = useState(false);
@@ -26,7 +28,9 @@ export function PlanBody({ request, busy, submit, bindKeys }: VariantProps<'plan
   return (
     <div className="flex flex-col gap-3">
       <div className={`overflow-hidden rounded-sm border border-border bg-bg px-3 py-2 ${expanded ? '' : 'max-h-80'}`}>
-        <Markdown markdown={request.plan} live={false} />
+        <TranscriptActionsProvider actions={{ openFile: (path, line) => openFile(item.appSessionId, path, line) }}>
+          <Markdown markdown={request.plan} live={false} />
+        </TranscriptActionsProvider>
       </div>
       <button type="button" onClick={() => setExpanded((e) => !e)} className="self-start text-ui-sm text-fg-muted underline outline-accent focus-visible:outline-2">
         {expanded ? 'Show less' : 'Show more'}

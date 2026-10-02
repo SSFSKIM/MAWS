@@ -489,6 +489,7 @@ export const panelHost = {
     const owner = at.pinned ? shown : at.appSessionId;
     writeRefs(owner, (refs) => refs, tabId);
     if (owner === shown) requestFocus(tabId);
+    reveal();
   },
   closeTab(id: string): Promise<boolean> {
     const tabId = resolveId(id);

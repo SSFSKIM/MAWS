@@ -99,7 +99,7 @@ export function createReviewStore(
   options: { git?: typeof useGit } = {},
 ): UseBoundStore<StoreApi<ReviewStore>> {
   const held = new Map<string, Held>();
-  const fileLoads = new Set<string>();
+  const fileLoads = new Map<string, symbol>();
 
   const store = create<ReviewStore>()((set, get) => {
     const read = async (key: string) => {
@@ -115,7 +115,7 @@ export function createReviewStore(
       if (held.get(key) !== h) return; // released meanwhile
       const next: ScopeDiff = result.ok ? answered(result.value) : { status: 'error', message: result.error.message };
       set((s) => ({ diffs: mapWith(s.diffs, key, next), files: mapWithout(s.files, (k) => k.startsWith(`${key}\0`)) }));
-      for (const k of [...fileLoads]) if (k.startsWith(`${key}\0`)) fileLoads.delete(k);
+      for (const k of [...fileLoads.keys()]) if (k.startsWith(`${key}\0`)) fileLoads.delete(k);
       if (h.again) {
         h.again = false;
         void read(key);
@@ -153,7 +153,7 @@ export function createReviewStore(
           if (--mine.count > 0) return;
           if (mine.timer !== null) clearTimeout(mine.timer);
           held.delete(key);
-          for (const k of [...fileLoads]) if (k.startsWith(`${key}\0`)) fileLoads.delete(k);
+          for (const k of [...fileLoads.keys()]) if (k.startsWith(`${key}\0`)) fileLoads.delete(k);
           set((s) => ({ diffs: mapWithout(s.diffs, (k) => k === key), files: mapWithout(s.files, (k) => k.startsWith(`${key}\0`)) }));
         };
       },
@@ -169,10 +169,11 @@ export function createReviewStore(
       loadFile(target, path) {
         const key = fileKey(target, path);
         if (!held.has(diffKey(target)) || fileLoads.has(key)) return;
-        fileLoads.add(key);
+        const generation = Symbol();
+        fileLoads.set(key, generation);
         set((s) => ({ files: mapWith(s.files, key, { status: 'loading' }) }));
         void settled(client.invoke('git.diff', diffInput(target, path))).then((result) => {
-          if (!fileLoads.has(key)) return; // the scope re-read or was released meanwhile
+          if (fileLoads.get(key) !== generation) return; // the scope re-read or was released meanwhile
           const next: FileDiff = result.ok ? { status: 'ok', file: splitPatch(result.value.patch)[0] ?? null } : { status: 'error', message: result.error.message };
           set((s) => ({ files: mapWith(s.files, key, next) }));
         });
