@@ -7,7 +7,7 @@ import { useState, useSyncExternalStore, type ReactNode, type Ref } from 'react'
 import { useTranscriptStore } from '../../../stores/transcript';
 import { useDisclosureMotion } from '../../../ui/disclosure';
 import { NOT_IN_CONTEXT } from '../../model/copy';
-import type { Row, TurnId } from '../../model/rows';
+import type { Row } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { inWorkArea } from '../motion';
 import { AgentMessageRow } from './AgentMessage';
@@ -49,15 +49,12 @@ function body(row: Row) {
 // The first row a turn shows: where a revealed branch's turn says it is not in context.
 const opensTurn = (row: Row) => row.kind === 'user' || (row.kind === 'divider' && row.origin !== 'human'); // engine and peer turns open with their divider
 
+// Keep one frame/body lineage when a surface answer moves a row into or out of the work area.
 export function RowView({ row }: { row: Row }) {
-  return inWorkArea(row) ? <WorkRowView row={row} turn={row.turnId!} /> : <RowFrame row={row}>{body(row)}</RowFrame>;
-}
-
-// A work-area row: it grows in when its divider has just opened the work area and closes away while the divider folds it.
-function WorkRowView({ row, turn }: { row: Row; turn: TurnId }) {
   const motion = useWorkMotion();
-  const folding = useSyncExternalStore(motion.subscribe, () => motion.isFolding(turn));
-  const [appear] = useState(() => motion.isOpening(turn));
+  const work = inWorkArea(row);
+  const folding = useSyncExternalStore(motion.subscribe, () => work && motion.isFolding(row.turnId!));
+  const [appear] = useState(() => work && motion.isOpening(row.turnId!));
   const { ref, mounted } = useDisclosureMotion<HTMLDivElement>(!folding, { appear });
   return (
     <RowFrame row={row} frameRef={ref}>
