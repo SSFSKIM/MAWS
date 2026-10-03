@@ -87,7 +87,10 @@ export function sittingSeed(base: { repo: string; engineId: string }, closeTurns
   const records = rows.find((row) => row.frame.event === 'owner_session_seed')!.frame.records as Record<string, unknown>[];
   const drawn = headers ? new Map(readFileSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/pass3/mods-surface-sitting-headers.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as SurfaceJournalRow).filter((row) => row.frame.event === 'display_hook_output').map((row) => [row.frame.uuid, row.frame.output])) : new Map();
   const seed: Record<string, unknown>[] = records.map((record) => ({ ...record, cwd: base.repo, sessionId: base.engineId, ...(drawn.has(record.uuid) && { message: { ...(record.message as object), content: [{ type: 'text', text: drawn.get(record.uuid) }] } }) }));
-  if (!closeTurns) return seed;
+  // This is a test projection: omitted metadata ancestors and synthetic duration records must not leave gaps or
+  // sibling branches in the disk follower's chain. Message identities, content and order remain the recorded ones.
+  const chain = (items: Record<string, unknown>[]) => items.map((record, index) => ({ ...record, parentUuid: index ? items[index - 1].uuid : null }));
+  if (!closeTurns) return chain(seed);
   // The owner's file has no duration records. Explicit test-authored completions let its messages exercise the
   // streaming path without pretending that replay echoes themselves carry the original live lifecycle.
   const closed: Record<string, unknown>[] = [];
@@ -99,5 +102,5 @@ export function sittingSeed(base: { repo: string; engineId: string }, closeTurns
     closed.push(record);
   }
   finish();
-  return closed;
+  return chain(closed);
 }

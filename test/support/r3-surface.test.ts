@@ -2,11 +2,11 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseTranscriptRecord } from '../../src/shared/wire/transcript';
+import { currentChain, parseTranscriptRecord } from '../../src/shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../src/engine-host/fs/backfill';
 import { applyEvents, createState } from '../../src/renderer/src/transcript/model/reduce';
 import { rowsOf, withAllExpanded } from '../../src/renderer/src/transcript/model/derive';
-import { addSurfaceSeedEchoes, ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, transcriptSeed } from './r3-surface';
+import { addSurfaceSeedEchoes, ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, sittingSeed, transcriptSeed } from './r3-surface';
 import { Normalizer } from '../../src/engine-host/normalizer';
 import type { JournalRow } from '../../src/shared/wire/journal';
 import type { SessionId } from '../../src/shared/graph/ids';
@@ -21,6 +21,14 @@ interface Entry { direction: string; frame: { request_id?: string; request?: { s
 const journal = (path: string): Entry[] => readFileSync(path, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Entry);
 
 describe('R3 e2e recording and disk-seed helpers', () => {
+  it.each([false, true])('keeps the projected sitting seed on one disk chain (synthetic completions=%s)', (closeTurns) => {
+    const records = sittingSeed(base, closeTurns);
+    const { chain, gap } = currentChain(records.map(parseTranscriptRecord));
+    expect(gap).toBeNull();
+    expect(chain).toHaveLength(records.length);
+    expect(derive(chain).filter((row) => row.kind === 'assistant_text')).toHaveLength(3);
+    expect(derive(chain).some((row) => row.kind === 'divider')).toBe(true);
+  });
   it('selects a recorded outcome and rebases only the request identity, retaining the original engine response', () => {
     const scratch = mkdtempSync(join(tmpdir(), 'maws-r3-helper-'));
     try {
