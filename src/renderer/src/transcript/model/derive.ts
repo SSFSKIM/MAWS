@@ -106,7 +106,7 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // divider folds everything else, so a turn of a local command alone (`/compact`: its boundary and its output) has no
 // work and no "Worked for 0s" divider. A question still counts as work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && row.phase === 'answer') || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin'));
+  row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin'));
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
@@ -548,7 +548,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     else ordered.push(item);
   });
 
-  const allRows = groupItems(ordered, turn, ui, tools);
+  const allRows = groupItems(ordered, turn, ui, tools).map((row): Row => row.kind === 'assistant_text' && ui?.assistantInk.has(row.id) ? { ...row, forHuman: true } : row);
   const workRows = allRows.filter((row) => !isPersistentRow(row));
   const cells = collectCells(workRows);
   const files = changedFiles(cells, turn);

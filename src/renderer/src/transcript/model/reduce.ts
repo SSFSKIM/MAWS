@@ -53,6 +53,7 @@ export interface TurnState {
 }
 
 export interface TranscriptUi {
+  assistantInk: Set<RowId>; // accepted mod drawings addressed to the human; session-local, never persisted
   expandedTurns: Set<TurnId>;
   collapsedTurns: Set<TurnId>;
   expandedGroups: Set<RowId>;
@@ -149,7 +150,7 @@ export interface PluginStatus {
 export function createState(sessionId: SessionId | null, agentId: AgentId | null): TranscriptState {
   return {
     sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
-    ui: { expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
+    ui: { assistantInk: new Set(), expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
     current: null, cwd: null, pluginStatus: new Map(), placement: new Map(),
     index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set() },
     memo: new Map(),

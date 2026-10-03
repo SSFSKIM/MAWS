@@ -38,7 +38,7 @@ export type Row = RowBase &
         kind: 'user'; messageUuid: MessageUuid | null; text: string; attachments: Attachment[]; placeholders: number[]; lines: number; editable: boolean; steer: boolean; dropped: boolean;
         pending?: 'next' | 'held'; // W1: not taken yet, a dimmed tail bubble: 'next' a steer the engine delivers at the running turn's next step, 'held' in MAWS's queue until the turn ends
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
-    | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; model: string | null }
+    | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null }
     | {
         kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
         toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | null; expanded: boolean; summary: TurnSummary;

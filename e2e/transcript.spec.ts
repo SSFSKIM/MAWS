@@ -977,3 +977,24 @@ test('R3 owner to-human draws the first span, folds the working record, fills th
     return t.finish();
   });
 });
+
+
+test('M1 marked commentary is visible at full contrast before and after folding work', async () => {
+  await surfaceReplay((root) => recordedSurfaceJournal(root, 'mods-surface-transcript-to-human'), async ({ pane }) => {
+    const body = pane.locator('[data-engine-native="AssistantMessage"]').filter({ hasText: 'First span.' });
+    await expect(body).toBeVisible();
+    await expect(body.locator('.transcript-commentary')).toHaveCount(0);
+    const divider = pane.locator('.transcript-divider button[aria-expanded]').first();
+    await expect(divider).toHaveAttribute('aria-expanded', 'false');
+    await divider.click();
+    await expect(divider).toHaveAttribute('aria-expanded', 'true');
+    await divider.click();
+    await expect(divider).toHaveAttribute('aria-expanded', 'false');
+    await expect(body).toBeVisible();
+  }, (base) => {
+    const t = transcriptSeed(base); t.user('owner-user', 'Show the report');
+    t.text('owner-multi', ownerMarkedText);
+    t.tool('owner-tool', 'Bash', { command: 'printf R3' }, r3Output);
+    return t.finish();
+  });
+});

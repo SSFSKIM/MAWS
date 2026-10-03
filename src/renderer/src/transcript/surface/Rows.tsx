@@ -1,8 +1,11 @@
 // R3's mounts change row bodies, never the transcript's turn/work-area structure. Virtual rows own these mounts;
 // folded or virtualized-away rows therefore issue no asks. Child transcripts are not their parent's engine surface.
-import { useCallback } from 'react';
-import { nativeQuestionsOf, type TranscriptProps } from '@shared/engine/surface-rows';
+import { useCallback, useEffect, useMemo } from 'react';
+import { nativeQuestionsOf, parseTranscriptProps, type TranscriptProps } from '@shared/engine/surface-rows';
 import { SurfaceRow } from '../../engine-surface/SurfaceRow';
+import { useSurfaceAttached, useSurfaceSite } from '../../engine-surface/site';
+import { hasInk } from '../../engine-surface/tree';
+import { expandedTurnRows } from '../model/derive';
 import { liveBuffer, useTranscriptStore } from '../../stores/transcript';
 import type { Row } from '../model/rows';
 import { AssistantTextRow } from '../view/rows/AssistantText';
@@ -24,13 +27,37 @@ export function SurfaceUserRow({ row }: { row: Extract<Row, { kind: 'user' }> })
   </SurfaceRow>;
 }
 
-export function SurfaceAssistantRow({ row }: { row: Extract<Row, { kind: 'assistant_text' }> }) {
+function useAssistantPresentation(row: Extract<Row, { kind: 'assistant_text' }>) {
   const { appSessionId, turn, storeKey } = useTranscriptSurface(row);
   const live = useTranscriptStore((s) => liveBuffer(s.entries[storeKey], row));
   const input = assistantInput({ ...row, markdown: live ?? row.markdown }, turn);
+  const attached = useSurfaceAttached(appSessionId);
+  const answer = useSurfaceSite({ appSessionId, component: 'AssistantMessage', instanceId: input?.instanceId ?? row.id, props: input?.props ?? { text: '', isFirstOfReply: false }, enabled: input !== null });
+  const ink = answer?.hooked === true && hasInk(answer.tree) && (!answer.rewritten || parseTranscriptProps('AssistantMessage', answer.props, input!.props) !== null);
+  useEffect(() => {
+    // A remount's pending ask does not erase the presentation remembered through virtualization.
+    if ((!attached || answer !== null) && row.turnId !== null) useTranscriptStore.getState().setAssistantInk(storeKey, row.id, row.turnId, attached && ink);
+  }, [attached, answer, ink, storeKey, row.id, row.turnId]);
+  return { appSessionId, input, ink };
+}
+
+// The virtualized divider bounds these ask-only mounts to turns in/near the viewport. Only assistant text bypasses
+// the fold; tool/group sites still wait for expansion. Shared registry addresses mean one ask per text block.
+export function FoldedAssistantProbes({ row }: { row: Extract<Row, { kind: 'divider' }> }) {
+  const { state, turn } = useTranscriptSurface(row);
+  const texts = useMemo(() => !row.expanded && state && turn ? expandedTurnRows(state, turn.id).filter((r): r is Extract<Row, { kind: 'assistant_text' }> => r.kind === 'assistant_text' && r.phase === 'commentary') : [], [row.expanded, state, turn]);
+  return <>{texts.map((text) => <AssistantProbe key={text.id} row={text} />)}</>;
+}
+function AssistantProbe({ row }: { row: Extract<Row, { kind: 'assistant_text' }> }) {
+  useAssistantPresentation(row);
+  return null;
+}
+
+export function SurfaceAssistantRow({ row }: { row: Extract<Row, { kind: 'assistant_text' }> }) {
+  const { appSessionId, input, ink } = useAssistantPresentation(row);
   if (!input) return <AssistantTextRow row={row} />;
   return <SurfaceRow appSessionId={appSessionId} component="AssistantMessage" {...input} placeholder={<AssistantTextRow row={row} text="…" />}>
-    {(props) => <AssistantTextRow row={row} text={props.text} />}
+    {(props) => <AssistantTextRow row={{ ...row, forHuman: ink }} text={props.text} />}
   </SurfaceRow>;
 }
 

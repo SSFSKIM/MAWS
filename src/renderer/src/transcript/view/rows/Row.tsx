@@ -11,7 +11,7 @@ import type { Row, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { inWorkArea } from '../motion';
 import { AgentMessageRow } from './AgentMessage';
-import { SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
+import { FoldedAssistantProbes, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
 import { CellRow } from './Cell';
@@ -30,7 +30,7 @@ function body(row: Row) {
     case 'user': return <SurfaceUserRow row={row} />;
     case 'assistant_text': return <SurfaceAssistantRow row={row} />;
     case 'thinking': return <ThinkingRow row={row} />;
-    case 'divider': return <DividerRow row={row} />;
+    case 'divider': return <><FoldedAssistantProbes row={row} /><DividerRow row={row} /></>;
     case 'group': return <SurfaceGroupRow row={row} />;
     case 'cell': return <CellRow row={row} />;
     case 'receipt': return <ReceiptRow row={row} />;

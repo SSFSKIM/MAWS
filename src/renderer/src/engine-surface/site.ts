@@ -7,6 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
+import { useTranscriptStore } from '../stores/transcript';
 import { forgetSession, hookKey, invalidateSession, retainSite, setSiteProps, siteKey, useSurfaceAnswers, type SiteAnswer } from './registry';
 
 // Attached and live: the only state in which a site asks the engine.
@@ -61,7 +62,10 @@ export function connectEngineSurface(client: MawsBridge = ipc): () => void {
   });
   const offStatus = client.on('session.status', ({ appSessionId, status }) => {
     const now = status.process === 'ready' && status.uiSurface !== undefined;
-    if (!now) forgetSession(appSessionId as AppSessionId);
+    if (!now) {
+      forgetSession(appSessionId as AppSessionId);
+      useTranscriptStore.getState().clearAssistantInk(appSessionId);
+    }
   });
   return () => {
     offEvents();
