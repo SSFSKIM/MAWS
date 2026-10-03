@@ -36,15 +36,15 @@ interface Entry extends SiteAddress {
 }
 
 export const siteKey = ({ appSessionId, component, instanceId }: SiteAddress): string => `${appSessionId}\u0000${component}\u0000${instanceId}`;
-const hookKey = (appSessionId: AppSessionId, component: SurfaceSite) => `${appSessionId}\u0000${component}`;
+export const hookKey = (appSessionId: AppSessionId, component: SurfaceSite) => `${appSessionId}\u0000${component}`;
 
 interface SurfaceAnswers {
   answers: ReadonlyMap<string, SiteAnswer>;
+  hooked: ReadonlyMap<string, boolean>;
 }
-export const useSurfaceAnswers = create<SurfaceAnswers>()(() => ({ answers: new Map() }));
+export const useSurfaceAnswers = create<SurfaceAnswers>()(() => ({ answers: new Map(), hooked: new Map() }));
 
 const entries = new Map<string, Entry>();
-const unhooked = new Set<string>(); // sites a ui_render answered `hooked: false`, until the session's next invalidate
 const generations = new Map<AppSessionId, number>(); // invalidations seen per session
 const generationOf = (appSessionId: AppSessionId): number => generations.get(appSessionId) ?? 0;
 
@@ -70,18 +70,21 @@ async function ask(key: string): Promise<void> {
     entry.again = true;
     return;
   }
-  if (unhooked.has(hookKey(entry.appSessionId, entry.component))) return;
+  if (useSurfaceAnswers.getState().hooked.get(hookKey(entry.appSessionId, entry.component)) === false) return;
   entry.inFlight = true;
   entry.again = false;
-  const { appSessionId, component, instanceId, props, viewport } = entry;
+  const { appSessionId, component, instanceId, props, propsKey, viewport } = entry;
   const generation = generationOf(appSessionId);
   const result = await entry.client.invoke('session.ui.render', { appSessionId, component, instanceId, props, ...(viewport && { viewport }) });
   entry.inFlight = false;
   if (entries.get(key) !== entry) return; // unmounted meanwhile
   if (result.ok) {
-    // an invalidate since this ask began outranks its `hooked: false`
-    if (!result.value.hooked && generation === generationOf(appSessionId)) unhooked.add(hookKey(appSessionId, component));
-    store(key, answerOf(result.value));
+    // A response belongs to the process, invalidation and props that asked it. Old props may still tell us
+    // whether the component is hooked, but may never replace a newer row's drawing.
+    if (generation === generationOf(appSessionId)) {
+      useSurfaceAnswers.setState((s) => ({ hooked: new Map(s.hooked).set(hookKey(appSessionId, component), result.value.hooked) }));
+      if (propsKey === entry.propsKey) store(key, answerOf(result.value));
+    }
   } else {
     console.warn(`[engine-surface] ${component} ${instanceId} not drawn: ${result.error.message}`);
   }
@@ -125,7 +128,7 @@ export function setSiteProps(address: SiteAddress, props: Record<string, unknown
 // sites answered unhooked may be hooked now.
 export function invalidateSession(appSessionId: AppSessionId): void {
   generations.set(appSessionId, generationOf(appSessionId) + 1);
-  for (const key of [...unhooked]) if (key.startsWith(`${appSessionId}\u0000`)) unhooked.delete(key);
+  useSurfaceAnswers.setState((s) => ({ hooked: new Map([...s.hooked].filter(([key, hooked]) => !key.startsWith(`${appSessionId}\u0000`) || hooked)) }));
   for (const [key, entry] of entries) if (entry.appSessionId === appSessionId) void ask(key);
 }
 
@@ -133,15 +136,17 @@ export function invalidateSession(appSessionId: AppSessionId): void {
 // at the next attach.
 export function forgetSession(appSessionId: AppSessionId): void {
   const prefix = `${appSessionId}\u0000`;
-  for (const key of [...unhooked]) if (key.startsWith(prefix)) unhooked.delete(key);
-  useSurfaceAnswers.setState((s) => ({ answers: new Map([...s.answers].filter(([key]) => !key.startsWith(prefix))) }));
-  for (const entry of entries.values()) if (entry.appSessionId === appSessionId) entry.propsKey = '';
+  generations.delete(appSessionId);
+  for (const [key, entry] of entries) if (entry.appSessionId === appSessionId) entries.delete(key);
+  useSurfaceAnswers.setState((s) => ({
+    answers: new Map([...s.answers].filter(([key]) => !key.startsWith(prefix))),
+    hooked: new Map([...s.hooked].filter(([key]) => !key.startsWith(prefix))),
+  }));
 }
 
 // Tests.
 export function resetSurfaceRegistry(): void {
   entries.clear();
-  unhooked.clear();
   generations.clear();
-  useSurfaceAnswers.setState({ answers: new Map() });
+  useSurfaceAnswers.setState({ answers: new Map(), hooked: new Map() });
 }
