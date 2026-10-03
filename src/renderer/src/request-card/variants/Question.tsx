@@ -13,7 +13,7 @@ import { Checkbox, RadioGroup } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import type { Question } from '@shared/graph/events';
 import { useAttention } from '../../stores/attention';
-import { questionAnswers, questionValue, toAnswer } from '../answers';
+import { normalizeQuestionSelections, questionAnswers, questionValue, toAnswer } from '../answers';
 import { CardButton, Controls } from '../controls';
 import { SandboxedPreview } from '../preview/SandboxedPreview';
 import { advance, answerOf, EMPTY_DRAFT, goTo, pick, setOther, skip, toggle, type QuestionDraft } from '../question-steps';
@@ -142,7 +142,8 @@ const ARROW = 'rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover ho
 export function QuestionBody({ item, request, placement, busy, submit, bindKeys }: VariantProps<'question.requested'>) {
   const { questions } = request;
   const count = questions.length;
-  const draft = useAttention((s) => s.drafts.get(item.id)) ?? EMPTY_DRAFT;
+  const storedDraft = useAttention((s) => s.drafts.get(item.id)) ?? EMPTY_DRAFT;
+  const draft = { ...storedDraft, ...normalizeQuestionSelections(questions, storedDraft) };
   const save = (next: QuestionDraft) => useAttention.getState().setDraft(item.id, next);
   const step = Math.min(draft.step, count - 1);
   const question = questions[step];

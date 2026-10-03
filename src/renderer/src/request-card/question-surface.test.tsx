@@ -39,8 +39,8 @@ afterEach(() => {
   disconnect();
   resetSurfaceRegistry();
 });
-function mount(placement: Placement = 'inline') {
-  return render(<article tabIndex={0}><RequestCard item={itemFor(question, APP)} request={question} placement={placement} paneIndex={0} /></article>);
+function mount(placement: Placement = 'inline', event = question) {
+  return render(<article tabIndex={0}><RequestCard item={itemFor(event, APP)} request={event} placement={placement} paneIndex={0} /></article>);
 }
 const asks = () => fake.invoked('session.ui.render');
 const answers = () => fake.invoked('session.answer');
@@ -157,4 +157,56 @@ it('a detached session uses the native card without asking for a surface', async
   await act(async () => {});
   expect(asks()).toEqual([]);
   expect(screen.getByRole('radio', { name: 'Local' })).toBeTruthy();
+});
+
+
+it('a multi-to-single rewrite displays and previews the surviving selection that Submit sends', async () => {
+  drawing = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: true };
+  mount('inline', { ...question, questions: [{ ...question.questions[0], multiSelect: true }] });
+  await waitFor(() => expect(asks()).toHaveLength(1));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Local' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Cloud' }));
+  drawing = { tree: { type: 'engine', ref: 0 }, props: { tool: 'AskUserQuestion', questions: [{
+    question: 'Where should we deploy?', header: 'Deployment', multiSelect: false,
+    options: [{ label: 'Cloud', preview: '<p>Cloud deployment</p>' }, { label: 'Hybrid' }],
+  }] }, rewritten: true, hooked: true };
+  act(() => invalidateSession(APP));
+  const cloud = await screen.findByRole('radio', { name: 'Cloud' });
+  expect(cloud.getAttribute('aria-checked')).toBe('true');
+  expect(screen.getByTitle('Preview of Cloud')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Submit' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+  await waitFor(() => expect(answers()[0]).toMatchObject({ answer: {
+    kind: 'question', answers: { 'Where should we deploy?': 'Cloud' },
+  } }));
+});
+
+it.each(['Private datacenter', ''])('a multi-to-single rewrite keeps Other exclusive, including a blank draft (%j)', async (text) => {
+  drawing = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: true };
+  mount('inline', { ...question, questions: [{ ...question.questions[0], multiSelect: true }] });
+  await waitFor(() => expect(asks()).toHaveLength(1));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Local' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Other…' }));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: text } });
+  drawing = { tree: { type: 'engine', ref: 0 }, props: { tool: 'AskUserQuestion', questions: [{
+    question: 'Where should we deploy?', header: 'Deployment', multiSelect: false,
+    options: [{ label: 'Local', preview: '<p>Local deployment</p>' }, { label: 'Cloud' }],
+  }] }, rewritten: true, hooked: true };
+  act(() => invalidateSession(APP));
+  const other = await screen.findByRole('radio', { name: 'Other…' });
+  expect(other.getAttribute('aria-checked')).toBe('true');
+  expect(screen.getByRole('radio', { name: 'Local' }).getAttribute('aria-checked')).toBe('false');
+  expect(screen.queryByTitle('Preview of Local')).toBeNull();
+  expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe(text);
+  const submit = screen.getByRole('button', { name: 'Submit' }) as HTMLButtonElement;
+  expect(submit.disabled).toBe(text === '');
+  if (text === '') {
+    fireEvent.click(submit);
+    expect(answers()).toEqual([]);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Later choice' } });
+  }
+  fireEvent.click(submit);
+  await waitFor(() => expect(answers()[0]).toMatchObject({ answer: {
+    kind: 'question', answers: { 'Where should we deploy?': text || 'Later choice' },
+  } }));
 });
