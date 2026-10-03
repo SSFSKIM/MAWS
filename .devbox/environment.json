@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "repos": [
+    {"name": "MAWS", "url": "https://github.com/SSFSKIM/MAWS.git"}
+  ],
+  "install": {"script": ".devbox/install.sh", "timeout_sec": 1800},
+  "start_skill": ".devbox/skill",
+  "services": [
+    {"name": "dev", "cmd": "pnpm dev", "cwd": ".", "ready": {"http": "http://127.0.0.1:5173/"}}
+  ],
+  "network": {"access": "unrestricted", "allowed_domains": []}
+}
