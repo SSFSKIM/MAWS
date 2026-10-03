@@ -10,3 +10,5 @@ export { drawsEngine, parseTree, textOf, type SurfaceNode } from './tree';
 export type { Site } from './actions';
 export { connectSurfaceAsks, ASK_COPY } from './asks';
 export { useSpinnerText } from './spinner';
+
+export { SurfaceRow, type SurfaceRowProps } from './SurfaceRow';

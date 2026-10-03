@@ -1,7 +1,7 @@
 // R2: the surface's own guard over a plugin's tree (tree.ts), over the trees 2.1.287 answered in pass3/mods-surface-*.
 import { describe, expect, it } from 'vitest';
 import { loadJournal } from '../../../../test/support/fixtures';
-import { drawsEngine, parseTree, textOf } from './tree';
+import { drawsEngine, hasInk, firstEngineRef, parseTree, textOf } from './tree';
 
 // Every tree a fixture's render answers carried, by component.
 function trees(name: string, component: string): unknown[] {
@@ -62,5 +62,19 @@ describe('parseTree (R2)', () => {
     expect(drawsEngine(parseTree({ type: 'engine', ref: 0 }))).toBe(true);
     expect(drawsEngine(null)).toBe(true);
     expect(drawsEngine(parseTree({ type: 'Text', children: ['x'] }))).toBe(false);
+  });
+});
+
+describe('row tree classification', () => {
+  it('native slots and whitespace do not count as mod ink, while decoration and controls do', () => {
+    expect(hasInk(parseTree({ type: 'Box', children: ['  ', { type: 'engine', ref: 7 }] }))).toBe(false);
+    expect(hasInk(parseTree({ type: 'Box', props: { borderStyle: 'round' }, children: [] }))).toBe(true);
+    expect(hasInk(parseTree({ type: 'Text', props: { inverse: true }, children: [] }))).toBe(true);
+    expect(hasInk(parseTree({ type: 'Markdown', props: { text: '  ' } }))).toBe(false);
+    expect(hasInk(parseTree({ type: 'Input', props: { key: 'reply' }, press: { plugin: 'p', handle: 1 } }))).toBe(true);
+  });
+  it('finds the first native reference in a nested tree, not only at its root', () => {
+    expect(firstEngineRef(parseTree({ type: 'Box', children: ['before', { type: 'Box', children: [{ type: 'engine', ref: 7 }] }, { type: 'engine', ref: 8 }] }))).toBe(7);
+    expect(firstEngineRef(parseTree({ type: 'Text', children: ['replacement'] }))).toBeNull();
   });
 });

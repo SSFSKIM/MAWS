@@ -6,12 +6,12 @@ import type { Row } from '../../model/rows';
 import { useTranscriptContext } from '../context';
 import { Markdown } from '../markdown/Markdown';
 
-export function AssistantTextRow({ row }: { row: Extract<Row, { kind: 'assistant_text' }> }) {
+export function AssistantTextRow({ row, text }: { row: Extract<Row, { kind: 'assistant_text' }>; text?: string }) {
   const { storeKey } = useTranscriptContext();
   const buffer = useTranscriptStore((state) => liveBuffer(state.entries[storeKey], row));
   return (
     <div className={row.phase === 'answer' ? 'transcript-answer' : 'transcript-commentary'}>
-      <Markdown markdown={buffer ?? row.markdown} live={row.live} />
+      <Markdown markdown={text ?? buffer ?? row.markdown} live={row.live} />
     </div>
   );
 }

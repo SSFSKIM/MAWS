@@ -24,15 +24,31 @@ export const questionValue = <T,>(values: Record<string, T>, question: string): 
 
 const blank = (text: string | undefined) => text === undefined || text.trim() === '';
 
+// A rewrite can remove choices or change a multi-select to a radio group. The same effective
+// selections drive the controls, previews and reply; selecting Other is exclusive in a radio group,
+// even while its text is blank. Derive this view without clearing valid drafts on presentation changes.
+export function normalizeQuestionSelections(questions: Question[], state: Pick<Extract<VariantState, { kind: 'question' }>, 'selected' | 'other'>) {
+  const selected: Record<string, string[]> = Object.create(null);
+  const other: Record<string, string> = Object.create(null);
+  for (const question of questions) {
+    const text = questionValue(state.other, question.question);
+    const valid = (questionValue(state.selected, question.question) ?? []).filter((label) => question.options.some((option) => option.label === label));
+    selected[question.question] = question.multiSelect ? valid : text !== undefined ? [] : valid.slice(0, 1);
+    if (text !== undefined) other[question.question] = text;
+  }
+  return { selected, other };
+}
+
 // Per question: the chosen options, then the Other text verbatim, joined `', '` (the terminal's multi-select join); a
 // question with neither has no entry. The pinned engine takes such a partial map as its own dialog sends one when the
 // operator submits past a blank question: an absent answer is unanswered, and no answer at all reads "The user did not
 // answer the questions." (2.1.283 `cli.pretty.js` 163990-164045, AskUserQuestion's `call` and its tool result).
 export function questionAnswers(state: Extract<VariantState, { kind: 'question' }>): Record<string, string> {
   const answers: Record<string, string> = Object.create(null);
+  const effective = normalizeQuestionSelections(state.questions, state);
   for (const { question } of state.questions) {
-    const other = questionValue(state.other, question);
-    const parts = [...(questionValue(state.selected, question) ?? []), ...(blank(other) ? [] : [other])];
+    const other = questionValue(effective.other, question);
+    const parts = [...effective.selected[question], ...(blank(other) ? [] : [other])];
     if (parts.length > 0) answers[question] = parts.join(', ');
   }
   return answers;

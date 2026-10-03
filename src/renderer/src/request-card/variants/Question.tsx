@@ -13,7 +13,7 @@ import { Checkbox, RadioGroup } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import type { Question } from '@shared/graph/events';
 import { useAttention } from '../../stores/attention';
-import { questionAnswers, questionValue, toAnswer } from '../answers';
+import { normalizeQuestionSelections, questionAnswers, questionValue, toAnswer } from '../answers';
 import { CardButton, Controls } from '../controls';
 import { SandboxedPreview } from '../preview/SandboxedPreview';
 import { advance, answerOf, EMPTY_DRAFT, goTo, pick, setOther, skip, toggle, type QuestionDraft } from '../question-steps';
@@ -51,7 +51,7 @@ function OtherInput({ question, value, onChange, onEnter, disabled }: { question
       placeholder="Type your own answer"
       value={value}
       disabled={disabled}
-      autoFocus
+      autoFocus={!disabled}
       onChange={(event) => onChange(event.target.value)}
       onKeyDown={onKeyDown}
       className="w-full rounded-sm border border-border-strong bg-bg px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2"
@@ -142,7 +142,8 @@ const ARROW = 'rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover ho
 export function QuestionBody({ item, request, placement, busy, submit, bindKeys }: VariantProps<'question.requested'>) {
   const { questions } = request;
   const count = questions.length;
-  const draft = useAttention((s) => s.drafts.get(item.id)) ?? EMPTY_DRAFT;
+  const storedDraft = useAttention((s) => s.drafts.get(item.id)) ?? EMPTY_DRAFT;
+  const draft = { ...storedDraft, ...normalizeQuestionSelections(questions, storedDraft) };
   const save = (next: QuestionDraft) => useAttention.getState().setDraft(item.id, next);
   const step = Math.min(draft.step, count - 1);
   const question = questions[step];
@@ -198,11 +199,12 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
     shown.current = step;
     if (!restoreFocus.current) return;
     restoreFocus.current = false;
+    if (busy) return;
     const body = bodyRef.current;
     const active = document.activeElement;
     if (!body || (active !== null && active !== document.body)) return;
     (keyOwner(body, placement) ?? body.querySelector<HTMLElement>('[role="radio"], [role="checkbox"]'))?.focus();
-  }, [step, placement]);
+  }, [step, placement, busy]);
 
   const Step = question.multiSelect ? MultiSelect : SingleSelect;
   return (

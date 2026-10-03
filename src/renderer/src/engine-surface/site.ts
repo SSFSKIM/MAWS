@@ -7,7 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
-import { forgetSession, invalidateSession, retainSite, setSiteProps, siteKey, useSurfaceAnswers, type SiteAnswer } from './registry';
+import { forgetSession, hookKey, invalidateSession, retainSite, setSiteProps, siteKey, useSurfaceAnswers, type SiteAnswer } from './registry';
 
 // Attached and live: the only state in which a site asks the engine.
 export function useSurfaceAttached(appSessionId: AppSessionId | null): boolean {
@@ -40,20 +40,28 @@ export function useSurfaceSite({ appSessionId, component, instanceId, props, vie
     // `props` and `viewport` are read through their key, so an equal object built anew asks nothing
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [on, address, propsKey]);
-  return useSurfaceAnswers((s) => (on && address ? (s.answers.get(siteKey(address)) ?? null) : null));
+  return useSurfaceAnswers((s) => {
+    if (!on || !address) return null;
+    if (s.hooked.get(hookKey(address.appSessionId, component)) === false) return UNHOOKED;
+    return s.answers.get(siteKey(address)) ?? null;
+  });
+}
+
+const UNHOOKED: SiteAnswer = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: false };
+
+export function useSurfaceHooked(appSessionId: AppSessionId | null, component: SurfaceSite): boolean | undefined {
+  return useSurfaceAnswers((s) => appSessionId === null ? undefined : s.hooked.get(hookKey(appSessionId, component)));
 }
 
 // Live batches only (never a snapshot): an invalidate re-asks the session's mounted instances; a session whose status
 // no longer carries the surface forgets its answers.
 export function connectEngineSurface(client: MawsBridge = ipc): () => void {
-  const attached = new Set<string>();
   const offEvents = client.on('session.eventBatch', ({ appSessionId, events }) => {
     if (events.some((event) => event.kind === 'plugin.invalidate')) invalidateSession(appSessionId as AppSessionId);
   });
   const offStatus = client.on('session.status', ({ appSessionId, status }) => {
     const now = status.process === 'ready' && status.uiSurface !== undefined;
-    if (now) attached.add(appSessionId);
-    else if (attached.delete(appSessionId)) forgetSession(appSessionId as AppSessionId);
+    if (!now) forgetSession(appSessionId as AppSessionId);
   });
   return () => {
     offEvents();

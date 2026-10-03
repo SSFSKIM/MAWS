@@ -3,10 +3,11 @@
 // keyboard), each cell a disclosure of its own. A running command's label ticks from the store's clock. W8: with nothing
 // running, the live label is the live thinking label of a thinking cell still streaming, else `Thinking`, either under
 // Codex's shimmer (ThinkingLabel.tsx).
+import type { ReactNode } from 'react';
 import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
 import { DisclosureBody } from '../../../ui/disclosure';
 import { activeGroupLabel } from '../../model/copy';
-import type { Row } from '../../model/rows';
+import type { Cell, Row } from '../../model/rows';
 import { CellLine } from '../cells/CellLine';
 import { useTranscriptContext } from '../context';
 import { CategoryIcon } from './icons';
@@ -34,7 +35,7 @@ function Header({ row, storeKey }: { row: GroupRowData; storeKey: string }) {
   return <CodeText text={header} />;
 }
 
-export function GroupRow({ row }: { row: GroupRowData }) {
+export function GroupRow({ row, renderCell }: { row: GroupRowData; renderCell?: (cell: Cell) => ReactNode }) {
   const { storeKey } = useTranscriptContext();
   return (
     <div className="transcript-group" data-state={row.state} data-cell-count={row.cells.length}>
@@ -48,7 +49,7 @@ export function GroupRow({ row }: { row: GroupRowData }) {
       <DisclosureBody open={row.expanded}>
         <div className="transcript-group-cells" data-group-cells="" tabIndex={0} aria-label="Tool calls, scroll for details">
           {row.cells.map((cell) => (
-            <CellLine key={cell.id} cell={cell} turnId={row.turnId} />
+            <div key={cell.id} style={{ display: 'contents' }}>{renderCell ? renderCell(cell) : <CellLine cell={cell} turnId={row.turnId} />}</div>
           ))}
         </div>
       </DisclosureBody>

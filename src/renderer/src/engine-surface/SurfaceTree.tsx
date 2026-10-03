@@ -5,20 +5,20 @@
 // handling (`layout.openExternal`); Code and Markdown draw through the transcript's own markdown renderer (Code as a
 // fenced block, so the transcript's highlighter draws it); an Svg is a `data:` image, or a frame with `sandbox=""` when
 // it asks to be interactive; `engine` draws MAWS's own drawing of the site (`engine`, given by the site). A Client
-// element runs plugin JavaScript on the surface, which R2 does not: it draws a muted note.
+// element requires client JavaScript, deferred in R3: it draws MAWS native instead.
 import { createContext, useContext, useState, type MouseEvent, type ReactNode } from 'react';
 import { Markdown } from '../transcript';
 import { input as sendInput, press as sendPress, select as sendSelect, type Site } from './actions';
 import { boxStyle, textStyle } from './style';
-import type { SurfaceNode } from './tree';
+import { firstEngineNode, type SurfaceNode } from './tree';
 
 export const SURFACE_COPY = {
-  client: (plugin: string) => `${plugin}: this drawing needs a client module, which MAWS does not run yet`,
   dismiss: (label: string) => label || 'Dismiss',
 };
 
 interface SurfaceContextValue {
   site: Site;
+  nativeNode: Extract<SurfaceNode, { type: 'engine' | 'Client' }> | null;
   engine: ReactNode; // MAWS's own drawing of the site, for an `engine` node
 }
 const SurfaceContext = createContext<SurfaceContextValue | null>(null);
@@ -40,7 +40,7 @@ const FIELD = 'h-6 min-w-0 rounded-sm border border-border-strong bg-bg px-1.5 t
 
 export function SurfaceTree({ tree, site, engine = null }: { tree: SurfaceNode; site: Site; engine?: ReactNode }) {
   return (
-    <SurfaceContext.Provider value={{ site, engine }}>
+    <SurfaceContext.Provider value={{ site, engine, nativeNode: firstEngineNode(tree) ?? firstClientNode(tree) }}>
       <Node key={identityOf(tree) ?? 'root'} node={tree} />
     </SurfaceContext.Provider>
   );
@@ -114,18 +114,28 @@ function Node({ node, inline = false }: { node: SurfaceNode; inline?: boolean })
     case 'Svg':
       return <SvgNode node={node} />;
     case 'Client':
-      return (
-        <span data-surface="client" role="note" className="text-ui-sm text-fg-faint">
-          {SURFACE_COPY.client(node.client.plugin)}
-        </span>
-      );
     case 'engine':
-      return <EngineNode />;
+      return <NativeNode node={node} />;
   }
 }
 
-function EngineNode() {
-  return <>{useSurface().engine}</>;
+// There is exactly one native placement: the first engine node, or, with no engine node, the first Client.
+// A Client is a fallback, not a second native slot (one persistent row host cannot mount in two places).
+function firstClientNode(tree: SurfaceNode): Extract<SurfaceNode, { type: 'Client' }> | null {
+  if (typeof tree === 'string') return null;
+  if (tree.type === 'Client') return tree;
+  if ('children' in tree) {
+    for (const child of tree.children) {
+      const client = firstClientNode(child);
+      if (client !== null) return client;
+    }
+  }
+  return null;
+}
+
+function NativeNode({ node }: { node: Extract<SurfaceNode, { type: 'engine' | 'Client' }> }) {
+  const { engine, nativeNode } = useSurface();
+  return <>{node === nativeNode ? engine : null}</>;
 }
 
 function ButtonNode({ node }: { node: Extract<SurfaceNode, { type: 'Button' }> }) {

@@ -2,9 +2,9 @@
 // followed through `plugin.panes`, tabs opened and closed with it, the pane's drawing or Desktop's placeholder, the
 // engine told which pane shows and when the person closes one, and the panel's "+" listing them under "Plugin panes".
 // The pane's tree is the one 2.1.287 answered in pass3/mods-surface-render-sites.
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneRoster } from '@shared/engine/surface';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CommandName } from '@shared/ipc/schema';
@@ -14,6 +14,10 @@ import { loadJournal } from '../../../../test/support/fixtures';
 import { panelHost, usePanelHost } from '../panel/host';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
+import { registerFocusTarget } from '../stores/composer';
+import { banner, toast, useNotices } from '../stores/notices';
+import { BannerHost } from '../app/BannerHost';
+import { ToastHost } from '../app/ToastHost';
 import { A, panelOf, resetPanelStores, TestHost } from '../test-support/panel';
 import { connectPluginPanes, resetPaneRosters } from './panes';
 import { resetSurfaceRegistry } from './registry';
@@ -44,10 +48,12 @@ beforeEach(() => {
   resetPanelStores();
   resetSurfaceRegistry();
   resetPaneRosters();
+  useNotices.setState({ notices: [] });
 });
 afterEach(() => {
   disconnect();
   cleanup();
+  vi.useRealTimers();
 });
 
 describe('plugin panes as panel tabs (R2)', () => {
@@ -180,4 +186,86 @@ describe('plugin panes as panel tabs (R2)', () => {
     await waitFor(() => expect(paneTabs()).toEqual([]));
     expect(fake.invoked('session.ui.close')).toEqual([]);
   });
+
+  it('Escape asks to close a closeOnEscape pane through the vetoable close path, never deleting a refused pane', async () => {
+    connect({ 'session.ui.panes': roster([{ ...pane('dialog', 'Dialog'), closeOnEscape: true }]), 'session.ui.render': PANE_ANSWER });
+    render(<TestHost />);
+    attach();
+    await waitFor(() => expect(paneTabs()).toHaveLength(1));
+    const body = document.querySelector<HTMLElement>('[data-plugin-pane="dialog"]')!;
+    act(() => body.focus());
+    fireEvent.keyDown(body, { key: 'Escape' });
+    expect(fake.invoked('session.ui.close')).toEqual([{ appSessionId: A, id: 'dialog' }]);
+    await act(() => fake.reply('session.ui.close', { closed: false }));
+    expect(paneTabs()).toHaveLength(1);
+    fireEvent.keyDown(body, { key: 'Escape' });
+    await act(() => fake.reply('session.ui.close', { closed: true }));
+    expect(paneTabs()).toEqual([]);
+  });
+
+  it('Escape without closeOnEscape returns keys to the composer and leaves the pane open', async () => {
+    connect({ 'session.ui.panes': roster([pane('one', 'One')]), 'session.ui.render': PANE_ANSWER });
+    const focusFrame = vi.fn();
+    const unregister = registerFocusTarget(A, { focusEditor: vi.fn(), focusFrame, insertText: vi.fn() });
+    render(<TestHost />);
+    attach();
+    await waitFor(() => expect(paneTabs()).toHaveLength(1));
+    const body = document.querySelector<HTMLElement>('[data-plugin-pane="one"]')!;
+    fireEvent.keyDown(body, { key: 'Escape' });
+    expect(focusFrame).toHaveBeenCalledOnce();
+    expect(fake.invoked('session.ui.close')).toEqual([]);
+    expect(paneTabs()).toHaveLength(1);
+    unregister();
+  });
+
+  it('leaves Escape to a child control that already handled it or an active IME', async () => {
+    connect({ 'session.ui.panes': roster([{ ...pane('dialog', 'Dialog'), closeOnEscape: true }]), 'session.ui.render': PANE_ANSWER });
+    render(<TestHost />);
+    attach();
+    await waitFor(() => expect(paneTabs()).toHaveLength(1));
+    const body = document.querySelector<HTMLElement>('[data-plugin-pane="dialog"]')!;
+    const child = body.appendChild(document.createElement('input'));
+    child.addEventListener('keydown', (event) => event.preventDefault());
+    fireEvent.keyDown(child, { key: 'Escape' });
+    fireEvent.keyDown(body, { key: 'Escape', isComposing: true });
+    expect(fake.invoked('session.ui.close')).toEqual([]);
+    expect(paneTabs()).toHaveLength(1);
+  });
+
+  it('holds transient toasts only while a holding pane is shown, preserves their duration, and leaves banners visible', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    connect({ 'session.ui.panes': roster([{ ...pane('dialog', 'Dialog'), holdToasts: true }, pane('other', 'Other')]), 'session.ui.render': PANE_ANSWER });
+    render(<><TestHost /><ToastHost /><BannerHost /></>);
+    attach();
+    await waitFor(() => expect(paneTabs()).toHaveLength(2));
+    act(() => {
+      toast({ id: 'held', level: 'info', text: 'Waiting until the pane yields', actions: [], dismissible: true, durationMs: 1000 });
+      banner({ id: 'warning', level: 'warning', text: 'Pinned warning', actions: [], dismissible: false });
+    });
+    expect(screen.queryByText('Waiting until the pane yields')).toBeNull();
+    expect(screen.getByText('Pinned warning')).toBeTruthy();
+    await act(async () => vi.advanceTimersByTime(5000));
+    expect(useNotices.getState().notices.map((notice) => notice.id)).toEqual(['held', 'warning']);
+    act(() => panelHost.selectTab(paneTabs()[1]!.id));
+    expect(screen.getByText('Waiting until the pane yields')).toBeTruthy();
+    await act(async () => vi.advanceTimersByTime(1200));
+    expect(useNotices.getState().notices.map((notice) => notice.id)).toEqual(['warning']);
+  });
+
+  it('releases held toasts when the pane closes or loses its holdToasts flag', async () => {
+    connect({ 'session.ui.panes': roster([{ ...pane('dialog', 'Dialog'), holdToasts: true }]), 'session.ui.render': PANE_ANSWER });
+    render(<><TestHost /><ToastHost /></>);
+    attach();
+    await waitFor(() => expect(paneTabs()).toHaveLength(1));
+    act(() => void toast({ id: 'held', level: 'info', text: 'A held toast', actions: [], dismissible: true }));
+    expect(screen.queryByText('A held toast')).toBeNull();
+    push(fake, roster([pane('dialog', 'Dialog')]), 2);
+    expect(screen.getByText('A held toast')).toBeTruthy();
+    push(fake, roster([{ ...pane('dialog', 'Dialog'), holdToasts: true }]), 3);
+    expect(screen.queryByText('A held toast')).toBeNull();
+    push(fake, roster([], null), 4);
+    await waitFor(() => expect(paneTabs()).toEqual([]));
+    expect(screen.getByText('A held toast')).toBeTruthy();
+  });
+
 });

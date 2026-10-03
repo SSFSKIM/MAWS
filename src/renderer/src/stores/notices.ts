@@ -16,6 +16,8 @@ export type NoticeInput = Omit<Notice, 'id' | 'kind'> & { id?: string };
 
 export interface NoticesState {
   notices: Notice[];
+  toastHolds: number; // visible dialog-like panes; toasts stay queued, banners remain visible
+  holdToasts(): () => void; // acquire a hold for one mounted surface; release on hide/unmount
   banner(notice: NoticeInput): string; // returns the id; an id already shown is replaced in place
   toast(notice: NoticeInput): string;
   dismiss(id: string): void;
@@ -33,6 +35,16 @@ export function createNoticesStore() {
     };
     return {
       notices: [],
+      toastHolds: 0,
+      holdToasts: () => {
+        let held = true;
+        set((state) => ({ toastHolds: state.toastHolds + 1 }));
+        return () => {
+          if (!held) return;
+          held = false;
+          set((state) => ({ toastHolds: state.toastHolds - 1 }));
+        };
+      },
       banner: (notice) => post('banner', notice),
       toast: (notice) => post('toast', notice),
       dismiss: (id) => set({ notices: get().notices.filter((n) => n.id !== id) }),

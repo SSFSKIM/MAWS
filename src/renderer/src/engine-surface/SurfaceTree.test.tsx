@@ -108,10 +108,10 @@ describe('SurfaceTree (R2)', () => {
     expect(frame.getAttribute('srcdoc')).toBe(svg);
   });
 
-  it('a Client draws a muted note, and an engine node draws MAWS’s own', () => {
-    setup({ type: 'Box', children: [{ type: 'Client', props: { key: 'board', module: 'hooks/board.tsx' }, client: { plugin: 'mods-probe' } }, { type: 'engine', ref: 0 }] });
-    expect(screen.getByRole('note').textContent).toBe('mods-probe: this drawing needs a client module, which MAWS does not run yet');
-    expect(screen.getByText('MAWS own')).toBeTruthy();
+  it('a Client draws MAWS native rather than a deferred-feature note', () => {
+    setup({ type: 'Client', props: { key: 'board', module: 'hooks/board.tsx' }, client: { plugin: 'mods-probe' } });
+    expect(screen.queryByRole('note')).toBeNull();
+    expect(screen.getAllByText('MAWS own')).toHaveLength(1);
   });
 
   it('a field keeps what was typed in it when the plugin draws another field before it', async () => {
@@ -134,4 +134,24 @@ describe('SurfaceTree (R2)', () => {
     view.rerender(<SurfaceTree tree={field('second')} site={site} />);
     expect((screen.getByRole('textbox', { name: 'second' }) as HTMLInputElement).value).toBe('');
   });
+});
+
+it('only the first engine node receives the native row, including duplicate refs', () => {
+  setup({ type: 'Box', children: [{ type: 'engine', ref: 3 }, 'middle', { type: 'engine', ref: 8 }, { type: 'engine', ref: 3 }] });
+  expect(screen.getAllByText('MAWS own')).toHaveLength(1);
+  expect(document.querySelector('[data-surface="box"]')?.textContent).toBe('MAWS ownmiddle');
+});
+
+it('native engine placement wins over Client fallbacks before or after it', () => {
+  const client = { type: 'Client', props: { key: 'board', module: 'board.js' }, client: { plugin: 'probe' } };
+  setup({ type: 'Box', children: [client, 'before slot', { type: 'engine', ref: 7 }, 'after slot', client] });
+  expect(screen.getAllByText('MAWS own')).toHaveLength(1);
+  expect(document.querySelector('[data-surface="box"]')?.textContent).toBe('before slotMAWS ownafter slot');
+});
+
+it('without an engine slot only the first Client draws native', () => {
+  const client = { type: 'Client', props: { key: 'board', module: 'board.js' }, client: { plugin: 'probe' } };
+  setup({ type: 'Box', children: [client, 'between clients', client] });
+  expect(screen.getAllByText('MAWS own')).toHaveLength(1);
+  expect(document.querySelector('[data-surface="box"]')?.textContent).toBe('MAWS ownbetween clients');
 });

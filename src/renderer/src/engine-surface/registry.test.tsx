@@ -9,7 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { useSessions } from '../stores/sessions';
-import { resetSurfaceRegistry } from './registry';
+import { forgetSession, invalidateSession, resetSurfaceRegistry } from './registry';
 import { connectEngineSurface, useSurfaceSite } from './site';
 import { textOf } from './tree';
 
@@ -17,8 +17,8 @@ const ID = 'app-r2' as AppSessionId;
 const band = (presses: number) => ({ tree: { type: 'Text', children: [`MODS_PROBE_BAND presses=${presses}`] }, props: {}, rewritten: false, hooked: true });
 const UNHOOKED = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: false };
 
-function Band({ client, isWorking = false }: { client: FakeClient['client']; isWorking?: boolean }) {
-  const answer = useSurfaceSite({ appSessionId: ID, component: 'AbovePrompt', instanceId: 'above-prompt', props: { isWorking }, client });
+function Band({ client, isWorking = false, instanceId = 'above-prompt' }: { client: FakeClient['client']; isWorking?: boolean; instanceId?: string }) {
+  const answer = useSurfaceSite({ appSessionId: ID, component: 'AbovePrompt', instanceId, props: { isWorking }, client });
   return <p data-testid="band">{answer ? textOf(answer.tree) || (answer.hooked ? '' : 'unhooked') : 'none'}</p>;
 }
 
@@ -104,5 +104,51 @@ describe('the render registry (R2)', () => {
     act(() => fake.event('session.status', { appSessionId: ID, status: { ...status(ID), uiSurface: { clientId: 'maws-main' } } }));
     attach(true);
     expect(fake.invoked('session.ui.render')).toHaveLength(2);
+  });
+});
+
+// R3 shares component hook knowledge across virtualized instances, not their answers.
+describe('row registry lifecycle', () => {
+  it('new instances of an unhooked component draw native without asking until invalidation', async () => {
+    attach(true);
+    const first = render(<Band client={fake.client} />);
+    await act(() => fake.reply('session.ui.render', UNHOOKED));
+    first.unmount();
+    render(<Band client={fake.client} instanceId="later" />);
+    expect(screen.getByTestId('band').textContent).toBe('unhooked');
+    expect(fake.invoked('session.ui.render')).toHaveLength(1);
+    invalidate(fake);
+    expect(fake.invoked('session.ui.render')).toHaveLength(2);
+  });
+
+  it('keeps a non-row site’s accepted drawing mounted while changed props are being answered', async () => {
+    attach(true);
+    const view = render(<Band client={fake.client} />);
+    await act(() => fake.reply('session.ui.render', band(1)));
+    view.rerender(<Band client={fake.client} isWorking />);
+    expect(screen.getByTestId('band').textContent).toBe('MODS_PROBE_BAND presses=1');
+    await act(() => fake.reply('session.ui.render', band(2)));
+    expect(screen.getByTestId('band').textContent).toBe('MODS_PROBE_BAND presses=2');
+  });
+
+  it('never publishes the response for old props while the latest ask is pending', async () => {
+    attach(true);
+    const view = render(<Band client={fake.client} />);
+    view.rerender(<Band client={fake.client} isWorking />);
+    await act(() => fake.reply('session.ui.render', band(1)));
+    expect(screen.getByTestId('band').textContent).toBe('none');
+    await act(() => fake.reply('session.ui.render', band(2)));
+    expect(screen.getByTestId('band').textContent).toBe('MODS_PROBE_BAND presses=2');
+  });
+
+  it('process loss discards an outstanding answer and its queued ask even before a ready status was observed', async () => {
+    attach(true);
+    render(<Band client={fake.client} />);
+    act(() => invalidateSession(ID));
+    act(() => fake.event('session.status', { appSessionId: ID, status: status(ID, { process: 'exited' }) }));
+    await act(() => fake.reply('session.ui.render', band(9)));
+    expect(screen.getByTestId('band').textContent).toBe('none');
+    expect(fake.invoked('session.ui.render')).toHaveLength(1);
+    act(() => forgetSession(ID));
   });
 });

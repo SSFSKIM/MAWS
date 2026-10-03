@@ -2,6 +2,7 @@
 // whose state lives in the store, and its detail when open. The status shows as a mark drawn by CSS from
 // `data-status`, so the line's text is the label alone. A standalone denied cell is itself focusable (tabindex -1,
 // scroll-margin) so the divider's count can land on it.
+import type { ReactNode } from 'react';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { DisclosureBody } from '../../../ui/disclosure';
 import type { Cell, TurnId } from '../../model/rows';
@@ -23,7 +24,7 @@ function Label({ cell }: { cell: Cell }) {
   );
 }
 
-export function CellLine({ cell, turnId, focusable = false }: { cell: Cell; turnId: TurnId | null; focusable?: boolean }) {
+export function CellLine({ cell, turnId, focusable = false, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
   const { storeKey } = useTranscriptContext();
   return (
     <div
@@ -34,14 +35,14 @@ export function CellLine({ cell, turnId, focusable = false }: { cell: Cell; turn
       data-expanded={cell.expanded ? '' : undefined}
       tabIndex={focusable ? -1 : undefined}
     >
-      <button type="button" className="transcript-cell-line" aria-expanded={cell.expanded} onClick={() => useTranscriptStore.getState().toggleCell(storeKey, cell.id)}>
+      <button type="button" className="transcript-cell-line" aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>
         <span className="transcript-cell-label">
           <Label cell={cell} />
         </span>
         <Chevron />
       </button>
       <DisclosureBody open={cell.expanded}>
-        <CellDetailView cell={cell} turnId={turnId} />
+        {renderDetail ? renderDetail(cell) : <CellDetailView cell={cell} turnId={turnId} />}
       </DisclosureBody>
     </div>
   );

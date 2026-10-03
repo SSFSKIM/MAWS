@@ -202,3 +202,36 @@ export function textOf(tree: SurfaceNode | null): string {
       return tree.children.map(textOf).join(tree.type === 'Box' || tree.type === 'div' ? ' ' : '');
   }
 }
+
+// A row has one native mount. Desktop places it at the first native reference, even when a composed tree
+// carries other engine references; a reference is an opaque engine identity, not an index into row props.
+export function firstEngineNode(tree: SurfaceNode | null): Extract<SurfaceNode, { type: 'engine' }> | null {
+  if (tree === null || typeof tree === 'string') return null;
+  if (tree.type === 'engine') return tree;
+  if ('children' in tree && tree.type !== 'Link') {
+    for (const child of tree.children) {
+      const node = firstEngineNode(child);
+      if (node !== null) return node;
+    }
+  }
+  return null;
+}
+export const firstEngineRef = (tree: SurfaceNode | null): number | null => firstEngineNode(tree)?.ref ?? null;
+
+// Ink belongs to the mod, not the native slot. Layout alone (padding, gap, an empty flex box) is not ink.
+export function hasInk(tree: SurfaceNode | null): boolean {
+  if (tree === null) return false;
+  if (typeof tree === 'string') return tree.trim() !== '';
+  switch (tree.type) {
+    case 'engine': return false;
+    case 'Button': case 'Input': case 'Select': case 'Svg': case 'Client': case 'Code': return true;
+    case 'Markdown': return tree.props.text.trim() !== '';
+    case 'Link': return tree.children.length ? tree.children.some(hasInk) : (tree.props.label ?? tree.props.href).trim() !== '';
+    case 'fragment': return tree.children.some(hasInk);
+    default:
+      return typeof tree.props.backgroundColor === 'string'
+        || ((tree.type === 'Box' || tree.type === 'div') && typeof tree.props.borderStyle === 'string' && tree.props.borderStyle !== '')
+        || ((tree.type === 'Text' || tree.type === 'span' || tree.type === 'b') && tree.props.inverse === true)
+        || tree.children.some(hasInk);
+  }
+}
