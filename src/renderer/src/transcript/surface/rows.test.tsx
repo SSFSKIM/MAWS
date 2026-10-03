@@ -64,6 +64,28 @@ describe('mounted transcript surface integration', () => {
     expect(view.container.textContent).toContain('rewritten output'); expect(view.container.textContent).not.toContain('original');
   });
 
+  it.each([true, false])('asks ToolResult from original provenance and preserves the ToolUse drawing (rewrite=%s)', async (rewrite) => {
+    const b = builder(); b.turn('u'); b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', 'original', { structured: BASH_RESULT('original') }); b.end(['u']);
+    const store = await mounted(b); act(() => useTranscriptStore.getState().expandAll(store.key));
+    const view = renderRow(rowOf(store.rows(), 'cell'), { storeKey: store.key });
+    const toolUse = asks().find((x) => x.component === 'ToolUse')!;
+    await act(() => fake.reply('session.ui.render', answer({ ...toolUse.props, tool: 'RenamedShell', input: { command: 'echo drawn command' }, output: BASH_RESULT('ToolUse output') }, engine, true)));
+    fireEvent.click(screen.getByRole('button', { name: /RenamedShell/ }));
+    view.rerenderRow(rowOf(store.rows(), 'cell'));
+    await waitFor(() => expect(asks().some((x) => x.component === 'ToolResult')).toBe(true));
+    const result = asks().find((x) => x.component === 'ToolResult')!;
+    expect(result.props).toEqual({ tool_use_id: 't', tool: 'Bash', output: BASH_RESULT('original'), isErrored: false });
+    const stored = structuredClone(useTranscriptStore.getState().rows(store.key));
+    await act(() => fake.reply('session.ui.render', answer(rewrite ? { ...result.props, output: BASH_RESULT('ToolResult output') } : result.props, engine, rewrite)));
+    expect(view.container.textContent).toContain('RenamedShell');
+    expect(view.container.textContent).toContain('echo drawn command');
+    expect(view.container.textContent).toContain(rewrite ? 'ToolResult output' : 'ToolUse output');
+    expect(view.container.textContent).not.toContain(rewrite ? 'ToolUse output' : 'ToolResult output');
+    expect(view.container.textContent).not.toContain('pwd');
+    expect(useTranscriptStore.getState().rows(store.key)).toEqual(stored);
+    expect(rowOf(stored, 'cell')).toMatchObject({ detail: { command: 'pwd' } });
+  });
+
   it('lets each hooked member of a merged read disclose its own native detail', async () => {
     fake = fakeClient({ 'session.ui.render': (request: CommandInput<'session.ui.render'>) => answer(request.props) }); holder.client = fake.client;
     const b = builder(); b.turn('u'); b.toolUse('r1', 'Read', { file_path: '/a' }); b.result('r1', 'first file'); b.toolUse('r2', 'Read', { file_path: '/b' }); b.result('r2', 'second file'); b.toolUse('g', 'Grep', { pattern: 'find' });

@@ -28,16 +28,16 @@ function ToolCall({ input, merged, first, turnId, standalone, focusable }: { inp
       if (merged !== null && !split && !first) return null;
       const native = merged !== null && !split ? merged : withToolProps(input, props);
       return <CellLine cell={split ? { ...native, expanded: open } : native} turnId={turnId} focusable={focusable && !concealed} onToggle={split ? toggle : undefined}
-        renderDetail={standalone ? (drawn) => <ToolResult input={{ ...input, cell: drawn }} turnId={turnId} enabled={!concealed} /> : undefined} />;
+        renderDetail={standalone ? (drawn) => <ToolResult input={{ ...input, cell: drawn }} drawnProps={props} turnId={turnId} enabled={!concealed} /> : undefined} />;
     }}
   </SurfaceRow>;
 }
 
-function ToolResult({ input, turnId, enabled = true }: { input: ToolInput; turnId: TurnId | null; enabled?: boolean }) {
+function ToolResult({ input, drawnProps = input.props, turnId, enabled = true }: { input: ToolInput; drawnProps?: ToolInput['props']; turnId: TurnId | null; enabled?: boolean }) {
   const { appSessionId } = useTranscriptSurface({ turnId });
   const props = { tool_use_id: input.props.tool_use_id, tool: input.props.tool, output: input.props.output, isErrored: input.props.isErrored };
   const resolved = resultInput(input) !== null;
   return <SurfaceRow appSessionId={appSessionId} component="ToolResult" instanceId={input.instanceId} props={props} enabled={enabled && resolved} onlyRewrites frameInkOnly placeholder={<span className="text-fg-faint">…</span>}>
-    {(rewritten) => <CellDetailView cell={rewritten.output === props.output ? input.cell : withToolProps(input, { ...input.props, output: rewritten.output })} turnId={turnId} />}
+    {(rewritten) => <CellDetailView cell={rewritten.output === props.output ? input.cell : withToolProps(input, { ...drawnProps, output: rewritten.output })} turnId={turnId} />}
   </SurfaceRow>;
 }
