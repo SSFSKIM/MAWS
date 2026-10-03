@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { status } from '../../../../../test/support/builders';
@@ -15,9 +15,9 @@ import { storeWith } from '../view/rows/test-support';
 
 afterEach(() => { cleanup(); resetSurfaceRegistry(); });
 
-function Transcript({ storeKey }: { storeKey: string }) {
+function Transcript({ storeKey, hideCommentary = false }: { storeKey: string; hideCommentary?: boolean }) {
   const rows = useTranscriptStore((s) => s.entries[storeKey].rows);
-  return <TranscriptProvider value={{ storeKey, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, effort: null }}>{rows.map((row) => <RowView key={row.id} row={row} />)}</TranscriptProvider>;
+  return <TranscriptProvider value={{ storeKey, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, effort: null }}>{rows.filter((row) => !hideCommentary || row.kind !== 'assistant_text' || row.phase !== 'commentary').map((row) => <RowView key={row.id} row={row} />)}</TranscriptProvider>;
 }
 
 it('keeps the first expanded commentary drawing mounted when ink promotes it to full contrast', async () => {
@@ -71,4 +71,75 @@ it.each([false, true])('probes folded assistant text, preserves ink in order at 
   act(() => fake.event('session.status', { appSessionId: id, status: { ...status(id), process: 'exited' } }));
   expect(useTranscriptStore.getState().entries[store.key].state.ui.assistantInk.size).toBe(0);
   off();
+});
+
+it.each([{ hooked: false, expanded: false }, { hooked: true, expanded: false }, { hooked: false, expanded: true }, { hooked: true, expanded: true }])('holds a promoted button until click with hooked=$hooked, expanded=$expanded', async ({ hooked, expanded }) => {
+  const b = builder(); b.turn('u'); b.text('first', 0, 'Update');
+  b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
+  b.text('last', 0, 'Answer'); b.end(['u']);
+  const store = await storeWith(b.events); const id = store.key as AppSessionId;
+  if (expanded) useTranscriptStore.getState().expandAll(store.key);
+  const fake = fakeClient({ 'session.ui.press': { handled: true } }); window.maws = fake.client;
+  useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
+  render(<Transcript storeKey={store.key} />);
+  const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
+  for (const ask of asks) await act(() => fake.reply('session.ui.render', {
+    hooked: ask.component === 'AssistantMessage', rewritten: false, props: ask.props,
+    tree: ask.props.text === 'Update' ? { type: 'Box', children: [{ type: 'Button', props: { key: 'accept', label: 'Accept' }, press: { plugin: 'test-mod', handle: 7 } }, { type: 'engine', ref: 0 }] } : { type: 'engine', ref: 0 },
+  }));
+  const button = screen.getByRole('button', { name: 'Accept' });
+  fireEvent.pointerDown(button, { button: 0, buttons: 1 });
+  act(() => invalidateSession(id));
+  while (fake.pending('session.ui.render')) await act(() => fake.reply('session.ui.render', { hooked, rewritten: false, props: {}, tree: { type: 'Box' } }));
+  expect(screen.getByRole('button', { name: 'Accept' })).toBe(button);
+  expect(screen.getByText('Update').closest('.transcript-commentary')).toBeNull();
+  expect(store.rows().find((r) => r.kind === 'assistant_text' && r.markdown === 'Update')).toMatchObject({ forHuman: true });
+  fireEvent.pointerUp(button, { button: 0 });
+  fireEvent.click(button);
+  expect(fake.invoked('session.ui.press')).toEqual([{ appSessionId: id, plugin: 'test-mod', handle: 7, key: 'accept' }]);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 1)));
+  expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+  expect(store.rows().filter((r) => r.kind === 'assistant_text')).toHaveLength(expanded ? 2 : 1);
+  if (expanded) expect(screen.getByText('Update').closest('.transcript-commentary')).not.toBeNull();
+  expect((fake.invoked('session.ui.render') as { component: string }[]).filter((a) => a.component === 'AssistantMessage')).toHaveLength(4);
+});
+
+it('hands presentation back to the folded probe when a pressed row virtualizes away, and releases every ask when the divider leaves', async () => {
+  const b = builder(); b.turn('u'); b.text('first', 0, 'Update');
+  b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
+  b.text('last', 0, 'Answer'); b.end(['u']);
+  const store = await storeWith(b.events); const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = fake.client;
+  useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
+  const view = render(<Transcript storeKey={store.key} />);
+  const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
+  for (const ask of asks) await act(() => fake.reply('session.ui.render', {
+    hooked: ask.component === 'AssistantMessage', rewritten: false, props: ask.props,
+    tree: ask.props.text === 'Update' ? { type: 'Button', props: { key: 'accept', label: 'Accept' }, press: { plugin: 'test-mod', handle: 7 } } : { type: 'engine', ref: 0 },
+  }));
+  fireEvent.pointerDown(screen.getByRole('button', { name: 'Accept' }), { button: 0, buttons: 1 });
+  act(() => invalidateSession(id));
+  const pending = fake.pending('session.ui.render');
+  for (let i = 0; i < pending; i++) await act(() => fake.reply('session.ui.render', { hooked: true, rewritten: false, props: {}, tree: { type: 'engine', ref: 0 } }));
+  expect(screen.getByRole('button', { name: 'Accept' })).toBeTruthy();
+  // The virtualizer can remove a promoted row independently of its still-mounted divider.
+  view.rerender(<Transcript storeKey={store.key} hideCommentary />);
+  expect(store.rows().filter((r) => r.kind === 'assistant_text')).toHaveLength(1);
+  expect(useTranscriptStore.getState().entries[store.key].state.ui.assistantInk.size).toBe(0);
+  const count = fake.invoked('session.ui.render').length;
+  expect(count).toBe(asks.length * 2);
+  view.unmount();
+  act(() => invalidateSession(id));
+  expect(fake.invoked('session.ui.render')).toHaveLength(count);
+  expect(fake.pending('session.ui.render')).toBe(0);
+  // A later divider mount can promote the row again; stale ownership must not suppress its probe.
+  render(<Transcript storeKey={store.key} />);
+  const remounted = fake.invoked('session.ui.render').slice(count) as typeof asks;
+  expect(remounted).toHaveLength(asks.length);
+  for (const ask of remounted) await act(() => fake.reply('session.ui.render', {
+    hooked: ask.component === 'AssistantMessage', rewritten: false, props: ask.props,
+    tree: ask.props.text === 'Update' ? { type: 'Text', children: ['returned drawing'] } : { type: 'engine', ref: 0 },
+  }));
+  expect(screen.getByText('returned drawing')).toBeTruthy();
+  expect(fake.invoked('session.ui.render')).toHaveLength(count + asks.length);
 });
