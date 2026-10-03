@@ -203,7 +203,8 @@ function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], ca
   }
 }
 
-export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean): Cell {
+// Draw-time rewrites may override status, before deriving both detail and label. Model callers omit it.
+export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean, displayStatus?: Cell['status']): Cell {
   const { use, result } = rec;
   const denial = result?.denial ? { kind: result.denial, reason: resultText(result.content).trim() || null } : null;
   const context: ClassifyContext = {
@@ -211,13 +212,15 @@ export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean): C
     safeguard: result && result.safeguard !== 'not_evaluated' ? result.safeguard : rec.safeguard, imageResult: isImageResult(result), isError: result?.isError ?? false,
   };
   const classification = classifyTool(use.toolName, use.input, context);
-  const status = statusOf(rec, turn, classification.denial?.disposition ?? null);
+  const recordedStatus = statusOf(rec, turn, classification.denial?.disposition ?? null);
+  const status = displayStatus ?? recordedStatus;
+  const labelClassification = status === recordedStatus ? classification : { ...classification, denial: null };
   const detail = detailOf(rec, status);
   const category = tableRowOf(use.toolName).category;
   const paths = detail.kind === 'read' ? detail.files.map((file) => file.path) : detail.kind === 'edit' ? [detail.filePath] : [];
   return {
     id: cellId.tool(use.toolUseId), toolUseId: use.toolUseId, toolName: use.toolName, category, classification, status,
-    label: labelOf(rec, detail, status, category, classification, turn), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
+    label: labelOf(rec, detail, status, category, labelClassification, turn), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
   };
 }
 

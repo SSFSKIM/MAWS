@@ -80,16 +80,43 @@ export function toolInputs(cell: Cell, turn: TurnState | undefined): ToolInput[]
   });
 }
 
+// Render output is unknown JSON, not necessarily X1's content-block list.
+function outputContent(output: unknown): string | ContentBlock[] {
+  if (output === undefined || output === null) return '';
+  if (typeof output === 'string') return output;
+  if (Array.isArray(output) && output.every((block) => typeof object(block).type === 'string')) return output as ContentBlock[];
+  return JSON.stringify(output, null, 2) ?? '';
+}
+
+// Answers cross JSON transport; reference and key order do not identify a presentation change.
+function sameValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object' || Array.isArray(left) !== Array.isArray(right)) return false;
+  const a = left as Record<string, unknown>; const b = right as Record<string, unknown>;
+  return Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((key) => Object.hasOwn(b, key) && sameValue(a[key], b[key]));
+}
+
 export function withToolProps(input: ToolInput, props: TranscriptProps['ToolUse']): Cell {
-  if (props === input.props) return input.cell;
+  if (sameValue(props, input.props)) return input.cell;
   const { record, cell, context } = input;
   const output = props.output;
-  const result = record.result === null ? null : { ...record.result, isError: props.isErrored,
-    content: typeof output === 'string' || Array.isArray(output) ? output as string | ContentBlock[] : record.result.content,
-    structured: typeof output === 'object' && output !== null && !Array.isArray(output) ? output : null };
-  const drawn = cellOf({ ...record, use: { ...record.use, toolName: props.tool, input: props.input }, result }, context, cell.expanded);
-  return { ...drawn, id: cell.id, classification: cell.classification, agent: cell.agent,
-    status: props.isInterrupted ? 'stopped' : props.isErrored ? 'error' : props.isRunning ? 'running' : 'done' };
+  const replacedOutput = !sameValue(output, input.props.output);
+  // This record exists only for drawing, including output supplied for a still-unresolved call. Never attach it
+  // to the turn. Unchanged output retains X1's text/structured pair; replaced output must not retain old spills.
+  const result = {
+    ...(record.result ?? { ...record.use, kind: 'tool.result' as const, at: context.lastAt, denial: null, safeguard: record.safeguard, spillPath: null }),
+    isError: props.isErrored,
+    content: !replacedOutput && record.result ? record.result.content : outputContent(output),
+    structured: !replacedOutput && record.result ? record.result.structured : typeof output === 'object' && output !== null && !Array.isArray(output) ? output : null,
+    ...(replacedOutput && { spillPath: null }),
+  };
+  const status = props.isInterrupted ? 'stopped' : props.isErrored ? cell.status === 'denied' ? 'denied' : 'error' : props.isRunning ? 'running' : 'done';
+  const drawn = cellOf({ ...record, use: { ...record.use, toolName: props.tool, input: props.input }, result }, context, cell.expanded, status);
+  // Reader state lives on the native cell, not the historical event. It remains applicable only to the same output/spill.
+  if (!replacedOutput && 'spill' in drawn.detail && 'spill' in cell.detail && cell.detail.spill !== null && drawn.detail.spill?.path === cell.detail.spill.path) {
+    drawn.detail = { ...drawn.detail, spill: cell.detail.spill };
+  }
+  return { ...drawn, id: cell.id, classification: cell.classification, agent: cell.agent, startedAt: cell.startedAt, endedAt: cell.endedAt };
 }
 
 interface Sized { value: unknown; nodes: number; chars: number }
