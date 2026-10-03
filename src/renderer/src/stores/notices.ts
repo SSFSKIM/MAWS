@@ -1,5 +1,5 @@
 // Banners (persistent, account- and app-wide, one host per window, §5.5) and toasts (transient). The hosts that render
-// them are M5's; C11's near-limit banner and the notifier's fallback toast arrive through `banner()` and `toast()`.
+// them are M5's; app banners and the notifier's fallback toast arrive through `banner()` and `toast()`.
 import { create } from 'zustand';
 
 export interface Notice {
@@ -54,6 +54,6 @@ export function createNoticesStore() {
 
 export const useNotices = createNoticesStore();
 
-// The helpers other modules call (C11's near-limit banner, the attention fallback toast); each returns the notice's id.
+// The helpers other modules call (app banners, the attention fallback toast); each returns the notice's id.
 export const banner = (notice: NoticeInput): string => useNotices.getState().banner(notice);
 export const toast = (notice: NoticeInput): string => useNotices.getState().toast(notice);

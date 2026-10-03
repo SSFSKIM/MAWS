@@ -18,12 +18,13 @@ export interface SurfaceRowProps<C extends TranscriptSite> {
   instanceId: string;
   props: TranscriptProps[C];
   enabled?: boolean;
-  children: (props: TranscriptProps[C], state: { concealed: boolean }) => ReactNode;
+  children: (props: TranscriptProps[C], state: { concealed: boolean; ink: boolean }) => ReactNode;
   placeholder?: ReactNode;
   onlyRewrites?: boolean;
   frameInkOnly?: boolean;
   drawingOnly?: boolean;
   onRewrite?: (props: TranscriptProps[C]) => void;
+  onInk?: (ink: boolean) => void; // applied drawing, after any gesture hold; pending remounts report nothing
   client?: MawsBridge;
 }
 
@@ -36,7 +37,7 @@ function equal(a: unknown, b: unknown): boolean {
 }
 const hasClient = (tree: SurfaceNode | null): boolean => tree !== null && typeof tree !== 'string' && (tree.type === 'Client' || ('children' in tree && tree.children.some(hasClient)));
 
-export function SurfaceRow<C extends TranscriptSite>({ appSessionId, component, instanceId, props, enabled = true, children, placeholder = '…', onlyRewrites = false, frameInkOnly = false, drawingOnly = false, onRewrite, client = ipc }: SurfaceRowProps<C>) {
+export function SurfaceRow<C extends TranscriptSite>({ appSessionId, component, instanceId, props, enabled = true, children, placeholder = '…', onlyRewrites = false, frameInkOnly = false, drawingOnly = false, onRewrite, onInk, client = ipc }: SurfaceRowProps<C>) {
   const attached = useSurfaceAttached(appSessionId);
   const hooked = useSurfaceHooked(appSessionId, component);
   const answer = useSurfaceSite({ appSessionId, component, instanceId, props, enabled, client });
@@ -65,6 +66,9 @@ export function SurfaceRow<C extends TranscriptSite>({ appSessionId, component, 
 
   const tree = accepted?.tree ?? null;
   const ink = hasInk(tree);
+  useEffect(() => {
+    if (!active || drawn.answer !== null) onInk?.(ink);
+  }, [active, drawn.answer, ink, onInk]);
   const slot = firstEngineRef(tree) !== null || hasClient(tree);
   const nativeOnly = accepted === null || drawsEngine(tree) || (frameInkOnly && slot && !ink);
   const pending = useInitialPending(active && drawn.pending && !drawingOnly, `${appSessionId}:${component}:${instanceId}`);
@@ -88,7 +92,7 @@ export function SurfaceRow<C extends TranscriptSite>({ appSessionId, component, 
       {/* Mount the host before native layout effects resolve their enclosing focus/shortcut owner. */}
       {!drawingOnly && createPortal(
         <div data-engine-native={component} aria-hidden={concealed || undefined} inert={concealed || undefined} style={{ display: 'contents', visibility: concealed ? 'hidden' : undefined }}>
-          {children(effective, { concealed })}
+          {children(effective, { concealed, ink })}
         </div>, host,
       )}
       {delayed && <div data-engine-withheld="" style={{ display: 'contents' }}>{placeholder}</div>}

@@ -10,7 +10,7 @@ export function AssistantTextRow({ row, text }: { row: Extract<Row, { kind: 'ass
   const { storeKey } = useTranscriptContext();
   const buffer = useTranscriptStore((state) => liveBuffer(state.entries[storeKey], row));
   return (
-    <div className={row.phase === 'answer' ? 'transcript-answer' : 'transcript-commentary'}>
+    <div className={row.phase === 'answer' || row.forHuman ? 'transcript-answer' : 'transcript-commentary'}>
       <Markdown markdown={text ?? buffer ?? row.markdown} live={row.live} />
     </div>
   );

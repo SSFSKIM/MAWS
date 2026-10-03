@@ -34,7 +34,10 @@ export function assistantInput(row: RowOf<'assistant_text'>, turn: TurnState | u
   // The terminal passes messageUuid unqualified (chunk-5s6b4r7q, af -> Qs). MAWS can mount multiple blocks of that
   // UUID together: keep its first identity and qualify later ones so one instance never races another's props.
   const instanceId = row.messageUuid === null ? row.id : row.blockIndex === firstMessageBlock ? row.messageUuid : `${row.messageUuid}:text:${row.blockIndex}`;
-  return { instanceId, props: { text: row.markdown, isFirstOfReply: row.blockIndex === firstIndex } };
+  // MessageDisplay may replace tags with ANSI headers that another mod understands. Native markdown is stripped;
+  // the hook contract is the engine's delivered block, not MAWS's plain drawing of it.
+  const text = peers.find((block) => block.rowId === row.id)?.sourceText ?? row.markdown;
+  return { instanceId, props: { text, isFirstOfReply: row.blockIndex === firstIndex } };
 }
 
 const toolCache = new WeakMap<SessionEvent[], Map<ToolUseId, ToolRecord>>();

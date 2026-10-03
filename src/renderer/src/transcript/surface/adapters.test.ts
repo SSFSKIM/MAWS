@@ -5,7 +5,7 @@ import { renderRow } from '../view/rows/test-support';
 import { rowsOf, withAllExpanded } from '../model/derive';
 import { applyEvents, createState, withReaderState } from '../model/reduce';
 import type { Row } from '../model/rows';
-import { BASH_RESULT, builder, tool, uuid } from '../model/test-events';
+import { BASH_RESULT, builder, api, tool, uuid } from '../model/test-events';
 import { assistantInput, commandInput, groupInput, toolInputs, userInput, withToolProps } from './adapters';
 
 afterEach(cleanup);
@@ -38,6 +38,18 @@ describe('transcript surface adapters', () => {
     expect(assistantInput(texts[0], turn)).toEqual({ instanceId: 'message', props: { text: 'First', isFirstOfReply: true } });
     expect(assistantInput({ ...texts[1], phase: 'commentary' }, turn)).toEqual({ instanceId: 'message:text:2', props: { text: 'Second', isFirstOfReply: false } });
     expect(assistantInput({ ...texts[0], markdown: '' }, turn)).toBeNull();
+  });
+
+  it('keeps display headers through split streaming deltas and completion, without leaking ANSI into native markdown', () => {
+    const b = builder(); b.turn('u'); b.thinking('api', 0, 'thinking');
+    const pieces = ['\u001b[1;', '36mto human\u001b[0m\n', 'Hello'];
+    for (const textDelta of pieces) b.emit('assistant.block.delta', { apiMessageId: api('api'), blockIndex: 1, blockType: 'text', textDelta, thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
+    const live = setup(b); const row = find(live.rows, 'assistant_text');
+    expect(assistantInput(row, live.turn)?.props).toEqual({ text: pieces.join(''), isFirstOfReply: true });
+    b.text('api', 0, pieces.join(''), { messageUuid: uuid('message') });
+    const done = setup(b); const text = find(done.rows, 'assistant_text');
+    expect(text.markdown).toBe('to human\nHello');
+    expect(assistantInput(text, done.turn)?.props).toEqual({ text: pieces.join(''), isFirstOfReply: true });
   });
 
   it('keeps raw tool input and structured output, not the compact label, and unfolds merged reads into individual calls', () => {

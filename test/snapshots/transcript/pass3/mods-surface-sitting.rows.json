@@ -1,0 +1,20 @@
+[
+  {
+    "at": "2026-10-03T06:59:18.164Z",
+    "id": "time:error:replay:journal:41:0",
+    "kind": "time",
+    "label": "Oct 3, 2026 6:59 AM",
+    "turnId": null
+  },
+  {
+    "at": "2026-10-03T06:59:18.164Z",
+    "attempt": null,
+    "id": "error:replay:journal:41:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

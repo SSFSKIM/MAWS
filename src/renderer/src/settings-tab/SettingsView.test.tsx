@@ -148,7 +148,7 @@ describe('settings tab writes one field per row', () => {
     expect(within(row('Monospace font')).getByText('Name a Nerd Font to draw prompt glyphs in the terminal')).toBeTruthy();
   });
 
-  it('Notifications: enabled, one kind at a time, sound and the near-limit threshold; held peer messages never notify', async () => {
+  it('Notifications: enabled, one kind at a time, sound and no retired near-limit control; held peer messages never notify', async () => {
     renderView();
     const when = row('When a session needs you');
     expect(within(when).queryByText(/^macOS:/)).toBeNull();
@@ -168,11 +168,8 @@ describe('settings tab writes one field per row', () => {
 
     fireEvent.click(within(row('Sound')).getByRole('switch'));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ notifications: { sound: true } }));
-    const threshold = within(row('Near-limit banner')).getByRole('combobox') as HTMLSelectElement;
-    expect([...threshold.options].map((o) => o.value)).toEqual(['80', '85', '90', '95']);
-    fireEvent.change(threshold, { target: { value: '85' } });
-    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ usage: { nearLimitPercent: 85 } }));
-    expect(b.sets).toHaveLength(4);
+    expect(screen.queryByText('Near-limit banner')).toBeNull();
+    expect(b.sets).toHaveLength(3);
   });
 
   it('a refused write shows a toast and the row keeps the value the store holds', async () => {

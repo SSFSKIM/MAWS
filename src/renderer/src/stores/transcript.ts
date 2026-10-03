@@ -55,6 +55,8 @@ export interface TranscriptStore {
   jumpTo(key: string, id: RowId | CellId, options?: { align?: JumpRequest['align']; turnId?: TurnId }): void; // expands what holds the row, then the view scrolls and focuses; `turnId` names the owning turn when the caller knows it (the search then derives that turn alone)
   jumpHandled(key: string, nonce: number): void;
   setFollowing(key: string, following: boolean): void;
+  setAssistantInk(key: string, row: RowId, turn: TurnId, ink: boolean): void;
+  clearAssistantInk(key: string): void;
   toggleTurn(key: string, turn: TurnId): void;
   toggleGroup(key: string, group: RowId): void;
   toggleCell(key: string, cell: CellId): void;
@@ -102,6 +104,7 @@ function copyUi(ui: TranscriptUi, turns: Iterable<TurnId> | 'all'): TranscriptUi
   const stamps = new Map(ui.stamps);
   if (turns !== 'all') for (const id of turns) stamps.set(id, (stamps.get(id) ?? 0) + 1);
   return {
+    assistantInk: new Set(ui.assistantInk),
     expandedTurns: new Set(ui.expandedTurns), collapsedTurns: new Set(ui.collapsedTurns), expandedGroups: new Set(ui.expandedGroups),
     expandedCells: new Set(ui.expandedCells), revealedBoundaries: new Set(ui.revealedBoundaries), receipts: new Map(ui.receipts), spills: new Map(ui.spills),
     global: turns === 'all' ? ui.global + 1 : ui.global, stamps, version: ui.version + 1,
@@ -355,6 +358,14 @@ export function createTranscriptStore() {
         if (entry(key) && entry(key)!.following !== following) put(key, { following });
       },
 
+      setAssistantInk(key, row, turn, ink) {
+        if (!entry(key) || entry(key)!.state.ui.assistantInk.has(row) === ink) return;
+        changeUi(key, () => [turn], (ui) => { if (ink) ui.assistantInk.add(row); else ui.assistantInk.delete(row); });
+      },
+      clearAssistantInk(key) {
+        if (!entry(key)?.state.ui.assistantInk.size) return;
+        changeUi(key, () => 'all', (ui) => ui.assistantInk.clear());
+      },
       toggleTurn(key, turn) {
         changeUi(key, () => [turn], (ui, state) => {
           if (isExpanded(state, turn)) {

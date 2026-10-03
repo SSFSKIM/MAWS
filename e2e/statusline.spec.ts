@@ -1,6 +1,6 @@
 // C7's status line end to end (C7 execution document, M5 and Acceptance item 2), and since W2 removed the line (§5.5 as
-// amended 2026-10-01) what stayed of it: a session's windows as Session info reads them, and the near-limit banner,
-// once per window. The built app on C5's stub scenario
+// amended 2026-10-01) what stayed of it: a session's windows as Session info reads them. M1 removes the near-limit
+// banner without changing those readings. The built app on C5's stub scenario
 // (`nine-sessions.json`, manual clock, one session re-pinned) with MAWS_CLAUDE_USAGE_DIR on a temporary copy of the
 // committed ClaudeUsage fixture, every `recordedAt` and `resetsAt` moved by one offset so its newest reading is two
 // minutes old (percentages untouched). The fixture's drain target is `2aca3c4b…` (5h 53 %, 7d 63 %); account
@@ -17,7 +17,6 @@ const QUOTA = 'Quota reset recovery'; // routed, its engine id unpinned: the dra
 const PROBE = 'Settings idle probe'; // routed, re-pinned below to account 477e393c…
 const CHARTER = 'Charter + research'; // direct: the engine's own windows, none from the stub
 const PINNED_ENGINE_ID = '73171552-c2ff-47db-b361-ca541bdf560e';
-const NEAR_LIMIT = /^5-hour window at 100% for 4@example\.test · resets in \d+m$/;
 
 let scratch: string;
 let usageDir: string;
@@ -58,7 +57,7 @@ async function open(page: Page, title: string): Promise<Locator> {
 }
 const nearLimitBanners = (page: Page) => page.locator('[data-banner-host] [role="status"]').filter({ hasText: 'window at' });
 
-test('usage: the session’s account windows in Session info, and one near-limit banner that stays dismissed', async () => {
+test('usage: Session info keeps reset times while near-limit windows never post a banner', async () => {
   test.setTimeout(90_000);
   const maws = await launchMaws({ env: ENV() });
   const { page } = maws;
@@ -75,27 +74,19 @@ test('usage: the session’s account windows in Session info, and one near-limit
     const charter = await open(page, CHARTER);
     await expect(charter).toHaveText('—');
 
-    // One near-limit banner in the banner host, for the one window at 100 %; dismissed, it is kept in usage.banners.
-    await expect(nearLimitBanners(page)).toHaveCount(1);
-    await expect(nearLimitBanners(page).locator('span').first()).toHaveText(NEAR_LIMIT);
-    await nearLimitBanners(page).getByRole('button', { name: 'Dismiss' }).click();
+    // Even an exhausted window posts nothing; the legacy layout key stays readable but unwritten.
     await expect(nearLimitBanners(page)).toHaveCount(0);
-    await expect
-      .poll(() => page.evaluate(() => window.maws.invoke('layout.get', { key: 'usage.banners' })))
-      .toMatchObject({ ok: true, value: { value: [expect.stringMatching(/^usage:aa9db20d-af2c-4718-ba6f-5cea946b4974:session:.+Z$/)] } });
+    expect(await page.evaluate(() => window.maws.invoke('layout.get', { key: 'usage.banners' }))).toMatchObject({ ok: true, value: { value: null } });
 
-    // After a reload the windows come back and the dismissed banner does not. The proof that the banner rule has read
-    // usage.banners and run is a banner it must post: account 477e393c…'s 5-hour window reaches 95 % (a new row in
-    // ClaudeUsage's history, which main's watcher publishes). The rule posts nothing before the dismissed keys are
-    // read, and it judges every account in the same snapshot, so when that banner shows, the dismissed one would too.
     await page.reload();
     const again = await open(page, QUOTA);
     await expect(again).toHaveText(/^5h 53% /);
     const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z'); // ClaudeUsage's form, compared as text
     const row = { limitKey: 'session', percent: 95, recordedAt: iso(Date.now()), resetsAt: iso(Date.now() + 2 * 3_600_000) };
     appendFileSync(join(usageDir, 'history', '477e393c-5c1a-4413-a3e6-7f5d1ed72cc3.jsonl'), `${JSON.stringify(row)}\n`);
-    await expect(nearLimitBanners(page)).toHaveCount(1, { timeout: 10_000 });
-    await expect(nearLimitBanners(page).locator('span').first()).toHaveText(/^5-hour window at 95% for 1@example\.test · resets in /);
+    await expect(await open(page, PROBE)).toHaveText(/^5h 95% · resets in /, { timeout: 10_000 });
+    await expect(nearLimitBanners(page)).toHaveCount(0);
+    expect(await page.evaluate(() => window.maws.invoke('layout.get', { key: 'usage.banners' }))).toMatchObject({ ok: true, value: { value: null } });
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();
