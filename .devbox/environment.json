@@ -21,6 +21,9 @@
       }
     }
   ],
+  "validate": {
+    "script": ".devbox/validate.sh"
+  },
   "network": {
     "access": "unrestricted",
     "allowed_domains": []
