@@ -17,7 +17,7 @@
       "cmd": "env MAWS_USER_DATA=\"$DEVENV_ROOT/.devbox/maws-userdata\" pnpm dev",
       "cwd": ".",
       "ready": {
-        "http": "http://127.0.0.1:5173/"
+        "http": "http://localhost:5173/"
       }
     }
   ],
