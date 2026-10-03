@@ -102,7 +102,7 @@ export function App() {
   // C8a end
   // C7 start: the X4 card in C5's requestCard slot (docked, card, hover) and C6's transcript request slot (inline)
   useEffect(() => connectRequestCard(), []);
-  useEffect(() => connectStatusLine(), []); // the shared ClaudeUsage read and the near-limit banner, app-wide (W2: no status line, the banner stays)
+  useEffect(() => connectStatusLine(), []); // the shared ClaudeUsage read, app-wide
   useEffect(() => connectComposer(), []); // the composer in C5's composer slot
   useEffect(() => connectInlineEdit(), []); // W3 (B6): a bubble's Edit, and a blocked prompt's Edit prompt (W1), edit the bubble in place
   // C7 end

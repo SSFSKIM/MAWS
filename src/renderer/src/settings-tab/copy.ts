@@ -136,9 +136,6 @@ export const NOTIFICATIONS = {
   approvalsCaption: 'permission requests, dialogs and MCP elicitations',
   heldNever: 'Never notifies in this version',
   sound: 'Sound',
-  nearLimit: 'Near-limit banner',
-  nearLimitAt: (n: number) => `at ${n}%`,
-  nearLimitHint: 'once per window, account-wide',
   on: 'on',
   off: 'off',
 };
