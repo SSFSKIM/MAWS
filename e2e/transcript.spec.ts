@@ -1021,7 +1021,8 @@ for (const headers of [false, true]) test(`M3 owner sitting preserves ${headers 
     await expect.poll(() => new Set(asks().map((a) => a.instance_id)).size).toBe(3);
     const texts = asks();
     expect(new Set(texts.map((a) => a.props.text.length))).toEqual(new Set(headers ? [258, 89, 2864] : [256, 87, 2920]));
-    expect(texts.every((a) => headers ? a.props.text.includes('\u001b[1;36mto human\u001b[0m') : a.props.text.startsWith('<to-human>') && a.props.text.endsWith('</to-human>'))).toBe(true);
+    const expectedTexts = new Map(sittingSeed({ repo: '/scratch', engineId: id }, false, headers).filter((r) => r.type === 'assistant').flatMap((r) => (r.message as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === 'text').map((b) => [r.uuid, b.text] as const)));
+    for (const ask of texts) expect(ask.props.text).toBe(expectedTexts.get(ask.instance_id));
     expect(texts.every((a) => a.props.isFirstOfReply)).toBe(true);
     expect(texts.map((a) => a.instance_id).filter((uuid) => uuid.startsWith('244de4a2') || uuid.startsWith('cd3271fb')).every((uuid) => !uuid.includes(':text:'))).toBe(true);
     await expect(pane.getByRole('button', { name: 'working record', exact: true })).toHaveCount(0);
