@@ -36,6 +36,28 @@ export function recordedSurfaceJournal(root: string, fixture: string, selected?:
   writeFileSync(path, journal.map((row) => JSON.stringify(row)).join('\n') + '\n');
   return path;
 }
+// Control-only probes carry no resumed conversation frames. An active session snapshot comes from its journal,
+// not the indexed disk file (engine-host/ipc.ts session.events). Supply explicitly synthetic echoes of our disk seed
+// to that journal, leaving every recorded control request/answer and plugin notification unchanged.
+export function addSurfaceSeedEchoes(path: string, records: Record<string, unknown>[]): void {
+  const rows = readFileSync(path, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as SurfaceJournalRow);
+  const initId = rows.find((row) => row.direction === 'out' && row.frame.request?.subtype === 'initialize')?.frame.request_id;
+  const at = rows.findIndex((row) => row.direction === 'in' && row.frame.response?.request_id === initId);
+  if (at < 0) throw new Error('Seed echoes need a recorded initialize answer');
+  const firstUser = records.find((record) => record.type === 'user');
+  const echoes: SurfaceJournalRow[] = [{ seq: 0, direction: 'meta', at: rows[at]!.at, frame: { event: 'e2e_synthetic_seed_echoes', description: 'Test-authored disk history echoed into the active replay journal; not an installed-engine recording' } }];
+  for (const record of records) {
+    const common = { session_id: record.sessionId, uuid: record.uuid, parent_tool_use_id: null };
+    const frame = record.type === 'user' ? { ...common, type: 'user', isReplay: true, origin: { kind: 'human' }, message: record.message, ...(record.toolUseResult !== undefined ? { tool_use_result: record.toolUseResult } : {}) }
+      : record.type === 'assistant' ? { ...common, type: 'assistant', message: record.message }
+      : record.subtype === 'turn_duration' ? { ...common, type: 'result', subtype: 'success', is_error: false, duration_ms: record.durationMs, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], user_message_uuids: [firstUser?.uuid] }
+      : null;
+    if (frame) echoes.push({ seq: 0, direction: 'in', at: String(record.timestamp), frame });
+  }
+  rows.splice(at + 1, 0, ...echoes);
+  writeFileSync(path, rows.map((row, index) => JSON.stringify({ ...row, seq: index + 1 })).join('\n') + '\n');
+}
+
 export const r3Question = { question: 'Which path?', header: 'Path', options: [{ label: 'One', description: 'First path' }, { label: 'Two', description: 'Second path' }], multiSelect: false };
 export const r3Output = { stdout: 'R3', stderr: '', interrupted: false };
 export const ownerMarkedText = 'Private working notes.\n<to-human>First **span**.</to-human>\n<essential>Second span.</essential>\n<need-input>Which path?\n<choice recommended>One</choice>\n<choice>Two</choice>\n</need-input>\nMore working notes.';
