@@ -30,9 +30,12 @@ const blank = (text: string | undefined) => text === undefined || text.trim() ==
 // answer the questions." (2.1.283 `cli.pretty.js` 163990-164045, AskUserQuestion's `call` and its tool result).
 export function questionAnswers(state: Extract<VariantState, { kind: 'question' }>): Record<string, string> {
   const answers: Record<string, string> = Object.create(null);
-  for (const { question } of state.questions) {
+  for (const { question, options, multiSelect } of state.questions) {
     const other = questionValue(state.other, question);
-    const parts = [...(questionValue(state.selected, question) ?? []), ...(blank(other) ? [] : [other])];
+    // A mod may rewrite the options while a persisted draft still holds the previous picks.
+    const selected = (questionValue(state.selected, question) ?? []).filter((label) => options.some((option) => option.label === label));
+    const picks = multiSelect ? selected : selected.slice(0, 1);
+    const parts = [...picks, ...(blank(other) ? [] : [other])];
     if (parts.length > 0) answers[question] = parts.join(', ');
   }
   return answers;

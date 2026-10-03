@@ -51,7 +51,7 @@ function OtherInput({ question, value, onChange, onEnter, disabled }: { question
       placeholder="Type your own answer"
       value={value}
       disabled={disabled}
-      autoFocus
+      autoFocus={!disabled}
       onChange={(event) => onChange(event.target.value)}
       onKeyDown={onKeyDown}
       className="w-full rounded-sm border border-border-strong bg-bg px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2"
@@ -198,11 +198,12 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
     shown.current = step;
     if (!restoreFocus.current) return;
     restoreFocus.current = false;
+    if (busy) return;
     const body = bodyRef.current;
     const active = document.activeElement;
     if (!body || (active !== null && active !== document.body)) return;
     (keyOwner(body, placement) ?? body.querySelector<HTMLElement>('[role="radio"], [role="checkbox"]'))?.focus();
-  }, [step, placement]);
+  }, [step, placement, busy]);
 
   const Step = question.multiSelect ? MultiSelect : SingleSelect;
   return (

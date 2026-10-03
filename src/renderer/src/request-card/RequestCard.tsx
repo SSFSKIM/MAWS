@@ -14,6 +14,8 @@ import { ATTENTION_HEADINGS, type AttentionTone } from '@shared/attention/headin
 import type { AttentionItem } from '@shared/graph/attention';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { SessionEvent } from '@shared/graph/events';
+import { engineQuestionsOf, nativeQuestionsOf } from '@shared/engine/surface-rows';
+import { SurfaceRow } from '../engine-surface/SurfaceRow';
 import { useNow } from '../app/use-now';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { ipc } from '../ipc/client';
@@ -162,7 +164,8 @@ export function RequestCard(props: RequestCardProps) {
   return <RequestCardFor key={props.item.id} {...props} />;
 }
 
-function RequestCardFor({ item, request: given, placement, onAnswered }: RequestCardProps) {
+function RequestCardFor(props: RequestCardProps) {
+  const { item, request: given, placement } = props;
   const fetched = useAttention((s) => s.requests.get(item.id));
   const unreadable = useAttention((s) => s.unreadable.get(item.id) ?? null);
   useEffect(() => {
@@ -171,6 +174,29 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
   const request = given ?? fetched ?? null;
   const loading = given === null && fetched === undefined && item.request.requestId !== null;
 
+  const native = (event: SessionEvent | null, concealed = false) => (
+    <NativeRequestCard {...props} request={event} loading={loading} unreadable={unreadable} concealed={concealed} />
+  );
+  if (request?.kind !== 'question.requested' || placement === 'hover') return native(request);
+
+  return (
+    <SurfaceRow
+      appSessionId={item.appSessionId}
+      component="AskUserQuestion"
+      instanceId={request.toolUseId}
+      props={{ tool: 'AskUserQuestion', questions: engineQuestionsOf(request.questions) }}
+      enabled={item.state === 'pending'}
+    >
+      {(rewritten, { concealed }) => native({ ...request, questions: nativeQuestionsOf(rewritten.questions)! }, concealed)}
+    </SurfaceRow>
+  );
+}
+
+function NativeRequestCard({ item, request, placement, onAnswered, loading, unreadable, concealed }: RequestCardProps & {
+  loading: boolean;
+  unreadable: string | null;
+  concealed: boolean;
+}) {
   const record = useSessions((s) => s.records.get(item.appSessionId));
   const project = useSessions((s) => (record?.projectId ? (s.projects.get(record.projectId)?.name ?? null) : null));
   const rows = useTranscriptStore((s) => s.entries[item.appSessionId]?.rows);
@@ -193,7 +219,7 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
   }, []);
   const accept = useCallback(() => keys.current.accept?.(), []);
   const decline = useCallback(() => keys.current.decline?.(), []);
-  const live = phase === 'pending' && item.state === 'pending';
+  const live = phase === 'pending' && item.state === 'pending' && !concealed;
 
   // Card placement: the focus owner is C5's article (the nearest `tabindex` ancestor), the card root without one.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -208,7 +234,7 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
 
   // Digits, from the element that owns the keys (the article, or the docked frame, which mounts once the request is
   // known to be answerable).
-  const framed = placement === 'docked' && answerable(request);
+  const framed = placement === 'docked' && answerable(request) && !concealed;
   useEffect(() => {
     if (!live || (placement !== 'card' && placement !== 'docked')) return;
     const owner = placement === 'card' ? ownerRef.current : (rootRef.current?.closest<HTMLElement>('[data-docked-frame]') ?? null);
@@ -234,7 +260,7 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
   const hover = placement === 'hover';
   const canAnswerHover = hover && hoverApproval(item, request) && record?.holder.kind !== 'terminal' && record?.holder.kind !== 'background_job';
   const openSession = () => useLayout.getState().openSession(item.appSessionId);
-  const variant = { item, placement, busy, submit, bindKeys };
+  const variant = { item, placement, busy: busy || concealed, submit, bindKeys };
 
   let body: ReactNode;
   if (loading) {
