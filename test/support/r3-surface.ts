@@ -44,13 +44,15 @@ export function addSurfaceSeedEchoes(path: string, records: Record<string, unkno
   const initId = rows.find((row) => row.direction === 'out' && row.frame.request?.subtype === 'initialize')?.frame.request_id;
   const at = rows.findIndex((row) => row.direction === 'in' && row.frame.response?.request_id === initId);
   if (at < 0) throw new Error('Seed echoes need a recorded initialize answer');
-  const firstUser = records.find((record) => record.type === 'user');
+  let lastUserUuid: unknown;
   const echoes: SurfaceJournalRow[] = [{ seq: 0, direction: 'meta', at: rows[at]!.at, frame: { event: 'e2e_synthetic_seed_echoes', description: 'Test-authored disk history echoed into the active replay journal; not an installed-engine recording' } }];
   for (const record of records) {
+    const content = (record.message as { content?: unknown } | undefined)?.content;
+    if (record.type === 'user' && (typeof content === 'string' || Array.isArray(content) && content.some((b: { type: string }) => b.type === 'text'))) lastUserUuid = record.uuid;
     const common = { session_id: record.sessionId, uuid: record.uuid, parent_tool_use_id: null };
     const frame = record.type === 'user' ? { ...common, type: 'user', isReplay: true, origin: { kind: 'human' }, message: record.message, ...(record.toolUseResult !== undefined ? { tool_use_result: record.toolUseResult } : {}) }
       : record.type === 'assistant' ? { ...common, type: 'assistant', message: record.message }
-      : record.subtype === 'turn_duration' ? { ...common, type: 'result', subtype: 'success', is_error: false, duration_ms: record.durationMs, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], user_message_uuids: [firstUser?.uuid] }
+      : record.subtype === 'turn_duration' ? { ...common, type: 'result', subtype: 'success', is_error: false, duration_ms: record.durationMs, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], user_message_uuids: [lastUserUuid] }
       : null;
     if (frame) echoes.push({ seq: 0, direction: 'in', at: String(record.timestamp), frame });
   }
@@ -77,4 +79,25 @@ export function transcriptSeed(base: { repo: string; engineId: string }) {
   };
   const finish = (closed = true) => { if (closed) add('system', 'duration-r3', { subtype: 'turn_duration', durationMs: 1000 }); return records; };
   return { user, text, tool, finish };
+}
+
+
+export function sittingSeed(base: { repo: string; engineId: string }, closeTurns = false, headers = false): Record<string, unknown>[] {
+  const rows = readFileSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/pass3/mods-surface-sitting.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as SurfaceJournalRow);
+  const records = rows.find((row) => row.frame.event === 'owner_session_seed')!.frame.records as Record<string, unknown>[];
+  const drawn = headers ? new Map(readFileSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/pass3/mods-surface-sitting-headers.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as SurfaceJournalRow).filter((row) => row.frame.event === 'display_hook_output').map((row) => [row.frame.uuid, row.frame.output])) : new Map();
+  const seed: Record<string, unknown>[] = records.map((record) => ({ ...record, cwd: base.repo, sessionId: base.engineId, ...(drawn.has(record.uuid) && { message: { ...(record.message as object), content: [{ type: 'text', text: drawn.get(record.uuid) }] } }) }));
+  if (!closeTurns) return seed;
+  // The owner's file has no duration records. Explicit test-authored completions let its messages exercise the
+  // streaming path without pretending that replay echoes themselves carry the original live lifecycle.
+  const closed: Record<string, unknown>[] = [];
+  let turn = 0;
+  const finish = () => { const last = closed.at(-1)!; closed.push({ ...last, type: 'system', uuid: `sitting-replay-duration-${turn++}`, parentUuid: last.uuid, message: undefined, subtype: 'turn_duration', durationMs: 1000 }); };
+  for (const record of seed) {
+    const content = (record.message as { content?: unknown } | undefined)?.content;
+    if (record.type === 'user' && typeof content === 'string' && closed.length) finish();
+    closed.push(record);
+  }
+  finish();
+  return closed;
 }

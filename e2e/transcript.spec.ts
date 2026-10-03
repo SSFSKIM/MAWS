@@ -7,7 +7,7 @@
 // session tab, showing its toast, its log lines in the transcript and its status line in the panel summary.
 // Runs only under `pnpm e2e:transcript`, which builds with MAWS_HARNESS=1 first (playwright.config.ts).
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test as base, type Page } from '@playwright/test';
@@ -15,7 +15,7 @@ import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
-import { addSurfaceSeedEchoes, ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, transcriptSeed } from '../test/support/r3-surface';
+import { addSurfaceSeedEchoes, ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, sittingSeed, transcriptSeed } from '../test/support/r3-surface';
 
 const test = base.extend<{ harness: MawsLaunch }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
@@ -790,7 +790,7 @@ test('a mod’s toast, log lines and status line show in the session (R1, pass3/
 // person's presses are held and matched in order. A scratch config home holds one transcript for a scratch directory,
 // so C4 indexes a record the sidebar shows; no engine runs.
 type SurfaceSeed = (base: { repo: string; engineId: string }) => Record<string, unknown>[];
-async function surfaceReplay(fixture: string | ((root: string) => string), body: (ctx: { page: Page; id: string; pane: ReturnType<Page['locator']> }) => Promise<void>, seed?: SurfaceSeed) {
+async function surfaceReplay(fixture: string | ((root: string) => string), body: (ctx: { page: Page; id: string; pane: ReturnType<Page['locator']>; userData: string }) => Promise<void>, seed?: SurfaceSeed, beforeLaunch?: (pane: ReturnType<Page['locator']>) => Promise<void>) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-r2-surface-')));
   const repo = join(root, 'repo');
   const config = join(root, 'claude-config');
@@ -816,9 +816,10 @@ async function surfaceReplay(fixture: string | ((root: string) => string), body:
     await expect(page.getByTestId('hover-meta')).toBeHidden();
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await beforeLaunch?.(pane);
     await launchReady(page, id, replayPath, { cwd: repo, ...(seed ? { resume: { sessionId: engineId as never, fork: false } } : {}) });
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).uiSurface).toEqual({ clientId: 'maws-main' });
-    await body({ page, id, pane });
+    await body({ page, id, pane, userData: maws.userData });
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();
@@ -948,6 +949,10 @@ test('R3 owner to-human draws the first span, folds the working record, fills th
     await unfoldSeedWork(pane);
     const report = pane.locator('[data-plugin-drawn="AssistantMessage"]').filter({ has: page.getByRole('button', { name: 'working record', exact: true }) });
     await expect(report.getByText('to human', { exact: false })).toBeVisible();
+    const label = report.locator('[data-surface="text"]').filter({ hasText: 'to human' }).first();
+    await expect(label).toHaveCSS('font-weight', '600');
+    const cyan = await label.evaluate((el) => { const probe = document.createElement('span'); probe.style.color = 'var(--term-ansi-cyan)'; el.appendChild(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; });
+    await expect(label).toHaveCSS('color', cyan);
     await expect(report.getByText('essential', { exact: true })).toBeVisible();
     await expect(report.getByText('need input', { exact: true })).toBeVisible();
     await expect(report.locator('[data-engine-native="AssistantMessage"]')).toContainText('First span.');
@@ -996,5 +1001,33 @@ test('M1 marked commentary is visible at full contrast before and after folding 
     t.text('owner-multi', ownerMarkedText);
     t.tool('owner-tool', 'Bash', { command: 'printf R3' }, r3Output);
     return t.finish();
+  });
+});
+
+
+for (const headers of [false, true]) test(`M3 owner sitting preserves ${headers ? 'display headers' : 'tags'} on disk and over replay`, async () => {
+  test.setTimeout(120_000);
+  await surfaceReplay((root) => recordedSurfaceJournal(root, headers ? 'mods-surface-sitting-headers' : 'mods-surface-sitting'), async ({ page, pane, id, userData }) => {
+    // Scroll the actual session through the virtual range, so both turns mount and ask.
+    const scroller = pane.locator('[data-transcript-scroller]');
+    if (await scroller.count()) await scroller.evaluate((el) => { el.scrollTop = 0; });
+    await expect(pane.locator('[data-plugin-drawn="AssistantMessage"]').filter({ hasText: "I'm going through both spec branches" })).toBeVisible();
+    const labels = pane.locator('[data-surface="text"]').filter({ hasText: 'to human' });
+    await expect(labels.first()).toHaveCSS('font-weight', '600');
+    await expect(labels.first()).toContainText('●');
+    await expect(labels.first()).toHaveCSS('color', 'rgb(5, 152, 188)');
+    const dir = join(userData, 'engine-host/journal', id);
+    const asks = () => readdirSync(dir).filter((name) => name.endsWith('.jsonl')).flatMap((name) => readFileSync(join(dir, name), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { direction: string; frame: { request?: { subtype: string; component: string; instance_id: string; props: { text: string; isFirstOfReply: boolean } } } })).filter((r) => r.direction === 'out' && r.frame.request?.subtype === 'ui_render' && r.frame.request.component === 'AssistantMessage').map((r) => r.frame.request!);
+    await expect.poll(() => new Set(asks().map((a) => a.instance_id)).size).toBe(3);
+    const texts = asks();
+    expect(new Set(texts.map((a) => a.props.text.length))).toEqual(new Set(headers ? [258, 89, 2864] : [256, 87, 2920]));
+    expect(texts.every((a) => headers ? a.props.text.includes('\u001b[1;36mto human\u001b[0m') : a.props.text.startsWith('<to-human>') && a.props.text.endsWith('</to-human>'))).toBe(true);
+    expect(texts.every((a) => a.props.isFirstOfReply)).toBe(true);
+    expect(texts.map((a) => a.instance_id).filter((uuid) => uuid.startsWith('244de4a2') || uuid.startsWith('cd3271fb')).every((uuid) => !uuid.includes(':text:'))).toBe(true);
+    await expect(pane.getByRole('button', { name: 'working record', exact: true })).toHaveCount(0);
+    expect(value(await invoke(page, 'session.status', { appSessionId: id as never })).turn).toBeNull();
+  }, (base) => sittingSeed(base, true, headers), async (pane) => {
+    await unfoldSeedWork(pane);
+    await expect(pane.locator('[data-kind="assistant_text"]')).toHaveCount(3); // hi plus the two status messages
   });
 });
