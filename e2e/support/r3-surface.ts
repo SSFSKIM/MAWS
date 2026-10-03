@@ -1,0 +1,51 @@
+// Installed-engine answers over explicit disk seeds. Rebase request instance identities only, never answer payloads.
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+const REPO_ROOT = resolve(__dirname, '../..');
+interface SurfaceJournalRow {
+  seq: number; direction: string; at: string;
+  frame: { type?: string; request_id?: string; request?: { subtype: string; component?: string; instance_id?: string }; response?: { request_id: string }; [key: string]: unknown };
+}
+export function recordedSurfaceJournal(root: string, fixture: string, selected?: { component: string; outcome: string; instanceId: string }): string {
+  const rows = readFileSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/pass3', `${fixture}.jsonl`), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as SurfaceJournalRow);
+  const renderIds = new Set(rows.filter((r) => r.direction === 'out' && r.frame.request?.subtype === 'ui_render').map((r) => r.frame.request_id));
+  const selectedIds = new Set(rows.filter((r) => r.direction === 'out' && r.frame.request?.subtype === 'ui_render'
+    && (!selected || (r.frame.request.component === selected.component && (r.frame.request.instance_id?.endsWith(`:${selected.outcome}`) || selected.outcome === 'unhooked')))).map((r) => r.frame.request_id));
+  if (!selectedIds.size) throw new Error(`No recorded ${selected?.component} ${selected?.outcome} draw in ${fixture}`);
+  const journal = rows.filter((r) => {
+    if (!selected) return true;
+    if (r.direction === 'out' && r.frame.request?.subtype === 'ui_render') return selectedIds.has(r.frame.request_id);
+    if (r.direction === 'in' && r.frame.type === 'control_response' && renderIds.has(r.frame.response?.request_id)) return selectedIds.has(r.frame.response?.request_id);
+    return true;
+  }).map((row, index) => {
+    const request = row.frame.request;
+    if (row.direction === 'out' && request?.subtype === 'ui_render') {
+      const instance = selected?.instanceId ?? request.instance_id;
+      return { ...row, seq: index + 1, frame: { ...row.frame, request: { ...request, instance_id: instance } } };
+    }
+    return { ...row, seq: index + 1 };
+  });
+  const path = join(root, `${fixture}-dom.jsonl`);
+  writeFileSync(path, journal.map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
+export const r3Question = { question: 'Which path?', header: 'Path', options: [{ label: 'One', description: 'First path' }, { label: 'Two', description: 'Second path' }], multiSelect: false };
+export const r3Output = { stdout: 'R3', stderr: '', interrupted: false };
+export const ownerMarkedText = 'Private working notes.\n<to-human>First **span**.</to-human>\n<essential>Second span.</essential>\n<need-input>Which path?\n<choice recommended>One</choice>\n<choice>Two</choice>\n</need-input>\nMore working notes.';
+export function transcriptSeed(base: { repo: string; engineId: string }) {
+  const records: Record<string, unknown>[] = [];
+  let parent: string | null = null;
+  const add = (type: string, uuid: string, fields: Record<string, unknown>) => {
+    records.push({ type, uuid, parentUuid: parent, isSidechain: false, cwd: base.repo, sessionId: base.engineId, version: '2.1.287', timestamp: new Date(Date.UTC(2026, 9, 2, 6, 0, records.length)).toISOString(), ...fields });
+    parent = uuid;
+  };
+  const user = (id: string, text: string) => add('user', id, { message: { role: 'user', content: text } });
+  const assistant = (id: string, content: unknown[], stop = 'end_turn') => add('assistant', id, { message: { id: `api-${id}`, type: 'message', role: 'assistant', model: 'claude-haiku-4-5-20251001', content, stop_reason: stop, usage: { input_tokens: 1, output_tokens: 1 } } });
+  const text = (id: string, value: string) => assistant(id, [{ type: 'text', text: value }]);
+  const tool = (id: string, name: string, input: unknown, output: unknown) => {
+    assistant(`use-${id}`, [{ type: 'tool_use', id, name, input }], 'tool_use');
+    add('user', `result-${id}`, { toolUseResult: output, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: JSON.stringify(output), is_error: false }] } });
+  };
+  const finish = (closed = true) => { if (closed) add('system', 'duration-r3', { subtype: 'turn_duration', durationMs: 1000 }); return records; };
+  return { user, text, tool, finish };
+}

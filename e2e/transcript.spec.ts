@@ -15,6 +15,7 @@ import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
+import { ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, transcriptSeed } from './support/r3-surface';
 
 const test = base.extend<{ harness: MawsLaunch }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
@@ -788,7 +789,8 @@ test('a mod’s toast, log lines and status line show in the session (R1, pass3/
 // the product app's session tab. The replay answers the surface's renders from the fixture by site and instance; the
 // person's presses are held and matched in order. A scratch config home holds one transcript for a scratch directory,
 // so C4 indexes a record the sidebar shows; no engine runs.
-async function surfaceReplay(fixture: string, body: (ctx: { page: Page; id: string; pane: ReturnType<Page['locator']> }) => Promise<void>) {
+type SurfaceSeed = (base: { repo: string; engineId: string }) => Record<string, unknown>[];
+async function surfaceReplay(fixture: string | ((root: string) => string), body: (ctx: { page: Page; id: string; pane: ReturnType<Page['locator']> }) => Promise<void>, seed?: SurfaceSeed) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-r2-surface-')));
   const repo = join(root, 'repo');
   const config = join(root, 'claude-config');
@@ -797,7 +799,7 @@ async function surfaceReplay(fixture: string, body: (ctx: { page: Page; id: stri
   mkdirSync(project, { recursive: true });
   const engineId = randomUUID();
   const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'a session with a mod that draws' }, uuid: randomUUID(), timestamp: '2026-10-02T06:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.287' };
-  writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(first)}\n`);
+  writeFileSync(join(project, `${engineId}.jsonl`), (seed?.({ repo, engineId }) ?? [first]).map((record) => JSON.stringify(record)).join('\n') + '\n');
   const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
   try {
     const { page } = maws;
@@ -806,7 +808,7 @@ async function surfaceReplay(fixture: string, body: (ctx: { page: Page; id: stri
     await (await sidebarRow(page, { appSessionId: id })).click();
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
-    await launchReady(page, id, `spikes/protocol-probe/fixtures/pass3/${fixture}.jsonl`, { cwd: repo });
+    await launchReady(page, id, typeof fixture === 'function' ? fixture(root) : `spikes/protocol-probe/fixtures/pass3/${fixture}.jsonl`, { cwd: repo });
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).uiSurface).toEqual({ clientId: 'maws-main' });
     await body({ page, id, pane });
     expect(maws.consoleErrors()).toEqual([]);
@@ -853,3 +855,118 @@ test('a press on a mod’s button reaches the mod and its band redraws (R2, pass
     void page;
   });
 });
+
+// R3 recorded answers over explicit disk history; no engine process or model turn runs in these tests.
+async function unfoldSeedWork(pane: ReturnType<Page['locator']>) {
+  const divider = pane.locator('[data-kind="divider"] button[aria-expanded]').first();
+  await expect(divider).toBeVisible();
+  if (await divider.getAttribute('aria-expanded') === 'false') await divider.click();
+}
+const r3DomCases = [
+  { site: 'user-message', component: 'UserMessage', outcome: 'replacement' },
+  { site: 'assistant-message', component: 'AssistantMessage', outcome: 'engine-slot-rewrite' },
+  { site: 'command-output', component: 'CommandOutput', outcome: 'rewrite-alone' },
+  { site: 'tool-use', component: 'ToolUse', outcome: 'inkless' },
+  { site: 'tool-result', component: 'ToolResult', outcome: 'rewrite-alone' },
+  { site: 'tool-group', component: 'ToolGroup', outcome: 'engine-slot-rewrite' },
+  { site: 'ask-user-question', component: 'AskUserQuestion', outcome: 'invalid-rewrite' },
+] as const;
+for (const { site, component, outcome } of r3DomCases) {
+  test(`R3 recorded ${component} ${outcome} reaches the transcript DOM`, async () => {
+    test.setTimeout(120_000);
+    const instanceId = component === 'ToolUse' || component === 'ToolResult' ? 'tool-r3' : component === 'ToolGroup' ? 'group:tool-r3' : `r3:${component}:${outcome}`;
+    const seed: SurfaceSeed = (base) => {
+      const t = transcriptSeed(base);
+      t.user(component === 'UserMessage' ? instanceId : 'seed-user', component === 'CommandOutput' ? '/help' : 'R3 user');
+      if (component === 'AssistantMessage') t.text(instanceId, 'R3 assistant');
+      if (component === 'CommandOutput') t.user(instanceId, '<local-command-stdout>R3 command</local-command-stdout>');
+      if (component === 'ToolUse' || component === 'ToolGroup' || component === 'ToolResult') t.tool('tool-r3', 'Bash', { command: 'printf R3' }, r3Output);
+      if (component === 'AskUserQuestion') t.tool(instanceId, 'AskUserQuestion', { questions: [r3Question] }, { questions: [r3Question], answers: { 'Which path?': 'One' } });
+      return t.finish(component !== 'ToolUse' && component !== 'ToolGroup');
+    };
+    await surfaceReplay((root) => recordedSurfaceJournal(root, `mods-surface-transcript-${site}`, { component, outcome, instanceId }), async ({ pane }) => {
+      if (component.startsWith('Tool')) await unfoldSeedWork(pane);
+      if (component === 'UserMessage') {
+        await expect(pane.getByText('R3 replacement UserMessage', { exact: true })).toBeVisible();
+        await expect(pane.locator('[data-engine-native="UserMessage"]').getByText('R3 user', { exact: true })).not.toBeVisible();
+      } else if (component === 'AssistantMessage') {
+        await expect(pane.getByText('R3 slot', { exact: true })).toBeVisible();
+        await expect(pane.locator('[data-engine-native="AssistantMessage"]').getByText('R3 rewritten text', { exact: true })).toBeVisible();
+        await expect(pane.getByText('R3 assistant', { exact: true })).not.toBeVisible();
+      } else if (component === 'CommandOutput') {
+        await expect(pane.locator('[data-kind="local_command"]')).toContainText('R3 rewritten text');
+        await expect(pane.getByText('R3 command', { exact: true })).not.toBeVisible();
+      } else if (component === 'ToolUse') {
+        const group = pane.locator('[data-kind="group"]').first();
+        await expect(group.locator('button[aria-expanded]').first()).toBeVisible();
+        await group.locator('button[aria-expanded]').first().click();
+        await expect(group.locator('[data-surface-row="ToolUse"]')).toHaveCount(1);
+        await expect(group.locator('.transcript-cell-line')).not.toBeVisible();
+        await expect(group.locator('[data-cell-count]')).toHaveAttribute('data-cell-count', '1');
+      } else if (component === 'ToolGroup') {
+        const group = pane.locator('[data-kind="group"]').first();
+        await expect(group.getByText('R3 slot', { exact: true })).toBeVisible();
+        await expect(group.locator('button[aria-expanded]').first()).toHaveAttribute('aria-expanded', 'true');
+        await expect(group.locator('.transcript-cell-line')).toContainText('printf R3');
+      } else if (component === 'ToolResult') {
+        // X3 renders a completed one-tool run as a standalone cell, so opening it mounts ToolResult.
+        const cell = pane.locator('[data-kind="cell"] .transcript-cell');
+        await expect(cell.locator('.transcript-cell-line')).toBeVisible();
+        await cell.locator('.transcript-cell-line').click();
+        await expect(cell.locator('[data-surface-row="ToolResult"]')).toHaveCount(1);
+        await expect(cell.locator('[data-engine-native="ToolResult"]')).toContainText('R3 rewritten output');
+      } else {
+        const receipt = pane.locator('[data-kind="question"] .transcript-question');
+        await expect(receipt).toBeVisible();
+        await expect(receipt.locator('[data-question]')).toHaveText('Path→One');
+        await expect(receipt.locator('[data-question]')).toHaveAttribute('title', 'Which path?');
+        await expect(receipt.getByRole('button')).toHaveCount(0);
+      }
+    }, seed);
+  });
+}
+
+test('R3 recorded unhooked UserMessage leaves the original prompt visible', async () => {
+  test.setTimeout(120_000);
+  await surfaceReplay((root) => recordedSurfaceJournal(root, 'mods-surface-transcript-unhooked', { component: 'UserMessage', outcome: 'unhooked', instanceId: 'unhooked:UserMessage' }), async ({ pane }) => {
+    await expect(pane.locator('[data-kind="user"]').getByText('R3 user', { exact: true })).toBeVisible();
+    await expect(pane.locator('[data-plugin-drawn="UserMessage"]')).toHaveCount(0);
+  }, (base) => { const t = transcriptSeed(base); t.user('unhooked:UserMessage', 'R3 user'); return t.finish(); });
+});
+
+test('R3 owner to-human draws the first span, folds the working record, fills the composer and preserves the question receipt', async () => {
+  test.setTimeout(120_000);
+  await surfaceReplay((root) => recordedSurfaceJournal(root, 'mods-surface-transcript-to-human'), async ({ pane, id, page }) => {
+    await unfoldSeedWork(pane);
+    const report = pane.locator('[data-plugin-drawn="AssistantMessage"]').filter({ has: page.getByRole('button', { name: 'working record', exact: true }) });
+    await expect(report.getByText('to human', { exact: false })).toBeVisible();
+    await expect(report.getByText('essential', { exact: true })).toBeVisible();
+    await expect(report.getByText('need input', { exact: true })).toBeVisible();
+    await expect(report.locator('[data-engine-native="AssistantMessage"]')).toContainText('First span.');
+    // Three engine refs, but this installed remote protocol carries only first-span props.
+    await expect(pane.getByText('Second span.', { exact: true })).not.toBeVisible();
+    await expect(pane.getByText('Private follow-up record.', { exact: true })).not.toBeVisible();
+    await expect(pane.getByRole('button', { name: 'working record', exact: true })).toHaveCount(1);
+    const receipt = pane.locator('[data-kind="question"] .transcript-question');
+    await expect(receipt.locator('[data-question]')).toHaveText('Path→One');
+    await expect(receipt.getByRole('button')).toHaveCount(0);
+    const usersBefore = await pane.locator('[data-kind="user"]').count();
+    await report.getByRole('button', { name: /^1: One/ }).click();
+    await expect(pane.locator(`[data-composer="${id}"] [contenteditable="true"]`)).toHaveText('Answering "Which path?": One');
+    expect(value(await invoke(page, 'session.status', { appSessionId: id as never })).turn).toBeNull();
+    expect(await pane.locator('[data-kind="user"]').count()).toBe(usersBefore);
+    await report.getByRole('button', { name: 'working record', exact: true }).click();
+    await expect(pane.getByText('Private follow-up record.', { exact: true })).toBeVisible();
+    await expect(pane.locator('[data-engine-native="AssistantMessage"]').filter({ hasText: 'Private working notes.' })).toContainText('More working notes.');
+    await expect(receipt.locator('[data-question]')).toHaveText('Path→One');
+  }, (base) => {
+    const t = transcriptSeed(base);
+    t.user('owner-user', 'Show the report');
+    t.text('owner-multi', ownerMarkedText);
+    t.text('owner-record', 'Private follow-up record.');
+    t.tool('owner-tool', 'Bash', { command: 'printf R3' }, r3Output);
+    t.tool('owner-question', 'AskUserQuestion', { questions: [r3Question] }, { questions: [r3Question], answers: { 'Which path?': 'One' } });
+    return t.finish();
+  });
+});
+
