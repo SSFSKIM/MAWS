@@ -6,7 +6,7 @@ import { parseTranscriptRecord } from '../../src/shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../src/engine-host/fs/backfill';
 import { applyEvents, createState } from '../../src/renderer/src/transcript/model/reduce';
 import { rowsOf, withAllExpanded } from '../../src/renderer/src/transcript/model/derive';
-import { ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, transcriptSeed } from './r3-surface';
+import { ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, transcriptSeed } from './r3-surface';
 import type { SessionId } from '../../src/shared/graph/ids';
 const root = resolve(__dirname, '../..');
 const base = { repo: '/tmp/maws-r3-seed', engineId: 'r3-seed' };
@@ -41,6 +41,12 @@ describe('R3 e2e recording and disk-seed helpers', () => {
       const original = journal(join(root, 'spikes/protocol-probe/fixtures/pass3', `${fixture}.jsonl`));
       const replay = journal(recordedSurfaceJournal(scratch, fixture));
       expect(replay.map((r) => r.frame)).toEqual(original.map((r) => r.frame));
+      const engineId = recordedSurfaceSessionId(join(scratch, `${fixture}-dom.jsonl`));
+      const pushedIds = new Set(replay.filter((r) => r.direction === 'in' && typeof r.frame.session_id === 'string').map((r) => r.frame.session_id));
+      expect([...pushedIds]).toEqual([engineId]);
+      const seed = transcriptSeed({ ...base, engineId });
+      seed.user('owner-user', 'Show the report');
+      expect(seed.finish().every((record) => record.sessionId === engineId)).toBe(true);
     } finally { rmSync(scratch, { recursive: true, force: true }); }
   });
   it('derives an active tool group, a completed standalone cell, and a native question receipt from the disk seeds', () => {

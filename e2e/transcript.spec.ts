@@ -15,7 +15,7 @@ import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
-import { ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, transcriptSeed } from '../test/support/r3-surface';
+import { ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, transcriptSeed } from '../test/support/r3-surface';
 
 const test = base.extend<{ harness: MawsLaunch }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
@@ -797,7 +797,10 @@ async function surfaceReplay(fixture: string | ((root: string) => string), body:
   mkdirSync(repo);
   const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
   mkdirSync(project, { recursive: true });
-  const engineId = randomUUID();
+  const replayPath = typeof fixture === 'function' ? fixture(root) : `spikes/protocol-probe/fixtures/pass3/${fixture}.jsonl`;
+  // Reconnect to the same engine identity as both the seed and recording. A fresh launch would replace the selected
+  // indexed session with an empty chat and leave this history attached to a different sidebar row.
+  const engineId = seed ? recordedSurfaceSessionId(replayPath.startsWith('/') ? replayPath : join(REPO_ROOT, replayPath)) : randomUUID();
   const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'a session with a mod that draws' }, uuid: randomUUID(), timestamp: '2026-10-02T06:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.287' };
   writeFileSync(join(project, `${engineId}.jsonl`), (seed?.({ repo, engineId }) ?? [first]).map((record) => JSON.stringify(record)).join('\n') + '\n');
   const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
@@ -808,7 +811,7 @@ async function surfaceReplay(fixture: string | ((root: string) => string), body:
     await (await sidebarRow(page, { appSessionId: id })).click();
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
-    await launchReady(page, id, typeof fixture === 'function' ? fixture(root) : `spikes/protocol-probe/fixtures/pass3/${fixture}.jsonl`, { cwd: repo });
+    await launchReady(page, id, replayPath, { cwd: repo, ...(seed ? { resume: { sessionId: engineId as never, fork: false } } : {}) });
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).uiSurface).toEqual({ clientId: 'maws-main' });
     await body({ page, id, pane });
     expect(maws.consoleErrors()).toEqual([]);

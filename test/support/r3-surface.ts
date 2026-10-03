@@ -6,6 +6,13 @@ interface SurfaceJournalRow {
   seq: number; direction: string; at: string;
   frame: { type?: string; request_id?: string; request?: { subtype: string; component?: string; instance_id?: string }; response?: { request_id: string }; [key: string]: unknown };
 }
+export function recordedSurfaceSessionId(path: string): string {
+  const rows = readFileSync(path, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as SurfaceJournalRow);
+  const id = rows.find((row) => row.frame.event === 'provenance')?.frame.pinnedSessionId;
+  if (typeof id !== 'string' || !id) throw new Error(`Missing pinned session id in ${path}`);
+  return id;
+}
+
 export function recordedSurfaceJournal(root: string, fixture: string, selected?: { component: string; outcome: string; instanceId: string }): string {
   const rows = readFileSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/pass3', `${fixture}.jsonl`), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as SurfaceJournalRow);
   const renderIds = new Set(rows.filter((r) => r.direction === 'out' && r.frame.request?.subtype === 'ui_render').map((r) => r.frame.request_id));
