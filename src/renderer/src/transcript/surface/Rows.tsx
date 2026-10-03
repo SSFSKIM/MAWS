@@ -1,6 +1,7 @@
 // R3's mounts change row bodies, never the transcript's turn/work-area structure. Virtual rows own these mounts;
 // folded or virtualized-away rows therefore issue no asks. Child transcripts are not their parent's engine surface.
 import { useCallback, useEffect, useMemo } from 'react';
+import { stripAnsi } from '@shared/wire/ansi';
 import { nativeQuestionsOf, parseTranscriptProps, type TranscriptProps } from '@shared/engine/surface-rows';
 import { SurfaceRow } from '../../engine-surface/SurfaceRow';
 import { useSurfaceAttached, useSurfaceSite } from '../../engine-surface/site';
@@ -57,7 +58,7 @@ export function SurfaceAssistantRow({ row }: { row: Extract<Row, { kind: 'assist
   const { appSessionId, input, ink } = useAssistantPresentation(row);
   if (!input) return <AssistantTextRow row={row} />;
   return <SurfaceRow appSessionId={appSessionId} component="AssistantMessage" {...input} placeholder={<AssistantTextRow row={row} text="…" />}>
-    {(props) => <AssistantTextRow row={{ ...row, forHuman: ink }} text={props.text} />}
+    {(props) => <AssistantTextRow row={{ ...row, forHuman: ink }} text={stripAnsi(props.text)} />}
   </SurfaceRow>;
 }
 

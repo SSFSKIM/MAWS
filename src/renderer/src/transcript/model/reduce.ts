@@ -18,6 +18,7 @@ export interface LiveBlock {
   blockIndex: number;
   blockType: 'text' | 'thinking' | 'tool_use';
   buffer: string;
+  sourceText?: string; // assistant text as delivered, before native ANSI stripping; mod render input
   rowId: RowId;
   completed: boolean;
   // Additive to the X3 definition: how derive.ts places the row and fills its static fields once the block completes.
@@ -521,11 +522,11 @@ function apply(batch: Batch, event: SessionEvent): void {
       const identity = blockIdentityOf(apiMessageId, event.blockIndex);
       const entry = turn.live.get(identity);
       if (entry) {
-        if (!entry.completed) turn.live.set(identity, { ...entry, buffer: type === 'tool_use' ? entry.buffer + piece : appendStripped(entry.buffer, piece) });
+        if (!entry.completed) turn.live.set(identity, { ...entry, buffer: type === 'tool_use' ? entry.buffer + piece : appendStripped(entry.buffer, piece), ...(type === 'text' && { sourceText: (entry.sourceText ?? '') + piece }) });
         return;
       }
       turn.live.set(identity, {
-        apiMessageId, blockIndex: event.blockIndex, blockType: type, buffer: type === 'tool_use' ? piece : appendStripped('', piece), rowId: liveRowId(type, apiMessageId, event.blockIndex), completed: false,
+        apiMessageId, blockIndex: event.blockIndex, blockType: type, buffer: type === 'tool_use' ? piece : appendStripped('', piece), ...(type === 'text' && { sourceText: piece }), rowId: liveRowId(type, apiMessageId, event.blockIndex), completed: false,
         markerEventId: type === 'tool_use' ? null : event.id, completeEventId: null, completedAt: null, messageUuid: null, model: null,
       });
       if (type !== 'tool_use') batch.push(turn, event); // the row appears now: a structural change
@@ -711,14 +712,14 @@ function completeBlock(turn: TurnState, event: Event<'assistant.block.complete'>
   }
   if (entry) {
     const key = blockIdentityOf(entry.apiMessageId!, entry.blockIndex);
-    turn.live.set(key, { ...entry, buffer: type === 'tool_use' ? entry.buffer : blockContent(event.block), completed: true, completeEventId: event.id, completedAt: event.at, messageUuid: event.messageUuid, model: event.model });
+    turn.live.set(key, { ...entry, buffer: type === 'tool_use' ? entry.buffer : blockContent(event.block), ...(type === 'text' && { sourceText: String(event.block.text ?? '') }), completed: true, completeEventId: event.id, completedAt: event.at, messageUuid: event.messageUuid, model: event.model });
     return;
   }
   if (type === 'tool_use') return;
   let blockIndex = event.blockIndex;
   while (turn.live.has(blockIdentityOf(event.apiMessageId, blockIndex))) blockIndex += 1;
   turn.live.set(blockIdentityOf(event.apiMessageId, blockIndex), {
-    apiMessageId: event.apiMessageId, blockIndex, blockType: type, buffer: blockContent(event.block), rowId: liveRowId(type, event.apiMessageId, blockIndex),
+    apiMessageId: event.apiMessageId, blockIndex, blockType: type, buffer: blockContent(event.block), ...(type === 'text' && { sourceText: String(event.block.text ?? '') }), rowId: liveRowId(type, event.apiMessageId, blockIndex),
     completed: true, markerEventId: null, completeEventId: event.id, completedAt: event.at, messageUuid: event.messageUuid, model: event.model,
   });
 }

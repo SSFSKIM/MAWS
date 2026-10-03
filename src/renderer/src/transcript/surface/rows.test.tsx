@@ -37,6 +37,15 @@ describe('mounted transcript surface integration', () => {
     view.unmount();
   });
 
+  it('sends display headers to the mod but keeps ANSI out of the unhooked native drawing', async () => {
+    const text = '\u001b[1;36mto human\u001b[0m\nHello';
+    const b = builder(); b.turn('u'); b.text('a', 0, text);
+    const store = await mounted(b); const view = renderRow(rowOf(store.rows(), 'assistant_text'), { storeKey: store.key });
+    expect(asks()[0].props.text).toBe(text);
+    await act(() => fake.reply('session.ui.render', { ...answer(asks()[0].props), hooked: false }));
+    expect(view.container.textContent).toBe('to human\nHello');
+  });
+
   it('keeps the group count line when its mod draws nothing; an expansion rewrite mounts member ToolUse sites', async () => {
     const b = builder(); b.turn('u'); b.toolUse('t1', 'Bash', { command: 'first' }); b.result('t1', 'ok'); b.toolUse('t2', 'Bash', { command: 'second' });
     const store = await mounted(b); const row = rowOf(store.rows(), 'group');
