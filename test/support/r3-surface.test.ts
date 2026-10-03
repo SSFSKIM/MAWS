@@ -6,7 +6,7 @@ import { parseTranscriptRecord } from '../../src/shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../src/engine-host/fs/backfill';
 import { applyEvents, createState } from '../../src/renderer/src/transcript/model/reduce';
 import { rowsOf, withAllExpanded } from '../../src/renderer/src/transcript/model/derive';
-import { ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, transcriptSeed } from '../../e2e/support/r3-surface';
+import { ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, transcriptSeed } from './r3-surface';
 import type { SessionId } from '../../src/shared/graph/ids';
 const root = resolve(__dirname, '../..');
 const base = { repo: '/tmp/maws-r3-seed', engineId: 'r3-seed' };

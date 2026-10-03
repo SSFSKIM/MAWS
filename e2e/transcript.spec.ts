@@ -15,7 +15,7 @@ import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
-import { ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, transcriptSeed } from './support/r3-surface';
+import { ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, transcriptSeed } from '../test/support/r3-surface';
 
 const test = base.extend<{ harness: MawsLaunch }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
