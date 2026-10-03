@@ -10,7 +10,11 @@ export const TOAST_DURATION_MS = 6000;
 
 export function ToastHost() {
   const toasts = useNotices(useShallow((s) => s.notices.filter((n) => n.kind === 'toast')));
+  const held = useNotices((s) => s.toastHolds > 0);
   const dismiss = (id: string) => useNotices.getState().dismiss(id);
+  // A pane's hold keeps notices in the store without mounting their timeout. When released,
+  // each toast gets its full readable duration; persistent banners are a separate host.
+  if (held) return null;
   return (
     <Toast.Provider duration={TOAST_DURATION_MS} swipeDirection="right">
       {toasts.map((notice) => (

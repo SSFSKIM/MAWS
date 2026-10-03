@@ -4,9 +4,11 @@
 // panes under "Plugin panes". Showing a tab tells the engine which pane the surface shows (`session.ui.paneShow`); the
 // keyboard moving into its body or out of it says so (`session.ui.paneFocus`); the person's close asks the engine
 // (`session.ui.close`), which a plugin may refuse, and a pane the engine closed closes its tab without asking.
-import { useEffect, useRef, type FocusEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, type FocusEvent, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { Icon } from '../app/IconButton';
+import { useComposerStore } from '../stores/composer';
+import { useNotices } from '../stores/notices';
 import type { PanelTool, PanelToolContext } from '../panel/tool';
 import { panesClient, usePaneRoster } from './pane-roster';
 import { useCells } from './cells';
@@ -57,6 +59,11 @@ function PaneBody({ state, ctx }: { state: PluginPaneState; ctx: PanelToolContex
   const client = panesClient();
   const { appSessionId, paneId } = state;
 
+  // R3: only a visible dialog-like pane holds transient notices (PaneOpenArgs.holdToasts).
+  useLayoutEffect(() => {
+    if (ctx.visible && pane?.holdToasts) return useNotices.getState().holdToasts();
+  }, [ctx.visible, pane?.holdToasts]);
+
   // a restored tab names no pane: it goes as soon as it is seen
   useEffect(() => {
     if (paneId !== null) return;
@@ -91,9 +98,19 @@ function PaneBody({ state, ctx }: { state: PluginPaneState; ctx: PanelToolContex
     void client.invoke('session.ui.paneFocus', { appSessionId, id: null });
   };
 
+  // Desktop's pane Escape rule: an opted-in pane takes the normal vetoable close path;
+  // otherwise hand the keys back to the composer (or its docked request). Children get first refusal.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (pane?.closeOnEscape) ctx.close();
+    else if (appSessionId !== null) useComposerStore.getState().focusTargets.get(appSessionId)?.focusFrame();
+  };
+
   if (pane === null) return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{PANE_COPY.closed}</p>;
   return (
-    <div ref={ref} tabIndex={-1} data-plugin-pane={pane.id} className="flex h-full min-h-0 flex-col outline-none" onFocus={onFocus} onBlur={onBlur}>
+    <div ref={ref} tabIndex={-1} data-plugin-pane={pane.id} className="flex h-full min-h-0 flex-col outline-none" onFocus={onFocus} onBlur={onBlur} onKeyDown={onKeyDown}>
       <SurfaceSite
         appSessionId={appSessionId}
         component="Pane"
