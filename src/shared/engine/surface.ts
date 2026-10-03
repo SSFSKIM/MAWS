@@ -6,6 +6,7 @@
 // the renderer validates them node by node, as Claude Desktop does, so one malformed node draws nothing and never
 // fails the whole answer.
 import * as z from 'zod';
+import { TRANSCRIPT_SITES } from './surface-rows';
 
 // MAWS has one window (`window.main`); the host attaches for it before any window asks, so the client is named for it.
 export const SURFACE_CLIENT_ID = 'maws-main';
@@ -19,8 +20,8 @@ export const DEFAULT_SURFACE_VIEWPORT = { columns: 100, rows: 30, isFullscreen: 
 export const SurfaceViewportSchema = z.strictObject({ columns: z.number().int().positive(), rows: z.number().int().positive(), isFullscreen: z.boolean().optional() });
 export type SurfaceViewport = z.infer<typeof SurfaceViewportSchema>;
 
-// The render sites R2 draws (transcript sites are R3's).
-export const SURFACE_SITES = ['AbovePrompt', 'SessionMode', 'PromptHint', 'Spinner', 'Pane'] as const;
+// R2's shell sites and R3's seven transcript sites (waves plan §2 K2).
+export const SURFACE_SITES = ['AbovePrompt', 'SessionMode', 'PromptHint', 'Spinner', 'Pane', ...TRANSCRIPT_SITES] as const;
 export type SurfaceSite = (typeof SURFACE_SITES)[number];
 // The two sites that scroll and hold the keyboard.
 export const ScrollSiteSchema = z.enum(['Pane', 'AbovePrompt']);
