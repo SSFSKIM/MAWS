@@ -1,5 +1,6 @@
-// R3's mounts change row bodies, never the transcript's turn/work-area structure. Virtual rows own these mounts;
-// folded or virtualized-away rows therefore issue no asks. Child transcripts are not their parent's engine surface.
+// R3's mounts adapt row bodies without changing history. The sitting's assistant-only probes may promote a drawn
+// row out of the work fold; virtualized-away dividers and folded tool/group rows issue no asks. Child transcripts
+// are not their parent's engine surface.
 import { useCallback, useEffect, useMemo } from 'react';
 import { stripAnsi } from '@shared/wire/ansi';
 import { nativeQuestionsOf, parseTranscriptProps, type TranscriptProps } from '@shared/engine/surface-rows';
