@@ -3,6 +3,7 @@
 // are not their parent's engine surface.
 import { useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { create } from 'zustand';
+import type { AppSessionId } from '@shared/graph/ids';
 import { stripAnsi } from '@shared/wire/ansi';
 import { nativeQuestionsOf, parseTranscriptProps, type TranscriptProps } from '@shared/engine/surface-rows';
 import { SurfaceRow } from '../../engine-surface/SurfaceRow';
@@ -45,7 +46,9 @@ function retainAssistantDrawing(key: string) {
 }
 
 function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
-  const { appSessionId, turn, storeKey } = useTranscriptSurface(row);
+  const { storeKey, variant } = useTranscriptContext();
+  const appSessionId = variant === 'session' && storeKey ? storeKey as AppSessionId : null;
+  const turn = useTranscriptStore((s) => row.turnId === null ? undefined : s.entries[storeKey]?.state.turns.get(row.turnId));
   const live = useTranscriptStore((s) => liveBuffer(s.entries[storeKey], row));
   const input = assistantInput({ ...row, markdown: live ?? row.markdown }, turn);
   const reportInk = useCallback((ink: boolean) => {
@@ -58,7 +61,7 @@ function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
 // the fold; tool/group sites still wait for expansion. Shared registry addresses mean one ask per text block.
 export function FoldedAssistantProbes({ row }: { row: Extract<Row, { kind: 'divider' }> }) {
   const { storeKey, variant } = useTranscriptContext();
-  const attached = useSurfaceAttached(variant === 'session' ? storeKey as Parameters<typeof useSurfaceAttached>[0] : null);
+  const attached = useSurfaceAttached(variant === 'session' && storeKey ? storeKey as AppSessionId : null);
   const ownRows = useTranscriptStore((s) => {
     const state = s.entries[storeKey]?.state;
     return attached && !row.expanded && state && row.turnId !== null ? turnRows(state, row.turnId) : undefined;
