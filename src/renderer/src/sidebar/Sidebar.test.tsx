@@ -169,6 +169,62 @@ describe('Needs you across projects', () => {
     expect(document.activeElement).toBe(buttons()[1]);
   });
 
+  it('keeps keyboard focus in the sidebar when a focused waiting session retires', () => {
+    fillStores(nine);
+    render(<Sidebar />);
+    act(() => buttons()[0].focus());
+    act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Fix sidebar drag'), items: [] }));
+    expect(document.activeElement).toBe(buttons()[0]);
+    act(() => {
+      for (const entry of nine.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
+    });
+    expect(document.activeElement).toBe(screen.getByRole('searchbox'));
+  });
+
+  it.each([
+    ['Sidebar interaction pass', 'Quota reset recovery'],
+    ['Quota reset recovery', 'Sidebar interaction pass'],
+  ])('focuses the neighbour of a retiring %s row', (retired, neighbour) => {
+    fillStores(nine);
+    render(<Sidebar />);
+    act(() => buttons().find((b) => b.dataset.needsYou === idOf(retired))!.focus());
+    act(() => useAttention.getState().applyChanged({ appSessionId: idOf(retired), items: [] }));
+    const survivor = buttons().find((b) => b.dataset.needsYou === idOf(neighbour))!;
+    expect(document.activeElement).toBe(survivor);
+    expect(survivor.tabIndex).toBe(0);
+    expect(buttons().filter((b) => b.tabIndex === 0)).toHaveLength(1);
+  });
+
+  it('keeps a surviving row focused through reordering and uses its new neighbour when it retires', () => {
+    fillStores(nine);
+    render(<Sidebar />);
+    const id = idOf('Fix sidebar drag');
+    const focused = buttons()[0];
+    act(() => focused.focus());
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [item(id, 'interrupted', '2026-10-03T10:00:00Z')] }));
+    expect(document.activeElement).toBe(focused);
+    expect(buttons().at(-1)).toBe(focused);
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [] }));
+    expect(document.activeElement).toBe(buttons().at(-1));
+  });
+
+  it.each(['session pane', 'search', 'project tree', 'sort control'])('does not reclaim focus from the %s when waiting rows retire', (place) => {
+    fillStores(nine);
+    render(<><Sidebar /><textarea aria-label="Session prompt" /></>);
+    act(() => buttons()[0].focus());
+    const target = place === 'session pane' ? screen.getByRole('textbox', { name: 'Session prompt' })
+      : place === 'search' ? screen.getByRole('searchbox')
+      : place === 'project tree' ? row('MAWS')
+      : screen.getByRole('button', { name: 'Sort sessions' });
+    act(() => target.focus());
+    act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Fix sidebar drag'), items: [] }));
+    expect(document.activeElement).toBe(target);
+    act(() => {
+      for (const entry of nine.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
+    });
+    expect(document.activeElement).toBe(target);
+  });
+
   it('updates reasons and ordering from attention, omits archived sessions, and disappears when empty', () => {
     fillStores(nine);
     render(<Sidebar />);

@@ -78,6 +78,7 @@ function SidebarBody() {
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const scroller = useRef<HTMLDivElement>(null);
+  const search = useRef<HTMLDivElement>(null);
 
   const byId = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const hidden = useMemo(() => new Set(hiddenProjects.map((p) => p.id)), [hiddenProjects]);
@@ -217,7 +218,7 @@ function SidebarBody() {
 
   return (
     <TreeContext.Provider value={tree}>
-      <div className="px-2.5 pt-1">
+      <div ref={search} className="px-2.5 pt-1">
         <Search value={query} onChange={setQuery} label="Search projects and sessions" onLeave={() => {
           const waiting = scroller.current?.querySelector<HTMLButtonElement>('[data-needs-you][tabindex="0"]');
           if (waiting) waiting.focus();
@@ -236,7 +237,7 @@ function SidebarBody() {
             }}
             className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
           >
-            <NeedsYou rows={rows} selected={selected} />
+            <NeedsYou rows={rows} selected={selected} onEmptyFocus={() => search.current?.querySelector('input')?.focus()} />
             <SectionHeading title="Projects">
               <SortMenu sort={sidebar.sort} />
               {projects.length > 0 && <AddProjectButton />}
