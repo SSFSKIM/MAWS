@@ -1,0 +1,225 @@
+{
+ "verdict": "incorrect",
+ "findings": [
+  {
+   "id": "scalpel-1#1",
+   "priority": "P2",
+   "title": "Apply the element returned by the focus round trip",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/actions.ts",
+   "lines": "38-39",
+   "comment": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/actions.ts discards successful session.ui.focus answers. The host forwards the engine's resolved element and denial, but ScrollingSite never applies either. When a ui.focus hook redirects a click or Tab move to another drawn element, DOM focus remains on the original target while the engine records the redirected target. The installed engine schema explicitly describes the returned element as the redirect the surface should focus.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#2",
+   "priority": "P2",
+   "title": "Report keyed element geometry for plugin scroll targets",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceSite.tsx",
+   "lines": "90-96",
+   "comment": "Neither geometry reports in /tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceSite.tsx nor render requests in /tmp/maws-review/mods2/src/renderer/src/engine-surface/registry.ts send keyed bounds. The IPC and host forwarding already support them. The installed 2.1.287 ui_render schema explicitly says $.ui.scroll({to:{key}}) is denied without this report. Thus a valid mod cannot scroll its Pane or AbovePrompt to a keyed element, even after layout.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#4",
+   "priority": "P2",
+   "title": "Honor autofocus when a plugin site takes the keyboard",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceTree.tsx",
+   "lines": "173-181",
+   "comment": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/tree.ts preserves autoFocus, but /tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceTree.tsx never consumes it and no site-level autofocus selection exists. A focus-requested pane focuses its outer body instead of the designated input/button/select. The engine's RenderElement contract says the first autofocus element starts the ring when the site takes the keyboard; MAWS also has no path reporting that move with by:'auto'.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#5",
+   "priority": "P2",
+   "title": "Avoid echoing plugin focus pushes as person gestures",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceSite.tsx",
+   "lines": "113-116",
+   "comment": "In /tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceSite.tsx, a plugin.focus push calls focus() without suppressing the bubbling onFocus handler. When the push moves focus to a different drawn element, that handler sends another session.ui.focus request with by:'person'. The same plugin-originated move is therefore re-run through the hook chain as a person gesture, allowing duplicate side effects or a second veto/redirect.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#6",
+   "priority": "P2",
+   "title": "Apply scroll answers from layout reports too",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceSite.tsx",
+   "lines": "94-96",
+   "comment": "The ResizeObserver path in /tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceSite.tsx sends a zero-distance scroll/layout report and discards its promise result. The ordinary scroll path applies returned offset and followEnd with generation checks, so the omission is specific to layout reports. A hook rewriting the accepted offset during a redraw/resize leaves MAWS displaying the old offset; a returned followed-end state is likewise lost. Person/report requests are answered rather than corrected by plugin.scroll pushes.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-1#7",
+   "priority": "P2",
+   "title": "Supply a measured viewport to production render sites",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/registry.ts",
+   "lines": "76-78",
+   "comment": "/tmp/maws-review/mods2/src/engine-host/surface.ts attaches with the documented placeholder 100\u00d730 viewport. Production callers never pass the optional measured viewport to /tmp/maws-review/mods2/src/renderer/src/engine-surface/registry.ts. PluginBand and PaneTool use useCells only for bodyColumns/bodyRows props, and transcript sites do not report the render envelope at all. A mod drawing from e.viewport therefore cannot size or reflow correctly when the session surface or split pane changes size.",
+   "sources": [
+    "scalpel-1"
+   ]
+  },
+  {
+   "id": "scalpel-2#1",
+   "priority": "P2",
+   "title": "Compute the longest backtick run without spreading every match",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceTree.tsx",
+   "lines": "251-253",
+   "comment": "Reproduced using the actual parser and fenced helper from /tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceTree.tsx: source='`a'.repeat(130000) is accepted by parseTree, but spreading its 130000 backtick matches into Math.max throws RangeError: Maximum call stack size exceeded. CodeNode calls this during rendering, and no renderer error boundary contains it. An accepted mod drawing can therefore fail the application render instead of using native fallback.",
+   "sources": [
+    "scalpel-2",
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-2#2",
+   "priority": "P2",
+   "title": "Normalize SVG source before URI-encoding it",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceTree.tsx",
+   "lines": "291",
+   "comment": "Reproduced with the actual tree parser: an Svg source containing an unpaired surrogate inside a text element is accepted, but the encodeURIComponent call used in /tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceTree.tsx throws URIError: URI malformed. JSON transport preserves this string. With no renderer error boundary, a mod that truncates a surrogate pair can fail the application render rather than produce an image or fallback.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-2#3",
+   "priority": "P2",
+   "title": "Align surface field values with the IPC length limit",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceTree.tsx",
+   "lines": "189-196",
+   "comment": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceTree.tsx accepts unrestricted Input edits and locally displays them before sending. /tmp/maws-review/mods2/src/shared/ipc/schema/session.ts rejects input and select values exceeding 16384 characters, while tree.ts permits larger initial values and option values within its overall tree budget. Pasting a longer value therefore makes the field appear updated while change and submit are rejected; selecting a longer valid tree option likewise never reaches the plugin.",
+   "sources": [
+    "scalpel-2"
+   ]
+  },
+  {
+   "id": "scalpel-3#1",
+   "priority": "P2",
+   "title": "Select newly shown panes without inventing a focus request",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/panes.ts",
+   "lines": "64",
+   "comment": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/panes.ts activates a newly added pane when it is shown, independently of focusRequestedId. panelHost.addTool then invokes activateIn/requestFocus, and /tmp/maws-review/mods2/src/renderer/src/engine-surface/PaneTool.tsx focuses the pane body. A roster with shownId set but focusedId and focusRequestedId null therefore steals composer focus. This also contradicts the existing-pane passive selection path and the charter's ruling that roster-driven selection does not take focus.",
+   "sources": [
+    "scalpel-3",
+    "sweep"
+   ]
+  },
+  {
+   "id": "scalpel-3#2",
+   "priority": "P2",
+   "title": "Clear pre-ready pane rosters when initialization ends",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/panes.ts",
+   "lines": "132-136",
+   "comment": "In /tmp/maws-review/mods2/src/renderer/src/engine-surface/panes.ts, plugin.panes events immediately install rosters without requiring readiness, but follow() clears only sessions previously added to its ready/attached set. /tmp/maws-review/mods2/src/engine-host/session.ts awaits surface.attach, including its roster read, before completing initialization. If that roster arrives and initialization then fails or is stopped, the session never enters the set; its exited status leaves the roster and newly created plugin-pane tabs behind.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-3#3",
+   "priority": "P2",
+   "title": "Invalidate pending attaches when the session ends",
+   "file": "/tmp/maws-review/mods2/src/engine-host/surface.ts",
+   "lines": "70-73",
+   "comment": "Reproduced against /tmp/maws-review/mods2/src/engine-host/surface.ts with a deferred ui_attach response: resolving the response and calling processExited before its continuation runs leaves attached===true and sends ui_panes afterward. Calling detach while attaching has the same result, with no ui_detach sent. Neither lifecycle path invalidates the pending continuation, so attachment can be republished after exit or completed after shutdown has passed its detach step.",
+   "sources": [
+    "scalpel-3"
+   ]
+  },
+  {
+   "id": "scalpel-4#1",
+   "priority": "P2",
+   "title": "Release withheld rows when their render request fails",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/engine-surface/registry.ts",
+   "lines": "88-90",
+   "comment": "Verified against /tmp/maws-review/mods2/src/renderer/src/engine-surface/registry.ts: a failed first render for a new known-hooked instance leaves the component hooked flag true and no stored answer, after the request has finished. /tmp/maws-review/mods2/src/renderer/src/engine-surface/SurfaceRow.tsx treats that combination as pending, keeps native content concealed/inert, and only replaces it with an ellipsis after five seconds. A timeout can indefinitely hide an assistant answer or question card until some unrelated re-ask occurs.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-4#2",
+   "priority": "P2",
+   "title": "Keep folded probe derivation independent of unrelated token batches",
+   "file": "/tmp/maws-review/mods2/src/renderer/src/transcript/surface/Rows.tsx",
+   "lines": "59-60",
+   "comment": "/tmp/maws-review/mods2/src/renderer/src/transcript/surface/Rows.tsx subscribes FoldedAssistantProbes to the entire TranscriptState and includes state in its derivation memo dependencies. Each applyEvents batch creates a new state even when that historical turn is unchanged. expandedTurnRows explicitly bypasses the per-turn memo in /tmp/maws-review/mods2/src/renderer/src/transcript/model/derive.ts, so streaming the latest turn repeatedly re-derives every mounted folded historical turn, including when detached. Virtualization bounds the number of dividers, not the cost of large turns behind them.",
+   "sources": [
+    "scalpel-4"
+   ]
+  },
+  {
+   "id": "scalpel-5#1",
+   "priority": "P2",
+   "title": "Validate action payloads before accepting replayed effects",
+   "file": "/tmp/maws-review/mods2/e2e/transcript.spec.ts",
+   "lines": "859-863",
+   "comment": "Reproduced using /tmp/maws-review/mods2/src/engine-host/replay-transport.ts and the mods-surface-invalidate fixture: a ui_press carrying plugin:'wrong-plugin', handle:999 and key:'nonexistent' still releases MODS_PROBE_PRESS 1, invalidate, and handled:true. Although subtype-only matching predates this change, the newly added acceptance test in /tmp/maws-review/mods2/e2e/transcript.spec.ts asserts only those replayed effects and never checks the outgoing payload. It therefore passes with broken button attribution/addressing instead of proving the button reaches the intended mod.",
+   "sources": [
+    "scalpel-5"
+   ]
+  }
+ ],
+ "coverage": [
+  {
+   "finder": "sweep",
+   "lens": null,
+   "status": "ok",
+   "candidates": 1
+  },
+  {
+   "finder": "scalpel-1",
+   "lens": "Protocol fidelity: every ui_* request MAWS sends and every answer it reads must match the engine's contract and the recorded fixtures (request and answer shapes, instance ids, props per site, viewport, invalidate and hooked semantics, refusals, the one-props answer with the first engine node). Compare the code against spikes/protocol-probe/fixtures/pass3/mods-*.jsonl and the d.ts anchors the comments cite.",
+   "status": "ok",
+   "candidates": 7
+  },
+  {
+   "finder": "scalpel-2",
+   "lens": "Renderer safety: a mod's plain-data tree must never inject markup, scripts, unsafe links or unbounded SVG into the window, and presses, inputs, prompt fills, selections and clipboard writes must be bounded and attributable to one plugin. Client surface modules must fall back to MAWS's own drawing without executing code.",
+   "status": "ok",
+   "candidates": 3
+  },
+  {
+   "finder": "scalpel-3",
+   "lens": "Lifecycle and races: attach and detach per session, answers across session end, resume and engine restart, invalidate generations and stale answers, mount and unmount of sites, the fold promotion of assistant rows, the pointer gesture hold, the withheld timer and request expiry. Look for leaks, double asks, and answers applied to the wrong instance or session.",
+   "status": "ok",
+   "candidates": 3
+  },
+  {
+   "finder": "scalpel-4",
+   "lens": "Transcript integration: the adapters build each site's props from MAWS's rows (ANSI display headers preserved, block instance ids, the ToolGroup budget and order, ToolResult provenance, AskUserQuestion rewrites validated against what the native card can draw), hidden rows and group counts behave as ruled, and MAWS's own turns, folds and answer-first placement stay intact.",
+   "status": "ok",
+   "candidates": 3
+  },
+  {
+   "finder": "scalpel-5",
+   "lens": "Tests and fixtures honesty: fixtures carry provenance and reflect the real engine, the e2e replay sends what the engine would send, assertions test behaviour rather than restate the edit, and the conformance allowlist is empty. Find tests that would still pass with the feature broken.",
+   "status": "ok",
+   "candidates": 1
+  }
+ ],
+ "lenses": [
+  "Protocol fidelity: every ui_* request MAWS sends and every answer it reads must match the engine's contract and the recorded fixtures (request and answer shapes, instance ids, props per site, viewport, invalidate and hooked semantics, refusals, the one-props answer with the first engine node). Compare the code against spikes/protocol-probe/fixtures/pass3/mods-*.jsonl and the d.ts anchors the comments cite.",
+  "Renderer safety: a mod's plain-data tree must never inject markup, scripts, unsafe links or unbounded SVG into the window, and presses, inputs, prompt fills, selections and clipboard writes must be bounded and attributable to one plugin. Client surface modules must fall back to MAWS's own drawing without executing code.",
+  "Lifecycle and races: attach and detach per session, answers across session end, resume and engine restart, invalidate generations and stale answers, mount and unmount of sites, the fold promotion of assistant rows, the pointer gesture hold, the withheld timer and request expiry. Look for leaks, double asks, and answers applied to the wrong instance or session.",
+  "Transcript integration: the adapters build each site's props from MAWS's rows (ANSI display headers preserved, block instance ids, the ToolGroup budget and order, ToolResult provenance, AskUserQuestion rewrites validated against what the native card can draw), hidden rows and group counts behave as ruled, and MAWS's own turns, folds and answer-first placement stay intact.",
+  "Tests and fixtures honesty: fixtures carry provenance and reflect the real engine, the e2e replay sends what the engine would send, assertions test behaviour rather than restate the edit, and the conformance allowlist is empty. Find tests that would still pass with the feature broken."
+ ],
+ "explanation": "confirmed: Apply the element returned by the focus round trip; Report keyed element geometry for plugin scroll targets; Honor autofocus when a plugin site takes the keyboard",
+ "target": {
+  "base": "base",
+  "baseCommit": "f4eba61ff29e5249008013ee6132b70517bdd2f0",
+  "headCommit": "90e4978b6373a287b35edf940a325cd9f38535b1",
+  "repo": "/tmp/maws-review/mods2"
+ },
+ "level": "xhigh"
+}

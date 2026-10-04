@@ -1,0 +1,3 @@
+panel (xhigh: finders sol/high, verifier sol/high): sweep + 5 scalpel(s) against base @ f4eba61ff2 (HEAD 90e4978b63)
+pool: 18 candidate(s) from 6/6 lanes
+panel verdict: incorrect — confirmed: Apply the element returned by the focus round trip; Report keyed element geometry for plugin scroll targets; Honor autofocus when a plugin site takes the keyboard
