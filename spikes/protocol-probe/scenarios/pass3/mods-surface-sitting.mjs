@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { CLIENT, VIEWPORT, ANSWERS, render, ask } from './mods-surface-common.mjs';
 import { initPayload, success } from './mods-common.mjs';
+import { clearEngineEnvironment } from './mods-environment.mjs';
 
 export default async function sitting({ bin = realpathSync('/Users/new/.local/bin/claude'), name = 'mods-surface-sitting', headers = false } = {}) {
   const sessionId = '6c90fab1-575c-4e47-a232-8a8df83076ec';
@@ -42,7 +43,7 @@ export default async function sitting({ bin = realpathSync('/Users/new/.local/bi
     });
   }
   const seed = records;
-  for (const key of Object.keys(process.env)) if (!['PATH','HOME','USER','LOGNAME','SHELL','TMPDIR','LANG'].includes(key) && !key.startsWith('LC_')) delete process.env[key];
+  clearEngineEnvironment();
   let p;
   try {
     p = new Probe(name, { cwd, bin, dir: 'fixtures/pass3/', noModel: true, settingSources: 'user', env: { CLAUDE_CONFIG_DIR: home, DISABLE_AUTOUPDATER: '1', ANTHROPIC_BASE_URL: 'http://127.0.0.1:9', ANTHROPIC_AUTH_TOKEN: 'control-only-no-credential', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' }, flags: ['--resume', sessionId, '--plugin-dir', plugin, '--replay-user-messages', '--include-hook-events', '--settings', '{"dialogExpiry":"never"}'] });

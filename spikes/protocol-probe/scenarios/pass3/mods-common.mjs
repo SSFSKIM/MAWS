@@ -21,6 +21,7 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,realp
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
+import {clearEngineEnvironment} from './mods-environment.mjs';
 export {delay,randomUUID,join,existsSync,writeFileSync,mkdirSync};
 
 export const BIN='/Users/new/.local/share/claude/versions/2.1.287';
@@ -77,10 +78,9 @@ export function scratchRun(label,{settings={},globalConfig={},mod=true}={}){
 }
 export const removeRun=run=>rmSync(run.root,{recursive:true,force:true});
 
-const BASE_KEYS=['PATH','HOME','USER','LOGNAME','SHELL','TMPDIR','LANG'];
 // Clears this process's environment to the base keys (the harness copies process.env), then builds MAWS's.
 function engineEnv(home,vars){
- for(const k of Object.keys(process.env))if(!BASE_KEYS.includes(k)&&!k.startsWith('LC_'))delete process.env[k];
+ clearEngineEnvironment();
  return {CLAUDE_CONFIG_DIR:home,...RELAY_ENV,ENABLE_TOOL_SEARCH:'true',CLAUDE_CODE_FORK_SUBAGENT:'true',CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING:'1',CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS:'1',TERM:'dumb',DISABLE_AUTOUPDATER:'1',...vars};
 }
 
