@@ -156,15 +156,15 @@ it.each([false, true])('does not derive large folded history during live token b
     b.text(`answer-${turn}`, 0, 'Answer'); b.end([`old-${turn}`]);
   }
   b.turn('live');
-  b.emit('assistant.block.delta', { apiMessageId: api('live'), blockIndex: 0, delta: { type: 'text_delta', text: 'start' } });
+  b.emit('assistant.block.delta', { apiMessageId: api('live'), blockIndex: 0, blockType: 'text', textDelta: 'start', thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
   const store = await storeWith(b.events.slice()); const id = store.key as AppSessionId;
   const fake = fakeClient(); window.maws = fake.client;
-  useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: attached ? { clientId: 'maws-main' } : null }]]) });
+  useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: attached ? { clientId: 'maws-main' } : undefined }]]) });
   const view = render(<Transcript storeKey={store.key} />);
   const before = turnDerivations.count;
   const start = performance.now();
   for (let n = 0; n < 40; n++) {
-    const event = b.emit('assistant.block.delta', { apiMessageId: api('live'), blockIndex: 0, delta: { type: 'text_delta', text: ' next' } });
+    const event = b.emit('assistant.block.delta', { apiMessageId: api('live'), blockIndex: 0, blockType: 'text', textDelta: ' next', thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
     act(() => store.push([event]));
   }
   const derivations = turnDerivations.count - before;
