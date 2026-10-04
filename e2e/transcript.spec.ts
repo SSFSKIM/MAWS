@@ -319,6 +319,34 @@ test('a group’s height moves through its disclosure rather than jumping, and t
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+test('M2 commentary uses answer typography in both themes and still folds with the work', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await loadAll(page, 'transcript/edit-and-receipt');
+  const divider = page.locator('[data-kind="divider"] button[aria-expanded]').first();
+  const commentary = page.locator('.transcript-commentary');
+  await expect(divider).toHaveAttribute('aria-expanded', 'false');
+  await expect(commentary).toHaveCount(0);
+  await divider.click();
+  await expect(commentary).toContainText('Edits applied; running the suite.');
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate((value) => (document.documentElement.dataset.theme = value), theme);
+    const styles = await page.evaluate(() => {
+      const typography = (selector: string) => {
+        const style = getComputedStyle(document.querySelector(selector)!);
+        return { color: style.color, font: style.fontFamily, size: style.fontSize, weight: style.fontWeight, lineHeight: style.lineHeight };
+      };
+      return { commentary: typography('.transcript-commentary p'), answer: typography('.transcript-answer p'), activity: typography('.transcript-disclosure') };
+    });
+    expect(styles.commentary, `${theme}: intermediate assistant text is message prose`).toEqual(styles.answer);
+    expect(styles.activity.color, `${theme}: activity stays muted`).not.toBe(styles.answer.color);
+  }
+  await divider.click();
+  await expect(commentary).toHaveCount(0);
+  await expect(page.locator('.transcript-answer')).toContainText('Tests pass');
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 test('theme switch re-themes highlighted code without reload', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);
