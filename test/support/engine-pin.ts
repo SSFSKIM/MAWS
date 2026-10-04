@@ -2,7 +2,7 @@
 // removes that binary. Live runs prefer an explicit override, then the retained pin, then the newest installed release.
 // Node imports only: the probe runner's .mjs imports this module directly with Node's type stripping.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,7 +21,9 @@ function engineBin(): string {
   // Keep a missing path reportable by live gates; importing replay support must not require a local installation.
   return newest ? join(versions, newest) : pinned;
 }
-export const ENGINE_BIN = engineBin();
+const candidate = engineBin();
+// A moving installer link must not change the file behind the version cached below.
+export const ENGINE_BIN = existsSync(candidate) ? realpathSync(candidate) : candidate;
 export const ENGINE_VERSION = (() => {
   try {
     const output = execFileSync(ENGINE_BIN, ['--version'], { encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();

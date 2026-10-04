@@ -90,8 +90,8 @@ async function open(label: string): Promise<MawsLaunch> {
 }
 
 const setupEvents = (page: Page) => page.evaluate(() => (window as unknown as { __setup: unknown[] }).__setup);
-// Every pinned-engine process on the machine under this scratch home (an orphan of a previous app would show here).
-const engines = () => sh('/bin/ps', ['-axo', 'pid=,ppid=,etime=,stat=,command=']).split('\n').filter((l) => l.includes('versions/2.1.283') && !l.includes(' sample ')).map((l) => l.trim().slice(0, 160));
+// Every process of the selected engine on this machine (including an orphan of a previous app).
+const engines = () => sh('/bin/ps', ['-axo', 'pid=,ppid=,etime=,stat=,command=']).split('\n').filter((l) => l.includes(ENGINE_BIN) && !l.includes(' sample ')).map((l) => l.trim().slice(0, 160));
 
 async function send(page: Page, id: string, text: string): Promise<void> {
   const before = (await statusOrNull(page, id))?.lastEventSeq ?? 0;
