@@ -778,6 +778,7 @@ async function unhover(page: Page, card: Locator): Promise<void> {
 
 // A native HTML drag with the real pointer: press on the source, move in steps to the point, release.
 async function drag(page: Page, source: Locator, to: { x: number; y: number }): Promise<void> {
+  await source.scrollIntoViewIfNeeded();
   const box = (await source.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
