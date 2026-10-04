@@ -145,14 +145,14 @@ function ButtonNode({ node }: { node: Extract<SurfaceNode, { type: 'Button' }> }
   const onClick = () => sendPress(site, node.press, key);
   if (role === 'dismiss') {
     return (
-      <button type="button" data-surface="button" data-plugin={node.press.plugin} data-key={key} data-role="dismiss" aria-label={SURFACE_COPY.dismiss(label)} title={SURFACE_COPY.dismiss(label)} onClick={onClick} className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+      <button type="button" data-surface="button" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} data-role="dismiss" aria-label={SURFACE_COPY.dismiss(label)} title={SURFACE_COPY.dismiss(label)} onClick={onClick} className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
         ×
       </button>
     );
   }
   const className = plain ? PLAIN : variant === 'primary' ? PRIMARY : BUTTON;
   return (
-    <button type="button" data-surface="button" data-plugin={node.press.plugin} data-key={key} data-hotkey={hotkey} onClick={onClick} className={`${className}${dimColor ? ' text-fg-muted hover:text-fg' : ''}`}>
+    <button type="button" data-surface="button" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} data-hotkey={hotkey} onClick={onClick} className={`${className}${dimColor ? ' text-fg-muted hover:text-fg' : ''}`}>
       {plain && hotkey ? <span className="text-accent">{hotkey}:&nbsp;</span> : null}
       {label}
     </button>
@@ -189,7 +189,7 @@ function InputNode({ node }: { node: Extract<SurfaceNode, { type: 'Input' }> }) 
   const text = field.value;
   const [focused, setFocused] = useState(false);
   return (
-    <label data-surface="input" data-plugin={node.press.plugin} data-key={key} className="inline-flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">
+    <label data-surface="input" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} className="inline-flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">
       {label && <span className="shrink-0">{label}</span>}
       <input
         type="text"
@@ -223,7 +223,7 @@ function SelectNode({ node }: { node: Extract<SurfaceNode, { type: 'Select' }> }
   const { key, label, options, value } = node.props;
   const field = useField(value ?? options[0]!.value);
   return (
-    <label data-surface="select" data-plugin={node.press.plugin} data-key={key} className="inline-flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">
+    <label data-surface="select" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} className="inline-flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">
       {label && <span className="shrink-0">{label}</span>}
       <select
         value={field.value}

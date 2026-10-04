@@ -35,8 +35,10 @@ export function select(site: Site, element: Press, key: string, value: string): 
 }
 
 // The keyboard moved in a scrolling site (the band, a pane): held or let go, and the element now holding it.
-export function focus(site: Site & { component: ScrollSite }, isHeld: boolean, element: SurfaceElement | null): void {
-  void site.client.invoke('session.ui.focus', { appSessionId: site.appSessionId, component: site.component, instanceId: site.instanceId, isHeld, element, by: 'person' }).then(warn('focus'));
+export async function focus(site: Site & { component: ScrollSite }, isHeld: boolean, element: SurfaceElement | null, by: 'person' | 'auto' = 'person'): Promise<{ moved: boolean; element: SurfaceElement | null; deny: string | null } | null> {
+  const result = await site.client.invoke('session.ui.focus', { appSessionId: site.appSessionId, component: site.component, instanceId: site.instanceId, isHeld, element, by });
+  if (!result.ok) { warn('focus')(result); return null; }
+  return result.value;
 }
 
 // The person scrolled a site: its window in rows of the line height, and the move.

@@ -4,12 +4,13 @@
 // keyboard and the window are (`session.ui.focus`, `session.ui.scroll`, in rows of the line height), follows a plugin's
 // own moves of them (`plugin.focus`, `plugin.scroll`, from live batches), and presses a Button by its hotkey while the
 // site holds the keyboard.
-import { useEffect, useLayoutEffect, useRef, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import type { ScrollSite, SurfaceSite as SiteName, SurfaceViewport } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
-import { focus as sendFocus, scroll as sendScroll, type Site } from './actions';
+import { scroll as sendScroll, type Site } from './actions';
+import { useSiteFocus } from './focus';
 import type { SiteAnswer } from './registry';
 import { useSurfaceSite } from './site';
 import { SurfaceBoundary } from './SurfaceBoundary';
@@ -68,6 +69,7 @@ function moveTo(container: HTMLElement, top: number, placed: { current: number |
 
 function ScrollingSite({ site, children }: { site: Site & { component: ScrollSite }; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  useSiteFocus(ref, site);
   const content = useRef<HTMLDivElement>(null); // the drawn tree at its own height, so any growth of it resizes something
   const movement = useRef(0); // each move of the window (the person's, a layout change, a plugin's): an older reply is stale
   const lastOffset = useRef(0); // the window's first row as the engine last heard or set it
@@ -111,11 +113,7 @@ function ScrollingSite({ site, children }: { site: Site & { component: ScrollSit
         if (!container) return;
         for (const event of events) {
           if ((event.kind !== 'plugin.focus' && event.kind !== 'plugin.scroll') || event.component !== site.component || event.instanceId !== site.instanceId) continue;
-          if (event.kind === 'plugin.focus') {
-            const target = container.querySelector<HTMLElement>(`[data-plugin="${CSS.escape(event.plugin)}"][data-key="${CSS.escape(event.key)}"]`);
-            const focusable = target?.matches('button, input, select') ? target : target?.querySelector<HTMLElement>('input, select, button');
-            focusable?.focus();
-          } else {
+          if (event.kind === 'plugin.scroll') {
             movement.current += 1;
             following.current = event.followEnd;
             const line = lineHeight(container);
@@ -128,17 +126,6 @@ function ScrollingSite({ site, children }: { site: Site & { component: ScrollSit
   );
   useEffect(() => () => void (frame.current !== null && cancelAnimationFrame(frame.current)), []);
 
-  const elementOf = (target: EventTarget | null) => {
-    const element = (target as HTMLElement | null)?.closest?.('[data-plugin][data-key]');
-    return element ? { plugin: element.getAttribute('data-plugin')!, key: element.getAttribute('data-key')! } : null;
-  };
-  const onFocus = (event: FocusEvent<HTMLDivElement>) => {
-    sendFocus(site, true, elementOf(event.target));
-  };
-  const onBlur = (event: FocusEvent<HTMLDivElement>) => {
-    if (ref.current?.contains(event.relatedTarget as Node | null)) return;
-    sendFocus(site, false, null);
-  };
   // The person's move, once per frame: the offset the engine held before it and the rows it covered (the engine applies
   // `by` to `offset`, pass3/mods-surface-panes seq 59/60); the window then goes where the engine says it is, unless the
   // window moved again before the reply (the newer move's reply, layout or plugin push decides).
@@ -181,7 +168,7 @@ function ScrollingSite({ site, children }: { site: Site & { component: ScrollSit
     button.click();
   };
   return (
-    <div ref={ref} data-surface-site={site.component} data-instance={site.instanceId} className="min-h-0 min-w-0 overflow-auto" onFocus={onFocus} onBlur={onBlur} onScroll={onScroll} onKeyDown={onKeyDown}>
+    <div ref={ref} data-surface-site={site.component} data-instance={site.instanceId} className="min-h-0 min-w-0 overflow-auto" tabIndex={-1} onScroll={onScroll} onKeyDown={onKeyDown}>
       <div ref={content} data-surface-content="">
         {children}
       </div>
