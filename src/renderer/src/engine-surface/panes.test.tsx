@@ -227,7 +227,7 @@ describe('plugin panes as panel tabs (R2)', () => {
     push(fake, roster([pane('early', 'Early')]));
     await waitFor(() => expect(paneTabs()).toHaveLength(1));
     // Status can advance while attach's roster read is still awaited, before ready is ever reached.
-    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'initializing', uiSurface: { clientId: 'maws-main' } }) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: { ...status(A, { process: 'initializing' }), uiSurface: { clientId: 'maws-main' } } }));
     expect(usePaneRosters.getState().rosters.has(A)).toBe(true);
     expect(fake.invoked('session.ui.panes')).toEqual([]);
 
