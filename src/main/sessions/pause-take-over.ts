@@ -32,6 +32,7 @@ export async function pauseTakeOver(deps: PauseDeps, q: { appSessionId: AppSessi
   const pollMs = deps.pollMs ?? 100;
   const sameProcess = (p: PaneProcess | undefined) => p?.started === holder.started && p.pgid === holder.pgid;
   const isPaused = async () => { const p = (await deps.processes()).get(holder.pid); return sameProcess(p) && p!.state.includes('T'); };
+  let pauseSent = false;
   let resuming = false;
   let ending = false;
   try {
@@ -39,6 +40,7 @@ export async function pauseTakeOver(deps: PauseDeps, q: { appSessionId: AppSessi
     const current = table.get(holder.pid);
     // Do not send control bytes to a shell prompt or to a different foreground job.
     if (!sameProcess(current) || current!.state.includes('T') || table.get(pane.pid)?.foreground !== holder.pgid) throw new Error('The confirmed CLI is no longer the foreground job in this terminal pane.');
+    pauseSent = true;
     await deps.write('\x1a');
     if (!(await until(isPaused, waitMs, pollMs))) throw new Error('The terminal CLI did not pause in time; nothing was resumed here.');
     resuming = true;
@@ -58,7 +60,7 @@ export async function pauseTakeOver(deps: PauseDeps, q: { appSessionId: AppSessi
       const p = table.get(holder.pid);
       // An untouched, still-foreground CLI needs no recovery. Otherwise only the unambiguous shell job is safe.
       restored = sameProcess(p) && !p!.state.includes('T') && p!.foreground === holder.pgid;
-      if (!restored && sameProcess(p) && canForeground(holder.pid, pane.pid, table) && !(await deps.foreground()).busy) {
+      if (pauseSent && !restored && sameProcess(p) && canForeground(holder.pid, pane.pid, table) && !(await deps.foreground()).busy) {
         await deps.write('\x15fg\n');
         restored = await until(async () => {
           const next = (await deps.processes()).get(holder.pid);

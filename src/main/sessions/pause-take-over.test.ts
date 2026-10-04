@@ -59,3 +59,18 @@ it('waits for the old registry row rather than mistaking MAWS readiness for rele
   const f = fixture(); f.deps.clear = async () => false;
   expect(await pauseTakeOver(f.deps, q, f.target)).toMatchObject({ status: 'resumed', warning: expect.stringContaining('registry') });
 });
+
+it('does not foreground an already stopped job when no pause was sent', async () => {
+  const f = fixture(); f.state('T'); f.foreground(10);
+  expect(await pauseTakeOver(f.deps, q, f.target)).toMatchObject({ status: 'refused' });
+  expect(f.events).toEqual([]);
+});
+it('does not signal a recycled holder pid after the engine became ready', async () => {
+  const f = fixture();
+  f.deps.resume = async () => {
+    f.events.push('ready');
+    f.deps.processes = async () => parseProcesses('10 1 10 10 Ss Mon Oct 3 12:00:00 2026\n30 10 30 10 T Mon Oct 3 12:00:09 2026');
+  };
+  expect(await pauseTakeOver(f.deps, q, f.target)).toMatchObject({ status: 'refused' });
+  expect(f.events).toEqual(['\x1a', 'ready', 'cancel']);
+});
