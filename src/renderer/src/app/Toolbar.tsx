@@ -1,5 +1,5 @@
 // The toolbar, which is also the window's title bar (`titleBarStyle: 'hiddenInset'`, §3; mockup 01): a drag region
-// with the traffic lights' 78 px clearance, the wordmark and sidebar/Overview toggles across the sidebar's width,
+// with the traffic lights' 78 px clearance and sidebar/Overview toggles across the sidebar's width,
 // the focused pane's active tab as the title (with the branch chip on a session), the usage slot,
 // the session actions menu and the panel toggle.
 // Every control is `no-drag`, so clicks reach it rather than moving the window.
@@ -62,10 +62,9 @@ export function Toolbar() {
   return (
     <header data-toolbar className="col-span-full row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg-raised select-none [-webkit-app-region:drag]">
       <div
-        className="flex h-full shrink-0 items-center justify-between gap-2 pr-3 pl-[78px]"
+        className="flex h-full shrink-0 items-center justify-end gap-2 pr-3 pl-[78px]"
         style={sidebar.collapsed ? undefined : { width }}
       >
-        <span className="text-ui-sm font-semibold tracking-[0.14em] text-fg-muted">MAWS</span>
         <div className="flex items-center gap-1">
           <IconButton label="Toggle sidebar" action="sidebar.toggle" pressed={!sidebar.collapsed} onClick={() => runAction('sidebar.toggle')}>
             <SidebarIcon />

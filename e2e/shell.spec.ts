@@ -184,6 +184,22 @@ async function assertToolbarPlacement(page: Page): Promise<void> {
   const sidebar = toolbar.getByRole('button', { name: 'Toggle sidebar' });
   const usage = toolbar.locator('[data-usage-pill]');
   const actions = toolbar.getByRole('button', { name: 'Session actions' });
+  const wordmark = page.locator('[data-sidebar-wordmark]');
+  const newChat = page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true });
+  const search = page.locator('[data-region="sidebar"]').getByRole('searchbox');
+  await expect(toolbar.getByText('MAWS', { exact: true })).toHaveCount(0);
+  await expect(wordmark).toBeVisible();
+  const [markBox, newBox, searchBox] = await Promise.all([wordmark, newChat, search].map((el) => el.boundingBox()));
+  expect(newBox!.y).toBe(markBox!.y + markBox!.height);
+  expect(searchBox!.y).toBeGreaterThanOrEqual(newBox!.y + newBox!.height);
+  await expect(newChat.locator('svg')).toHaveCSS('color', await newChat.evaluate((el) => getComputedStyle(el).color));
+  await sidebar.click();
+  await expect(page.locator('[data-region="sidebar"]')).toHaveAttribute('inert', '');
+  await expect(overview).toBeVisible();
+  await expect(sidebar).toBeVisible();
+  const collapsedToggle = (await sidebar.boundingBox())!;
+  expect(collapsedToggle.x).toBeGreaterThanOrEqual(78);
+  await sidebar.click();
   await expect(toolbar).toHaveCSS('height', '44px');
   await expect(overview).toHaveCSS('width', '28px');
   await expect(overview).toHaveCSS('height', '28px');
@@ -238,8 +254,23 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     ]);
 
     // W11: the project list, most recently active first, with each collapsed project's waiting and working counts; no
-    // Needs-you or Pinned section. Each project expands in place to its sessions, pinned first.
-    await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toHaveCount(0);
+    // Pinned section. M2 restores cross-project Needs you above it, independent of expansions.
+    await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toBeVisible();
+    expect(await sidebar.getByRole('list', { name: 'Needs you' }).getByRole('button').allTextContents()).toEqual([
+      `MAWS${FIX}Approval needed`, `MAWS${SIP}Question`, `codex_somersault${QUOTA}Plan review`,
+    ]);
+    const needsYou = sidebar.getByRole('list', { name: 'Needs you' }).getByRole('button');
+    await sidebar.getByRole('searchbox').focus();
+    await page.keyboard.press('Tab');
+    await expect(needsYou.nth(0)).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(needsYou.nth(2)).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(needsYou.nth(0)).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(sidebar.getByRole('button', { name: 'Sort sessions' })).toBeFocused();
+    await sidebar.getByRole('searchbox').focus();
+    await expect(page.locator('[data-hover-card]')).toHaveCount(0);
     expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', 'Other sessions']);
     expect(await rollups(sidebar)).toEqual({ [USAGE_PROJECT]: '●1', codex_somersault: '◐1', MAWS: '◐2●1', 'Other sessions': '' });
     const pages: Record<string, string[]> = {
@@ -747,6 +778,7 @@ async function unhover(page: Page, card: Locator): Promise<void> {
 
 // A native HTML drag with the real pointer: press on the source, move in steps to the point, release.
 async function drag(page: Page, source: Locator, to: { x: number; y: number }): Promise<void> {
+  await source.scrollIntoViewIfNeeded();
   const box = (await source.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();

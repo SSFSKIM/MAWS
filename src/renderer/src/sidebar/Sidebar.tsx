@@ -3,8 +3,8 @@
 // Other sessions last; each expands in place to its sessions (`ProjectRow.tsx`), and which are expanded persists in the
 // `regions` layout key (`expandedProjects`), so a relaunch shows what the person left; the search and the "Show more"
 // reveals do not persist. The search filters every project (by name, or holding a matching session) and shows each
-// listed project open on its matching sessions without changing what is expanded. Cross-project attention is the
-// Overview's, the notifier's, the dock badge's and ⌘⇧J's, which read the attention table directly. One context menu
+// listed project open on its matching sessions without changing what is expanded. M2 restores Needs you above the
+// tree, independent of search and hidden projects, from the same attention table as the Overview. One context menu
 // serves every row, and the tree is one roving tab stop (`tree.ts`). A project removed from the sidebar (I5) is listed
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
@@ -27,6 +27,7 @@ import { ResumePickerHost } from './ResumePicker';
 import { registerProjectRevealer } from './reveal';
 import { runAddProject, useAddProjectEnabled } from './project-actions';
 import { Search } from './Search';
+import { NeedsYou } from './NeedsYou';
 import { SectionHeading } from './SectionHeading';
 import { moreNodeId, projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
 
@@ -36,6 +37,10 @@ export function Sidebar() {
   const loaded = sessionsLoaded && attentionLoaded;
   return (
     <div className="flex min-h-0 flex-1 flex-col text-fg" aria-busy={!loaded}>
+      <div className="px-2.5 pt-2.5">
+        <div data-sidebar-wordmark className="flex h-(--row-h) items-center px-[9px] text-ui-sm font-semibold tracking-[0.08em] text-fg-muted">MAWS</div>
+        <NewChatRow />
+      </div>
       {loaded ? <SidebarBody /> : <SidebarSkeleton />}
       <Footer />
     </div>
@@ -73,6 +78,7 @@ function SidebarBody() {
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const scroller = useRef<HTMLDivElement>(null);
+  const search = useRef<HTMLDivElement>(null);
 
   const byId = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const hidden = useMemo(() => new Set(hiddenProjects.map((p) => p.id)), [hiddenProjects]);
@@ -212,11 +218,12 @@ function SidebarBody() {
 
   return (
     <TreeContext.Provider value={tree}>
-      <div className="px-2.5 pt-2.5">
-        <NewChatRow />
-      </div>
-      <div className="px-2.5 pt-1">
-        <Search value={query} onChange={setQuery} label="Search projects and sessions" onLeave={() => tabStop && focusItem(tabStop)} />
+      <div ref={search} className="px-2.5 pt-1">
+        <Search value={query} onChange={setQuery} label="Search projects and sessions" onLeave={() => {
+          const waiting = scroller.current?.querySelector<HTMLButtonElement>('[data-needs-you][tabindex="0"]');
+          if (waiting) waiting.focus();
+          else if (tabStop) focusItem(tabStop);
+        }} />
       </div>
       <ContextMenu.Root modal={false} onOpenChange={(isOpen) => !isOpen && setMenuTarget(null)}>
         <ContextMenu.Trigger asChild>
@@ -230,6 +237,7 @@ function SidebarBody() {
             }}
             className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
           >
+            <NeedsYou rows={rows} selected={selected} onEmptyFocus={() => search.current?.querySelector('input')?.focus()} />
             <SectionHeading title="Projects">
               <SortMenu sort={sidebar.sort} />
               {projects.length > 0 && <AddProjectButton />}
@@ -312,7 +320,7 @@ function SortMenu({ sort }: { sort: SidebarSort }) {
   );
 }
 
-// New chat (2026-10-01): the sidebar's first row, above the search and the tree, as Codex's first nav row sits above its
+// New chat (M2): directly under the sidebar wordmark, above the search and tree, as Codex's first nav row sits above its
 // projects (readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:519957-519987, 520284-520293). It
 // starts in the project whose tab set the strip shows (`focusedProject`), else in none ("Choose a project").
 function NewChatRow() {
@@ -327,7 +335,7 @@ function NewChatRow() {
       onClick={() => void createSession(focusedProject())}
       className="group/new flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] text-ui text-fg outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
     >
-      <NewChatIcon className="size-[13px] text-fg-muted" />
+      <NewChatIcon className="size-[13px]" />
       <span className="min-w-0 flex-1 truncate text-left">{NEW_CHAT}</span>
       {chord && <kbd className="font-ui text-ui-sm text-fg-faint opacity-0 group-hover/new:opacity-100 group-focus-visible/new:opacity-100">{chord}</kbd>}
     </button>

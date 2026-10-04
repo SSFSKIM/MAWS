@@ -1,6 +1,6 @@
 // The sidebar's search field (§5.1; mockup 01 `.search`): filters the tree in place, every project by its name and by
 // the sessions it holds (title, project name, directory), each listed project open on its matches. Escape clears it;
-// ArrowDown moves into the tree. The mockup's ⌘K hint is not shown: ⌘K is the command palette (§5.8;
+// ArrowDown moves to Needs you when present, otherwise the tree. The mockup's ⌘K hint is not shown: ⌘K is the command palette (§5.8;
 // residue *Command palette*).
 import { SearchIcon } from '../app/IconButton';
 

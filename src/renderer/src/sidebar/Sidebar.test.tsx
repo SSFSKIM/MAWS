@@ -10,7 +10,7 @@ import { registerSessionCreator } from '../keymap/actions-runtime';
 import { closeDialog, useDialogs } from '../sessions/dialogs';
 import { SessionDialogs } from '../sessions/SessionDialogs';
 import { TabStrip } from '../main/TabStrip';
-import { record } from '../../../../test/support/builders';
+import { item, record } from '../../../../test/support/builders';
 import { registerAction } from '../keymap/actions-runtime'; // C11
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
@@ -126,12 +126,129 @@ describe('sidebar recovery routes', () => {
   });
 });
 
+describe('Needs you across projects', () => {
+  const waiting = () => screen.getByRole('list', { name: 'Needs you' });
+  const buttons = () => within(waiting()).getAllByRole('button');
+
+  it('shows every waiting session in wait order, with project, title and reason, unaffected by search or hidden projects', async () => {
+    fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, hidden: p.name === 'MAWS' })) });
+    render(<Sidebar />);
+    expect(buttons().map((b) => b.textContent)).toEqual([
+      'MAWSFix sidebar dragApproval needed',
+      'MAWSSidebar interaction passQuestion',
+      'codex_somersaultQuota reset recoveryPlan review',
+    ]);
+    expect(screen.queryByRole('button', { name: /Needs you/ })).toBeNull();
+    expect(row('codex_somersault').getAttribute('aria-expanded')).toBe('false');
+    await userEvent.type(screen.getByRole('searchbox'), 'no matching project');
+    expect(buttons()).toHaveLength(3);
+    expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
+  });
+
+  it('has one tab stop before the project controls; arrows and Home/End navigate, Enter opens without answering', async () => {
+    fillStores(nine);
+    fileTabsByProject();
+    const fake = fakeClient({ 'attention.request': () => ({ event: null }) });
+    window.maws = fake.client;
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    const search = screen.getByRole('searchbox');
+    search.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(buttons()[0]);
+    expect(buttons().filter((b) => b.tabIndex === 0)).toHaveLength(1);
+    await user.keyboard('{End}{ArrowUp}{Home}{ArrowDown}{Enter}');
+    expect(document.activeElement).toBe(buttons()[1]);
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: idOf('Sidebar interaction pass') });
+    expect(useLayout.getState().main.current).toBe('proj-maws');
+    expect(fake.invoked('session.answer')).toEqual([]);
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Sort sessions' }));
+    search.focus();
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(buttons()[1]);
+  });
+
+  it('keeps keyboard focus in the sidebar when a focused waiting session retires', () => {
+    fillStores(nine);
+    render(<Sidebar />);
+    act(() => buttons()[0].focus());
+    act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Fix sidebar drag'), items: [] }));
+    expect(document.activeElement).toBe(buttons()[0]);
+    act(() => {
+      for (const entry of nine.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
+    });
+    expect(document.activeElement).toBe(screen.getByRole('searchbox'));
+  });
+
+  it.each([
+    ['Sidebar interaction pass', 'Quota reset recovery'],
+    ['Quota reset recovery', 'Sidebar interaction pass'],
+  ])('focuses the neighbour of a retiring %s row', (retired, neighbour) => {
+    fillStores(nine);
+    render(<Sidebar />);
+    act(() => buttons().find((b) => b.dataset.needsYou === idOf(retired))!.focus());
+    act(() => useAttention.getState().applyChanged({ appSessionId: idOf(retired), items: [] }));
+    const survivor = buttons().find((b) => b.dataset.needsYou === idOf(neighbour))!;
+    expect(document.activeElement).toBe(survivor);
+    expect(survivor.tabIndex).toBe(0);
+    expect(buttons().filter((b) => b.tabIndex === 0)).toHaveLength(1);
+  });
+
+  it('keeps a surviving row focused through reordering and uses its new neighbour when it retires', () => {
+    fillStores(nine);
+    render(<Sidebar />);
+    const id = idOf('Fix sidebar drag');
+    const focused = buttons()[0];
+    act(() => focused.focus());
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [item(id, 'interrupted', '2026-10-03T10:00:00Z')] }));
+    expect(document.activeElement).toBe(focused);
+    expect(buttons().at(-1)).toBe(focused);
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [] }));
+    expect(document.activeElement).toBe(buttons().at(-1));
+  });
+
+  it.each(['session pane', 'search', 'project tree', 'sort control'])('does not reclaim focus from the %s when waiting rows retire', (place) => {
+    fillStores(nine);
+    render(<><Sidebar /><textarea aria-label="Session prompt" /></>);
+    act(() => buttons()[0].focus());
+    const target = place === 'session pane' ? screen.getByRole('textbox', { name: 'Session prompt' })
+      : place === 'search' ? screen.getByRole('searchbox')
+      : place === 'project tree' ? row('MAWS')
+      : screen.getByRole('button', { name: 'Sort sessions' });
+    act(() => target.focus());
+    act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Fix sidebar drag'), items: [] }));
+    expect(document.activeElement).toBe(target);
+    act(() => {
+      for (const entry of nine.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
+    });
+    expect(document.activeElement).toBe(target);
+  });
+
+  it('updates reasons and ordering from attention, omits archived sessions, and disappears when empty', () => {
+    fillStores(nine);
+    render(<Sidebar />);
+    const id = idOf('Fix sidebar drag');
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [item(id, 'interrupted', '2026-10-03T10:00:00Z')] }));
+    expect(buttons().at(-1)?.textContent).toBe('MAWSFix sidebar dragInterrupted');
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [item(id, 'error', '2026-09-01T10:00:00Z')] }));
+    expect(buttons()[0].textContent).toBe('MAWSFix sidebar dragError');
+    act(() => useSessions.getState().applyChanged({ record: { ...useSessions.getState().records.get(id)!, archived: true }, cause: 'update', revision: useSessions.getState().revision + 1 }));
+    expect(buttons()).toHaveLength(2);
+    act(() => {
+      for (const entry of nine.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
+    });
+    expect(screen.queryByRole('list', { name: 'Needs you' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /Needs you/ })).toBeNull();
+  });
+});
+
 describe('the project list', () => {
   beforeEach(() => fillStores(nine));
 
-  it('lists the projects most recently active first, then Other sessions, each collapsed, with no levels and no Needs-you or Pinned section', () => {
+  it('lists the projects most recently active first, then Other sessions, each collapsed, with no drill-in or Pinned section', () => {
     render(<Sidebar />);
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Projects']);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Needs you · 3', 'Projects']);
     expect(screen.queryByTestId('sidebar-levels')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Back to projects' })).toBeNull();
     expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'MAWS', 'Other sessions']);
@@ -579,7 +696,8 @@ describe('sidebar keyboard', () => {
     expect(within(projectsTree()).getAllByRole('treeitem').filter((t) => t.tabIndex === 0).map(label)).toEqual(['Fix sidebar drag']);
   });
 
-  it('ArrowDown from the search enters the tree', async () => {
+  it('ArrowDown from the search enters the tree when no session waits', async () => {
+    fillStores({ ...nine, attention: [] });
     const user = userEvent.setup();
     render(<Sidebar />);
     await user.click(screen.getByRole('searchbox', { name: 'Search projects and sessions' }));

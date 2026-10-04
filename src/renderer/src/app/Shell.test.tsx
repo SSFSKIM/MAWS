@@ -25,7 +25,7 @@ import { useState } from 'react';
 import { Shell } from './Shell';
 import { registerSlot, resetSlots } from './slots';
 import { toolbarTitle } from './Toolbar';
-import { scenarioFile } from '../test-support/shell-stores';
+import { fillStores, scenarioFile } from '../test-support/shell-stores';
 import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
@@ -62,6 +62,23 @@ describe('shell frame', () => {
       [region('sidebar').id, '300'],
       [region('panel').id, '380'],
     ]);
+  });
+
+  it('keeps the wordmark in the sidebar body and leaves title-bar navigation reachable when collapsed', () => {
+    fillStores(scenarioFile('empty'));
+    render(<Shell />);
+    const toolbar = screen.getByRole('banner');
+    expect(within(toolbar).queryByText('MAWS')).toBeNull();
+    const wordmark = within(region('sidebar')).getByText('MAWS');
+    const newChat = within(region('sidebar')).getByRole('button', { name: 'New chat' });
+    expect(wordmark.nextElementSibling).toBe(newChat);
+    act(() => useLayout.getState().setSidebar({ collapsed: true }));
+    expect(region('sidebar').inert).toBe(true);
+    for (const name of ['Toggle sidebar', 'Overview']) {
+      const control = within(toolbar).getByRole('button', { name });
+      expect(control.closest('[inert]')).toBeNull();
+      expect(control.className).toContain('[-webkit-app-region:no-drag]');
+    }
   });
 
   it('puts the Overview toggle beside the sidebar toggle in the title-bar toolbar', async () => {

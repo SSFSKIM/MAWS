@@ -152,7 +152,7 @@ async function startDirect(page: Page, id: string, patch: CommandInput<'session.
 }
 
 // A session's row in the sidebar (W11: inside its expanded project).
-const row = (page: Page, id: string) => page.locator(`[data-region="sidebar"] [data-menu="session:${id}"]`);
+const row = (page: Page, id: string) => page.locator(`[data-region="sidebar"] [role="treeitem"][data-menu="session:${id}"]`);
 
 // Every text a transcript's load-failure alert showed (the alert stays until Retry), from before the first start: a
 // session started through "+" hydrates once the engine host knows it, never failing on an id not yet launched or bound.
@@ -737,6 +737,7 @@ test.describe('sessions', () => {
     await expect(card.getByText('Approval needed')).toBeVisible();
     await card.getByRole('button', { name: 'Approve' }).click();
     await expect(entry.getByRole('img', { name: 'Needs approval' })).toHaveCount(0);
+    await expect(entry, 'the project tree row survives attention retirement').toBeVisible();
     await turnEnded(page, id);
   });
 });

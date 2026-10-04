@@ -1,5 +1,7 @@
 import { act, cleanup } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { rowId } from '../../model/keys';
 import { api, builder, uuid } from '../../model/test-events';
 import { renderRow, rowOf, storeWith } from './test-support';
@@ -17,6 +19,34 @@ function streaming() {
 }
 
 describe('assistant text row', () => {
+  it.each(['light', 'dark'])('renders commentary at the answer’s contrast and type scale in %s', async (theme) => {
+    const style = document.createElement('style');
+    style.textContent = readFileSync(resolve(__dirname, '../../../styles/tokens.css'), 'utf8') + readFileSync(resolve(__dirname, '../transcript.css'), 'utf8');
+    document.head.append(style);
+    const previousTheme = document.documentElement.dataset.theme;
+    document.documentElement.dataset.theme = theme;
+    try {
+      const b = builder();
+      b.turn('u1');
+      b.text('m1', 0, 'The edits are ready; running the suite.');
+      const store = await storeWith(b.events);
+      const row = rowOf(store.rows(), 'assistant_text');
+      const view = renderRow({ ...row, phase: 'answer' }, { storeKey: store.key });
+      const typography = () => {
+        const css = getComputedStyle(view.container.querySelector('p')!);
+        return { color: css.color, size: css.fontSize, weight: css.fontWeight, lineHeight: css.lineHeight };
+      };
+      const answer = typography();
+      expect(answer.color).not.toBe('');
+      view.rerenderRow({ ...row, phase: 'commentary' });
+      expect(typography()).toEqual(answer);
+    } finally {
+      style.remove();
+      if (previousTheme === undefined) delete document.documentElement.dataset.theme;
+      else document.documentElement.dataset.theme = previousTheme;
+    }
+  });
+
   it('streams from the live buffer with a caret, then renders the completed block without one under the same key', async () => {
     const { b, delta } = streaming();
     delta('Hello');
