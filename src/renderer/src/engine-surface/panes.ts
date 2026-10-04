@@ -130,8 +130,11 @@ export function connectPluginPanes(client: MawsBridge = ipc): () => void {
       attached.add(id);
       read(id);
     }
-    for (const id of [...attached]) {
+    // The host reads panes before initialization reaches ready, so a pushed roster need never enter `attached`.
+    for (const id of new Set([...attached, ...usePaneRosters.getState().rosters.keys()])) {
       if (now.has(id)) continue;
+      const process = useSessions.getState().engine.get(id)?.process;
+      if (!attached.has(id) && (process === 'starting' || process === 'initializing')) continue;
       attached.delete(id);
       pushed.delete(id);
       setRoster(id, null);
@@ -146,6 +149,8 @@ export function connectPluginPanes(client: MawsBridge = ipc): () => void {
   });
   const offEvents = client.on('session.eventBatch', ({ appSessionId, events }) => {
     const id = appSessionId as AppSessionId;
+    const process = useSessions.getState().engine.get(id)?.process;
+    if (process === 'exiting' || process === 'exited') return; // a buffered batch cannot revive the ended surface
     let latest: PaneRoster | null = null;
     for (const event of events) if (event.kind === 'plugin.panes') latest = { panes: event.panes, shownId: event.shownId, focusedId: event.focusedId, focusRequestedId: event.focusRequestedId };
     if (latest === null) return;
