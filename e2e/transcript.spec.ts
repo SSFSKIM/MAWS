@@ -853,7 +853,7 @@ test('a mod’s band, mode slot, hint and pane draw in the session (R2, pass3/mo
 
 test('a press on a mod’s button reaches the mod and its band redraws (R2, pass3/mods-surface-invalidate)', async () => {
   test.setTimeout(120_000);
-  await surfaceReplay('mods-surface-invalidate', async ({ page, pane }) => {
+  await surfaceReplay('mods-surface-invalidate', async ({ pane, id, userData }) => {
     const band = pane.getByRole('region', { name: 'From plugins' });
     await expect(band).toContainText('MODS_PROBE_BAND presses=0', { timeout: 20_000 });
     // the recorded press (seq 24): the replay holds at it until the app writes it; its answer, the mod's log line and the
@@ -861,7 +861,9 @@ test('a press on a mod’s button reaches the mod and its band redraws (R2, pass
     await band.getByRole('button', { name: 'Press' }).click();
     await expect(band).toContainText('MODS_PROBE_BAND presses=1', { timeout: 20_000 });
     await expect(pane.locator('.transcript-error[data-scope="plugin"]')).toContainText(['mods-probe: MODS_PROBE_PRESS 1']);
-    void page;
+    const dir = join(userData, 'engine-host/journal', id);
+    const presses = () => readdirSync(dir).filter((name) => name.endsWith('.jsonl')).flatMap((name) => readFileSync(join(dir, name), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { direction: string; frame: { request?: { subtype: string } } })).filter((r) => r.direction === 'out' && r.frame.request?.subtype === 'ui_press').map((r) => r.frame.request);
+    await expect.poll(presses).toEqual([{ subtype: 'ui_press', plugin: 'mods-probe', handle: 1, key: 'press', surface: 'desktop', client_id: 'maws-main' }]);
   });
 });
 
