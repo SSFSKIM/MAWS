@@ -7,8 +7,8 @@ import { connectEngineSurface } from '../../engine-surface/site';
 import { invalidateSession, resetSurfaceRegistry } from '../../engine-surface/registry';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore } from '../../stores/transcript';
-import { expandedTurnRows } from '../model/derive';
-import { builder } from '../model/test-events';
+import { expandedTurnRows, turnDerivations } from '../model/derive';
+import { api, builder } from '../model/test-events';
 import { Disclosures, TranscriptProvider, NO_ACTIONS } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import { storeWith } from '../view/rows/test-support';
@@ -142,4 +142,33 @@ it('hands presentation back to the folded probe when a pressed row virtualizes a
   }));
   expect(screen.getByText('returned drawing')).toBeTruthy();
   expect(fake.invoked('session.ui.render')).toHaveLength(count + asks.length);
+});
+
+it.each([false, true])('does not derive large folded history during live token batches (attached=%s)', async (attached) => {
+  const b = builder();
+  for (let turn = 0; turn < 6; turn++) {
+    b.turn(`old-${turn}`);
+    for (let n = 0; n < 100; n++) {
+      b.text(`text-${turn}-${n}`, 0, `Commentary ${n}`);
+      b.toolUse(`tool-${turn}-${n}`, 'Bash', { command: 'pwd' });
+      b.result(`tool-${turn}-${n}`, '/tmp');
+    }
+    b.text(`answer-${turn}`, 0, 'Answer'); b.end([`old-${turn}`]);
+  }
+  b.turn('live');
+  b.emit('assistant.block.delta', { apiMessageId: api('live'), blockIndex: 0, delta: { type: 'text_delta', text: 'start' } });
+  const store = await storeWith(b.events.slice()); const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = fake.client;
+  useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: attached ? { clientId: 'maws-main' } : null }]]) });
+  const view = render(<Transcript storeKey={store.key} />);
+  const before = turnDerivations.count;
+  const start = performance.now();
+  for (let n = 0; n < 40; n++) {
+    const event = b.emit('assistant.block.delta', { apiMessageId: api('live'), blockIndex: 0, delta: { type: 'text_delta', text: ' next' } });
+    act(() => store.push([event]));
+  }
+  const derivations = turnDerivations.count - before;
+  console.info(`FX3 folded benchmark attached=${attached}: 6 turns x 100 tool calls, 40 batches, ${derivations} derivations, ${(performance.now() - start).toFixed(1)} ms`);
+  view.unmount();
+  expect(derivations).toBe(0);
 });

@@ -132,6 +132,12 @@ export function turnPhrases(turn: TurnState): string {
   return groupSummary(phrasesOf(deriveTurn(turn, null).cells.filter((cell) => cell.classification.denial === null)));
 }
 
+// Stable per-turn selector for consumers that must not follow unrelated streaming batches.
+export function turnRows(state: TranscriptState, id: TurnId): Row[] | undefined {
+  const turn = state.turns.get(id);
+  return turn ? rowsOfTurn(state, turn) : undefined;
+}
+
 // One turn's rows with its work area expanded (groups and cells as the reader left them), derived outside the memo:
 // what a jump into a collapsed turn looks for, at the cost of that turn alone.
 export function expandedTurnRows(state: TranscriptState, id: TurnId): Row[] {
