@@ -981,7 +981,7 @@ test('R3 recorded unhooked UserMessage leaves the original prompt visible', asyn
 });
 
 // Opt-in replay evidence, like the earlier per-wave shot switches. The app and all session state remain scratch.
-async function captureR3bEvidence(page: Page, pane: ReturnType<Page['locator']>, name: string) {
+async function captureR3bEvidence(page: Page, name: string) {
   if (process.env.MAWS_R3B_SHOTS !== '1') return;
   const dir = '/tmp/maws-r3b-evidence';
   mkdirSync(dir, { recursive: true });
@@ -989,9 +989,7 @@ async function captureR3bEvidence(page: Page, pane: ReturnType<Page['locator']>,
     for (const theme of ['light', 'dark'] as const) {
       await page.evaluate((value) => (document.documentElement.dataset.theme = value), theme);
       await page.evaluate(() => document.fonts.ready);
-      const clip = await pane.boundingBox();
-      expect(clip).not.toBeNull();
-      await page.screenshot({ path: join(dir, `${name}-${theme}.png`), clip: clip!, animations: 'disabled' });
+      await page.screenshot({ path: join(dir, `${name}-${theme}.png`), animations: 'disabled' });
     }
   } finally {
     await page.evaluate(() => (document.documentElement.dataset.theme = 'light'));
@@ -1028,7 +1026,7 @@ test('R3 owner to-human draws every span as Markdown, folds the working record, 
     const receipt = pane.locator('[data-kind="question"] .transcript-question');
     await expect(receipt.locator('[data-question]')).toHaveText('Path→One');
     await expect(receipt.getByRole('button')).toHaveCount(0);
-    await captureR3bEvidence(page, pane, 'to-human-folded');
+    await captureR3bEvidence(page, 'to-human-folded');
     const usersBefore = await pane.locator('[data-kind="user"]').count();
     await report.getByRole('button', { name: /^1: One/ }).click();
     await expect(pane.locator(`[data-composer="${id}"] [contenteditable="true"]`)).toHaveText('Answering "Which path?": One');
@@ -1045,7 +1043,7 @@ test('R3 owner to-human draws every span as Markdown, folds the working record, 
     await expect(pane.getByRole('button', { name: 'working record', exact: true })).toHaveCount(0);
     await expect(receipt.locator('[data-question]')).toHaveText('Path→One');
     await expect(receipt.getByRole('button')).toHaveCount(0);
-    await captureR3bEvidence(page, pane, 'to-human-unfolded');
+    await captureR3bEvidence(page, 'to-human-unfolded');
   }, (base) => {
     const t = transcriptSeed(base);
     t.user('owner-user', 'Show the report');
@@ -1129,7 +1127,7 @@ for (const { fixture, headers } of sittingReplays) test(`M3 owner sitting preser
     expect(texts.map((a) => a.instance_id).filter((uuid) => uuid.startsWith('244de4a2') || uuid.startsWith('cd3271fb')).every((uuid) => !uuid.includes(':text:'))).toBe(true);
     await expect(pane.getByRole('button', { name: 'working record', exact: true })).toHaveCount(0);
     expect(value(await invoke(page, 'session.status', { appSessionId: id as never })).turn).toBeNull();
-    await captureR3bEvidence(page, pane, fixture);
+    await captureR3bEvidence(page, fixture);
   }, (base) => sittingSeed(base, true, headers), async (pane) => {
     await unfoldSeedWork(pane);
     await expect(pane.locator('[data-kind="assistant_text"]')).toHaveCount(3); // hi plus the two status messages
