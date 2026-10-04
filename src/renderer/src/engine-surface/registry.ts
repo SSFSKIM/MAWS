@@ -87,6 +87,8 @@ async function ask(key: string): Promise<void> {
     }
   } else {
     console.warn(`[engine-surface] ${component} ${instanceId} not drawn: ${result.error.message}`);
+    // A failed/timed-out ask is settled, not still pending. Keep hook knowledge so a later invalidate retries.
+    if (generation === generationOf(appSessionId) && propsKey === entry.propsKey) store(key, { tree: null, hooked: true, props, rewritten: false });
   }
   if (entry.again) void ask(key);
 }

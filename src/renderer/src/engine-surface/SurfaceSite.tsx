@@ -12,6 +12,7 @@ import { ipc } from '../ipc/client';
 import { focus as sendFocus, scroll as sendScroll, type Site } from './actions';
 import type { SiteAnswer } from './registry';
 import { useSurfaceSite } from './site';
+import { SurfaceBoundary } from './SurfaceBoundary';
 import { SurfaceTree } from './SurfaceTree';
 import { drawsEngine } from './tree';
 
@@ -44,7 +45,7 @@ export function SurfaceSite({ appSessionId, component, instanceId, props, viewpo
   const site: Site = { appSessionId, component, instanceId, client };
   const tree = <SurfaceTree tree={drawn.tree!} site={site} engine={own} />;
   const body = isScrollSite(component) ? <ScrollingSite site={{ ...site, component }}>{tree}</ScrollingSite> : tree;
-  return <>{frame ? frame(body, drawn) : body}</>;
+  return <SurfaceBoundary key={`${appSessionId}:${component}:${instanceId}`} answer={drawn} name={`${component} ${instanceId}`} fallback={own}>{frame ? frame(body, drawn) : body}</SurfaceBoundary>;
 }
 
 const lineHeight = (element: HTMLElement): number => {
