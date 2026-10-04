@@ -37,6 +37,10 @@ export function Sidebar() {
   const loaded = sessionsLoaded && attentionLoaded;
   return (
     <div className="flex min-h-0 flex-1 flex-col text-fg" aria-busy={!loaded}>
+      <div className="px-2.5 pt-2.5">
+        <div data-sidebar-wordmark className="flex h-(--row-h) items-center px-[9px] text-ui-sm font-semibold tracking-[0.08em] text-fg-muted">MAWS</div>
+        <NewChatRow />
+      </div>
       {loaded ? <SidebarBody /> : <SidebarSkeleton />}
       <Footer />
     </div>
@@ -213,9 +217,6 @@ function SidebarBody() {
 
   return (
     <TreeContext.Provider value={tree}>
-      <div className="px-2.5 pt-2.5">
-        <NewChatRow />
-      </div>
       <div className="px-2.5 pt-1">
         <Search value={query} onChange={setQuery} label="Search projects and sessions" onLeave={() => {
           const waiting = scroller.current?.querySelector<HTMLButtonElement>('[data-needs-you][tabindex="0"]');
@@ -318,7 +319,7 @@ function SortMenu({ sort }: { sort: SidebarSort }) {
   );
 }
 
-// New chat (2026-10-01): the sidebar's first row, above the search and the tree, as Codex's first nav row sits above its
+// New chat (M2): directly under the sidebar wordmark, above the search and tree, as Codex's first nav row sits above its
 // projects (readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:519957-519987, 520284-520293). It
 // starts in the project whose tab set the strip shows (`focusedProject`), else in none ("Choose a project").
 function NewChatRow() {
@@ -333,7 +334,7 @@ function NewChatRow() {
       onClick={() => void createSession(focusedProject())}
       className="group/new flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] text-ui text-fg outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
     >
-      <NewChatIcon className="size-[13px] text-fg-muted" />
+      <NewChatIcon className="size-[13px]" />
       <span className="min-w-0 flex-1 truncate text-left">{NEW_CHAT}</span>
       {chord && <kbd className="font-ui text-ui-sm text-fg-faint opacity-0 group-hover/new:opacity-100 group-focus-visible/new:opacity-100">{chord}</kbd>}
     </button>
