@@ -14,6 +14,7 @@ const tree = { type: 'Box', children: [
   { type: 'Button', props: { key: 'second', label: 'Second', autoFocus: true }, press },
   { type: 'Button', props: { key: 'third', label: 'Third' }, press },
   { type: 'Link', props: { href: 'https://example.com', label: 'Link' } },
+  { type: 'Markdown', props: { key: 'markdown', text: '[Markdown link](https://example.com/markdown)' }, press },
   { type: 'engine', ref: 1 },
 ] };
 let fake: FakeClient;
@@ -91,11 +92,11 @@ it('restores an outside stop on denied entry and ignores an answer after the per
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Outside' }));
 });
 
-it.each(['Link', 'Native'])('keeps an accepted unkeyed %s stop and restores it on an unidentified denial', async (name) => {
+it.each(['Link', 'Native', 'Markdown link'])('keeps an accepted unkeyed %s stop and restores it on an unidentified denial', async (name) => {
   await mount();
   focus('First');
   await reply('first');
-  const target = screen.getByRole(name === 'Link' ? 'link' : 'button', { name });
+  const target = screen.getByRole(name === 'Native' ? 'button' : 'link', { name });
   act(() => target.focus());
   await reply(null);
   expect(document.activeElement).toBe(target);
@@ -106,10 +107,10 @@ it.each(['Link', 'Native'])('keeps an accepted unkeyed %s stop and restores it o
   expect(fake.invoked('session.ui.focus')).toHaveLength(3);
 });
 
-it.each(['Link', 'Native'])('does not substitute autofocus for deliberate entry on an unkeyed %s stop', async (name) => {
+it.each(['Link', 'Native', 'Markdown link'])('does not substitute autofocus for deliberate entry on an unkeyed %s stop', async (name) => {
   await mount();
   focus('Outside');
-  const target = screen.getByRole(name === 'Link' ? 'link' : 'button', { name });
+  const target = screen.getByRole(name === 'Native' ? 'button' : 'link', { name });
   act(() => target.focus());
   expect(fake.invoked('session.ui.focus')).toEqual([{ appSessionId: ID, component: 'Pane', instanceId: 'pane', isHeld: true, element: null, by: 'person' }]);
   await reply(null);
@@ -142,5 +143,17 @@ it('still follows a successful redirect from a keyed control onto the pane stop'
   focus('First');
   await reply(null);
   expect(document.activeElement).toBe(host);
+  expect(fake.invoked('session.ui.focus')).toHaveLength(1);
+});
+
+it('resolves a ring control past a geometry-addressed Markdown wrapper sharing its key', async () => {
+  fake = fakeClient({ 'session.ui.render': {
+    tree: { ...tree, children: [{ type: 'Markdown', props: { key: 'second', text: '[Geometry link](https://example.com/geometry)' }, press }, ...tree.children] },
+    props: {}, rewritten: false, hooked: true,
+  } });
+  await mount();
+  focus('First');
+  await reply('second');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
   expect(fake.invoked('session.ui.focus')).toHaveLength(1);
 });

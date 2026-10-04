@@ -2,8 +2,10 @@ import { useLayoutEffect, type RefObject } from 'react';
 import type { ScrollSite, SurfaceElement } from '@shared/engine/surface';
 import { focus as sendFocus, type Site } from './actions';
 
+// Geometry keys also address Markdown; only these nodes belong to the focus ring.
+const focusControl = ':is([data-surface="button"], [data-surface="input"], [data-surface="select"])';
 const elementOf = (target: HTMLElement | null): SurfaceElement | null => {
-  const element = target?.closest('[data-plugin][data-key]');
+  const element = target?.closest(`[data-plugin][data-key]${focusControl}`);
   return element ? { plugin: element.getAttribute('data-plugin')!, key: element.getAttribute('data-key')! } : null;
 };
 const controlOf = (target: HTMLElement | null): HTMLElement | null => target?.matches('button, input, select') ? target : target?.querySelector<HTMLElement>('input, select, button') ?? null;
@@ -21,7 +23,7 @@ export function useSiteFocus(ref: RefObject<HTMLDivElement | null>, site: Site &
     let generation = 0;
     let applying = false;
     let accepted: HTMLElement | null = null;
-    const resolve = (element: SurfaceElement) => controlOf(container.querySelector<HTMLElement>(`[data-plugin="${CSS.escape(element.plugin)}"][data-key="${CSS.escape(element.key)}"]`));
+    const resolve = (element: SurfaceElement) => controlOf(container.querySelector<HTMLElement>(`[data-plugin="${CSS.escape(element.plugin)}"][data-key="${CSS.escape(element.key)}"]${focusControl}`));
     const place = (target: HTMLElement | null) => {
       applying = true;
       try {
