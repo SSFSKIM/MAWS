@@ -115,6 +115,7 @@ function PaneBody({ state, ctx }: { state: PluginPaneState; ctx: PanelToolContex
         appSessionId={appSessionId}
         component="Pane"
         instanceId={pane.id}
+        viewport={{ columns, rows, isFullscreen: true }}
         props={{ title: pane.title, isFocused: focusedId === pane.id, bodyColumns: columns, placement: 'dock', scroll: { offset: 0, bodyRows: rows }, view: {} }}
         engine={<Placeholder plugin={pane.plugin} />}
         frame={(tree) => <div className="flex min-h-0 flex-1 flex-col p-3 text-ui text-fg [&>*]:flex-1">{tree}</div>}

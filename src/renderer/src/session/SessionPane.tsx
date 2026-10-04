@@ -6,10 +6,11 @@
 // when the record arrives. In both placements the composer sits in the column the transcript's rows use
 // (`.thread-column`, W2: §5.4 as amended 2026-10-01, Codex's shared class), so the frame is exactly the transcript's
 // width.
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { SurfaceViewportProvider } from '../engine-surface/viewport';
 import { useSlot } from '../app/slots';
 import { FALLBACKS } from '../app/slot-fallbacks'; // C7
 import { waitingItem } from '../attention/derive';
@@ -28,7 +29,10 @@ export function ComposerColumn({ children }: { children: ReactNode }) {
 
 export function SessionPane({ appSessionId, paneIndex }: { appSessionId: AppSessionId; paneIndex: PaneIndex }) {
   const record = useSessions((s) => s.records.get(appSessionId));
-  return record ? <StartedPane record={record} paneIndex={paneIndex} /> : <UnstartedPane appSessionId={appSessionId} paneIndex={paneIndex} />;
+  const envelope = useRef<HTMLDivElement>(null);
+  return <div ref={envelope} className="h-full min-h-0 min-w-0"><SurfaceViewportProvider element={envelope}>
+    {record ? <StartedPane record={record} paneIndex={paneIndex} /> : <UnstartedPane appSessionId={appSessionId} paneIndex={paneIndex} />}
+  </SurfaceViewportProvider></div>;
 }
 
 function UnstartedPane({ appSessionId, paneIndex }: { appSessionId: AppSessionId; paneIndex: PaneIndex }) {

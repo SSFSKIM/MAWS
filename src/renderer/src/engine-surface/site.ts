@@ -5,6 +5,7 @@ import { useEffect, useMemo } from 'react';
 import type { SurfaceSite, SurfaceViewport } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { useSurfaceViewport } from './viewport';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../stores/transcript';
@@ -31,6 +32,8 @@ export interface SiteOptions {
 
 // The instance's latest answer while the session is attached, else null (draw MAWS's own).
 export function useSurfaceSite({ appSessionId, component, instanceId, props, viewport, enabled = true, client = ipc }: SiteOptions): SiteAnswer | null {
+  const envelope = useSurfaceViewport();
+  viewport ??= envelope;
   const attached = useSurfaceAttached(appSessionId);
   const on = enabled && attached && appSessionId !== null;
   const address = useMemo(() => (appSessionId === null ? null : { appSessionId, component, instanceId }), [appSessionId, component, instanceId]);
