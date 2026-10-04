@@ -2,9 +2,9 @@
 // Each launch has a new scratch config, no owner configuration, and an unreachable API endpoint (never the relay).
 import {scratchRun,launch,removeRun,initPayload,success,check,endAsStop} from './mods-common.mjs';
 import {CLIENT,VIEWPORT,ANSWERS,render,ask} from './mods-surface-common.mjs';
-import {mkdirSync,writeFileSync,readFileSync,copyFileSync} from 'node:fs';
+import {mkdirSync,writeFileSync,copyFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {createHash} from 'node:crypto';
+import {ownerModSource} from './owner-mod-source.mjs';
 export {CLIENT,VIEWPORT,render,ask,check,success};
 export const COMPONENTS=['UserMessage','AssistantMessage','CommandOutput','ToolUse','ToolResult','ToolGroup','AskUserQuestion'];
 export const OUTCOMES=['engine-slot-rewrite','replacement','rewrite-alone','inkless','invalid-rewrite','passthrough'];
@@ -51,12 +51,13 @@ function install(run,module,owner){
  return dir;
 }
 export async function transcriptRun(name,body,{owner,mod=true}={}){
- const run=scratchRun(name,{mod:false});if(mod)install(run,MODULE,owner);
- try{return await launch(name,run,{vars:{ANTHROPIC_BASE_URL:'http://127.0.0.1:9',ANTHROPIC_AUTH_TOKEN:'r3-control-only-not-a-credential',CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:'1'},provenance:{spike:'R3',pin:'aee32faf1a86d6e6705e357da562b54af4b3211d',question:'Seven transcript sites and per-draw engine refs',controlOnly:true,...(owner?{ownerSource:owner,ownerSha256:createHash('sha256').update(readFileSync(owner)).digest('hex')}:{})}},async p=>{
+ const source=owner?ownerModSource():undefined;
+ const run=scratchRun(name,{mod:false});if(mod)install(run,MODULE,source?.ownerSource);
+ try{return await launch(name,run,{vars:{ANTHROPIC_BASE_URL:'http://127.0.0.1:9',ANTHROPIC_AUTH_TOKEN:'r3-control-only-not-a-credential',CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:'1'},provenance:{spike:'R3',pin:'aee32faf1a86d6e6705e357da562b54af4b3211d',question:'Seven transcript sites and per-draw engine refs',controlOnly:true,...(source?{ownerSource:source.ownerSource,ownerSha256:source.ownerSha256,ownerCommit:source.ownerCommit,ownerVersion:source.ownerVersion}:{})}},async p=>{
   const init=success(await p.init(initPayload(run.cwd)),'initialize');
   check(p,'ui_surface_v1 available',init.capabilities?.includes('ui_surface_v1'),init.capabilities);
   success(await ask(p,'ui_attach',{surface:'desktop',client_id:CLIENT,viewport:VIEWPORT,answers:ANSWERS},'attach'),'attach');
-  await body(p,run);
+  await body(p,{...run,owner:source});
   check(p,'no user or model frames',!p.frames.some(r=>['user','assistant','stream_event','result'].includes(r.frame.type)));
   await ask(p,'ui_detach',{client_id:CLIENT},'detach');await endAsStop(p);
  });}finally{removeRun(run);}
