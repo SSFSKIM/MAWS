@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient } from '../../../../test/support/fake-client';
 import type { Site } from './actions';
-import { SurfaceTree } from './SurfaceTree';
+import { fenced, SurfaceTree } from './SurfaceTree';
 import { parseTree, type SurfaceNode } from './tree';
 
 afterEach(cleanup);
@@ -154,4 +154,52 @@ it('without an engine slot only the first Client draws native', () => {
   setup({ type: 'Box', children: [client, 'between clients', client] });
   expect(screen.getAllByText('MAWS own')).toHaveLength(1);
   expect(document.querySelector('[data-surface="box"]')?.textContent).toBe('MAWS ownbetween clients');
+});
+
+
+describe('accepted tree safety (FX1)', () => {
+  it('fences a bounded source with many separate backtick runs without exhausting call arguments', () => {
+    const source = '` '.repeat(125_000) + '````';
+    expect(parseTree({ type: 'Code', props: { source } })).not.toBeNull();
+    expect(fenced(source, 'text')).toBe('`````text\n' + source + '\n`````');
+  });
+
+  it('normalizes lone SVG surrogates before forming the image URI', () => {
+    setup({ type: 'Svg', props: { source: '<svg>\ud800</svg>', alt: 'Malformed source' } });
+    expect(screen.getByRole('img').getAttribute('src')).toBe('data:image/svg+xml;charset=utf-8,%3Csvg%3E%EF%BF%BD%3C%2Fsvg%3E');
+  });
+
+  it('refuses an oversized input change locally and explains it, then accepts a valid edit', () => {
+    const fake = setup({ type: 'Input', props: { key: 'field', value: 'kept' }, press });
+    const field = screen.getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(field, { target: { value: 'x'.repeat(16_385) } });
+    expect(field.value).toBe('kept');
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByRole('alert').textContent).toMatch(/16,384/);
+    expect(fake.invoked('session.ui.input')).toHaveLength(0);
+    fireEvent.change(field, { target: { value: 'x'.repeat(16_384) } });
+    expect(field.value).toHaveLength(16_384);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(fake.invoked('session.ui.input')).toHaveLength(1);
+  });
+
+  it('refuses oversized select values without changing the selected value or crossing IPC', () => {
+    const huge = 'x'.repeat(16_385);
+    const fake = setup({ type: 'Select', props: { key: 'pick', value: 'ok', options: [{ value: 'ok' }, { value: huge, label: 'Too long' }] }, press });
+    const field = screen.getByRole('combobox') as HTMLSelectElement;
+    fireEvent.change(field, { target: { value: huge } });
+    expect(field.value).toBe('ok');
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByRole('alert').textContent).toMatch(/16,384/);
+    expect(fake.invoked('session.ui.select')).toHaveLength(0);
+  });
+
+  it('an oversized drawn input cannot submit until corrected', () => {
+    const fake = setup({ type: 'Input', props: { key: 'field', value: 'x'.repeat(16_385) }, press });
+    const field = screen.getByRole('textbox') as HTMLInputElement;
+    expect(field.value).toBe('');
+    expect(screen.getByRole('alert')).toBeTruthy();
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(fake.invoked('session.ui.input')).toHaveLength(0);
+  });
 });

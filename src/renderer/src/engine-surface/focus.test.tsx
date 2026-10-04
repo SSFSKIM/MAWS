@@ -1,0 +1,159 @@
+import { act, cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
+import { status } from '../../../../test/support/builders';
+import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { useSessions } from '../stores/sessions';
+import { invalidateSession, resetSurfaceRegistry } from './registry';
+import { SurfaceSite } from './SurfaceSite';
+
+const ID = 'fx1-focus' as AppSessionId;
+const press = { plugin: 'mod', handle: 1 };
+const tree = { type: 'Box', children: [
+  { type: 'Input', props: { key: 'first', label: 'First', autoFocus: true }, press },
+  { type: 'Button', props: { key: 'second', label: 'Second', autoFocus: true }, press },
+  { type: 'Button', props: { key: 'third', label: 'Third' }, press },
+  { type: 'Link', props: { href: 'https://example.com', label: 'Link' } },
+  { type: 'Markdown', props: { key: 'markdown', text: '[Markdown link](https://example.com/markdown)' }, press },
+  { type: 'engine', ref: 1 },
+] };
+let fake: FakeClient;
+beforeEach(() => {
+  resetSurfaceRegistry();
+  fake = fakeClient({ 'session.ui.render': { tree, props: {}, rewritten: false, hooked: true } });
+  useSessions.setState({ engine: new Map([[ID, { ...status(ID), uiSurface: { clientId: 'maws-main' } }]]) });
+});
+afterEach(cleanup);
+async function mount() {
+  const view = render(<><button>Outside</button><div data-plugin-pane="pane" tabIndex={-1}><SurfaceSite appSessionId={ID} component="Pane" instanceId="pane" props={{}} engine={<button>Native</button>} client={fake.client} /></div></>);
+  await act(async () => {});
+  return view.container.querySelector<HTMLElement>('[data-plugin-pane]')!;
+}
+const focus = (name: string) => act(() => screen.getByRole(name === 'First' ? 'textbox' : 'button', { name }).focus());
+const reply = (key: string | null, moved = true, deny: string | null = null) => act(() => fake.reply('session.ui.focus', { moved, element: key === null ? null : { plugin: 'mod', key }, deny }));
+const push = (key: string) => act(() => fake.event('session.eventBatch', { appSessionId: ID, events: [{ kind: 'plugin.focus', component: 'Pane', instanceId: 'pane', plugin: 'mod', key }] }));
+
+it('applies a focus redirect and a denial without echoing either back as another gesture', async () => {
+  await mount();
+  focus('First');
+  await reply('second');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+  expect(fake.invoked('session.ui.focus')).toHaveLength(1);
+  focus('First');
+  await reply('second', false, 'kept');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+  expect(fake.invoked('session.ui.focus')).toHaveLength(2);
+});
+
+it('does not echo a plugin focus push or let a pending gesture overwrite it', async () => {
+  await mount();
+  focus('First');
+  push('second');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+  expect(fake.invoked('session.ui.focus')).toHaveLength(1);
+  await reply('first');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+});
+
+it('starts at the first autofocus element when the pane body takes the keyboard, by auto, not on mount or redraw', async () => {
+  const host = await mount();
+  expect(fake.invoked('session.ui.focus')).toHaveLength(0);
+  act(() => host.focus());
+  expect(fake.invoked('session.ui.focus')).toEqual([{ appSessionId: ID, component: 'Pane', instanceId: 'pane', isHeld: true, element: { plugin: 'mod', key: 'first' }, by: 'auto' }]);
+  await reply('first');
+  expect(document.activeElement).toBe(screen.getByRole('textbox'));
+  focus('Second');
+  await reply('second');
+  await act(async () => invalidateSession(ID));
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+  expect(fake.invoked('session.ui.focus')).toHaveLength(2);
+});
+
+it('starts at the first autofocus element when the inner scrolling container takes the keyboard', async () => {
+  const host = await mount();
+  focus('Outside');
+  const container = host.querySelector<HTMLElement>('[data-surface-site="Pane"]')!;
+  act(() => container.focus());
+  expect(fake.invoked('session.ui.focus')).toEqual([{ appSessionId: ID, component: 'Pane', instanceId: 'pane', isHeld: true, element: { plugin: 'mod', key: 'first' }, by: 'auto' }]);
+  await reply('first');
+  expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'First' }));
+  expect(fake.invoked('session.ui.focus')).toHaveLength(1);
+});
+
+it('restores an outside stop on denied entry and ignores an answer after the person leaves', async () => {
+  await mount();
+  focus('Outside');
+  focus('First');
+  await reply(null, false, 'no');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Outside' }));
+  focus('First');
+  focus('Outside');
+  await reply('second');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Outside' }));
+});
+
+it.each(['Link', 'Native', 'Markdown link'])('keeps an accepted unkeyed %s stop and restores it on an unidentified denial', async (name) => {
+  await mount();
+  focus('First');
+  await reply('first');
+  const target = screen.getByRole(name === 'Native' ? 'button' : 'link', { name });
+  act(() => target.focus());
+  await reply(null);
+  expect(document.activeElement).toBe(target);
+  expect(fake.invoked('session.ui.focus')).toHaveLength(2);
+  focus('First');
+  await reply(null, false, 'kept');
+  expect(document.activeElement).toBe(target);
+  expect(fake.invoked('session.ui.focus')).toHaveLength(3);
+});
+
+it.each(['Link', 'Native', 'Markdown link'])('does not substitute autofocus for deliberate entry on an unkeyed %s stop', async (name) => {
+  await mount();
+  focus('Outside');
+  const target = screen.getByRole(name === 'Native' ? 'button' : 'link', { name });
+  act(() => target.focus());
+  expect(fake.invoked('session.ui.focus')).toEqual([{ appSessionId: ID, component: 'Pane', instanceId: 'pane', isHeld: true, element: null, by: 'person' }]);
+  await reply(null);
+  expect(document.activeElement).toBe(target);
+  expect(fake.invoked('session.ui.focus')).toHaveLength(1);
+});
+
+it('follows and retains the latest denied answer holder after an obsolete gesture was accepted', async () => {
+  await mount();
+  focus('First');
+  await reply('first');
+  focus('Second');
+  focus('Third');
+  await reply('second');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Third' }));
+  await reply('second', false, 'kept');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+  expect(fake.invoked('session.ui.focus')).toHaveLength(3);
+  focus('First');
+  await reply(null, false, 'kept');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+  focus('Third');
+  await reply('not-drawn', false, 'kept');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+  expect(fake.invoked('session.ui.focus')).toHaveLength(5);
+});
+
+it('still follows a successful redirect from a keyed control onto the pane stop', async () => {
+  const host = await mount();
+  focus('First');
+  await reply(null);
+  expect(document.activeElement).toBe(host);
+  expect(fake.invoked('session.ui.focus')).toHaveLength(1);
+});
+
+it('resolves a ring control past a geometry-addressed Markdown wrapper sharing its key', async () => {
+  fake = fakeClient({ 'session.ui.render': {
+    tree: { ...tree, children: [{ type: 'Markdown', props: { key: 'second', text: '[Geometry link](https://example.com/geometry)' }, press }, ...tree.children] },
+    props: {}, rewritten: false, hooked: true,
+  } });
+  await mount();
+  focus('First');
+  await reply('second');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+  expect(fake.invoked('session.ui.focus')).toHaveLength(1);
+});

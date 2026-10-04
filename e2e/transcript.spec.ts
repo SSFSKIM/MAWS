@@ -791,6 +791,9 @@ test('a mod’s toast, log lines and status line show in the session (R1, pass3/
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
 
+    // The index seed may hydrate before launch. Make that history deterministic rather than letting a
+    // lazy transcript's timing decide whether the startup log is the first row in the whole transcript.
+    await expect(pane.locator('[data-kind="user"]').filter({ hasText: 'a session with a mod' })).toBeVisible();
     await launchReady(page, id, fixture, { cwd: repo }); // the fixture answers initialize after the session.start pushes (seq 4-7)
     await expect.poll(() => page.evaluate(() => (window as unknown as { __toasts: string[] }).__toasts), { timeout: 20_000 }).toContainEqual(expect.stringContaining('mods-probe: MODS_PROBE_TOAST start'));
     value(await invoke(page, 'session.send', { appSessionId: id as never, content: 'Reply with exactly MODS_PROBE_OK' })); // as recorded (seq 9); the replay holds at it
@@ -799,9 +802,12 @@ test('a mod’s toast, log lines and status line show in the session (R1, pass3/
     // the log lines, dim notices under the plugin's name, at their arrival positions: before the turn and after it
     const notices = pane.locator('.transcript-error[data-scope="plugin"]');
     await expect(notices).toHaveText(['mods-probe: MODS_PROBE_LOG start surface=null interactive=false', 'mods-probe: MODS_PROBE_LOG turn']);
-    const order = await pane.locator('[data-row-id]').evaluateAll((rows) => rows.map((row) => row.querySelector('[data-kind]')?.getAttribute('data-kind')).filter((kind) => kind !== 'time'));
-    expect(order.slice(0, 2)).toEqual(['error', 'user']);
-    expect(order.at(-1)).toBe('error');
+    const order = await pane.locator('[data-row-id]').evaluateAll((rows) => rows.map((row) => ({ kind: row.querySelector('[data-kind]')?.getAttribute('data-kind'), text: row.textContent ?? '' })).filter((row) => row.kind !== 'time'));
+    const start = order.findIndex((row) => row.text.includes('mods-probe: MODS_PROBE_LOG start'));
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(order.slice(start, start + 2).map((row) => row.kind)).toEqual(['error', 'user']);
+    expect(order[start + 1].text).toContain('Reply with exactly MODS_PROBE_OK');
+    expect(order.at(-1)?.text).toContain('mods-probe: MODS_PROBE_LOG turn');
     // the status line, its latest text, in the panel summary's Plugins section
     const plugins = page.locator('[data-region="panel"]').getByRole('region', { name: 'Plugins' });
     await expect(plugins).toContainText('mods-probe · MODS_PROBE_STATUS turn');

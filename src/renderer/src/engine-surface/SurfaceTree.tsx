@@ -6,7 +6,8 @@
 // fenced block, so the transcript's highlighter draws it); an Svg is a `data:` image, or a frame with `sandbox=""` when
 // it asks to be interactive; `engine` draws MAWS's own drawing of the site (`engine`, given by the site). A Client
 // element requires client JavaScript, deferred in R3: it draws MAWS native instead.
-import { createContext, useContext, useState, type MouseEvent, type ReactNode } from 'react';
+import { createContext, useContext, useId, useState, type MouseEvent, type ReactNode } from 'react';
+import { SURFACE_VALUE_MAX } from '@shared/engine/surface';
 import { Markdown } from '../transcript';
 import { input as sendInput, press as sendPress, select as sendSelect, type Site } from './actions';
 import { boxStyle, textStyle } from './style';
@@ -144,14 +145,14 @@ function ButtonNode({ node }: { node: Extract<SurfaceNode, { type: 'Button' }> }
   const onClick = () => sendPress(site, node.press, key);
   if (role === 'dismiss') {
     return (
-      <button type="button" data-surface="button" data-plugin={node.press.plugin} data-key={key} data-role="dismiss" aria-label={SURFACE_COPY.dismiss(label)} title={SURFACE_COPY.dismiss(label)} onClick={onClick} className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+      <button type="button" data-surface="button" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} data-role="dismiss" aria-label={SURFACE_COPY.dismiss(label)} title={SURFACE_COPY.dismiss(label)} onClick={onClick} className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
         ×
       </button>
     );
   }
   const className = plain ? PLAIN : variant === 'primary' ? PRIMARY : BUTTON;
   return (
-    <button type="button" data-surface="button" data-plugin={node.press.plugin} data-key={key} data-hotkey={hotkey} onClick={onClick} className={`${className}${dimColor ? ' text-fg-muted hover:text-fg' : ''}`}>
+    <button type="button" data-surface="button" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} data-hotkey={hotkey} onClick={onClick} className={`${className}${dimColor ? ' text-fg-muted hover:text-fg' : ''}`}>
       {plain && hotkey ? <span className="text-accent">{hotkey}:&nbsp;</span> : null}
       {label}
     </button>
@@ -160,43 +161,58 @@ function ButtonNode({ node }: { node: Extract<SurfaceNode, { type: 'Button' }> }
 
 // What the person typed or picked, until a redraw draws another value, which replaces it as the engine's own field does
 // (adjusted while rendering, so the field keeps its element and the keyboard).
-function useDrawn(drawn: string): [string, (next: string) => void] {
-  const [state, setState] = useState({ drawn, current: drawn });
-  if (state.drawn !== drawn) {
-    const next = { drawn, current: drawn };
-    setState(next);
-    return [next.current, (current) => setState({ drawn, current })];
-  }
-  return [state.current, (current) => setState({ drawn, current })];
+function useField(drawn: string) {
+  const initial = () => ({ drawn, current: drawn.length > SURFACE_VALUE_MAX ? '' : drawn, refused: drawn.length > SURFACE_VALUE_MAX });
+  const [state, setState] = useState(initial);
+  const errorId = useId();
+  const current = state.drawn === drawn ? state : initial();
+  if (current !== state) setState(current);
+  const setValue = (value: string): boolean => {
+    if (value.length > SURFACE_VALUE_MAX) {
+      setState({ ...current, refused: true });
+      return false;
+    }
+    setState({ drawn, current: value, refused: false });
+    return true;
+  };
+  return { value: current.current, refused: current.refused, setValue, errorId };
+}
+
+function FieldError({ id }: { id: string }) {
+  return <span id={id} role="alert" className="text-ui-sm text-fg-muted">Value refused: maximum 16,384 characters.</span>;
 }
 
 function InputNode({ node }: { node: Extract<SurfaceNode, { type: 'Input' }> }) {
   const { site } = useSurface();
   const { key, label, placeholder, value, submitLabel } = node.props;
-  const [text, setText] = useDrawn(value ?? '');
+  const field = useField(value ?? '');
+  const text = field.value;
   const [focused, setFocused] = useState(false);
   return (
-    <label data-surface="input" data-plugin={node.press.plugin} data-key={key} className="inline-flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">
+    <label data-surface="input" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} className="inline-flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">
       {label && <span className="shrink-0">{label}</span>}
       <input
         type="text"
         value={text}
         placeholder={placeholder}
+        aria-invalid={field.refused || undefined}
+        aria-describedby={field.refused ? field.errorId : undefined}
         aria-label={label ?? key}
         spellCheck={false}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onChange={(event) => {
-          setText(event.target.value);
+          if (!field.setValue(event.target.value)) return;
           sendInput(site, node.press, key, 'change', event.target.value);
         }}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
           event.preventDefault();
-          sendInput(site, node.press, key, 'submit', text);
+          if (!field.refused) sendInput(site, node.press, key, 'submit', text);
         }}
         className={FIELD}
       />
+      {field.refused && <FieldError id={field.errorId} />}
       {focused && <span className="shrink-0 text-fg-faint">↵ {submitLabel ?? 'submit'}</span>}
     </label>
   );
@@ -205,25 +221,29 @@ function InputNode({ node }: { node: Extract<SurfaceNode, { type: 'Input' }> }) 
 function SelectNode({ node }: { node: Extract<SurfaceNode, { type: 'Select' }> }) {
   const { site } = useSurface();
   const { key, label, options, value } = node.props;
-  const [picked, setPicked] = useDrawn(value ?? options[0]!.value);
+  const field = useField(value ?? options[0]!.value);
   return (
-    <label data-surface="select" data-plugin={node.press.plugin} data-key={key} className="inline-flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">
+    <label data-surface="select" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} className="inline-flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">
       {label && <span className="shrink-0">{label}</span>}
       <select
-        value={picked}
+        value={field.value}
+        aria-invalid={field.refused || undefined}
+        aria-describedby={field.refused ? field.errorId : undefined}
         aria-label={label ?? key}
         onChange={(event) => {
-          setPicked(event.target.value);
+          if (!field.setValue(event.target.value)) return;
           sendSelect(site, node.press, key, event.target.value);
         }}
         className={FIELD}
       >
+        {field.value === '' && !options.some((option) => option.value === '') && <option value="" disabled>Choose a value</option>}
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label ?? option.value}
           </option>
         ))}
       </select>
+      {field.refused && <FieldError id={field.errorId} />}
     </label>
   );
 }
@@ -249,7 +269,8 @@ function LinkNode({ node }: { node: Extract<SurfaceNode, { type: 'Link' }> }) {
 
 // A fence the source cannot close early: one backtick longer than its longest run.
 export function fenced(source: string, language: string): string {
-  const longest = Math.max(2, ...[...source.matchAll(/`+/g)].map((m) => m[0].length));
+  let longest = 2;
+  for (const match of source.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
   const fence = '`'.repeat(longest + 1);
   return `${fence}${language}\n${source}\n${fence}`;
 }
@@ -279,7 +300,7 @@ function MarkdownNode({ node }: { node: Extract<SurfaceNode, { type: 'Markdown' 
     else if (/^https?:/.test(href)) openExternal(site, href);
   };
   return (
-    <div data-surface="markdown" className={`min-w-0${dimColor ? ' text-fg-muted' : ''}`} onClickCapture={onClickCapture}>
+    <div data-surface="markdown" data-plugin={node.press?.plugin} data-key={key} className={`min-w-0${dimColor ? ' text-fg-muted' : ''}`} onClickCapture={onClickCapture}>
       <Markdown markdown={text} live={false} />
     </div>
   );
@@ -288,5 +309,5 @@ function MarkdownNode({ node }: { node: Extract<SurfaceNode, { type: 'Markdown' 
 function SvgNode({ node }: { node: Extract<SurfaceNode, { type: 'Svg' }> }) {
   const { source, alt, width, height, isInteractive } = node.props;
   if (isInteractive) return <iframe data-surface="svg" sandbox="" srcDoc={source} title={alt} width={width} height={height} className="max-w-full border-0" />;
-  return <img data-surface="svg" src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`} alt={alt} width={width} height={height} className="max-w-full" />;
+  return <img data-surface="svg" src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(new TextDecoder().decode(new TextEncoder().encode(source)))}`} alt={alt} width={width} height={height} className="max-w-full" />;
 }

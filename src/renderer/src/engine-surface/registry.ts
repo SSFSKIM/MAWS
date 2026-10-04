@@ -7,7 +7,7 @@
 // never marks its site unhooked (the invalidate may say a plugin hooks it now), so the re-ask it queued still runs. The
 // answers live in a small store React reads; the bookkeeping is module state.
 import { create } from 'zustand';
-import type { RenderAnswer, SurfaceSite, SurfaceViewport } from '@shared/engine/surface';
+import type { RenderAnswer, SurfaceGeometry, SurfaceSite, SurfaceViewport } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { parseTree, type SurfaceNode } from './tree';
@@ -30,6 +30,7 @@ interface Entry extends SiteAddress {
   props: Record<string, unknown>;
   propsKey: string;
   viewport: SurfaceViewport | undefined;
+  geometry?: SurfaceGeometry;
   inFlight: boolean;
   again: boolean; // asked while in flight: ask once more when it lands
   mounts: number;
@@ -75,7 +76,7 @@ async function ask(key: string): Promise<void> {
   entry.again = false;
   const { appSessionId, component, instanceId, props, propsKey, viewport } = entry;
   const generation = generationOf(appSessionId);
-  const result = await entry.client.invoke('session.ui.render', { appSessionId, component, instanceId, props, ...(viewport && { viewport }) });
+  const result = await entry.client.invoke('session.ui.render', { appSessionId, component, instanceId, props, ...entry.geometry, ...(viewport && { viewport }) });
   entry.inFlight = false;
   if (entries.get(key) !== entry) return; // unmounted meanwhile
   if (result.ok) {
@@ -87,6 +88,8 @@ async function ask(key: string): Promise<void> {
     }
   } else {
     console.warn(`[engine-surface] ${component} ${instanceId} not drawn: ${result.error.message}`);
+    // A failed/timed-out ask is settled, not still pending. Keep hook knowledge so a later invalidate retries.
+    if (generation === generationOf(appSessionId) && propsKey === entry.propsKey) store(key, { tree: null, hooked: true, props, rewritten: false });
   }
   if (entry.again) void ask(key);
 }
@@ -149,4 +152,10 @@ export function resetSurfaceRegistry(): void {
   entries.clear();
   generations.clear();
   useSurfaceAnswers.setState({ answers: new Map(), hooked: new Map() });
+}
+
+// Layout is reported over ui.scroll now, and accompanies the next render ask without causing a render/layout loop.
+export function setSiteGeometry(address: SiteAddress, geometry: SurfaceGeometry): void {
+  const entry = entries.get(siteKey(address));
+  if (entry) entry.geometry = geometry;
 }

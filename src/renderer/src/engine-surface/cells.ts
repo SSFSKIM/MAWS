@@ -4,7 +4,7 @@
 // before the first layout (or with none, in tests), the given fallbacks.
 import { useEffect, useState, type RefObject } from 'react';
 
-const PROBE = 'position:absolute;visibility:hidden;width:1ch;height:1lh';
+const PROBE = 'position:absolute;visibility:hidden;pointer-events:none;font-family:var(--font-mono);width:1ch;height:1lh';
 
 export function useCells(ref: RefObject<HTMLElement | null>, fallback: { columns: number; rows: number }): { columns: number; rows: number } {
   const [cells, setCells] = useState(fallback);
@@ -12,7 +12,9 @@ export function useCells(ref: RefObject<HTMLElement | null>, fallback: { columns
   useEffect(() => {
     const element = ref.current;
     if (!element || typeof ResizeObserver === 'undefined') return;
+    let frame: number | null = null;
     const measure = () => {
+      frame = null;
       const probe = document.createElement('span');
       probe.style.cssText = PROBE;
       element.appendChild(probe);
@@ -22,9 +24,11 @@ export function useCells(ref: RefObject<HTMLElement | null>, fallback: { columns
       const next = { columns: ch > 0 && width > 0 ? Math.max(1, Math.floor(width / ch)) : fallbackColumns, rows: lh > 0 && height > 0 ? Math.max(1, Math.floor(height / lh)) : fallbackRows };
       setCells((prev) => (prev.columns === next.columns && prev.rows === next.rows ? prev : next));
     };
-    const observer = new ResizeObserver(measure);
+    const observer = new ResizeObserver(() => {
+      if (frame === null) frame = requestAnimationFrame(measure);
+    });
     observer.observe(element); // its first callback measures
-    return () => observer.disconnect();
+    return () => { observer.disconnect(); if (frame !== null) cancelAnimationFrame(frame); };
   }, [ref, fallbackColumns, fallbackRows]);
   return cells;
 }

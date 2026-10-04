@@ -9,6 +9,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import type { SiteAnswer } from './registry';
 import { useSurfaceAttached, useSurfaceHooked, useSurfaceSite } from './site';
+import { SurfaceBoundary } from './SurfaceBoundary';
 import { SurfaceTree } from './SurfaceTree';
 import { drawsEngine, firstEngineRef, hasInk, type SurfaceNode } from './tree';
 
@@ -44,7 +45,8 @@ export function SurfaceRow<C extends TranscriptSite>({ appSessionId, component, 
   const active = enabled && attached && appSessionId !== null;
   const incoming = useMemo(() => ({ answer, props, pending: active && hooked === true && answer === null }), [answer, props, active, hooked]);
   const [drawn, onPointerDownCapture] = useGestureDrawing(incoming, `${appSessionId}:${component}:${instanceId}:${active}`);
-  const current = active ? drawn.answer : null;
+  const [failed, setFailed] = useState<SiteAnswer | null>(null);
+  const current = active && drawn.answer !== failed ? drawn.answer : null;
   const ignored = !current?.hooked || (onlyRewrites && (!current.rewritten || equal(current.props, drawn.props)));
   const parsed = useMemo(() => current?.rewritten && !ignored ? parseTranscriptProps(component, current.props, drawn.props) : drawn.props, [component, current, drawn.props, ignored]);
   const refused = !ignored && parsed === null;
@@ -85,9 +87,11 @@ export function SurfaceRow<C extends TranscriptSite>({ appSessionId, component, 
   // A drawing-only ToolGroup has its native group beside this mount. Engine slots in that drawing stay empty.
   return (
     <div data-surface-row={component} style={{ display: 'contents' }} onPointerDownCapture={onPointerDownCapture}>
+      <SurfaceBoundary key={`${appSessionId}:${component}:${instanceId}`} answer={drawn.answer} name={`${component} ${instanceId}`} onError={setFailed}>
       {showDrawing && appSessionId !== null && <div data-plugin-drawn={component} style={{ display: 'contents' }}>
         <SurfaceTree tree={tree!} site={{ appSessionId, component, instanceId, client }} engine={drawingOnly ? null : own} />
       </div>}
+      </SurfaceBoundary>
       {!drawingOnly && (!showDrawing || !slot) && <div style={{ display: delayed || (concealed && !pending) ? 'none' : 'contents' }} aria-hidden={concealed || undefined} inert={concealed || undefined}>{own}</div>}
       {/* Mount the host before native layout effects resolve their enclosing focus/shortcut owner. */}
       {!drawingOnly && createPortal(
