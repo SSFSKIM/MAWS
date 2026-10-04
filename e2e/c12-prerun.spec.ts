@@ -24,7 +24,7 @@ import { _electron, expect, test, type ElectronApplication, type Locator, type P
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { ENGINE_BIN as ENGINE_BIN_PATH } from '../test/support/engine-pin'; // W13: the fixtures' engine
+import { ENGINE_BIN as ENGINE_BIN_PATH, ENGINE_VERSION } from '../test/support/engine-pin'; // FX4: the resolved live engine
 import { writeScratchShellHome } from '../test/support/shell-home';
 import { synthesise } from '../test/support/synth-transcript';
 import { invoke, value } from './support/c7-replay';
@@ -145,7 +145,7 @@ async function openOverview(page: Page): Promise<Locator> {
 // Haiku in this profile (the settings row the owner's Settings › Engine carries), since no item needs the owner's model
 // for its children.
 async function open(extraEnv: Record<string, string> = {}): Promise<MawsLaunch> {
-  const maws = await launchMaws({ userData: scratch.userData, env: { MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, ...extraEnv } });
+  const maws = await launchMaws({ userData: scratch.userData, env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN_PATH, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, ...extraEnv } });
   launches.push(maws.consoleErrors);
   await expect(main(maws.page)).toBeVisible({ timeout: 60_000 });
   value(await invoke(maws.page, 'settings.set', { engine: { subagentModel: 'haiku' } }));
@@ -915,13 +915,13 @@ test('§10.5 the archived deep session resumes from a terminal with claude --res
       if (offered) await page.keyboard.press('Escape'); // the worktree stays for the terminal
     });
 
-    await step('claude --resume in the worktree (the pinned 2.1.283 under the scratch home)', async () => {
+    await step(`claude --resume in the worktree (${ENGINE_VERSION} under the scratch home)`, async () => {
       const since = Date.now();
       const term = await ptyEngine(scratch.config, worktree!, ['--resume', engineId!], join(scratch.root, 'terminal-10.5.txt'));
       try {
         await term.say('In one short sentence: what file did you create in this session, and what line does it hold?');
         const reply = await term.replied(/c12-deep/i, 180_000);
-        out.terminalResume = { engineSessionId: engineId, reply, version: '2.1.283 (the pin, by absolute path); the owner’s `claude` on PATH is 2.1.285, so the owner’s step 5 resumes with a newer engine than MAWS’s' };
+        out.terminalResume = { engineSessionId: engineId, reply, version: ENGINE_VERSION, binary: ENGINE_BIN_PATH };
       } finally {
         await term.exit();
         const usd = transcriptUsdEstimate(transcriptFile(scratch.config, worktree!, engineId!), since);

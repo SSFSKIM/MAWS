@@ -24,6 +24,7 @@ import type { JournalRow } from '@shared/wire/journal';
 import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { c12LiveSkipReason, c12Scratch, lsPin, ownerFileCheck, psRead, spend, treeOf, type C12Scratch } from './support/c12-live';
+import { ENGINE_BIN } from '../test/support/engine-pin';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { newChatIn, sidebarRow } from './support/sidebar';
 
@@ -224,7 +225,7 @@ const toolUses = (rows: JournalRow[]) =>
 // ---- the run -------------------------------------------------------------------------------------------------------
 
 test('nine sessions under a memory budget: releases, the released surfaces, Send-to-resume with the grant, and the banner with the per-session stop', async () => {
-  const maws: MawsLaunch = await launchMaws({ userData: scratch.userData, env: { MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
+  const maws: MawsLaunch = await launchMaws({ userData: scratch.userData, env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
   const { page, app } = maws;
   const labels = new Map<string, string>(); // appSessionId → A1 … B7
   const ids: Record<string, string> = {};

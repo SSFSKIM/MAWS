@@ -18,7 +18,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
 import type { JournalRow } from '@shared/wire/journal';
 import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
-import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13: the fixtures' engine
+import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // FX4: the resolved live engine
 import { resumeSpec, type ResumeFields } from '../../src/renderer/src/composer/dev/resume-spec';
 import { assertConfigHomeSafe, scratchConfigHome } from '../../test/live/support/live';
 import { invoke, value } from './c7-replay';
@@ -30,8 +30,8 @@ export const LIVE = process.env.MAWS_C7_LIVE === '1';
 export function liveSkipReason(): string | null {
   if (!LIVE) return 'the C7 live acceptance runs only under MAWS_C7_LIVE=1';
   if (!existsSync(ENGINE_BIN)) return `engine binary missing at ${ENGINE_BIN}`;
-  const version = execFileSync(ENGINE_BIN, ['--version'], { encoding: 'utf8', timeout: 15_000 }).trim();
-  if (!version.startsWith(ENGINE_VERSION)) return `engine reports ${version}, expected ${ENGINE_VERSION}`;
+  if (!ENGINE_VERSION) return `engine did not report a version at ${ENGINE_BIN}`;
+  console.info(`[live engine] ${ENGINE_BIN} (${ENGINE_VERSION})`);
   return relaySkipReason(RELAY_URL);
 }
 

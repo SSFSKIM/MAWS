@@ -22,7 +22,7 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../src/engine-host/launch';
-import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin'; // W13: the fixtures' engine
+import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin'; // FX4: the resolved live engine
 import { scratchConfigHome } from '../test/live/support/live';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
@@ -30,8 +30,8 @@ import { sidebarRow } from './support/sidebar';
 function skipReason(): string | null {
   if (process.env.MAWS_C8B_LIVE !== '1') return 'the C8b live acceptance runs only under MAWS_C8B_LIVE=1';
   if (!existsSync(ENGINE_BIN)) return `engine binary missing at ${ENGINE_BIN}`;
-  const version = execFileSync(ENGINE_BIN, ['--version'], { encoding: 'utf8', timeout: 15_000 }).trim();
-  if (!version.startsWith(ENGINE_VERSION)) return `engine reports ${version}, expected ${ENGINE_VERSION}`;
+  if (!ENGINE_VERSION) return `engine did not report a version at ${ENGINE_BIN}`;
+  console.info(`[live engine] ${ENGINE_BIN} (${ENGINE_VERSION})`);
   const code = execFileSync('/usr/bin/curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', `${RELAY_URL}/api/hello`], { encoding: 'utf8' }).trim();
   if (code !== '200') return `relay at ${RELAY_URL} answered ${code}: start ClaudeUsage`;
   const main = readdirSync(join(REPO_ROOT, 'out/renderer/assets')).filter((f) => f.startsWith('index-') && f.endsWith('.js'));
@@ -434,7 +434,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
   };
 
   const open = async (env: Record<string, string>) => {
-    const launch = await launchMaws({ env: { CLAUDE_CONFIG_DIR: config, MAWS_HARNESS: '0', CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...env } });
+    const launch = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, CLAUDE_CONFIG_DIR: config, MAWS_HARNESS: '0', CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...env } });
     await launch.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide());
     const page = launch.page;
     const invoke: Invoke = (name, input) => page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const);

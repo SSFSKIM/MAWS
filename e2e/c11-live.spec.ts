@@ -20,6 +20,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { invoke, value } from './support/c7-replay';
 import { c11LiveSkipReason, c11Scratch, Forwarder, FORWARDER_PORT, relayCatalogue, type C11Scratch } from './support/c11-live';
+import { ENGINE_BIN } from '../test/support/engine-pin';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, sidebarRow } from './support/sidebar';
 
@@ -51,7 +52,7 @@ interface Live {
 }
 
 async function withApp(label: string, env: Record<string, string>, fn: (live: Live) => Promise<void>): Promise<void> {
-  const maws = await launchMaws({ env: { MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, MAWS_CLAUDE_USAGE_DIR: CLAUDE_USAGE_DIR, ...env } });
+  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, MAWS_CLAUDE_USAGE_DIR: CLAUDE_USAGE_DIR, ...env } });
   const { page } = maws;
   const failures: string[] = [];
   const observe = (key: string, v: unknown) => scratch.observe(`${label}.${key}`, v);

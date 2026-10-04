@@ -14,6 +14,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, value } from './support/c7-replay';
 import { journalSpend, ownerFileCheck, scratchRepo, stateOf } from './support/c12-prerun';
+import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { newChatIn, sidebarRow } from './support/sidebar';
 
@@ -68,7 +69,8 @@ async function rowOf(page: Page, id: string): Promise<Locator> {
 }
 
 async function open(label: string): Promise<MawsLaunch> {
-  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
+  console.info(`[live engine] ${ENGINE_BIN} (${ENGINE_VERSION})`);
+  const maws = await launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
   const child = maws.app.process();
   const appLog = out(`app-${label}.log`);
   child.stdout?.on('data', (c: Buffer) => appendFileSync(appLog, c));
@@ -88,8 +90,8 @@ async function open(label: string): Promise<MawsLaunch> {
 }
 
 const setupEvents = (page: Page) => page.evaluate(() => (window as unknown as { __setup: unknown[] }).__setup);
-// Every pinned-engine process on the machine under this scratch home (an orphan of a previous app would show here).
-const engines = () => sh('/bin/ps', ['-axo', 'pid=,ppid=,etime=,stat=,command=']).split('\n').filter((l) => l.includes('versions/2.1.283') && !l.includes(' sample ')).map((l) => l.trim().slice(0, 160));
+// Every process of the selected engine on this machine (including an orphan of a previous app).
+const engines = () => sh('/bin/ps', ['-axo', 'pid=,ppid=,etime=,stat=,command=']).split('\n').filter((l) => l.includes(ENGINE_BIN) && !l.includes(' sample ')).map((l) => l.trim().slice(0, 160));
 
 async function send(page: Page, id: string, text: string): Promise<void> {
   const before = (await statusOrNull(page, id))?.lastEventSeq ?? 0;

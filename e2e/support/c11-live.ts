@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
-import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13: the fixtures' engine
+import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // FX4: the resolved live engine
 
 export const RELAY = 'http://127.0.0.1:8641'; // ClaudeUsage's relay, whatever MAWS_RELAY_URL this process may carry
 export const FORWARDER_PORT = 18641;
@@ -18,8 +18,8 @@ export const FORWARDER_PORT = 18641;
 export function c11LiveSkipReason(): string | null {
   if (process.env.MAWS_C11_LIVE !== '1') return 'the C11 live acceptance runs only under MAWS_C11_LIVE=1';
   if (!existsSync(ENGINE_BIN)) return `engine binary missing at ${ENGINE_BIN}`;
-  const version = execFileSync(ENGINE_BIN, ['--version'], { encoding: 'utf8', timeout: 15_000 }).trim();
-  if (!version.startsWith(ENGINE_VERSION)) return `engine reports ${version}, expected ${ENGINE_VERSION}`;
+  if (!ENGINE_VERSION) return `engine did not report a version at ${ENGINE_BIN}`;
+  console.info(`[live engine] ${ENGINE_BIN} (${ENGINE_VERSION})`);
   const code = execFileSync('/usr/bin/curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', `${RELAY}/api/hello`], { encoding: 'utf8' }).trim();
   return code === '200' ? null : `relay at ${RELAY} answered ${code}: start ClaudeUsage`;
 }

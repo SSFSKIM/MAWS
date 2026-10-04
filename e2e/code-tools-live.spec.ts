@@ -20,7 +20,7 @@ import { expect, type Page } from '@playwright/test';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../src/engine-host/launch';
-import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin'; // W13: the fixtures' engine
+import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin'; // FX4: the resolved live engine
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { scratchConfigHome } from '../test/live/support/live';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
@@ -30,8 +30,8 @@ import { sidebarOf, sidebarRow } from './support/sidebar';
 function skipReason(): string | null {
   if (process.env.MAWS_CODE_LIVE !== '1') return 'the C8c live acceptance runs only under MAWS_CODE_LIVE=1';
   if (!existsSync(ENGINE_BIN)) return `engine binary missing at ${ENGINE_BIN}`;
-  const version = execFileSync(ENGINE_BIN, ['--version'], { encoding: 'utf8', timeout: 15_000 }).trim();
-  if (!version.startsWith(ENGINE_VERSION)) return `engine reports ${version}, expected ${ENGINE_VERSION}`;
+  if (!ENGINE_VERSION) return `engine did not report a version at ${ENGINE_BIN}`;
+  console.info(`[live engine] ${ENGINE_BIN} (${ENGINE_VERSION})`);
   const code = execFileSync('/usr/bin/curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', `${RELAY_URL}/api/hello`], { encoding: 'utf8' }).trim();
   return code === '200' ? null : `relay at ${RELAY_URL} answered ${code}: start ClaudeUsage`;
 }
@@ -249,7 +249,7 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
   expect(lineNo, 'the line the turn edits').toBeGreaterThan(0);
   const edited = `${before[lineNo - 1]} (C8c live)`;
 
-  const maws = await launchMaws({ env: { CLAUDE_CONFIG_DIR: config, MAWS_HARNESS: '0' } });
+  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, CLAUDE_CONFIG_DIR: config, MAWS_HARNESS: '0' } });
   try {
     await hideWindow(maws);
     const { page } = maws;
