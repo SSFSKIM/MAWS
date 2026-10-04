@@ -12,6 +12,8 @@ import { handshakePrelude } from './conformance/harness';
 import { handshakeResponder, INIT_RESPONSE, scriptedSession } from './conformance/session-harness';
 import { replayEngine } from './replay-transport';
 import { SessionSurface, SURFACE_ANSWER_MS } from './surface';
+import { ControlClient } from './rpc';
+import { MemoryJournal, scriptedTransport } from './conformance/scripted-transport';
 import type { TransportItem } from './transport';
 
 afterEach(() => {
@@ -115,6 +117,60 @@ describe('the session attaches as the desktop surface (R2)', () => {
     await session.answerSurface('fill-1' as RequestId, { ask: 'prompt_fill', filled: true });
     await session.answerSurface('suggest-1' as RequestId, { ask: 'prompt_suggest', shown: false });
     expect(transport.writes.filter((w) => w.type === 'control_response').map((w) => (w as { response: { response: unknown } }).response.response)).toEqual([{ text: 'MAWS draft', cursor: 10 }, { filled: true }, { shown: false }]);
+  });
+});
+
+describe('SessionSurface attachment cannot outlive shutdown', () => {
+  it.each(['exit', 'detach', 'detach without client'] as const)('invalidates an answered attach before its continuation runs on %s', async (ending) => {
+    const transport = scriptedTransport({ onWrite: (frame) => {
+      if (frame.type !== 'control_request' || frame.request.subtype === 'ui_attach') return;
+      const response = frame.request.subtype === 'ui_panes' ? ROSTER : { detached: true, surfaces: [] };
+      queueMicrotask(() => client.observe({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response } }));
+    } });
+    const client = new ControlClient(transport, new MemoryJournal(), 'surface-race');
+    const published: boolean[] = [];
+    const surface = new SessionSurface({ log: () => {}, touch: () => published.push(surface.attached) });
+    try {
+      const attaching = surface.attach(client, ['ui_surface_v1']);
+      await client.writer.whenIdle();
+      const request = transport.requestsOf('ui_attach')[0]!;
+      // The response is delivered; shutdown runs before the awaiting attach continuation.
+      client.observe({ type: 'control_response', response: { subtype: 'success', request_id: request.request_id, response: { surfaces: ['desktop'] } } });
+      if (ending === 'exit') surface.processExited();
+      else surface.detach(ending === 'detach' ? client : null);
+      await attaching;
+      expect(surface.attached).toBe(false);
+      expect(published).not.toContain(true);
+      expect(writtenSubtypes(transport.writes)).toEqual(ending === 'detach' ? ['ui_attach', 'ui_detach'] : ['ui_attach']);
+      // A late system/init cannot start a second attach during shutdown.
+      await surface.attach(client, ['ui_surface_v1']);
+      expect(transport.requestsOf('ui_attach')).toHaveLength(1);
+    } finally {
+      surface.processExited();
+      client.close('test finished');
+      transport.exit(0);
+    }
+  });
+
+  it('detaches a still-unanswered attach before end_session and never publishes its late success', async () => {
+    const { session, transport } = scriptedSession({ responder: { ...surfaceResponder(), ui_attach: () => null } });
+    const starting = session.start();
+    await until(() => transport.requestsOf('ui_attach').length === 1, 'ui_attach');
+    const stopping = session.stop('stop');
+    try {
+      await until(() => transport.requestsOf('end_session').length === 1, 'end_session');
+      transport.answer('ui_attach', { surfaces: ['desktop'] });
+      await starting;
+      expect(session.status().process).toBe('exiting');
+      expect(session.status().uiSurface).toBeUndefined();
+      const order = writtenSubtypes(transport.writes);
+      expect(order).not.toContain('ui_panes');
+      expect(order.indexOf('ui_detach')).toBeGreaterThan(order.indexOf('ui_attach'));
+      expect(order.indexOf('ui_detach')).toBeLessThan(order.indexOf('end_session'));
+    } finally {
+      transport.exit(0);
+      await stopping;
+    }
   });
 });
 

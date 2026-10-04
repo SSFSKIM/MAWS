@@ -61,8 +61,9 @@ function reconcile(appSessionId: AppSessionId): void {
   const shown = shownSession() === appSessionId;
   for (const pane of roster.panes) {
     if (kept.has(pane.id)) continue;
-    const tab = panelHost.addTool(PLUGIN_PANE_TOOL, { appSessionId, params: { paneId: pane.id }, activate: shown && pane.id === roster.shownId });
+    const tab = panelHost.addTool(PLUGIN_PANE_TOOL, { appSessionId, params: { paneId: pane.id }, activate: false });
     setTitle(tab, titleOf(roster, pane.id));
+    if (shown && pane.id === roster.shownId) panelHost.selectTab(tab, { focus: false });
   }
   // the engine moved the shown pane (a plugin's open or show of one that already has a tab): on screen, its tab is
   // selected, the keyboard left where it is (a focus request is the roster's own field); only on a change, so an
@@ -129,8 +130,11 @@ export function connectPluginPanes(client: MawsBridge = ipc): () => void {
       attached.add(id);
       read(id);
     }
-    for (const id of [...attached]) {
+    // The host reads panes before initialization reaches ready, so a pushed roster need never enter `attached`.
+    for (const id of new Set([...attached, ...usePaneRosters.getState().rosters.keys()])) {
       if (now.has(id)) continue;
+      const process = useSessions.getState().engine.get(id)?.process;
+      if (!attached.has(id) && (process === 'starting' || process === 'initializing')) continue;
       attached.delete(id);
       pushed.delete(id);
       setRoster(id, null);
@@ -145,6 +149,8 @@ export function connectPluginPanes(client: MawsBridge = ipc): () => void {
   });
   const offEvents = client.on('session.eventBatch', ({ appSessionId, events }) => {
     const id = appSessionId as AppSessionId;
+    const process = useSessions.getState().engine.get(id)?.process;
+    if (process === 'exiting' || process === 'exited') return; // a buffered batch cannot revive the ended surface
     let latest: PaneRoster | null = null;
     for (const event of events) if (event.kind === 'plugin.panes') latest = { panes: event.panes, shownId: event.shownId, focusedId: event.focusedId, focusRequestedId: event.focusRequestedId };
     if (latest === null) return;

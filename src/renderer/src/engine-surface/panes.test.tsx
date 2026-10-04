@@ -21,6 +21,7 @@ import { ToastHost } from '../app/ToastHost';
 import { A, panelOf, resetPanelStores, TestHost } from '../test-support/panel';
 import { connectPluginPanes, resetPaneRosters } from './panes';
 import { resetSurfaceRegistry } from './registry';
+import { usePaneRosters } from './pane-roster';
 
 // The Pane answer of the fixture (seq 58).
 const PANE_ANSWER = (() => {
@@ -166,6 +167,38 @@ describe('plugin panes as panel tabs (R2)', () => {
     composer.remove();
   });
 
+  it.each([false, true])('a newly shown pane selects without taking the composer keyboard or revealing the panel (collapsed=%s)', async (collapsed) => {
+    connect({ 'session.ui.panes': roster([pane('one', 'One')]), 'session.ui.render': PANE_ANSWER });
+    render(<><textarea aria-label="Composer" /><TestHost /></>);
+    attach();
+    await waitFor(() => expect(paneTabs()).toHaveLength(1));
+    act(() => useLayout.getState().setPanel({ collapsed }));
+    const composer = screen.getByRole('textbox', { name: 'Composer' });
+    act(() => composer.focus());
+
+    push(fake, roster([pane('one', 'One'), pane('two', 'Two')], 'two'), 2);
+
+    await waitFor(() => expect(tabs()).toEqual([['Plugin pane · One', false], ['Plugin pane · Two', true]]));
+    expect(document.activeElement).toBe(composer);
+    expect(useLayout.getState().regions.panel.collapsed).toBe(collapsed);
+    expect(fake.invoked('session.ui.paneFocus')).toEqual([]);
+  });
+
+  it('an initial shown pane leaves the composer keyboard until the roster requests focus', async () => {
+    connect({ 'session.ui.panes': roster([pane('one', 'One')]), 'session.ui.render': PANE_ANSWER });
+    render(<><textarea aria-label="Composer" /><TestHost /></>);
+    const composer = screen.getByRole('textbox', { name: 'Composer' });
+    act(() => composer.focus());
+    attach();
+    await waitFor(() => expect(tabs()).toEqual([['Plugin pane · One', true]]));
+    expect(document.activeElement).toBe(composer);
+    expect(fake.invoked('session.ui.paneFocus')).toEqual([]);
+
+    push(fake, roster([pane('one', 'One'), pane('two', 'Two')], 'two', { focusRequestedId: 'two' }), 2);
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-plugin-pane')).toBe('two'));
+    expect(fake.invoked('session.ui.paneFocus')).toContainEqual({ appSessionId: A, id: 'two' });
+  });
+
   it('a roster read still out when the connection goes never applies', async () => {
     connect({ 'session.ui.render': PANE_ANSWER }); // `session.ui.panes` stays unanswered until the test replies
     render(<TestHost />);
@@ -185,6 +218,38 @@ describe('plugin panes as panel tabs (R2)', () => {
     act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'exited' }) }));
     await waitFor(() => expect(paneTabs()).toEqual([]));
     expect(fake.invoked('session.ui.close')).toEqual([]);
+  });
+
+  it.each(['exiting', 'exited'] as const)('clears a roster received during initialization when the session becomes %s', async (process) => {
+    connect({ 'session.ui.render': PANE_ANSWER });
+    render(<TestHost />);
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'initializing' }) }));
+    push(fake, roster([pane('early', 'Early')]));
+    await waitFor(() => expect(paneTabs()).toHaveLength(1));
+    // Status can advance while attach's roster read is still awaited, before ready is ever reached.
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: { ...status(A, { process: 'initializing' }), uiSurface: { clientId: 'maws-main' } } }));
+    expect(usePaneRosters.getState().rosters.has(A)).toBe(true);
+    expect(fake.invoked('session.ui.panes')).toEqual([]);
+
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process }) }));
+    await waitFor(() => expect(paneTabs()).toEqual([]));
+    expect(usePaneRosters.getState().rosters.has(A)).toBe(false);
+    expect(fake.invoked('session.ui.close')).toEqual([]);
+  });
+
+  it('forgets a pre-ready roster before hydration can create its tabs, including a late batch after exit', async () => {
+    resetPanelStores({ hydrated: false });
+    connect({ 'session.ui.render': PANE_ANSWER });
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'initializing' }) }));
+    push(fake, roster([pane('early', 'Early')]));
+    expect(usePaneRosters.getState().rosters.has(A)).toBe(true);
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'exited' }) }));
+    expect(usePaneRosters.getState().rosters.has(A)).toBe(false);
+    push(fake, roster([pane('early', 'Early')]), 2);
+    act(() => useLayout.setState({ hydrated: true }));
+    render(<TestHost />);
+    expect(usePaneRosters.getState().rosters.has(A)).toBe(false);
+    expect(paneTabs()).toEqual([]);
   });
 
   it('Escape asks to close a closeOnEscape pane through the vetoable close path, never deleting a refused pane', async () => {
