@@ -30,6 +30,7 @@ import { forkRefusal, guardIntentStart, guardResumeStart, type GuardContext, typ
 import { trustKeyOf, trustStateOf } from './trust';
 import { findPane, paneCall, readProcesses } from './pane-holder';
 import { pauseTakeOver, until } from './pause-take-over';
+import { holderAuthority } from './holders';
 import { reservationOf } from './context';
 import type { SetupEvent } from '@shared/sessions/setup';
 import { releaseHolder, type TakeOverDeps } from './take-over'; // W7
@@ -394,6 +395,7 @@ export class SessionService {
               const answer = outcome as SetupEvent['outcome'];
               if (answer?.kind !== 'ready') throw new Error(answer?.kind === 'error' ? answer.message : `MAWS could not become ready: ${answer?.kind ?? 'no answer'}.`);
             },
+            authority: (paused) => holderAuthority({ dispatch: this.s.dispatch, sessions: this.s.sessions }, { appSessionId, engineSessionId: record.engineSessionId! }, paused),
             cancel: async () => {
               if (await reservationOf(this.s.dispatch, appSessionId)) await hostCall(this.s.dispatch, 'session.stop', { appSessionId, reason: 'stop' });
               return until(async () => await reservationOf(this.s.dispatch, appSessionId) === null, STOP_WAIT_MS, 100);

@@ -25,7 +25,7 @@ export function parseProcesses(text: string): Processes {
 }
 export function readProcesses(): Promise<Processes> {
   return new Promise((resolve, reject) => {
-    execFile('/bin/ps', ['-axo', 'pid=,ppid=,pgid=,tpgid=,stat=,lstart='], { timeout: 2_000 }, (error, stdout) => error ? reject(error) : resolve(parseProcesses(stdout)));
+    execFile('/bin/ps', ['-axo', 'pid=,ppid=,pgid=,tpgid=,stat=,lstart='], { env: { LC_ALL: 'C', TZ: 'UTC' }, timeout: 2_000 }, (error, stdout) => error ? reject(error) : resolve(parseProcesses(stdout)));
   });
 }
 export function paneForPid(pid: number, panes: readonly PtyInfo[], table: Processes): PtyInfo | null {

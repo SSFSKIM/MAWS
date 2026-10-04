@@ -3,8 +3,9 @@
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { PtyInfo } from '@shared/ipc/schema/pty';
 import type { TakeOverOutcome } from '@shared/ipc/schema/session';
-import type { PausedHolder } from './holders';
+import type { HolderVerdict, PausedHolder } from './holders';
 import { canForeground, type PaneProcess, type Processes } from './pane-holder';
+import { holderName } from './take-over';
 
 export const PAUSE_WAIT_MS = 3_000;
 export interface PauseDeps {
@@ -14,6 +15,7 @@ export interface PauseDeps {
   signal(pid: number, signal: 'SIGKILL'): void;
   clear(): Promise<boolean>;
   resume(allow: PausedHolder): Promise<void>; // settles at ready, or rejects after launch failure
+  authority(paused: PausedHolder): Promise<HolderVerdict>; // fresh rollback check, excluding only this still-stopped CLI
   cancel(): Promise<boolean>; // true only when the new engine is confirmed gone
   waitMs?: number;
   pollMs?: number;
@@ -32,6 +34,7 @@ export async function pauseTakeOver(deps: PauseDeps, q: { appSessionId: AppSessi
   const pollMs = deps.pollMs ?? 100;
   const sameProcess = (p: PaneProcess | undefined) => p?.started === holder.started && p.pgid === holder.pgid;
   const isPaused = async () => { const p = (await deps.processes()).get(holder.pid); return sameProcess(p) && p!.state.includes('T'); };
+  const paused: PausedHolder = { ...q, pid: holder.pid, isPaused };
   let pauseSent = false;
   let resuming = false;
   let ending = false;
@@ -44,7 +47,7 @@ export async function pauseTakeOver(deps: PauseDeps, q: { appSessionId: AppSessi
     await deps.write('\x1a');
     if (!(await until(isPaused, waitMs, pollMs))) throw new Error('The terminal CLI did not pause in time; nothing was resumed here.');
     resuming = true;
-    await deps.resume({ ...q, pid: holder.pid, isPaused });
+    await deps.resume(paused);
     if (!(await isPaused())) throw new Error('The terminal CLI was continued while MAWS was starting.');
     ending = true;
     deps.signal(holder.pid, 'SIGKILL');
@@ -55,19 +58,37 @@ export async function pauseTakeOver(deps: PauseDeps, q: { appSessionId: AppSessi
     if (ending) return { status: 'resumed', warning: `The session is running here, but MAWS could not finish ending the paused terminal CLI: ${why} Do not run fg for that old CLI.` };
     if (resuming && !(await deps.cancel().catch(() => false))) return { status: 'refused', reason: 'resume_failed', message: `${why} The new engine may still be running; the terminal CLI was left paused to avoid two writers. Stop the engine here before typing fg in that pane.` };
     let restored = false;
+    let blocked: string | null = null;
     try {
       const table = await deps.processes();
       const p = table.get(holder.pid);
       // An untouched, still-foreground CLI needs no recovery. Otherwise only the unambiguous shell job is safe.
       restored = sameProcess(p) && !p!.state.includes('T') && p!.foreground === holder.pgid;
       if (pauseSent && !restored && sameProcess(p) && canForeground(holder.pid, pane.pid, table) && !(await deps.foreground()).busy) {
-        await deps.write('\x15fg\n');
-        restored = await until(async () => {
-          const next = (await deps.processes()).get(holder.pid);
-          return sameProcess(next) && !next!.state.includes('T') && next!.foreground === holder.pgid;
-        }, waitMs, pollMs);
+        // Cancellation proves only our new engine is gone. A different writer can have caused the refusal.
+        try {
+          const verdict = await deps.authority(paused);
+          if (verdict.live !== 'none') {
+            const h = verdict.holder;
+            const owner = h.kind === 'terminal' || h.kind === 'background_job' ? holderName(h) : 'a MAWS engine reservation';
+            blocked = `${owner} still holds this session`;
+          }
+        } catch (error) {
+          blocked = `holder authority could not be verified: ${error instanceof Error ? error.message : String(error)}`;
+        }
+        if (blocked === null) {
+          const fresh = await deps.processes();
+          if (sameProcess(fresh.get(holder.pid)) && canForeground(holder.pid, pane.pid, fresh) && !(await deps.foreground()).busy) {
+            // Emacs-mode shell editors: kill before AND after the cursor before submitting fg.
+            await deps.write('\x15\x0bfg\n');
+            restored = await until(async () => {
+              const next = (await deps.processes()).get(holder.pid);
+              return sameProcess(next) && !next!.state.includes('T') && next!.foreground === holder.pgid;
+            }, waitMs, pollMs);
+          }
+        }
       }
     } catch { /* leave the job untouched when foreground ownership cannot be established */ }
-    return { status: 'refused', reason: resuming ? 'resume_failed' : 'pause_failed', message: `${why} ${restored ? 'The terminal CLI is back in the foreground.' : 'To return to the CLI, type fg in that terminal pane.'}` };
+    return { status: 'refused', reason: resuming ? 'resume_failed' : 'pause_failed', message: `${why} ${blocked !== null ? `The terminal CLI was left paused because ${blocked}. Resolve that holder conflict before running fg in the terminal pane.` : restored ? 'The terminal CLI is back in the foreground.' : 'To return to the CLI, type fg in that terminal pane.'}` };
   }
 }
