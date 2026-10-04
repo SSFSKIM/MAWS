@@ -28,6 +28,11 @@ import { markInterrupted, reconcileIntent } from './recovery';
 import { removeCreatedWorktree, retainedWorktree, type Setup } from './setup';
 import { forkRefusal, guardIntentStart, guardResumeStart, type GuardContext, type Guarded } from './start-guards';
 import { trustKeyOf, trustStateOf } from './trust';
+import { findPane, paneCall, readProcesses } from './pane-holder';
+import { pauseTakeOver, until } from './pause-take-over';
+import { holderAuthority } from './holders';
+import { reservationOf } from './context';
+import type { SetupEvent } from '@shared/sessions/setup';
 import { releaseHolder, type TakeOverDeps } from './take-over'; // W7
 import type { ForeignHolder } from '@shared/graph/session'; // W7
 import type { TakeOverOutcome } from '@shared/ipc/schema/session'; // W7
@@ -353,13 +358,55 @@ export class SessionService {
 
   // `session.takeOver`: ends the foreign holder the owner confirmed and waits for the registry to clear (take-over.ts).
   // Refused while a start of this id is in flight; the resume that follows is the renderer's `session.start`.
-  async takeOver(appSessionId: AppSessionId, expected: ForeignHolder): Promise<TakeOverOutcome> {
+  async takeOverPane(pid: number): Promise<{ ptyId: string; label: string } | null> {
     await this.ready();
-    const record = this.deps.index.sessions.get(appSessionId);
-    if (record === null) return { status: 'refused', reason: 'unknown_session', message: `no session record for ${appSessionId}` };
+    const target = await findPane(this.s.dispatch, pid);
+    return target ? { ptyId: target.pane.ptyId, label: target.pane.label } : null;
+  }
+
+  async takeOver(appSessionId: AppSessionId, expected: ForeignHolder, paneId?: string | null): Promise<TakeOverOutcome> {
+    await this.ready();
     if (this.starting.has(appSessionId)) return { status: 'refused', reason: 'self', message: 'This session is starting in MAWS.' };
-    const deps: TakeOverDeps = { dispatch: this.s.dispatch, sessions: this.s.sessions, env: this.s.env, ...this.deps.takeOver };
-    return releaseHolder(deps, { engineSessionId: record.engineSessionId, appSessionId, expected });
+    this.starting.add(appSessionId);
+    try {
+      return await this.serial(appSessionId, async () => {
+        const record = this.deps.index.sessions.get(appSessionId);
+        if (record === null) return { status: 'refused', reason: 'unknown_session', message: `no session record for ${appSessionId}` };
+        const deps: TakeOverDeps = {
+          dispatch: this.s.dispatch, sessions: this.s.sessions, env: this.s.env, ...this.deps.takeOver, paneId,
+          resumePane: async (target) => pauseTakeOver({
+            processes: readProcesses,
+            write: (data) => paneCall(this.s.dispatch, 'pty.write', { ptyId: target.pane.ptyId, data }),
+            foreground: () => paneCall(this.s.dispatch, 'pty.foreground', { ptyId: target.pane.ptyId }),
+            signal: (pid, signal) => process.kill(pid, signal),
+            clear: async () => {
+              const { holders } = await hostCall(this.s.dispatch, 'fs.holders', { sessionIds: [record.engineSessionId!], directories: null });
+              return !holders.some((row) => row.holder.kind === 'terminal' && row.holder.pid === target.holder.pid);
+            },
+            resume: async (paused) => {
+              let outcome: SetupEvent['outcome'] = null;
+              const setup: Setup = { ...this.s, emit: (name, payload) => {
+                if (name === 'session.setup') outcome = (payload as SetupEvent).outcome;
+                return this.s.emit(name, payload);
+              } };
+              const [guard, run] = await guardResumeStart(setup, record, { message: null, options: {} }, this.resumeMessages, paused);
+              if (!run) throw new Error(`MAWS could not resume this session: ${guard.status}.`);
+              await run();
+              const answer = outcome as SetupEvent['outcome'];
+              if (answer?.kind !== 'ready') throw new Error(answer?.kind === 'error' ? answer.message : `MAWS could not become ready: ${answer?.kind ?? 'no answer'}.`);
+            },
+            authority: (paused) => holderAuthority({ dispatch: this.s.dispatch, sessions: this.s.sessions }, { appSessionId, engineSessionId: record.engineSessionId! }, paused),
+            cancel: async () => {
+              if (await reservationOf(this.s.dispatch, appSessionId)) await hostCall(this.s.dispatch, 'session.stop', { appSessionId, reason: 'stop' });
+              return until(async () => await reservationOf(this.s.dispatch, appSessionId) === null, STOP_WAIT_MS, 100);
+            },
+          }, { appSessionId, engineSessionId: record.engineSessionId! }, target),
+        };
+        return releaseHolder(deps, { engineSessionId: record.engineSessionId, appSessionId, expected });
+      });
+    } finally {
+      this.starting.delete(appSessionId);
+    }
   }
 
   // ---- start ------------------------------------------------------------------------------------------------------

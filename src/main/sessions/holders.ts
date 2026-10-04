@@ -28,14 +28,22 @@ const NONE: HolderVerdict = { holder: { kind: 'none' }, live: 'none', source: 'n
 
 // One session. A reservation under the app id, or under another app id for the same engine session, is MAWS's own
 // (`already_live`); else the first live registry holder of the engine session (`held`); else none.
-export async function holderAuthority(deps: HolderDeps, q: { engineSessionId: SessionId | null; appSessionId: AppSessionId }): Promise<HolderVerdict> {
+export interface PausedHolder {
+  engineSessionId: SessionId;
+  appSessionId: AppSessionId;
+  pid: number;
+  isPaused(): Promise<boolean>;
+}
+
+export async function holderAuthority(deps: HolderDeps, q: { engineSessionId: SessionId | null; appSessionId: AppSessionId }, paused?: PausedHolder): Promise<HolderVerdict> {
   const reserved = (await reservations(deps)).some(
     (s) => s.appSessionId === q.appSessionId || (q.engineSessionId !== null && s.engineSessionId === q.engineSessionId),
   );
   if (reserved) return SELF;
   if (q.engineSessionId === null) return NONE; // no engine id: nothing the registry could name
   const { holders } = await hostCall(deps.dispatch, 'fs.holders', { sessionIds: [q.engineSessionId], directories: null });
-  const first = holders[0];
+  const allowed = paused && paused.engineSessionId === q.engineSessionId && paused.appSessionId === q.appSessionId && await paused.isPaused();
+  const first = holders.find((row) => !(allowed && row.sessionId === paused.engineSessionId && row.holder.kind === 'terminal' && row.holder.pid === paused.pid && (row.entrypoint === undefined || row.entrypoint === 'cli')));
   return first ? { holder: first.holder, live: 'foreign', source: 'registry' } : NONE;
 }
 

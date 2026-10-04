@@ -103,6 +103,7 @@ function answerWith(over: Parameters<typeof fakeClient>[0] = {}): void {
     'layout.get': ({ key }: { key: string }) => ({ value: key === 'sessions.attachTabs' ? persisted : null }),
     'layout.set': ({ key, value }: { key: string; value: unknown }) => void (key === 'sessions.attachTabs' && (persisted = value)),
     'pty.write': undefined,
+    'session.takeOverPane': () => null,
     ...over,
   };
   for (const [name, answer] of Object.entries(over)) if (answer === null) delete answers[name as keyof typeof answers];
@@ -429,6 +430,19 @@ describe('take over a session another process holds', () => {
     expect(asked.body).toBe('MAWS ends the terminal process that holds this session (pid 7) and resumes the session here. A turn in progress there is lost.');
     await waitFor(() => expect(fake.invoked('session.start')).toEqual([{ appSessionId: A, message: null, options: {} }]));
     expect(fake.invoked('session.takeOver')).toEqual([{ appSessionId: A, holder: { kind: 'terminal', pid: 7 } }]);
+  });
+
+  it('names an own pane, keeps the loss warning and does not start a second resume after main reached ready', async () => {
+    answerWith({ 'session.takeOverPane': { ptyId: 'pty-t1', label: 'Terminal pane' }, 'session.takeOver': { status: 'resumed', warning: null } });
+    registry.start('Terminal pane', A);
+    renderNotice(held({ kind: 'terminal', pid: 7 }));
+    await userEvent.click(screen.getByRole('button', { name: 'Take over here' }));
+    const asked = await answerConfirm(true);
+    expect(asked.body).toContain('terminal pane');
+    expect(asked.body).toContain('pauses');
+    expect(asked.body).toContain('A turn in progress there is lost.');
+    await waitFor(() => expect(fake.invoked('session.takeOver')).toHaveLength(1));
+    expect(fake.invoked('session.start')).toEqual([]);
   });
 
   it('does nothing when the confirm is cancelled, and says a refusal without resuming', async () => {

@@ -894,3 +894,6 @@ test('openTerminal runs the attach command', async ({ maws }) => {
   await h.expectLine(other.terminalId!, 'MAWS_ATTACH_B', 5_000);
   expect(await h.info(other.terminalId!)).toMatchObject({ cwd: DIR_B, visible: true });
 });
+
+// W14: real-pane takeover through the product confirm.
+import "./terminal-take-over";

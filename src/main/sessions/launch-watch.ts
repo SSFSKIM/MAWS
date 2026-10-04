@@ -25,6 +25,7 @@ export class LaunchWatch {
     readonly appSessionId: AppSessionId,
     // C3 corrective: a retry's watch ignores the launch it replaces, whose last statuses may still arrive after its exit
     private readonly previousLaunchId: string | null = null,
+    private readonly readyLimitMs?: number,
   ) {
     s.watches.add(this);
     this.offs = [
@@ -53,10 +54,11 @@ export class LaunchWatch {
   }
 
   async untilReady(): Promise<LaunchEnd> {
+    const deadline = this.readyLimitMs === undefined ? Infinity : Date.now() + this.readyLimitMs;
     for (;;) {
       if (this.exited) return { kind: 'exited', errors: await this.exitErrors(), codes: this.codes };
       if (this.last?.process === 'ready') return { kind: 'ready', status: this.last };
-      if (await this.nextChange(this.s.watchdogMs)) return { kind: 'timeout' };
+      if (Date.now() >= deadline || await this.nextChange(Math.min(this.s.watchdogMs, deadline - Date.now()))) return { kind: 'timeout' };
     }
   }
 
