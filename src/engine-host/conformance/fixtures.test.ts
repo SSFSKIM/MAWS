@@ -3,6 +3,7 @@ import * as z from 'zod';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { ClaimSessionResponseSchema, GetStatusResponseSchema, GetWorkspaceDiffResponseSchema, InitializeResponseSchema, UiRenderResponseSchema, RewindConversationResponseSchema, RewindFilesResponseSchema } from '@shared/wire/control';
 import { FIXTURE_PASSES, listJournals, loadJournal, type FixturePass } from '../../../test/support/fixtures';
+import { ownerMarkedText, sittingSeed } from '../../../test/support/r3-surface';
 import { RELAY_URL } from '../launch';
 import { replayFixture, type ConformanceRun } from './harness';
 
@@ -63,7 +64,7 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const w7 = ['w7-collision', 'w7-take-over']; // W7: a terminal resuming a session MAWS holds (the transcript and registry records beside it), and "Take over here" against one (meta rows only)
     const r0 = ['mods-attach', 'mods-consent', 'mods-gate-off', 'mods-gate-served-off', 'mods-gate-unset', 'mods-pushes']; // R0: the mods probe on the installed 2.1.287 (init capability, pushes without attach, attach and render, the rollout gate, the consent dialog)
     const r2 = ['mods-surface-copy', 'mods-surface-invalidate', 'mods-surface-panes', 'mods-surface-press-input-select', 'mods-surface-prompt-access', 'mods-surface-render-sites']; // R2: the attached desktop surface (sites, presses, inputs and picks, panes, invalidate, prompt access, copy)
-    const r3 = ['ask-user-question', 'assistant-message', 'command-output', 'to-human', 'tool-group', 'tool-result', 'tool-use', 'unhooked', 'user-message'].map((site) => `mods-surface-transcript-${site}`); // R3: seven transcript sites, unhooked baseline and the owner's unchanged to-human module
+    const r3 = ['ask-user-question', 'assistant-message', 'command-output', 'to-human', 'tool-group', 'tool-result', 'tool-use', 'unhooked', 'user-message'].map((site) => `mods-surface-transcript-${site}`); // R3: seven transcript sites, unhooked baseline and the owner's to-human module (R3b: 7.135.0)
     const wave7 = ['hooks-flipped']; // debt wave 7: W1's blocking hooks with the forms flipped (an exit-2 Stop block, JSON prompt blocks), for the disk records beside it
     expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers'].sort());
   });
@@ -649,6 +650,14 @@ describe('normaliser: the attached surface (R2, pass3/mods-surface-*)', () => {
 // R3 wire characterization: installed-engine answers, not synthesized responses. The worker's unchanged next(e)
 // still carries ref 1 and rewritten:true; only the mod-free run is hooked:false.
 describe('normaliser: transcript surface recordings (R3)', () => {
+  interface RecordedNode { type?: string; ref?: number; props?: Record<string, unknown>; children?: unknown[] }
+  const nodesOf = (tree: unknown): RecordedNode[] => {
+    if (typeof tree !== 'object' || tree === null) return [];
+    const node = tree as RecordedNode;
+    return [node, ...(node.children ?? []).flatMap(nodesOf)];
+  };
+  const refs = (tree: unknown) => nodesOf(tree).filter((node) => node.type === 'engine').map((node) => node.ref);
+  const markdownBodies = (tree: unknown) => nodesOf(tree).filter((node) => node.type === 'Markdown').map((node) => node.props?.['text']);
   const rewrittenProps: Record<string, Record<string, unknown>> = {
     'user-message': { text: 'R3 rewritten text' },
     'assistant-message': { text: 'R3 rewritten text' },
@@ -688,19 +697,17 @@ describe('normaliser: transcript surface recordings (R3)', () => {
     expect(draws[0]?.props?.['origin']).toEqual({ kind: 'sdk' });
   });
 
-  it('owner to-human: preserves multiple engine refs but only first-span props, and answers a draft fill without submitting', async () => {
+  it('owner to-human: preserves every Markdown span and unchanged folded props, and answers a draft fill without submitting', async () => {
     const { events, requests } = await run('pass3', 'mods-surface-transcript-to-human');
     const renderRequests = requests.filter((r) => r.subtype === 'ui_render');
     const draws = renderRequests.map((r) => UiRenderResponseSchema.parse(r.response));
-    expect(draws).toHaveLength(10);
+    expect(draws).toHaveLength(14);
     const first = draws[0]!;
-    expect(first.props).toEqual({ text: 'First **span**.', isFirstOfReply: false });
-    const refs = (node: unknown): number[] => {
-      if (typeof node !== 'object' || node === null) return [];
-      const tree = node as { type?: string; ref?: number; children?: unknown[] };
-      return tree.type === 'engine' ? [tree.ref!] : (tree.children ?? []).flatMap(refs);
-    };
-    expect(refs(first.tree)).toEqual([1, 2, 3]);
+    expect(first).toMatchObject({ props: { text: ownerMarkedText, isFirstOfReply: true }, rewritten: false, hooked: true });
+    expect(refs(first.tree)).toEqual([]);
+    expect(markdownBodies(first.tree)).toEqual(['First **span**.', 'Second span.', 'Which path?']);
+    expect(nodesOf(first.tree).filter((node) => node.type === 'Text').map((node) => node.children?.join('').trim())).toEqual(['● to human', 'essential', 'need input']);
+    expect(nodesOf(first.tree).filter((node) => node.type === 'Button').map((node) => node.props?.['label'])).toEqual(['1: One ★', '2: Two', 'reply…', 'working record']);
     expect(ofKind(events, 'plugin.ask').map(({ ask, text, mode }) => ({ ask, text, mode }))).toEqual([
       { ask: 'prompt_read', text: null, mode: null },
       { ask: 'prompt_fill', text: 'Answering "Which path?": One', mode: 'replace' },
@@ -717,9 +724,44 @@ describe('normaliser: transcript surface recordings (R3)', () => {
     const invalidates = ofKind(events, 'plugin.invalidate');
     expect(invalidates.some((e) => e.seq !== null && e.seq < presses[0]!.seq)).toBe(true);
     expect(invalidates.some((e) => e.seq !== null && e.seq > presses[1]!.seq && e.seq < renderRequests[5]!.seq)).toBe(true);
-    expect(draws.at(-1)).toMatchObject({ tree: { type: 'engine', ref: 1 }, props: { tool: 'AskUserQuestion', output: { answers: { 'Which path?': 'One' } } } });
+    expect(draws[9]).toMatchObject({ tree: { type: 'engine', ref: 1 }, props: { tool: 'AskUserQuestion', output: { answers: { 'Which path?': 'One' } } } });
+    // The owner's screenshot form contains two questions, in both tagged and display-hook-header history.
+    for (const [folded, unfolded] of [[draws[10]!, draws[11]!], [draws[12]!, draws[13]!]]) {
+      expect(folded).toMatchObject({ hooked: true, rewritten: false });
+      expect(refs(folded.tree)).toEqual([]);
+      expect(markdownBodies(folded.tree)).toEqual(['Here are two questions.', 'Which path?', 'When should it run?']);
+      expect(nodesOf(folded.tree).filter((node) => node.type === 'Text').map((node) => node.children?.join('').trim())).toEqual(['● to human', 'need input', 'need input']);
+      expect(nodesOf(folded.tree).filter((node) => node.type === 'Button').map((node) => node.props?.['label'])).toEqual(['1: One ★', '2: Two', 'reply…', '1: Now ★', '2: Later', 'reply…', 'working record']);
+      expect(unfolded.props).toEqual(folded.props);
+      expect(refs(unfolded.tree)).toEqual([1]);
+      expect(markdownBodies(unfolded.tree)).toEqual([]);
+    }
     expect(ofKind(events, 'turn.started')).toEqual([]);
     expect(ofKind(events, 'user.message')).toEqual([]);
-    expect(requests.filter((r) => r.subtype === 'ui_press').map((r) => r.response)).toMatchObject([{ handled: true }, { handled: true }]);
+    expect(presses.map((r) => r.response)).toMatchObject([{ handled: true }, { handled: true }, { handled: true }, { handled: true }]);
+  });
+
+  for (const fixture of ['mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers']) it(`${fixture}: folded bodies include the question without engine slots or props rewrites`, async () => {
+    const { events, requests, rows } = await run('pass3', fixture);
+    const asked = new Map(rows.filter((row) => row.direction === 'out' && (row.frame as { request?: { subtype: string } }).request?.subtype === 'ui_render').map((row) => [row.seq, (row.frame as { request: { instance_id: string; props: { text: string; isFirstOfReply: boolean } } }).request]));
+    const renders = requests.filter((request) => request.subtype === 'ui_render');
+    const rawTexts = new Map(sittingSeed({ repo: '/scratch', engineId: 'conformance-sitting' }).filter((record) => record.type === 'assistant').flatMap((record) => (record.message as { content: { type: string; text?: string }[] }).content.filter((block) => block.type === 'text').map((block) => [record.uuid, block.text!] as const)));
+    expect(renders).toHaveLength(fixture.endsWith('headers') ? 12 : 6);
+    for (const request of renders) {
+      const draw = UiRenderResponseSchema.parse(request.response);
+      const input = asked.get(request.seq)!;
+      expect(draw).toMatchObject({ hooked: true, rewritten: false, props: input.props });
+      expect(refs(draw.tree)).toEqual([]);
+      // SGR display headers carry the same spans as the raw seed; plain headers without SGR are deliberately inkless.
+      const source = input.props.text.includes('\u001b') ? rawTexts.get(input.instance_id.replace(/^diagnostic:/, ''))! : input.props.text;
+      const spans = Array.from(source.matchAll(/<(to-human|need-input)>([\s\S]*?)<\/\1>/g), (match) => match[2].replace(/<choice\b[^>]*>[\s\S]*?<\/choice>/g, '').trim());
+      expect(markdownBodies(draw.tree)).toEqual(spans);
+      if (source.includes('<need-input>')) {
+        expect(spans.at(-1)).toBe('What next?');
+        expect(nodesOf(draw.tree).filter((node) => node.type === 'Button')).toHaveLength(4); // three choices and reply
+      }
+    }
+    expect(ofKind(events, 'turn.started')).toEqual([]);
+    expect(ofKind(events, 'user.message')).toEqual([]);
   });
 });
