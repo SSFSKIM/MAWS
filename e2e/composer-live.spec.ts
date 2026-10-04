@@ -17,6 +17,7 @@ import type { JournalRow } from '@shared/wire/journal';
 import { LiveLedger } from '../test/live/support/live';
 import { framesOf, journal, liveScratch, liveSkipReason, mainResults, printSession, recordOf, resumeLive, statusOf, terminalSession, userWrites, type LiveScratch } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
+import { ENGINE_BIN } from '../test/support/engine-pin';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 
@@ -56,7 +57,7 @@ interface Live {
 }
 
 async function withApp(label: string, fn: (live: Live) => Promise<void>): Promise<void> {
-  const maws = await launchMaws({ env: { MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, MAWS_CLAUDE_USAGE_DIR: CLAUDE_USAGE_DIR } });
+  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, MAWS_CLAUDE_USAGE_DIR: CLAUDE_USAGE_DIR } });
   const live: Live = { maws, page: maws.page, launches: [] };
   try {
     await fn(live);

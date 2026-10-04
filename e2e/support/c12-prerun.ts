@@ -14,7 +14,7 @@ import { expect, type Page } from '@playwright/test';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import type { JournalRow } from '@shared/wire/journal';
 import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
-import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13: the fixtures' engine
+import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // FX4: the resolved live engine
 import { assertConfigHomeSafe, journalCost } from '../../test/live/support/live';
 import { invoke, value } from './c7-replay';
 import { REPO_ROOT } from './launch';
@@ -27,8 +27,8 @@ export const THEMES = ['light', 'dark'] as const;
 export function prerunSkipReason(): string | null {
   if (process.env.MAWS_C12_PRERUN !== '1') return 'the C12 pre-run goes only under MAWS_C12_PRERUN=1';
   if (!existsSync(ENGINE_BIN)) return `engine binary missing at ${ENGINE_BIN}`;
-  const version = execFileSync(ENGINE_BIN, ['--version'], { encoding: 'utf8', timeout: 15_000 }).trim();
-  if (!version.startsWith(ENGINE_VERSION)) return `engine reports ${version}, expected ${ENGINE_VERSION}`;
+  if (!ENGINE_VERSION) return `engine did not report a version at ${ENGINE_BIN}`;
+  console.info(`[live engine] ${ENGINE_BIN} (${ENGINE_VERSION})`);
   const code = execFileSync('/usr/bin/curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', `${RELAY_URL}/api/hello`], { encoding: 'utf8' }).trim();
   return code === '200' ? null : `relay at ${RELAY_URL} answered ${code}: start ClaudeUsage`;
 }

@@ -16,7 +16,7 @@ import { captureShellEnvironment } from '@shared/host/shell-env';
 import type { JournalRow } from '@shared/wire/journal';
 import { JOURNAL_MAX_BYTES, JournalWriter } from '../../../src/engine-host/journal';
 import { buildLaunch, RELAY_URL, spawnMeta, type LaunchPlan } from '../../../src/engine-host/launch';
-import { ENGINE_BIN, ENGINE_VERSION } from '../../support/engine-pin'; // W13: the live harness runs the fixtures' engine
+import { ENGINE_BIN, ENGINE_VERSION } from '../../support/engine-pin'; // FX4: the resolved live engine
 import { checkRelay } from '../../../src/engine-host/relay-health';
 import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from '../../../src/engine-host/transport';
 
@@ -216,13 +216,8 @@ export interface LiveContext {
 export async function liveGate(): Promise<{ skip: string } | LiveContext> {
   if (process.env.MAWS_LIVE !== '1') return { skip: 'live tests skipped: MAWS_LIVE is not 1' };
   if (!existsSync(ENGINE_BIN)) return { skip: `live tests skipped: engine binary missing at ${ENGINE_BIN}` };
-  let version: string;
-  try {
-    version = execFileSync(ENGINE_BIN, ['--version'], { encoding: 'utf8', timeout: 15_000 }).trim();
-  } catch (error) {
-    return { skip: `live tests skipped: ${ENGINE_BIN} --version failed: ${error instanceof Error ? error.message : String(error)}` };
-  }
-  if (!version.startsWith(ENGINE_VERSION)) return { skip: `live tests skipped: engine reports ${version}, expected ${ENGINE_VERSION}` };
+  if (!ENGINE_VERSION) return { skip: `live tests skipped: engine did not report a version at ${ENGINE_BIN}` };
+  console.info(`[live engine] ${ENGINE_BIN} (${ENGINE_VERSION})`);
   const health = await checkRelay(RELAY_URL);
   if (!health.ok) return { skip: `live tests skipped: relay at ${RELAY_URL} unreachable — start ClaudeUsage` };
   const userData = mkdtempSync(join(tmpdir(), 'maws-live-'));

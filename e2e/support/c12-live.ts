@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFi
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { RELAY_URL } from '../../src/engine-host/launch';
-import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13: the fixtures' engine
+import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // FX4: the resolved live engine
 import { assertConfigHomeSafe } from '../../test/live/support/live';
 import { journal, processCost } from './c7-live';
 import { REPO_ROOT } from './launch';
@@ -25,8 +25,8 @@ export const MCP_SERVER = join(REPO_ROOT, 'spikes/protocol-probe/scenarios/pass2
 export function c12LiveSkipReason(): string | null {
   if (process.env.MAWS_C12_LIVE !== '1') return 'the C12 live run goes only under MAWS_C12_LIVE=1';
   if (!existsSync(ENGINE_BIN)) return `engine binary missing at ${ENGINE_BIN}`;
-  const version = execFileSync(ENGINE_BIN, ['--version'], { encoding: 'utf8', timeout: 15_000 }).trim();
-  if (!version.startsWith(ENGINE_VERSION)) return `engine reports ${version}, expected ${ENGINE_VERSION}`;
+  if (!ENGINE_VERSION) return `engine did not report a version at ${ENGINE_BIN}`;
+  console.info(`[live engine] ${ENGINE_BIN} (${ENGINE_VERSION})`);
   const code = execFileSync('/usr/bin/curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', `${RELAY_URL}/api/hello`], { encoding: 'utf8' }).trim();
   return code === '200' ? null : `relay at ${RELAY_URL} answered ${code}: start ClaudeUsage`;
 }

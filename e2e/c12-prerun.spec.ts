@@ -145,7 +145,7 @@ async function openOverview(page: Page): Promise<Locator> {
 // Haiku in this profile (the settings row the owner's Settings › Engine carries), since no item needs the owner's model
 // for its children.
 async function open(extraEnv: Record<string, string> = {}): Promise<MawsLaunch> {
-  const maws = await launchMaws({ userData: scratch.userData, env: { MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, ...extraEnv } });
+  const maws = await launchMaws({ userData: scratch.userData, env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN_PATH, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, ...extraEnv } });
   launches.push(maws.consoleErrors);
   await expect(main(maws.page)).toBeVisible({ timeout: 60_000 });
   value(await invoke(maws.page, 'settings.set', { engine: { subagentModel: 'haiku' } }));
