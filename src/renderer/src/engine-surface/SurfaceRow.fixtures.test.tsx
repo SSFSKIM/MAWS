@@ -1,6 +1,6 @@
 // The seven real 2.1.287 ui_render sites, replayed through the same wrapper the transcript mounts.
 // Scenario names come from the probe, not the renderer's classifier: changing a renderer outcome must fail here.
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TranscriptProps, TranscriptSite } from '@shared/engine/surface-rows';
 import type { RenderAnswer } from '@shared/engine/surface';
@@ -9,7 +9,7 @@ import { status } from '../../../../test/support/builders';
 import { loadJournal } from '../../../../test/support/fixtures';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { useSessions } from '../stores/sessions';
-import { resetSurfaceRegistry } from './registry';
+import { invalidateSession, resetSurfaceRegistry } from './registry';
 import { SurfaceRow } from './SurfaceRow';
 
 interface Request {
@@ -82,18 +82,35 @@ for (const name of names) {
   });
 }
 
-it('the recorded owner mod puts its single rewritten native body at the first of three refs only', async () => {
-  const row = cases('to-human').find(({ request }) => request.instance_id === 'owner-multi')!;
+const ownerBodyCases = [
+  { instanceId: 'owner-multi', bodies: ['First span.', 'Second span.', 'Which path?'], labels: ['● to human', 'essential', 'need input'], buttons: ['1: One ★', '2: Two', 'reply…', 'working record'] },
+  ...['raw', 'headers'].map((form) => ({ instanceId: `owner-screenshot:${form}`, bodies: ['Here are two questions.', 'Which path?', 'When should it run?'], labels: ['● to human', 'need input', 'need input'], buttons: ['1: One ★', '2: Two', 'reply…', '1: Now ★', '2: Later', 'reply…', 'working record'] })),
+];
+for (const { instanceId, bodies, labels, buttons } of ownerBodyCases) it(`recorded ${instanceId} draws all Markdown bodies with concealed native, then restores one native on invalidate`, async () => {
+  const recorded = cases('to-human').filter(({ request }) => request.instance_id === instanceId);
+  expect(recorded).toHaveLength(2); // folded, then unfolded by the recorded working-record press
+  const [row, unfolded] = recorded;
   const fake = fakeClient();
-  render(<SurfaceRow appSessionId={ID} component="AssistantMessage" instanceId={row.request.instance_id} props={row.request.props as TranscriptProps['AssistantMessage']} client={fake.client}>{(props) => <span data-testid="owner-native">{props.text}</span>}</SurfaceRow>);
+  const view = render(<SurfaceRow appSessionId={ID} component="AssistantMessage" instanceId={row.request.instance_id} props={row.request.props as TranscriptProps['AssistantMessage']} client={fake.client}>{(props) => <span data-testid="owner-native">{props.text}</span>}</SurfaceRow>);
   await act(() => fake.reply('session.ui.render', row.answer));
-  expect(screen.getAllByTestId('owner-native')).toHaveLength(1);
-  expect(screen.getByTestId('owner-native').textContent).toBe('First **span**.');
-  expect(screen.getByTestId('owner-native').closest('[data-surface="box"]')?.parentElement?.textContent).toContain('to human');
-  expect(screen.getByText('essential')).toBeTruthy();
-  expect(screen.getByText('need input')).toBeTruthy();
-  expect(screen.queryByText('Second span.')).toBeNull();
-  expect(screen.getByRole('button', { name: 'working record' })).toBeTruthy();
+  await waitFor(() => expect(Array.from(view.container.querySelectorAll('[data-surface="markdown"]'), (el) => el.textContent)).toEqual(bodies));
+  expect(Array.from(view.container.querySelectorAll('[data-surface="text"], [data-surface="markdown"]'), (el) => el.textContent!.trim())).toEqual(labels.flatMap((label, i) => [label, bodies[i]]));
+  if (instanceId === 'owner-multi') expect(view.container.querySelector('[data-surface="markdown"] [data-streamdown="strong"]')?.textContent).toBe('span');
+  expect(screen.getAllByRole('button').map((el) => el.textContent)).toEqual(buttons);
+  expect(screen.getAllByRole('button', { name: 'working record' })).toHaveLength(1);
+  expect(view.container.querySelector('[data-plugin-drawn] [data-engine-slot]')).toBeNull();
+  const native = screen.getByTestId('owner-native');
+  expect(native.textContent).toBe((row.request.props as TranscriptProps['AssistantMessage']).text);
+  expect(native.closest('[data-engine-native]')?.getAttribute('aria-hidden')).toBe('true');
+  expect(native.closest('[inert]')).not.toBeNull();
+  expect(row.answer).toMatchObject({ props: row.request.props, hooked: true, rewritten: false });
+  act(() => invalidateSession(ID));
+  await act(() => fake.reply('session.ui.render', unfolded.answer));
+  expect(screen.getAllByTestId('owner-native')).toEqual([native]);
+  expect(native.closest('[inert]')).toBeNull();
+  expect(native.closest('[data-engine-native]')?.getAttribute('aria-hidden')).toBeNull();
+  expect(view.container.querySelectorAll('[data-plugin-drawn] [data-engine-slot]')).toHaveLength(1);
+  expect(view.container.querySelector('[data-surface="markdown"]')).toBeNull();
 });
 
 describe('recorded unhooked sites', () => {

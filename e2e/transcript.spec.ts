@@ -980,7 +980,23 @@ test('R3 recorded unhooked UserMessage leaves the original prompt visible', asyn
   }, (base) => { const t = transcriptSeed(base); t.user('unhooked:UserMessage', 'R3 user'); return t.finish(); });
 });
 
-test('R3 owner to-human draws the first span, folds the working record, fills the composer and preserves the question receipt', async () => {
+// Opt-in replay evidence, like the earlier per-wave shot switches. The app and all session state remain scratch.
+async function captureR3bEvidence(page: Page, name: string) {
+  if (process.env.MAWS_R3B_SHOTS !== '1') return;
+  const dir = '/tmp/maws-r3b-evidence';
+  mkdirSync(dir, { recursive: true });
+  try {
+    for (const theme of ['light', 'dark'] as const) {
+      await page.evaluate((value) => (document.documentElement.dataset.theme = value), theme);
+      await page.evaluate(() => document.fonts.ready);
+      await page.screenshot({ path: join(dir, `${name}-${theme}.png`), animations: 'disabled' });
+    }
+  } finally {
+    await page.evaluate(() => (document.documentElement.dataset.theme = 'light'));
+  }
+}
+
+test('R3 owner to-human draws every span as Markdown, folds the working record, fills the composer and preserves the question receipt', async () => {
   test.setTimeout(120_000);
   await surfaceReplay((root) => recordedSurfaceJournal(root, 'mods-surface-transcript-to-human'), async ({ pane, id, page }) => {
     await unfoldSeedWork(pane);
@@ -990,16 +1006,27 @@ test('R3 owner to-human draws the first span, folds the working record, fills th
     await expect(label).toHaveCSS('font-weight', '600');
     const cyan = await label.evaluate((el) => { const probe = document.createElement('span'); probe.style.color = 'var(--term-ansi-cyan)'; el.appendChild(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; });
     await expect(label).toHaveCSS('color', cyan);
-    await expect(report.getByText('essential', { exact: true })).toBeVisible();
-    await expect(report.getByText('need input', { exact: true })).toBeVisible();
-    await expect(report.locator('[data-engine-native="AssistantMessage"]')).toContainText('First span.');
-    // Three engine refs, but this installed remote protocol carries only first-span props.
-    await expect(pane.getByText('Second span.', { exact: true })).not.toBeVisible();
+    const bodies = report.locator('[data-surface="markdown"]');
+    await expect(bodies).toHaveText(['First span.', 'Second span.', 'Which path?']);
+    await expect(bodies.first().locator('[data-streamdown="strong"]')).toHaveText('span');
+    await expect(report.locator('[data-surface="text"], [data-surface="markdown"]')).toHaveText([
+      '● to human', 'First span.', 'essential', 'Second span.', 'need input', 'Which path?',
+    ]);
+    await expect(report.getByRole('button', { name: /^1: One/ })).toBeVisible();
+    await expect(report.getByRole('button', { name: '2: Two', exact: true })).toBeVisible();
+    // 7.135.0 draws each span itself: no engine slot in the mod drawing, unchanged native history kept concealed.
+    await expect(report.locator('[data-engine-slot]')).toHaveCount(0);
+    const native = report.locator('xpath=..').locator('[data-engine-native="AssistantMessage"]');
+    await expect(native).toHaveAttribute('aria-hidden', 'true');
+    await expect(native).toHaveAttribute('inert', '');
+    await expect(native).not.toBeVisible();
+    await expect(native).toContainText('Private working notes.');
     await expect(pane.getByText('Private follow-up record.', { exact: true })).not.toBeVisible();
     await expect(pane.getByRole('button', { name: 'working record', exact: true })).toHaveCount(1);
     const receipt = pane.locator('[data-kind="question"] .transcript-question');
     await expect(receipt.locator('[data-question]')).toHaveText('Path→One');
     await expect(receipt.getByRole('button')).toHaveCount(0);
+    await captureR3bEvidence(page, 'to-human-folded');
     const usersBefore = await pane.locator('[data-kind="user"]').count();
     await report.getByRole('button', { name: /^1: One/ }).click();
     await expect(pane.locator(`[data-composer="${id}"] [contenteditable="true"]`)).toHaveText('Answering "Which path?": One');
@@ -1007,8 +1034,16 @@ test('R3 owner to-human draws the first span, folds the working record, fills th
     expect(await pane.locator('[data-kind="user"]').count()).toBe(usersBefore);
     await report.getByRole('button', { name: 'working record', exact: true }).click();
     await expect(pane.getByText('Private follow-up record.', { exact: true })).toBeVisible();
-    await expect(pane.locator('[data-engine-native="AssistantMessage"]').filter({ hasText: 'Private working notes.' })).toContainText('More working notes.');
+    const unfolded = pane.locator('[data-engine-native="AssistantMessage"]').filter({ hasText: 'Private working notes.' });
+    await expect(unfolded).toBeVisible();
+    await expect(unfolded).toContainText('More working notes.');
+    const unfoldedDrawing = unfolded.locator('xpath=ancestor::*[@data-plugin-drawn="AssistantMessage"][1]');
+    await expect(unfoldedDrawing.locator('[data-engine-slot]')).toHaveCount(1);
+    await expect(pane.locator('[data-plugin-drawn="AssistantMessage"] [data-surface="markdown"]')).toHaveCount(0);
+    await expect(pane.getByRole('button', { name: 'working record', exact: true })).toHaveCount(0);
     await expect(receipt.locator('[data-question]')).toHaveText('Path→One');
+    await expect(receipt.getByRole('button')).toHaveCount(0);
+    await captureR3bEvidence(page, 'to-human-unfolded');
   }, (base) => {
     const t = transcriptSeed(base);
     t.user('owner-user', 'Show the report');
@@ -1023,8 +1058,10 @@ test('R3 owner to-human draws the first span, folds the working record, fills th
 
 test('M1 marked commentary is visible at full contrast before and after folding work', async () => {
   await surfaceReplay((root) => recordedSurfaceJournal(root, 'mods-surface-transcript-to-human'), async ({ pane }) => {
-    const body = pane.locator('[data-engine-native="AssistantMessage"]').filter({ hasText: 'First span.' });
+    const body = pane.locator('[data-plugin-drawn="AssistantMessage"] [data-surface="markdown"]').filter({ hasText: 'First span.' });
     await expect(body).toBeVisible();
+    const foreground = await body.evaluate((el) => { const probe = document.createElement('span'); probe.style.color = 'var(--fg)'; el.appendChild(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; });
+    await expect(body).toHaveCSS('color', foreground);
     await expect(body.locator('.transcript-commentary')).toHaveCount(0);
     const divider = pane.locator('.transcript-divider button[aria-expanded]').first();
     await expect(divider).toHaveAttribute('aria-expanded', 'false');
@@ -1042,13 +1079,39 @@ test('M1 marked commentary is visible at full contrast before and after folding 
 });
 
 
-for (const headers of [false, true]) test(`M3 owner sitting preserves ${headers ? 'display headers' : 'tags'} on disk and over replay`, async () => {
+const sittingReplays = [
+  { fixture: 'mods-surface-sitting', headers: false },
+  { fixture: 'mods-surface-sitting-2-1-287', headers: false },
+  { fixture: 'mods-surface-sitting-headers', headers: true },
+] as const;
+for (const { fixture, headers } of sittingReplays) test(`M3 owner sitting preserves ${headers ? 'display headers' : 'tags'} on disk and over replay (${fixture})`, async () => {
   test.setTimeout(120_000);
-  await surfaceReplay((root) => recordedSurfaceJournal(root, headers ? 'mods-surface-sitting-headers' : 'mods-surface-sitting'), async ({ page, pane, id, userData }) => {
+  await surfaceReplay((root) => recordedSurfaceJournal(root, fixture), async ({ page, pane, id, userData }) => {
     // Scroll the actual session through the virtual range, so both turns mount and ask.
     const scroller = pane.locator('[data-transcript-scroller]');
     if (await scroller.count()) await scroller.evaluate((el) => { el.scrollTop = 0; });
-    await expect(pane.locator('[data-plugin-drawn="AssistantMessage"]').filter({ hasText: "I'm going through both spec branches" })).toBeVisible();
+    const drawings = pane.locator('[data-plugin-drawn="AssistantMessage"]');
+    const commentary = drawings.filter({ hasText: "I'm going through both spec branches" });
+    await expect(commentary.locator('[data-surface="markdown"]')).toHaveText("I'm going through both spec branches to see where each one stands.");
+    const greeting = drawings.filter({ hasText: "Hi. I'm in" });
+    await expect(greeting.locator('[data-surface="markdown"]')).toHaveCount(1);
+    await expect(greeting.locator('[data-surface="markdown"]')).toContainText('Executing that spec is one option.');
+    const report = drawings.filter({ hasText: 'This repo has two infrastructure initiatives' });
+    await expect(report.locator('[data-surface="markdown"]')).toHaveCount(2);
+    await expect(report.locator('[data-surface="markdown"]').first()).toContainText("I haven't checked what it's working on.");
+    await expect(report.locator('[data-surface="markdown"]').last()).toHaveText('What next?');
+    await expect(report.locator('[data-surface="text"]')).toHaveText(['● to human', 'need input']);
+    await expect(report.getByRole('button', { name: /^1: Resume E2/ })).toBeVisible();
+    await expect(report.getByRole('button', { name: /^2: Pick up #163/ })).toBeVisible();
+    await expect(report.getByRole('button', { name: /^3: Housekeeping/ })).toBeVisible();
+    await expect(drawings.locator('[data-engine-slot]')).toHaveCount(0);
+    const concealed = pane.locator('[data-engine-native="AssistantMessage"]');
+    await expect(concealed).toHaveCount(3);
+    for (const native of await concealed.all()) {
+      await expect(native).toHaveAttribute('aria-hidden', 'true');
+      await expect(native).toHaveAttribute('inert', '');
+      await expect(native).not.toBeVisible();
+    }
     const labels = pane.locator('[data-surface="text"]').filter({ hasText: 'to human' });
     await expect(labels.first()).toHaveCSS('font-weight', '600');
     await expect(labels.first()).toContainText('●');
@@ -1064,6 +1127,7 @@ for (const headers of [false, true]) test(`M3 owner sitting preserves ${headers 
     expect(texts.map((a) => a.instance_id).filter((uuid) => uuid.startsWith('244de4a2') || uuid.startsWith('cd3271fb')).every((uuid) => !uuid.includes(':text:'))).toBe(true);
     await expect(pane.getByRole('button', { name: 'working record', exact: true })).toHaveCount(0);
     expect(value(await invoke(page, 'session.status', { appSessionId: id as never })).turn).toBeNull();
+    await captureR3bEvidence(page, fixture);
   }, (base) => sittingSeed(base, true, headers), async (pane) => {
     await unfoldSeedWork(pane);
     await expect(pane.locator('[data-kind="assistant_text"]')).toHaveCount(3); // hi plus the two status messages
