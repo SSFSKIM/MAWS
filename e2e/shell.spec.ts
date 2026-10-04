@@ -238,8 +238,11 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     ]);
 
     // W11: the project list, most recently active first, with each collapsed project's waiting and working counts; no
-    // Needs-you or Pinned section. Each project expands in place to its sessions, pinned first.
-    await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toHaveCount(0);
+    // Pinned section. M2 restores cross-project Needs you above it, independent of expansions.
+    await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toBeVisible();
+    expect(await sidebar.getByRole('list', { name: 'Needs you' }).getByRole('button').allTextContents()).toEqual([
+      `MAWS${FIX}Approval needed`, `MAWS${SIP}Question`, `codex_somersault${QUOTA}Plan review`,
+    ]);
     expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', 'Other sessions']);
     expect(await rollups(sidebar)).toEqual({ [USAGE_PROJECT]: '●1', codex_somersault: '◐1', MAWS: '◐2●1', 'Other sessions': '' });
     const pages: Record<string, string[]> = {

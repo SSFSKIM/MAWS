@@ -45,7 +45,10 @@ afterEach(() => {
   delete (window as { maws?: MawsBridge }).maws;
 });
 
-describe('hover card approves read-only only', () => {
+describe.each(['tree', 'Needs you'] as const)('%s hover card approves read-only only', (placement) => {
+  const needsRow = (title: string) => placement === 'tree'
+    ? screen.getByRole('treeitem', { name: title })
+    : within(screen.getByRole('list', { name: 'Needs you' })).getByRole('button', { name: new RegExp(title.replace('+', '\\+')) });
   it('previews the Bash request with its command and cwd, offers Open session and no Approve', async () => {
     withMain();
     const user = userEvent.setup();

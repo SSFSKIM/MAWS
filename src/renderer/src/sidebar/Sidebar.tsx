@@ -3,8 +3,8 @@
 // Other sessions last; each expands in place to its sessions (`ProjectRow.tsx`), and which are expanded persists in the
 // `regions` layout key (`expandedProjects`), so a relaunch shows what the person left; the search and the "Show more"
 // reveals do not persist. The search filters every project (by name, or holding a matching session) and shows each
-// listed project open on its matching sessions without changing what is expanded. Cross-project attention is the
-// Overview's, the notifier's, the dock badge's and ⌘⇧J's, which read the attention table directly. One context menu
+// listed project open on its matching sessions without changing what is expanded. M2 restores Needs you above the
+// tree, independent of search and hidden projects, from the same attention table as the Overview. One context menu
 // serves every row, and the tree is one roving tab stop (`tree.ts`). A project removed from the sidebar (I5) is listed
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
@@ -27,6 +27,7 @@ import { ResumePickerHost } from './ResumePicker';
 import { registerProjectRevealer } from './reveal';
 import { runAddProject, useAddProjectEnabled } from './project-actions';
 import { Search } from './Search';
+import { NeedsYou } from './NeedsYou';
 import { SectionHeading } from './SectionHeading';
 import { moreNodeId, projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
 
@@ -216,7 +217,11 @@ function SidebarBody() {
         <NewChatRow />
       </div>
       <div className="px-2.5 pt-1">
-        <Search value={query} onChange={setQuery} label="Search projects and sessions" onLeave={() => tabStop && focusItem(tabStop)} />
+        <Search value={query} onChange={setQuery} label="Search projects and sessions" onLeave={() => {
+          const waiting = scroller.current?.querySelector<HTMLButtonElement>('[data-needs-you][tabindex="0"]');
+          if (waiting) waiting.focus();
+          else if (tabStop) focusItem(tabStop);
+        }} />
       </div>
       <ContextMenu.Root modal={false} onOpenChange={(isOpen) => !isOpen && setMenuTarget(null)}>
         <ContextMenu.Trigger asChild>
@@ -230,6 +235,7 @@ function SidebarBody() {
             }}
             className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
           >
+            <NeedsYou rows={rows} selected={selected} />
             <SectionHeading title="Projects">
               <SortMenu sort={sidebar.sort} />
               {projects.length > 0 && <AddProjectButton />}
