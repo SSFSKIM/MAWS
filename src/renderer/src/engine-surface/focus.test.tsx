@@ -12,6 +12,9 @@ const press = { plugin: 'mod', handle: 1 };
 const tree = { type: 'Box', children: [
   { type: 'Input', props: { key: 'first', label: 'First', autoFocus: true }, press },
   { type: 'Button', props: { key: 'second', label: 'Second', autoFocus: true }, press },
+  { type: 'Button', props: { key: 'third', label: 'Third' }, press },
+  { type: 'Link', props: { href: 'https://example.com', label: 'Link' } },
+  { type: 'engine', ref: 1 },
 ] };
 let fake: FakeClient;
 beforeEach(() => {
@@ -21,7 +24,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 async function mount() {
-  const view = render(<><button>Outside</button><div data-plugin-pane="pane" tabIndex={-1}><SurfaceSite appSessionId={ID} component="Pane" instanceId="pane" props={{}} client={fake.client} /></div></>);
+  const view = render(<><button>Outside</button><div data-plugin-pane="pane" tabIndex={-1}><SurfaceSite appSessionId={ID} component="Pane" instanceId="pane" props={{}} engine={<button>Native</button>} client={fake.client} /></div></>);
   await act(async () => {});
   return view.container.querySelector<HTMLElement>('[data-plugin-pane]')!;
 }
@@ -75,4 +78,58 @@ it('restores an outside stop on denied entry and ignores an answer after the per
   focus('Outside');
   await reply('second');
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Outside' }));
+});
+
+it.each(['Link', 'Native'])('keeps an accepted unkeyed %s stop and restores it on an unidentified denial', async (name) => {
+  await mount();
+  focus('First');
+  await reply('first');
+  const target = screen.getByRole(name === 'Link' ? 'link' : 'button', { name });
+  act(() => target.focus());
+  await reply(null);
+  expect(document.activeElement).toBe(target);
+  expect(fake.invoked('session.ui.focus')).toHaveLength(2);
+  focus('First');
+  await reply(null, false, 'kept');
+  expect(document.activeElement).toBe(target);
+  expect(fake.invoked('session.ui.focus')).toHaveLength(3);
+});
+
+it.each(['Link', 'Native'])('does not substitute autofocus for deliberate entry on an unkeyed %s stop', async (name) => {
+  await mount();
+  focus('Outside');
+  const target = screen.getByRole(name === 'Link' ? 'link' : 'button', { name });
+  act(() => target.focus());
+  expect(fake.invoked('session.ui.focus')).toEqual([{ appSessionId: ID, component: 'Pane', instanceId: 'pane', isHeld: true, element: null, by: 'person' }]);
+  await reply(null);
+  expect(document.activeElement).toBe(target);
+  expect(fake.invoked('session.ui.focus')).toHaveLength(1);
+});
+
+it('follows and retains the latest denied answer holder after an obsolete gesture was accepted', async () => {
+  await mount();
+  focus('First');
+  await reply('first');
+  focus('Second');
+  focus('Third');
+  await reply('second');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Third' }));
+  await reply('second', false, 'kept');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+  expect(fake.invoked('session.ui.focus')).toHaveLength(3);
+  focus('First');
+  await reply(null, false, 'kept');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+  focus('Third');
+  await reply('not-drawn', false, 'kept');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Second' }));
+  expect(fake.invoked('session.ui.focus')).toHaveLength(5);
+});
+
+it('still follows a successful redirect from a keyed control onto the pane stop', async () => {
+  const host = await mount();
+  focus('First');
+  await reply(null);
+  expect(document.activeElement).toBe(host);
+  expect(fake.invoked('session.ui.focus')).toHaveLength(1);
 });

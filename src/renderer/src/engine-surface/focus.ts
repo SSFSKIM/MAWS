@@ -31,18 +31,23 @@ export function useSiteFocus(ref: RefObject<HTMLDivElement | null>, site: Site &
     };
     const request = (held: boolean, target: HTMLElement | null, previous: HTMLElement | null, by: 'person' | 'auto') => {
       const version = ++generation;
-      void sendFocus(address, held, held ? elementOf(target) : null, by).then((answer) => {
+      const element = held ? elementOf(target) : null;
+      void sendFocus(address, held, element, by).then((answer) => {
         if (!answer || version !== generation) return;
+        // The answer names the engine's current holder even when this move was denied.
+        const holder = answer.element ? resolve(answer.element) : null;
         if (!answer.moved || answer.deny !== null) {
-          place(previous);
+          accepted = holder ?? previous;
+          place(accepted);
           return;
         }
-        accepted = held ? (answer.element ? resolve(answer.element) : host) : null;
+        // A null identity covers native stops too; only a redirect off a keyed stop means the host.
+        accepted = held ? (answer.element ? holder : element ? host : target) : null;
         if (held) place(accepted);
       });
     };
     const take = (target: HTMLElement, previous: HTMLElement | null) => {
-      const auto = !elementOf(target) && !host.contains(previous) ? controlOf(container.querySelector<HTMLElement>('[data-autofocus]')) : null;
+      const auto = target === host && !host.contains(previous) ? controlOf(container.querySelector<HTMLElement>('[data-autofocus]')) : null;
       request(true, auto ?? target, accepted ?? previous, auto ? 'auto' : 'person');
     };
     const onFocus = (event: FocusEvent) => {
