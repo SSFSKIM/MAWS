@@ -47,7 +47,7 @@ export interface SessionSurfaceDeps {
 
 export class SessionSurface {
   readonly clientId = SURFACE_CLIENT_ID;
-  private state: 'detached' | 'attaching' | 'attached' = 'detached';
+  private state: 'detached' | 'attaching' | 'attached' | 'ended' = 'detached';
   private readonly asks = new Map<RequestId, { subtype: SurfaceRequestSubtype; timer: ReturnType<typeof setTimeout> }>();
 
   constructor(private readonly deps: SessionSurfaceDeps) {}
@@ -68,6 +68,7 @@ export class SessionSurface {
     this.state = 'attaching';
     try {
       await uiAttach(client, { ...this.address, viewport: { ...DEFAULT_SURFACE_VIEWPORT }, answers: [...SURFACE_ANSWERS] });
+      if (this.state !== 'attaching') return; // detach/exit invalidates even an answer whose continuation was queued
       this.state = 'attached';
       this.deps.touch();
       await uiPanes(client, { client_id: this.clientId }); // the answer becomes `plugin.panes` (the normaliser)
@@ -77,11 +78,13 @@ export class SessionSurface {
     }
   }
 
-  // The session is ending: leave the roster before `end_session` (written first on the same pipe).
+  // The session is ending: no later attach is allowed for this process. An in-flight attach already went onto the
+  // pipe, so its detach follows it before `end_session`, without waiting for the attach answer's continuation.
   detach(client: ControlClient | null): void {
-    if (this.state !== 'attached' || !client) return;
-    this.state = 'detached';
-    uiDetach(client, { client_id: this.clientId }).catch(() => {}); // the exit is the answer that matters
+    const active = this.state === 'attaching' || this.state === 'attached';
+    this.state = 'ended';
+    if (!active) return;
+    if (client) uiDetach(client, { client_id: this.clientId }).catch(() => {}); // the exit is the answer that matters
     this.deps.touch();
   }
 
@@ -117,6 +120,6 @@ export class SessionSurface {
   processExited(): void {
     for (const { timer } of this.asks.values()) clearTimeout(timer);
     this.asks.clear();
-    this.state = 'detached';
+    this.state = 'ended';
   }
 }
