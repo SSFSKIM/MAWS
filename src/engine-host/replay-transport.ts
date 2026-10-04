@@ -16,6 +16,7 @@
 // recorded answer for the same ask (a render's by its component and instance) as of the cursor (the latest at or before
 // it, else the next after it), or an empty success when the fixture has none, and their recorded rows are passed over.
 // What the person does to a plugin's drawing (presses, inputs, picks, a pane closed) is still held and matched in order.
+import { isDeepStrictEqual } from 'node:util';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { requestClassOf } from './controls';
@@ -52,12 +53,19 @@ function describeFrame(f: Frame): string {
   return String(f.type);
 }
 
-// Same type; control requests by subtype; control responses by request id and, when recorded, behavior; a cancel by
+// Same type; surface controls by complete JSON wire payload (not their minted envelope id), other controls by
+// subtype; control responses by request id and, when recorded, behavior; a cancel by
 // the id it names, read through the recorded→minted map (a cancel of a host-minted request names the id this run minted
 // for the recorded request, never the recorded one).
 function matches(recorded: Frame, written: Frame, idMap: ReadonlyMap<string, string> = new Map()): boolean {
   if (recorded.type !== written.type) return false;
-  if (recorded.type === 'control_request') return (recorded as ControlRequest).request.subtype === (written as ControlRequest).request.subtype;
+  if (recorded.type === 'control_request') {
+    const a = (recorded as ControlRequest).request;
+    const b = (written as ControlRequest).request;
+    if (a.subtype !== b.subtype) return false;
+    // Compare what goes over JSON stdin: optional undefined properties are absent on the wire.
+    return a.subtype.startsWith('ui_') ? isDeepStrictEqual(a, JSON.parse(JSON.stringify(b))) : true;
+  }
   if (recorded.type === 'control_response') {
     const a = (recorded as ControlResponse).response;
     const b = (written as ControlResponse).response;

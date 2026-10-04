@@ -3,12 +3,13 @@
 // are not their parent's engine surface.
 import { useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { create } from 'zustand';
+import type { AppSessionId } from '@shared/graph/ids';
 import { stripAnsi } from '@shared/wire/ansi';
 import { nativeQuestionsOf, parseTranscriptProps, type TranscriptProps } from '@shared/engine/surface-rows';
 import { SurfaceRow } from '../../engine-surface/SurfaceRow';
 import { useSurfaceAttached, useSurfaceSite } from '../../engine-surface/site';
 import { hasInk } from '../../engine-surface/tree';
-import { expandedTurnRows } from '../model/derive';
+import { expandedTurnRows, turnRows } from '../model/derive';
 import { liveBuffer, useTranscriptStore } from '../../stores/transcript';
 import type { Row } from '../model/rows';
 import { AssistantTextRow } from '../view/rows/AssistantText';
@@ -19,6 +20,7 @@ import { UserRow } from '../view/rows/User';
 import { assistantInput, commandInput, groupInput, questionInput, userInput } from './adapters';
 import { SurfaceCellLine } from './Tools';
 
+import { useTranscriptContext } from '../view/context';
 import { useTranscriptSurface } from './context';
 
 export function SurfaceUserRow({ row }: { row: Extract<Row, { kind: 'user' }> }) {
@@ -44,7 +46,9 @@ function retainAssistantDrawing(key: string) {
 }
 
 function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
-  const { appSessionId, turn, storeKey } = useTranscriptSurface(row);
+  const { storeKey, variant } = useTranscriptContext();
+  const appSessionId = variant === 'session' && storeKey ? storeKey as AppSessionId : null;
+  const turn = useTranscriptStore((s) => row.turnId === null ? undefined : s.entries[storeKey]?.state.turns.get(row.turnId));
   const live = useTranscriptStore((s) => liveBuffer(s.entries[storeKey], row));
   const input = assistantInput({ ...row, markdown: live ?? row.markdown }, turn);
   const reportInk = useCallback((ink: boolean) => {
@@ -56,9 +60,18 @@ function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
 // The virtualized divider bounds these ask-only mounts to turns in/near the viewport. Only assistant text bypasses
 // the fold; tool/group sites still wait for expansion. Shared registry addresses mean one ask per text block.
 export function FoldedAssistantProbes({ row }: { row: Extract<Row, { kind: 'divider' }> }) {
-  const { state, turn } = useTranscriptSurface(row);
-  const texts = useMemo(() => !row.expanded && state && turn ? expandedTurnRows(state, turn.id).filter((r): r is Extract<Row, { kind: 'assistant_text' }> => r.kind === 'assistant_text' && r.phase === 'commentary') : [], [row.expanded, state, turn]);
-  return <>{texts.map((text) => <AssistantProbe key={text.id} row={text} />)}</>;
+  const { storeKey, variant } = useTranscriptContext();
+  const attached = useSurfaceAttached(variant === 'session' && storeKey ? storeKey as AppSessionId : null);
+  const ownRows = useTranscriptStore((s) => {
+    const state = s.entries[storeKey]?.state;
+    return attached && !row.expanded && state && row.turnId !== null ? turnRows(state, row.turnId) : undefined;
+  });
+  return useMemo(() => {
+    // ownRows is the per-turn invalidation key; read the latest state only when that key changes.
+    const state = useTranscriptStore.getState().entries[storeKey]?.state;
+    if (!attached || row.expanded || !ownRows || !state || row.turnId === null) return null;
+    return <>{expandedTurnRows(state, row.turnId).filter((r): r is Extract<Row, { kind: 'assistant_text' }> => r.kind === 'assistant_text' && r.phase === 'commentary').map((text) => <AssistantProbe key={text.id} row={text} />)}</>;
+  }, [attached, row.expanded, row.turnId, ownRows, storeKey]);
 }
 function AssistantProbe({ row }: { row: Extract<Row, { kind: 'assistant_text' }> }) {
   const { appSessionId, input, reportInk, key } = useAssistantInput(row);

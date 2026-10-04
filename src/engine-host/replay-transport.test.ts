@@ -306,3 +306,56 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     await expect(transport.exited).resolves.toEqual({ code: 0, signal: null });
   });
 });
+
+it.each([{ plugin: 'wrong-plugin' }, { handle: 999 }, { key: 'nonexistent' }])('refuses a mis-addressed recorded press %j without releasing effects', async (wrong) => {
+  const journal = loadJournal('pass3', 'mods-surface-invalidate');
+  const press = journal.findIndex((r) => r.direction === 'out' && (r.frame as { request?: { subtype: string } }).request?.subtype === 'ui_press');
+  expect(press).toBeGreaterThan(-1);
+  const recorded = journal[press].frame as Extract<StdinFrame, { type: 'control_request' }>;
+  const transport = replayEngine(journal.slice(press), { prelude, surfaceReads: true });
+  const write = transport.write({ ...recorded, request_id: 'new-press', request: { ...recorded.request, ...wrong } });
+  const items = await take(transport.frames, 1);
+  await expect(write).rejects.toThrow('replay mismatch');
+  expect(items).toHaveLength(1);
+  expect(items[0].error?.kind).toBe('replay_mismatch');
+  await expect(transport.exited).resolves.toEqual({ code: null, signal: null });
+});
+
+it('matches the complete surface control payload regardless of property order and ignores its minted envelope id', async () => {
+  const transport = replayEngine([
+    row(1, 'out', { type: 'control_request', request_id: 'recorded', request: { subtype: 'ui_press', plugin: 'mod', handle: 7, key: 'go' } }),
+    row(2, 'in', { type: 'control_response', response: { subtype: 'success', request_id: 'recorded', response: { handled: true } } }),
+    row(3, 'meta', { event: 'exit', code: 0, signal: null }),
+  ], { prelude });
+  const write = transport.write({ type: 'control_request', request_id: 'minted', request: { key: 'go', handle: 7, plugin: 'mod', subtype: 'ui_press' } });
+  const items = await take(transport.frames, 10);
+  await write;
+  expect(items.map(frameOf)).toEqual([{ type: 'control_response', response: { subtype: 'success', request_id: 'minted', response: { handled: true } } }]);
+});
+
+it.each([
+  { subtype: 'ui_render', component: 'AssistantMessage', instance_id: 'message-1', props: { text: 'hello' } },
+  { subtype: 'ui_input', plugin: 'mod', handle: 2, key: 'field', value: 'hello' },
+  { subtype: 'ui_select', plugin: 'mod', handle: 3, key: 'choice', value: 'one' },
+])('does not substitute another surface payload for $subtype', async (request) => {
+  for (const key of Object.keys(request).filter((key) => key !== 'subtype')) {
+    const transport = replayEngine([
+      row(1, 'out', { type: 'control_request', request_id: 'recorded', request }),
+      row(2, 'in', { type: 'system', subtype: 'plugin_notification', text: 'must not release' }),
+    ], { prelude });
+    const write = transport.write({ type: 'control_request', request_id: 'minted', request: { ...request, [key]: 'wrong' } });
+    const items = await take(transport.frames, 2);
+    if (request.subtype === 'ui_render') {
+      // Unrecorded reads are answered empty, without consuming the recorded ask or its effects.
+      await write;
+      expect(items[0].error?.kind).toBe('replay_unrecorded_read');
+      expect(items[1].frame).toMatchObject({ response: { request_id: 'minted', response: {} } });
+      expect(transport.holding?.seq).toBe(1);
+      transport.kill('SIGTERM');
+    } else {
+      await expect(write).rejects.toThrow('replay mismatch');
+      expect(items).toHaveLength(1);
+      expect(items[0].error?.kind).toBe('replay_mismatch');
+    }
+  }
+});
