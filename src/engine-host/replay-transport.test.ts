@@ -345,8 +345,17 @@ it.each([
     ], { prelude });
     const write = transport.write({ type: 'control_request', request_id: 'minted', request: { ...request, [key]: 'wrong' } });
     const items = await take(transport.frames, 2);
-    await expect(write).rejects.toThrow('replay mismatch');
-    expect(items).toHaveLength(1);
-    expect(items[0].error?.kind).toBe('replay_mismatch');
+    if (request.subtype === 'ui_render') {
+      // Unrecorded reads are answered empty, without consuming the recorded ask or its effects.
+      await write;
+      expect(items[0].error?.kind).toBe('replay_unrecorded_read');
+      expect(items[1].frame).toMatchObject({ response: { request_id: 'minted', response: {} } });
+      expect(transport.holding?.seq).toBe(1);
+      transport.kill('SIGTERM');
+    } else {
+      await expect(write).rejects.toThrow('replay mismatch');
+      expect(items).toHaveLength(1);
+      expect(items[0].error?.kind).toBe('replay_mismatch');
+    }
   }
 });

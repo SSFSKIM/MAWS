@@ -168,6 +168,7 @@ it.each([false, true])('does not derive large folded history during live token b
     act(() => store.push([event]));
   }
   const derivations = turnDerivations.count - before;
+  expect(screen.getByText('start' + ' next'.repeat(40))).toBeTruthy();
   console.info(`FX3 folded benchmark attached=${attached}: 6 turns x 100 tool calls, 40 batches, ${derivations} derivations, ${(performance.now() - start).toFixed(1)} ms`);
   view.unmount();
   expect(derivations).toBe(0);
