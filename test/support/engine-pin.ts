@@ -25,7 +25,7 @@ export const ENGINE_BIN = engineBin();
 export const ENGINE_VERSION = (() => {
   try {
     const output = execFileSync(ENGINE_BIN, ['--version'], { encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return /^(\d+\.\d+\.\d+(?:-[\w.-]+)?)(?:\s|$)/.exec(output)?.[1] ?? '';
+    return /\d+\.\d+\.\d+[^\s]*/.exec(output)?.[0] ?? ''; // Same version token the product probe reports.
   } catch {
     return ''; // Missing, unexecutable or unversioned: the live gate reports it; no fixture-version impersonation.
   }

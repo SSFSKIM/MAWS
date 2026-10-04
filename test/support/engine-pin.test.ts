@@ -25,8 +25,8 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 it('uses an explicit engine before the retained fixture pin and probes its actual version once', () => {
   const s = setup();
   s.binary('2.1.283');
-  const override = s.binary('custom', '3.0.1');
-  expect(s.resolve(override)).toEqual({ bin: override, version: '3.0.1' });
+  const override = s.binary('custom', '3.0.1-dev+local');
+  expect(s.resolve(override)).toEqual({ bin: override, version: '3.0.1-dev+local' });
   expect(readFileSync(join(s.home, 'probes'), 'utf8')).toBe('probe\n');
 });
 it('prefers the retained fixture pin over newer installed versions', () => {
