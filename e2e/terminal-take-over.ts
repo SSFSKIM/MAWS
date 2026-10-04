@@ -35,7 +35,7 @@ for (const ready of [true, false]) {
       await store.addTranscript(repo.root, sid, [{ type: 'user', uuid: 'w14-user', parentUuid: null, cwd: repo.root, sessionId: sid, timestamp: '2026-10-03T10:00:00.000Z', message: { role: 'user', content: 'W14 pane takeover' } }]);
       writeFileSync(join(store.configHome, '.claude.json'), JSON.stringify({ projects: { [repo.root]: { hasTrustDialogAccepted: true } } }));
       writeFileSync(join(store.configHome, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
-      maws = await launchMaws({ env: { MAWS_HARNESS: '1', MAWS_SESSION_SOURCE: '', MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: ready ? fixture : '', CLAUDE_CONFIG_DIR: store.configHome, DISABLE_AUTOUPDATER: '1' } });
+      maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: '', MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: ready ? fixture : '', CLAUDE_CONFIG_DIR: store.configHome, DISABLE_AUTOUPDATER: '1' } });
       const { page } = maws;
       await invoke(page, 'settings.set', { gateway: { defaultRoute: 'direct' } });
       await expect.poll(async () => (await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);

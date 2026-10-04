@@ -1,0 +1,82 @@
+{
+  "binary": "/Users/new/.local/share/claude/versions/2.1.287",
+  "scratch": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/w14-maws-live-86bVv1",
+  "results": [
+    {
+      "mode": "kill",
+      "pane": {
+        "ptyId": "7870b064-7e3a-419d-aa54-224d4604a12f",
+        "pid": 38545
+      },
+      "cli": 38557,
+      "stopped": {
+        "pid": 38557,
+        "ppid": 38545,
+        "pgid": 38557,
+        "fg": 38545,
+        "state": "T",
+        "command": "/Users/new/.local/share/claude/versions/2.1.287"
+      },
+      "afterSignal": null,
+      "shellProof": "usable\nspeed 38400 baud; 30 rows; 100 columns;\nlflags: icanon isig iexten echo echoe echok echoke -echonl echoctl\n\t-echoprt -altwerase -noflsh -tostop -flusho pendin -nokerninfo\n\t-extproc\niflags: -istrip icrnl -inlcr -igncr ixon -ixoff ixany imaxbel iutf8\n\t-ignbrk brkint -inpck -ignpar -parmrk\noflags: opost onlcr -oxtabs -onocr -onlret\ncflags: cread cs8 -parenb -parodd hupcl -clocal -cstopb -crtscts -dsrflow\n\t-dtrflow -mdmbuf\ncchars: discard = ^O; dsusp = ^Y; eof = ^D; eol = <undef>;\n\teol2 = <undef>; erase = ^?; intr = ^C; kill = ^U; lnext = ^V;\n\tmin = 1; quit = ^\\; reprint = ^R; start = ^Q; status = ^T;\n\tstop = ^S; susp = ^Z; time = 0; werase = ^W;\n"
+    },
+    {
+      "mode": "cont-term",
+      "pane": {
+        "ptyId": "cc29b2b1-4d4c-4eb2-bbea-951d184e6388",
+        "pid": 41103
+      },
+      "cli": 41110,
+      "stopped": {
+        "pid": 41110,
+        "ppid": 41103,
+        "pgid": 41110,
+        "fg": 41103,
+        "state": "T",
+        "command": "/Users/new/.local/share/claude/versions/2.1.287"
+      },
+      "afterSignal": {
+        "pid": 41110,
+        "ppid": 41103,
+        "pgid": 41110,
+        "fg": 41103,
+        "state": "T",
+        "command": "/Users/new/.local/share/claude/versions/2.1.287"
+      },
+      "shellProof": "usable\nspeed 38400 baud; 30 rows; 100 columns;\nlflags: icanon isig iexten echo echoe echok echoke -echonl echoctl\n\t-echoprt -altwerase -noflsh -tostop -flusho pendin -nokerninfo\n\t-extproc\niflags: -istrip icrnl -inlcr -igncr ixon -ixoff ixany imaxbel iutf8\n\t-ignbrk brkint -inpck -ignpar -parmrk\noflags: opost onlcr -oxtabs -onocr -onlret\ncflags: cread cs8 -parenb -parodd hupcl -clocal -cstopb -crtscts -dsrflow\n\t-dtrflow -mdmbuf\ncchars: discard = ^O; dsusp = ^Y; eof = ^D; eol = <undef>;\n\teol2 = <undef>; erase = ^?; intr = ^C; kill = ^U; lnext = ^V;\n\tmin = 1; quit = ^\\; reprint = ^R; start = ^Q; status = ^T;\n\tstop = ^S; susp = ^Z; time = 0; werase = ^W;\n"
+    },
+    {
+      "mode": "rollback-fg",
+      "pane": {
+        "ptyId": "052d42f3-a087-4bf7-92c3-dedaf5be2a8f",
+        "pid": 42501
+      },
+      "cli": 42511,
+      "stopped": {
+        "pid": 42511,
+        "ppid": 42501,
+        "pgid": 42511,
+        "fg": 42501,
+        "state": "T",
+        "command": "/Users/new/.local/share/claude/versions/2.1.287"
+      },
+      "afterSignal": {
+        "pid": 42511,
+        "ppid": 42501,
+        "pgid": 42511,
+        "fg": 42501,
+        "state": "T",
+        "command": "/Users/new/.local/share/claude/versions/2.1.287"
+      },
+      "afterFg": {
+        "pid": 42511,
+        "ppid": 42501,
+        "pgid": 42511,
+        "fg": 42511,
+        "state": "R+",
+        "command": "/Users/new/.local/share/claude/versions/2.1.287"
+      },
+      "shellProof": "usable\nspeed 38400 baud; 30 rows; 100 columns;\nlflags: icanon isig iexten echo echoe echok echoke -echonl echoctl\n\t-echoprt -altwerase -noflsh -tostop -flusho pendin -nokerninfo\n\t-extproc\niflags: -istrip icrnl -inlcr -igncr ixon -ixoff ixany imaxbel iutf8\n\t-ignbrk brkint -inpck -ignpar -parmrk\noflags: opost onlcr -oxtabs -onocr -onlret\ncflags: cread cs8 -parenb -parodd hupcl -clocal -cstopb -crtscts -dsrflow\n\t-dtrflow -mdmbuf\ncchars: discard = ^O; dsusp = ^Y; eof = ^D; eol = <undef>;\n\teol2 = <undef>; erase = ^?; intr = ^C; kill = ^U; lnext = ^V;\n\tmin = 1; quit = ^\\; reprint = ^R; start = ^Q; status = ^T;\n\tstop = ^S; susp = ^Z; time = 0; werase = ^W;\n"
+    }
+  ]
+}
