@@ -329,6 +329,7 @@ test('M2 commentary uses answer typography in both themes and still folds with t
   await expect(commentary).toHaveCount(0);
   await divider.click();
   await expect(commentary).toContainText('Edits applied; running the suite.');
+  await page.mouse.move(0, 0); // the disclosure deliberately uses body ink while hovered
   for (const theme of ['light', 'dark'] as const) {
     await page.evaluate((value) => (document.documentElement.dataset.theme = value), theme);
     const styles = await page.evaluate(() => {
