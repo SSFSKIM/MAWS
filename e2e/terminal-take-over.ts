@@ -1,6 +1,6 @@
-// Included by the terminal group. Real PTYs and product confirmation; replayed engine, no model calls.
+// Included by the terminal group. Real PTYs and product confirmation; replayed success, a stub exits before ready on failure. No model calls.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
@@ -22,7 +22,7 @@ const ps = (pid: number) => {
 };
 
 for (const ready of [true, false]) {
-  test(`pause-first takeover ${ready ? 'ends the paused CLI only after ready and leaves a usable shell' : 'returns the CLI to the foreground when resume is refused'}`, async () => {
+  test(`pause-first takeover ${ready ? 'ends the paused CLI only after ready and leaves a usable shell' : 'returns the CLI to the foreground when the engine cannot become ready'}`, async () => {
     test.setTimeout(90_000);
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
@@ -35,7 +35,11 @@ for (const ready of [true, false]) {
       await store.addTranscript(repo.root, sid, [{ type: 'user', uuid: 'w14-user', parentUuid: null, cwd: repo.root, sessionId: sid, timestamp: '2026-10-03T10:00:00.000Z', message: { role: 'user', content: 'W14 pane takeover' } }]);
       writeFileSync(join(store.configHome, '.claude.json'), JSON.stringify({ projects: { [repo.root]: { hasTrustDialogAccepted: true } } }));
       writeFileSync(join(store.configHome, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
-      maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: '', MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: ready ? fixture : '', CLAUDE_CONFIG_DIR: store.configHome, DISABLE_AUTOUPDATER: '1' } });
+      // The main launch gate probes a version even for replay. No installed binary or model is needed here.
+      const gateBinary = join(store.configHome, 'version-only-engine');
+      writeFileSync(gateBinary, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.283 (Claude Code)"; exit 0; fi\nexit 99\n');
+      chmodSync(gateBinary, 0o755);
+      maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_E2E_ENGINE_BIN: gateBinary, MAWS_SESSION_SOURCE: '', MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: ready ? fixture : '', CLAUDE_CONFIG_DIR: store.configHome, DISABLE_AUTOUPDATER: '1' } });
       const { page } = maws;
       await invoke(page, 'settings.set', { gateway: { defaultRoute: 'direct' } });
       await expect.poll(async () => (await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
@@ -60,7 +64,7 @@ for (const ready of [true, false]) {
       await confirm.getByRole('button', { name: 'Take over', exact: true }).click();
       await expect.poll(() => events().map((e) => e.event)).toContain('suspended');
       if (ready) {
-        await expect.poll(async () => (await invoke(page, 'session.status', { appSessionId: record.appId })).process, { timeout: 25_000 }).toBe('ready');
+        await expect.poll(async () => (await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === record.appId)?.process, { timeout: 25_000 }).toBe('ready');
         await expect.poll(() => ps(pid!), { timeout: 12_000 }).toBe('');
         expect(events().map((e) => e.event)).not.toContain('continued');
         expect((await invoke(page, 'fs.holders', { sessionIds: [sid], directories: null })).holders.some((r) => r.holder.kind === 'terminal' && r.holder.pid === pid)).toBe(false);
@@ -73,7 +77,7 @@ for (const ready of [true, false]) {
         await expect.poll(() => events().map((e) => e.event), { timeout: 15_000 }).toContain('continued');
         expect(ps(pid)).not.toContain('T');
         expect((await invoke(page, 'pty.foreground', { ptyId: pane.ptyId })).busy).toBe(true);
-        await expect(page.getByText(/replay_disabled.*terminal CLI is back in the foreground/)).toBeVisible();
+        await expect(page.getByText(/engine exited before.*terminal CLI is back in the foreground/)).toBeVisible();
       }
     } finally {
       if (pid !== null && ps(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ } }
