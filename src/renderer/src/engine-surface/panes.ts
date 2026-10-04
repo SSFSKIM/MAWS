@@ -61,8 +61,9 @@ function reconcile(appSessionId: AppSessionId): void {
   const shown = shownSession() === appSessionId;
   for (const pane of roster.panes) {
     if (kept.has(pane.id)) continue;
-    const tab = panelHost.addTool(PLUGIN_PANE_TOOL, { appSessionId, params: { paneId: pane.id }, activate: shown && pane.id === roster.shownId });
+    const tab = panelHost.addTool(PLUGIN_PANE_TOOL, { appSessionId, params: { paneId: pane.id }, activate: false });
     setTitle(tab, titleOf(roster, pane.id));
+    if (shown && pane.id === roster.shownId) panelHost.selectTab(tab, { focus: false });
   }
   // the engine moved the shown pane (a plugin's open or show of one that already has a tab): on screen, its tab is
   // selected, the keyboard left where it is (a focus request is the roster's own field); only on a change, so an

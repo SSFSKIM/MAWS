@@ -166,6 +166,38 @@ describe('plugin panes as panel tabs (R2)', () => {
     composer.remove();
   });
 
+  it.each([false, true])('a newly shown pane selects without taking the composer keyboard or revealing the panel (collapsed=%s)', async (collapsed) => {
+    connect({ 'session.ui.panes': roster([pane('one', 'One')]), 'session.ui.render': PANE_ANSWER });
+    render(<><textarea aria-label="Composer" /><TestHost /></>);
+    attach();
+    await waitFor(() => expect(paneTabs()).toHaveLength(1));
+    act(() => useLayout.getState().setPanel({ collapsed }));
+    const composer = screen.getByRole('textbox', { name: 'Composer' });
+    act(() => composer.focus());
+
+    push(fake, roster([pane('one', 'One'), pane('two', 'Two')], 'two'), 2);
+
+    await waitFor(() => expect(tabs()).toEqual([['Plugin pane · One', false], ['Plugin pane · Two', true]]));
+    expect(document.activeElement).toBe(composer);
+    expect(useLayout.getState().regions.panel.collapsed).toBe(collapsed);
+    expect(fake.invoked('session.ui.paneFocus')).toEqual([]);
+  });
+
+  it('an initial shown pane leaves the composer keyboard until the roster requests focus', async () => {
+    connect({ 'session.ui.panes': roster([pane('one', 'One')]), 'session.ui.render': PANE_ANSWER });
+    render(<><textarea aria-label="Composer" /><TestHost /></>);
+    const composer = screen.getByRole('textbox', { name: 'Composer' });
+    act(() => composer.focus());
+    attach();
+    await waitFor(() => expect(tabs()).toEqual([['Plugin pane · One', true]]));
+    expect(document.activeElement).toBe(composer);
+    expect(fake.invoked('session.ui.paneFocus')).toEqual([]);
+
+    push(fake, roster([pane('one', 'One'), pane('two', 'Two')], 'two', { focusRequestedId: 'two' }), 2);
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-plugin-pane')).toBe('two'));
+    expect(fake.invoked('session.ui.paneFocus')).toContainEqual({ appSessionId: A, id: 'two' });
+  });
+
   it('a roster read still out when the connection goes never applies', async () => {
     connect({ 'session.ui.render': PANE_ANSWER }); // `session.ui.panes` stays unanswered until the test replies
     render(<TestHost />);
