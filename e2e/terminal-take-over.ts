@@ -77,7 +77,7 @@ for (const ready of [true, false]) {
         await expect.poll(() => events().map((e) => e.event), { timeout: 15_000 }).toContain('continued');
         expect(ps(pid)).not.toContain('T');
         expect((await invoke(page, 'pty.foreground', { ptyId: pane.ptyId })).busy).toBe(true);
-        await expect(page.getByText(/engine exited before.*terminal CLI is back in the foreground/)).toBeVisible();
+        await expect(page.getByRole('listitem').filter({ hasText: /engine exited before.*terminal CLI is back in the foreground/ })).toBeVisible();
       }
     } finally {
       if (pid !== null && ps(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ } }
