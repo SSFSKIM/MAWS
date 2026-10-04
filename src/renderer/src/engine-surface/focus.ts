@@ -47,7 +47,7 @@ export function useSiteFocus(ref: RefObject<HTMLDivElement | null>, site: Site &
       });
     };
     const take = (target: HTMLElement, previous: HTMLElement | null) => {
-      const auto = target === host && !host.contains(previous) ? controlOf(container.querySelector<HTMLElement>('[data-autofocus]')) : null;
+      const auto = (target === host || target === container) && !host.contains(previous) ? controlOf(container.querySelector<HTMLElement>('[data-autofocus]')) : null;
       request(true, auto ?? target, accepted ?? previous, auto ? 'auto' : 'person');
     };
     const onFocus = (event: FocusEvent) => {

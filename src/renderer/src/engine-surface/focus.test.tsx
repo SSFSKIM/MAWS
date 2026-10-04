@@ -68,6 +68,17 @@ it('starts at the first autofocus element when the pane body takes the keyboard,
   expect(fake.invoked('session.ui.focus')).toHaveLength(2);
 });
 
+it('starts at the first autofocus element when the inner scrolling container takes the keyboard', async () => {
+  const host = await mount();
+  focus('Outside');
+  const container = host.querySelector<HTMLElement>('[data-surface-site="Pane"]')!;
+  act(() => container.focus());
+  expect(fake.invoked('session.ui.focus')).toEqual([{ appSessionId: ID, component: 'Pane', instanceId: 'pane', isHeld: true, element: { plugin: 'mod', key: 'first' }, by: 'auto' }]);
+  await reply('first');
+  expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'First' }));
+  expect(fake.invoked('session.ui.focus')).toHaveLength(1);
+});
+
 it('restores an outside stop on denied entry and ignores an answer after the person leaves', async () => {
   await mount();
   focus('Outside');
