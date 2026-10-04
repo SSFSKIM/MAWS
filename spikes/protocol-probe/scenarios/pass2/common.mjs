@@ -4,7 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {readdirSync,existsSync,realpathSync} from 'node:fs';
 import {homedir} from 'node:os';
 export {delay,Probe,root};
-import {ENGINE_BIN} from '../../../../test/support/engine-pin.ts'; // W13: the probe records on the fixtures' pin (Node strips the types)
+import {ENGINE_BIN} from '../../../../test/support/engine-pin.ts'; // FX4: the resolved live engine (Node strips the types)
 export const BIN=ENGINE_BIN;
 export const PROVENANCE={charter:'docs/charter.md',child:'C2',pin:'32b75d61b572f51c53c4d9d3dd77672b39c1dd86',pinAutoMode:'4ff2f2dfad428883691556a9765c324316069e7e'};
 export const DIALOGS=['auto_mode_server_fallback','refusal_fallback_prompt'];

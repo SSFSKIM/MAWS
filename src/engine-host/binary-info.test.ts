@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBinaryProbe, INSTALLED_LINK } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat';
 import { setBinaryConfig } from './launch';
-import { ENGINE_VERSION } from '../../test/support/engine-pin';
+import { FIXTURE_ENGINE_VERSION } from '../../test/support/engine-pin';
 
 let root: string;
 let home: string;
@@ -149,5 +149,5 @@ describe('engine.binaryInfo resolves the installed Claude Code at every call', (
 });
 
 it('the tested version MAWS reports is the fixtures’ pin', () => {
-  expect(TESTED_ENGINE_VERSION).toBe(ENGINE_VERSION);
+  expect(TESTED_ENGINE_VERSION).toBe(FIXTURE_ENGINE_VERSION);
 });

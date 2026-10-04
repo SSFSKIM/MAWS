@@ -9,6 +9,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { launchMaws, REPO_ROOT } from './support/launch';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
@@ -192,7 +193,7 @@ test('settings: Engine shows the resolved binary, its version and the tested one
     const binary = panel(page).getByRole('group', { name: 'Binary' });
     await expect(binary).toContainText(realpathSync(stub));
     await expect(binary).toContainText('2.1.290');
-    await expect(binary).toContainText("MAWS's fixtures and conformance tests were recorded on Claude Code 2.1.283");
+    await expect(binary).toContainText(`MAWS's fixtures and conformance tests were recorded on Claude Code ${FIXTURE_ENGINE_VERSION}`);
     await expect(binary.locator('.text-warning')).toHaveCount(0);
     await expect(binary.getByRole('button', { name: 'Use installed' })).toHaveCount(0);
     const update = panel(page).getByRole('group', { name: 'Update' });
