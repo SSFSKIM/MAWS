@@ -83,3 +83,8 @@ export type SurfaceAnswer = z.infer<typeof SurfaceAnswerSchema>;
 
 // Shared by field validation and the IPC boundary.
 export const SURFACE_VALUE_MAX = 16_384;
+
+export interface SurfaceGeometry {
+  contentRows: number;
+  keyed: { plugin: string; key: string; top: number; bottom: number }[];
+}

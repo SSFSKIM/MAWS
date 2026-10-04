@@ -160,3 +160,33 @@ describe('a scrolling site’s window (R2 review fixes)', () => {
     expect([...observed]).toEqual([container, wrapper]);
   });
 });
+
+
+it('applies a layout report answer and followed-end state, dropping a layout reply superseded by a push', async () => {
+  holdScrolls();
+  const { grow, top } = await mount();
+  resize();
+  await reply(16, true);
+  expect(top()).toBe(16);
+  grow(30);
+  resize();
+  expect(top()).toBe(26);
+  push(false, 4);
+  await reply(26, true);
+  grow(40);
+  resize();
+  expect(top()).toBe(4);
+});
+
+it('reports keyed content-space row bounds on layout and subsequent render asks', async () => {
+  drawn = { ...BAND, tree: { type: 'Button', props: { key: 'target', label: 'Target' }, press: { plugin: 'mod', handle: 1 } } };
+  const { container } = await mount();
+  vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({ top: 100 } as DOMRect);
+  const button = container.querySelector('button')!;
+  vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({ top: 190, bottom: 226 } as DOMRect);
+  container.scrollTop = 2 * LINE;
+  resize();
+  expect(fake.invoked('session.ui.scroll').at(-1)).toMatchObject({ keyed: [{ plugin: 'mod', key: 'target', top: 7, bottom: 9 }] });
+  await act(async () => invalidateSession(ID));
+  expect(fake.invoked('session.ui.render').at(-1)).toMatchObject({ contentRows: 20, keyed: [{ plugin: 'mod', key: 'target', top: 7, bottom: 9 }] });
+});

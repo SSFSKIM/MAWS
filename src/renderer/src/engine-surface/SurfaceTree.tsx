@@ -300,7 +300,7 @@ function MarkdownNode({ node }: { node: Extract<SurfaceNode, { type: 'Markdown' 
     else if (/^https?:/.test(href)) openExternal(site, href);
   };
   return (
-    <div data-surface="markdown" className={`min-w-0${dimColor ? ' text-fg-muted' : ''}`} onClickCapture={onClickCapture}>
+    <div data-surface="markdown" data-plugin={node.press?.plugin} data-key={key} className={`min-w-0${dimColor ? ' text-fg-muted' : ''}`} onClickCapture={onClickCapture}>
       <Markdown markdown={text} live={false} />
     </div>
   );
