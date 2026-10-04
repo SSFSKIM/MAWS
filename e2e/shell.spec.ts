@@ -259,6 +259,18 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     expect(await sidebar.getByRole('list', { name: 'Needs you' }).getByRole('button').allTextContents()).toEqual([
       `MAWS${FIX}Approval needed`, `MAWS${SIP}Question`, `codex_somersault${QUOTA}Plan review`,
     ]);
+    const needsYou = sidebar.getByRole('list', { name: 'Needs you' }).getByRole('button');
+    await sidebar.getByRole('searchbox').focus();
+    await page.keyboard.press('Tab');
+    await expect(needsYou.nth(0)).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(needsYou.nth(2)).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(needsYou.nth(0)).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(sidebar.getByRole('button', { name: 'Sort sessions' })).toBeFocused();
+    await sidebar.getByRole('searchbox').focus();
+    await expect(page.locator('[data-hover-card]')).toHaveCount(0);
     expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', 'Other sessions']);
     expect(await rollups(sidebar)).toEqual({ [USAGE_PROJECT]: '●1', codex_somersault: '◐1', MAWS: '◐2●1', 'Other sessions': '' });
     const pages: Record<string, string[]> = {
