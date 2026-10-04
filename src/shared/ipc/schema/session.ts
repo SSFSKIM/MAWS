@@ -1,6 +1,7 @@
 // X2 `session.*` (charter §12 C1 *IPC registry composition*). Each child adds its entries as one delimited block and
 // spreads it into the exported registries; C3's block is the engine host's per-session surface.
 import * as z from 'zod';
+import { SURFACE_VALUE_MAX } from '../../engine/surface';
 // C3 start: the engine host's `session.*` commands and events (C3 execution document, Interfaces "X2 — commands and
 // events"). Owner engine-host; every input names the session `appSessionId`. Each command is one of the three deadline
 // shapes (immediate, bounded under 8 s, operation), named per command in src/engine-host/ipc.ts.
@@ -507,11 +508,11 @@ const r2Commands = {
   ),
   'session.ui.press': host(input({ ...ElementRefSchema.shape, key: z.string().optional(), href: z.string().max(2048).optional() }), z.strictObject({ handled: z.boolean(), element: z.string().nullable() })),
   'session.ui.input': host(
-    input({ ...ElementRefSchema.shape, kind: z.enum(['change', 'submit']), value: z.string().max(16_384), key: z.string().optional(), component: z.enum(SURFACE_SITES).optional(), instanceId: z.string().optional() }),
+    input({ ...ElementRefSchema.shape, kind: z.enum(['change', 'submit']), value: z.string().max(SURFACE_VALUE_MAX), key: z.string().optional(), component: z.enum(SURFACE_SITES).optional(), instanceId: z.string().optional() }),
     z.strictObject({ handled: z.boolean(), element: z.string().nullable(), value: z.string().nullable() }),
   ),
   'session.ui.select': host(
-    input({ ...ElementRefSchema.shape, value: z.string().max(16_384), key: z.string().optional(), component: z.enum(SURFACE_SITES).optional(), instanceId: z.string().optional() }),
+    input({ ...ElementRefSchema.shape, value: z.string().max(SURFACE_VALUE_MAX), key: z.string().optional(), component: z.enum(SURFACE_SITES).optional(), instanceId: z.string().optional() }),
     z.strictObject({ handled: z.boolean(), element: z.string().nullable(), value: z.string().nullable() }),
   ),
   'session.ui.focus': host(
