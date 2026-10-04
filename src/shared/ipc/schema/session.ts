@@ -365,7 +365,8 @@ const c7Events = {
 // `session.start`. `refused`: nothing more was done, for the reason in words.
 export const TakeOverOutcomeSchema = z.discriminatedUnion('status', [
   z.strictObject({ status: z.literal('released') }),
-  z.strictObject({ status: z.literal('refused'), reason: z.enum(['unknown_session', 'self', 'changed', 'no_job_id', 'other_app', 'signal_failed', 'stop_failed', 'timeout']), message: z.string() }),
+  z.strictObject({ status: z.literal('resumed'), warning: z.string().nullable() }),
+  z.strictObject({ status: z.literal('refused'), reason: z.enum(['unknown_session', 'self', 'changed', 'no_job_id', 'other_app', 'signal_failed', 'stop_failed', 'timeout', 'pause_failed', 'resume_failed']), message: z.string() }),
 ]);
 export type TakeOverOutcome = z.infer<typeof TakeOverOutcomeSchema>;
 
@@ -453,7 +454,8 @@ const c10Commands = {
   // W7 (D-12 as amended 2026-10-01): "Take over here": ends the holder the owner confirmed (`claude stop` for a `--bg`
   // job, SIGTERM to an interactive holder's verified pid) and waits for the registry to clear; on `released` the
   // renderer resumes the record with `session.start`
-  'session.takeOver': { input: z.strictObject({ appSessionId: AppSessionIdSchema, holder: ForeignHolderSchema }), output: TakeOverOutcomeSchema, owner: 'main' },
+  'session.takeOverPane': { input: z.strictObject({ pid: z.number().int().positive() }), output: z.strictObject({ ptyId: z.string(), label: z.string() }).nullable(), owner: 'main' },
+  'session.takeOver': { input: z.strictObject({ appSessionId: AppSessionIdSchema, holder: ForeignHolderSchema, paneId: z.string().nullable().optional() }), output: TakeOverOutcomeSchema, owner: 'main' },
   'session.delete': { input: z.strictObject({ appSessionId: AppSessionIdSchema, stopIfLive: z.boolean() }), output: DeleteOutcomeSchema, owner: 'main' },
   // validators never transform: the service trims; a title that is only whitespace is refused here
   'session.rename': {

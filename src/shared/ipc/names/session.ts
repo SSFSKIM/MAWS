@@ -18,7 +18,7 @@ export const commands = [
   'session.setVisible', 'session.launchMode', 'session.appEvents', 'session.history.list', 'session.history.append', 'session.trust.check',
   'session.forget', 'session.create', 'session.intent.get', 'session.intent.list', 'session.intent.patch',
   'session.intent.release', 'session.intent.discard', 'session.intent.resolveWorktree', 'session.start',
-  'session.fork', 'session.archive', 'session.takeOver' /* W7 */, 'session.delete', 'session.rename', 'session.revealPath',
+  'session.fork', 'session.archive', 'session.takeOver' /* W7 */, 'session.takeOverPane' /* W14 */, 'session.delete', 'session.rename', 'session.revealPath',
   'session.deletions.list', 'session.deletions.keep', 'session.deletions.preview', 'session.projects.addFolder' /* New chat */,
   // R2: the engine's remote surface
   'session.ui.render', 'session.ui.press', 'session.ui.input', 'session.ui.select', 'session.ui.focus', 'session.ui.scroll',

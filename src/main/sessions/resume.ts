@@ -9,7 +9,7 @@ import type { FirstMessage } from '@shared/sessions/intent';
 import type { SetupEvent, SetupResources } from '@shared/sessions/setup';
 import type { StartOptions } from '@shared/ipc/schema/session';
 import { hostCall, pathExists, transcriptPathOf } from './context';
-import { holderAuthority } from './holders';
+import { holderAuthority, type PausedHolder } from './holders';
 import { LaunchWatch, type LaunchEnd } from './launch-watch';
 import { resumeLaunchSpec } from './launch-mapping';
 import { passLaunchGate, runBootstrap } from './setup'; // C12: passLaunchGate
@@ -24,7 +24,7 @@ export const RETRY_DETAIL = 'No output from the engine for 30 s · trying once m
 export async function runResume(
   s: Setup,
   record: SessionRecord,
-  input: { decision: 'accepted' | 'declined' | null; options: StartOptions; message: FirstMessage | null; onSent: () => void; onFailed: () => void },
+  input: { decision: 'accepted' | 'declined' | null; options: StartOptions; message: FirstMessage | null; onSent: () => void; onFailed: () => void; paused?: PausedHolder },
 ): Promise<void> {
   const appSessionId = record.appId;
   let watch: LaunchWatch | null = null;
@@ -45,9 +45,13 @@ export async function runResume(
       });
       // the bootstrap took seconds: a terminal or a job that resumed the conversation meanwhile is found before MAWS
       // becomes its second writer (the guards' read is that old)
-      const verdict = await holderAuthority({ dispatch: s.dispatch, sessions: s.sessions }, { engineSessionId: record.engineSessionId, appSessionId });
+      const verdict = await holderAuthority({ dispatch: s.dispatch, sessions: s.sessions }, { engineSessionId: record.engineSessionId, appSessionId }, input.paused);
       if (verdict.live === 'foreign') throw HeldFailure.holding(verdict.holder);
       if (verdict.live === 'self') throw new SetupFailure('launching', 'the session is already running in MAWS');
+    }
+    if (input.paused) {
+      const verdict = await holderAuthority({ dispatch: s.dispatch, sessions: s.sessions }, { engineSessionId: record.engineSessionId, appSessionId }, input.paused);
+      if (verdict.live !== 'none' || !(await input.paused.isPaused())) throw new SetupFailure('launching', 'The paused holder changed or another process holds this session.');
     }
     setupEvent(s, appSessionId, 'launching', 'Starting');
     // disk-to-live: C4's follower fed the exited session's tab from its transcript; C3's stream takes over
@@ -61,7 +65,7 @@ export async function runResume(
     let end: LaunchEnd;
     let previousLaunchId: string | null = null;
     for (;;) {
-      watch = new LaunchWatch(s, appSessionId, previousLaunchId);
+      watch = new LaunchWatch(s, appSessionId, previousLaunchId, input.paused ? 15_000 : undefined);
       const answer = await hostCall(s.dispatch, 'session.launch', { spec });
       if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
       if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);

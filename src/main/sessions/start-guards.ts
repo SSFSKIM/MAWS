@@ -13,7 +13,7 @@ import type { TrustState } from '@shared/sessions/trust';
 import type { StartOptions } from '@shared/ipc/schema/session';
 import { attachCommand } from '@shared/sessions/attach';
 import { hostCall, isDirectory, reservationOf } from './context';
-import { holderAuthority } from './holders';
+import { holderAuthority, type PausedHolder } from './holders';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf } from './intent-rules';
 import { runResume } from './resume';
 import { runIntentSetup } from './setup';
@@ -98,7 +98,7 @@ export async function forkRefusal(s: Setup, sourceId: AppSessionId): Promise<{ r
   return null;
 }
 
-export async function guardResumeStart(s: Setup, record: SessionRecord, args: { message: FirstMessage | null; options: StartOptions }, resumeMessages: Map<string, FirstMessage>): Promise<Guarded> {
+export async function guardResumeStart(s: Setup, record: SessionRecord, args: { message: FirstMessage | null; options: StartOptions }, resumeMessages: Map<string, FirstMessage>, paused?: PausedHolder): Promise<Guarded> {
   const appSessionId = record.appId;
   if (args.message !== null) resumeMessages.set(appSessionId, args.message);
   const handBack = (outcome: StartOutcome): [StartOutcome, null] => {
@@ -106,7 +106,7 @@ export async function guardResumeStart(s: Setup, record: SessionRecord, args: { 
     return [outcome, null];
   };
   if (record.archived) return handBack({ status: 'archived', appSessionId });
-  const verdict = await holderAuthority({ dispatch: s.dispatch, sessions: s.sessions }, { engineSessionId: record.engineSessionId, appSessionId });
+  const verdict = await holderAuthority({ dispatch: s.dispatch, sessions: s.sessions }, { engineSessionId: record.engineSessionId, appSessionId }, paused);
   if (verdict.live === 'self') return handBack({ status: 'already_live', appSessionId });
   if (verdict.live === 'foreign') return handBack({ status: 'held', appSessionId, holder: verdict.holder, attach: await attachOf(s, verdict.holder) });
   if (!(await isDirectory(record.directory))) return handBack({ status: 'missing_directory', appSessionId, directory: record.directory });
@@ -118,7 +118,7 @@ export async function guardResumeStart(s: Setup, record: SessionRecord, args: { 
   const message = resumeMessages.get(appSessionId) ?? null;
   // the retained message goes once it is C3's (sent) or handed back (a failure other than C3's relay answer)
   const drop = () => resumeMessages.delete(appSessionId);
-  const run = () => runResume(s, record, { decision, options: args.options, message, onSent: drop, onFailed: drop });
+  const run = () => runResume(s, record, { decision, options: args.options, message, onSent: drop, onFailed: drop, paused });
   return [{ status: 'starting', appSessionId }, run];
 }
 

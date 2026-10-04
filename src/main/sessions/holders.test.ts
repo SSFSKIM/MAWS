@@ -55,6 +55,18 @@ describe('holder authority', () => {
     expect(host.queries).toEqual([{ sessionIds: ['eng-app-1'], directories: null }]);
   });
 
+  it('allows only this takeover’s stopped holder and still refuses another writer', async () => {
+    host.hold('eng-app-1', { kind: 'terminal', pid: 41 }, '/work/a');
+    const q = { engineSessionId: sid('eng-app-1'), appSessionId: id('app-1') };
+    const paused = { ...q, pid: 41, isPaused: async () => true };
+    expect((await holderAuthority(deps, q, paused)).live).toBe('none');
+    expect((await holderAuthority(deps, q)).live).toBe('foreign');
+    expect((await holderAuthority(deps, q, { ...paused, isPaused: async () => false })).live).toBe('foreign');
+    expect((await holderAuthority(deps, q, { ...paused, appSessionId: id('other') })).live).toBe('foreign');
+    host.hold('eng-app-1', { kind: 'terminal', pid: 42 }, '/work/a');
+    expect((await holderAuthority(deps, q, paused)).live).toBe('foreign');
+  });
+
   it('answers none when nothing holds the session, and asks no registry for a session with no engine id', async () => {
     records.push(record('app-1', { holder: { kind: 'terminal', pid: 9 } })); // a stale projection is never read
     await expect(holderAuthority(deps, { engineSessionId: sid('eng-app-1'), appSessionId: id('app-1') })).resolves.toEqual({

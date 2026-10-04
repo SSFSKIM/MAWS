@@ -11,12 +11,16 @@ import type { ForeignHolder } from '@shared/graph/session';
 import type { TakeOverOutcome } from '@shared/ipc/schema/session';
 import { hostCall } from './context';
 import { holderAuthority, type HolderDeps } from './holders';
+import { findPane, type PaneProcess } from './pane-holder';
+import type { PtyInfo } from '@shared/ipc/schema/pty';
 
 export const TAKE_OVER_WAIT_MS = 10_000; // the registry clears at the holder's exit (its exit handler unlinks the record)
 export const TAKE_OVER_POLL_MS = 250;
 export const STOP_TIMEOUT_MS = 15_000; // `claude stop` asks the job's daemon and waits for it
 
 export interface TakeOverDeps extends HolderDeps {
+  paneId?: string | null;
+  resumePane?: (target: { pane: PtyInfo; holder: PaneProcess }) => Promise<TakeOverOutcome>;
   env: NodeJS.ProcessEnv; // the environment the engine receives (its config home)
   signal?: (pid: number) => void;
   runStop?: (binary: string, jobId: string, env: NodeJS.ProcessEnv) => Promise<void>;
@@ -55,6 +59,11 @@ export async function releaseHolder(deps: TakeOverDeps, q: { engineSessionId: Se
   // engine (Claude Desktop, an IDE, another SDK app) registers as interactive too, and is that app's to end.
   if (holder.kind === 'terminal' && row.entrypoint !== undefined && row.entrypoint !== 'cli') {
     return refused('other_app', `The session is open in another app (${row.entrypoint}, pid ${holder.pid}); close it there, or fork a copy.`);
+  }
+  if (holder.kind === 'terminal' && deps.resumePane) {
+    const target = await findPane(deps.dispatch, holder.pid);
+    if ((target?.pane.ptyId ?? null) !== (deps.paneId ?? null)) return refused('changed', 'The holder’s terminal pane changed since the confirm; nothing was stopped. Try again.');
+    if (target) return deps.resumePane(target);
   }
   try {
     if (holder.kind === 'terminal') (deps.signal ?? ((pid) => process.kill(pid, 'SIGTERM')))(holder.pid);

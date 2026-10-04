@@ -17,6 +17,7 @@ import { useSetup } from './store';
 import { confirm } from './dialogs'; // W7
 import { resumeSession } from './setup-actions'; // W7
 import { displayTitle } from './title';
+import { terminals } from '../terminal/registry';
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
 
@@ -148,9 +149,11 @@ export const resubmitProvider: ResubmitProvider = {
 // takes. A job MAWS cannot name is left to "Fork a copy".
 export const canTakeOver = (holder: ForeignHolder): boolean => holder.kind === 'terminal' || holder.jobId !== null;
 
-export function takeOverWords(holder: ForeignHolder): { title: string; body: string } {
+export function takeOverWords(holder: ForeignHolder, paneTitle?: string): { title: string; body: string } {
   const what =
-    holder.kind === 'terminal'
+    paneTitle !== undefined
+      ? `MAWS pauses the CLI in the terminal pane “${paneTitle}”, resumes the session here, then ends the paused CLI once ready.`
+      : holder.kind === 'terminal'
       ? `MAWS ends the terminal process that holds this session (pid ${holder.pid}) and resumes the session here.`
       : `MAWS stops the background job bg · ${holder.jobId ?? '?'} (claude stop) and resumes the session here.`;
   return { title: 'Take over this session?', body: `${what} A turn in progress there is lost.` };
@@ -160,15 +163,26 @@ export function takeOverWords(holder: ForeignHolder): { title: string; body: str
 // waits for the registry to clear (`session.takeOver`), then the session resumes here the usual way. A refusal or a
 // timeout is a notice; nothing else changes.
 export async function takeOverSession(appSessionId: AppSessionId, holder: ForeignHolder): Promise<void> {
-  const words = takeOverWords(holder);
+  let pane: { ptyId: string; label: string } | null = null;
+  if (holder.kind === 'terminal') {
+    const found = await ipc.invoke('session.takeOverPane', { pid: holder.pid });
+    if (!found.ok) { fail(found.error.message); return; }
+    pane = found.value;
+  }
+  const paneTitle = pane === null ? undefined : terminals.list().find((t) => t.ptyId === pane.ptyId)?.title || 'Terminal';
+  const words = takeOverWords(holder, paneTitle);
   if (!(await confirm({ title: words.title, body: words.body, confirmLabel: 'Take over', destructive: true }))) return;
-  const result = await ipc.invoke('session.takeOver', { appSessionId, holder });
+  const result = await ipc.invoke('session.takeOver', { appSessionId, holder, ...(pane ? { paneId: pane.ptyId } : {}) });
   if (!result.ok) {
     fail(result.error.message);
     return;
   }
   if (result.value.status === 'refused') {
     toast({ level: 'warning', text: result.value.message, actions: [], dismissible: true });
+    return;
+  }
+  if (result.value.status === 'resumed') {
+    if (result.value.warning) toast({ level: 'warning', text: result.value.warning, actions: [], dismissible: true });
     return;
   }
   await resumeSession(appSessionId);

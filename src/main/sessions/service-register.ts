@@ -28,7 +28,8 @@ export function registerSessionServiceHandlers(service: SessionService): void {
     relay(() => service.fork(id(appSessionId), target, { message, rewindTo: rewindTo as MessageUuid | null })),
   );
   registerMainHandler('session.archive', ({ appSessionId, onlyIfIdle }) => service.archive(id(appSessionId), { onlyIfIdle }));
-  registerMainHandler('session.takeOver', ({ appSessionId, holder }) => service.takeOver(id(appSessionId), holder)); // W7
+  registerMainHandler('session.takeOverPane', ({ pid }) => service.takeOverPane(pid));
+  registerMainHandler('session.takeOver', ({ appSessionId, holder, paneId }) => service.takeOver(id(appSessionId), holder, paneId)); // W7
   registerMainHandler('session.delete', ({ appSessionId, stopIfLive }) => service.remove(id(appSessionId), stopIfLive));
   registerMainHandler('session.rename', ({ appSessionId, title }) => service.rename(id(appSessionId), title));
   registerMainHandler('session.revealPath', ({ path }) => service.revealPath(path));
