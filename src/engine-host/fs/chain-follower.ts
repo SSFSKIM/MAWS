@@ -30,6 +30,7 @@ export interface Skeleton {
   deliveryOwner: MessageUuid | null; // proved at adoption, never inferred across a branch
   localCommand: boolean;
   localCaveat: boolean;
+  noResponse: boolean;
   isProgress: boolean;
   startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
   endsTurn: boolean; // a `system/turn_duration` record (backfill's `turn.ended`); not a blocked prompt's record, also written for a steer dropped mid-turn
@@ -177,7 +178,7 @@ class FollowerCore {
     }
     const uuid = record.uuid as MessageUuid;
     if (this.skeletons.has(uuid)) return; // the engine's dedup-transcript rule: a uuid is written once
-    const message = record.message as { id?: unknown; content?: unknown } | null | undefined;
+    const message = record.message as { id?: unknown; model?: unknown; content?: unknown } | null | undefined;
     const skeleton: Skeleton = {
       uuid,
       parentUuid: typeof record.parentUuid === 'string' ? (record.parentUuid as MessageUuid) : null,
@@ -192,6 +193,8 @@ class FollowerCore {
         : record.type === 'attachment' || record.type === 'system' || isTaskNotification(record) ? 'interleave'
         : (record.type === 'user' && record.isMeta === true) || (record.type === 'assistant' && record.isApiErrorMessage === true) ? 'tail' : null,
       deliveryOwner: null,
+      // SPEC 35 resume cleanup (i6): model and diagnostic guard matter, not just the familiar text.
+      noResponse: record.type === 'assistant' && record.isApiErrorMessage !== true && message?.model === '<synthetic>' && singleText(record) === 'No response requested.', 
       localCaveat: localCommandKind(record) === 'caveat',
       localCommand: localCommandKind(record) === 'caveat' || localCommandKind(record) === 'output'
         || (localCommandKind(record) === 'echo' && typeof record.parentUuid === 'string' && this.skeletons.get(record.parentUuid as MessageUuid)?.localCaveat === true)
@@ -364,7 +367,8 @@ class FollowerCore {
       const skeleton = this.skeletons.get(member)!;
       return skeleton.localCommand || skeleton.type === 'attachment';
     });
-    const silentSwap = leafSibling || localOnly;
+    const noResponseOnly = removed.length > 0 && removed.every((member) => this.skeletons.get(member)?.noResponse === true);
+    const silentSwap = leafSibling || localOnly || noResponseOnly;
     // W7: decided before any reading of the branch as a rewind: while a foreign process holds the session, its branch
     // never retracts what MAWS wrote (after MAWS's exit one live holder is left, which the terminal-rewind reading would
     // otherwise accept). MAWS's branch stays in view; this record joins the skeletons only, and one notice says why.

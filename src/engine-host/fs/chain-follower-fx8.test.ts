@@ -95,3 +95,25 @@ describe('FX8 local-command-only cuts', () => {
     expect(cuts(events)).toHaveLength(1);
   });
 });
+
+
+describe('FX8 synthetic no-response cuts', () => {
+  it.each([false, true])('silently absorbs the exact synthetic assistant (tail=%s)', async (tail) => {
+    const { follower, events } = await follow(fixture('no-response'), tail);
+    expect(cuts(events)).toEqual([]);
+    expect(notices(events)).toEqual([]);
+    expect(follower.snapshot().chain).toEqual(['u', 'next']);
+  });
+
+  it.each(['real-model', 'api-error', 'extra-block', 'different-text'])('keeps %s as a real removal', async (shape) => {
+    const records = fixture('no-response');
+    const assistant = records[1];
+    const message = assistant.message as { model: string; content: { type: string; text: string }[] };
+    if (shape === 'real-model') message.model = 'sample-model';
+    if (shape === 'api-error') assistant.isApiErrorMessage = true;
+    if (shape === 'extra-block') message.content.push({ type: 'text', text: 'Real content.' });
+    if (shape === 'different-text') message.content[0].text = 'A real answer.';
+    const { events } = await follow(records);
+    expect(cuts(events)).toMatchObject([{ kind: 'boundary.retraction', retractedMessageUuids: ['synthetic'] }]);
+  });
+});
