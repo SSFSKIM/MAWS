@@ -392,6 +392,19 @@ describe('follows the leaf across a rewind', () => {
     expectWellFormed(out.events());
   });
 
+  it('keeps worktree, PR and agent-setting bookkeeping silent without hiding unknown types', async () => {
+    const { follower, out } = await started(joined([
+      line({ type: 'worktree-state', sessionId: SESSION, worktree: null }),
+      line({ type: 'pr-link', sessionId: SESSION, prNumber: 12 }),
+      line({ type: 'agent-setting', sessionId: SESSION, agentSetting: 'reviewer' }),
+      line({ type: 'future-bookkeeping', sessionId: SESSION }),
+    ]));
+    expect(out.events()).toHaveLength(1);
+    expect(out.of('frame.unknown')).toMatchObject([{ frameType: 'transcript:future-bookkeeping', subtype: null }]);
+    expect(follower.snapshot().chain).toEqual([]);
+    expect(follower.snapshot().skippedLines).toBe(0);
+  });
+
   it('delivers events in batches of at most 500 and materialises everything delivered', async () => {
     const lines: string[] = [];
     let parent: string | null = null;
