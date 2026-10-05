@@ -18,6 +18,7 @@ export interface LiveBlock {
   blockIndex: number;
   blockType: 'text' | 'thinking' | 'tool_use';
   buffer: string;
+  isApiErrorMessage?: boolean;
   sourceText?: string; // assistant text as delivered, before native ANSI stripping; mod render input
   rowId: RowId;
   completed: boolean;
@@ -574,7 +575,8 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (turn) batch.closeUnended(turn, event.status, event.at);
         return;
       }
-      if (!pushRouted(index.tasks.get(event.taskId))) batch.loose(event, false);
+      const owner = index.tasks.get(event.taskId) ?? (event.kind === 'task.notification' && event.toolUseId !== null ? index.toolUses.get(event.toolUseId) : undefined);
+      if (!pushRouted(owner)) batch.loose(event, false);
       return;
     }
     case 'subagent.progress':
@@ -712,7 +714,7 @@ function completeBlock(turn: TurnState, event: Event<'assistant.block.complete'>
   }
   if (entry) {
     const key = blockIdentityOf(entry.apiMessageId!, entry.blockIndex);
-    turn.live.set(key, { ...entry, buffer: type === 'tool_use' ? entry.buffer : blockContent(event.block), ...(type === 'text' && { sourceText: String(event.block.text ?? '') }), completed: true, completeEventId: event.id, completedAt: event.at, messageUuid: event.messageUuid, model: event.model });
+    turn.live.set(key, { ...entry, buffer: type === 'tool_use' ? entry.buffer : blockContent(event.block), ...(type === 'text' && { sourceText: String(event.block.text ?? '') }), completed: true, isApiErrorMessage: event.isApiErrorMessage, completeEventId: event.id, completedAt: event.at, messageUuid: event.messageUuid, model: event.model });
     return;
   }
   if (type === 'tool_use') return;
@@ -720,7 +722,7 @@ function completeBlock(turn: TurnState, event: Event<'assistant.block.complete'>
   while (turn.live.has(blockIdentityOf(event.apiMessageId, blockIndex))) blockIndex += 1;
   turn.live.set(blockIdentityOf(event.apiMessageId, blockIndex), {
     apiMessageId: event.apiMessageId, blockIndex, blockType: type, buffer: blockContent(event.block), ...(type === 'text' && { sourceText: String(event.block.text ?? '') }), rowId: liveRowId(type, event.apiMessageId, blockIndex),
-    completed: true, markerEventId: null, completeEventId: event.id, completedAt: event.at, messageUuid: event.messageUuid, model: event.model,
+    completed: true, isApiErrorMessage: event.isApiErrorMessage, markerEventId: null, completeEventId: event.id, completedAt: event.at, messageUuid: event.messageUuid, model: event.model,
   });
 }
 

@@ -1,4 +1,12 @@
-import { act, cleanup } from '@testing-library/react';
+import type { AppSessionId } from '@shared/graph/ids';
+import { fakeClient } from '../../../../../../test/support/fake-client';
+import { status } from '../../../../../../test/support/builders';
+import { resetSurfaceRegistry } from '../../../engine-surface/registry';
+import { useSessions } from '../../../stores/sessions';
+import { useTranscriptStore } from '../../../stores/transcript';
+import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../context';
+import { RowView } from './Row';
+import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -6,7 +14,7 @@ import { rowId } from '../../model/keys';
 import { api, builder, uuid } from '../../model/test-events';
 import { renderRow, rowOf, storeWith } from './test-support';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); resetSurfaceRegistry(); });
 
 const caret = (container: HTMLElement) => container.querySelector('[style*="--streamdown-caret"]') !== null;
 
@@ -91,4 +99,27 @@ describe('assistant text row', () => {
       expect(container.textContent).toContain('<img src="x" onerror="alert(2)">'); // shown as written, never parsed (W1)
     });
   });
+});
+
+it('keeps extension presentation when it rewrites the native text to empty', async () => {
+  const b = builder(); b.turn('u'); b.text('answer', 0, 'Visible answer.'); b.end(['u']);
+  const store = await storeWith(b.events);
+  const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = fake.client;
+  useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
+  function View() {
+    const rows = useTranscriptStore((s) => s.entries[store.key].rows);
+    return <TranscriptProvider value={{ storeKey: store.key, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'd1' }}>
+      {rows.map((row) => <RowView key={row.id} row={row} />)}
+    </TranscriptProvider>;
+  }
+  const view = render(<View />);
+  const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
+  expect(asks.filter((ask) => ask.component === 'AssistantMessage').map((ask) => ask.props.text)).toEqual(['Visible answer.']);
+  for (const ask of asks) await act(() => fake.reply('session.ui.render', {
+    hooked: ask.component === 'AssistantMessage', rewritten: ask.component === 'AssistantMessage', props: ask.component === 'AssistantMessage' ? { ...ask.props, text: '' } : ask.props,
+    tree: ask.component === 'AssistantMessage' ? { type: 'Box', children: [{ type: 'Text', children: ['Extension supplied presentation'] }, { type: 'engine', ref: 0 }] } : { type: 'engine', ref: 0 },
+  }));
+  expect([...view.container.querySelectorAll('[data-kind="assistant_text"]')].map((frame) => frame.textContent)).toEqual(['Extension supplied presentation']);
+  expect(view.container.querySelectorAll('.transcript-commentary, .transcript-answer')).toHaveLength(0);
 });

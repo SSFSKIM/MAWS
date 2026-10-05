@@ -2,6 +2,7 @@
 // "Expansion state", "Revisable log", "Requests", "Receipts", "Bash rows", "Time separators"). Rows are derived per
 // turn from its retained events and memoised on (version, ui version); the flat list is the concatenation, with
 // loose rows placed after the turn they followed and time separators inserted by the thresholds in time.ts.
+import { stripAnsi } from '@shared/wire/ansi';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
@@ -18,7 +19,7 @@ import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } fr
 import { isEngineOrigin, originOf, RECEIPT_APPLIED, runningTurn, type ReceiptUndo } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
-import { isInterruptionMarker, isLocalCommand, localCommandOutput, userTextOf } from './user-text';
+import { isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -102,11 +103,12 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // it, Codex's persistent unit), a hook that got in the way, the answer, a boundary (compaction, reset, retraction:
 // charter §5.3, the visible transcript stays true to the model's context), a slash command's output and an answered
 // question's receipt (W4, the owner's ruling: what the human answered stays in view; T3's receipts outlive the fold
-// too), and what a plugin said in the transcript (R1: its log lines and load issues, as the terminal keeps them). The
-// divider folds everything else, so a turn of a local command alone (`/compact`: its boundary and its output) has no
-// work and no "Worked for 0s" divider. A question still counts as work for where the answer starts (WORK_ROWS).
+// too), what a plugin said in the transcript (R1: its log lines and load issues, as the terminal keeps them), and fatal
+// API diagnostics (transient retries remain work). The divider folds everything else, so a turn of a local command
+// alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
+// work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin'));
+  row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')));
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
@@ -257,6 +259,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const blockRow = (block: LiveBlock, at: string): Item | null => {
     const live = !block.completed;
     if (dropped(block.messageUuid)) return null;
+    if (block.isApiErrorMessage) return { kind: 'row', row: { id: block.rowId, turnId: turn.id, at, kind: 'error', severity: 'error', text: block.buffer, attempt: null, scope: 'api', lostAttentionCount: null } };
+    // The mod adapter already rejects empty source text. Rewritten text is presentation-only and never reaches this guard.
+    if (block.blockType === 'text' && !live && block.buffer.trim() === '') return null;
     if (block.blockType === 'text') return { kind: 'text', row: { id: block.rowId, turnId: turn.id, at, kind: 'assistant_text', messageUuid: block.messageUuid, blockIndex: block.blockIndex, markdown: block.buffer, live, phase: 'answer', model: block.model } };
     if (block.blockType === 'thinking') {
       // A completed thinking block with no text (a signature-only block) has nothing to disclose: no row (W1).
@@ -294,7 +299,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           const at = items.findIndex((item) => item.kind === 'row' && item.row.kind === 'bash' && item.row.exitCode === null);
           if (at >= 0) items[at] = { kind: 'row', row: withBashOutput((items[at] as { row: RowOf<'bash'> }).row, event) };
         } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) { // a synthetic one is the engine's caveat for the model (W1)
-          items.push({ kind: 'row', row: localCommandRow(event, turn.id) });
+          const row = localCommandRow(event, turn.id);
+          if (row) items.push({ kind: 'row', row });
         } else if (isInterruptionMarker(event.origin, event.content)) {
           // The engine's interrupt marker is never a bubble, whatever turn it landed in: the stopped divider says it.
         } else if (originOf(event.origin) === 'engine') {
@@ -354,6 +360,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'tool.result': {
         const rec = tools.get(event.toolUseId);
         if (rec) rec.result = event;
+        const group = byToolUse.get(event.toolUseId);
+        const ref = group?.refs.find((ref) => ref.toolUseId === event.toolUseId);
+        if (group && ref && event.isError) group.statuses.set(ref.taskId, 'finished_with_errors');
         const agentId = record(event.structured).agentId;
         if (typeof agentId === 'string') agentIds.set(event.toolUseId, agentId as AgentId);
         const pending = pendingRows.get(event.toolUseId);
@@ -414,9 +423,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       }
       case 'subagent.finished':
       case 'task.notification': {
-        const group = byTask.get(event.taskId);
+        const group = byTask.get(event.taskId) ?? (event.kind === 'task.notification' && event.toolUseId !== null ? byToolUse.get(event.toolUseId) : undefined);
         if (group) {
-          group.statuses.set(event.taskId, event.status === 'completed' ? 'finished' : event.status === 'failed' ? 'finished_with_errors' : 'stopped');
+          const taskId = event.kind === 'task.notification' ? group.refs.find((ref) => ref.toolUseId === event.toolUseId)?.taskId ?? event.taskId : event.taskId;
+          group.statuses.set(taskId, event.status === 'completed' ? 'finished' : event.status === 'failed' ? 'finished_with_errors' : 'stopped');
           break;
         }
         for (const rec of tools.values()) if (rec.backgroundTaskId === event.taskId) rec.backgroundDone = true;
@@ -816,8 +826,11 @@ function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'bo
 }
 
 // The engine's local-command echo, tags stripped; the raw text stands when the wrapper is absent (C3 tagged it).
-function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'local_command'> {
-  const text = localCommandOutput(event.content) ?? (typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => str(block.text)).join('\n'));
+function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'local_command'> | null {
+  const content = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => str(block.text)).join('\n');
+  if (slashCommandLine(content) !== null) return null; // the system echo, not the human's command
+  const text = stripAnsi(localCommandOutput(content) ?? content).trim();
+  if (!text) return null;
   return { id: event.messageUuid === null ? rowId.localOfEvent(event.id) : rowId.local(event.messageUuid), turnId, at: event.at, kind: 'local_command', messageUuid: event.messageUuid, text };
 }
 
@@ -865,7 +878,10 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         else if (event.bash?.part === 'output') {
           const at = rows.findIndex((row) => row.kind === 'bash' && row.exitCode === null);
           if (at >= 0) rows[at] = withBashOutput(rows[at] as RowOf<'bash'>, event);
-        } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) rows.push(localCommandRow(event, null));
+        } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) {
+          const row = localCommandRow(event, null);
+          if (row) rows.push(row);
+        }
         break;
       }
       case 'boundary.compaction':

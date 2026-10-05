@@ -1,5 +1,9 @@
-// The M2 pins over the synthetic journals, the event fixtures and the seeded transcript (C6 execution document,
-// M2 "Proves"). The probe-journal pins live in journals.test.ts.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { AgentId, SessionId } from '@shared/graph/ids';
+import { ChainFollower, type ChainFollowerOptions } from '../../../../engine-host/fs/chain-follower';
+import { MemoryFileReader } from '../../../../../test/support/memory-reader';
+import { TEST_FIXTURE_DIR } from '../../../../../test/support/fixtures';
 import type { SessionEvent } from '@shared/graph/events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../test/support/fixtures';
@@ -322,4 +326,77 @@ describe('the seeded transcript', () => {
     expect(ofKind(first, 'boundary').filter((b) => b.boundaryKind === 'compaction')).toHaveLength(2);
     expect(ofKind(first, 'divider').filter((d) => d.denied > 0)).toHaveLength(12);
   });
+});
+
+// D1: synthetic, anonymised terminal storage shapes through the production disk pipeline.
+async function d1Fixture(name: string, options: ChainFollowerOptions = {}) {
+  const events: SessionEvent[] = [];
+  const follower = new ChainFollower(new MemoryFileReader(readFileSync(join(TEST_FIXTURE_DIR, `transcript-d1-${name}.jsonl`))), 'd1-session' as SessionId, null,
+    (event) => { if (event.t === 'events') events.push(...event.events); }, { holders: () => 0, ...options });
+  await follower.start();
+  follower.stop();
+  const state = stateOf(events);
+  return { events, state, rows: rowsOf(withAllExpanded(state)) };
+}
+
+describe('D1 disk semantics', () => {
+  it('S1 draws command output without wrappers, ANSI, empty output or command echoes', async () => {
+    const { rows } = await d1Fixture('local-commands');
+    expect(ofKind(rows, 'user').map((row) => row.text)).toEqual(['/model example']);
+    expect(ofKind(rows, 'local_command').map((row) => row.text)).toEqual(['Model selected', 'Status ready', 'Command failed']);
+    expect(ofKind(rows, 'error')).toEqual([]);
+  });
+});
+
+const d1Sidecars: ChainFollowerOptions['subagents'] = {
+  byToolUseId: (toolUseId) => ({ agentId: toolUseId.replace('tool-', 'child-') as AgentId, meta: { agentType: 'general-purpose', description: toolUseId, toolUseId, spawnDepth: 1, requestShape: 'background' }, prompt: null }),
+};
+
+describe('D1 subagent outcomes', () => {
+  it.each([false, true])('S2 closes task notifications and deduplicates source/legacy deliveries (sidecar %s)', async (sidecar) => {
+    const { events, state, rows } = await d1Fixture('subagents', sidecar ? { subagents: d1Sidecars } : {});
+    expect(state.order).toHaveLength(1);
+    expect(events.filter((event) => event.kind === 'turn.started')).toHaveLength(1);
+    expect(ofKind(rows, 'assistant_text').at(-1)?.turnId).toBe(state.order[0]);
+    expect(state.turns.get(state.order[0])?.ended?.userMessageUuids).toEqual(['d1-subagents-0']);
+    const outcomes = events.filter((event) => event.kind === 'subagent.finished' || event.kind === 'task.notification');
+    expect(outcomes.map((event) => [event.taskId, event.status])).toEqual([['child-new', 'completed'], ['child-old', 'completed']]);
+    expect(ofKind(rows, 'subagent').map((row) => row.status)).toEqual(['finished']);
+    expect(ofKind(rows, 'user').map((row) => row.text)).toEqual(['Run two sample tasks.']);
+  });
+  it.each([false, true])('S2 failed Agent results terminate the invocation (sidecar %s)', async (sidecar) => {
+    const { rows } = await d1Fixture('agent-failure', sidecar ? { subagents: d1Sidecars } : {});
+    expect(ofKind(rows, 'subagent').map((row) => row.status)).toEqual(['finished_with_errors']);
+  });
+});
+
+it('S3 keeps warning and notice informational records, not info/empty, and preserves blocked prompts', async () => {
+  const { events, rows } = await d1Fixture('notices');
+  expect(events.filter((e) => e.kind === 'notice.posted').map((e) => [e.level, e.text])).toEqual([
+    ['notice', 'Usage resumed.'], ['warning', 'Remote connection unavailable.'],
+  ]);
+  expect(ofKind(rows, 'error').map((row) => [row.scope, row.text])).toEqual([
+    ['notice', 'Usage resumed.'], ['notice', 'Remote connection unavailable.'], ['hook', 'A hook blocked your prompt · Blocked by sample policy'],
+  ]);
+});
+
+it('S4 retains API-error envelopes as diagnostics and uses the last assistant evidence for turn outcomes', async () => {
+  const { events, state, rows } = await d1Fixture('api-errors');
+  expect(ofKind(rowsOf(state), 'error').map((row) => row.text)).toEqual(['Authentication unavailable.', 'Authentication unavailable.']);
+  expect(events.filter((e) => e.kind === 'assistant.block.complete' && e.model === '<synthetic>')).toEqual([
+    expect.objectContaining({ isApiErrorMessage: true, error: 'authentication_failed' }),
+    expect.objectContaining({ isApiErrorMessage: true, error: 'authentication_failed' }),
+  ]);
+  expect(events.filter((e) => e.kind === 'turn.ended').map((e) => [e.result, e.isError])).toEqual([
+    ['error_during_execution', true], ['success', false], ['success', false],
+  ]);
+  expect(ofKind(rows, 'assistant_text').map((row) => row.markdown)).toEqual(['Recovered successfully.', 'Success.']);
+  expect(ofKind(rows, 'error').map((row) => [row.scope, row.severity, row.text])).toEqual([
+    ['api', 'error', 'Authentication unavailable.'], ['api', 'error', 'Authentication unavailable.'],
+  ]);
+});
+
+it('S5 skips completed empty and whitespace native text rows', async () => {
+  const { rows } = await d1Fixture('empty-text');
+  expect(ofKind(rows, 'assistant_text').map((row) => row.markdown)).toEqual(['Visible answer.']);
 });

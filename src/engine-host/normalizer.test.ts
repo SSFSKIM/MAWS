@@ -119,6 +119,21 @@ describe('normaliser: ids, turns and the human prompt bubble', () => {
     expect(drained.state.currentTurn?.userMessageUuids).toEqual(['u-1', 'u-2']);
   });
 
+  it.each(['local_agent', 'local_bash'])('a live %s task notification preserves the running human turn', (taskType) => {
+    const n = make();
+    feed(n, [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame)]);
+    const events = feed(n, [
+      inRow({ type: 'system', subtype: 'task_started', task_id: 'task-1', tool_use_id: 'toolu_1', task_type: taskType, description: 'Sample task', is_backgrounded: true }),
+      inRow({ type: 'system', subtype: 'task_notification', task_id: 'task-1', tool_use_id: 'toolu_1', status: 'completed', summary: 'Done', output_file: '/tmp/task.output' }),
+    ], 4);
+    expect(kinds(events)).toEqual(taskType === 'local_agent' ? ['subagent.started', 'subagent.finished'] : ['task.started', 'task.notification']);
+    expect(events[1]).toMatchObject({ taskId: 'task-1', status: 'completed', summary: 'Done', outputFile: '/tmp/task.output' });
+    expect(n.state.currentTurn).toMatchObject({ origin: 'human', userMessageUuids: ['u-1'] });
+    const ended = feed(n, [inRow(result())], 6);
+    expect(only(ended, 'turn.ended')[0]).toMatchObject({ userMessageUuids: ['u-1'], origin: 'human' });
+    expect(n.state.currentTurn).toBeNull();
+  });
+
   it('system/init with no open turn opens an engine-initiated one, closed by a task-notification result', () => {
     const n = make();
     const events = feed(n, [inRow(initFrame), inRow(result({ origin: { kind: 'task-notification' }, user_message_uuids: [] }))]);
@@ -663,4 +678,15 @@ describe('normaliser: plugin pushes and load issues (R1)', () => {
     const events = feed(make(), [outRow(userOut('u-1')), startedIn('u-1'), inRow({ ...initFrame, plugin_warnings: [{ plugin: 'p', type: 't', message: 'm' }] })]);
     expect(kinds(events)).toEqual(['user.message', 'command.lifecycle', 'turn.started', 'session.init', 'plugin.load_issue']);
   });
+});
+
+it('preserves API-error envelope identity and code on completed blocks', () => {
+  const events = feed(make(), [inRow({
+    type: 'assistant', session_id: SESSION, uuid: 'api-error-envelope', parent_tool_use_id: null,
+    isApiErrorMessage: true, error: 'authentication_failed',
+    message: { id: 'msg-api-error', type: 'message', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: 'Authentication unavailable.' }], stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } },
+  })]);
+  expect(only(events, 'assistant.block.complete')).toEqual([
+    expect.objectContaining({ isApiErrorMessage: true, error: 'authentication_failed', block: { type: 'text', text: 'Authentication unavailable.' } }),
+  ]);
 });

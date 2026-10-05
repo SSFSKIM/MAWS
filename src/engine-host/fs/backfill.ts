@@ -29,6 +29,8 @@ export interface BackfillContext {
   // Agent tool uses read before their child's meta existed: a tailer reads the assistant record before the tool runs
   // and writes the meta, so the lookup is asked again at the tool use's result and at its task notification.
   readonly pendingAgents: Set<string>;
+  readonly notificationSources: Set<string>;
+  readonly notificationTools: Set<string>;
   readonly subagents: SubagentLookup | null;
   lastAt: string; // the previous event's `at`, inherited by records without a timestamp
   started: boolean; // session.started emitted (once per follow)
@@ -38,6 +40,7 @@ export interface BackfillContext {
   // assistant record, an interrupt marker, a prompt that opens a turn and `system/turn_duration`. It tells a blocked
   // steer (blockedPrompt, below) from a blocked prompt of its own.
   inToolLoop: boolean;
+  lastAssistantWasApiError: boolean;
 }
 
 export function createBackfillContext(init: {
@@ -51,11 +54,14 @@ export function createBackfillContext(init: {
     parentToolUseId: init.agent?.parentToolUseId ?? null,
     seenToolUses: new Map(),
     pendingAgents: new Set(),
+    notificationSources: new Set(),
+    notificationTools: new Set(),
     subagents: init.subagents ?? null,
     lastAt: EPOCH,
     started: false,
     lastTurnUserUuid: null,
     inToolLoop: false,
+    lastAssistantWasApiError: false,
   };
 }
 
@@ -100,6 +106,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
       systemEvents(record, ctx, base, events);
       break;
     case 'attachment': // context injections: on the chain, nothing to show, except a relay's receipt in a child and a prompt taken mid-turn (W1)
+      if (taskNotificationAttachment(record, uuid, ctx, base, events)) break;
       if (ctx.agentId === null) steeredPrompt(record, base, events);
       else coordinatorMessage(record, uuid, ctx, base, events);
       break;
@@ -145,7 +152,19 @@ function steeredPrompt(record: TranscriptRecord, base: Base, events: SessionEven
   events.push({ ...base(), kind: 'command.lifecycle', commandUuid: messageUuid, state: 'started' });
 }
 
-function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+// Desktop's history adapter unwraps queued task notifications as user records. At a tool boundary they are synthetic
+// context for the running turn, not a new prompt; outside the loop they can trigger an engine follow-up. Old records
+// lack source_uuid; their tool-use identity is the only stable delivery identity available.
+function taskNotificationAttachment(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): boolean {
+  const attachment = record.attachment as { type?: unknown; commandMode?: unknown; prompt?: unknown; source_uuid?: unknown; isMeta?: unknown } | undefined;
+  if (attachment?.type !== 'queued_command' || attachment.commandMode !== 'task-notification') return false;
+  if (attachment.isMeta === true || typeof attachment.prompt !== 'string') return true;
+  const source = typeof attachment.source_uuid === 'string' && attachment.source_uuid ? attachment.source_uuid as MessageUuid : null;
+  userEvents({ ...record, type: 'user', isMeta: record.isMeta === true || ctx.inToolLoop, message: { role: 'user', content: attachment.prompt } }, source ?? uuid, ctx, base, events, source);
+  return true;
+}
+
+function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[], sourceUuid: MessageUuid | null = uuid): void {
   const content = messageContent(record);
   // W1 (A5): the summary `/compact` writes after its boundary (`isCompactSummary`, w1-compact.jsonl line 29) is the
   // engine's context for the model, which the live stream sends as a synthetic frame: no bubble and no turn, like meta.
@@ -156,6 +175,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     if (isMeta || marker || local) return; // the marker belongs to the turn it interrupted, a command's output to the command's turn (W1)
     ctx.lastTurnUserUuid = uuid;
     ctx.inToolLoop = false;
+    ctx.lastAssistantWasApiError = false;
     events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
   };
   if (marker) ctx.inToolLoop = false; // an interrupt ends the loop: no model call follows
@@ -165,6 +185,12 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
   }
   if (typeof content === 'string') {
     const notification = parseTaskNotification(content);
+    if (notification !== null) {
+      const duplicate = sourceUuid !== null ? ctx.notificationSources.has(sourceUuid) : notification.toolUseId !== null && ctx.notificationTools.has(notification.toolUseId);
+      if (duplicate) return;
+      if (sourceUuid !== null) ctx.notificationSources.add(sourceUuid);
+      if (notification.toolUseId !== null) ctx.notificationTools.add(notification.toolUseId);
+    }
     const origin = notification === null ? null : 'task-notification'; // X1's engine-initiated origin
     const bash = parseBash(content);
     turn(origin);
@@ -184,6 +210,9 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
           outputFile: notification.outputFile,
           reason: null,
         });
+      } else if (notification.taskId !== null) {
+        // Like the live normaliser, an outcome without a known task type is a task.notification.
+        events.push({ ...base(), kind: 'task.notification', taskId: notification.taskId as TaskId, toolUseId: notification.toolUseId as ToolUseId, status: notification.status, summary: notification.result ?? notification.summary ?? '', outputFile: notification.outputFile, reason: null });
       }
     }
     return;
@@ -245,6 +274,7 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
   const model = typeof message?.model === 'string' ? message.model : '';
   const apiBlockIndex = typeof record.apiBlockIndex === 'number' ? record.apiBlockIndex : null;
   ctx.inToolLoop = false;
+  ctx.lastAssistantWasApiError = record.isApiErrorMessage === true;
   content.forEach((block, i) => {
     events.push({
       ...base(),
@@ -257,6 +287,8 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
       supersedes: [],
       aborted: false,
       userMessageUuids: [],
+      ...(record.isApiErrorMessage === true && { isApiErrorMessage: true }),
+      ...(typeof record.error === 'string' && { error: record.error }),
     });
     if (block.type !== 'tool_use' || typeof block.id !== 'string' || block.id.length === 0) return;
     const toolUseId = block.id as ToolUseId;
@@ -318,8 +350,8 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
       events.push({
         ...base(),
         kind: 'turn.ended',
-        result: 'success',
-        isError: false,
+        result: ctx.lastAssistantWasApiError ? 'error_during_execution' : 'success',
+        isError: ctx.lastAssistantWasApiError,
         terminalReason: null,
         resultText: null,
         durationMs: typeof record.durationMs === 'number' ? record.durationMs : 0,
@@ -357,11 +389,18 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
     case 'permission_retry':
       return;
     case 'local_command':
-      events.push({ ...base(), kind: 'notice.posted', level: 'info', text: typeof record.content === 'string' ? record.content : '', key: 'local_command' });
+    case 'local_command_output':
+      events.push({ ...base(), kind: 'user.message', messageUuid: record.uuid as MessageUuid, content: typeof record.content === 'string' ? record.content : '', isReplay: false, isSynthetic: record.isMeta === true, origin: 'local-command', bash: null });
       return;
     case 'informational': {
       const blocked = blockedPrompt(record);
-      if (blocked === null) break;
+      if (blocked === null) {
+        const text = typeof record.content === 'string' ? record.content.trim() : '';
+        if (record.level === 'info') return;
+        if (record.level !== 'warning' && record.level !== 'notice') break; // preserve unknown shapes as compatibility signals
+        if (text) events.push({ ...base(), kind: 'notice.posted', level: record.level, text, key: 'informational' });
+        return;
+      }
       // The prompt, from the record's "Original prompt:"; none when the hook suppressed it, though a queue operation
       // before the record may still hold its text, left unread as the hook asked.
       const uuid = record.uuid as MessageUuid;

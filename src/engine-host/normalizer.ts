@@ -312,7 +312,7 @@ export class Normalizer {
       // frame of the replacement only; `cli.pretty.js` `H0e`), empty when the frame has none. No fixture records a
       // refusal fallback yet (debt wave 4, a synthetic pin). The engine's `model_refusal_fallback` frame still yields
       // `boundary.retraction`.
-      out.emit({ kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex, block, model: frame.message.model, supersedes, aborted: (frame as { aborted?: unknown }).aborted === true, userMessageUuids }, attribution);
+      out.emit({ kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex, block, model: frame.message.model, supersedes, aborted: (frame as { aborted?: unknown }).aborted === true, userMessageUuids, ...(frame.isApiErrorMessage === true && { isApiErrorMessage: true }), ...(typeof frame.error === 'string' && { error: frame.error }) }, attribution);
       if (block.type === 'tool_use') {
         out.emit({ kind: 'tool.use', toolUseId: String(block.id) as ToolUseId, toolName: String(block.name), input: block.input, apiMessageId, messageUuid }, attribution);
       }

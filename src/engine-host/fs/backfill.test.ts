@@ -140,7 +140,7 @@ describe('transcript records map to X1 events', () => {
       rec({ type: 'attachment', uuid: 'x1', parentUuid: 'm1', attachment: { type: 'model' }, timestamp: at(7) }),
     ]);
     expect(kinds(events)).toEqual([
-      'session.started', 'turn.started', 'user.message', 'turn.ended', 'notice.posted', 'frame.unknown', 'boundary.compaction', 'boundary.compaction', 'frame.unknown',
+      'session.started', 'turn.started', 'user.message', 'turn.ended', 'user.message', 'frame.unknown', 'boundary.compaction', 'boundary.compaction', 'frame.unknown',
     ]);
     const ended = only(events, 'turn.ended')[0];
     expect(ended).toMatchObject({
@@ -148,7 +148,7 @@ describe('transcript records map to X1 events', () => {
       usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null },
       permissionDenials: [], errors: [], userMessageUuids: ['u1'], origin: null, resultIndex: null, isEchoReceipt: false,
     });
-    expect(only(events, 'notice.posted')[0]).toMatchObject({ level: 'info', text: '<command-name>/help</command-name>', key: 'local_command' });
+    expect(only(events, 'user.message')[1]).toMatchObject({ origin: 'local-command', content: '<command-name>/help</command-name>' });
     const unknown = only(events, 'frame.unknown');
     expect(unknown[0]).toMatchObject({ id: 's3', frameType: 'transcript:system', subtype: 'future_system_subtype' });
     expect(unknown[1]).toMatchObject({ id: 'm1', frameType: 'transcript:mystery', subtype: null });
@@ -337,13 +337,13 @@ describe('a hook that got in the way, from disk', () => {
     expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual(['60842001-6fbc-4b9d-988d-035e5f61b3c8', BLOCKED, QUIET, '185c31b3-7310-4148-899e-fd576ad53957']);
   });
 
-  it('leaves every other meta record and informational record as before', () => {
+  it('keeps other meta records silent and other informational warnings as notices', () => {
     const user = (content: string, isMeta: boolean) => rec({ type: 'user', uuid: 'm1', parentUuid: null, isMeta, timestamp: at(0), message: { role: 'user', content } });
     const info = (content: string) => rec({ type: 'system', subtype: 'informational', uuid: 'i1', parentUuid: null, timestamp: at(0), content, level: 'warning' });
     expect(kinds(mapAll([user('Stop hook feedback:\nnot meta', false)]))).toEqual(['turn.started', 'user.message']);
     expect(kinds(mapAll([user('Some other reminder', true)]))).toEqual(['user.message']);
-    expect(kinds(mapAll([info('Operation stopped by hook: no')]))).toEqual(['frame.unknown']);
-    expect(kinds(mapAll([info('UserPromptExpansion operation blocked by hook:\n[x]: no\n\nOriginal prompt: /cmd')]))).toEqual(['frame.unknown']);
+    expect(kinds(mapAll([info('Operation stopped by hook: no')]))).toEqual(['notice.posted']);
+    expect(kinds(mapAll([info('UserPromptExpansion operation blocked by hook:\n[x]: no\n\nOriginal prompt: /cmd')]))).toEqual(['notice.posted']);
   });
 
   // The engine writes the same informational record for a queued `next` steer the hook rejects at the mid-turn fold,
@@ -374,6 +374,43 @@ describe('a hook that got in the way, from disk', () => {
     // the marker in a record of its own after the rejected tool's result, as 2.1.283 writes it (w1-steer-next-interrupted.jsonl lines 23 and 25)
     const marker = rec({ type: 'user', uuid: 'm1', parentUuid: 'r1', timestamp: at(3), message: { role: 'user', content: [MARKER] } });
     expect(blockedTurn(mapAll([prompt, toolUse, toolResult(), marker, blocked('b1', 'm1', STEER)]), 'b1')).toEqual(standalone);
+  });
+});
+
+describe('queued task notification turn boundaries', () => {
+  const prompt = rec({ type: 'user', uuid: 'p1', parentUuid: null, timestamp: at(0), message: { role: 'user', content: 'Run a task' } });
+  const result = rec({ type: 'user', uuid: 'r1', parentUuid: 'p1', timestamp: at(1), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'Task launched' }] } });
+  const content = '<task-notification><task-id>task-1</task-id><tool-use-id>t1</tool-use-id><status>completed</status><summary>Task complete</summary></task-notification>';
+  const queued = rec({ type: 'attachment', uuid: 'n1', parentUuid: 'r1', timestamp: at(2), attachment: { type: 'queued_command', commandMode: 'task-notification', source_uuid: 'source-1', prompt: content } });
+  const duration = rec({ type: 'system', subtype: 'turn_duration', uuid: 'd1', parentUuid: 'n1', timestamp: at(3), durationMs: 1500 });
+
+  it('consumes a queued delivery in the tool loop without replacing the human turn or its duration attribution', () => {
+    const ctx = createBackfillContext({ sessionId: SESSION, agent: null });
+    const events = mapAll([prompt, result, queued, duration], ctx);
+    expect(only(events, 'turn.started').map((event) => event.userMessageUuid)).toEqual(['p1']);
+    expect(only(events, 'user.message').map((event) => [event.messageUuid, event.isSynthetic, event.origin])).toEqual([
+      ['p1', false, null], ['source-1', true, 'task-notification'],
+    ]);
+    expect(only(events, 'task.notification')).toEqual([
+      expect.objectContaining({ taskId: 'task-1', toolUseId: 't1', status: 'completed', summary: 'Task complete' }),
+    ]);
+    expect(only(events, 'turn.ended')[0]).toMatchObject({ userMessageUuids: ['p1'], durationMs: 1500 });
+    // A standalone copy under the source UUID adds neither another turn nor another lifecycle event.
+    expect(mapAll([rec({ type: 'user', uuid: 'source-1', parentUuid: 'n1', message: { role: 'user', content } })], ctx)).toEqual([]);
+  });
+
+  it.each(['idle', 'ended', 'answered', 'interrupted'] as const)('retains an engine follow-up when the tool loop is %s', (boundary) => {
+    const before = boundary === 'idle' ? [] : [prompt, result];
+    if (boundary === 'ended') before.push(duration);
+    if (boundary === 'answered') before.push(rec({ type: 'assistant', uuid: 'a1', parentUuid: 'r1', timestamp: at(2), message: { id: 'm1', model: 'x', content: [{ type: 'text', text: 'Task launched' }] } }));
+    if (boundary === 'interrupted') before.push(rec({ type: 'user', uuid: 'i1', parentUuid: 'r1', timestamp: at(2), message: { role: 'user', content: '[Request interrupted by user]' } }));
+    const ctx = createBackfillContext({ sessionId: SESSION, agent: null });
+    mapAll(before, ctx);
+    const events = mapAll([queued, duration], ctx);
+    expect(kinds(events)).toEqual(['turn.started', 'user.message', 'task.notification', 'turn.ended']);
+    expect(events[0]).toMatchObject({ userMessageUuid: 'source-1', origin: 'task-notification' });
+    expect(events[1]).toMatchObject({ messageUuid: 'source-1', isSynthetic: false, origin: 'task-notification' });
+    expect(only(events, 'turn.ended')[0].userMessageUuids).toEqual(['source-1']);
   });
 });
 
