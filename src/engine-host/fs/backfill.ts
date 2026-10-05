@@ -387,7 +387,11 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
       return;
     case 'informational': {
       const blocked = blockedPrompt(record);
-      if (blocked === null) break;
+      if (blocked === null) {
+        const text = typeof record.content === 'string' ? record.content.trim() : '';
+        if (text && (record.level === 'warning' || record.level === 'notice')) events.push({ ...base(), kind: 'notice.posted', level: record.level, text, key: 'informational' });
+        return;
+      }
       // The prompt, from the record's "Original prompt:"; none when the hook suppressed it, though a queue operation
       // before the record may still hold its text, left unread as the hook asked.
       const uuid = record.uuid as MessageUuid;

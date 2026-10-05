@@ -367,3 +367,13 @@ describe('D1 subagent outcomes', () => {
     expect(ofKind(rows, 'subagent').map((row) => row.status)).toEqual(['finished_with_errors']);
   });
 });
+
+it('S3 keeps warning and notice informational records, not info/empty, and preserves blocked prompts', async () => {
+  const { events, rows } = await d1Fixture('notices');
+  expect(events.filter((e) => e.kind === 'notice.posted').map((e) => [e.level, e.text])).toEqual([
+    ['notice', 'Usage resumed.'], ['warning', 'Remote connection unavailable.'],
+  ]);
+  expect(ofKind(rows, 'error').map((row) => [row.scope, row.text])).toEqual([
+    ['notice', 'Usage resumed.'], ['notice', 'Remote connection unavailable.'], ['hook', 'A hook blocked your prompt · Blocked by sample policy'],
+  ]);
+});

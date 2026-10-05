@@ -337,13 +337,13 @@ describe('a hook that got in the way, from disk', () => {
     expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual(['60842001-6fbc-4b9d-988d-035e5f61b3c8', BLOCKED, QUIET, '185c31b3-7310-4148-899e-fd576ad53957']);
   });
 
-  it('leaves every other meta record and informational record as before', () => {
+  it('keeps other meta records silent and other informational warnings as notices', () => {
     const user = (content: string, isMeta: boolean) => rec({ type: 'user', uuid: 'm1', parentUuid: null, isMeta, timestamp: at(0), message: { role: 'user', content } });
     const info = (content: string) => rec({ type: 'system', subtype: 'informational', uuid: 'i1', parentUuid: null, timestamp: at(0), content, level: 'warning' });
     expect(kinds(mapAll([user('Stop hook feedback:\nnot meta', false)]))).toEqual(['turn.started', 'user.message']);
     expect(kinds(mapAll([user('Some other reminder', true)]))).toEqual(['user.message']);
-    expect(kinds(mapAll([info('Operation stopped by hook: no')]))).toEqual(['frame.unknown']);
-    expect(kinds(mapAll([info('UserPromptExpansion operation blocked by hook:\n[x]: no\n\nOriginal prompt: /cmd')]))).toEqual(['frame.unknown']);
+    expect(kinds(mapAll([info('Operation stopped by hook: no')]))).toEqual(['notice.posted']);
+    expect(kinds(mapAll([info('UserPromptExpansion operation blocked by hook:\n[x]: no\n\nOriginal prompt: /cmd')]))).toEqual(['notice.posted']);
   });
 
   // The engine writes the same informational record for a queued `next` steer the hook rejects at the mid-turn fold,
