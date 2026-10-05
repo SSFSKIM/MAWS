@@ -2,6 +2,7 @@
 // "Expansion state", "Revisable log", "Requests", "Receipts", "Bash rows", "Time separators"). Rows are derived per
 // turn from its retained events and memoised on (version, ui version); the flat list is the concatenation, with
 // loose rows placed after the turn they followed and time separators inserted by the thresholds in time.ts.
+import { stripAnsi } from '@shared/wire/ansi';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
@@ -18,7 +19,7 @@ import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } fr
 import { isEngineOrigin, originOf, RECEIPT_APPLIED, runningTurn, type ReceiptUndo } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
-import { isInterruptionMarker, isLocalCommand, localCommandOutput, userTextOf } from './user-text';
+import { isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -294,7 +295,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           const at = items.findIndex((item) => item.kind === 'row' && item.row.kind === 'bash' && item.row.exitCode === null);
           if (at >= 0) items[at] = { kind: 'row', row: withBashOutput((items[at] as { row: RowOf<'bash'> }).row, event) };
         } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) { // a synthetic one is the engine's caveat for the model (W1)
-          items.push({ kind: 'row', row: localCommandRow(event, turn.id) });
+          const row = localCommandRow(event, turn.id);
+          if (row) items.push({ kind: 'row', row });
         } else if (isInterruptionMarker(event.origin, event.content)) {
           // The engine's interrupt marker is never a bubble, whatever turn it landed in: the stopped divider says it.
         } else if (originOf(event.origin) === 'engine') {
@@ -816,8 +818,11 @@ function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'bo
 }
 
 // The engine's local-command echo, tags stripped; the raw text stands when the wrapper is absent (C3 tagged it).
-function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'local_command'> {
-  const text = localCommandOutput(event.content) ?? (typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => str(block.text)).join('\n'));
+function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'local_command'> | null {
+  const content = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => str(block.text)).join('\n');
+  if (slashCommandLine(content) !== null) return null; // the system echo, not the human's command
+  const text = stripAnsi(localCommandOutput(content) ?? content).trim();
+  if (!text) return null;
   return { id: event.messageUuid === null ? rowId.localOfEvent(event.id) : rowId.local(event.messageUuid), turnId, at: event.at, kind: 'local_command', messageUuid: event.messageUuid, text };
 }
 
@@ -865,7 +870,10 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         else if (event.bash?.part === 'output') {
           const at = rows.findIndex((row) => row.kind === 'bash' && row.exitCode === null);
           if (at >= 0) rows[at] = withBashOutput(rows[at] as RowOf<'bash'>, event);
-        } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) rows.push(localCommandRow(event, null));
+        } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) {
+          const row = localCommandRow(event, null);
+          if (row) rows.push(row);
+        }
         break;
       }
       case 'boundary.compaction':

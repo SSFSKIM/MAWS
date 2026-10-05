@@ -357,7 +357,8 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
     case 'permission_retry':
       return;
     case 'local_command':
-      events.push({ ...base(), kind: 'notice.posted', level: 'info', text: typeof record.content === 'string' ? record.content : '', key: 'local_command' });
+    case 'local_command_output':
+      events.push({ ...base(), kind: 'user.message', messageUuid: record.uuid as MessageUuid, content: typeof record.content === 'string' ? record.content : '', isReplay: false, isSynthetic: record.isMeta === true, origin: 'local-command', bash: null });
       return;
     case 'informational': {
       const blocked = blockedPrompt(record);

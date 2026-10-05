@@ -115,12 +115,13 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
 // The engine's local-command echo (`/model`, `/status` and the like arrive as replayed user frames wrapped in these
 // tags; C3 tags the event `origin: 'local-command'`): a `local_command` row, never a bubble and never a turn. The
 // wrapper is recognised too, so an untagged replay (disk backfill) reads the same way.
-const LOCAL_COMMAND = /^\s*<local-command-(stdout|caveat)>([\s\S]*?)<\/local-command-\1>\s*$/;
+const LOCAL_COMMAND = /<local-command-(stdout|stderr|caveat)>([\s\S]*?)<\/local-command-\1>/g;
 
 export function localCommandOutput(content: string | ContentBlock[]): string | null {
   if (typeof content !== 'string') return null;
-  const match = LOCAL_COMMAND.exec(content);
-  return match ? match[2].trim() : null;
+  const matches = [...content.matchAll(LOCAL_COMMAND)];
+  if (matches.length === 0 || content.replace(LOCAL_COMMAND, '').trim() !== '') return null;
+  return matches.filter((match) => match[1] !== 'caveat').map((match) => match[2].trim()).filter(Boolean).join('\n');
 }
 
 export const isLocalCommand = (origin: string | null, content: string | ContentBlock[]) => origin === 'local-command' || localCommandOutput(content) !== null;

@@ -1,5 +1,11 @@
 // The M2 pins over the synthetic journals, the event fixtures and the seeded transcript (C6 execution document,
 // M2 "Proves"). The probe-journal pins live in journals.test.ts.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { SessionId } from '@shared/graph/ids';
+import { ChainFollower, type ChainFollowerOptions } from '../../../../engine-host/fs/chain-follower';
+import { MemoryFileReader } from '../../../../../test/support/memory-reader';
+import { TEST_FIXTURE_DIR } from '../../../../../test/support/fixtures';
 import type { SessionEvent } from '@shared/graph/events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../test/support/fixtures';
@@ -321,5 +327,25 @@ describe('the seeded transcript', () => {
     expect(ofKind(first, 'subagent')).toHaveLength(50);
     expect(ofKind(first, 'boundary').filter((b) => b.boundaryKind === 'compaction')).toHaveLength(2);
     expect(ofKind(first, 'divider').filter((d) => d.denied > 0)).toHaveLength(12);
+  });
+});
+
+// D1: synthetic, anonymised terminal storage shapes through the production disk pipeline.
+async function d1Fixture(name: string, options: ChainFollowerOptions = {}) {
+  const events: SessionEvent[] = [];
+  const follower = new ChainFollower(new MemoryFileReader(readFileSync(join(TEST_FIXTURE_DIR, `transcript-d1-${name}.jsonl`))), 'd1-session' as SessionId, null,
+    (event) => { if (event.t === 'events') events.push(...event.events); }, { holders: () => 0, ...options });
+  await follower.start();
+  follower.stop();
+  const state = stateOf(events);
+  return { events, state, rows: rowsOf(withAllExpanded(state)) };
+}
+
+describe('D1 disk semantics', () => {
+  it('S1 draws command output without wrappers, ANSI, empty output or command echoes', async () => {
+    const { rows } = await d1Fixture('local-commands');
+    expect(ofKind(rows, 'user').map((row) => row.text)).toEqual(['/model example']);
+    expect(ofKind(rows, 'local_command').map((row) => row.text)).toEqual(['Model selected', 'Status ready', 'Command failed']);
+    expect(ofKind(rows, 'error')).toEqual([]);
   });
 });
