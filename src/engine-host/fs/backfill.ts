@@ -40,6 +40,7 @@ export interface BackfillContext {
   // assistant record, an interrupt marker, a prompt that opens a turn and `system/turn_duration`. It tells a blocked
   // steer (blockedPrompt, below) from a blocked prompt of its own.
   inToolLoop: boolean;
+  lastAssistantWasApiError: boolean;
 }
 
 export function createBackfillContext(init: {
@@ -60,6 +61,7 @@ export function createBackfillContext(init: {
     started: false,
     lastTurnUserUuid: null,
     inToolLoop: false,
+    lastAssistantWasApiError: false,
   };
 }
 
@@ -172,6 +174,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     if (isMeta || marker || local) return; // the marker belongs to the turn it interrupted, a command's output to the command's turn (W1)
     ctx.lastTurnUserUuid = uuid;
     ctx.inToolLoop = false;
+    ctx.lastAssistantWasApiError = false;
     events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
   };
   if (marker) ctx.inToolLoop = false; // an interrupt ends the loop: no model call follows
@@ -270,6 +273,7 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
   const model = typeof message?.model === 'string' ? message.model : '';
   const apiBlockIndex = typeof record.apiBlockIndex === 'number' ? record.apiBlockIndex : null;
   ctx.inToolLoop = false;
+  ctx.lastAssistantWasApiError = record.isApiErrorMessage === true;
   content.forEach((block, i) => {
     events.push({
       ...base(),
@@ -282,6 +286,8 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
       supersedes: [],
       aborted: false,
       userMessageUuids: [],
+      ...(record.isApiErrorMessage === true && { isApiErrorMessage: true }),
+      ...(typeof record.error === 'string' && { error: record.error }),
     });
     if (block.type !== 'tool_use' || typeof block.id !== 'string' || block.id.length === 0) return;
     const toolUseId = block.id as ToolUseId;
@@ -343,8 +349,8 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
       events.push({
         ...base(),
         kind: 'turn.ended',
-        result: 'success',
-        isError: false,
+        result: ctx.lastAssistantWasApiError ? 'error_during_execution' : 'success',
+        isError: ctx.lastAssistantWasApiError,
         terminalReason: null,
         resultText: null,
         durationMs: typeof record.durationMs === 'number' ? record.durationMs : 0,

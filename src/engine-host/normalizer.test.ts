@@ -664,3 +664,14 @@ describe('normaliser: plugin pushes and load issues (R1)', () => {
     expect(kinds(events)).toEqual(['user.message', 'command.lifecycle', 'turn.started', 'session.init', 'plugin.load_issue']);
   });
 });
+
+it('preserves API-error envelope identity and code on completed blocks', () => {
+  const events = feed(make(), [inRow({
+    type: 'assistant', session_id: SESSION, uuid: 'api-error-envelope', parent_tool_use_id: null,
+    isApiErrorMessage: true, error: 'authentication_failed',
+    message: { id: 'msg-api-error', type: 'message', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: 'Authentication unavailable.' }], stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } },
+  })]);
+  expect(only(events, 'assistant.block.complete')).toEqual([
+    expect.objectContaining({ isApiErrorMessage: true, error: 'authentication_failed', block: { type: 'text', text: 'Authentication unavailable.' } }),
+  ]);
+});
