@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -647,9 +647,9 @@ describe('IndexSessionSource against the real filesystem state service', () => {
   const user = (uuid: string, parentUuid: string | null, cwd: string, content: string) => ({ type: 'user', uuid, parentUuid, cwd, timestamp: '2026-09-28T10:00:00.000Z', message: { role: 'user', content } });
   const S = [sessionIdFor(1), sessionIdFor(2), sessionIdFor(3)];
   const noop = recordingWriter().writer;
-  const begin = () => {
+  const begin = (writer: ReadModelWriter = noop) => {
     const source = new IndexSessionSource(index, wired.host, { emit: () => true, tickMs: 5 });
-    stop = source.start(noop);
+    stop = source.start(writer);
     return source;
   };
 
@@ -668,6 +668,49 @@ describe('IndexSessionSource against the real filesystem state service', () => {
     await fixture.appendLines(fixture.transcriptPath(S[1]), [JSON.stringify({ type: 'custom-title', customTitle: 'Named later', sessionId: S[1] })]);
     await expect.poll(() => later.find((e) => e.summary.customTitle === 'Named later')?.appSessionId, { timeout: 3_000 }).toBe(allocated[1]);
     expect(index.sessions.get(allocated[1])?.title).toEqual({ text: 'Named later', source: 'user' });
+  });
+
+  it.each(['cold reconcile', 'watcher delete'] as const)('%s marks missing transcripts gone and drops empty discovered projects, not user projects', async (route) => {
+    const discoveredDir = join(dir.path, 'discovered');
+    const userDir = join(dir.path, 'user');
+    mkdirSync(discoveredDir);
+    mkdirSync(userDir);
+    const userProject = index.projects.add(userDir);
+    await fixture.addTranscript(discoveredDir, S[0], [user('u1', null, discoveredDir, 'discovered transcript')]);
+    await fixture.addTranscript(userDir, S[1], [user('u2', null, userDir, 'user project transcript')]);
+    const recorded = recordingWriter();
+    wired.start();
+    begin(recorded.writer);
+    await expect.poll(() => index.sessions.list().length, { timeout: 3_000 }).toBe(2);
+    await expect.poll(() => wired.calls.some((c) => c.name === 'fs.state'), { timeout: 3_000 }).toBe(true);
+    const discoveredProject = index.sessions.getByEngineId(S[0])!.projectId;
+    expect(index.projects.list().map((p) => p.id)).toContain(discoveredProject);
+
+    if (route === 'cold reconcile') {
+      stop!();
+      wired.stop();
+    }
+    rmSync(fixture.transcriptPath(S[0]));
+    rmSync(fixture.transcriptPath(S[1]));
+    if (route === 'cold reconcile') {
+      wired = inProcessHost(fixture.configHome);
+      wired.start();
+      begin(recorded.writer);
+    }
+
+    await expect.poll(() => index.sessions.list(), { timeout: 3_000 }).toEqual([]);
+    for (const sessionId of S.slice(0, 2)) {
+      expect(index.sessions.getByEngineId(sessionId)).toMatchObject({ archived: true });
+      expect(index.sessions.bindings().find((b) => b.sessionId === sessionId)).toMatchObject({ size: null, mtimeMs: null });
+    }
+    expect(index.projects.list().map((p) => p.id)).toEqual([userProject.id]);
+    expect(index.projects.listWithRemoved().map((p) => p.id)).toEqual([userProject.id]);
+    expect(recorded.of('observeProjectRemoved')).toContain(discoveredProject);
+
+    // A moved/restored transcript recovers its archived record and project membership.
+    await fixture.addTranscript(discoveredDir, S[0], [user('u1', null, discoveredDir, 'discovered transcript')]);
+    await expect.poll(() => index.sessions.getByEngineId(S[0])?.archived, { timeout: 3_000 }).toBe(false);
+    expect(index.projects.list().map((p) => p.id)).toContain(discoveredProject);
   });
 
   it('a cold start scans once: one fs.scan, and each transcript reaches main in one fs.sessionChanged (debt wave 6)', async () => {

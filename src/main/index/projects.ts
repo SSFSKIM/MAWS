@@ -252,6 +252,12 @@ const project = (row: ProjectRow): ProjectRecord => ({
   ...(row.hidden ? { hidden: true } : {}), // W11: carried on the renderer's list, which hides it
 });
 
+// A transcript removed by retention keeps an archived session record, not an otherwise empty discovered project
+// in the sidebar or Hidden projects. User-added projects and sessions awaiting their first transcript remain.
+const HAS_PRESENT_SESSION = `EXISTS (SELECT 1 FROM sessions WHERE sessions.project_id = projects.id
+  AND (sessions.transcript_path IS NOT NULL OR sessions.summary IS NULL))`;
+const HAS_PROJECT_CONTENT = `(origin = 'user' OR ${HAS_PRESENT_SESSION})`;
+
 export class ProjectStore {
   private readonly listeners = new Set<(revision: number) => void>();
 
@@ -263,19 +269,18 @@ export class ProjectStore {
 
   // Visible projects in their order (then by creation).
   list(opts: { includeHidden?: boolean } = {}): ProjectRecord[] {
-    const where = opts.includeHidden ? '' : 'WHERE hidden = 0';
+    const where = opts.includeHidden ? '' : `WHERE hidden = 0 AND ${HAS_PROJECT_CONTENT}`;
     return this.db.all<ProjectRow>(`SELECT * FROM projects ${where} ORDER BY sort_order, created_at, id`).map(project);
   }
 
   // What `session.projects.list` answers (W11, I5): the visible projects and, marked `hidden`, those removed from the
-  // sidebar, so the renderer keeps their sessions out of Other sessions and can offer them back. A hidden project
-  // discovery made that holds no session is left out: the start-up refold hides the linked worktrees it folds that way
-  // once their sessions have moved (`SessionStore.refoldLinkedWorktrees`), and nobody removed those.
+  // sidebar, so the renderer keeps their sessions out of Other sessions and can offer them back. Discovered projects
+  // without a present session are omitted, including those whose last transcript vanished. Their rows stay, so a
+  // restored transcript recovers its membership and the owner's explicit hide is not undone.
   listWithRemoved(): ProjectRecord[] {
     return this.db
       .all<ProjectRow>(
-        `SELECT * FROM projects WHERE hidden = 0 OR origin = 'user' OR EXISTS (SELECT 1 FROM sessions WHERE sessions.project_id = projects.id)
-         ORDER BY sort_order, created_at, id`,
+        `SELECT * FROM projects WHERE ${HAS_PROJECT_CONTENT} ORDER BY sort_order, created_at, id`,
       )
       .map(project);
   }
@@ -358,6 +363,11 @@ export class ProjectStore {
       const location = locate(row.directory);
       return location.worktreePath === null ? [] : [{ id: row.id as ProjectId, origin: row.origin, location }];
     });
+  }
+
+  // A transcript appeared or vanished: discovered project visibility follows its present sessions.
+  sessionPresenceChanged(): void {
+    this.changed();
   }
 
   // After commit, once per transaction that changed projects, with that change's revision.
