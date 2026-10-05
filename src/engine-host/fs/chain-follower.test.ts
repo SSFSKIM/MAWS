@@ -102,7 +102,7 @@ describe('leaf-sibling attachments', () => {
     await follower.poke();
     expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'foreign']);
     expect(out.of('boundary.retraction').map((e) => [e.reason, e.retractedMessageUuids])).toEqual([['transcript_branch', ['r1']]]);
-    expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
+    expect(out.of('notice.posted').map((e) => e.key)).toEqual([]);
     expect(out.of('boundary.rewind')).toEqual([]);
   });
 
@@ -234,7 +234,7 @@ describe('parallel response-group interleaves', () => {
       await follower.poke();
       expect(follower.snapshot().chain).toEqual(pinned ? PARALLEL_CHAIN.slice(0, 6) : ['u1', 'a1', 'foreign']);
       expect(out.of('boundary.retraction').map((e) => e.retractedMessageUuids)).toEqual(pinned ? [] : [['a2', 'h1', 'rA', 'rB']]);
-      expect(out.of('notice.posted').map((e) => e.key)).toEqual([pinned ? 'transcript_branch_held' : 'transcript_branch']);
+      expect(out.of('notice.posted').map((e) => e.key)).toEqual(pinned ? ['transcript_branch_held'] : []);
       expect(out.of('boundary.rewind')).toEqual([]);
     }
   });
@@ -261,7 +261,7 @@ describe('parallel response-group interleaves', () => {
     const { follower, out } = await started(joined([...prefix.map(line), line(result)]));
     expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'rA']);
     expect(out.of('boundary.retraction').map((e) => e.retractedMessageUuids)).toEqual([['a2']]);
-    expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
+    expect(out.of('notice.posted').map((e) => e.key)).toEqual([]);
   });
 
   it('retracts adopted results too when a genuine fork parents above their group', async () => {
@@ -270,7 +270,7 @@ describe('parallel response-group interleaves', () => {
     await follower.poke();
     expect(follower.snapshot().chain).toEqual(['u1', 'foreign']);
     expect(out.of('boundary.retraction').map((e) => e.retractedMessageUuids)).toEqual([PARALLEL_CHAIN.slice(1)]);
-    expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
+    expect(out.of('notice.posted').map((e) => e.key)).toEqual([]);
     expect(out.of('boundary.rewind')).toEqual([]);
   });
 });
@@ -380,7 +380,7 @@ describe('follows the leaf across a rewind', () => {
     expectWellFormed(out.events());
   });
 
-  it('without the anchor and with two live holders, the continuation is a second writer: retraction plus a warning', async () => {
+  it('without the anchor and with two live holders, the continuation keeps a fork boundary without inferring its writer', async () => {
     // With at most one holder this same shape is the terminal rewind (below); two processes make it contested.
     const lines = [...REWIND_LINES.slice(0, 26), ...REWIND_LINES.slice(27)];
     const out = new Collector();
@@ -393,16 +393,14 @@ describe('follows the leaf across a rewind', () => {
     expect(retractions[0].retractedMessageUuids.map(short)).toEqual(['36a2aa44', '57525d04']);
     expect(retractions[0]).toMatchObject({ reason: 'transcript_branch', fallbackModel: null });
     const notices = out.of('notice.posted');
-    expect(notices).toHaveLength(1);
-    expect(notices[0]).toMatchObject({ level: 'warning', key: 'transcript_branch' });
-    // The retraction and the notice precede the branching record's own events.
+    expect(notices).toEqual([]); // a parent mismatch alone does not establish a second writer
+    // The retraction precedes the branching record's own events.
     const order = out.events().map((e) => e.kind);
     expect(order.indexOf('boundary.retraction')).toBeLessThan(order.lastIndexOf('turn.started'));
-    expect(order.indexOf('notice.posted')).toBeLessThan(order.lastIndexOf('turn.started'));
     expectWellFormed(out.events());
   });
 
-  it('a continuation from the rewound-away branch is not a continuation: retraction and notice', async () => {
+  it('a continuation from the rewound-away branch still rejoins, but an empty cut has no boundary', async () => {
     const edited = [...REWIND_LINES];
     const record = JSON.parse(edited[29]) as { parentUuid: string };
     record.parentUuid = fullUuid('57525d04');
@@ -412,9 +410,10 @@ describe('follows the leaf across a rewind', () => {
     expect(state.chain.map(short)).toEqual([...CUT_CHAIN, 'af765f44', '36a2aa44', '57525d04', 'a4d68c72', '7c05f769']);
     expect(state.rewind).toBeNull();
     expect(out.of('boundary.rewind')).toHaveLength(1); // the anchor's cut
-    expect(out.of('boundary.retraction')).toHaveLength(1);
-    expect(out.of('boundary.retraction')[0].reason).toBe('transcript_branch');
-    expect(out.of('notice.posted')).toHaveLength(1);
+    // FX8 rule E: no removal means no retraction or notice. The seven observed empty cuts have no
+    // outstanding rewind; this rejected-rewind path keeps its rejoin/redelivery semantics too.
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(out.of('notice.posted')).toEqual([]);
     // The cut records rejoin the chain and are re-read and re-emitted as a second delivery occurrence.
     expect(out.of('user.message').map((e) => short(e.messageUuid))).toEqual(['e3b48834', '36a2aa44', '36a2aa44', 'a4d68c72']);
     expect(out.of('user.message').map((e) => e.id.slice(36))).toEqual(['#1', '#1', '@2#1', '#1']);
@@ -462,7 +461,7 @@ describe('follows the leaf across a rewind', () => {
     expectWellFormed(out.events());
   });
 
-  it('a compaction boundary restarts the chain silently; a stray null-parent record is a second writer', async () => {
+  it('a compaction boundary restarts the chain silently; a stray null-parent record is a fork', async () => {
     const lines = [
       line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'one' } }),
       line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: at(1), message: { id: 'm', model: 'x', content: [{ type: 'text', text: 'ok' }] } }),
@@ -481,7 +480,7 @@ describe('follows the leaf across a rewind', () => {
     expect(follower.snapshot().chain).toEqual(['u9']);
     expect(out.of('boundary.retraction')).toHaveLength(1);
     expect(out.of('boundary.retraction')[0].retractedMessageUuids).toEqual(['c1', 'u2']);
-    expect(out.of('notice.posted')).toHaveLength(1);
+    expect(out.of('notice.posted')).toEqual([]);
     expectWellFormed(out.events());
   });
 
@@ -629,15 +628,15 @@ describe('a terminal rewind without an anchor', () => {
     expect(short(follower.snapshot().leaf)).toBe('c25b804b');
   });
 
-  it('with two live holders the same branch is a second writer: the retraction and the notice', async () => {
+  it('with two live holders the same branch is a fork, without a generic writer notice', async () => {
     const { follower, out } = await follow(TERMINAL_LINES.slice(0, 48), 2);
     expect(out.of('boundary.rewind')).toEqual([]);
     expect(out.of('boundary.retraction').map((e) => [e.reason, e.retractedMessageUuids.map(short)])).toEqual([['transcript_branch', BANANA_TURN]]);
-    expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
+    expect(out.of('notice.posted').map((e) => e.key)).toEqual([]);
     expect(short(follower.snapshot().leaf)).toBe('c25b804b');
   });
 
-  it('with one live holder, a prompt parented mid-turn is still a second writer', async () => {
+  it('with one live holder, a prompt parented mid-turn is still a fork', async () => {
     // Re-parented onto the APPLE turn's first assistant record (its thinking block), which another assistant record follows.
     const [boundary, inside] = [fullTerminal('8eb6beb3'), fullTerminal('77c649cb')];
     const midTurn = TERMINAL_LINES.slice(0, 48).map((l) => (l.includes('"uuid":"040727ec') ? l.replace(`"parentUuid":"${boundary}"`, `"parentUuid":"${inside}"`) : l));
@@ -645,7 +644,7 @@ describe('a terminal rewind without an anchor', () => {
     const { out } = await follow(midTurn, 1);
     expect(out.of('boundary.rewind')).toEqual([]);
     expect(out.of('boundary.retraction')).toHaveLength(1);
-    expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
+    expect(out.of('notice.posted').map((e) => e.key)).toEqual([]);
   });
 
   function fullTerminal(prefix: string): string {
@@ -1276,11 +1275,11 @@ describe('a transcript a terminal and MAWS both write (W7)', () => {
     const between = (from: number, to?: number) => out.events().slice(marks[from], to === undefined ? undefined : marks[to]);
     expect(between(0, 1).filter((e) => e.kind === 'boundary.retraction')).toEqual([]); // TERMINAL_ONE extends MAWS_ONE
     const flipToMaws = between(1, 2).filter((e) => e.kind === 'boundary.retraction' || e.kind === 'notice.posted');
-    expect(flipToMaws.map((e) => e.kind)).toEqual(['boundary.retraction', 'notice.posted']);
+    expect(flipToMaws.map((e) => e.kind)).toEqual(['boundary.retraction']);
     expect((flipToMaws[0] as Extract<SessionEvent, { kind: 'boundary.retraction' }>).retractedMessageUuids).toEqual(turnOf(1));
     const flipBack = between(2, 3).filter((e) => e.kind === 'boundary.retraction');
     expect(flipBack.map((e) => e.retractedMessageUuids)).toEqual([turnOf(2)]); // MAWS_TWO's turn leaves the view
-    expect(out.of('notice.posted').map((e) => e.text)).toEqual(['Another process wrote a sibling branch into this transcript', 'Another process wrote a sibling branch into this transcript']);
+    expect(out.of('notice.posted').map((e) => e.text)).toEqual([]);
     expect(wordsOnChain(follower)).toEqual(['MAWS_ONE', 'TERMINAL_ONE', 'TERMINAL_TWO']);
   });
 

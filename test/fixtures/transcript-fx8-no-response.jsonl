@@ -1,0 +1,3 @@
+{"type": "user", "uuid": "u", "parentUuid": null, "message": {"content": "Sample context."}}
+{"type": "assistant", "uuid": "synthetic", "parentUuid": "u", "message": {"id": "synthetic-response", "model": "<synthetic>", "content": [{"type": "text", "text": "No response requested."}]}}
+{"type": "user", "uuid": "next", "parentUuid": "u", "message": {"content": "Continue."}}

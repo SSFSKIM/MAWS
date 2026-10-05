@@ -1,0 +1,4 @@
+{"type": "user", "uuid": "u", "parentUuid": null, "message": {"content": "Sample prompt."}}
+{"type": "assistant", "uuid": "early", "parentUuid": "late", "message": {"id": "response", "content": [{"type": "text", "text": "Sample response."}]}}
+{"type": "attachment", "uuid": "late", "parentUuid": "u", "attachment": {"type": "output_style"}}
+{"type": "user", "uuid": "next", "parentUuid": "early", "message": {"content": "Continue."}}

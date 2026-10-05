@@ -12,7 +12,10 @@ export function BoundaryRow({ row }: { row: Extract<Row, { kind: 'boundary' }> }
   return (
     <div className="transcript-boundary" data-boundary-kind={row.boundaryKind} title={row.detail ?? undefined}>
       <span className="transcript-boundary-rule" aria-hidden="true" />
-      <span className="transcript-boundary-text">{row.boundaryKind === 'rewind' ? rewindLabel(row.hiddenRows) : row.text}</span>
+      <span className="transcript-boundary-text">
+        <span>{row.boundaryKind === 'rewind' ? rewindLabel(row.hiddenRows) : row.text}</span>
+        {row.secondary && <span className="transcript-boundary-secondary">{row.secondary}</span>}
+      </span>
       {toggle && (
         <button type="button" className="transcript-quiet-button" aria-expanded={row.revealed} onClick={() => useTranscriptStore.getState().toggleBoundary(storeKey, row.id)}>
           {row.revealed ? REWIND_TOGGLE.hide : REWIND_TOGGLE.show}

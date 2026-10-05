@@ -6,6 +6,7 @@
 import type { ContentBlock, EventBase, SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
 import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
+import { slashCommandLine } from '@shared/wire/local-command';
 import { INTERRUPT_MARKER } from '../normalizer-support';
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
@@ -141,13 +142,19 @@ function coordinatorMessage(record: TranscriptRecord, uuid: MessageUuid, ctx: Ba
 // (`source_uuid`, the uuid it was written with), then the engine's `started` for it, which folds it into the open turn
 // at this point (the reducer's `next` path), so a reloaded session places the steer where the live one did. A queued
 // command of another origin (a task notification, a coordinator's) or a meta one is a context injection, as before.
-function steeredPrompt(record: TranscriptRecord, base: Base, events: SessionEvent[]): void {
+function humanQueuedPrompt(record: TranscriptRecord): { messageUuid: MessageUuid; content: string | ContentBlock[] } | null {
+  if (record.type !== 'attachment') return null;
   const attachment = record.attachment as { type?: unknown; prompt?: unknown; source_uuid?: unknown; commandMode?: unknown; origin?: { kind?: unknown }; isMeta?: unknown } | undefined;
-  if (attachment?.type !== 'queued_command' || attachment.origin?.kind !== 'human' || attachment.commandMode !== 'prompt' || attachment.isMeta === true) return;
-  if (typeof attachment.source_uuid !== 'string' || attachment.source_uuid.length === 0) return;
+  if (attachment?.type !== 'queued_command' || attachment.origin?.kind !== 'human' || attachment.commandMode !== 'prompt' || attachment.isMeta === true) return null;
+  if (typeof attachment.source_uuid !== 'string' || attachment.source_uuid.length === 0) return null;
   const content = typeof attachment.prompt === 'string' ? attachment.prompt : Array.isArray(attachment.prompt) ? attachment.prompt.filter(isContentBlock) : null;
-  if (content === null) return;
-  const messageUuid = attachment.source_uuid as MessageUuid;
+  return content === null ? null : { messageUuid: attachment.source_uuid as MessageUuid, content };
+}
+
+function steeredPrompt(record: TranscriptRecord, base: Base, events: SessionEvent[]): void {
+  const prompt = humanQueuedPrompt(record);
+  if (prompt === null) return;
+  const { messageUuid, content } = prompt;
   events.push({ ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: false, origin: null, bash: null });
   events.push({ ...base(), kind: 'command.lifecycle', commandUuid: messageUuid, state: 'started' });
 }
@@ -275,6 +282,7 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
   const apiBlockIndex = typeof record.apiBlockIndex === 'number' ? record.apiBlockIndex : null;
   ctx.inToolLoop = false;
   ctx.lastAssistantWasApiError = record.isApiErrorMessage === true;
+  if (isNoResponseMarker(record)) return; // resume bookkeeping still resets the assistant context above
   content.forEach((block, i) => {
     events.push({
       ...base(),
@@ -522,10 +530,37 @@ function isInterruptMarker(record: TranscriptRecord): boolean {
 // command's turn, as the live stream's replay of it does (pass3/compact seq 45), so it opens none of its own (a turn of
 // its own read "Worked for 0s" under a bubble-less divider).
 function isLocalCommandOutput(record: TranscriptRecord): boolean {
-  if (record.type !== 'user') return false;
+  return localCommandKind(record) === 'caveat' || localCommandKind(record) === 'output';
+}
+
+// Shared with the follower: engine-tagged local history, not arbitrary slash-prefixed human/skill prompts.
+// A user command echo also needs a preceding caveat to distinguish it from a skill invocation.
+export function localCommandKind(record: TranscriptRecord): 'caveat' | 'echo' | 'output' | null {
+  if (record.type === 'system') return record.subtype === 'local_command' || record.subtype === 'local_command_output' ? 'output' : null;
+  if (record.type !== 'user') return null;
+  const text = singleText(record);
+  if (text === null) return null;
+  if (/^\s*<local-command-caveat>/.test(text)) return 'caveat';
+  if (/^\s*<local-command-(stdout|stderr)>/.test(text)) return 'output';
+  return slashCommandLine(text) === null ? null : 'echo';
+}
+
+// Shared with the follower: human prompts are barriers even when encoded outside user records.
+// A queued steer need not open a turn, so this is deliberately broader than startsTurn.
+export function isHumanPrompt(record: TranscriptRecord): boolean {
+  return (startsTurn(record) && !isTaskNotification(record)) || blockedPrompt(record) !== null || humanQueuedPrompt(record) !== null;
+}
+
+// SPEC 35 resume cleanup (i6): matching prose from a real model or diagnostic is not bookkeeping.
+export function isNoResponseMarker(record: TranscriptRecord): boolean {
+  return record.type === 'assistant' && record.isApiErrorMessage !== true
+    && (record.message as { model?: unknown } | undefined)?.model === '<synthetic>'
+    && singleText(record) === 'No response requested.';
+}
+
+export function singleText(record: TranscriptRecord): string | null {
   const content = messageContent(record);
-  const text = typeof content === 'string' ? content : Array.isArray(content) && content.length === 1 && isContentBlock(content[0]) && content[0].type === 'text' && typeof content[0].text === 'string' ? content[0].text : null;
-  return text !== null && /^\s*<local-command-(stdout|caveat)>/.test(text);
+  return typeof content === 'string' ? content : Array.isArray(content) && content.length === 1 && isContentBlock(content[0]) && content[0].type === 'text' && typeof content[0].text === 'string' ? content[0].text : null;
 }
 
 function messageContent(record: TranscriptRecord): unknown {
@@ -562,6 +597,12 @@ interface TaskNotification {
   summary: string | null;
   result: string | null;
   outputFile: string | null;
+}
+
+// The same disk shape used by the follower's response-delivery classification.
+export function isTaskNotification(record: TranscriptRecord): boolean {
+  const content = messageContent(record);
+  return record.type === 'user' && typeof content === 'string' && parseTaskNotification(content) !== null;
 }
 
 // The engine's `<task-notification>` block (SPEC 20.9): the outcome of a background task, delivered as a user record.

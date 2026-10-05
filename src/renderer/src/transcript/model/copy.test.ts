@@ -165,6 +165,7 @@ describe('subagent and boundary copy', () => {
     expect(boundaryCopy({ kind: 'reset', trigger: 'plan_approved' })).toBe('Conversation reset · after plan approval');
     expect(boundaryCopy({ kind: 'reset', trigger: 'clear' })).toBe('Conversation reset · cleared');
     expect(boundaryCopy({ kind: 'reset', trigger: 'fresh_session' })).toBe('Conversation reset · fresh_session');
+    expect(boundaryCopy({ kind: 'retraction', reason: 'transcript_branch', fallbackModel: null })).toBe('Conversation continued from an earlier point');
     expect(boundaryCopy({ kind: 'retraction', reason: 'refusal', fallbackModel: 'claude-sonnet-5' })).toBe('Response retracted · refusal · switched to claude-sonnet-5');
     expect(boundaryCopy({ kind: 'rewind', hiddenRows: 4, revealed: false })).toBe('Rewound to here · 4 messages hidden · Show');
     expect(boundaryCopy({ kind: 'rewind', hiddenRows: 4, revealed: true })).toBe('Rewound to here · 4 messages hidden · Hide');

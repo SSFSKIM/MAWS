@@ -1,0 +1,89 @@
+[
+  {
+    "id": "time:turn:u",
+    "turnId": "turn:u",
+    "at": "1970-01-01T00:00:00.000Z",
+    "kind": "time",
+    "label": "Jan 1, 1970 12:00 AM"
+  },
+  {
+    "id": "user:u",
+    "turnId": "turn:u",
+    "at": "1970-01-01T00:00:00.000Z",
+    "kind": "user",
+    "messageUuid": "u",
+    "text": "Inspect sample one.",
+    "attachments": [],
+    "placeholders": [],
+    "lines": 1,
+    "editable": true,
+    "steer": false,
+    "dropped": false
+  },
+  {
+    "id": "boundary:branch:fork:retraction",
+    "turnId": "turn:u",
+    "at": "1970-01-01T00:00:00.000Z",
+    "kind": "boundary",
+    "hiddenRows": 0,
+    "revealed": false,
+    "boundaryKind": "retraction",
+    "text": "Conversation continued from an earlier point",
+    "secondary": "Later messages from the previous path are no longer part of the current conversation history",
+    "detail": "transcript_branch · a · r · answer"
+  },
+  {
+    "id": "user:fork",
+    "turnId": "turn:fork",
+    "at": "1970-01-01T00:00:00.000Z",
+    "kind": "user",
+    "messageUuid": "fork",
+    "text": "Inspect sample two instead.",
+    "attachments": [],
+    "placeholders": [],
+    "lines": 1,
+    "editable": true,
+    "steer": false,
+    "dropped": false
+  },
+  {
+    "id": "divider:turn:fork",
+    "turnId": "turn:fork",
+    "at": "1970-01-01T00:00:00.000Z",
+    "kind": "divider",
+    "state": "working",
+    "origin": "human",
+    "startedAt": "1970-01-01T00:00:00.000Z",
+    "endedAt": null,
+    "toolCalls": 0,
+    "denied": 0,
+    "autoDenied": 0,
+    "firstDeniedCell": null,
+    "expanded": true,
+    "summary": {
+      "durationMs": null,
+      "toolCalls": 0,
+      "byCategory": {
+        "mcp": 0,
+        "skills": 0,
+        "files": 0,
+        "exploration": 0,
+        "commands": 0,
+        "web": 0,
+        "other": 0
+      },
+      "denials": [],
+      "autoDenied": 0,
+      "safeguard": {
+        "reviewed": 0,
+        "flagged": 0,
+        "notEvaluated": 0
+      },
+      "costUsd": null,
+      "usage": null,
+      "model": null,
+      "childAgents": 0,
+      "terminalReason": null
+    }
+  }
+]

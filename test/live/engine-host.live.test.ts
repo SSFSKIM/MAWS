@@ -1495,8 +1495,8 @@ describe('engine host live', () => {
       expect(at('registry_maws_only').after.holderEvents).toEqual([]);
       expect(at('registry_both').after.holderEvents).toEqual([{ kind: 'terminal', pid: term.pid }]);
       expect(at('terminal_turn_one').after.foreignWrites).toHaveLength(1);
-      expect(at('maws_turn_two').before.follower.map((e) => e.kind)).toEqual(['boundary.retraction', 'notice.posted']);
-      expect(at('terminal_turn_two').before.follower.map((e) => e.kind)).toEqual(['boundary.retraction', 'notice.posted']); // MAWS_TWO vanishes
+      expect(at('maws_turn_two').before.follower.map((e) => e.kind)).toEqual(['boundary.retraction']); // FX8: a parent mismatch alone posts no warning
+      expect(at('terminal_turn_two').before.follower.map((e) => e.kind)).toEqual(['boundary.retraction']); // MAWS_TWO vanishes
       expect(at('terminal_turn_two').after.follower.map((e) => e.key ?? e.kind)).toEqual(['transcript_branch_held']); // MAWS_TWO stays
       expect(at('maws_exited').before.holderEvents).toEqual([]); // pre-W7: nothing re-emitted at MAWS's exit
       // the terminal's exit re-folds onto its branch (or, when its last records land after the registry cleared, the

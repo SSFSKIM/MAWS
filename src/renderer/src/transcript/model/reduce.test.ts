@@ -721,6 +721,23 @@ describe('child traffic', () => {
 });
 
 describe('revisable log', () => {
+  it('a real fork stays outside folded work without blaming a second process', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Read', { file_path: '/sample' });
+    b.result('t1', 'Sample');
+    b.text('m1', 0, 'Previous path');
+    b.emit('boundary.retraction', { retractedMessageUuids: [uuid('m1-u0')], reason: 'transcript_branch', fallbackModel: null });
+    b.end(['u1']);
+    const state = applyEvents(createState(null, null), b.events);
+    const folded = rowsOf(state);
+    const boundary = find(folded, 'boundary');
+    expect(boundary).toMatchObject({ text: 'Conversation continued from an earlier point', secondary: 'Later messages from the previous path are no longer part of the current conversation history', detail: 'transcript_branch · m1-u0' });
+    expect(find(rowsOf(withAllExpanded(state)), 'boundary')).toEqual(boundary);
+    expect(folded.some((row) => row.kind === 'assistant_text' && row.markdown === 'Previous path')).toBe(false);
+    expect(folded.some((row) => row.kind === 'error')).toBe(false);
+  });
+
   it('retraction removes the retracted message’s rows and leaves a boundary at its position', () => {
     const b = builder();
     b.turn('u1');

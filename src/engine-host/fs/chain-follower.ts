@@ -4,7 +4,7 @@
 // plus the trailing partial line; every poke reads `[offset, size)` once. Oversized partials retain only their start
 // offset until a newline arrives, then re-read that one complete record for parsing. Rewinds arrive as `last-prompt {rewound: true}` anchors that cut the chain at
 // once; the engine then continues from an attachment the cut removed, which the announced `rewind` state recognises.
-// A branch nothing explains is a second writer: retraction plus a warning, unless the session is contested (W7: a
+// An unexplained cut changes conversation history, without proving who wrote it. If contested (W7: a
 // foreign process holds it now) and the branch would replace records MAWS wrote with another writer's, in which case
 // MAWS's branch stays in view and the other is held back until the holder exits and the follower re-folds. Every
 // method is serialised behind one promise chain, so a watcher event, a reconcile tick and a follow request never
@@ -14,7 +14,7 @@ import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
-import { createBackfillContext, eventBase, recordToEvents, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, eventBase, recordToEvents, isTaskNotification, isHumanPrompt, isNoResponseMarker, localCommandKind, singleText, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 export interface Skeleton {
   uuid: MessageUuid;
@@ -23,6 +23,16 @@ export interface Skeleton {
   messageId: string | null; // assistant API response group; never the message payload
   sourceToolAssistantUuid: MessageUuid | null;
   isToolResult: boolean;
+  agentId: string | null;
+  isSidechain: boolean;
+  isDiagnostic: boolean;
+  delivery: 'tail' | 'interleave' | null;
+  deliveryOwner: MessageUuid | null; // proved at adoption, never inferred across a branch
+  localCommand: boolean;
+  localTurnUuid: MessageUuid | null; // mapper turn owning the delivered local history
+  humanPrompt: boolean; // includes blocked prompts and human queued-command attachments
+  localCaveat: boolean;
+  noResponse: boolean;
   isProgress: boolean;
   startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
   endsTurn: boolean; // a `system/turn_duration` record (backfill's `turn.ended`); not a blocked prompt's record, also written for a steer dropped mid-turn
@@ -45,7 +55,7 @@ export interface FollowerState {
   skeletons: Map<MessageUuid, Skeleton>; // every uuid-bearing record, chain or not; payloads are not retained
   chain: MessageUuid[]; // root → leaf
   leaf: MessageUuid | null;
-  emitted: Set<MessageUuid>; // chain records whose events have been delivered (a cut removes them)
+  emitted: Set<MessageUuid>; // delivered chain records plus silently retained local history; real cuts remove them
   rewind: RewindState;
   skippedLines: number;
   gap: { parentUuid: string; childUuid: string } | null;
@@ -171,6 +181,7 @@ class FollowerCore {
     const uuid = record.uuid as MessageUuid;
     if (this.skeletons.has(uuid)) return; // the engine's dedup-transcript rule: a uuid is written once
     const message = record.message as { id?: unknown; content?: unknown } | null | undefined;
+    const humanPrompt = isHumanPrompt(record);
     const skeleton: Skeleton = {
       uuid,
       parentUuid: typeof record.parentUuid === 'string' ? (record.parentUuid as MessageUuid) : null,
@@ -178,6 +189,20 @@ class FollowerCore {
       messageId: record.type === 'assistant' && typeof message?.id === 'string' ? message.id : null,
       sourceToolAssistantUuid: record.type === 'user' && typeof record.sourceToolAssistantUUID === 'string' ? record.sourceToolAssistantUUID as MessageUuid : null,
       isToolResult: record.type === 'user' && Array.isArray(message?.content) && message.content.some((block: unknown) => typeof block === 'object' && block !== null && 'type' in block && block.type === 'tool_result'),
+      agentId: typeof record.agentId === 'string' ? record.agentId : null,
+      isSidechain: record.isSidechain === true,
+      isDiagnostic: record.type === 'assistant' && record.isApiErrorMessage === true,
+      humanPrompt,
+      delivery: humanPrompt || record.isCompactSummary === true || (record.type === 'system' && record.subtype === 'compact_boundary') ? null
+        : record.type === 'attachment' || record.type === 'system' || isTaskNotification(record) ? 'interleave'
+        : (record.type === 'user' && record.isMeta === true) || (record.type === 'assistant' && record.isApiErrorMessage === true) ? 'tail' : null,
+      deliveryOwner: null,
+      noResponse: isNoResponseMarker(record),
+      localTurnUuid: null,
+      localCaveat: localCommandKind(record) === 'caveat',
+      localCommand: localCommandKind(record) === 'caveat' || localCommandKind(record) === 'output'
+        || (localCommandKind(record) === 'echo' && typeof record.parentUuid === 'string' && this.skeletons.get(record.parentUuid as MessageUuid)?.localCaveat === true)
+        || (record.type === 'user' && singleText(record) === '/compact'),
       isProgress: record.type === 'progress',
       startsTurn: startsTurn(record),
       endsTurn: record.type === 'system' && record.subtype === 'turn_duration',
@@ -238,6 +263,7 @@ class FollowerCore {
     const targetMessageUuid = segment.find((uuid) => this.skeletons.get(uuid)?.type === 'user') ?? null;
     if (targetMessageUuid !== null) {
       // A cut segment with no user record is attachments only, invisible to consumers: no boundary.
+      this.invalidateHiddenLocalHistory(segment);
       this.produce(null, { ...eventBase(this.ctx, `anchor:${offset}`), kind: 'boundary.rewind', targetMessageUuid, precedingAssistantUuid: leafUuid, prefillText });
     }
     this.rewind = { phase: 'announced', leafUuid, targetMessageUuid, prefillText, anchorOffset: offset };
@@ -246,6 +272,8 @@ class FollowerCore {
   private async handleRecord(record: TranscriptRecord, skeleton: Skeleton): Promise<void> {
     const parent = this.throughProgress(skeleton.parentUuid);
     if (parent === this.leaf) {
+      const group = parent === null ? null : this.responseGroup(parent);
+      if (group !== null && skeleton.delivery !== null && this.sameScope(skeleton, group)) skeleton.deliveryOwner = group.uuid;
       this.extend(record, skeleton.uuid);
       return;
     }
@@ -279,6 +307,7 @@ class FollowerCore {
       this.chain.push(member);
       this.onChain.add(member);
       if (!this.emitted.has(member)) await this.reemit(member);
+      else if (this.skeletons.get(member)?.localCommand) await this.reemit(member, false);
     }
     this.extend(record, uuid);
   }
@@ -328,35 +357,56 @@ class FollowerCore {
     // The incoming record must belong too: a prompt or a different response at an older tool is still a real fork.
     if (!leafSibling && parent !== null && this.onChain.has(parent) && removed.length > 0) {
       const group = this.responseGroup(parent);
-      if (group !== null && this.inResponseGroup(uuid, group) && removed.every((member) => this.inResponseGroup(member, group))) {
+      const incoming = this.skeletons.get(uuid)!;
+      const delivery = group !== null && incoming.delivery === 'interleave' && this.sameScope(incoming, group)
+        // Two delivery tails selecting the same older parent are ambiguous; only core siblings can be crossed.
+        && removed.every((member) => this.skeletons.get(member)?.delivery === null || this.skeletons.get(member)?.type === 'attachment');
+      if (group !== null && (this.inResponseGroup(uuid, group) || delivery) && removed.every((member) => this.inResponseGroup(member, group))) {
+        if (delivery) incoming.deliveryOwner = group.uuid;
         this.extend(record, uuid);
         return;
       }
     }
+    // FX8 C: these records are local history rather than model conversation; swapping them must not retract
+    // their already-delivered output. Attachments may accompany a deferred bare /compact echo.
+    const localOnly = removed.length > 0 && removed.every((member) => {
+      const skeleton = this.skeletons.get(member)!;
+      return skeleton.localCommand || (skeleton.type === 'attachment' && !skeleton.humanPrompt);
+    });
+    const noResponseOnly = removed.length > 0 && removed.every((member) => this.skeletons.get(member)?.noResponse === true);
+    // FX8 E: a continuation can add previously off-chain ancestry without removing anything. Keep the
+    // normal swap/re-delivery path (including a rejected rewind), but there is nothing to retract or announce.
+    const silentSwap = removed.length === 0 || leafSibling || localOnly || noResponseOnly;
     // W7: decided before any reading of the branch as a rewind: while a foreign process holds the session, its branch
     // never retracts what MAWS wrote (after MAWS's exit one live holder is left, which the terminal-rewind reading would
     // otherwise accept). MAWS's branch stays in view; this record joins the skeletons only, and one notice says why.
-    if (!leafSibling && this.holdsBack(record, removed)) {
+    if (!silentSwap && this.holdsBack(record, removed)) {
       if (!this.held) this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:held`), kind: 'notice.posted', level: 'warning', text: HELD_NOTICE, key: 'transcript_branch_held' });
       this.held = true;
       return;
     }
-    const terminal = !leafSibling && this.rewind === null ? this.terminalRewind(record, parent) : null;
-    for (const member of removed) this.emitted.delete(member);
-    if (!leafSibling && this.chain.length > 0) {
+    const terminal = !silentSwap && this.rewind === null ? this.terminalRewind(record, parent) : null;
+    for (const member of removed) {
+      // A silent local-history swap leaves these events visible. Keep their delivery identity if the
+      // record later rejoins; conversational records removed by a real cut must still be mapped again.
+      if (!(silentSwap && this.skeletons.get(member)?.localCommand)) this.emitted.delete(member);
+    }
+    if (!silentSwap && this.chain.length > 0) {
       if (terminal !== null) {
+        this.invalidateHiddenLocalHistory(removed);
         this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:rewind`), kind: 'boundary.rewind', ...terminal, prefillText: null });
       } else if (this.rewind?.phase === 'unanchored') {
         const targetMessageUuid = removed.find((member) => this.skeletons.get(member)?.type === 'user') ?? null;
         if (targetMessageUuid !== null) {
+          this.invalidateHiddenLocalHistory(removed);
           this.produce(null, { ...eventBase(this.ctx, `anchor:${this.rewind.anchorOffset}`), kind: 'boundary.rewind', targetMessageUuid, precedingAssistantUuid: this.rewind.leafUuid, prefillText: this.rewind.prefillText });
         }
       } else {
-        // No anchor explains this, or the announced rewind rejected the parent: a second writer (pass-2 item 10).
+        // No anchor explains this, or the announced rewind rejected the parent. The cut does not prove contention.
         this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:retraction`), kind: 'boundary.retraction', retractedMessageUuids: removed, reason: 'transcript_branch', fallbackModel: null });
-        this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:notice`), kind: 'notice.posted', level: 'warning', text: 'Another process wrote a sibling branch into this transcript', key: 'transcript_branch' });
       }
     }
+    const previousChain = this.onChain;
     this.chain = newChain;
     this.onChain = newSet;
     this.leaf = uuid;
@@ -365,30 +415,47 @@ class FollowerCore {
     for (const member of newChain) {
       if (member === uuid) this.emit(record, uuid);
       else if (!this.emitted.has(member)) await this.reemit(member);
+      else if (!previousChain.has(member) && this.skeletons.get(member)?.localCommand) await this.reemit(member, false);
     }
   }
 
-  // Nearest assistant ancestor, following a result's issuing assistant rather than its incidental file parent.
-  private responseGroup(parent: MessageUuid): string | null {
-    let current: MessageUuid | null = parent;
-    for (let hops = 0; current !== null && hops < this.skeletons.size; hops++) {
-      const skeleton = this.skeletons.get(current);
-      if (skeleton === undefined) return null;
-      if (skeleton.type === 'assistant') return skeleton.messageId;
-      current = skeleton.isToolResult ? skeleton.sourceToolAssistantUuid ?? skeleton.parentUuid : skeleton.parentUuid;
+  // Rewinds hide whole turns, including local history silently swapped off the chain. Restore its delivery
+  // eligibility when its owning turn is hidden. An off-chain command can itself own a turn beneath a cut
+  // prompt; follow only that local ownership ancestry, leaving earlier still-visible history delivered.
+  private invalidateHiddenLocalHistory(removed: MessageUuid[]): void {
+    const hiddenTurns = new Set(removed.filter((uuid) => this.skeletons.get(uuid)?.startsTurn));
+    for (const uuid of this.emitted) {
+      const local = this.skeletons.get(uuid);
+      if (!local?.localCommand || this.onChain.has(uuid)) continue;
+      let owner = local.localTurnUuid;
+      for (let hops = 0; owner !== null && hops < this.skeletons.size; hops++) {
+        if (hiddenTurns.has(owner)) {
+          this.emitted.delete(uuid);
+          break;
+        }
+        owner = this.skeletons.get(owner)?.parentUuid ?? null;
+      }
     }
-    return null;
   }
 
-  private inResponseGroup(uuid: MessageUuid, group: string): boolean {
+  // A diagnostic never owns a response. Delivery ownership is recorded only on an unbranched extension or a
+  // proved interleave; ancestry alone cannot turn an older prompt or a branched meta tail into a group member.
+  private responseGroup(uuid: MessageUuid): Skeleton | null {
     const skeleton = this.skeletons.get(uuid);
-    if (skeleton === undefined) return false;
-    if (skeleton.type === 'attachment') return true;
-    if (skeleton.type === 'assistant') return skeleton.messageId === group;
-    if (!skeleton.isToolResult) return false;
-    const source = skeleton.sourceToolAssistantUuid ?? skeleton.parentUuid;
+    if (skeleton === undefined) return null;
+    if (skeleton.type === 'assistant' && !skeleton.isDiagnostic) return skeleton.messageId === null ? null : skeleton;
+    const source = skeleton.isToolResult ? skeleton.sourceToolAssistantUuid ?? skeleton.parentUuid : skeleton.deliveryOwner;
     const assistant = source === null ? undefined : this.skeletons.get(source);
-    return assistant?.type === 'assistant' && assistant.messageId === group;
+    return assistant?.type === 'assistant' && !assistant.isDiagnostic && assistant.messageId !== null && this.sameScope(skeleton, assistant) ? assistant : null;
+  }
+
+  private sameScope(a: Skeleton, b: Skeleton): boolean {
+    return a.agentId === b.agentId && a.isSidechain === b.isSidechain;
+  }
+
+  private inResponseGroup(uuid: MessageUuid, group: Skeleton): boolean {
+    const owner = this.responseGroup(uuid);
+    return owner !== null && owner.messageId === group.messageId && this.sameScope(owner, group);
   }
 
   // W7: a second writer's branch that would retract records MAWS wrote, while a foreign process holds the session. A
@@ -424,6 +491,8 @@ class FollowerCore {
   private emit(record: TranscriptRecord, uuid: MessageUuid): void {
     if (this.interrupted) return;
     this.produce(uuid, ...recordToEvents(record, this.ctx));
+    const skeleton = this.skeletons.get(uuid);
+    if (skeleton?.localCommand) skeleton.localTurnUuid = this.ctx.lastTurnUserUuid;
     this.emitted.add(uuid);
   }
 
@@ -433,8 +502,9 @@ class FollowerCore {
   }
 
   // A record that came onto the chain after its line was read: re-read it by offset (attachments carry no events, so
-  // their bytes are not fetched).
-  private async reemit(uuid: MessageUuid): Promise<void> {
+  // their bytes are not fetched). Silently retained local history restores mapper context on rejoin without
+  // publishing its events again: its command turn, not the abandoned branch's turn, owns the continuation.
+  private async reemit(uuid: MessageUuid, publish = true): Promise<void> {
     const skeleton = this.skeletons.get(uuid);
     if (skeleton === undefined || this.interrupted) return;
     if (skeleton.type === 'attachment') {
@@ -442,7 +512,10 @@ class FollowerCore {
       return;
     }
     const record = parseLine(await this.reader.read(skeleton.offset, skeleton.length));
-    if (record !== null && record.uuid === uuid) this.emit(record, uuid);
+    if (record !== null && record.uuid === uuid) {
+      if (publish) this.emit(record, uuid);
+      else recordToEvents(record, this.ctx);
+    }
     // The file changed under the read (a rename-over, or a rewrite in place): the record stays undelivered and the
     // retry reloads the file, which delivers it (a reload in progress is abandoned and retried at once).
     else this.interrupted = true;
@@ -730,6 +803,11 @@ export class ChainFollower {
     }
     for (const uuid of fresh.chain) {
       if (!old.emitted.has(uuid)) produced.push(...(byRecord.get(uuid) ?? []));
+    }
+    // The fresh pass suppresses off-chain events. Only local history actually delivered before the reload
+    // may keep its silent-swap delivery identity; an unseen local record must still emit if it rejoins later.
+    for (const uuid of fresh.emitted) {
+      if (!freshChain.has(uuid) && !old.emitted.has(uuid)) fresh.emitted.delete(uuid);
     }
     fresh.out = [];
     this.core = fresh;
