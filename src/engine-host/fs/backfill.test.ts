@@ -7,6 +7,7 @@ import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRe
 import { FIXTURE_DIR, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
 import { recordedReceiptRecord } from '../../../test/support/agents-events';
 import { createBackfillContext, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { mapSystemFrame } from '../normalizer-system';
 
 const SESSION = 'S' as SessionId;
 const SIDECAR_DIR = join(FIXTURE_DIR, 'subagent-sidecars');
@@ -132,7 +133,7 @@ describe('transcript records map to X1 events', () => {
       rec({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'go' } }),
       rec({ type: 'system', subtype: 'turn_duration', uuid: 's1', parentUuid: 'u1', durationMs: 1234, timestamp: at(1) }),
       rec({ type: 'system', subtype: 'local_command', uuid: 's2', parentUuid: 's1', content: '<command-name>/help</command-name>', timestamp: at(2) }),
-      rec({ type: 'system', subtype: 'stop_hook_summary', uuid: 's3', parentUuid: 's2', timestamp: at(3) }),
+      rec({ type: 'system', subtype: 'future_system_subtype', uuid: 's3', parentUuid: 's2', timestamp: at(3) }),
       rec({ type: 'system', subtype: 'compact_boundary', uuid: 's4', parentUuid: null, logicalParentUuid: 's3', compactMetadata: { trigger: 'auto', preTokens: 150000 }, timestamp: at(4) }),
       rec({ type: 'system', subtype: 'compact_boundary', uuid: 's5', parentUuid: 's4', compactMetadata: { trigger: 'manual' } }),
       rec({ type: 'mystery', uuid: 'm1', parentUuid: 's5', timestamp: at(6) }),
@@ -149,11 +150,52 @@ describe('transcript records map to X1 events', () => {
     });
     expect(only(events, 'notice.posted')[0]).toMatchObject({ level: 'info', text: '<command-name>/help</command-name>', key: 'local_command' });
     const unknown = only(events, 'frame.unknown');
-    expect(unknown[0]).toMatchObject({ id: 's3', frameType: 'transcript:system', subtype: 'stop_hook_summary' });
+    expect(unknown[0]).toMatchObject({ id: 's3', frameType: 'transcript:system', subtype: 'future_system_subtype' });
     expect(unknown[1]).toMatchObject({ id: 'm1', frameType: 'transcript:mystery', subtype: null });
     const compactions = only(events, 'boundary.compaction');
     expect(compactions[0]).toMatchObject({ trigger: 'auto', preTokens: 150000, postTokens: null, logicalParentUuid: 's3', historical: true, at: at(4) });
     expect(compactions[1]).toMatchObject({ trigger: 'manual', preTokens: 0, logicalParentUuid: null, at: at(4) }); // no timestamp: the previous event's `at`
+  });
+
+  it('maps API errors to the same unknown frame as the live normalizer, not an invented error row', () => {
+    const events = mapAll([rec({
+      type: 'system', subtype: 'api_error', uuid: 'error', parentUuid: 'a1', timestamp: at(1),
+      level: 'error', error: { message: 'Connection unavailable', formatted: 'Connection unavailable', connection: {}, isNetworkDown: true, rateLimits: null, noResponse: null },
+      retryInMs: 1000, retryAttempt: 1, maxRetries: 3, source: 'api',
+    })]);
+    const live = mapSystemFrame({ type: 'system', subtype: 'api_error' }, { taskTypes: new Map(), workflowNames: new Map(), toolUseToAgent: new Map() });
+    expect(events).toEqual([{ id: 'error', sessionId: SESSION, at: at(1), seq: null, agentId: null, parentToolUseId: null, kind: 'frame.unknown', frameType: 'system', subtype: 'api_error' }]);
+    expect(events).toMatchObject(live.payloads);
+  });
+
+  it('maps refusals from camelCase disk fields to the live retraction payloads, with absent-field defaults', () => {
+    // Field names verified read-only on real records; values below are synthetic.
+    const events = mapAll([
+      rec({ type: 'system', subtype: 'model_refusal_fallback', uuid: 'f1', parentUuid: 'a1', timestamp: at(1), content: 'Retrying with a fallback', originalModel: 'original', fallbackModel: 'fallback', retractedMessageUuids: ['a1', 'a2'] }),
+      rec({ type: 'system', subtype: 'model_refusal_no_fallback', uuid: 'f2', parentUuid: 'f1', timestamp: at(2), content: 'No fallback available', originalModel: 'original' }),
+      rec({ type: 'system', subtype: 'model_refusal_fallback', uuid: 'f3', parentUuid: 'f2', timestamp: at(3) }),
+      rec({ type: 'system', subtype: 'model_refusal_no_fallback', uuid: 'f4', parentUuid: 'f3', timestamp: at(4) }),
+    ]);
+    expect(events).toMatchObject([
+      { id: 'f1', kind: 'boundary.retraction', retractedMessageUuids: ['a1', 'a2'], reason: 'Retrying with a fallback', fallbackModel: 'fallback' },
+      { id: 'f2', kind: 'boundary.retraction', retractedMessageUuids: [], reason: 'No fallback available', fallbackModel: null },
+      { id: 'f3', kind: 'boundary.retraction', retractedMessageUuids: [], reason: 'model refusal', fallbackModel: null },
+      { id: 'f4', kind: 'boundary.retraction', retractedMessageUuids: [], reason: 'model refusal', fallbackModel: null },
+    ]);
+    const tasks = { taskTypes: new Map(), workflowNames: new Map(), toolUseToAgent: new Map() };
+    expect(events[0]).toMatchObject(mapSystemFrame({ type: 'system', subtype: 'model_refusal_fallback', content: 'Retrying with a fallback', original_model: 'original', fallback_model: 'fallback', retracted_message_uuids: ['a1', 'a2'] }, tasks).payloads[0]);
+    expect(events[1]).toMatchObject(mapSystemFrame({ type: 'system', subtype: 'model_refusal_no_fallback', content: 'No fallback available', original_model: 'original' }, tasks).payloads[0]);
+  });
+
+  it('leaves known system digests and status records silent, even with readable content', () => {
+    const records = [
+      { subtype: 'stop_hook_summary', hookCount: 1, hookInfos: [], hookErrors: [], hookAdditionalContext: [], preventedContinuation: false, stopReason: '', hasOutput: true },
+      { subtype: 'away_summary', content: 'Synthetic recap', isMeta: true },
+      { subtype: 'scheduled_task_fire', content: 'Synthetic scheduled wakeup', isMeta: true },
+      { subtype: 'bridge_status', content: 'Remote control active', url: 'https://example.invalid/session', isMeta: true },
+      { subtype: 'permission_retry', content: 'Synthetic permission retry', commands: ['true'], level: 'info', isMeta: true },
+    ];
+    expect(mapAll(records.map((record, i) => rec({ type: 'system', uuid: `s${i}`, parentUuid: 'u1', timestamp: at(i), ...record })))).toEqual([]);
   });
 
   // C6's second whole-branch-review ask: the marker the engine writes after an interrupt is an ordinary `user` record on

@@ -334,6 +334,28 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
         isEchoReceipt: false,
       });
       return;
+    case 'api_error':
+      // Live also leaves this unmapped; retain its compatibility signal rather than inventing an error row.
+      events.push({ ...base(), kind: 'frame.unknown', frameType: 'system', subtype });
+      return;
+    case 'model_refusal_fallback':
+    case 'model_refusal_no_fallback':
+      // Disk uses camelCase (the live stream uses snake_case). No-fallback retracts no messages on the live path.
+      events.push({
+        ...base(),
+        kind: 'boundary.retraction',
+        retractedMessageUuids: subtype === 'model_refusal_fallback' && Array.isArray(record.retractedMessageUuids)
+          ? record.retractedMessageUuids.filter((uuid): uuid is MessageUuid => typeof uuid === 'string') : [],
+        reason: typeof record.content === 'string' ? record.content : 'model refusal',
+        fallbackModel: subtype === 'model_refusal_fallback' && typeof record.fallbackModel === 'string' ? record.fallbackModel : null,
+      });
+      return;
+    case 'stop_hook_summary':
+    case 'away_summary':
+    case 'scheduled_task_fire':
+    case 'bridge_status':
+    case 'permission_retry':
+      return;
     case 'local_command':
       events.push({ ...base(), kind: 'notice.posted', level: 'info', text: typeof record.content === 'string' ? record.content : '', key: 'local_command' });
       return;

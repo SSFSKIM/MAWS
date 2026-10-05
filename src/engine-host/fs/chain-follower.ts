@@ -83,7 +83,7 @@ const NEWLINE = 0x0a;
 const KNOWN_SILENT_TYPES = new Set([
   'last-prompt', 'custom-title', 'ai-title', 'relocated', 'queue-operation', 'mode', 'permission-mode', 'atis-latch',
   'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'tag', 'history-suppression', 'ended-by-model',
-  'continued-in', 'attribution-snapshot', 'fork-context-ref', 'observer-ref',
+  'continued-in', 'attribution-snapshot', 'fork-context-ref', 'observer-ref', 'worktree-state', 'pr-link', 'agent-setting',
   'agent-name', 'bridge-session', // a teammate's display name (SPEC 35 AgentNameRecord); remote-control bridge bookkeeping
 ]);
 
@@ -306,17 +306,20 @@ class FollowerCore {
     newChain.reverse();
     const newSet = new Set(newChain);
     const removed = this.chain.filter((member) => !newSet.has(member));
+    // Attachments can be leaf siblings of the next tool result, not another writer's branch. An attachment-only
+    // removal swaps silently, even when MAWS wrote the attachments: neither W7 nor the rewind heuristic reads it.
+    const leafSibling = removed.length > 0 && removed.every((member) => this.skeletons.get(member)?.type === 'attachment');
     // W7: decided before any reading of the branch as a rewind: while a foreign process holds the session, its branch
     // never retracts what MAWS wrote (after MAWS's exit one live holder is left, which the terminal-rewind reading would
     // otherwise accept). MAWS's branch stays in view; this record joins the skeletons only, and one notice says why.
-    if (this.holdsBack(record, removed)) {
+    if (!leafSibling && this.holdsBack(record, removed)) {
       if (!this.held) this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:held`), kind: 'notice.posted', level: 'warning', text: HELD_NOTICE, key: 'transcript_branch_held' });
       this.held = true;
       return;
     }
-    const terminal = this.rewind === null ? this.terminalRewind(record, parent) : null;
+    const terminal = !leafSibling && this.rewind === null ? this.terminalRewind(record, parent) : null;
     for (const member of removed) this.emitted.delete(member);
-    if (this.chain.length > 0) {
+    if (!leafSibling && this.chain.length > 0) {
       if (terminal !== null) {
         this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:rewind`), kind: 'boundary.rewind', ...terminal, prefillText: null });
       } else if (this.rewind?.phase === 'unanchored') {
