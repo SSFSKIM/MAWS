@@ -14,7 +14,7 @@ import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
-import { createBackfillContext, eventBase, recordToEvents, isTaskNotification, localCommandKind, singleText, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, eventBase, recordToEvents, isTaskNotification, isHumanPrompt, isNoResponseMarker, localCommandKind, singleText, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 export interface Skeleton {
   uuid: MessageUuid;
@@ -29,6 +29,7 @@ export interface Skeleton {
   delivery: 'tail' | 'interleave' | null;
   deliveryOwner: MessageUuid | null; // proved at adoption, never inferred across a branch
   localCommand: boolean;
+  humanPrompt: boolean; // includes blocked prompts and human queued-command attachments
   localCaveat: boolean;
   noResponse: boolean;
   isProgress: boolean;
@@ -53,7 +54,7 @@ export interface FollowerState {
   skeletons: Map<MessageUuid, Skeleton>; // every uuid-bearing record, chain or not; payloads are not retained
   chain: MessageUuid[]; // root → leaf
   leaf: MessageUuid | null;
-  emitted: Set<MessageUuid>; // chain records whose events have been delivered (a cut removes them)
+  emitted: Set<MessageUuid>; // delivered chain records plus silently retained local history; real cuts remove them
   rewind: RewindState;
   skippedLines: number;
   gap: { parentUuid: string; childUuid: string } | null;
@@ -178,7 +179,8 @@ class FollowerCore {
     }
     const uuid = record.uuid as MessageUuid;
     if (this.skeletons.has(uuid)) return; // the engine's dedup-transcript rule: a uuid is written once
-    const message = record.message as { id?: unknown; model?: unknown; content?: unknown } | null | undefined;
+    const message = record.message as { id?: unknown; content?: unknown } | null | undefined;
+    const humanPrompt = isHumanPrompt(record);
     const skeleton: Skeleton = {
       uuid,
       parentUuid: typeof record.parentUuid === 'string' ? (record.parentUuid as MessageUuid) : null,
@@ -189,12 +191,12 @@ class FollowerCore {
       agentId: typeof record.agentId === 'string' ? record.agentId : null,
       isSidechain: record.isSidechain === true,
       isDiagnostic: record.type === 'assistant' && record.isApiErrorMessage === true,
-      delivery: record.isCompactSummary === true || (record.type === 'system' && record.subtype === 'compact_boundary') ? null
+      humanPrompt,
+      delivery: humanPrompt || record.isCompactSummary === true || (record.type === 'system' && record.subtype === 'compact_boundary') ? null
         : record.type === 'attachment' || record.type === 'system' || isTaskNotification(record) ? 'interleave'
         : (record.type === 'user' && record.isMeta === true) || (record.type === 'assistant' && record.isApiErrorMessage === true) ? 'tail' : null,
       deliveryOwner: null,
-      // SPEC 35 resume cleanup (i6): model and diagnostic guard matter, not just the familiar text.
-      noResponse: record.type === 'assistant' && record.isApiErrorMessage !== true && message?.model === '<synthetic>' && singleText(record) === 'No response requested.', 
+      noResponse: isNoResponseMarker(record),
       localCaveat: localCommandKind(record) === 'caveat',
       localCommand: localCommandKind(record) === 'caveat' || localCommandKind(record) === 'output'
         || (localCommandKind(record) === 'echo' && typeof record.parentUuid === 'string' && this.skeletons.get(record.parentUuid as MessageUuid)?.localCaveat === true)
@@ -365,7 +367,7 @@ class FollowerCore {
     // their already-delivered output. Attachments may accompany a deferred bare /compact echo.
     const localOnly = removed.length > 0 && removed.every((member) => {
       const skeleton = this.skeletons.get(member)!;
-      return skeleton.localCommand || skeleton.type === 'attachment';
+      return skeleton.localCommand || (skeleton.type === 'attachment' && !skeleton.humanPrompt);
     });
     const noResponseOnly = removed.length > 0 && removed.every((member) => this.skeletons.get(member)?.noResponse === true);
     // FX8 E: a continuation can add previously off-chain ancestry without removing anything. Keep the
@@ -380,7 +382,11 @@ class FollowerCore {
       return;
     }
     const terminal = !silentSwap && this.rewind === null ? this.terminalRewind(record, parent) : null;
-    for (const member of removed) this.emitted.delete(member);
+    for (const member of removed) {
+      // A silent local-history swap leaves these events visible. Keep their delivery identity if the
+      // record later rejoins; conversational records removed by a real cut must still be mapped again.
+      if (!(silentSwap && this.skeletons.get(member)?.localCommand)) this.emitted.delete(member);
+    }
     if (!silentSwap && this.chain.length > 0) {
       if (terminal !== null) {
         this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:rewind`), kind: 'boundary.rewind', ...terminal, prefillText: null });
@@ -764,6 +770,11 @@ export class ChainFollower {
     }
     for (const uuid of fresh.chain) {
       if (!old.emitted.has(uuid)) produced.push(...(byRecord.get(uuid) ?? []));
+    }
+    // The fresh pass suppresses off-chain events. Only local history actually delivered before the reload
+    // may keep its silent-swap delivery identity; an unseen local record must still emit if it rejoins later.
+    for (const uuid of fresh.emitted) {
+      if (!freshChain.has(uuid) && !old.emitted.has(uuid)) fresh.emitted.delete(uuid);
     }
     fresh.out = [];
     this.core = fresh;

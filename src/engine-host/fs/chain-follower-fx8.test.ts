@@ -5,14 +5,16 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
 import { TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../test/support/memory-reader';
-import { ChainFollower } from './chain-follower';
+import { ChainFollower, type ChainFollowerOptions } from './chain-follower';
+import { TranscriptRecordSchema } from '@shared/wire/transcript';
+import { createBackfillContext, recordToEvents } from './backfill';
 
 const fixture = (name: string): Record<string, unknown>[] => readFileSync(join(TEST_FIXTURE_DIR, `transcript-fx8-${name}.jsonl`), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
 const bytes = (records: Record<string, unknown>[]) => Buffer.from(records.map((r) => JSON.stringify(r) + '\n').join(''));
-async function follow(records: Record<string, unknown>[], tail = false) {
+async function follow(records: Record<string, unknown>[], tail = false, options: ChainFollowerOptions = {}) {
   const reader = new MemoryFileReader(tail ? Buffer.alloc(0) : bytes(records));
   const events: SessionEvent[] = [];
-  const follower = new ChainFollower(reader, 'FX8' as SessionId, null, (e) => { if (e.t === 'events') events.push(...e.events); }, { holders: () => 2 });
+  const follower = new ChainFollower(reader, 'FX8' as SessionId, null, (e) => { if (e.t === 'events') events.push(...e.events); }, { holders: () => 2, ...options });
   await follower.start();
   if (tail) for (const record of records) { reader.append(bytes([record])); await follower.poke(); }
   return { reader, follower, events };
@@ -20,6 +22,48 @@ async function follow(records: Record<string, unknown>[], tail = false) {
 const cuts = (events: SessionEvent[]) => events.filter((e) => e.kind === 'boundary.retraction' || e.kind === 'boundary.rewind');
 const notices = (events: SessionEvent[]) => events.filter((e) => e.kind === 'notice.posted');
 const delivery = fixture('delivery-tails');
+const humanRecords = [
+  { type: 'system', subtype: 'informational', content: 'UserPromptSubmit operation blocked by hook:\nSample block\n\nOriginal prompt: Resume earlier' },
+  { type: 'attachment', attachment: { type: 'queued_command', origin: { kind: 'human' }, commandMode: 'prompt', source_uuid: 'steer', prompt: 'Human steer' } },
+];
+
+describe('FX8 non-user human prompts', () => {
+  it.each(humanRecords)('does not adopt an incoming human $type across a response sibling', async (human) => {
+    const { follower, events } = await follow([...delivery.slice(0, 3), { ...human, uuid: 'human', parentUuid: 'a1' }]);
+    expect(cuts(events)).toMatchObject([{ kind: 'boundary.retraction', retractedMessageUuids: ['a2'] }]);
+    expect(follower.snapshot().chain).toEqual(['u', 'a1', 'human']);
+  });
+
+  it.each(humanRecords)('does not cross an unbranched human $type in a response suffix', async (human) => {
+    const { follower, events } = await follow([...delivery.slice(0, 3), { ...human, uuid: 'human', parentUuid: 'a2' }, delivery[8]]);
+    expect(cuts(events)).toMatchObject([{ kind: 'boundary.retraction', retractedMessageUuids: ['a2', 'human'] }]);
+    expect(follower.snapshot().chain).toEqual(['u', 'a1', 'r1']);
+  });
+
+  it.each(humanRecords)('honours W7 for an incoming human $type that would remove our response', async (human) => {
+    const { follower, events } = await follow([...delivery.slice(0, 3), { ...human, uuid: 'human', parentUuid: 'a1' }], false,
+      { pinned: () => true, isOwnRecord: (record) => record.uuid === 'a2' });
+    expect(cuts(events)).toEqual([]);
+    expect(notices(events)).toMatchObject([{ key: 'transcript_branch_held' }]);
+    expect(follower.snapshot().chain).toEqual(['u', 'a1', 'a2']);
+  });
+
+  it.each([false, true])('does not silently cut local output plus a human queued prompt (pinned=%s)', async (pinned) => {
+    const base = fixture('local-cuts');
+    const { follower, events } = await follow([...base.slice(0, 2),
+      { type: 'system', subtype: 'local_command', uuid: 'out', parentUuid: 'a', content: 'Local output' },
+      { ...humanRecords[1], uuid: 'human', parentUuid: 'out' }, base.at(-1)!], false,
+    { pinned: () => pinned, isOwnRecord: (record) => record.uuid === 'out' });
+    if (pinned) {
+      expect(cuts(events)).toEqual([]);
+      expect(notices(events)).toMatchObject([{ key: 'transcript_branch_held' }]);
+      expect(follower.snapshot().chain).toEqual(['u', 'a', 'out', 'human']);
+    } else {
+      expect(cuts(events)).toMatchObject([{ kind: 'boundary.retraction', retractedMessageUuids: ['out', 'human'] }]);
+      expect(follower.snapshot().chain).toEqual(['u', 'a', 'next']);
+    }
+  });
+});
 
 describe('FX8 eligible response deliveries', () => {
   it.each([false, true])('retains diagnostic, meta, system, attachment and task tails in file order (tail=%s)', async (tail) => {
@@ -32,7 +76,7 @@ describe('FX8 eligible response deliveries', () => {
   });
 
   it.each(['notification', 'system'])('adopts an incoming %s over a same-response sibling', async (kind) => {
-    const incoming = { ...delivery[kind === 'notification' ? 7 : 5], parentUuid: 'a1', ...(kind === 'system' ? { subtype: 'local_command', content: '<local-command-stdout>Ready</local-command-stdout>' } : {}) };
+    const incoming: Record<string, unknown> = { ...delivery[kind === 'notification' ? 7 : 5], parentUuid: 'a1', ...(kind === 'system' ? { subtype: 'local_command', content: '<local-command-stdout>Ready</local-command-stdout>' } : {}) };
     const records = [...delivery.slice(0, 3), incoming, ...delivery.slice(8)];
     const { follower, events } = await follow(records);
     expect(cuts(events)).toEqual([]);
@@ -66,12 +110,20 @@ describe('FX8 eligible response deliveries', () => {
 
 
 describe('FX8 local-command-only cuts', () => {
+  it('keeps terminal rewind semantics for a bare compact echo followed by a human receipt', async () => {
+    const base = fixture('local-cuts');
+    const { follower, events } = await follow([...base.slice(0, 2),
+      { type: 'user', uuid: 'compact', parentUuid: 'a', message: { content: '/compact' } },
+      { ...humanRecords[1], uuid: 'human', parentUuid: 'compact' }, base.at(-1)!], false, { holders: () => 1 });
+    expect(cuts(events)).toMatchObject([{ kind: 'boundary.rewind', targetMessageUuid: 'compact', precedingAssistantUuid: 'a' }]);
+    expect(follower.snapshot().chain).toEqual(['u', 'a', 'next']);
+  });
   it.each([false, true])('swaps local bookkeeping without retracting its output (tail=%s)', async (tail) => {
     const { follower, events } = await follow(fixture('local-cuts'), tail);
     expect(cuts(events)).toEqual([]);
     expect(notices(events)).toEqual([]);
     expect(follower.snapshot().chain).toEqual(['u', 'a', 'next']);
-    expect(events.filter((e) => e.kind === 'user.message' && e.origin === 'local-command').map((e) => e.messageUuid)).toContain('system-output');
+    expect(events.filter((e) => e.kind === 'user.message').filter((e) => e.origin === 'local-command').map((e) => e.messageUuid)).toContain('system-output');
   });
 
   it('absorbs only the deferred bare compact echo, with optional attachments', async () => {
@@ -98,11 +150,24 @@ describe('FX8 local-command-only cuts', () => {
 
 
 describe('FX8 synthetic no-response cuts', () => {
+  it('keeps the silent assistant context reset for the next blocked prompt and turn result', () => {
+    const ctx = createBackfillContext({ sessionId: 'FX8' as SessionId, agent: null });
+    const map = (record: Record<string, unknown>) => recordToEvents(TranscriptRecordSchema.parse(record), ctx);
+    map({ type: 'assistant', uuid: 'diagnostic', isApiErrorMessage: true, message: { model: 'sample', content: [{ type: 'text', text: 'Sample diagnostic' }] } });
+    map({ type: 'user', uuid: 'result', message: { content: [{ type: 'tool_result', tool_use_id: 'sample-tool', content: 'Result' }] } });
+    expect(map(fixture('no-response')[1])).toEqual([]);
+    const blocked = map({ ...humanRecords[0], uuid: 'blocked' });
+    expect(blocked.filter((event) => event.kind === 'turn.started')).toMatchObject([{ userMessageUuid: 'blocked' }]);
+    expect(blocked.filter((event) => event.kind === 'command.lifecycle')).toEqual([]);
+    expect(map({ type: 'system', subtype: 'turn_duration', uuid: 'duration', durationMs: 1 }))
+      .toMatchObject([{ kind: 'turn.ended', result: 'success', isError: false }]);
+  });
   it.each([false, true])('silently absorbs the exact synthetic assistant (tail=%s)', async (tail) => {
     const { follower, events } = await follow(fixture('no-response'), tail);
     expect(cuts(events)).toEqual([]);
     expect(notices(events)).toEqual([]);
     expect(follower.snapshot().chain).toEqual(['u', 'next']);
+    expect(events.filter((e) => e.kind === 'assistant.block.complete')).toEqual([]);
   });
 
   it.each(['real-model', 'api-error', 'extra-block', 'different-text'])('keeps %s as a real removal', async (shape) => {
@@ -115,6 +180,7 @@ describe('FX8 synthetic no-response cuts', () => {
     if (shape === 'different-text') message.content[0].text = 'A real answer.';
     const { events } = await follow(records);
     expect(cuts(events)).toMatchObject([{ kind: 'boundary.retraction', retractedMessageUuids: ['synthetic'] }]);
+    expect(events.filter((e) => e.kind === 'assistant.block.complete')).toHaveLength(shape === 'extra-block' ? 2 : 1);
   });
 });
 

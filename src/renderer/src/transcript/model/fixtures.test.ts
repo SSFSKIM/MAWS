@@ -424,6 +424,79 @@ describe('FX8 disk conversation history', () => {
     await expect(JSON.stringify(rows, null, 2) + '\n').toMatchFileSnapshot(join(TEST_FIXTURE_DIR, '../snapshots/transcript/fx8/fork.rows.json'));
   });
 
+  it('does not render the exact synthetic no-response marker', async () => {
+    const state = await fx8('no-response');
+    expect(ofKind(rowsOf(state), 'assistant_text')).toEqual([]);
+    expect(ofKind(rowsOf(withAllExpanded(state)), 'assistant_text')).toEqual([]);
+  });
+
+  it('delivers a rejoining local record first discovered off-chain during rewrite', async () => {
+    const prefix = [
+      { type: 'user', uuid: 'u', parentUuid: null, message: { content: 'Sample request' } },
+      { type: 'assistant', uuid: 'a', parentUuid: 'u', message: { id: 'response', content: [{ type: 'text', text: 'Sample answer' }] } },
+    ];
+    const local = (uuid: string, parentUuid: string) => ({ type: 'system', subtype: 'local_command', uuid, parentUuid, content: `<local-command-stdout>${uuid}</local-command-stdout>` });
+    const encode = (records: unknown[]) => records.map((record) => JSON.stringify(record) + '\n').join('');
+    const reader = new MemoryFileReader(encode(prefix));
+    const events: SessionEvent[] = [];
+    const follower = new ChainFollower(reader, 'fx8-rewrite-local' as SessionId, null,
+      (event) => { if (event.t === 'events') events.push(...event.events); }, { holders: () => 2 });
+    await follower.start();
+    reader.replace(encode([...prefix, local('out1', 'a'), local('out2', 'a')]));
+    await follower.poke();
+    reader.append(encode([local('out3', 'out1')]));
+    await follower.poke();
+    const rows = rowsOf(stateOf(events));
+    expect(ofKind(rows, 'local_command').map((row) => row.text)).toEqual(['out2', 'out1', 'out3']);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length);
+    expect(events.filter((event) => event.kind === 'user.message' && event.messageUuid === 'out1').map((event) => event.id)).toEqual(['out1']);
+    follower.stop();
+  });
+
+  it.each(['tail', 'cold', 'rewrite', 'refold'])('retains local output exactly once when silently swapped history rejoins (%s)', async (mode) => {
+    const records: Record<string, unknown>[] = [
+      { type: 'user', uuid: 'u', parentUuid: null, message: { content: 'Sample request' } },
+      { type: 'assistant', uuid: 'a', parentUuid: 'u', message: { id: 'response', model: 'sample', content: [{ type: 'text', text: 'Sample answer' }] } },
+      { type: 'system', subtype: 'local_command', uuid: 'out1', parentUuid: 'a', content: '<local-command-stdout>First output</local-command-stdout>' },
+      { type: 'system', subtype: 'local_command', uuid: 'out2', parentUuid: 'a', content: '<local-command-stdout>Second output</local-command-stdout>' },
+    ];
+    const rejoin = { type: 'system', subtype: 'local_command', uuid: 'out3', parentUuid: 'out1', content: '<local-command-stdout>Third output</local-command-stdout>' };
+    const encode = (items: Record<string, unknown>[]) => items.map((record) => JSON.stringify(record) + '\n').join('');
+    const events: SessionEvent[] = [];
+    let pinned = mode === 'refold';
+    const reader = new MemoryFileReader(encode(mode === 'cold' ? [...records, rejoin] : records));
+    const follower = new ChainFollower(reader, 'fx8-local-rejoin' as SessionId, null,
+      (event) => { if (event.t === 'events') events.push(...event.events); },
+      { holders: () => 2, pinned: () => pinned, isOwnRecord: (record) => record.uuid === 'a' });
+    await follower.start();
+    if (mode === 'rewrite') { reader.replace(encode(records)); await follower.poke(); }
+    if (mode === 'refold') {
+      records.push({ type: 'user', uuid: 'foreign', parentUuid: 'u', message: { content: 'Earlier branch' } });
+      reader.append(encode(records.slice(-1)));
+      await follower.poke();
+      expect(events.filter((event) => event.kind === 'notice.posted')).toMatchObject([{ key: 'transcript_branch_held' }]);
+      pinned = false;
+      await follower.refold();
+    }
+    if (mode !== 'cold') { reader.append(encode([rejoin])); await follower.poke(); }
+    const state = stateOf(events);
+    for (const rows of [rowsOf(state), rowsOf(withAllExpanded(state))]) {
+      expect(ofKind(rows, 'local_command').map((row) => row.text)).toEqual(['First output', 'Second output', 'Third output']);
+      const ids = rows.map((row) => row.id);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+    expect(events.filter((event) => event.kind === 'user.message' && event.messageUuid === 'out1').map((event) => event.id)).toEqual(['out1']);
+    if (mode === 'refold') {
+      // Conversational records genuinely retracted during the refold still need re-delivery.
+      expect(events.filter((event) => event.kind === 'assistant.block.complete' && event.messageUuid === 'a').map((event) => event.id)).toEqual(['a', 'a@2']);
+    }
+    const idsBeforeRewrite = rowsOf(state).map((row) => row.id);
+    reader.replace(encode([...records, rejoin]));
+    await follower.poke();
+    expect(rowsOf(stateOf(events)).map((row) => row.id)).toEqual(idsBeforeRewrite);
+    follower.stop();
+  });
+
   it('a local-only swap leaves command output visible as local history', async () => {
     const rows = rowsOf(await fx8('local-cuts'));
     expect(ofKind(rows, 'boundary')).toEqual([]);
