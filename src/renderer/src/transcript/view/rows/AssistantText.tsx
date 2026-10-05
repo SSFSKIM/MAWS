@@ -9,9 +9,11 @@ import { Markdown } from '../markdown/Markdown';
 export function AssistantTextRow({ row, text }: { row: Extract<Row, { kind: 'assistant_text' }>; text?: string }) {
   const { storeKey } = useTranscriptContext();
   const buffer = useTranscriptStore((state) => liveBuffer(state.entries[storeKey], row));
+  const markdown = text ?? buffer ?? row.markdown;
+  if (!row.live && markdown.trim() === '') return null;
   return (
     <div className={row.phase === 'answer' || row.forHuman ? 'transcript-answer' : 'transcript-commentary'}>
-      <Markdown markdown={text ?? buffer ?? row.markdown} live={row.live} />
+      <Markdown markdown={markdown} live={row.live} />
     </div>
   );
 }

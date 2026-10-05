@@ -259,6 +259,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const live = !block.completed;
     if (dropped(block.messageUuid)) return null;
     if (block.isApiErrorMessage) return { kind: 'notice', row: { id: block.rowId, turnId: turn.id, at, kind: 'error', severity: 'error', text: block.buffer, attempt: null, scope: 'api', lostAttentionCount: null } };
+    // The mod adapter already rejects empty source text. Rewritten text is presentation-only and never reaches this guard.
+    if (block.blockType === 'text' && !live && block.buffer.trim() === '') return null;
     if (block.blockType === 'text') return { kind: 'text', row: { id: block.rowId, turnId: turn.id, at, kind: 'assistant_text', messageUuid: block.messageUuid, blockIndex: block.blockIndex, markdown: block.buffer, live, phase: 'answer', model: block.model } };
     if (block.blockType === 'thinking') {
       // A completed thinking block with no text (a signature-only block) has nothing to disclose: no row (W1).
