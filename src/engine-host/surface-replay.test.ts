@@ -1,6 +1,7 @@
 // R2: an app replay (the launcher's replay transport, surface reads on) of the R2 fixtures through a real EngineSession:
 // the session attaches, becomes ready, answers renders by site, takes the person's focus reports without holding, and a
 // held press advances the replay.
+import { appReplayHandshake } from './replay-handshake';
 import { describe, expect, it } from 'vitest';
 import { loadJournal } from '../../test/support/fixtures';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin';
@@ -26,7 +27,7 @@ function appReplay(name: string) {
   const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
   const journal = new MemoryJournal();
   const logs: string[] = [];
-  const session = new EngineSession({ spec, plan, journal, log: (m) => logs.push(m), spawn: () => replayEngine(fixture, { prelude: handshakePrelude(), surfaceReads: true }) });
+  const session = new EngineSession({ spec, plan, journal, log: (m) => logs.push(m), spawn: () => replayEngine(appReplayHandshake(fixture, spec.trust), { prelude: handshakePrelude(), surfaceReads: true }) });
   return { session, journal, logs };
 }
 

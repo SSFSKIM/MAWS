@@ -2,6 +2,8 @@
 // journaled to disk by the production JournalWriter re-reads through a fresh Normalizer into the same event list, ids
 // and seq included, a successful rewind, a transport parse error and the process exit among them; and (M5) with the
 // event ring capped at 50, `session.events` rebuilds the evicted range from that journal through the X2 handlers.
+import { withAppRewindGuards } from '../../../test/support/app-rewind-fixture';
+import { writeFile } from 'node:fs/promises';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -51,7 +53,7 @@ function withParseError(inner: EngineTransport, after: number): EngineTransport 
 }
 
 describe('journal round-trips into the same graph', () => {
-  it('pass2/rewind with a parse error and the exit, journaled to disk, re-reads into the live event list exactly', async () => {
+  it('pass2/rewind with app guard fields, a parse error and the exit, journaled to disk, re-reads into the live event list exactly', async () => {
     const sent: MessageUuid[] = [];
     const dir = join(userData, 'engine-host', 'journal', 'replay-rewind');
     const writer = new JournalWriter(dir, 'LAUNCHJ1', { maxBytes: JOURNAL_MAX_BYTES });
@@ -59,9 +61,10 @@ describe('journal round-trips into the same graph', () => {
       const frame = row.frame as { type: string; message?: { content: string }; request?: { subtype: string } };
       if (frame.type === 'user') void ready().then(() => session.send((fixture.find((r) => r.seq === row.seq)!.frame as { message: { content: string } }).message.content)).then((r) => sent.push(r.messageUuid!));
       else if (frame.request?.subtype === 'rewind_files') void session.control!.request('rewind_files', { user_message_id: sent[1]!, dry_run: true }).catch(() => {});
-      else if (frame.request?.subtype === 'rewind_conversation') void rewind(session, { targetMessageUuid: row.seq === 39 ? sent[0]! : sent[1]!, lastSeenMessageUuid: sent[1]!, files: false }); // seq 39 stale, seq 41 rewound
+      else if (frame.request?.subtype === 'rewind_conversation') void rewind(session, { targetMessageUuid: row.seq === 39 ? sent[0]! : sent[1]!, lastSeenMessageUuid: row.seq === 39 ? sent[0]! : sent[1]!, files: false }); // seq 39 stale, seq 41 rewound
       else transport.kill('SIGTERM');
     }, {
+      edit: withAppRewindGuards,
       wrap: (t) => withParseError(t, 10),
       session: { journal: writer },
     });
@@ -85,7 +88,7 @@ describe('journal round-trips into the same graph', () => {
 
   // The spec's pin names a ring of 50; the whole of pass2/rewind yields 36 events, so the ring is capped at 10 here to
   // make the eviction the pin is about actually happen (the rebuild path is the same at any size).
-  it('with the ring capped below the run, session.events after a replayed pass2/rewind and a stop deep-equals every batch received, boundary and exit included', async () => {
+  it('with the ring capped below the run, session.events after a replayed pass2/rewind with app guard fields and a stop deep-equals every batch received, boundary and exit included', async () => {
     const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
     const batches: SessionEvent[][] = [];
     const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
@@ -104,11 +107,13 @@ describe('journal round-trips into the same graph', () => {
       await until(() => turnsEnded() === turns, `turn ${turns}`);
       for (let s = await status(); s.turn !== null; s = await status()) await new Promise((r) => setTimeout(r, 5));
     };
-    const fixture = loadJournal('pass2', 'rewind');
+    const fixture = withAppRewindGuards(loadJournal('pass2', 'rewind'));
+    const replayPath = join(userData, 'rewind-with-app-guards.jsonl');
+    await writeFile(replayPath, fixture.map((row) => JSON.stringify(row)).join('\n') + '\n');
     const prompt = (seq: number) => (fixture.find((r) => r.seq === seq)!.frame as { message: { content: string } }).message.content;
     const spec = LaunchSpecSchema.parse({
       appSessionId: 'app-ring', cwd: '/tmp/maws-ring', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
-      resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null /* C10 */, replay: 'spikes/protocol-probe/fixtures/pass2/rewind.jsonl',
+      resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null /* C10 */, replay: replayPath,
     });
     await handlers.get('session.launch')!({ spec });
     for (let s = await status(); s.process !== 'ready'; s = await status()) await new Promise((r) => setTimeout(r, 5));
@@ -118,7 +123,7 @@ describe('journal round-trips into the same graph', () => {
     const second = (await call('session.send', { content: prompt(19) })).messageUuid as MessageUuid;
     await idle(2);
     expect(await call('session.rewindFiles', { userMessageUuid: second, dryRun: true })).toMatchObject({ ok: false, enabled: false }); // seq 36
-    expect(await call('session.rewind', { targetMessageUuid: first, lastSeenMessageUuid: second, files: false })).toMatchObject({ rewound: false }); // seq 39
+    expect(await call('session.rewind', { targetMessageUuid: first, lastSeenMessageUuid: first, files: false })).toMatchObject({ rewound: false }); // seq 39
     expect(await call('session.rewind', { targetMessageUuid: second, lastSeenMessageUuid: second, files: false })).toMatchObject({ rewound: true }); // seq 41
     await call('session.send', { content: prompt(44) });
     await idle(3);

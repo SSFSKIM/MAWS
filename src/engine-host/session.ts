@@ -18,11 +18,12 @@ import type { QueueEntry, QueueState, SendContent, SessionStateStore } from '@sh
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SurfaceAnswer } from '@shared/engine/surface'; // R2
-import { HookCallbackRequestSchema, type GetStatusResponse, type InitializeRequest, type InterruptResponse } from '@shared/wire/control';
+import { HookCallbackRequestSchema, type GetStatusResponse, type InterruptResponse } from '@shared/wire/control';
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import { BashMode } from './bash-mode';
-import { DECLARED_DIALOG_KINDS, PermissionBroker } from './broker';
+import { PermissionBroker } from './broker';
+import { appInitialize } from '@shared/engine/initialize';
 import { cancelAsyncMessage, endSession, getContextUsage, getStatus, initialize, interrupt, REQUEST_TIMEOUT_MS, requestClassOf, setPermissionMode } from './controls';
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
 import { ENGINE_COMPAT_NOTICE_KEY, EngineCompatWatch } from './engine-compat'; // W13
@@ -554,10 +555,9 @@ export class EngineSession {
       }
     }, FIRST_OUTPUT_MS);
 
-    const request: InitializeRequest = { supportedDialogKinds: [...DECLARED_DIALOG_KINDS], perTaskStopAffordance: true };
+    const request = appInitialize(this.spec.trust ?? undefined);
     const hooks = this.hooks.forInitialize();
     if (hooks) request.hooks = hooks;
-    if (this.spec.trust) request.workspaceTrust = this.spec.trust;
     let init;
     try {
       init = await initialize(client, request, {

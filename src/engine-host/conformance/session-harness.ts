@@ -2,6 +2,7 @@
 // auto-responder for the handshake, and an EngineSession over a fixture replay with a driver that runs at each `out`
 // row the replay holds at (the moment the host would write it), so a suite issues the fixture's prompts, rewinds and
 // `!` commands through the real session API and the replay fails on any write the probe never recorded.
+import { appReplayHandshake } from '../replay-handshake';
 import type { SessionEvent } from '@shared/graph/events';
 import { SessionEventSchema } from '@shared/graph/events';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
@@ -85,7 +86,7 @@ export async function replayedSession(
   const session: EngineSession = new EngineSession({
     spec, plan, journal, log: () => {},
     spawn: () => {
-      transport = replayEngine(fixture, {
+      transport = replayEngine(appReplayHandshake(fixture, spec.trust), {
         prelude: handshakePrelude(),
         onHold: (row) => {
           const frame = row.frame as { type: string; request?: { subtype?: string } };

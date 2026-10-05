@@ -1,3 +1,4 @@
+import { withAppRewindGuards } from '../../test/support/app-rewind-fixture';
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
@@ -66,7 +67,7 @@ describe('rewind sends last_seen and derives the boundary from the response', ()
     ]);
   });
 
-  it('pass2/rewind replayed through a session: two sends, the refused dry run, a stale rewind, the successful rewind with last_seen, and the next turn', async () => {
+  it('pass2/rewind with app guard fields replayed through a session: two sends, the refused dry run, a stale rewind, the successful rewind with last_seen, and the next turn', async () => {
     const sent: MessageUuid[] = [];
     const outcomes: unknown[] = [];
     let rewinds = 0;
@@ -77,9 +78,9 @@ describe('rewind sends last_seen and derives the boundary from the response', ()
       else if (frame.request?.subtype === 'rewind_conversation') {
         rewinds += 1;
         const target = rewinds === 1 ? sent[0]! : sent[1]!;
-        void rewind(session, { targetMessageUuid: target, lastSeenMessageUuid: sent[1]!, files: false }).then((o) => outcomes.push(o));
+        void rewind(session, { targetMessageUuid: target, lastSeenMessageUuid: target, files: false }).then((o) => outcomes.push(o));
       } else transport.kill('SIGTERM');
-    });
+    }, { edit: withAppRewindGuards });
     expect(run.journal.rows.filter((r) => r.direction === 'meta' && (r.frame as { event: string }).event === 'replay_mismatch')).toEqual([]);
     expect(sent).toHaveLength(3);
     expect(outcomes).toEqual([
@@ -89,7 +90,7 @@ describe('rewind sends last_seen and derives the boundary from the response', ()
     ]);
     const requests = run.journal.rows.filter((r) => r.direction === 'out' && (r.frame as { request?: { subtype: string } }).request?.subtype === 'rewind_conversation').map((r) => (r.frame as { request: unknown }).request);
     expect(requests).toEqual([
-      { subtype: 'rewind_conversation', target_message_uuid: sent[0], last_seen_user_message_uuid: sent[1], interrupt_if_running: false },
+      { subtype: 'rewind_conversation', target_message_uuid: sent[0], last_seen_user_message_uuid: sent[0], interrupt_if_running: false },
       { subtype: 'rewind_conversation', target_message_uuid: sent[1], last_seen_user_message_uuid: sent[1], interrupt_if_running: false },
     ]);
     expect(ofKind(run.events, 'boundary.rewind')).toMatchObject([{ targetMessageUuid: sent[1], prefillText: 'Also remember the word BANANA. Reply OK.' }]);

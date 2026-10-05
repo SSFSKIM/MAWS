@@ -17,7 +17,8 @@ import type { ControlClient } from './rpc';
 
 // The dialog kinds `initialize` declares (§4.1): we render exactly these, so a request for any other kind is never
 // answered on the human's behalf (SPEC 45.22.13); it stays pending with a warning.
-export const DECLARED_DIALOG_KINDS: readonly string[] = Object.freeze(['auto_mode_server_fallback', 'refusal_fallback_prompt']);
+import { DECLARED_DIALOG_KINDS } from '@shared/engine/initialize';
+export { DECLARED_DIALOG_KINDS } from '@shared/engine/initialize';
 
 export const TOMBSTONE_LIMIT = 1_000;
 export const DENY_MESSAGE = 'Denied by the user in MAWS.';
