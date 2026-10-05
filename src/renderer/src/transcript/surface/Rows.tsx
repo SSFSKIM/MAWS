@@ -2,7 +2,7 @@
 // row out of the work fold; virtualized-away dividers and folded tool/group rows issue no asks. Child transcripts
 // are not their parent's engine surface.
 import { useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
-import { create } from 'zustand';
+import { assistantDrawingKey, retainAssistantDrawing, useAssistantDrawings } from '../../engine-surface/assistant-drawings';
 import type { AppSessionId } from '@shared/graph/ids';
 import { stripAnsi } from '@shared/wire/ansi';
 import { nativeQuestionsOf, parseTranscriptProps, type TranscriptProps } from '@shared/engine/surface-rows';
@@ -33,19 +33,6 @@ export function SurfaceUserRow({ row }: { row: Extract<Row, { kind: 'user' }> })
   </SurfaceRow>;
 }
 
-// Live drawings own presentation while mounted; a divider probe takes over when virtualization removes them.
-// Register in layout so a probe's passive answer effect cannot outrun a newly mounted drawing's gesture hold.
-const useAssistantDrawings = create<ReadonlyMap<string, number>>(() => new Map());
-function retainAssistantDrawing(key: string) {
-  useAssistantDrawings.setState((s) => new Map(s).set(key, (s.get(key) ?? 0) + 1), true);
-  return () => useAssistantDrawings.setState((s) => {
-    const next = new Map(s), count = next.get(key)! - 1;
-    if (count) next.set(key, count);
-    else next.delete(key);
-    return next;
-  }, true);
-}
-
 function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
   const { storeKey, variant } = useTranscriptContext();
   const appSessionId = variant === 'session' && storeKey ? storeKey as AppSessionId : null;
@@ -62,7 +49,7 @@ function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
     const state = s.entries[storeKey]?.state;
     return row.turnId === null || !state || state.ui.expandedTurns.has(row.turnId) || (turn?.state === 'open' && !state.ui.collapsedTurns.has(row.turnId));
   });
-  return { appSessionId, input, reportInk, attached, presentation, showRecord, key: `${storeKey}\u0000${row.id}` };
+  return { appSessionId, input, reportInk, attached, presentation, showRecord, key: assistantDrawingKey(storeKey, row.id) };
 }
 
 // The virtualized divider bounds these ask-only mounts to turns in/near the viewport. Only assistant text bypasses
@@ -99,6 +86,7 @@ export function SurfaceAssistantRow({ row }: { row: Extract<Row, { kind: 'assist
     const state = s.entries[storeKey]?.state;
     return !!state && row.turnId !== null && !!turnRows(state, row.turnId)?.some((r) => r.kind === 'divider');
   });
+  // Claim in layout before a folded probe's passive answer or surface cleanup can demote this drawing.
   useLayoutEffect(() => retainAssistantDrawing(key), [key]);
   useEffect(() => {
     if (!attached) reportInk(presentation !== null);

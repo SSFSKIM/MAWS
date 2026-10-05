@@ -6,6 +6,7 @@ import type { SurfaceSite, SurfaceViewport } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { useSurfaceViewport } from './viewport';
+import { assistantDrawingKey, useAssistantDrawings } from './assistant-drawings';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../stores/transcript';
@@ -67,7 +68,10 @@ export function connectEngineSurface(client: MawsBridge = ipc): () => void {
     const now = status.process === 'ready' && status.uiSurface !== undefined;
     if (!now) {
       forgetSession(appSessionId as AppSessionId);
-      useTranscriptStore.getState().clearAssistantInk(appSessionId, 'surface');
+      // Mounted rows must survive until React hands their presentation back to the detached renderer.
+      // Unmounted surface drawings have no such owner and are cleared immediately.
+      const drawings = useAssistantDrawings.getState();
+      useTranscriptStore.getState().clearAssistantInk(appSessionId, 'surface', (row) => drawings.has(assistantDrawingKey(appSessionId, row)));
     }
   });
   return () => {

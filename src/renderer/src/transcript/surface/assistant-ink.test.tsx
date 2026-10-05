@@ -250,6 +250,43 @@ it.each([false, true])('R4 retains local promotion through resume with its divid
   } finally { off(); }
 });
 
+it.each([
+  { marked: true, mounted: true }, { marked: false, mounted: true }, { marked: true, mounted: false },
+])('R4 hands off attached promotion on detach with divider virtualized (marked=$marked, mounted=$mounted)', async ({ marked, mounted }) => {
+  const text = marked ? '<to-human>Local report.</to-human>' : 'Ordinary commentary.';
+  const b = builder(); b.turn('u'); b.text('first', 0, text);
+  b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
+  b.text('last', 0, 'Native answer'); b.end(['u']);
+  const store = await storeWith(b.events); const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = fake.client;
+  useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
+  const off = connectEngineSurface(fake.client);
+  try {
+    const view = render(<Transcript storeKey={store.key} />);
+    const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
+    for (const ask of asks) await act(() => fake.reply('session.ui.render', {
+      hooked: ask.component === 'AssistantMessage', rewritten: false, props: ask.props,
+      tree: ask.props.text === text ? { type: 'Text', children: ['Mod report'] } : { type: 'engine', ref: 0 },
+    }));
+    expect(screen.getByText('Mod report')).toBeTruthy();
+    view.rerender(<Transcript storeKey={store.key} hideDivider hideCommentary={!mounted} />);
+    act(() => {
+      const next = { ...status(id), process: 'exited' as const };
+      // Cleanup can precede the React commit which switches the mounted drawing to local/native.
+      fake.event('session.status', { appSessionId: id, status: next });
+      useSessions.setState({ engine: new Map([[id, next]]) });
+    });
+    expect(screen.queryByText('Mod report')).toBeNull();
+    if (marked && mounted) {
+      expect(screen.getByText('Local report.')).toBeTruthy();
+      expect(store.rows().find((r) => r.kind === 'assistant_text' && r.markdown === text)).toMatchObject({ forHuman: true });
+    } else {
+      expect(store.rows().filter((r) => r.kind === 'assistant_text')).toHaveLength(1);
+      expect(useTranscriptStore.getState().entries[store.key].state.ui.assistantInk.size).toBe(0);
+    }
+  } finally { off(); }
+});
+
 it('R4 yields exclusively to an attached surface, including native fallback, and returns on detach', async () => {
   const b = builder(); b.turn('u'); b.text('first', 0, '<to-human>Local report.</to-human>');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');

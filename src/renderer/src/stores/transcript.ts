@@ -58,7 +58,7 @@ export interface TranscriptStore {
   jumpHandled(key: string, nonce: number): void;
   setFollowing(key: string, following: boolean): void;
   setAssistantInk(key: string, row: RowId, turn: TurnId, ink: boolean, source?: 'surface' | 'local'): void;
-  clearAssistantInk(key: string, source?: 'surface'): void;
+  clearAssistantInk(key: string, source?: 'surface', retain?: (row: RowId) => boolean): void;
   toggleTurn(key: string, turn: TurnId): void;
   toggleGroup(key: string, group: RowId): void;
   toggleCell(key: string, cell: CellId): void;
@@ -376,10 +376,10 @@ export function createTranscriptStore() {
         }
         put(key, patch);
       },
-      clearAssistantInk(key, source) {
+      clearAssistantInk(key, source, retain) {
         const current = entry(key);
         if (!current?.state.ui.assistantInk.size) return;
-        const remove = [...current.state.ui.assistantInk].filter((row) => source !== 'surface' || !current.localAssistantInk?.has(row));
+        const remove = [...current.state.ui.assistantInk].filter((row) => !retain?.(row) && (source !== 'surface' || !current.localAssistantInk?.has(row)));
         if (!remove.length) return;
         const ui = copyUi(current.state.ui, 'all');
         for (const row of remove) ui.assistantInk.delete(row);
