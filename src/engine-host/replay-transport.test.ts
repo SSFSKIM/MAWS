@@ -47,6 +47,32 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     await expect(transport.exited).resolves.toEqual({ code: 0, signal: null });
   });
 
+  it.each([
+    [{ type: 'control_request', request_id: 'recorded', request: { subtype: 'set_model', model: 'sonnet' } }, { type: 'control_request', request_id: 'minted', request: { subtype: 'set_model', model: 'opus' } }],
+    [{ type: 'control_request', request_id: 'recorded', request: { subtype: 'initialize', hooks: { changed: false } } }, { type: 'control_request', request_id: 'minted', request: { subtype: 'initialize', hooks: { changed: true } } }],
+    [{ type: 'control_request', request_id: 'recorded', request: { subtype: 'get_context_usage', detail: 'summary' } }, { type: 'control_request', request_id: 'minted', request: { subtype: 'get_context_usage', detail: 'full' } }],
+  ])('rejects a changed recorded control payload rather than advancing or substituting an unrecorded read', async (recorded, written) => {
+    const transport = replayEngine([row(1, 'out', recorded), row(2, 'meta', { event: 'exit', code: 0, signal: null })], { prelude });
+    const write = transport.write(written as StdinFrame);
+    const items = await take(transport.frames, 1);
+    expect(items[0]?.error?.kind).toBe('replay_mismatch');
+    await expect(write).rejects.toThrow('replay mismatch');
+  });
+
+  it('matches id references structurally without replacing substrings inside payload text', async () => {
+    const transport = replayEngine([
+      row(1, 'out', { type: 'user', uuid: 'rec-u', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null }),
+      row(2, 'out', { type: 'control_request', request_id: 'rec-r', request: { subtype: 'rewind_conversation', user_message_uuid: 'rec-u' } }),
+      row(3, 'in', { type: 'control_response', response: { subtype: 'success', request_id: 'rec-r', response: { text: 'literal rec-u suffix', user_message_uuid: 'rec-u' } } }),
+    ], { prelude });
+    const user = transport.write({ type: 'user', uuid: 'mint-u', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null });
+    const control = transport.write({ type: 'control_request', request_id: 'mint-r', request: { subtype: 'rewind_conversation', user_message_uuid: 'mint-u' } } as StdinFrame);
+    const items = await take(transport.frames, 1);
+    await Promise.all([user, control]);
+    expect(items[0]?.frame).toEqual({ type: 'control_response', response: { subtype: 'success', request_id: 'mint-r', response: { text: 'literal rec-u suffix', user_message_uuid: 'mint-u' } } });
+    transport.kill('SIGTERM');
+  });
+
   it('maps a user write\'s minted uuid onto the recorded uuid in every following in row', async () => {
     const journal = [
       row(1, 'out', { type: 'user', uuid: 'rec-u', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null }),

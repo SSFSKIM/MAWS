@@ -2,6 +2,7 @@
 // Normalizer → PermissionBroker, with a scripted human answering each broker item as it appears and a driver that
 // sends the fixture's own prompts. The replay fails on any write the probe never recorded, so every answer here is
 // a frame the fixture's next `out` row accepts (control responses match by request id and behavior).
+import { appReplayHandshake } from '../replay-handshake';
 import { describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
@@ -43,7 +44,7 @@ async function replaySession(pass: FixturePass, name: string, opts: { human?: (i
   const session: EngineSession = new EngineSession({
     spec, plan, journal, log: () => {},
     spawn: () => {
-      transport = replayEngine(fixture, {
+      transport = replayEngine(appReplayHandshake(fixture, spec.trust), {
         prelude: handshakePrelude(),
         onHold: (row) => {
           const frame = row.frame as StdinFrame;

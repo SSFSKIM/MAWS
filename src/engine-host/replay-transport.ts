@@ -53,24 +53,27 @@ function describeFrame(f: Frame): string {
   return String(f.type);
 }
 
-// Same type; surface controls by complete JSON wire payload (not their minted envelope id), other controls by
-// subtype; control responses by request id and, when recorded, behavior; a cancel by
-// the id it names, read through the recorded→minted map (a cancel of a host-minted request names the id this run minted
-// for the recorded request, never the recorded one).
+// Minted ids are wire values, never substrings of arbitrary payload text.
+function rewriteIds(value: unknown, idMap: ReadonlyMap<string, string>): unknown {
+  if (typeof value === 'string') return idMap.get(value) ?? value;
+  if (Array.isArray(value)) return value.map((entry) => rewriteIds(entry, idMap));
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, rewriteIds(entry, idMap)]));
+  return value;
+}
+
+function sameControl(recorded: Frame, written: Frame): boolean {
+  return recorded.type === 'control_request' && written.type === 'control_request' && (recorded as ControlRequest).request.subtype === (written as ControlRequest).request.subtype;
+}
+
+// Control request payloads match structurally after recorded ids are translated to this run's ids. Only the request's
+// freshly minted envelope id is excluded. Responses retain the existing id/behavior contract. Optional undefined properties do not travel over JSON stdin.
 function matches(recorded: Frame, written: Frame, idMap: ReadonlyMap<string, string> = new Map()): boolean {
   if (recorded.type !== written.type) return false;
-  if (recorded.type === 'control_request') {
-    const a = (recorded as ControlRequest).request;
-    const b = (written as ControlRequest).request;
-    if (a.subtype !== b.subtype) return false;
-    // Compare what goes over JSON stdin: optional undefined properties are absent on the wire.
-    return a.subtype.startsWith('ui_') ? isDeepStrictEqual(a, JSON.parse(JSON.stringify(b))) : true;
-  }
+  if (recorded.type === 'control_request') return isDeepStrictEqual(rewriteIds((recorded as ControlRequest).request, idMap), JSON.parse(JSON.stringify((written as ControlRequest).request)));
   if (recorded.type === 'control_response') {
     const a = (recorded as ControlResponse).response;
     const b = (written as ControlResponse).response;
-    if (a.request_id !== b.request_id) return false;
-    return a.response?.behavior === undefined || a.response.behavior === b.response?.behavior;
+    return (idMap.get(a.request_id) ?? a.request_id) === b.request_id && (a.response?.behavior === undefined || a.response.behavior === b.response?.behavior);
   }
   if (recorded.type === 'control_cancel_request') return (idMap.get(recorded.request_id as string) ?? recorded.request_id) === written.request_id;
   return true;
@@ -120,12 +123,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
   let resolveExited!: (v: { code: number | null; signal: NodeJS.Signals | null }) => void;
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
 
-  const rewrite = (frame: unknown): unknown => {
-    if (idMap.size === 0) return frame;
-    let text = JSON.stringify(frame);
-    for (const [recorded, minted] of idMap) if (recorded !== minted) text = text.split(recorded).join(minted);
-    return JSON.parse(text) as unknown;
-  };
+  const rewrite = (frame: unknown): unknown => rewriteIds(frame, idMap);
 
   const pushStderr = (line: string) => {
     if (stderrWaiter) {
@@ -309,7 +307,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
       }
       if (f.type === 'control_request' && (f as ControlRequest).request.subtype === 'end_session') {
         const upcoming = nextOut();
-        if (!upcoming || !matches(upcoming.frame as Frame, f)) {
+        if (!upcoming || !sameControl(upcoming.frame as Frame, f)) {
           // The engine's answer to end_session is to exit (Decision Log, controller for M4 and M5): the write reaches
           // the pipe, then the replay ends with exit 0 and no mismatch. A macrotask later, so the writer's continuation
           // journals the out row before the stream ends.
@@ -319,7 +317,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
       }
       if (f.type === 'control_request' && PRELUDE_SUBTYPES.has((f as ControlRequest).request.subtype)) {
         const upcoming = nextOut();
-        if (!upcoming || !matches(upcoming.frame as Frame, f)) {
+        if (!upcoming || !sameControl(upcoming.frame as Frame, f)) {
           const answer = preludeResponse(opts.prelude, (f as ControlRequest).request.subtype);
           if (!answer) return Promise.reject(new TransportClosed(`the handshake prelude has no ${(f as ControlRequest).request.subtype} response`));
           const response = { ...(answer as ControlResponse).response, request_id: (f as ControlRequest).request_id };
@@ -330,7 +328,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
       }
       if (f.type === 'control_request' && requestClassOf((f as ControlRequest).request.subtype) === 'read') {
         const upcoming = nextOut();
-        if (!upcoming || !matches(upcoming.frame as Frame, f)) {
+        if (!upcoming || !sameControl(upcoming.frame as Frame, f) || ((f as ControlRequest).request.subtype.startsWith('ui_') && !matches(upcoming.frame as Frame, f, idMap))) {
           const { subtype } = (f as ControlRequest).request;
           const requestId = (f as ControlRequest).request_id;
           const message = `replay: ${subtype} was not recorded; answered with an empty success`;

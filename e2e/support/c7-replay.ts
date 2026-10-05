@@ -112,7 +112,12 @@ export function rewindJournal(dir: string, name: string, replay: RewindReplay): 
 // holds at the interrupt (seq 190) through the turn, and after it at the next prompt (seq 199), which the released
 // entry is.
 export function queueInterruptJournal(dir: string, name: string): string {
-  const rows = rowsOf('spikes/protocol-probe/fixtures/queue-and-interrupt.jsonl').filter((r) => ![146, 150, 191].includes(r.seq));
+  const rows = rowsOf('spikes/protocol-probe/fixtures/queue-and-interrupt.jsonl').map((row) => {
+    // App recording variant: the interrupt is a person cancelling, not the probe's diagnostic interrupt.
+    if (row.direction !== 'out' || row.seq !== 190) return row;
+    const frame = row.frame as { request: Record<string, unknown> };
+    return { ...row, frame: { ...frame, request: { ...frame.request, reason: 'user-cancel', cancel_queued: false } } };
+  }).filter((r) => ![146, 150, 191].includes(r.seq));
   return writeJournal(dir, `${name}-queue-interrupt`, rows);
 }
 
@@ -123,7 +128,12 @@ export function queueInterruptJournal(dir: string, name: string): string {
 // steer is already withdrawn; the probe's own cancel of it at seq 191 is dropped); Resume releases the held entry as the
 // next prompt (seq 199).
 export function steerStopJournal(dir: string, name: string): string {
-  const rows = rowsOf('spikes/protocol-probe/fixtures/queue-and-interrupt.jsonl').filter((r) => r.seq !== 191);
+  const rows = rowsOf('spikes/protocol-probe/fixtures/queue-and-interrupt.jsonl').map((row) => {
+    // App recording variant: the interrupt is a person cancelling, not the probe's diagnostic interrupt.
+    if (row.direction !== 'out' || row.seq !== 190) return row;
+    const frame = row.frame as { request: Record<string, unknown> };
+    return { ...row, frame: { ...frame, request: { ...frame.request, reason: 'user-cancel', cancel_queued: false } } };
+  }).filter((r) => r.seq !== 191);
   const steer = rows.find((r) => r.seq === 146)!;
   steer.frame = { ...steer.frame, priority: 'next' };
   const session = rows.find((r) => r.seq === 150)!.frame.session_id;

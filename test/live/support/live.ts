@@ -6,9 +6,9 @@
 // runs in a scratch directory under the OS temp dir, never in the owner's projects.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { SessionEvent } from '@shared/graph/events';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
@@ -51,19 +51,19 @@ export function redactJournal(text: string, env: Record<string, string> = string
     .join('\n');
 }
 
-// The config-home rule (coordinator, live-acceptance rule for every executor): a case under the owner's config home
-// observes the owner's real configuration and may only read; a control the engine persists into the config home
-// (`set_cwd` trust into `.claude.json`, an MCP toggle, a grant to a settings file, a `#` note to the user's CLAUDE.md or
-// to any path under the config home)
-// runs under a scratch CLAUDE_CONFIG_DIR only. A case declares the persisting controls it will issue; the host checks the
-// declaration before anything spawns and refuses an undeclared one at the call.
+// Every engine session writes a transcript, even when its controls only read. Live runs therefore require an
+// explicit scratch CLAUDE_CONFIG_DIR. The C12 real-store exception is an index-only app case, not a live engine case.
 export const PERSISTING_CONTROLS = ['set_cwd:trust', 'mcp_toggle', 'grant:local_settings', 'memory:user', 'launch:trust' /* C10: the launch attestation records trust as set_cwd's does */] as const;
 export type PersistingControl = (typeof PERSISTING_CONTROLS)[number];
 
-// `configHome`: the scratch CLAUDE_CONFIG_DIR, or null for the owner's own home.
+// Require an existing directory so its actual destination is known, including every symlink in its path.
 export function assertConfigHomeSafe(plan: { configHome: string | null; controls: readonly PersistingControl[] }): void {
-  if (plan.configHome !== null || plan.controls.length === 0) return;
-  throw new Error(`live case refused before spawning: ${plan.controls.join(', ')} would persist into the owner's config home; run it under a scratch CLAUDE_CONFIG_DIR`);
+  const canonical = (path: string): string => existsSync(path) ? realpathSync(path) : resolve(path);
+  if (plan.configHome && isAbsolute(plan.configHome) && existsSync(plan.configHome) && statSync(plan.configHome).isDirectory()) {
+    const configHome = realpathSync(plan.configHome);
+    if (configHome !== canonical(homedir()) && !isUnder(configHome, canonical(join(homedir(), '.claude')))) return;
+  }
+  throw new Error(`live case refused before spawning: ${plan.controls.join(', ') || 'session transcript'} would persist into the owner's config home; run it under an existing scratch CLAUDE_CONFIG_DIR`);
 }
 
 // The owner's config home: what the engine reads and writes when no scratch CLAUDE_CONFIG_DIR is set.
@@ -87,7 +87,7 @@ export function persistingControlOf(command: string, input: unknown, configHome:
 
 function isUnder(path: string, dir: string): boolean {
   const rel = relative(resolve(dir), resolve(path));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 // A scratch config home: an empty user settings layer, so the owner's `~/.claude.json` and settings are never written.
@@ -215,6 +215,7 @@ export interface LiveContext {
 
 export async function liveGate(): Promise<{ skip: string } | LiveContext> {
   if (process.env.MAWS_LIVE !== '1') return { skip: 'live tests skipped: MAWS_LIVE is not 1' };
+  assertConfigHomeSafe({ configHome: process.env.CLAUDE_CONFIG_DIR ?? null, controls: [] });
   if (!existsSync(ENGINE_BIN)) return { skip: `live tests skipped: engine binary missing at ${ENGINE_BIN}` };
   if (!ENGINE_VERSION) return { skip: `live tests skipped: engine did not report a version at ${ENGINE_BIN}` };
   console.info(`[live engine] ${ENGINE_BIN} (${ENGINE_VERSION})`);
@@ -273,7 +274,9 @@ export interface RawProcess {
 // responses by request id), runs `fn`, then ends the process (stdin end, 5 s, SIGTERM, 3 s, SIGKILL) and prints the
 // journal path. Sends nothing on its own: the caller decides what reaches the engine.
 export async function withRawProcess(ctx: LiveContext, spec: LaunchSpec, fn: (p: RawProcess) => Promise<void>): Promise<{ journalPath: string; rows: JournalRow[] }> {
-  const captured = await captureShellEnvironment();
+  const configHome = process.env.CLAUDE_CONFIG_DIR ?? null;
+  assertConfigHomeSafe({ configHome, controls: [] });
+  const captured = { ...(await captureShellEnvironment()), CLAUDE_CONFIG_DIR: configHome! };
   const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
   const journal = new JournalWriter(join(ctx.userData, 'engine-host', 'journal', spec.appSessionId), plan.launchId, { maxBytes: JOURNAL_MAX_BYTES });
   const rows: JournalRow[] = [];

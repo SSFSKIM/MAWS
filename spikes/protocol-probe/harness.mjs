@@ -1,4 +1,5 @@
 import {spawn,execFileSync,execFile} from 'node:child_process';
+import {appInitialize} from '../../src/shared/engine/initialize.ts';
 import {mkdtempSync,writeFileSync,appendFileSync,readFileSync,mkdirSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {randomUUID} from 'node:crypto';
@@ -38,7 +39,7 @@ export class Probe {
  wait(test,{after=0,timeout=120000}={}){const old=this.frames.find(r=>r.seq>after&&test(r.frame));if(old)return Promise.resolve(old.frame);return new Promise((resolve,reject)=>{const cleanup=()=>{clearTimeout(timer);this.waiters.delete(w);};const w={test,after,done:f=>{cleanup();resolve(f);},fail:e=>{cleanup();reject(e);}};const timer=setTimeout(()=>w.fail(new Error('frame timeout')),timeout);this.waiters.add(w);});}
  user(content){return this.send({type:'user',uuid:randomUUID(),message:{role:'user',content},parent_tool_use_id:null,origin:{kind:'human'}});}
  async turn(content){const after=this.seq;this.user(content);return this.wait(f=>f.type==='result',{after});}
- async init(payload={}){return this.request('initialize',payload);}
+ async init(payload={}){return this.request('initialize',{...appInitialize(),...payload});}
  async stop(){if(this.exited)return;this.child.stdin.end();const timer=setTimeout(()=>this.child.kill('SIGTERM'),5000);await this.closed;clearTimeout(timer);}
 }
 export async function run(name,fn,options={}){const p=new Probe(name,options);try{await fn(p);}catch(e){p.note({event:'scenario_error',error:e.stack});console.error(name,e.message);}finally{await p.stop();}console.log(name,JSON.stringify({sessionId:p.sessionId,peakRSSKiB:p.peakRSSKiB,peakTreeRSSKiB:p.peakTreeRSSKiB,fixture:p.file}));return p;}

@@ -8,6 +8,7 @@
 // never touches the binary, the relay or the shell: nothing is spawned, the replay transport stands in for the process
 // with the handshake prelude, and the rest of the adapter runs as it would live; its plan names the fixture as its
 // binary and the tested version as its engine's.
+import { appReplayHandshake } from './replay-handshake';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -88,7 +89,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
     }
 
     const replay = journal;
-    const spawn = replay !== null ? () => replayEngine(replay, { prelude: prelude!, surfaceReads: true /* R2 */ }) : deps.spawn;
+    const spawn = replay !== null ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */ }) : deps.spawn;
     const outcome = deps.table.reserve(spec.appSessionId, () => {
       const session = new EngineSession({
         spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),

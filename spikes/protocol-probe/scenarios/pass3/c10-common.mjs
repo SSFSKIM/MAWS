@@ -67,5 +67,6 @@ export async function launch(name,{cwd,env,sessionId=randomUUID(),flags=[],model
  return {p,configHome,globalConfig,sessionId};
 }
 
-export const initPayload=(extra={})=>({supportedDialogKinds:DIALOGS,...extra});
+import {appInitialize} from '../../../../src/shared/engine/initialize.ts';
+export const initPayload=(extra={})=>({...appInitialize(),...extra});
 export {mkdirSync,writeFileSync,existsSync,join,randomUUID};

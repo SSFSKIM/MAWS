@@ -171,7 +171,12 @@ describe('queue release never follows an engine-initiated turn', () => {
 
   it('pass1/queue-and-interrupt cut to the queued prompt (seq 146, 150) and the interrupt (190-192), plus one recorded send: the submission the engine cancels before it started (seq 191) retires there with its own notice, so the next send waits for Resume', async () => {
     const againRow = { seq: 9_002, direction: 'out' as const, at: '2026-09-28T10:00:00.000Z', frame: { type: 'user', uuid: 'recorded-again', message: { role: 'user', content: 'again' }, parent_tool_use_id: null, origin: { kind: 'human' } } };
-    const cut = (rows: JournalRow[]) => [...rows.filter((r) => r.seq <= 3 || [146, 150, 190, 191, 192].includes(r.seq)), againRow];
+    const cut = (rows: JournalRow[]) => [...rows.filter((r) => r.seq <= 3 || [146, 150, 190, 191, 192].includes(r.seq)).map((row) => {
+      if (row.seq !== 190) return row;
+      // App-shaped interrupt: only the probe's diagnostic reason differs.
+      const frame = row.frame as { request: Record<string, unknown> };
+      return { ...row, frame: { ...frame, request: { ...frame.request, reason: 'user-cancel' } } };
+    }), againRow];
     let afterInterrupt: { cancelled: number; busy: boolean; entries: QueueEntry[]; disposition: string | null } | null = null;
     const run = await replayedSession('pass1', 'queue-and-interrupt', (row, { session, transport, ready, fixture }) => {
       if (row.seq === 146) void ready().then(() => session.send(contentOf(fixture, 146)));
