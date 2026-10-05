@@ -395,7 +395,9 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
       const blocked = blockedPrompt(record);
       if (blocked === null) {
         const text = typeof record.content === 'string' ? record.content.trim() : '';
-        if (text && (record.level === 'warning' || record.level === 'notice')) events.push({ ...base(), kind: 'notice.posted', level: record.level, text, key: 'informational' });
+        if (record.level === 'info') return;
+        if (record.level !== 'warning' && record.level !== 'notice') break; // preserve unknown shapes as compatibility signals
+        if (text) events.push({ ...base(), kind: 'notice.posted', level: record.level, text, key: 'informational' });
         return;
       }
       // The prompt, from the record's "Original prompt:"; none when the hook suppressed it, though a queue operation
