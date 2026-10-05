@@ -1,7 +1,8 @@
 # Readable sources of the reference apps
 
-The research under this directory reads the shipped code of the two apps that set MAWS's bar: the ChatGPT/Codex
-desktop app (interaction) and Claude Desktop (the reference wiring of the same engine). Their extractions live
+The research under this directory reads the code of the three apps that set MAWS's bar: the ChatGPT/Codex
+desktop app (UX quality), Claude Desktop (engine integration, the same engine) and T3 Code (source readability;
+open source, so its tree is a plain clone). Their extractions live
 outside the repository, because the vendors' terms forbid redistribution, and are regenerated per build by one
 toolchain. This page says where everything is and how to cite it.
 
@@ -10,6 +11,7 @@ toolchain. This page says where everything is and how to cite it.
 | ChatGPT / Codex app | `~/codex-app-src/readable/<build>/` | `chatgpt-26.928.40906` (published 2026-10-01, runtime 0.0.27, `@oai/cua` 0.2.5) | `chatgpt-26.928.31416`, `chatgpt-26.924`, `chatgpt-26.917`, `codex-26.623`, `cua-node-0.0.24` |
 | Claude Desktop | `~/claude-desktop-re/readable/<build>/` | `app-2.16120.0` (2026-09-29, Electron 44.4.3) | `app-2.9939.2` |
 | claude.ai web app | inside `app-2.16120.0/web/` (shipped with the app from 2.16120 on) | | `~/claude-desktop-re/readable/web-2026-09-25/` (cache capture) |
+| T3 Code (open source, MIT) | `~/t3code-src` (git clone of `pingdotgg/t3code`) | `148e6dee` (2026-10-01) | `git -C ~/t3code-src log` holds the history; cite `<path>:<line>` at a named commit |
 | toolchain | `~/app-source-tools` (git) | | |
 
 ## What a build directory contains
