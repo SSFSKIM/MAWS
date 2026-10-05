@@ -141,6 +141,140 @@ describe('leaf-sibling attachments', () => {
   });
 });
 
+// FX6: split API responses and their independently parented tool results, in file order.
+const PARALLEL_LINES = linesOf(join(TEST_FIXTURE_DIR, 'transcript-parallel-tool-group.jsonl'));
+const PARALLEL_CHAIN = ['u1', 'a1', 'a2', 'h1', 'rA', 'rB', 'h2', 'h3', 'a3', 'a4', 'a5', 'a6', 'rC', 'rA2', 'rB2', 'a7', 's1'];
+
+describe('parallel response-group interleaves', () => {
+  it.each(['backfill', 'tail'] as const)('%s keeps successive groups and pairs each result once in file order', async (mode) => {
+    const { reader, follower, out } = await started(mode === 'backfill' ? joined(PARALLEL_LINES) : Buffer.alloc(0));
+    if (mode === 'tail') {
+      for (const record of PARALLEL_LINES) {
+        reader.append(joined([record]));
+        await follower.poke();
+        await follower.poke();
+      }
+    }
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(out.of('notice.posted')).toEqual([]);
+    expect(out.of('boundary.rewind')).toEqual([]);
+    expect(follower.snapshot().chain).toEqual(PARALLEL_CHAIN);
+    expect(follower.snapshot().emitted).toEqual(new Set(PARALLEL_CHAIN));
+    expect(out.events().map((e) => [e.kind, e.id])).toEqual([
+      ['session.started', `session:${SESSION}:started`], ['turn.started', 'u1'], ['user.message', 'u1#1'],
+      ['assistant.block.complete', 'a1'], ['tool.use', 'a1#1'],
+      ['assistant.block.complete', 'a2'], ['tool.use', 'a2#1'], ['tool.result', 'rA'], ['tool.result', 'rB'],
+      ['assistant.block.complete', 'a3'],
+      ['assistant.block.complete', 'a4'], ['tool.use', 'a4#1'],
+      ['assistant.block.complete', 'a5'], ['tool.use', 'a5#1'],
+      ['assistant.block.complete', 'a6'], ['tool.use', 'a6#1'],
+      ['tool.result', 'rC'], ['tool.result', 'rA2'], ['tool.result', 'rB2'],
+      ['assistant.block.complete', 'a7'], ['turn.ended', 's1'],
+    ]);
+    expect(out.of('tool.use').map((e) => [e.id, e.toolUseId])).toEqual([
+      ['a1#1', 't1'], ['a2#1', 't2'], ['a4#1', 't3'], ['a5#1', 't4'], ['a6#1', 't5'],
+    ]);
+    expect(out.of('tool.result').map((e) => [e.id, e.toolUseId])).toEqual([
+      ['rA', 't1'], ['rB', 't2'], ['rC', 't5'], ['rA2', 't3'], ['rB2', 't4'],
+    ]);
+    expectWellFormed(out.events());
+    const before = out.events();
+    reader.replace(joined(PARALLEL_LINES));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(PARALLEL_CHAIN);
+    expect(out.events()).toEqual(before);
+  });
+
+  it('adopts through an older result, including the parent fallback when source is absent', async () => {
+    const prefix = PARALLEL_LINES.slice(0, 6).map((l) => {
+      const record = JSON.parse(l);
+      delete record.sourceToolAssistantUUID;
+      return line(record);
+    });
+    const { reader, follower, out } = await started(joined(prefix));
+    reader.append(joined([
+      line({ type: 'attachment', uuid: 'older-hook', parentUuid: 'rA', attachment: { type: 'hook_success' } }),
+      line({ type: 'assistant', uuid: 'same-response', parentUuid: 'older-hook', message: { id: 'm1', content: [{ type: 'text', text: 'More of this response.' }] } }),
+    ]));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual([...PARALLEL_CHAIN.slice(0, 6), 'older-hook', 'same-response']);
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(out.of('notice.posted')).toEqual([]);
+    expect(out.of('boundary.rewind')).toEqual([]);
+  });
+
+  it('adopts group members before W7 even when removed members were written by MAWS', async () => {
+    const own = PARALLEL_LINES.slice(0, 4).map((l) => line({ ...JSON.parse(l), entrypoint: 'sdk-ts' }));
+    const reader = new MemoryFileReader(joined(own));
+    const out = new Collector();
+    const follower = new ChainFollower(reader, SESSION, null, out.sink, { holders: () => 2, pinned: () => true, isOwnRecord });
+    await follower.start();
+    reader.append(joined(PARALLEL_LINES.slice(4, 6)));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(PARALLEL_CHAIN.slice(0, 6));
+    expect(out.of('notice.posted')).toEqual([]);
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(out.of('boundary.rewind')).toEqual([]);
+    const before = out.events();
+    await follower.refold();
+    expect(out.events()).toEqual(before);
+  });
+
+  it.each([
+    { type: 'user', message: { role: 'user', content: 'A second writer prompt.' } },
+    { type: 'user', isMeta: true, message: { role: 'user', content: 'A resumed context.' } },
+    { type: 'assistant', message: { id: 'different-response', content: [{ type: 'text', text: 'Another response.' }] } },
+  ])('keeps a $type outside the response group as a branch, or holds it under W7', async (record) => {
+    for (const pinned of [false, true]) {
+      const reader = new MemoryFileReader(joined(PARALLEL_LINES.slice(0, 6).map((l) => line({ ...JSON.parse(l), entrypoint: 'sdk-ts' }))));
+      const out = new Collector();
+      const follower = new ChainFollower(reader, SESSION, null, out.sink, { holders: () => 2, pinned: () => pinned, isOwnRecord });
+      await follower.start();
+      reader.append(joined([line({ ...record, uuid: 'foreign', parentUuid: 'a1', entrypoint: 'cli' })]));
+      await follower.poke();
+      expect(follower.snapshot().chain).toEqual(pinned ? PARALLEL_CHAIN.slice(0, 6) : ['u1', 'a1', 'foreign']);
+      expect(out.of('boundary.retraction').map((e) => e.retractedMessageUuids)).toEqual(pinned ? [] : [['a2', 'h1', 'rA', 'rB']]);
+      expect(out.of('notice.posted').map((e) => e.key)).toEqual([pinned ? 'transcript_branch_held' : 'transcript_branch']);
+      expect(out.of('boundary.rewind')).toEqual([]);
+    }
+  });
+
+  it('keeps an inherited ancestry gap when adopting the existing prefix', async () => {
+    const first = { ...JSON.parse(PARALLEL_LINES[0]), parentUuid: 'missing-root' };
+    const { reader, follower, out } = await started(joined([line(first), ...PARALLEL_LINES.slice(1)]));
+    reader.append(joined([line({ type: 'user', uuid: 'fork', parentUuid: 'u1', message: { content: 'A genuine fork.' } })]));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1', 'fork']);
+    expect(follower.snapshot().gap).toEqual({ parentUuid: 'missing-root', childUuid: 'u1' });
+    expect(out.of('boundary.retraction').map((e) => e.retractedMessageUuids)).toEqual([PARALLEL_CHAIN.slice(1)]);
+  });
+
+  it.each(['missing-id', 'different-removed-response', 'different-source'] as const)('does not infer membership from %s', async (shape) => {
+    const prefix = PARALLEL_LINES.slice(0, 3).map((l) => JSON.parse(l));
+    if (shape === 'missing-id') {
+      delete prefix[1].message.id;
+      delete prefix[2].message.id;
+    }
+    if (shape === 'different-removed-response') prefix[2].message.id = 'another-response';
+    const result = JSON.parse(PARALLEL_LINES[4]);
+    if (shape === 'different-source') result.sourceToolAssistantUUID = 'u1'; // present, but not a group assistant: no parent fallback
+    const { follower, out } = await started(joined([...prefix.map(line), line(result)]));
+    expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'rA']);
+    expect(out.of('boundary.retraction').map((e) => e.retractedMessageUuids)).toEqual([['a2']]);
+    expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
+  });
+
+  it('retracts adopted results too when a genuine fork parents above their group', async () => {
+    const { reader, follower, out } = await started(joined(PARALLEL_LINES));
+    reader.append(joined([line({ type: 'user', uuid: 'foreign', parentUuid: 'u1', message: { role: 'user', content: 'Resume earlier.' } })]));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1', 'foreign']);
+    expect(out.of('boundary.retraction').map((e) => e.retractedMessageUuids)).toEqual([PARALLEL_CHAIN.slice(1)]);
+    expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
+    expect(out.of('boundary.rewind')).toEqual([]);
+  });
+});
+
 const FULL_CHAIN = ['e3b48834', '030c4331', '6a832db5', 'a7225f9b', '73dad25d', '521cf9e3', '24b7be38', 'ae68c39d', '075fef0b', '1c54a876', '7b176449', 'edf0f954', 'af765f44', 'a4d68c72', '7c05f769'];
 const CUT_CHAIN = FULL_CHAIN.slice(0, 12); // … edf0f954
 

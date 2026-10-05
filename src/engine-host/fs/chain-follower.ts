@@ -20,6 +20,9 @@ export interface Skeleton {
   uuid: MessageUuid;
   parentUuid: MessageUuid | null;
   type: string;
+  messageId: string | null; // assistant API response group; never the message payload
+  sourceToolAssistantUuid: MessageUuid | null;
+  isToolResult: boolean;
   isProgress: boolean;
   startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
   endsTurn: boolean; // a `system/turn_duration` record (backfill's `turn.ended`); not a blocked prompt's record, also written for a steer dropped mid-turn
@@ -167,10 +170,14 @@ class FollowerCore {
     }
     const uuid = record.uuid as MessageUuid;
     if (this.skeletons.has(uuid)) return; // the engine's dedup-transcript rule: a uuid is written once
+    const message = record.message as { id?: unknown; content?: unknown } | null | undefined;
     const skeleton: Skeleton = {
       uuid,
       parentUuid: typeof record.parentUuid === 'string' ? (record.parentUuid as MessageUuid) : null,
       type: record.type,
+      messageId: record.type === 'assistant' && typeof message?.id === 'string' ? message.id : null,
+      sourceToolAssistantUuid: record.type === 'user' && typeof record.sourceToolAssistantUUID === 'string' ? record.sourceToolAssistantUUID as MessageUuid : null,
+      isToolResult: record.type === 'user' && Array.isArray(message?.content) && message.content.some((block: unknown) => typeof block === 'object' && block !== null && 'type' in block && block.type === 'tool_result'),
       isProgress: record.type === 'progress',
       startsTurn: startsTurn(record),
       endsTurn: record.type === 'system' && record.subtype === 'turn_duration',
@@ -287,7 +294,7 @@ class FollowerCore {
   // Branch: walk this record's ancestry through the skeletons; the walk is the new chain (C1's gap rule: stop at a
   // missing parent, report, never bridge). The old chain's members not on it are retracted.
   private async branch(record: TranscriptRecord, uuid: MessageUuid, parent: MessageUuid | null): Promise<void> {
-    const newChain: MessageUuid[] = [uuid];
+    let newChain: MessageUuid[] = [uuid];
     const visited = new Set<MessageUuid>([uuid]);
     let gap: FollowerState['gap'] = null;
     let child: MessageUuid = uuid;
@@ -296,6 +303,13 @@ class FollowerCore {
       const ancestor = this.skeletons.get(current);
       if (ancestor === undefined || visited.has(current)) {
         gap = { parentUuid: current, childUuid: child };
+        break;
+      }
+      if (this.onChain.has(current)) {
+        // The adopted prefix can contain recovered parallel results outside raw parentUuid ancestry. Keep it;
+        // a fork still removes every member after this ancestor, recovered records included.
+        newChain = newChain.concat(this.chain.slice(0, this.chain.indexOf(current) + 1).reverse());
+        gap = this.gap;
         break;
       }
       visited.add(current);
@@ -309,6 +323,16 @@ class FollowerCore {
     // Attachments can be leaf siblings of the next tool result, not another writer's branch. An attachment-only
     // removal swaps silently, even when MAWS wrote the attachments: neither W7 nor the rewind heuristic reads it.
     const leafSibling = removed.length > 0 && removed.every((member) => this.skeletons.get(member)?.type === 'attachment');
+    // FX6: split assistants share an API message id; each tool result parents on its issuing assistant (SPEC 11.2.2).
+    // Like the engine's recovery (SPEC 35.12.3), retain the whole response group, in file order, without a boundary.
+    // The incoming record must belong too: a prompt or a different response at an older tool is still a real fork.
+    if (!leafSibling && parent !== null && this.onChain.has(parent) && removed.length > 0) {
+      const group = this.responseGroup(parent);
+      if (group !== null && this.inResponseGroup(uuid, group) && removed.every((member) => this.inResponseGroup(member, group))) {
+        this.extend(record, uuid);
+        return;
+      }
+    }
     // W7: decided before any reading of the branch as a rewind: while a foreign process holds the session, its branch
     // never retracts what MAWS wrote (after MAWS's exit one live holder is left, which the terminal-rewind reading would
     // otherwise accept). MAWS's branch stays in view; this record joins the skeletons only, and one notice says why.
@@ -342,6 +366,29 @@ class FollowerCore {
       if (member === uuid) this.emit(record, uuid);
       else if (!this.emitted.has(member)) await this.reemit(member);
     }
+  }
+
+  // Nearest assistant ancestor, following a result's issuing assistant rather than its incidental file parent.
+  private responseGroup(parent: MessageUuid): string | null {
+    let current: MessageUuid | null = parent;
+    for (let hops = 0; current !== null && hops < this.skeletons.size; hops++) {
+      const skeleton = this.skeletons.get(current);
+      if (skeleton === undefined) return null;
+      if (skeleton.type === 'assistant') return skeleton.messageId;
+      current = skeleton.isToolResult ? skeleton.sourceToolAssistantUuid ?? skeleton.parentUuid : skeleton.parentUuid;
+    }
+    return null;
+  }
+
+  private inResponseGroup(uuid: MessageUuid, group: string): boolean {
+    const skeleton = this.skeletons.get(uuid);
+    if (skeleton === undefined) return false;
+    if (skeleton.type === 'attachment') return true;
+    if (skeleton.type === 'assistant') return skeleton.messageId === group;
+    if (!skeleton.isToolResult) return false;
+    const source = skeleton.sourceToolAssistantUuid ?? skeleton.parentUuid;
+    const assistant = source === null ? undefined : this.skeletons.get(source);
+    return assistant?.type === 'assistant' && assistant.messageId === group;
   }
 
   // W7: a second writer's branch that would retract records MAWS wrote, while a foreign process holds the session. A
