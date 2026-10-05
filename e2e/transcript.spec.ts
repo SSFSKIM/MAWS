@@ -1073,9 +1073,10 @@ test('R4 detached owner recording draws labelled bodies and inert choices withou
     expect(question!.y + question!.height).toBeLessThanOrEqual(choices!.y);
     await expect(pane.getByText('Private working notes.', { exact: true })).not.toBeVisible();
     await expect(pane.getByText('Private follow-up record.', { exact: true })).not.toBeVisible();
-    const state = value(await invoke(page, 'session.status', { appSessionId: id as never }));
-    expect(state.uiSurface).toBeUndefined();
-    expect(state.process).not.toBe('ready');
+    // This indexed session was never started: there is no engine host session, not a detached ready process.
+    expect(await invoke(page, 'session.status', { appSessionId: id as never })).toEqual({
+      ok: false, error: { code: 'internal', message: `unknown session ${id}` },
+    });
     const dir = '/tmp/maws-r4-evidence'; mkdirSync(dir, { recursive: true });
     try {
       for (const theme of ['light', 'dark'] as const) {

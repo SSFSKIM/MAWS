@@ -25,6 +25,8 @@ export interface JumpRequest {
 export interface TranscriptEntry {
   state: TranscriptState;
   rows: Row[];
+  // The latest writer owns each promotion: surface cleanup must not erase detached local drawing.
+  localAssistantInk?: ReadonlySet<RowId>;
   phase: 'hydrating' | 'live' | 'failed'; // failed: the snapshot rejected; the key is detached and `attach` may be called again
   error: string | null; // why the last attach failed
   following: boolean;
@@ -55,8 +57,8 @@ export interface TranscriptStore {
   jumpTo(key: string, id: RowId | CellId, options?: { align?: JumpRequest['align']; turnId?: TurnId }): void; // expands what holds the row, then the view scrolls and focuses; `turnId` names the owning turn when the caller knows it (the search then derives that turn alone)
   jumpHandled(key: string, nonce: number): void;
   setFollowing(key: string, following: boolean): void;
-  setAssistantInk(key: string, row: RowId, turn: TurnId, ink: boolean): void;
-  clearAssistantInk(key: string): void;
+  setAssistantInk(key: string, row: RowId, turn: TurnId, ink: boolean, source?: 'surface' | 'local'): void;
+  clearAssistantInk(key: string, source?: 'surface'): void;
   toggleTurn(key: string, turn: TurnId): void;
   toggleGroup(key: string, group: RowId): void;
   toggleCell(key: string, cell: CellId): void;
@@ -305,7 +307,7 @@ export function createTranscriptStore() {
           attached.restartUi = null; // an explicit reset empties the key at once
           attached.stagedJump = null;
           const state = createState(null, attached.agentId);
-          put(key, { state, phase: 'hydrating', error: null, clock: null, jump: null });
+          put(key, { state, localAssistantInk: undefined, phase: 'hydrating', error: null, clock: null, jump: null });
           hydrate(key, attached);
         }) ?? null;
         return hydrate(key, attached);
@@ -358,13 +360,30 @@ export function createTranscriptStore() {
         if (entry(key) && entry(key)!.following !== following) put(key, { following });
       },
 
-      setAssistantInk(key, row, turn, ink) {
-        if (!entry(key) || entry(key)!.state.ui.assistantInk.has(row) === ink) return;
-        changeUi(key, () => [turn], (ui) => { if (ink) ui.assistantInk.add(row); else ui.assistantInk.delete(row); });
+      setAssistantInk(key, row, turn, ink, source = 'surface') {
+        const current = entry(key);
+        if (!current) return;
+        const local = ink && source === 'local';
+        const changedInk = current.state.ui.assistantInk.has(row) !== ink;
+        if (!changedInk && (current.localAssistantInk?.has(row) ?? false) === local) return;
+        const localAssistantInk = new Set(current.localAssistantInk);
+        if (local) localAssistantInk.add(row); else localAssistantInk.delete(row);
+        const patch: Partial<TranscriptEntry> = { localAssistantInk };
+        if (changedInk) {
+          const ui = copyUi(current.state.ui, [turn]);
+          if (ink) ui.assistantInk.add(row); else ui.assistantInk.delete(row);
+          patch.state = withUi(current.state, ui);
+        }
+        put(key, patch);
       },
-      clearAssistantInk(key) {
-        if (!entry(key)?.state.ui.assistantInk.size) return;
-        changeUi(key, () => 'all', (ui) => ui.assistantInk.clear());
+      clearAssistantInk(key, source) {
+        const current = entry(key);
+        if (!current?.state.ui.assistantInk.size) return;
+        const remove = [...current.state.ui.assistantInk].filter((row) => source !== 'surface' || !current.localAssistantInk?.has(row));
+        if (!remove.length) return;
+        const ui = copyUi(current.state.ui, 'all');
+        for (const row of remove) ui.assistantInk.delete(row);
+        put(key, { state: withUi(current.state, ui), ...(source ? {} : { localAssistantInk: undefined }) });
       },
       toggleTurn(key, turn) {
         changeUi(key, () => [turn], (ui, state) => {

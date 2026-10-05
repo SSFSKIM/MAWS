@@ -67,7 +67,7 @@ export function connectEngineSurface(client: MawsBridge = ipc): () => void {
     const now = status.process === 'ready' && status.uiSurface !== undefined;
     if (!now) {
       forgetSession(appSessionId as AppSessionId);
-      useTranscriptStore.getState().clearAssistantInk(appSessionId);
+      useTranscriptStore.getState().clearAssistantInk(appSessionId, 'surface');
     }
   });
   return () => {

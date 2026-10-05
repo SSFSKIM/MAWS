@@ -24,6 +24,18 @@ it('puts a question above inert choices, marks the recommendation and explains r
   expect(screen.getByText('Which path?').compareDocumentPosition(screen.getByRole('list')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(view.container.querySelector('[data-streamdown="strong"]')?.textContent).toBe('fast');
 });
+it('renders choice-only questions beside a report without losing their options', () => {
+  render(draw('<to-human>Report.</to-human><need-input><choice recommended>A</choice><choice>B</choice></need-input>'));
+  expect(screen.getByText('Report.')).toBeTruthy();
+  expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual(['ARecommended', 'B']);
+  expect(screen.getByText('Resume this session to answer.')).toBeTruthy();
+});
+it('passes malformed choice markup through Markdown as literal text', () => {
+  const view = render(draw('<need-input>Pick.\n<choice>A<choice>B</choice></need-input>'));
+  expect(view.container.textContent).toContain('<choice>A<choice>B</choice>');
+  expect(view.container.querySelector('choice')).toBeNull();
+  expect(screen.queryByRole('list')).toBeNull();
+});
 it('keeps mixed-body commentary inside the work fold and reveals it in source order', () => {
   const text = 'Before.\n<to-human>Report.</to-human>\nAfter.\n<insight>Because.</insight>';
   const view = render(draw(text));

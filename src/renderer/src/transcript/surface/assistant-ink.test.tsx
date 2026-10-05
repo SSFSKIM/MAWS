@@ -15,9 +15,9 @@ import { storeWith } from '../view/rows/test-support';
 
 afterEach(() => { cleanup(); resetSurfaceRegistry(); });
 
-function Transcript({ storeKey, hideCommentary = false, variant = 'session' }: { storeKey: string; hideCommentary?: boolean; variant?: 'session' | 'child' }) {
+function Transcript({ storeKey, hideCommentary = false, hideDivider = false, variant = 'session' }: { storeKey: string; hideCommentary?: boolean; hideDivider?: boolean; variant?: 'session' | 'child' }) {
   const rows = useTranscriptStore((s) => s.entries[storeKey].rows);
-  return <TranscriptProvider value={{ storeKey, variant, actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, effort: null }}>{rows.filter((row) => !hideCommentary || row.kind !== 'assistant_text' || row.phase !== 'commentary').map((row) => <RowView key={row.id} row={row} />)}</TranscriptProvider>;
+  return <TranscriptProvider value={{ storeKey, variant, actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, effort: null }}>{rows.filter((row) => (!hideDivider || row.kind !== 'divider') && (!hideCommentary || row.kind !== 'assistant_text' || row.phase !== 'commentary')).map((row) => <RowView key={row.id} row={row} />)}</TranscriptProvider>;
 }
 
 it('keeps the first expanded commentary drawing mounted when ink promotes it to full contrast', async () => {
@@ -209,6 +209,45 @@ it('R4 keeps detached ordinary commentary folded and ordinary answers native', a
   expect(screen.queryByText('Working notes.')).toBeNull();
   expect(screen.getByText('Native answer').closest('.transcript-answer')).not.toBeNull();
   expect(view.container.querySelector('[data-owner-report]')).toBeNull();
+});
+
+it.each([false, true])('R4 retains local promotion through resume with its divider virtualized, then yields to mod/native (hooked=%s)', async (hooked) => {
+  const b = builder(); b.turn('u'); b.text('first', 0, '<to-human>Local report.</to-human>');
+  b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
+  b.text('last', 0, 'Native answer'); b.end(['u']);
+  const store = await storeWith(b.events); const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = fake.client; useSessions.setState({ engine: new Map() });
+  const off = connectEngineSurface(fake.client);
+  try {
+    const view = render(<Transcript storeKey={store.key} />);
+    expect(screen.getByText('Local report.')).toBeTruthy();
+    view.rerender(<Transcript storeKey={store.key} hideDivider />);
+    for (const process of ['initializing', 'exited'] as const) {
+      act(() => {
+        const next = { ...status(id), process };
+        useSessions.setState({ engine: new Map([[id, next]]) });
+        fake.event('session.status', { appSessionId: id, status: next });
+      });
+      expect(screen.getByText('Local report.')).toBeTruthy();
+      expect(store.rows().find((r) => r.kind === 'assistant_text' && r.markdown.includes('Local report.'))).toMatchObject({ forHuman: true });
+    }
+    act(() => {
+      const next = { ...status(id), uiSurface: { clientId: 'maws-main' } };
+      useSessions.setState({ engine: new Map([[id, next]]) });
+      fake.event('session.status', { appSessionId: id, status: next });
+    });
+    expect(view.container.querySelector('[data-owner-report]')).toBeNull();
+    const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
+    for (const ask of asks) await act(() => fake.reply('session.ui.render', {
+      hooked: ask.component === 'AssistantMessage', rewritten: false, props: ask.props,
+      tree: ask.props.text?.includes('Local report.') ? { type: 'Text', children: ['Mod report'] } : { type: 'engine', ref: 0 },
+    }));
+    expect(screen.getByText('Mod report')).toBeTruthy();
+    act(() => invalidateSession(id));
+    while (fake.pending('session.ui.render')) await act(() => fake.reply('session.ui.render', { hooked, rewritten: false, props: {}, tree: { type: 'engine', ref: 0 } }));
+    expect(screen.queryByText('Mod report')).toBeNull();
+    expect(store.rows().filter((r) => r.kind === 'assistant_text')).toHaveLength(1);
+  } finally { off(); }
 });
 
 it('R4 yields exclusively to an attached surface, including native fallback, and returns on detach', async () => {

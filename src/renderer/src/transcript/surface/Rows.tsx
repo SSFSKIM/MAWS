@@ -52,10 +52,10 @@ function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
   const turn = useTranscriptStore((s) => row.turnId === null ? undefined : s.entries[storeKey]?.state.turns.get(row.turnId));
   const live = useTranscriptStore((s) => liveBuffer(s.entries[storeKey], row));
   const input = assistantInput({ ...row, markdown: live ?? row.markdown }, turn);
-  const reportInk = useCallback((ink: boolean) => {
-    if (row.turnId !== null) useTranscriptStore.getState().setAssistantInk(storeKey, row.id, row.turnId, ink);
-  }, [storeKey, row.id, row.turnId]);
   const attached = useSurfaceAttached(appSessionId);
+  const reportInk = useCallback((ink: boolean) => {
+    if (row.turnId !== null) useTranscriptStore.getState().setAssistantInk(storeKey, row.id, row.turnId, ink, attached ? 'surface' : 'local');
+  }, [storeKey, row.id, row.turnId, attached]);
   const text = live ?? row.markdown;
   const presentation = useMemo(() => attached ? null : assistantPresentation(text), [attached, text]);
   const showRecord = useTranscriptStore((s) => {
@@ -97,7 +97,7 @@ export function SurfaceAssistantRow({ row }: { row: Extract<Row, { kind: 'assist
   const { storeKey } = useTranscriptContext();
   const hasWorkFold = useTranscriptStore((s) => {
     const state = s.entries[storeKey]?.state;
-    return !!state && row.turnId !== null && turnRows(state, row.turnId).some((r) => r.kind === 'divider');
+    return !!state && row.turnId !== null && !!turnRows(state, row.turnId)?.some((r) => r.kind === 'divider');
   });
   useLayoutEffect(() => retainAssistantDrawing(key), [key]);
   useEffect(() => {

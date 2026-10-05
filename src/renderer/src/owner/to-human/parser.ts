@@ -42,7 +42,20 @@ export function parse(text: string): Part[] {
   for (const part of parts) {
     if (part.kind === 'need-input') {
       const choices: Choice[] = [];
-      part.text = part.text.replace(/<choice( recommended)?>([\s\S]*?)<\/choice>\n?/g, (_, flag: string | undefined, body: string) => {
+      // Pair stored marks first: a lazy match must not consume an outer opener with an inner closer.
+      // Nested choices are not the mod's flat option grammar; leave that entire markup literal.
+      const marks = [...part.text.matchAll(/<choice(?: recommended)?>|<\/choice>/g)];
+      const opens: number[] = [];
+      const flat = new Set<number>();
+      for (let i = 0; i < marks.length; i++) {
+        if (marks[i][0] !== '</choice>') opens.push(i);
+        else if (opens.length) {
+          const start = opens.pop()!;
+          if (opens.length === 0 && i === start + 1) flat.add(marks[start].index);
+        }
+      }
+      part.text = part.text.replace(/<choice( recommended)?>([\s\S]*?)<\/choice>\n?/g, (match: string, flag: string | undefined, body: string, offset: number) => {
+        if (!flat.has(offset)) return match;
         if (body.trim()) choices.push({ text: body.trim(), recommended: flag !== undefined });
         return '';
       });
@@ -50,5 +63,6 @@ export function parse(text: string): Part[] {
     }
     if (part.kind !== 'plain') part.text = part.text.trim();
   }
-  return parts.filter((part) => part.text !== '');
+  // Unlike the mod's empty-span filter, stored questions must not lose their only content: the options.
+  return parts.filter((part) => part.text !== '' || (part.kind === 'need-input' && !!part.choices?.length));
 }

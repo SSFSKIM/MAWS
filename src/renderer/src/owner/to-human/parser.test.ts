@@ -14,6 +14,20 @@ describe('stored owner marks', () => {
       { kind: 'to-human', text: 'Done.' }, { kind: 'essential', text: 'Tests fail.' }, { kind: 'to-human', text: 'More.' },
     ]);
   });
+  it('preserves choice-only questions beside another report', () => {
+    expect(parse('<to-human>Report.</to-human><need-input><choice recommended>A</choice><choice>B</choice></need-input>')).toEqual([
+      { kind: 'to-human', text: 'Report.' },
+      { kind: 'need-input', text: '', choices: [{ text: 'A', recommended: true }, { text: 'B', recommended: false }] },
+    ]);
+  });
+  it.each([
+    '<choice>A<choice>B</choice>',
+    '<choice recommended>A<choice>B</choice>',
+    '<choice>A<choice>B</choice></choice>',
+    '<choice>A', '</choice>A',
+  ])('keeps malformed or nested choice markup literal: %s', (markup) => {
+    expect(parse(`<need-input>Pick.\n${markup}</need-input>`)).toEqual([{ kind: 'need-input', text: `Pick.\n${markup}` }]);
+  });
   it('lifts inline or multiline choices only inside questions', () => {
     for (const gap of [' ', '\n']) expect(parse(`<need-input>Which backend?${gap}<choice> SQLite </choice>${gap}<choice recommended>Postgres</choice></need-input>`)).toEqual([
       { kind: 'need-input', text: 'Which backend?', choices: [{ text: 'SQLite', recommended: false }, { text: 'Postgres', recommended: true }] },
