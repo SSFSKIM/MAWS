@@ -117,3 +117,18 @@ describe('FX8 synthetic no-response cuts', () => {
     expect(cuts(events)).toMatchObject([{ kind: 'boundary.retraction', retractedMessageUuids: ['synthetic'] }]);
   });
 });
+
+
+it('FX8 E: a forward-parent continuation removes nothing and emits no boundary or notice', async () => {
+  const records = fixture('empty-cut');
+  const { reader, follower, events } = await follow(records.slice(0, -1));
+  expect(follower.snapshot().rewind).toBeNull();
+  expect(follower.snapshot().chain).toEqual(['u', 'late']);
+  const before = events.length;
+  reader.append(bytes(records.slice(-1)));
+  await follower.poke();
+  expect(cuts(events.slice(before))).toEqual([]);
+  expect(notices(events.slice(before))).toEqual([]);
+  expect(follower.snapshot().chain).toEqual(['u', 'late', 'early', 'next']);
+  expect(follower.snapshot().rewind).toBeNull();
+});

@@ -368,7 +368,9 @@ class FollowerCore {
       return skeleton.localCommand || skeleton.type === 'attachment';
     });
     const noResponseOnly = removed.length > 0 && removed.every((member) => this.skeletons.get(member)?.noResponse === true);
-    const silentSwap = leafSibling || localOnly || noResponseOnly;
+    // FX8 E: a continuation can add previously off-chain ancestry without removing anything. Keep the
+    // normal swap/re-delivery path (including a rejected rewind), but there is nothing to retract or announce.
+    const silentSwap = removed.length === 0 || leafSibling || localOnly || noResponseOnly;
     // W7: decided before any reading of the branch as a rewind: while a foreign process holds the session, its branch
     // never retracts what MAWS wrote (after MAWS's exit one live holder is left, which the terminal-rewind reading would
     // otherwise accept). MAWS's branch stays in view; this record joins the skeletons only, and one notice says why.

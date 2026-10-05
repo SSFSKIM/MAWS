@@ -402,7 +402,7 @@ describe('follows the leaf across a rewind', () => {
     expectWellFormed(out.events());
   });
 
-  it('a continuation from the rewound-away branch is not a continuation: retraction and notice', async () => {
+  it('a continuation from the rewound-away branch still rejoins, but an empty cut has no boundary', async () => {
     const edited = [...REWIND_LINES];
     const record = JSON.parse(edited[29]) as { parentUuid: string };
     record.parentUuid = fullUuid('57525d04');
@@ -412,9 +412,10 @@ describe('follows the leaf across a rewind', () => {
     expect(state.chain.map(short)).toEqual([...CUT_CHAIN, 'af765f44', '36a2aa44', '57525d04', 'a4d68c72', '7c05f769']);
     expect(state.rewind).toBeNull();
     expect(out.of('boundary.rewind')).toHaveLength(1); // the anchor's cut
-    expect(out.of('boundary.retraction')).toHaveLength(1);
-    expect(out.of('boundary.retraction')[0].reason).toBe('transcript_branch');
-    expect(out.of('notice.posted')).toHaveLength(1);
+    // FX8 rule E: no removal means no retraction or notice. The seven observed empty cuts have no
+    // outstanding rewind; this rejected-rewind path keeps its rejoin/redelivery semantics too.
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(out.of('notice.posted')).toEqual([]);
     // The cut records rejoin the chain and are re-read and re-emitted as a second delivery occurrence.
     expect(out.of('user.message').map((e) => short(e.messageUuid))).toEqual(['e3b48834', '36a2aa44', '36a2aa44', 'a4d68c72']);
     expect(out.of('user.message').map((e) => e.id.slice(36))).toEqual(['#1', '#1', '@2#1', '#1']);
