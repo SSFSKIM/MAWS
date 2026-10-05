@@ -356,6 +356,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'tool.result': {
         const rec = tools.get(event.toolUseId);
         if (rec) rec.result = event;
+        const group = byToolUse.get(event.toolUseId);
+        const ref = group?.refs.find((ref) => ref.toolUseId === event.toolUseId);
+        if (group && ref && event.isError) group.statuses.set(ref.taskId, 'finished_with_errors');
         const agentId = record(event.structured).agentId;
         if (typeof agentId === 'string') agentIds.set(event.toolUseId, agentId as AgentId);
         const pending = pendingRows.get(event.toolUseId);
@@ -416,9 +419,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       }
       case 'subagent.finished':
       case 'task.notification': {
-        const group = byTask.get(event.taskId);
+        const group = byTask.get(event.taskId) ?? (event.kind === 'task.notification' && event.toolUseId !== null ? byToolUse.get(event.toolUseId) : undefined);
         if (group) {
-          group.statuses.set(event.taskId, event.status === 'completed' ? 'finished' : event.status === 'failed' ? 'finished_with_errors' : 'stopped');
+          const taskId = event.kind === 'task.notification' ? group.refs.find((ref) => ref.toolUseId === event.toolUseId)?.taskId ?? event.taskId : event.taskId;
+          group.statuses.set(taskId, event.status === 'completed' ? 'finished' : event.status === 'failed' ? 'finished_with_errors' : 'stopped');
           break;
         }
         for (const rec of tools.values()) if (rec.backgroundTaskId === event.taskId) rec.backgroundDone = true;

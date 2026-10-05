@@ -2,7 +2,7 @@
 // M2 "Proves"). The probe-journal pins live in journals.test.ts.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { SessionId } from '@shared/graph/ids';
+import type { AgentId, SessionId } from '@shared/graph/ids';
 import { ChainFollower, type ChainFollowerOptions } from '../../../../engine-host/fs/chain-follower';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { TEST_FIXTURE_DIR } from '../../../../../test/support/fixtures';
@@ -347,5 +347,23 @@ describe('D1 disk semantics', () => {
     expect(ofKind(rows, 'user').map((row) => row.text)).toEqual(['/model example']);
     expect(ofKind(rows, 'local_command').map((row) => row.text)).toEqual(['Model selected', 'Status ready', 'Command failed']);
     expect(ofKind(rows, 'error')).toEqual([]);
+  });
+});
+
+const d1Sidecars: ChainFollowerOptions['subagents'] = {
+  byToolUseId: (toolUseId) => ({ agentId: toolUseId.replace('tool-', 'child-') as AgentId, meta: { agentType: 'general-purpose', description: toolUseId, toolUseId, spawnDepth: 1, requestShape: 'background' }, prompt: null }),
+};
+
+describe('D1 subagent outcomes', () => {
+  it.each([false, true])('S2 closes task notifications and deduplicates source/legacy deliveries (sidecar %s)', async (sidecar) => {
+    const { events, rows } = await d1Fixture('subagents', sidecar ? { subagents: d1Sidecars } : {});
+    const outcomes = events.filter((event) => event.kind === 'subagent.finished' || event.kind === 'task.notification');
+    expect(outcomes.map((event) => [event.taskId, event.status])).toEqual([['child-new', 'completed'], ['child-old', 'completed']]);
+    expect(ofKind(rows, 'subagent').map((row) => row.status)).toEqual(['finished']);
+    expect(ofKind(rows, 'user').map((row) => row.text)).toEqual(['Run two sample tasks.']);
+  });
+  it.each([false, true])('S2 failed Agent results terminate the invocation (sidecar %s)', async (sidecar) => {
+    const { rows } = await d1Fixture('agent-failure', sidecar ? { subagents: d1Sidecars } : {});
+    expect(ofKind(rows, 'subagent').map((row) => row.status)).toEqual(['finished_with_errors']);
   });
 });

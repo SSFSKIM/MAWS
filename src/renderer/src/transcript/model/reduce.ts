@@ -574,7 +574,8 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (turn) batch.closeUnended(turn, event.status, event.at);
         return;
       }
-      if (!pushRouted(index.tasks.get(event.taskId))) batch.loose(event, false);
+      const owner = index.tasks.get(event.taskId) ?? (event.kind === 'task.notification' && event.toolUseId !== null ? index.toolUses.get(event.toolUseId) : undefined);
+      if (!pushRouted(owner)) batch.loose(event, false);
       return;
     }
     case 'subagent.progress':
