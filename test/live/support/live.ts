@@ -6,9 +6,9 @@
 // runs in a scratch directory under the OS temp dir, never in the owner's projects.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { SessionEvent } from '@shared/graph/events';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
@@ -56,11 +56,14 @@ export function redactJournal(text: string, env: Record<string, string> = string
 export const PERSISTING_CONTROLS = ['set_cwd:trust', 'mcp_toggle', 'grant:local_settings', 'memory:user', 'launch:trust' /* C10: the launch attestation records trust as set_cwd's does */] as const;
 export type PersistingControl = (typeof PERSISTING_CONTROLS)[number];
 
-// Resolve existing symlinks too: a scratch-named link to the owner's store is still the owner's store.
+// Require an existing directory so its actual destination is known, including every symlink in its path.
 export function assertConfigHomeSafe(plan: { configHome: string | null; controls: readonly PersistingControl[] }): void {
   const canonical = (path: string): string => existsSync(path) ? realpathSync(path) : resolve(path);
-  if (plan.configHome && isAbsolute(plan.configHome) && canonical(plan.configHome) !== canonical(homedir()) && !isUnder(canonical(plan.configHome), canonical(join(homedir(), '.claude')))) return;
-  throw new Error(`live case refused before spawning: ${plan.controls.join(', ') || 'session transcript'} would persist into the owner's config home; run it under a scratch CLAUDE_CONFIG_DIR`);
+  if (plan.configHome && isAbsolute(plan.configHome) && existsSync(plan.configHome) && statSync(plan.configHome).isDirectory()) {
+    const configHome = realpathSync(plan.configHome);
+    if (configHome !== canonical(homedir()) && !isUnder(configHome, canonical(join(homedir(), '.claude')))) return;
+  }
+  throw new Error(`live case refused before spawning: ${plan.controls.join(', ') || 'session transcript'} would persist into the owner's config home; run it under an existing scratch CLAUDE_CONFIG_DIR`);
 }
 
 // The owner's config home: what the engine reads and writes when no scratch CLAUDE_CONFIG_DIR is set.
@@ -84,7 +87,7 @@ export function persistingControlOf(command: string, input: unknown, configHome:
 
 function isUnder(path: string, dir: string): boolean {
   const rel = relative(resolve(dir), resolve(path));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 // A scratch config home: an empty user settings layer, so the owner's `~/.claude.json` and settings are never written.

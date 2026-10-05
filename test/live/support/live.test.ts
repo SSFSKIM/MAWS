@@ -8,6 +8,9 @@ import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { assertConfigHomeSafe, exportFixture, frameInventory, journalCost, LiveLedger, liveSpec, ownerConfigHome, persistingControlOf, PROVENANCE, turnAttribution, withRawProcess } from './live';
 import { LiveHost } from './live-host';
 
+// Offline support tests must not run the installed engine's import-time version probe.
+vi.mock('../../support/engine-pin', () => ({ ENGINE_BIN: '/unused/offline-engine', ENGINE_VERSION: '2.1.283' }));
+
 const REPO_ROOT = resolve(__dirname, '../../..');
 
 const row = (seq: number, direction: JournalRow['direction'], frame: unknown): JournalRow => ({ seq, direction, at: '2026-09-28T10:00:00.000Z', frame });
@@ -102,7 +105,12 @@ describe('live suite bookkeeping', () => {
 
   it("the config-home guard: a case under the owner's home may not declare a control the engine persists (coordinator's live-acceptance rule)", () => {
     expect(() => assertConfigHomeSafe({ configHome: null, controls: ['set_cwd:trust'] })).toThrow(/set_cwd:trust.*owner's config home/);
-    expect(() => assertConfigHomeSafe({ configHome: '/tmp/maws-live-config-x', controls: ['set_cwd:trust'] })).not.toThrow();
+    const scratch = mkdtempSync(join(tmpdir(), 'maws-live-config-'));
+    try {
+      expect(() => assertConfigHomeSafe({ configHome: scratch, controls: ['set_cwd:trust'] })).not.toThrow();
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
     expect(() => assertConfigHomeSafe({ configHome: null, controls: [] })).toThrow(); // even reads write a transcript
     for (const control of ['mcp_toggle', 'grant:local_settings', 'memory:user'] as const) expect(() => assertConfigHomeSafe({ configHome: null, controls: [control] })).toThrow();
     // the controls a call would issue, inferred from the X2 command and its input
@@ -132,7 +140,7 @@ describe('live suite bookkeeping', () => {
   it('the live host fails a case before any spawn when its config home is the owner\'s and it declares a persisting control, and refuses an undeclared one at the call', async () => {
     const userData = mkdtempSync(join(tmpdir(), 'maws-live-guard-'));
     try {
-      expect(() => new LiveHost({ userData, controls: ['set_cwd:trust'] })).toThrow(/owner's config home/);
+      expect(() => new LiveHost({ userData, configHome: null, controls: ['set_cwd:trust'] })).toThrow(/owner's config home/);
       const host = new LiveHost({ userData, configHome: userData, replayEnabled: true, cwd: REPO_ROOT });
       await expect(host.callRaw('session.setCwd', { appSessionId: 'nobody', path: '/x', trust: { accepted: true, directory: '/x' } })).rejects.toThrow(/set_cwd:trust.*not declared/);
     } finally {
