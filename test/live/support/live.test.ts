@@ -1,11 +1,11 @@
 // The live suite's own bookkeeping (C3 execution document, M6): cost per journal, the frame inventory, the fixture
 // export, and the run's cost ledger with its cap. Runs in `pnpm test` (it spawns nothing).
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
-import { assertConfigHomeSafe, exportFixture, frameInventory, journalCost, LiveLedger, liveSpec, ownerConfigHome, persistingControlOf, PROVENANCE, turnAttribution } from './live';
+import { assertConfigHomeSafe, exportFixture, frameInventory, journalCost, LiveLedger, liveSpec, ownerConfigHome, persistingControlOf, PROVENANCE, turnAttribution, withRawProcess } from './live';
 import { LiveHost } from './live-host';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
@@ -71,7 +71,7 @@ describe('live suite bookkeeping', () => {
 
   it('the live host drives the X2 surface through the host runtime: launch to ready, a send, its turn, a read, shutdown', async () => {
     const userData = mkdtempSync(join(tmpdir(), 'maws-live-host-'));
-    const host = new LiveHost({ userData, replayEnabled: true, cwd: REPO_ROOT });
+    const host = new LiveHost({ userData, configHome: userData, replayEnabled: true, cwd: REPO_ROOT });
     try {
       const spec = liveSpec('/tmp/maws-live-host', { appSessionId: 'live-host-replay' as never, replay: 'spikes/protocol-probe/fixtures/reads.jsonl', maxBudgetUsd: null });
       const { status } = await host.launch(spec);
@@ -103,7 +103,7 @@ describe('live suite bookkeeping', () => {
   it("the config-home guard: a case under the owner's home may not declare a control the engine persists (coordinator's live-acceptance rule)", () => {
     expect(() => assertConfigHomeSafe({ configHome: null, controls: ['set_cwd:trust'] })).toThrow(/set_cwd:trust.*owner's config home/);
     expect(() => assertConfigHomeSafe({ configHome: '/tmp/maws-live-config-x', controls: ['set_cwd:trust'] })).not.toThrow();
-    expect(() => assertConfigHomeSafe({ configHome: null, controls: [] })).not.toThrow(); // reads only
+    expect(() => assertConfigHomeSafe({ configHome: null, controls: [] })).toThrow(); // even reads write a transcript
     for (const control of ['mcp_toggle', 'grant:local_settings', 'memory:user'] as const) expect(() => assertConfigHomeSafe({ configHome: null, controls: [control] })).toThrow();
     // the controls a call would issue, inferred from the X2 command and its input
     expect(persistingControlOf('session.setCwd', { appSessionId: 'a', path: '/x', trust: { accepted: true, directory: '/x' } })).toBe('set_cwd:trust');
@@ -133,10 +133,23 @@ describe('live suite bookkeeping', () => {
     const userData = mkdtempSync(join(tmpdir(), 'maws-live-guard-'));
     try {
       expect(() => new LiveHost({ userData, controls: ['set_cwd:trust'] })).toThrow(/owner's config home/);
-      const host = new LiveHost({ userData, replayEnabled: true, cwd: REPO_ROOT });
+      const host = new LiveHost({ userData, configHome: userData, replayEnabled: true, cwd: REPO_ROOT });
       await expect(host.callRaw('session.setCwd', { appSessionId: 'nobody', path: '/x', trust: { accepted: true, directory: '/x' } })).rejects.toThrow(/set_cwd:trust.*not declared/);
     } finally {
       rmSync(userData, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses even a non-persisting live host or raw process without an explicit scratch config home', async () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);
+    try {
+      expect(() => new LiveHost({ userData: '/unused' })).toThrow(/scratch CLAUDE_CONFIG_DIR/);
+      await expect(withRawProcess({ userData: '/unused', scratch: () => '/unused' }, liveSpec('/unused'), async () => {})).rejects.toThrow(/scratch CLAUDE_CONFIG_DIR/);
+      for (const configHome of ['', join(homedir(), '.claude'), join(homedir(), '.claude', 'projects')]) {
+        expect(() => assertConfigHomeSafe({ configHome, controls: [] })).toThrow(/scratch CLAUDE_CONFIG_DIR/);
+      }
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 

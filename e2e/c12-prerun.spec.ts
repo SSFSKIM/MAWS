@@ -228,6 +228,7 @@ test('§10.1 real store, read only', async () => {
   test.skip(!REALSTORE, 'the real-store case runs alone, under MAWS_C12_REALSTORE=1 with its own userData');
   const executable = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;
   expect(executable, 'the real-store case runs over the owner build (pnpm e2e:packaged)').not.toBeNull();
+  // Explicit MAWS_C12_REALSTORE exception: index/discovery reads only, no engine launch or live helper.
   // launchMaws's environment (e2e/support/launch.ts), with only CLAUDE_CONFIG_DIR deleted.
   const env: Record<string, string> = {};
   for (const [key, v] of Object.entries(process.env)) if (v !== undefined) env[key] = v;

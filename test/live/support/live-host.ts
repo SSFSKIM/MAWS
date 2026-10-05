@@ -54,13 +54,13 @@ export class LiveHost {
   private readonly controls: ReadonlySet<PersistingControl>;
   private readonly configHome: string; // the home the guard checks `#` path targets against
 
-  // `configHome`: a scratch CLAUDE_CONFIG_DIR every process of this host runs under (null: the owner's own home);
+  // `configHome`: an explicit scratch CLAUDE_CONFIG_DIR (defaults to the environment; missing is refused);
   // `controls`: the persisting controls the case will issue, checked against the home before anything spawns;
   // `fs` (W7): also serve C4's `fs.*` over that scratch home, as the engine host does, `session.events` answering a
   // session with no stream from it. `binary` (W13): the binary path the host is configured with, as main's
   // `engine.configure` would send it: the fixtures' pin by default, null for the installed Claude Code.
   constructor(deps: Pick<EngineIpcDeps, 'userData'> & Partial<EngineIpcDeps> & { configHome?: string | null; controls?: PersistingControl[]; fs?: boolean; binary?: string | null }) {
-    const { configHome = null, controls = [], fs: withFs = false, binary = ENGINE_BIN, ...ipcDeps } = deps;
+    const { configHome = process.env.CLAUDE_CONFIG_DIR ?? null, controls = [], fs: withFs = false, binary = ENGINE_BIN, ...ipcDeps } = deps;
     setBinaryConfig({ binaryPath: binary });
     if (withFs && configHome === null) throw new Error('a live host serves fs.* only over a scratch config home');
     assertConfigHomeSafe({ configHome, controls });

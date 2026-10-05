@@ -1,3 +1,4 @@
+// Requires an explicit scratch CLAUDE_CONFIG_DIR, including cases that only issue read controls: every launch writes a transcript.
 // The live suite (C3 execution document, Acceptance item 3; M6): the pinned binary through ClaudeUsage's relay, in
 // auto mode with the owner's setting sources, Sonnet, `--max-budget-usd 0.50` per process, one scratch git repository
 // per case, run serially. Every case but 3.18 goes through the X2 surface the renderer uses (C1's host runtime serving
@@ -836,7 +837,7 @@ describe('engine host live', () => {
       denied = deny.includes('ExitPlanMode');
       console.log(`   owner settings deny ${JSON.stringify(deny)}${denied ? ': plan approval cannot occur under them; running under a scratch user config' : ''}`);
     });
-    const scratchHost = new LiveHost({ userData: g.userData, configHome: denied ? scratchConfigHome() : null });
+    const scratchHost = new LiveHost({ userData: g.userData, configHome: denied ? scratchConfigHome() : process.env.CLAUDE_CONFIG_DIR });
     await withHost(g, '3.20', async (host) => {
       const spec = liveSpec(g.scratch());
       const { status } = await host.launch(spec);
