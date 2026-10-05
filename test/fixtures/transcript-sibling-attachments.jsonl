@@ -1,0 +1,15 @@
+{"type":"user","uuid":"u1","parentUuid":null,"cwd":"/synthetic","timestamp":"2026-10-04T10:00:00.000Z","message":{"role":"user","content":"Run three checks."}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","id":"m1","model":"test-model","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"printf one"}}]}}
+{"type":"attachment","uuid":"h1","parentUuid":"a1","attachment":{"type":"hook_success","hookName":"PostToolUse:Bash","toolUseID":"t1","hookEvent":"PostToolUse","content":"Checked.","stdout":"Checked.","stderr":"","exitCode":0,"command":"printf Checked.","durationMs":1}}
+{"type":"user","uuid":"r1","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"one"}]}}
+{"type":"assistant","uuid":"a2","parentUuid":"r1","message":{"role":"assistant","id":"m2","model":"test-model","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"printf two"}}]}}
+{"type":"attachment","uuid":"h2","parentUuid":"a2","attachment":{"type":"hook_success","hookName":"PostToolUse:Bash","toolUseID":"t2","hookEvent":"PostToolUse","content":"Checked.","stdout":"Checked.","stderr":"","exitCode":0,"command":"printf Checked.","durationMs":1}}
+{"type":"attachment","uuid":"o2","parentUuid":"a2","attachment":{"type":"output_style","style":"concise"}}
+{"type":"user","uuid":"r2","parentUuid":"a2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":"two"}]}}
+{"type":"assistant","uuid":"a3","parentUuid":"r2","message":{"role":"assistant","id":"m3","model":"test-model","content":[{"type":"tool_use","id":"t3","name":"Bash","input":{"command":"printf three"}}]}}
+{"type":"attachment","uuid":"h3","parentUuid":"a3","attachment":{"type":"hook_success","hookName":"PostToolUse:Bash","toolUseID":"t3","hookEvent":"PostToolUse","content":"Checked.","stdout":"Checked.","stderr":"","exitCode":0,"command":"printf Checked.","durationMs":1}}
+{"type":"attachment","uuid":"o3","parentUuid":"a3","attachment":{"type":"output_style","style":"concise"}}
+{"type":"attachment","uuid":"n3","parentUuid":"a3","attachment":{"type":"total_tokens_reminder","text":"Token budget reminder."}}
+{"type":"user","uuid":"r3","parentUuid":"a3","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t3","content":"three"}]}}
+{"type":"assistant","uuid":"a4","parentUuid":"r3","message":{"role":"assistant","id":"m4","model":"test-model","content":[{"type":"text","text":"All checks passed."}]}}
+{"type":"system","subtype":"turn_duration","uuid":"s1","parentUuid":"a4","durationMs":1000,"timestamp":"2026-10-04T10:00:01.000Z"}

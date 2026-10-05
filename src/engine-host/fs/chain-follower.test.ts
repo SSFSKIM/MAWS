@@ -69,6 +69,78 @@ async function started(bytes: Buffer, sessionId: SessionId = SESSION): Promise<{
   return { reader, follower, out };
 }
 
+// FX5: hand-written, public synthetic data; no owner's transcript content.
+const SIBLING_LINES = linesOf(join(TEST_FIXTURE_DIR, 'transcript-sibling-attachments.jsonl'));
+
+describe('leaf-sibling attachments', () => {
+  it.each(['backfill', 'tail'] as const)('%s swaps hook siblings silently and delivers every visible record once in order', async (mode) => {
+    const { reader, follower, out } = await started(mode === 'backfill' ? joined(SIBLING_LINES) : Buffer.alloc(0));
+    if (mode === 'tail') {
+      for (const record of SIBLING_LINES) {
+        reader.append(joined([record]));
+        await follower.poke();
+        await follower.poke(); // an unchanged file delivers nothing again
+      }
+    }
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(out.of('notice.posted')).toEqual([]);
+    expect(out.of('boundary.rewind')).toEqual([]);
+    expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'r1', 'a2', 'r2', 'a3', 'r3', 'a4', 's1']);
+    expect(out.events().map((e) => [e.kind, e.id])).toEqual([
+      ['session.started', `session:${SESSION}:started`], ['turn.started', 'u1'], ['user.message', 'u1#1'],
+      ['assistant.block.complete', 'a1'], ['tool.use', 'a1#1'], ['tool.result', 'r1'],
+      ['assistant.block.complete', 'a2'], ['tool.use', 'a2#1'], ['tool.result', 'r2'],
+      ['assistant.block.complete', 'a3'], ['tool.use', 'a3#1'], ['tool.result', 'r3'],
+      ['assistant.block.complete', 'a4'], ['turn.ended', 's1'],
+    ]);
+    expectWellFormed(out.events());
+  });
+
+  it('still retracts a real second-writer branch that removes a user record', async () => {
+    const { reader, follower, out } = await started(joined(SIBLING_LINES.slice(0, 4)));
+    reader.append(joined([line({ type: 'user', uuid: 'foreign', parentUuid: 'a1', message: { role: 'user', content: 'Another writer' } })]));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'foreign']);
+    expect(out.of('boundary.retraction').map((e) => [e.reason, e.retractedMessageUuids])).toEqual([['transcript_branch', ['r1']]]);
+    expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
+    expect(out.of('boundary.rewind')).toEqual([]);
+  });
+
+  it('does not hold a foreign record displacing only a MAWS-written attachment (W7)', async () => {
+    const ownLines = SIBLING_LINES.slice(0, 3).map((l) => line({ ...JSON.parse(l), entrypoint: 'sdk-ts' }));
+    const reader = new MemoryFileReader(joined(ownLines));
+    const out = new Collector();
+    const follower = new ChainFollower(reader, SESSION, null, out.sink, { holders: () => 1, pinned: () => true, isOwnRecord });
+    await follower.start();
+    expect(follower.snapshot().skeletons.get('h1' as MessageUuid)?.own).toBe(true);
+    reader.append(joined([line({ ...JSON.parse(SIBLING_LINES[3]), entrypoint: 'cli' })]));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'r1']);
+    expect(out.of('tool.result').map((e) => e.toolUseId)).toEqual(['t1']);
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(out.of('boundary.rewind')).toEqual([]);
+    expect(out.of('notice.posted')).toEqual([]);
+    const before = out.events();
+    await follower.refold();
+    expect(out.events()).toEqual(before); // no invisible branch was held for later
+  });
+
+  it('an unanchored rewind cutting only attachments remains silent', async () => {
+    const { reader, follower, out } = await started(joined([
+      ...SIBLING_LINES.slice(0, 3),
+      line({ type: 'last-prompt', leafUuid: 'absent', rewound: true, lastPrompt: 'synthetic prefill' }),
+    ]));
+    expect(follower.snapshot().rewind?.phase).toBe('unanchored');
+    reader.append(joined(SIBLING_LINES.slice(3, 4)));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'r1']);
+    expect(follower.snapshot().rewind).toBeNull();
+    expect(out.of('boundary.rewind')).toEqual([]);
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(out.of('notice.posted')).toEqual([]);
+  });
+});
+
 const FULL_CHAIN = ['e3b48834', '030c4331', '6a832db5', 'a7225f9b', '73dad25d', '521cf9e3', '24b7be38', 'ae68c39d', '075fef0b', '1c54a876', '7b176449', 'edf0f954', 'af765f44', 'a4d68c72', '7c05f769'];
 const CUT_CHAIN = FULL_CHAIN.slice(0, 12); // … edf0f954
 
