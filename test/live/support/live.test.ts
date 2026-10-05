@@ -145,7 +145,7 @@ describe('live suite bookkeeping', () => {
     try {
       expect(() => new LiveHost({ userData: '/unused' })).toThrow(/scratch CLAUDE_CONFIG_DIR/);
       await expect(withRawProcess({ userData: '/unused', scratch: () => '/unused' }, liveSpec('/unused'), async () => {})).rejects.toThrow(/scratch CLAUDE_CONFIG_DIR/);
-      for (const configHome of ['', join(homedir(), '.claude'), join(homedir(), '.claude', 'projects')]) {
+      for (const configHome of ['', homedir(), join(homedir(), '.claude'), join(homedir(), '.claude', 'projects')]) {
         expect(() => assertConfigHomeSafe({ configHome, controls: [] })).toThrow(/scratch CLAUDE_CONFIG_DIR/);
       }
     } finally {

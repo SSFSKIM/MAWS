@@ -59,7 +59,7 @@ export type PersistingControl = (typeof PERSISTING_CONTROLS)[number];
 // Resolve existing symlinks too: a scratch-named link to the owner's store is still the owner's store.
 export function assertConfigHomeSafe(plan: { configHome: string | null; controls: readonly PersistingControl[] }): void {
   const canonical = (path: string): string => existsSync(path) ? realpathSync(path) : resolve(path);
-  if (plan.configHome && isAbsolute(plan.configHome) && !isUnder(canonical(plan.configHome), canonical(join(homedir(), '.claude')))) return;
+  if (plan.configHome && isAbsolute(plan.configHome) && canonical(plan.configHome) !== canonical(homedir()) && !isUnder(canonical(plan.configHome), canonical(join(homedir(), '.claude')))) return;
   throw new Error(`live case refused before spawning: ${plan.controls.join(', ') || 'session transcript'} would persist into the owner's config home; run it under a scratch CLAUDE_CONFIG_DIR`);
 }
 
