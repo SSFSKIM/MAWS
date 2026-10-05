@@ -1,0 +1,10 @@
+{"type": "user", "uuid": "u", "parentUuid": null, "message": {"content": "Inspect the sample files."}}
+{"type": "assistant", "uuid": "a1", "parentUuid": "u", "message": {"id": "response", "content": [{"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "/sample/one"}}]}}
+{"type": "assistant", "uuid": "a2", "parentUuid": "a1", "message": {"id": "response", "content": [{"type": "tool_use", "id": "t2", "name": "Read", "input": {"file_path": "/sample/two"}}]}}
+{"type": "assistant", "uuid": "diagnostic", "parentUuid": "a2", "isApiErrorMessage": true, "message": {"id": "error-response", "model": "<synthetic>", "content": [{"type": "text", "text": "Request failed"}]}}
+{"type": "user", "uuid": "meta", "parentUuid": "diagnostic", "isMeta": true, "message": {"content": "Synthetic context delivery."}}
+{"type": "system", "uuid": "system", "parentUuid": "meta", "subtype": "stop_hook_summary"}
+{"type": "attachment", "uuid": "attachment", "parentUuid": "system", "attachment": {"type": "hook_success"}}
+{"type": "user", "uuid": "notification", "parentUuid": "attachment", "message": {"content": "<task-notification><task-id>task</task-id><status>completed</status></task-notification>"}}
+{"type": "user", "uuid": "r1", "parentUuid": "a1", "sourceToolAssistantUUID": "a1", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "Sample one"}]}}
+{"type": "user", "uuid": "r2", "parentUuid": "a2", "sourceToolAssistantUUID": "a2", "message": {"content": [{"type": "tool_result", "tool_use_id": "t2", "content": "Sample two"}]}}

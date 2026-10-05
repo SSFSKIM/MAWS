@@ -564,6 +564,12 @@ interface TaskNotification {
   outputFile: string | null;
 }
 
+// The same disk shape used by the follower's response-delivery classification.
+export function isTaskNotification(record: TranscriptRecord): boolean {
+  const content = messageContent(record);
+  return record.type === 'user' && typeof content === 'string' && parseTaskNotification(content) !== null;
+}
+
 // The engine's `<task-notification>` block (SPEC 20.9): the outcome of a background task, delivered as a user record.
 function parseTaskNotification(content: string): TaskNotification | null {
   if (!content.trimStart().startsWith('<task-notification>')) return null;

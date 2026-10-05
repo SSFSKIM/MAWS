@@ -14,7 +14,7 @@ import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
-import { createBackfillContext, eventBase, recordToEvents, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, eventBase, recordToEvents, isTaskNotification, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 export interface Skeleton {
   uuid: MessageUuid;
@@ -23,6 +23,11 @@ export interface Skeleton {
   messageId: string | null; // assistant API response group; never the message payload
   sourceToolAssistantUuid: MessageUuid | null;
   isToolResult: boolean;
+  agentId: string | null;
+  isSidechain: boolean;
+  isDiagnostic: boolean;
+  delivery: 'tail' | 'interleave' | null;
+  deliveryOwner: MessageUuid | null; // proved at adoption, never inferred across a branch
   isProgress: boolean;
   startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
   endsTurn: boolean; // a `system/turn_duration` record (backfill's `turn.ended`); not a blocked prompt's record, also written for a steer dropped mid-turn
@@ -178,6 +183,13 @@ class FollowerCore {
       messageId: record.type === 'assistant' && typeof message?.id === 'string' ? message.id : null,
       sourceToolAssistantUuid: record.type === 'user' && typeof record.sourceToolAssistantUUID === 'string' ? record.sourceToolAssistantUUID as MessageUuid : null,
       isToolResult: record.type === 'user' && Array.isArray(message?.content) && message.content.some((block: unknown) => typeof block === 'object' && block !== null && 'type' in block && block.type === 'tool_result'),
+      agentId: typeof record.agentId === 'string' ? record.agentId : null,
+      isSidechain: record.isSidechain === true,
+      isDiagnostic: record.type === 'assistant' && record.isApiErrorMessage === true,
+      delivery: record.isCompactSummary === true || (record.type === 'system' && record.subtype === 'compact_boundary') ? null
+        : record.type === 'attachment' || record.type === 'system' || isTaskNotification(record) ? 'interleave'
+        : (record.type === 'user' && record.isMeta === true) || (record.type === 'assistant' && record.isApiErrorMessage === true) ? 'tail' : null,
+      deliveryOwner: null,
       isProgress: record.type === 'progress',
       startsTurn: startsTurn(record),
       endsTurn: record.type === 'system' && record.subtype === 'turn_duration',
@@ -246,6 +258,8 @@ class FollowerCore {
   private async handleRecord(record: TranscriptRecord, skeleton: Skeleton): Promise<void> {
     const parent = this.throughProgress(skeleton.parentUuid);
     if (parent === this.leaf) {
+      const group = parent === null ? null : this.responseGroup(parent);
+      if (group !== null && skeleton.delivery !== null && this.sameScope(skeleton, group)) skeleton.deliveryOwner = group.uuid;
       this.extend(record, skeleton.uuid);
       return;
     }
@@ -328,7 +342,12 @@ class FollowerCore {
     // The incoming record must belong too: a prompt or a different response at an older tool is still a real fork.
     if (!leafSibling && parent !== null && this.onChain.has(parent) && removed.length > 0) {
       const group = this.responseGroup(parent);
-      if (group !== null && this.inResponseGroup(uuid, group) && removed.every((member) => this.inResponseGroup(member, group))) {
+      const incoming = this.skeletons.get(uuid)!;
+      const delivery = group !== null && incoming.delivery === 'interleave' && this.sameScope(incoming, group)
+        // Two delivery tails selecting the same older parent are ambiguous; only core siblings can be crossed.
+        && removed.every((member) => this.skeletons.get(member)?.delivery === null || this.skeletons.get(member)?.type === 'attachment');
+      if (group !== null && (this.inResponseGroup(uuid, group) || delivery) && removed.every((member) => this.inResponseGroup(member, group))) {
+        if (delivery) incoming.deliveryOwner = group.uuid;
         this.extend(record, uuid);
         return;
       }
@@ -368,27 +387,24 @@ class FollowerCore {
     }
   }
 
-  // Nearest assistant ancestor, following a result's issuing assistant rather than its incidental file parent.
-  private responseGroup(parent: MessageUuid): string | null {
-    let current: MessageUuid | null = parent;
-    for (let hops = 0; current !== null && hops < this.skeletons.size; hops++) {
-      const skeleton = this.skeletons.get(current);
-      if (skeleton === undefined) return null;
-      if (skeleton.type === 'assistant') return skeleton.messageId;
-      current = skeleton.isToolResult ? skeleton.sourceToolAssistantUuid ?? skeleton.parentUuid : skeleton.parentUuid;
-    }
-    return null;
+  // A diagnostic never owns a response. Delivery ownership is recorded only on an unbranched extension or a
+  // proved interleave; ancestry alone cannot turn an older prompt or a branched meta tail into a group member.
+  private responseGroup(uuid: MessageUuid): Skeleton | null {
+    const skeleton = this.skeletons.get(uuid);
+    if (skeleton === undefined) return null;
+    if (skeleton.type === 'assistant' && !skeleton.isDiagnostic) return skeleton.messageId === null ? null : skeleton;
+    const source = skeleton.isToolResult ? skeleton.sourceToolAssistantUuid ?? skeleton.parentUuid : skeleton.deliveryOwner;
+    const assistant = source === null ? undefined : this.skeletons.get(source);
+    return assistant?.type === 'assistant' && !assistant.isDiagnostic && assistant.messageId !== null && this.sameScope(skeleton, assistant) ? assistant : null;
   }
 
-  private inResponseGroup(uuid: MessageUuid, group: string): boolean {
-    const skeleton = this.skeletons.get(uuid);
-    if (skeleton === undefined) return false;
-    if (skeleton.type === 'attachment') return true;
-    if (skeleton.type === 'assistant') return skeleton.messageId === group;
-    if (!skeleton.isToolResult) return false;
-    const source = skeleton.sourceToolAssistantUuid ?? skeleton.parentUuid;
-    const assistant = source === null ? undefined : this.skeletons.get(source);
-    return assistant?.type === 'assistant' && assistant.messageId === group;
+  private sameScope(a: Skeleton, b: Skeleton): boolean {
+    return a.agentId === b.agentId && a.isSidechain === b.isSidechain;
+  }
+
+  private inResponseGroup(uuid: MessageUuid, group: Skeleton): boolean {
+    const owner = this.responseGroup(uuid);
+    return owner !== null && owner.messageId === group.messageId && this.sameScope(owner, group);
   }
 
   // W7: a second writer's branch that would retract records MAWS wrote, while a foreign process holds the session. A
