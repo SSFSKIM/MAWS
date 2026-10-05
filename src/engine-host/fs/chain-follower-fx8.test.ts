@@ -63,3 +63,35 @@ describe('FX8 eligible response deliveries', () => {
     expect(cuts(events)).toMatchObject([{ kind: 'boundary.retraction', retractedMessageUuids: delivery.slice(1).map((r) => r.uuid) }]);
   });
 });
+
+
+describe('FX8 local-command-only cuts', () => {
+  it.each([false, true])('swaps local bookkeeping without retracting its output (tail=%s)', async (tail) => {
+    const { follower, events } = await follow(fixture('local-cuts'), tail);
+    expect(cuts(events)).toEqual([]);
+    expect(notices(events)).toEqual([]);
+    expect(follower.snapshot().chain).toEqual(['u', 'a', 'next']);
+    expect(events.filter((e) => e.kind === 'user.message' && e.origin === 'local-command').map((e) => e.messageUuid)).toContain('system-output');
+  });
+
+  it('absorbs only the deferred bare compact echo, with optional attachments', async () => {
+    const base = fixture('local-cuts');
+    const records = [...base.slice(0, 2), { type: 'user', uuid: 'compact', parentUuid: 'a', message: { content: '/compact' } }, { type: 'attachment', uuid: 'hook', parentUuid: 'compact', attachment: { type: 'hook_success' } }, base.at(-1)!];
+    const { follower, events } = await follow(records);
+    expect(cuts(events)).toEqual([]);
+    expect(notices(events)).toEqual([]);
+    expect(follower.snapshot().chain).toEqual(['u', 'a', 'next']);
+  });
+
+  it.each(['<command-name>/review</command-name><command-message>review</command-message>', '/review', '/compact keep the sample', 'A real prompt.', '<command-name>/review</command-name> extra prose'])('does not absorb a human or skill prompt: %s', async (content) => {
+    const base = fixture('local-cuts');
+    const { events } = await follow([...base.slice(0, 2), { type: 'user', uuid: 'human', parentUuid: 'a', message: { content } }, base.at(-1)!]);
+    expect(cuts(events)).toMatchObject([{ kind: 'boundary.retraction', retractedMessageUuids: ['human'] }]);
+  });
+
+  it('keeps a genuine fork when a local command accompanies a real answer', async () => {
+    const base = fixture('local-cuts');
+    const { events } = await follow([...base.slice(0, -1), { type: 'assistant', uuid: 'answer', parentUuid: 'system-output', message: { id: 'real', content: [{ type: 'text', text: 'Another answer.' }] } }, base.at(-1)!]);
+    expect(cuts(events)).toHaveLength(1);
+  });
+});

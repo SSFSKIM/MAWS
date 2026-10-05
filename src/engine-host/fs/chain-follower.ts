@@ -14,7 +14,7 @@ import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
-import { createBackfillContext, eventBase, recordToEvents, isTaskNotification, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, eventBase, recordToEvents, isTaskNotification, localCommandKind, singleText, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 export interface Skeleton {
   uuid: MessageUuid;
@@ -28,6 +28,8 @@ export interface Skeleton {
   isDiagnostic: boolean;
   delivery: 'tail' | 'interleave' | null;
   deliveryOwner: MessageUuid | null; // proved at adoption, never inferred across a branch
+  localCommand: boolean;
+  localCaveat: boolean;
   isProgress: boolean;
   startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
   endsTurn: boolean; // a `system/turn_duration` record (backfill's `turn.ended`); not a blocked prompt's record, also written for a steer dropped mid-turn
@@ -190,6 +192,10 @@ class FollowerCore {
         : record.type === 'attachment' || record.type === 'system' || isTaskNotification(record) ? 'interleave'
         : (record.type === 'user' && record.isMeta === true) || (record.type === 'assistant' && record.isApiErrorMessage === true) ? 'tail' : null,
       deliveryOwner: null,
+      localCaveat: localCommandKind(record) === 'caveat',
+      localCommand: localCommandKind(record) === 'caveat' || localCommandKind(record) === 'output'
+        || (localCommandKind(record) === 'echo' && typeof record.parentUuid === 'string' && this.skeletons.get(record.parentUuid as MessageUuid)?.localCaveat === true)
+        || (record.type === 'user' && singleText(record) === '/compact'),
       isProgress: record.type === 'progress',
       startsTurn: startsTurn(record),
       endsTurn: record.type === 'system' && record.subtype === 'turn_duration',
@@ -352,17 +358,24 @@ class FollowerCore {
         return;
       }
     }
+    // FX8 C: these records are local history rather than model conversation; swapping them must not retract
+    // their already-delivered output. Attachments may accompany a deferred bare /compact echo.
+    const localOnly = removed.length > 0 && removed.every((member) => {
+      const skeleton = this.skeletons.get(member)!;
+      return skeleton.localCommand || skeleton.type === 'attachment';
+    });
+    const silentSwap = leafSibling || localOnly;
     // W7: decided before any reading of the branch as a rewind: while a foreign process holds the session, its branch
     // never retracts what MAWS wrote (after MAWS's exit one live holder is left, which the terminal-rewind reading would
     // otherwise accept). MAWS's branch stays in view; this record joins the skeletons only, and one notice says why.
-    if (!leafSibling && this.holdsBack(record, removed)) {
+    if (!silentSwap && this.holdsBack(record, removed)) {
       if (!this.held) this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:held`), kind: 'notice.posted', level: 'warning', text: HELD_NOTICE, key: 'transcript_branch_held' });
       this.held = true;
       return;
     }
-    const terminal = !leafSibling && this.rewind === null ? this.terminalRewind(record, parent) : null;
+    const terminal = !silentSwap && this.rewind === null ? this.terminalRewind(record, parent) : null;
     for (const member of removed) this.emitted.delete(member);
-    if (!leafSibling && this.chain.length > 0) {
+    if (!silentSwap && this.chain.length > 0) {
       if (terminal !== null) {
         this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:rewind`), kind: 'boundary.rewind', ...terminal, prefillText: null });
       } else if (this.rewind?.phase === 'unanchored') {

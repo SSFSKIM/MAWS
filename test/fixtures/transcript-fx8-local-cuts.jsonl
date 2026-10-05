@@ -1,0 +1,7 @@
+{"type": "user", "uuid": "u", "parentUuid": null, "message": {"content": "A sample prompt."}}
+{"type": "assistant", "uuid": "a", "parentUuid": "u", "message": {"id": "answer", "content": [{"type": "text", "text": "A sample answer."}]}}
+{"type": "user", "uuid": "caveat", "parentUuid": "a", "isMeta": true, "message": {"content": "<local-command-caveat>Local command context.</local-command-caveat>"}}
+{"type": "user", "uuid": "echo", "parentUuid": "caveat", "message": {"content": "<command-name>/status</command-name><command-message>status</command-message><command-args></command-args>"}}
+{"type": "user", "uuid": "output", "parentUuid": "echo", "message": {"content": "<local-command-stdout>Ready</local-command-stdout>"}}
+{"type": "system", "uuid": "system-output", "parentUuid": "output", "subtype": "local_command", "content": "<local-command-stdout>Ready again</local-command-stdout>"}
+{"type": "user", "uuid": "next", "parentUuid": "a", "message": {"content": "Continue the sample."}}

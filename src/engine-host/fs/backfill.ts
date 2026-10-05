@@ -6,6 +6,7 @@
 import type { ContentBlock, EventBase, SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
 import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
+import { slashCommandLine } from '@shared/wire/local-command';
 import { INTERRUPT_MARKER } from '../normalizer-support';
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
@@ -522,10 +523,24 @@ function isInterruptMarker(record: TranscriptRecord): boolean {
 // command's turn, as the live stream's replay of it does (pass3/compact seq 45), so it opens none of its own (a turn of
 // its own read "Worked for 0s" under a bubble-less divider).
 function isLocalCommandOutput(record: TranscriptRecord): boolean {
-  if (record.type !== 'user') return false;
+  return localCommandKind(record) === 'caveat' || localCommandKind(record) === 'output';
+}
+
+// Shared with the follower: engine-tagged local history, not arbitrary slash-prefixed human/skill prompts.
+// A user command echo also needs a preceding caveat to distinguish it from a skill invocation.
+export function localCommandKind(record: TranscriptRecord): 'caveat' | 'echo' | 'output' | null {
+  if (record.type === 'system') return record.subtype === 'local_command' || record.subtype === 'local_command_output' ? 'output' : null;
+  if (record.type !== 'user') return null;
+  const text = singleText(record);
+  if (text === null) return null;
+  if (/^\s*<local-command-caveat>/.test(text)) return 'caveat';
+  if (/^\s*<local-command-(stdout|stderr)>/.test(text)) return 'output';
+  return slashCommandLine(text) === null ? null : 'echo';
+}
+
+export function singleText(record: TranscriptRecord): string | null {
   const content = messageContent(record);
-  const text = typeof content === 'string' ? content : Array.isArray(content) && content.length === 1 && isContentBlock(content[0]) && content[0].type === 'text' && typeof content[0].text === 'string' ? content[0].text : null;
-  return text !== null && /^\s*<local-command-(stdout|caveat)>/.test(text);
+  return typeof content === 'string' ? content : Array.isArray(content) && content.length === 1 && isContentBlock(content[0]) && content[0].type === 'text' && typeof content[0].text === 'string' ? content[0].text : null;
 }
 
 function messageContent(record: TranscriptRecord): unknown {
