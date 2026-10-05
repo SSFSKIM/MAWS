@@ -377,7 +377,8 @@ it('S3 keeps warning and notice informational records, not info/empty, and prese
 });
 
 it('S4 retains API-error envelopes as diagnostics and uses the last assistant evidence for turn outcomes', async () => {
-  const { events, rows } = await d1Fixture('api-errors');
+  const { events, state, rows } = await d1Fixture('api-errors');
+  expect(ofKind(rowsOf(state), 'error').map((row) => row.text)).toEqual(['Authentication unavailable.', 'Authentication unavailable.']);
   expect(events.filter((e) => e.kind === 'assistant.block.complete' && e.model === '<synthetic>')).toEqual([
     expect.objectContaining({ isApiErrorMessage: true, error: 'authentication_failed' }),
     expect.objectContaining({ isApiErrorMessage: true, error: 'authentication_failed' }),

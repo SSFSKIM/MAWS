@@ -103,11 +103,12 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // it, Codex's persistent unit), a hook that got in the way, the answer, a boundary (compaction, reset, retraction:
 // charter §5.3, the visible transcript stays true to the model's context), a slash command's output and an answered
 // question's receipt (W4, the owner's ruling: what the human answered stays in view; T3's receipts outlive the fold
-// too), and what a plugin said in the transcript (R1: its log lines and load issues, as the terminal keeps them). The
-// divider folds everything else, so a turn of a local command alone (`/compact`: its boundary and its output) has no
-// work and no "Worked for 0s" divider. A question still counts as work for where the answer starts (WORK_ROWS).
+// too), what a plugin said in the transcript (R1: its log lines and load issues, as the terminal keeps them), and fatal
+// API diagnostics (transient retries remain work). The divider folds everything else, so a turn of a local command
+// alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
+// work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin'));
+  row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')));
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.

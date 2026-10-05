@@ -4,7 +4,7 @@ import { heldRow, rowsOf, turnSummary, withAllExpanded, withQueueTail } from './
 import { cellId, rowId, turnId } from './keys';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
-import { BASH_RESULT, builder, task, tool, uuid } from './test-events';
+import { api, BASH_RESULT, builder, task, tool, uuid } from './test-events';
 import { configureTime } from './time';
 
 const reduce = (events: SessionEvent[]) => applyEvents(createState(null, null), events);
@@ -353,6 +353,26 @@ describe('time separators', () => {
     expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'user', 'assistant_text', 'time', 'user', 'assistant_text', 'time', 'divider', 'assistant_text']); // the engine turn's divider
     expect(find(list, 'time', 0)).toMatchObject({ id: rowId.time(turnId.ofMessage(uuid('u1'))), label: 'Today 10:00 AM' });
     expect(find(list, 'time', 1).label).toBe('Today 11:31 AM');
+  });
+});
+
+describe('API diagnostics outside the work fold', () => {
+  it.each([false, true])('keeps a fatal envelope visible but folds transient retries (streamed %s)', (streamed) => {
+    const b = builder();
+    b.turn('u1');
+    b.emit('api.retry', { attempt: 1, maxRetries: 3, retryDelayMs: 500, errorStatus: 529, error: 'overloaded' });
+    if (streamed) b.emit('assistant.block.delta', { apiMessageId: api('failure'), blockIndex: 0, blockType: 'text', textDelta: 'Authentication', thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
+    b.text('failure', 0, 'Authentication unavailable.', { isApiErrorMessage: true, error: 'authentication_failed', model: '<synthetic>' });
+    b.end(['u1'], { result: 'error_during_execution', isError: true });
+
+    const state = reduce(b.events);
+    const folded = rowsOf(state);
+    expect(folded.filter((row) => row.kind === 'error')).toEqual([
+      expect.objectContaining({ turnId: state.order[0], scope: 'api', severity: 'error', text: 'Authentication unavailable.' }),
+    ]);
+    expect(find(folded, 'divider')).toMatchObject({ state: 'failed', expanded: false });
+    expect(folded.some((row) => row.kind === 'assistant_text')).toBe(false);
+    expect(rowsOf(withAllExpanded(state)).filter((row) => row.kind === 'error').map((row) => row.severity)).toEqual(['transient', 'error']);
   });
 });
 
