@@ -12,8 +12,8 @@ test('relay gate bounds a silent server and skips refusal/non-200 responses', as
       if (req.url.startsWith('/hang/')) return;
       res.writeHead(req.url.startsWith('/bad/') ? 503 : 200); res.end();
     });
-    server.listen(0, '127.0.0.1', () => console.log(server.address().port));
-  `], { stdio: ['ignore', 'pipe', 'pipe'] });
+    server.listen(0, '127.0.0.1', () => process.stdout.write(String(server.address().port)));
+  `], { env: { ...process.env, FORCE_COLOR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   const exited = once(server, 'exit');
   const [chunk] = await once(server.stdout!, 'data');
   const url = `http://127.0.0.1:${Number(String(chunk).trim())}`;
