@@ -258,7 +258,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const blockRow = (block: LiveBlock, at: string): Item | null => {
     const live = !block.completed;
     if (dropped(block.messageUuid)) return null;
-    if (block.isApiErrorMessage) return { kind: 'notice', row: { id: block.rowId, turnId: turn.id, at, kind: 'error', severity: 'error', text: block.buffer, attempt: null, scope: 'api', lostAttentionCount: null } };
+    if (block.isApiErrorMessage) return { kind: 'row', row: { id: block.rowId, turnId: turn.id, at, kind: 'error', severity: 'error', text: block.buffer, attempt: null, scope: 'api', lostAttentionCount: null } };
     // The mod adapter already rejects empty source text. Rewritten text is presentation-only and never reaches this guard.
     if (block.blockType === 'text' && !live && block.buffer.trim() === '') return null;
     if (block.blockType === 'text') return { kind: 'text', row: { id: block.rowId, turnId: turn.id, at, kind: 'assistant_text', messageUuid: block.messageUuid, blockIndex: block.blockIndex, markdown: block.buffer, live, phase: 'answer', model: block.model } };

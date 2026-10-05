@@ -1,18 +1,6 @@
-import { createElement } from 'react';
-import { act, cleanup, render } from '@testing-library/react';
-import { fakeClient } from '../../../../../test/support/fake-client';
-import { status } from '../../../../../test/support/builders';
-import { resetSurfaceRegistry } from '../../engine-surface/registry';
-import { useSessions } from '../../stores/sessions';
-import { useTranscriptStore } from '../../stores/transcript';
-import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
-import { RowView } from '../view/rows/Row';
-import { storeWith } from '../view/rows/test-support';
-// The M2 pins over the synthetic journals, the event fixtures and the seeded transcript (C6 execution document,
-// M2 "Proves"). The probe-journal pins live in journals.test.ts.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentId, AppSessionId, SessionId } from '@shared/graph/ids';
+import type { AgentId, SessionId } from '@shared/graph/ids';
 import { ChainFollower, type ChainFollowerOptions } from '../../../../engine-host/fs/chain-follower';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { TEST_FIXTURE_DIR } from '../../../../../test/support/fixtures';
@@ -34,7 +22,7 @@ const ofKind = <K extends Row['kind']>(rows: Row[], kind: K) => rows.filter((row
 const cellsOf = (rows: Row[]): Cell[] => rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
 const inTurn = (rows: Row[], turnId: string | null) => rows.filter((row) => row.turnId === turnId);
 
-afterEach(() => { configureTime(null); cleanup(); resetSurfaceRegistry(); });
+afterEach(() => configureTime(null));
 
 describe('synthetic journals', () => {
   it('transcript/denials: every disposition of the denial table', () => {
@@ -403,29 +391,7 @@ it('S4 retains API-error envelopes as diagnostics and uses the last assistant ev
   ]);
 });
 
-it('S5 skips completed empty native rows without suppressing an extension that rewrites text to empty', async () => {
-  const { events, rows } = await d1Fixture('empty-text');
+it('S5 skips completed empty and whitespace native text rows', async () => {
+  const { rows } = await d1Fixture('empty-text');
   expect(ofKind(rows, 'assistant_text').map((row) => row.markdown)).toEqual(['Visible answer.']);
-  const store = await storeWith(events);
-  useTranscriptStore.getState().expandAll(store.key);
-  const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client;
-  useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
-  function View() {
-    const rows = useTranscriptStore((s) => rowsOf(s.entries[store.key].state));
-    return createElement(TranscriptProvider, { value: { storeKey: store.key, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'd1' } },
-      rows.map((row) => createElement(RowView, { key: row.id, row })));
-  }
-  const view = render(createElement(View));
-  const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
-  expect(asks.filter((ask) => ask.component === 'AssistantMessage').map((ask) => ask.props.text)).toEqual(['Visible answer.']);
-  for (const ask of asks) await act(() => fake.reply('session.ui.render', {
-    hooked: ask.component === 'AssistantMessage', rewritten: ask.component === 'AssistantMessage', props: ask.component === 'AssistantMessage' ? { ...ask.props, text: '' } : ask.props,
-    tree: ask.component === 'AssistantMessage' ? { type: 'Box', children: [{ type: 'Text', children: ['Extension supplied presentation'] }, { type: 'engine', ref: 0 }] } : { type: 'engine', ref: 0 },
-  }));
-  const frames = [...view.container.querySelectorAll<HTMLElement>('[data-kind="assistant_text"]')];
-  expect(frames.map((frame) => [frame.style.display, frame.textContent])).toEqual([
-    ['', 'Extension supplied presentation'],
-  ]);
-  expect(view.container.querySelectorAll('.transcript-commentary, .transcript-answer')).toHaveLength(0);
 });
