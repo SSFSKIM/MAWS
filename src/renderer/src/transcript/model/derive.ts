@@ -10,7 +10,7 @@ import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { cellOf, editCounts, filePathOf, type ToolRecord, type TurnContext } from './cells';
 import { hookNotice, type HookRecord } from './hooks';
-import { agentMessageCopy, boundaryCopy, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
+import { agentMessageCopy, boundaryCopy, BRANCH_HISTORY_DETAIL, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
 import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
@@ -821,7 +821,7 @@ function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'bo
     case 'boundary.reset':
       return { ...base, boundaryKind: 'reset', text: boundaryCopy({ kind: 'reset', trigger: event.trigger }), detail: event.newConversationId };
     case 'boundary.retraction':
-      return { ...base, boundaryKind: 'retraction', text: boundaryCopy({ kind: 'retraction', reason: event.reason, fallbackModel: event.fallbackModel }), detail: event.retractedMessageUuids.join(', ') || null };
+      return { ...base, boundaryKind: 'retraction', text: boundaryCopy({ kind: 'retraction', reason: event.reason, fallbackModel: event.fallbackModel }), ...(event.reason === 'transcript_branch' ? { secondary: BRANCH_HISTORY_DETAIL, detail: [event.reason, ...event.retractedMessageUuids].join(' · ') } : { detail: event.retractedMessageUuids.join(', ') || null }) };
   }
 }
 

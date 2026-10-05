@@ -400,3 +400,33 @@ it('S5 skips completed empty and whitespace native text rows', async () => {
   const { rows } = await d1Fixture('empty-text');
   expect(ofKind(rows, 'assistant_text').map((row) => row.markdown)).toEqual(['Visible answer.']);
 });
+
+
+describe('FX8 disk conversation history', () => {
+  async function fx8(name: string) {
+    const events: SessionEvent[] = [];
+    const follower = new ChainFollower(new MemoryFileReader(readFileSync(join(TEST_FIXTURE_DIR, `transcript-fx8-${name}.jsonl`))), 'fx8-session' as SessionId, null,
+      (event) => { if (event.t === 'events') events.push(...event.events); }, { holders: () => 2 });
+    await follower.start();
+    follower.stop();
+    return stateOf(events);
+  }
+
+  it('a real fork persists outside folded work, without a second-writer notice', async () => {
+    configureTime({ now: '2026-10-04T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' });
+    const state = await fx8('fork');
+    const rows = rowsOf(state);
+    const boundaries = ofKind(rows, 'boundary');
+    expect(boundaries).toHaveLength(1);
+    expect(boundaries[0]).toMatchObject({ text: 'Conversation continued from an earlier point', secondary: 'Later messages from the previous path are no longer part of the current conversation history' });
+    expect(ofKind(rows, 'error')).toEqual([]);
+    expect(ofKind(rowsOf(withAllExpanded(state)), 'boundary')).toEqual(boundaries);
+    await expect(JSON.stringify(rows, null, 2) + '\n').toMatchFileSnapshot(join(TEST_FIXTURE_DIR, '../snapshots/transcript/fx8/fork.rows.json'));
+  });
+
+  it('a local-only swap leaves command output visible as local history', async () => {
+    const rows = rowsOf(await fx8('local-cuts'));
+    expect(ofKind(rows, 'boundary')).toEqual([]);
+    expect(ofKind(rows, 'local_command').map((row) => row.text)).toEqual(['Ready', 'Ready again']);
+  });
+});

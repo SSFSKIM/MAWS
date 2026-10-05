@@ -226,6 +226,23 @@ describe('request slot', () => {
 });
 
 describe('boundary row', () => {
+  it('a conversation fork draws quiet primary and secondary copy, identifiers only in technical detail', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Previous path');
+    b.emit('boundary.retraction', { retractedMessageUuids: [uuid('m1-u0')], reason: 'transcript_branch', fallbackModel: null });
+    b.end(['u1']);
+    const store = await storeWith(b.events);
+    const boundary = ofKind(store.rows(), 'boundary')[0];
+    const view = renderRow(boundary, { storeKey: store.key });
+    expect(screen.getByText('Conversation continued from an earlier point')).toBeTruthy();
+    expect(screen.getByText('Later messages from the previous path are no longer part of the current conversation history')).toBeTruthy();
+    const element = view.container.querySelector('[data-boundary-kind="retraction"]')!;
+    expect(element.getAttribute('title')).toBe('transcript_branch · m1-u0');
+    expect(element.textContent).not.toMatch(/transcript_branch|m1-u0|Another process|Response retracted/);
+    expect(element.querySelector('button')).toBeNull();
+  });
+
   it('transcript/boundaries: compaction and retraction read as boundaries, and the retracted text row is gone from where the boundary stands', async () => {
     const store = await expanded(journalToEvents(loadSyntheticJournal('boundaries')));
     const boundaries = ofKind(store.rows(), 'boundary');

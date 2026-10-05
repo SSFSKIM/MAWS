@@ -275,11 +275,14 @@ export function boundaryCopy(input: BoundaryCopyInput): string {
     case 'reset':
       return input.trigger === null ? 'Conversation reset' : `Conversation reset · ${RESET_TRIGGERS[input.trigger] ?? input.trigger}`;
     case 'retraction':
+      if (input.reason === 'transcript_branch') return 'Conversation continued from an earlier point';
       return `Response retracted · ${input.reason}${input.fallbackModel ? ` · switched to ${input.fallbackModel}` : ''}`;
     case 'rewind':
       return `${rewindLabel(input.hiddenRows)} · ${REWIND_TOGGLE[input.revealed ? 'hide' : 'show']}`;
   }
 }
+
+export const BRANCH_HISTORY_DETAIL = 'Later messages from the previous path are no longer part of the current conversation history';
 
 // The rewind boundary's line without its toggle, and the toggle (the row renders the toggle as a button).
 export const rewindLabel = (hiddenRows: number) => `Rewound to here · ${plural(hiddenRows, 'message')} hidden`;

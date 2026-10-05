@@ -4,7 +4,7 @@
 // plus the trailing partial line; every poke reads `[offset, size)` once. Oversized partials retain only their start
 // offset until a newline arrives, then re-read that one complete record for parsing. Rewinds arrive as `last-prompt {rewound: true}` anchors that cut the chain at
 // once; the engine then continues from an attachment the cut removed, which the announced `rewind` state recognises.
-// A branch nothing explains is a second writer: retraction plus a warning, unless the session is contested (W7: a
+// An unexplained cut changes conversation history, without proving who wrote it. If contested (W7: a
 // foreign process holds it now) and the branch would replace records MAWS wrote with another writer's, in which case
 // MAWS's branch stays in view and the other is held back until the holder exits and the follower re-folds. Every
 // method is serialised behind one promise chain, so a watcher event, a reconcile tick and a follow request never
@@ -390,9 +390,8 @@ class FollowerCore {
           this.produce(null, { ...eventBase(this.ctx, `anchor:${this.rewind.anchorOffset}`), kind: 'boundary.rewind', targetMessageUuid, precedingAssistantUuid: this.rewind.leafUuid, prefillText: this.rewind.prefillText });
         }
       } else {
-        // No anchor explains this, or the announced rewind rejected the parent: a second writer (pass-2 item 10).
+        // No anchor explains this, or the announced rewind rejected the parent. The cut does not prove contention.
         this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:retraction`), kind: 'boundary.retraction', retractedMessageUuids: removed, reason: 'transcript_branch', fallbackModel: null });
-        this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:notice`), kind: 'notice.posted', level: 'warning', text: 'Another process wrote a sibling branch into this transcript', key: 'transcript_branch' });
       }
     }
     this.chain = newChain;

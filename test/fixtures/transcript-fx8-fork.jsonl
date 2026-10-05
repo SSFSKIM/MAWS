@@ -1,0 +1,5 @@
+{"type": "user", "uuid": "u", "parentUuid": null, "message": {"content": "Inspect sample one."}}
+{"type": "assistant", "uuid": "a", "parentUuid": "u", "message": {"id": "response-one", "content": [{"type": "tool_use", "id": "t", "name": "Read", "input": {"file_path": "/sample/one"}}]}}
+{"type": "user", "uuid": "r", "parentUuid": "a", "sourceToolAssistantUUID": "a", "message": {"content": [{"type": "tool_result", "tool_use_id": "t", "content": "Sample one"}]}}
+{"type": "assistant", "uuid": "answer", "parentUuid": "r", "message": {"id": "answer-one", "content": [{"type": "text", "text": "Sample one is ready."}]}}
+{"type": "user", "uuid": "fork", "parentUuid": "u", "message": {"content": "Inspect sample two instead."}}

@@ -84,7 +84,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
     scope: z.enum(['turn', 'task', 'process', 'transport', 'request', 'api', 'reconnect', 'notice', 'exit', 'hook', 'plugin' /* R1 */]), lostAttentionCount: nullable(z.number()),
     action: z.enum(['edit_prompt', 'engine_settings']).optional(), // W13: engine_settings
   }),
-  z.strictObject({ ...base, kind: z.literal('boundary'), boundaryKind: z.enum(['compaction', 'reset', 'retraction', 'rewind']), text: z.string(), detail: nullable(z.string()), hiddenRows: z.number(), revealed: z.boolean() }),
+  z.strictObject({ ...base, kind: z.literal('boundary'), boundaryKind: z.enum(['compaction', 'reset', 'retraction', 'rewind']), text: z.string(), secondary: z.string().optional(), detail: nullable(z.string()), hiddenRows: z.number(), revealed: z.boolean() }),
   z.strictObject({ ...base, kind: z.literal('bash'), command: z.string(), stdout: z.string(), stderr: z.string(), exitCode: nullable(z.number()), cwd: nullable(z.string()) }),
   z.strictObject({ ...base, kind: z.literal('local_command'), messageUuid: nullable(z.string()), text: z.string() }),
 ]);

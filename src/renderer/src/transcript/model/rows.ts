@@ -60,7 +60,7 @@ export type Row = RowBase &
         scope: 'turn' | 'task' | 'process' | 'transport' | 'request' | 'api' | 'reconnect' | 'notice' | 'exit' | 'hook' | 'plugin'; lostAttentionCount: number | null; // R1: 'plugin', a plugin's log line (a dim notice) or load issue
         action?: 'edit_prompt' | 'engine_settings'; // W1: a hook blocked the turn's own prompt; the row offers Edit prompt (that prompt back into the composer). W13: a newer engine sent what MAWS did not understand; the row opens Settings › Engine
       }
-    | { kind: 'boundary'; boundaryKind: 'compaction' | 'reset' | 'retraction' | 'rewind'; text: string; detail: string | null; hiddenRows: number; revealed: boolean }
+    | { kind: 'boundary'; boundaryKind: 'compaction' | 'reset' | 'retraction' | 'rewind'; text: string; secondary?: string; detail: string | null; hiddenRows: number; revealed: boolean }
     | { kind: 'bash'; command: string; stdout: string; stderr: string; exitCode: number | null; cwd: string | null }
     | { kind: 'local_command'; messageUuid: MessageUuid | null; text: string } // the engine's `<local-command-stdout>` echo after a slash command (C3's `origin: 'local-command'`), tags stripped; a replayed row, never a bubble
   );
