@@ -29,6 +29,7 @@ export interface Skeleton {
   delivery: 'tail' | 'interleave' | null;
   deliveryOwner: MessageUuid | null; // proved at adoption, never inferred across a branch
   localCommand: boolean;
+  localTurnUuid: MessageUuid | null; // mapper turn owning the delivered local history
   humanPrompt: boolean; // includes blocked prompts and human queued-command attachments
   localCaveat: boolean;
   noResponse: boolean;
@@ -197,6 +198,7 @@ class FollowerCore {
         : (record.type === 'user' && record.isMeta === true) || (record.type === 'assistant' && record.isApiErrorMessage === true) ? 'tail' : null,
       deliveryOwner: null,
       noResponse: isNoResponseMarker(record),
+      localTurnUuid: null,
       localCaveat: localCommandKind(record) === 'caveat',
       localCommand: localCommandKind(record) === 'caveat' || localCommandKind(record) === 'output'
         || (localCommandKind(record) === 'echo' && typeof record.parentUuid === 'string' && this.skeletons.get(record.parentUuid as MessageUuid)?.localCaveat === true)
@@ -261,6 +263,7 @@ class FollowerCore {
     const targetMessageUuid = segment.find((uuid) => this.skeletons.get(uuid)?.type === 'user') ?? null;
     if (targetMessageUuid !== null) {
       // A cut segment with no user record is attachments only, invisible to consumers: no boundary.
+      this.invalidateHiddenLocalHistory(segment);
       this.produce(null, { ...eventBase(this.ctx, `anchor:${offset}`), kind: 'boundary.rewind', targetMessageUuid, precedingAssistantUuid: leafUuid, prefillText });
     }
     this.rewind = { phase: 'announced', leafUuid, targetMessageUuid, prefillText, anchorOffset: offset };
@@ -304,6 +307,7 @@ class FollowerCore {
       this.chain.push(member);
       this.onChain.add(member);
       if (!this.emitted.has(member)) await this.reemit(member);
+      else if (this.skeletons.get(member)?.localCommand) await this.reemit(member, false);
     }
     this.extend(record, uuid);
   }
@@ -389,10 +393,12 @@ class FollowerCore {
     }
     if (!silentSwap && this.chain.length > 0) {
       if (terminal !== null) {
+        this.invalidateHiddenLocalHistory(removed);
         this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:rewind`), kind: 'boundary.rewind', ...terminal, prefillText: null });
       } else if (this.rewind?.phase === 'unanchored') {
         const targetMessageUuid = removed.find((member) => this.skeletons.get(member)?.type === 'user') ?? null;
         if (targetMessageUuid !== null) {
+          this.invalidateHiddenLocalHistory(removed);
           this.produce(null, { ...eventBase(this.ctx, `anchor:${this.rewind.anchorOffset}`), kind: 'boundary.rewind', targetMessageUuid, precedingAssistantUuid: this.rewind.leafUuid, prefillText: this.rewind.prefillText });
         }
       } else {
@@ -400,6 +406,7 @@ class FollowerCore {
         this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:retraction`), kind: 'boundary.retraction', retractedMessageUuids: removed, reason: 'transcript_branch', fallbackModel: null });
       }
     }
+    const previousChain = this.onChain;
     this.chain = newChain;
     this.onChain = newSet;
     this.leaf = uuid;
@@ -408,6 +415,26 @@ class FollowerCore {
     for (const member of newChain) {
       if (member === uuid) this.emit(record, uuid);
       else if (!this.emitted.has(member)) await this.reemit(member);
+      else if (!previousChain.has(member) && this.skeletons.get(member)?.localCommand) await this.reemit(member, false);
+    }
+  }
+
+  // Rewinds hide whole turns, including local history silently swapped off the chain. Restore its delivery
+  // eligibility when its owning turn is hidden. An off-chain command can itself own a turn beneath a cut
+  // prompt; follow only that local ownership ancestry, leaving earlier still-visible history delivered.
+  private invalidateHiddenLocalHistory(removed: MessageUuid[]): void {
+    const hiddenTurns = new Set(removed.filter((uuid) => this.skeletons.get(uuid)?.startsTurn));
+    for (const uuid of this.emitted) {
+      const local = this.skeletons.get(uuid);
+      if (!local?.localCommand || this.onChain.has(uuid)) continue;
+      let owner = local.localTurnUuid;
+      for (let hops = 0; owner !== null && hops < this.skeletons.size; hops++) {
+        if (hiddenTurns.has(owner)) {
+          this.emitted.delete(uuid);
+          break;
+        }
+        owner = this.skeletons.get(owner)?.parentUuid ?? null;
+      }
     }
   }
 
@@ -464,6 +491,8 @@ class FollowerCore {
   private emit(record: TranscriptRecord, uuid: MessageUuid): void {
     if (this.interrupted) return;
     this.produce(uuid, ...recordToEvents(record, this.ctx));
+    const skeleton = this.skeletons.get(uuid);
+    if (skeleton?.localCommand) skeleton.localTurnUuid = this.ctx.lastTurnUserUuid;
     this.emitted.add(uuid);
   }
 
@@ -473,8 +502,9 @@ class FollowerCore {
   }
 
   // A record that came onto the chain after its line was read: re-read it by offset (attachments carry no events, so
-  // their bytes are not fetched).
-  private async reemit(uuid: MessageUuid): Promise<void> {
+  // their bytes are not fetched). Silently retained local history restores mapper context on rejoin without
+  // publishing its events again: its command turn, not the abandoned branch's turn, owns the continuation.
+  private async reemit(uuid: MessageUuid, publish = true): Promise<void> {
     const skeleton = this.skeletons.get(uuid);
     if (skeleton === undefined || this.interrupted) return;
     if (skeleton.type === 'attachment') {
@@ -482,7 +512,10 @@ class FollowerCore {
       return;
     }
     const record = parseLine(await this.reader.read(skeleton.offset, skeleton.length));
-    if (record !== null && record.uuid === uuid) this.emit(record, uuid);
+    if (record !== null && record.uuid === uuid) {
+      if (publish) this.emit(record, uuid);
+      else recordToEvents(record, this.ctx);
+    }
     // The file changed under the read (a rename-over, or a rewrite in place): the record stays undelivered and the
     // retry reloads the file, which delivers it (a reload in progress is abandoned and retried at once).
     else this.interrupted = true;

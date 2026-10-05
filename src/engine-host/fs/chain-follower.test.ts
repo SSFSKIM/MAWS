@@ -380,7 +380,7 @@ describe('follows the leaf across a rewind', () => {
     expectWellFormed(out.events());
   });
 
-  it('without the anchor and with two live holders, the continuation is a second writer: retraction plus a warning', async () => {
+  it('without the anchor and with two live holders, the continuation keeps a fork boundary without inferring its writer', async () => {
     // With at most one holder this same shape is the terminal rewind (below); two processes make it contested.
     const lines = [...REWIND_LINES.slice(0, 26), ...REWIND_LINES.slice(27)];
     const out = new Collector();
@@ -461,7 +461,7 @@ describe('follows the leaf across a rewind', () => {
     expectWellFormed(out.events());
   });
 
-  it('a compaction boundary restarts the chain silently; a stray null-parent record is a second writer', async () => {
+  it('a compaction boundary restarts the chain silently; a stray null-parent record is a fork', async () => {
     const lines = [
       line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'one' } }),
       line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: at(1), message: { id: 'm', model: 'x', content: [{ type: 'text', text: 'ok' }] } }),
@@ -628,7 +628,7 @@ describe('a terminal rewind without an anchor', () => {
     expect(short(follower.snapshot().leaf)).toBe('c25b804b');
   });
 
-  it('with two live holders the same branch is a second writer: the retraction and the notice', async () => {
+  it('with two live holders the same branch is a fork, without a generic writer notice', async () => {
     const { follower, out } = await follow(TERMINAL_LINES.slice(0, 48), 2);
     expect(out.of('boundary.rewind')).toEqual([]);
     expect(out.of('boundary.retraction').map((e) => [e.reason, e.retractedMessageUuids.map(short)])).toEqual([['transcript_branch', BANANA_TURN]]);
@@ -636,7 +636,7 @@ describe('a terminal rewind without an anchor', () => {
     expect(short(follower.snapshot().leaf)).toBe('c25b804b');
   });
 
-  it('with one live holder, a prompt parented mid-turn is still a second writer', async () => {
+  it('with one live holder, a prompt parented mid-turn is still a fork', async () => {
     // Re-parented onto the APPLE turn's first assistant record (its thinking block), which another assistant record follows.
     const [boundary, inside] = [fullTerminal('8eb6beb3'), fullTerminal('77c649cb')];
     const midTurn = TERMINAL_LINES.slice(0, 48).map((l) => (l.includes('"uuid":"040727ec') ? l.replace(`"parentUuid":"${boundary}"`, `"parentUuid":"${inside}"`) : l));

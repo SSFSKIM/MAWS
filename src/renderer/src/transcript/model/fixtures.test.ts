@@ -430,6 +430,78 @@ describe('FX8 disk conversation history', () => {
     expect(ofKind(rowsOf(withAllExpanded(state)), 'assistant_text')).toEqual([]);
   });
 
+  it.each([
+    { command: 'echo', anchored: false }, { command: 'compact', anchored: false },
+    { command: 'echo', anchored: true }, { command: 'compact', anchored: true },
+  ])('restores the retained $command turn context on rejoin (anchored=$anchored) without duplicate rows or deliveries', async ({ command, anchored }) => {
+    const records: Record<string, unknown>[] = readFileSync(join(TEST_FIXTURE_DIR, 'transcript-fx8-local-cuts.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    if (command === 'compact') records.splice(2, 4, { type: 'user', uuid: 'compact', parentUuid: 'a', message: { content: '/compact' } });
+    const encode = (items: Record<string, unknown>[]) => items.map((record) => JSON.stringify(record) + '\n').join('');
+    const events: SessionEvent[] = [];
+    const reader = new MemoryFileReader(encode(records));
+    const follower = new ChainFollower(reader, 'fx8-local-context' as SessionId, null,
+      (event) => { if (event.t === 'events') events.push(...event.events); }, { holders: () => 2 });
+    await follower.start();
+    if (anchored) {
+      reader.append(encode([{ type: 'last-prompt', leafUuid: 'a', rewound: true }]));
+      await follower.poke();
+    }
+    const before = events.length;
+    reader.append(encode([{ type: 'system', subtype: 'turn_duration', uuid: 'end', parentUuid: command === 'echo' ? 'output' : 'compact', durationMs: 25 }]));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(command === 'echo' ? ['u', 'a', 'caveat', 'echo', 'output', 'end'] : ['u', 'a', 'compact', 'end']);
+    expect(events.slice(before).filter((event) => event.kind === 'turn.ended')).toMatchObject([{ userMessageUuids: [command] }]);
+    expect(events.slice(before).filter((event) => event.kind === 'user.message' || event.kind === 'turn.started')).toEqual([]);
+    const state = stateOf(events);
+    // C6 tracks the existing reducer limitation for results naming already-closed turns; FX8 pins
+    // the follower's exact command identity above and preserves visible history without duplicate delivery.
+    for (const rows of [rowsOf(state), rowsOf(withAllExpanded(state))]) {
+      // Local commands contain no model work, so their completed turn correctly has no work divider.
+      expect(ofKind(rows, 'divider').filter((row) => row.turnId === `turn:${command}`)).toEqual([]);
+      expect(ofKind(rows, 'local_command').map((row) => row.text)).toEqual(command === 'echo' ? ['Ready', 'Ready again'] : []);
+      expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length);
+    }
+    expect(new Set(events.map((event) => event.id)).size).toBe(events.length);
+    follower.stop();
+  });
+
+  it.each([
+    { rewind: 'anchor', compact: false }, { rewind: 'terminal', compact: false },
+    { rewind: 'anchor', compact: true }, { rewind: 'terminal', compact: true },
+  ])('redelivers retained output hidden by a genuine $rewind rewind (compact=$compact), but not earlier visible output', async ({ rewind, compact }) => {
+    const user = (uuid: string, parentUuid: string | null) => ({ type: 'user', uuid, parentUuid, message: { content: `Sample ${uuid}` } });
+    const assistant = (uuid: string, parentUuid: string) => ({ type: 'assistant', uuid, parentUuid, message: { id: `response-${uuid}`, content: [{ type: 'text', text: `Answer ${uuid}` }] } });
+    const local = (uuid: string, parentUuid: string) => ({ type: 'system', subtype: 'local_command', uuid, parentUuid, content: `<local-command-stdout>${uuid}</local-command-stdout>` });
+    const encode = (records: unknown[]) => records.map((record) => JSON.stringify(record) + '\n').join('');
+    const records = [user('u1', null), assistant('a1', 'u1'), local('earlier', 'a1'), user('u2', 'a1'), assistant('a2', 'u2'),
+      ...(compact ? [{ ...user('compact', 'a2'), message: { content: '/compact' } }] : []),
+      local('out', compact ? 'compact' : 'a2'), user('next', 'a2')];
+    const events: SessionEvent[] = [];
+    const reader = new MemoryFileReader(encode(records));
+    const follower = new ChainFollower(reader, 'fx8-local-rewind' as SessionId, null,
+      (event) => { if (event.t === 'events') events.push(...event.events); }, { holders: () => 1 });
+    await follower.start();
+    reader.append(encode([rewind === 'anchor' ? { type: 'last-prompt', rewound: true, leafUuid: 'a1', lastPrompt: 'Second sample' } : user('replacement', 'a1')]));
+    await follower.poke();
+    expect(events.filter((event) => event.kind === 'boundary.rewind')).toMatchObject([{ targetMessageUuid: 'u2' }]);
+    expect(ofKind(rowsOf(stateOf(events)), 'local_command').map((row) => row.text)).toEqual(['earlier']);
+    reader.append(encode([local('rejoin', 'out')]));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'u2', 'a2', ...(compact ? ['compact'] : []), 'out', 'rejoin']);
+    const rows = rowsOf(stateOf(events));
+    expect(ofKind(rows, 'local_command').map((row) => row.text)).toEqual(['earlier', 'out', 'rejoin']);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length);
+    expect(events.filter((event) => event.kind === 'user.message' && event.messageUuid === 'out').map((event) => event.id)).toEqual(['out', 'out@2']);
+    // An earlier turn stayed visible through the rewind; rejoining its local output must not duplicate it.
+    reader.append(encode([local('earlier-rejoin', 'earlier')]));
+    await follower.poke();
+    expect(events.filter((event) => event.kind === 'user.message' && event.messageUuid === 'earlier').map((event) => event.id)).toEqual(['earlier']);
+    const after = rowsOf(stateOf(events));
+    expect(ofKind(after, 'local_command').filter((row) => row.text === 'earlier')).toHaveLength(1);
+    expect(new Set(after.map((row) => row.id)).size).toBe(after.length);
+    follower.stop();
+  });
+
   it('delivers a rejoining local record first discovered off-chain during rewrite', async () => {
     const prefix = [
       { type: 'user', uuid: 'u', parentUuid: null, message: { content: 'Sample request' } },
