@@ -354,7 +354,11 @@ const d1Sidecars: ChainFollowerOptions['subagents'] = {
 
 describe('D1 subagent outcomes', () => {
   it.each([false, true])('S2 closes task notifications and deduplicates source/legacy deliveries (sidecar %s)', async (sidecar) => {
-    const { events, rows } = await d1Fixture('subagents', sidecar ? { subagents: d1Sidecars } : {});
+    const { events, state, rows } = await d1Fixture('subagents', sidecar ? { subagents: d1Sidecars } : {});
+    expect(state.order).toHaveLength(1);
+    expect(events.filter((event) => event.kind === 'turn.started')).toHaveLength(1);
+    expect(ofKind(rows, 'assistant_text').at(-1)?.turnId).toBe(state.order[0]);
+    expect(state.turns.get(state.order[0])?.ended?.userMessageUuids).toEqual(['d1-subagents-0']);
     const outcomes = events.filter((event) => event.kind === 'subagent.finished' || event.kind === 'task.notification');
     expect(outcomes.map((event) => [event.taskId, event.status])).toEqual([['child-new', 'completed'], ['child-old', 'completed']]);
     expect(ofKind(rows, 'subagent').map((row) => row.status)).toEqual(['finished']);

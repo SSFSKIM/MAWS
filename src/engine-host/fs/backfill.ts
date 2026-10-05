@@ -152,14 +152,15 @@ function steeredPrompt(record: TranscriptRecord, base: Base, events: SessionEven
   events.push({ ...base(), kind: 'command.lifecycle', commandUuid: messageUuid, state: 'started' });
 }
 
-// Desktop's history adapter unwraps queued task notifications as user records. Old records lack source_uuid;
-// their tool-use identity is the only stable delivery identity available.
+// Desktop's history adapter unwraps queued task notifications as user records. At a tool boundary they are synthetic
+// context for the running turn, not a new prompt; outside the loop they can trigger an engine follow-up. Old records
+// lack source_uuid; their tool-use identity is the only stable delivery identity available.
 function taskNotificationAttachment(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): boolean {
   const attachment = record.attachment as { type?: unknown; commandMode?: unknown; prompt?: unknown; source_uuid?: unknown; isMeta?: unknown } | undefined;
   if (attachment?.type !== 'queued_command' || attachment.commandMode !== 'task-notification') return false;
   if (attachment.isMeta === true || typeof attachment.prompt !== 'string') return true;
   const source = typeof attachment.source_uuid === 'string' && attachment.source_uuid ? attachment.source_uuid as MessageUuid : null;
-  userEvents({ ...record, type: 'user', message: { role: 'user', content: attachment.prompt } }, source ?? uuid, ctx, base, events, source);
+  userEvents({ ...record, type: 'user', isMeta: record.isMeta === true || ctx.inToolLoop, message: { role: 'user', content: attachment.prompt } }, source ?? uuid, ctx, base, events, source);
   return true;
 }
 
