@@ -1,0 +1,17 @@
+{"type":"user","uuid":"u1","parentUuid":null,"cwd":"/synthetic","timestamp":"2026-10-04T10:00:00.000Z","message":{"role":"user","content":"Run independent checks."}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","requestId":"req-m1","message":{"role":"assistant","id":"m1","model":"test-model","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"printf synthetic"}}]}}
+{"type":"assistant","uuid":"a2","parentUuid":"a1","requestId":"req-m1","message":{"role":"assistant","id":"m1","model":"test-model","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"printf synthetic"}}]}}
+{"type":"attachment","uuid":"h1","parentUuid":"a2","attachment":{"type":"hook_success","hookName":"PostToolUse:Bash","hookEvent":"PostToolUse","content":"Checked.","stdout":"Checked.","stderr":"","exitCode":0,"command":"printf Checked.","durationMs":1}}
+{"type":"user","uuid":"rA","parentUuid":"a1","sourceToolAssistantUUID":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"synthetic result"}]}}
+{"type":"user","uuid":"rB","parentUuid":"a2","sourceToolAssistantUUID":"a2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":"synthetic result"}]}}
+{"type":"attachment","uuid":"h2","parentUuid":"rB","attachment":{"type":"hook_success","hookName":"PostToolUse:Bash","hookEvent":"PostToolUse","content":"Checked.","stdout":"Checked.","stderr":"","exitCode":0,"command":"printf Checked.","durationMs":1}}
+{"type":"attachment","uuid":"h3","parentUuid":"h2","attachment":{"type":"hook_success","hookName":"PostToolUse:Bash","hookEvent":"PostToolUse","content":"Checked.","stdout":"Checked.","stderr":"","exitCode":0,"command":"printf Checked.","durationMs":1}}
+{"type":"assistant","uuid":"a3","parentUuid":"h3","message":{"role":"assistant","id":"m2","model":"test-model","content":[{"type":"text","text":"First checks completed."}]}}
+{"type":"assistant","uuid":"a4","parentUuid":"a3","requestId":"req-m3","message":{"role":"assistant","id":"m3","model":"test-model","content":[{"type":"tool_use","id":"t3","name":"Bash","input":{"command":"printf synthetic"}}]}}
+{"type":"assistant","uuid":"a5","parentUuid":"a4","requestId":"req-m3","message":{"role":"assistant","id":"m3","model":"test-model","content":[{"type":"tool_use","id":"t4","name":"Bash","input":{"command":"printf synthetic"}}]}}
+{"type":"assistant","uuid":"a6","parentUuid":"a5","requestId":"req-m3","message":{"role":"assistant","id":"m3","model":"test-model","content":[{"type":"tool_use","id":"t5","name":"Bash","input":{"command":"printf synthetic"}}]}}
+{"type":"user","uuid":"rC","parentUuid":"a6","sourceToolAssistantUUID":"a6","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t5","content":"synthetic result"}]}}
+{"type":"user","uuid":"rA2","parentUuid":"a4","sourceToolAssistantUUID":"a4","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t3","content":"synthetic result"}]}}
+{"type":"user","uuid":"rB2","parentUuid":"a5","sourceToolAssistantUUID":"a5","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t4","content":"synthetic result"}]}}
+{"type":"assistant","uuid":"a7","parentUuid":"rB2","message":{"role":"assistant","id":"m4","model":"test-model","content":[{"type":"text","text":"All checks completed."}]}}
+{"type":"system","uuid":"s1","parentUuid":"a7","subtype":"turn_duration","durationMs":1000,"timestamp":"2026-10-04T10:00:01.000Z"}
