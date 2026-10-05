@@ -140,7 +140,7 @@ describe('transcript records map to X1 events', () => {
       rec({ type: 'attachment', uuid: 'x1', parentUuid: 'm1', attachment: { type: 'model' }, timestamp: at(7) }),
     ]);
     expect(kinds(events)).toEqual([
-      'session.started', 'turn.started', 'user.message', 'turn.ended', 'notice.posted', 'frame.unknown', 'boundary.compaction', 'boundary.compaction', 'frame.unknown',
+      'session.started', 'turn.started', 'user.message', 'turn.ended', 'user.message', 'frame.unknown', 'boundary.compaction', 'boundary.compaction', 'frame.unknown',
     ]);
     const ended = only(events, 'turn.ended')[0];
     expect(ended).toMatchObject({
@@ -148,7 +148,7 @@ describe('transcript records map to X1 events', () => {
       usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null },
       permissionDenials: [], errors: [], userMessageUuids: ['u1'], origin: null, resultIndex: null, isEchoReceipt: false,
     });
-    expect(only(events, 'notice.posted')[0]).toMatchObject({ level: 'info', text: '<command-name>/help</command-name>', key: 'local_command' });
+    expect(only(events, 'user.message')[1]).toMatchObject({ origin: 'local-command', content: '<command-name>/help</command-name>' });
     const unknown = only(events, 'frame.unknown');
     expect(unknown[0]).toMatchObject({ id: 's3', frameType: 'transcript:system', subtype: 'future_system_subtype' });
     expect(unknown[1]).toMatchObject({ id: 'm1', frameType: 'transcript:mystery', subtype: null });
