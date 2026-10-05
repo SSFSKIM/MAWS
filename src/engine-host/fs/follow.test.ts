@@ -557,7 +557,7 @@ describe('a followed session backfills, then tails its transcript', () => {
     expect(events('fs.followState').filter((s) => s.appSessionId === APP && s.state === 'stopped')).toHaveLength(3);
   });
 
-  it('reads a terminal rewind (no anchor) as boundary.rewind with one registry holder or none, and as a second writer with two', async () => {
+  it('reads a terminal rewind (no anchor) as boundary.rewind with one registry holder or none, and as a fork with two', async () => {
     const TERMINAL = 'a76ad588-e4b4-4a99-bf4e-69287514916f' as SessionId;
     const lines = readFileSync(join(TRANSCRIPT_FIXTURE_DIR, 'rewind-terminal.jsonl'), 'latin1').split('\n').filter((l) => l.length > 0).slice(0, 48);
     await fixture.addTranscript('/private/tmp/maws-accept', TERMINAL, lines.slice(0, 42));
@@ -577,14 +577,15 @@ describe('a followed session backfills, then tails its transcript', () => {
       await fs.unbind('app-terminal-contested' as AppSessionId);
       fs.bind([{ sessionId: TERMINAL, appSessionId: app as AppSessionId }]);
       const events = (await fs.eventsSnapshot(app as AppSessionId, null)).events;
-      return { rewinds: events.filter((e) => e.kind === 'boundary.rewind').length, notices: events.flatMap((e) => (e.kind === 'notice.posted' ? [e.key] : [])) };
+      return { rewinds: events.filter((e) => e.kind === 'boundary.rewind').length, retractions: events.filter((e) => e.kind === 'boundary.retraction').length, notices: events.flatMap((e) => (e.kind === 'notice.posted' ? [e.key] : [])) };
     };
-    // Two live processes on the session: contested, the second writer's retraction and notice.
+    // Two live processes rule out a terminal rewind. FX8 keeps the fork boundary; only W7 holding a
+    // foreign branch off MAWS-owned records posts a contention notice, not this historical parent mismatch.
     const second = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
     try {
       await fixture.addRegistryRecord(second.pid!, { sessionId: TERMINAL, cwd: '/private/tmp/maws-accept', kind: 'interactive', startedAt: Date.now() });
       await expect.poll(async () => (await fs.holdersNow({ sessionIds: [TERMINAL], directories: null })).holders.length).toBe(2);
-      expect(await refollow('app-terminal-contested')).toEqual({ rewinds: 0, notices: ['transcript_branch'] });
+      expect(await refollow('app-terminal-contested')).toEqual({ rewinds: 0, retractions: 1, notices: [] });
     } finally {
       second.kill('SIGKILL');
     }
@@ -592,7 +593,7 @@ describe('a followed session backfills, then tails its transcript', () => {
     await fixture.removeRegistryRecord(second.pid!);
     await fixture.removeRegistryRecord(process.pid);
     await expect.poll(() => fs.state().holders.length).toBe(0);
-    expect(await refollow('app-terminal-unheld')).toEqual({ rewinds: 1, notices: [] });
+    expect(await refollow('app-terminal-unheld')).toEqual({ rewinds: 1, retractions: 0, notices: [] });
   });
 
   it('follows an app session whose transcript does not exist yet, and picks it up when it appears', async () => {

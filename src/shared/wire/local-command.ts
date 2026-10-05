@@ -12,4 +12,3 @@ export function slashCommandLine(text: string): string | null {
   const args = parts.get('command-args')?.trim() ?? '';
   return args ? `${name} ${args}` : name;
 }
-
