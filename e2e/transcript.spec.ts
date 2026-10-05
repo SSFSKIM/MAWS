@@ -825,7 +825,7 @@ test('a mod’s toast, log lines and status line show in the session (R1, pass3/
 // person's presses are held and matched in order. A scratch config home holds one transcript for a scratch directory,
 // so C4 indexes a record the sidebar shows; no engine runs.
 type SurfaceSeed = (base: { repo: string; engineId: string }) => Record<string, unknown>[];
-async function surfaceReplay(fixture: string | ((root: string) => string), body: (ctx: { page: Page; id: string; pane: ReturnType<Page['locator']>; userData: string }) => Promise<void>, seed?: SurfaceSeed, beforeLaunch?: (pane: ReturnType<Page['locator']>) => Promise<void>) {
+async function surfaceReplay(fixture: string | ((root: string) => string), body: (ctx: { page: Page; id: string; pane: ReturnType<Page['locator']>; userData: string }) => Promise<void>, seed?: SurfaceSeed, beforeLaunch?: (pane: ReturnType<Page['locator']>) => Promise<void>, attached = true) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-r2-surface-')));
   const repo = join(root, 'repo');
   const config = join(root, 'claude-config');
@@ -852,8 +852,10 @@ async function surfaceReplay(fixture: string | ((root: string) => string), body:
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
     await beforeLaunch?.(pane);
-    await launchReady(page, id, replayPath, { cwd: repo, ...(seed ? { resume: { sessionId: engineId as never, fork: false } } : {}) });
-    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).uiSurface).toEqual({ clientId: 'maws-main' });
+    if (attached) {
+      await launchReady(page, id, replayPath, { cwd: repo, ...(seed ? { resume: { sessionId: engineId as never, fork: false } } : {}) });
+      await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).uiSurface).toEqual({ clientId: 'maws-main' });
+    }
     await body({ page, id, pane, userData: maws.userData });
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
@@ -1055,6 +1057,50 @@ test('R3 owner to-human draws every span as Markdown, folds the working record, 
   });
 });
 
+
+test('R4 detached owner recording draws labelled bodies and inert choices without an engine surface', async () => {
+  await surfaceReplay((root) => recordedSurfaceJournal(root, 'mods-surface-transcript-to-human'), async ({ page, pane, id }) => {
+    const report = pane.locator('[data-owner-report]');
+    await expect(report).toBeVisible();
+    await expect(report.locator('.owner-report-label')).toHaveText(['to human', 'essential', 'need input']);
+    await expect(report.locator('.owner-report-body > .transcript-prose')).toHaveText(['First span.', 'Second span.', 'Which path?']);
+    await expect(report.locator('[data-streamdown="strong"]')).toHaveText('span');
+    await expect(report.getByRole('listitem')).toHaveText(['OneRecommended', 'Two']);
+    await expect(report.getByRole('button')).toHaveCount(0);
+    await expect(report.getByText('Resume this session to answer.')).toBeVisible();
+    const question = await report.getByText('Which path?', { exact: true }).boundingBox();
+    const choices = await report.getByRole('list').boundingBox();
+    expect(question!.y + question!.height).toBeLessThanOrEqual(choices!.y);
+    await expect(pane.getByText('Private working notes.', { exact: true })).not.toBeVisible();
+    await expect(pane.getByText('Private follow-up record.', { exact: true })).not.toBeVisible();
+    const state = value(await invoke(page, 'session.status', { appSessionId: id as never }));
+    expect(state.uiSurface).toBeUndefined();
+    expect(state.process).not.toBe('ready');
+    const dir = '/tmp/maws-r4-evidence'; mkdirSync(dir, { recursive: true });
+    try {
+      for (const theme of ['light', 'dark'] as const) {
+        await page.evaluate((value) => (document.documentElement.dataset.theme = value), theme);
+        await page.evaluate(() => document.fonts.ready);
+        await page.screenshot({ path: join(dir, `to-human-detached-${theme}.png`), animations: 'disabled' });
+      }
+    } finally { await page.evaluate(() => (document.documentElement.dataset.theme = 'light')); }
+    const divider = pane.locator('.transcript-divider button[aria-expanded]').first();
+    await expect(divider).toHaveAttribute('aria-expanded', 'false');
+    await divider.click();
+    await expect(report.getByText('Private working notes.', { exact: true })).toBeVisible();
+    await expect(report.getByText('More working notes.', { exact: true })).toBeVisible();
+    await expect(pane.getByText('Private follow-up record.', { exact: true })).toBeVisible();
+    await divider.click();
+    await expect(report.getByText('First span.', { exact: false })).toBeVisible();
+    await expect(report.getByText('Private working notes.', { exact: true })).not.toBeVisible();
+  }, (base) => {
+    const t = transcriptSeed(base); t.user('owner-user', 'Show the report');
+    t.text('owner-multi', ownerMarkedText); t.text('owner-record', 'Private follow-up record.');
+    t.tool('owner-tool', 'Bash', { command: 'printf R3' }, r3Output);
+    t.tool('owner-question', 'AskUserQuestion', { questions: [r3Question] }, { questions: [r3Question], answers: { 'Which path?': 'One' } });
+    return t.finish();
+  }, undefined, false);
+});
 
 test('M1 marked commentary is visible at full contrast before and after folding work', async () => {
   await surfaceReplay((root) => recordedSurfaceJournal(root, 'mods-surface-transcript-to-human'), async ({ pane }) => {

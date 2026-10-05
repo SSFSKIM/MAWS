@@ -15,9 +15,9 @@ import { storeWith } from '../view/rows/test-support';
 
 afterEach(() => { cleanup(); resetSurfaceRegistry(); });
 
-function Transcript({ storeKey, hideCommentary = false }: { storeKey: string; hideCommentary?: boolean }) {
+function Transcript({ storeKey, hideCommentary = false, variant = 'session' }: { storeKey: string; hideCommentary?: boolean; variant?: 'session' | 'child' }) {
   const rows = useTranscriptStore((s) => s.entries[storeKey].rows);
-  return <TranscriptProvider value={{ storeKey, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, effort: null }}>{rows.filter((row) => !hideCommentary || row.kind !== 'assistant_text' || row.phase !== 'commentary').map((row) => <RowView key={row.id} row={row} />)}</TranscriptProvider>;
+  return <TranscriptProvider value={{ storeKey, variant, actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, effort: null }}>{rows.filter((row) => !hideCommentary || row.kind !== 'assistant_text' || row.phase !== 'commentary').map((row) => <RowView key={row.id} row={row} />)}</TranscriptProvider>;
 }
 
 it('keeps the first expanded commentary drawing mounted when ink promotes it to full contrast', async () => {
@@ -172,4 +172,67 @@ it.each([false, true])('does not derive large folded history during live token b
   console.info(`FX3 folded benchmark attached=${attached}: 6 turns x 100 tool calls, 40 batches, ${derivations} derivations, ${(performance.now() - start).toFixed(1)} ms`);
   view.unmount();
   expect(derivations).toBe(0);
+});
+
+it.each(['session', 'child'] as const)('R4 presents detached marked commentary outside the fold (%s), keeping plain text inside', async (variant) => {
+  const b = builder(); b.turn('u'); b.text('first', 0, 'Working notes.\n<to-human>Report.</to-human>');
+  b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
+  b.text('last', 0, 'Answer'); b.end(['u']);
+  const store = await storeWith(b.events);
+  const fake = fakeClient(); window.maws = fake.client; useSessions.setState({ engine: new Map() });
+  const view = render(<Transcript storeKey={store.key} variant={variant} />);
+  expect(screen.getByText('Report.').closest('.transcript-answer')).not.toBeNull();
+  expect(store.rows().find((r) => r.kind === 'assistant_text' && r.markdown.includes('Report.'))).toMatchObject({ forHuman: true });
+  expect(screen.queryByText('Working notes.')).toBeNull();
+  act(() => useTranscriptStore.getState().expandAll(store.key));
+  expect(screen.getByText('Working notes.').closest('.transcript-commentary')).not.toBeNull();
+  expect(view.container.querySelectorAll('[data-owner-report]')).toHaveLength(1);
+  expect(fake.invoked('session.ui.render')).toHaveLength(0);
+});
+
+it('R4 keeps the working record reachable when a mixed answer has no turn divider', async () => {
+  const b = builder(); b.turn('u'); b.text('only', 0, 'Private notes.\n<to-human>Report.</to-human>'); b.end(['u']);
+  const store = await storeWith(b.events); useSessions.setState({ engine: new Map() });
+  render(<Transcript storeKey={store.key} />);
+  expect(screen.getByText('Report.')).toBeTruthy();
+  expect(screen.queryByText('Private notes.')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Working record' }));
+  expect(screen.getByText('Private notes.').closest('.transcript-commentary')).not.toBeNull();
+});
+
+it('R4 keeps detached ordinary commentary folded and ordinary answers native', async () => {
+  const b = builder(); b.turn('u'); b.text('first', 0, 'Working notes.');
+  b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
+  b.text('last', 0, 'Native answer'); b.end(['u']);
+  const store = await storeWith(b.events); useSessions.setState({ engine: new Map() });
+  const view = render(<Transcript storeKey={store.key} />);
+  expect(screen.queryByText('Working notes.')).toBeNull();
+  expect(screen.getByText('Native answer').closest('.transcript-answer')).not.toBeNull();
+  expect(view.container.querySelector('[data-owner-report]')).toBeNull();
+});
+
+it('R4 yields exclusively to an attached surface, including native fallback, and returns on detach', async () => {
+  const b = builder(); b.turn('u'); b.text('first', 0, '<to-human>Local report.</to-human>');
+  b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
+  b.text('last', 0, 'Native answer'); b.end(['u']);
+  const store = await storeWith(b.events); const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = fake.client; useSessions.setState({ engine: new Map() });
+  const view = render(<Transcript storeKey={store.key} />);
+  expect(screen.getByText('Local report.')).toBeTruthy();
+  act(() => useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) }));
+  expect(view.container.querySelector('[data-owner-report]')).toBeNull();
+  const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
+  for (const ask of asks) await act(() => fake.reply('session.ui.render', {
+    hooked: ask.component === 'AssistantMessage', rewritten: false, props: ask.props,
+    tree: ask.props.text?.includes('Local report.') ? { type: 'Text', children: ['Mod report'] } : { type: 'engine', ref: 0 },
+  }));
+  expect(screen.getByText('Mod report')).toBeTruthy();
+  expect(screen.queryByText('Local report.')).toBeNull();
+  act(() => invalidateSession(id));
+  while (fake.pending('session.ui.render')) await act(() => fake.reply('session.ui.render', { hooked: false, rewritten: false, props: {}, tree: { type: 'engine', ref: 0 } }));
+  expect(view.container.querySelector('[data-owner-report]')).toBeNull();
+  expect(screen.queryByText('Mod report')).toBeNull();
+  act(() => useSessions.setState({ engine: new Map([[id, { ...status(id), process: 'exited' }]]) }));
+  expect(screen.getByText('Local report.')).toBeTruthy();
+  expect(store.rows().find((r) => r.kind === 'assistant_text' && r.markdown.includes('Local report.'))).toMatchObject({ forHuman: true });
 });

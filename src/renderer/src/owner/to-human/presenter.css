@@ -1,0 +1,11 @@
+/* R4 adopts the mod's labelled, indented Markdown bodies, without its interactive choices. */
+.owner-report { display: flex; flex-direction: column; gap: calc(var(--space) * 2); }
+.owner-report-label { font-weight: 600; color: var(--term-ansi-cyan); }
+.owner-report-span[data-owner-span="essential"] > .owner-report-label { color: var(--term-ansi-green); }
+.owner-report-span[data-owner-span="need-input"] > .owner-report-label { color: var(--term-ansi-magenta); }
+.owner-report-span[data-owner-span="insight"] > .owner-report-label { color: var(--term-ansi-yellow); }
+.owner-report-body { padding-inline-start: calc(var(--space) * 4); }
+.owner-report-choices { margin-block: var(--space); padding-inline-start: calc(var(--space) * 5); }
+.owner-report-choices li { padding-block: var(--space); }
+.owner-report-recommended { color: var(--fg-muted); font-size: var(--text-ui-sm); font-weight: 600; }
+.owner-report-resume { margin-block: var(--space); color: var(--fg-muted); font-size: var(--text-ui-sm); font-weight: 400; }
