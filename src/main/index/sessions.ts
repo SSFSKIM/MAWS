@@ -267,6 +267,7 @@ export class SessionStore {
         this.db.insert('sessions', { app_id: appId, engine_session_id: summary.sessionId, ...facts, created_at: now, updated_at: now });
         this.changed(appId, 'discovered');
         this.bindingChanged(appId);
+        if (projectId !== null) this.projects.sessionPresenceChanged();
         return { record: this.require(appId), created: true, advanced: false };
       }
 
@@ -283,6 +284,7 @@ export class SessionStore {
       }
       const advanced = existing.last_record_at !== null && summary.lastRecordAt !== null && summary.lastRecordAt > existing.last_record_at;
       const appId = existing.app_id as AppSessionId;
+      if ((projectId !== null && existing.transcript_path === null) || existing.project_id !== projectId) this.projects.sessionPresenceChanged();
       if (this.write(existing, facts)) this.changed(appId, 'facts');
       return { record: this.require(appId), created: false, advanced };
     });
@@ -297,6 +299,7 @@ export class SessionStore {
       if (!existing) return null;
       const values: Record<string, Value> = { archived: true, transcript_path: null };
       if (existing.archived === 0) values.removed_at = new Date().toISOString();
+      if (existing.project_id !== null && existing.transcript_path !== null) this.projects.sessionPresenceChanged();
       if (this.write(existing, values)) this.changed(existing.app_id as AppSessionId, 'facts');
       return this.require(existing.app_id as AppSessionId);
     });
@@ -354,6 +357,7 @@ export class SessionStore {
         created_at: now,
         updated_at: now,
       });
+      if (membership.projectId !== null) this.projects.sessionPresenceChanged();
       this.changed(appId, 'live');
       return { ok: true, record: this.require(appId) };
     });
@@ -576,6 +580,7 @@ export class SessionStore {
 
   private deleteRow(existing: SessionRecord): void {
     this.db.run('DELETE FROM sessions WHERE app_id = ?', existing.appId);
+    if (existing.projectId !== null) this.projects.sessionPresenceChanged();
     this.removed.set(existing.appId, existing);
     this.changed(existing.appId, 'removed');
     this.bindingChanged(existing.appId);
