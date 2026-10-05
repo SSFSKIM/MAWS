@@ -509,6 +509,7 @@ export class SessionStore {
         for (const row of this.db.all<SessionRow>('SELECT * FROM sessions WHERE project_id = ?', folded.id)) {
           const values = { project_id: projectId, worktree_path: row.worktree_path ?? folded.location.worktreePath, worktree_branch: row.worktree_branch ?? row.branch };
           if (!this.write(row, values)) continue;
+          this.projects.sessionPresenceChanged();
           this.changed(row.app_id as AppSessionId, 'facts');
           moved += 1;
         }

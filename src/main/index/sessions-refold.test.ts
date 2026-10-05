@@ -53,14 +53,14 @@ describe('refolding linked worktrees under their main checkout', () => {
   // A record as the earlier rule left it, written through a second connection: in the linked worktree's own project,
   // with no worktree unless it was a managed one inside it.
   let engineIds = 0x200000;
-  const earlierRecord = (projectId: ProjectId, directory: string, branch: string, worktree: { path: string; branch: string } | null = null) => {
+  const earlierRecord = (projectId: ProjectId, directory: string, branch: string, worktree: { path: string; branch: string } | null = null, transcript: ReturnType<typeof summary> | null = null) => {
     const appId = randomUUID() as AppSessionId;
     const now = new Date().toISOString();
     const db = new DatabaseSync(join(dir.path, 'index.sqlite'));
     try {
       db.prepare(
-        'INSERT INTO sessions (app_id, engine_session_id, project_id, directory, branch, worktree_path, worktree_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ).run(appId, sessionIdFor(++engineIds), projectId, directory, branch, worktree?.path ?? null, worktree?.branch ?? null, now, now);
+        'INSERT INTO sessions (app_id, engine_session_id, project_id, directory, branch, worktree_path, worktree_branch, transcript_path, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(appId, transcript?.sessionId ?? sessionIdFor(++engineIds), projectId, directory, branch, worktree?.path ?? null, worktree?.branch ?? null, transcript?.transcriptPath ?? null, transcript === null ? null : JSON.stringify(transcript), now, now);
     } finally {
       db.close();
     }
@@ -142,6 +142,40 @@ describe('refolding linked worktrees under their main checkout', () => {
       expect(seen.records.at(-1)).toMatchObject(moved);
       expect(seen.projects.at(-1)).toMatchObject({ id: mainProject.id, directory: main });
       expect(seen.removedProjects).toEqual([discovered.id]);
+    } finally {
+      stop();
+    }
+  });
+
+  it('publishes an existing discovered main project whose last transcript vanished when a user-added worktree refolds into it', async () => {
+    const gone = summary({ directory: main, transcriptPath: join(dir.path, 'gone.jsonl') });
+    index.sessions.upsertFromSummary(gone);
+    const mainProject = index.projects.list().find((p) => p.directory === main)!;
+    index.sessions.markTranscriptRemoved(gone.sessionId);
+    const added = index.projects.add(sibling);
+    const present = summary({ directory: sibling, gitBranch: 'feature', transcriptPath: join(dir.path, 'present.jsonl') });
+    const appId = earlierRecord(added.id, sibling, 'feature', null, present);
+    expect(directoriesOf(index.projects.list())).toEqual([sibling]);
+    expect(index.projects.list({ includeHidden: true })).toContainEqual(mainProject);
+    projectChanges = 0;
+
+    let warming: Promise<void> | null = null;
+    const { seen, stop } = started((directories) => (warming = warmLinkedWorktrees(directories)));
+    try {
+      expect(directoriesOf(seen.projects)).toEqual([sibling]); // the emptied main project was omitted at start
+      await warming;
+      const moved = { appId, projectId: mainProject.id, worktree: { path: sibling, branch: 'feature' } };
+      expect(seen.records.at(-1)).toMatchObject(moved);
+      await vi.waitFor(() => expect(seen.projects).toContainEqual(mainProject));
+
+      expect(directoriesOf(index.projects.list())).toEqual([main, sibling].sort());
+      expect(directoriesOf(seen.projects.slice(1))).toEqual([main, sibling].sort());
+      expect(seen.removedProjects).toEqual([]); // the user-added worktree project stays
+      expect(projectChanges).toBe(1);
+      await vi.waitFor(() => expect(seen.emitted.map((e) => e.name).sort()).toEqual(['session.changed', 'session.projects.changed']));
+      const projectsChanged = seen.emitted.find((e) => e.name === 'session.projects.changed')!.payload as EventPayload<'session.projects.changed'>;
+      expect(projectsChanged.projects).toContainEqual(mainProject);
+      expect(directoriesOf(projectsChanged.projects)).toEqual([main, sibling].sort());
     } finally {
       stop();
     }
