@@ -3,6 +3,7 @@
 import { join } from 'node:path';
 import type { SessionDigest } from '@shared/ipc/schema';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { projectReveal } from '../sidebar/reveal';
 import { useAttention } from '../stores/attention';
 import { NO_PROJECT_OF, useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -40,6 +41,7 @@ export function fillStores(scenario: Scenario, opts: { loaded?: boolean } = {}):
 }
 
 export function resetShellStores(): void {
+  projectReveal.setState({ pending: null });
   fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] }, { loaded: false });
   useSessions.setState({ indexing: null });
   useLayout.setState({
