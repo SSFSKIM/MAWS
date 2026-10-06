@@ -21,6 +21,14 @@
 // its per-name `lstat` classifies that batch's kinds from outside metadata. `openExternal` is path-checked immediately
 // before `shell.openPath`, with no descriptor guarantee, and hands the OS only a regular, non-executable file of a document
 // or media kind (`opensExternally`, an allowlist).
+//
+// `write` (E5) is `read`'s boundary with a read-write open: it compares the file's hash and writes in place through the
+// confirmed descriptor, never by path, so it shares `read`'s guarantee and never creates, renames or replaces a file.
+// Its recorded limits: a crash between the truncate and the last write leaves the file truncated (the editor keeps its
+// content and stays dirty until `ok`), and the per-file serialisation covers MAWS's own writers only, so an outside
+// writer between the compare and the write is not caught (containment is guaranteed, not an atomic compare-and-swap).
+import { isUtf8 } from 'node:buffer';
+import { createHash } from 'node:crypto';
 import fs, { type BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, normalize, sep } from 'node:path';
@@ -29,6 +37,8 @@ import {
   BINARY_SNIFF_BYTES,
   FILES_LIST_MAX_ENTRIES,
   FILES_READ_DEFAULT_LENGTH,
+  FILES_READ_MAX_LENGTH,
+  FILES_WRITE_MAX_BYTES,
   opensExternally,
   type FilesChanged,
   type FilesEntry,
@@ -36,6 +46,8 @@ import {
   type FilesOpenExternalOutput,
   type FilesReadInput,
   type FilesReadOutput,
+  type FilesWriteInput,
+  type FilesWriteOutput,
 } from '@shared/ipc/schema/files';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { fileMime, isTextMime } from './mime';
@@ -59,6 +71,7 @@ export interface FilesServiceOptions {
 export interface FilesService {
   list(input: { appSessionId: AppSessionId; path?: string }): Promise<FilesListOutput>;
   read(input: FilesReadInput): Promise<FilesReadOutput>;
+  write(input: FilesWriteInput): Promise<FilesWriteOutput>; // E5
   watch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
   openExternal(appSessionId: AppSessionId, path: string): Promise<FilesOpenExternalOutput>;
@@ -73,7 +86,7 @@ export const FILES_REFUSAL = "path outside the session's directories";
 // names must not start thousands of filesystem calls together.
 const LIST_STAT_CONCURRENCY = 64;
 
-const { O_RDONLY, O_NONBLOCK, O_DIRECTORY } = fs.constants;
+const { O_RDONLY, O_RDWR, O_NONBLOCK, O_DIRECTORY } = fs.constants;
 // macOS only (MAWS is macOS only; macOS 11 and later): refuse a symlink anywhere on the path the kernel walks, not only
 // in its last component. Node's fs.constants does not carry it, so it is passed through numerically; a test asserts the
 // kernel honours it, so a port to a platform that ignores the bit fails loudly instead of silently losing the guard.
@@ -81,6 +94,9 @@ const { O_RDONLY, O_NONBLOCK, O_DIRECTORY } = fs.constants;
 // macOS 26.6.2), and O_NOFOLLOW_ANY alone refuses a symlink in the last component with ELOOP as well.
 export const O_NOFOLLOW_ANY = 0x20000000;
 export const OPEN_FLAGS = O_RDONLY | O_NONBLOCK | O_NOFOLLOW_ANY;
+// E5's write: the same open read-write, and nothing else: no O_CREAT (the editor edits a file it opened), no O_TRUNC
+// (nothing is destroyed before the compare).
+const WRITE_FLAGS = O_RDWR | O_NONBLOCK | O_NOFOLLOW_ANY;
 
 class Refusal extends Error {
   constructor() {
@@ -102,6 +118,9 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     await hooks?.at?.(point, path);
   };
   const watches = new WatchTable({ emit, beforeBatch: (real) => at('before-batch', real) });
+  // Per confirmed file identity (`dev:ino`), the tail of its writes' chain: two writes of one file (two tabs, two
+  // sessions, a hard-link alias) compare and write one after the other. Removed when its chain drains.
+  const writing = new Map<string, Promise<void>>();
   const releases = new Map<number, number>(); // per window, how many times its holds were released (files.unwatch)
 
   // Step 1: absolute, already normal (a `..` is refused before the disk is touched, since the kernel resolves `/X/..`
@@ -129,25 +148,29 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     return { roots, real0 };
   }
 
-  // Steps 2 to 5b for a regular file (`read`) or a directory (`list`, `watch`). The caller closes the handle.
-  async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'dir'): Promise<Confirmed> {
+  // Steps 2 to 5b for a regular file (`read`; `write` opens it read-write) or a directory (`list`, `watch`). The caller
+  // closes the handle.
+  async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'write' | 'dir'): Promise<Confirmed> {
     const { roots, real0 } = await precheck(appSessionId, path);
     await at('before-open', path);
     let handle: FileHandle;
     try {
       // real0 with O_NOFOLLOW_ANY: the descriptor names an object reached through no symlink at all, beneath a root that
       // is itself a realpath, so the open is a containment check of its own and step 5 a second one.
-      handle = await fs.promises.open(real0, kind === 'dir' ? OPEN_FLAGS | O_DIRECTORY : OPEN_FLAGS);
+      handle = await fs.promises.open(real0, kind === 'dir' ? OPEN_FLAGS | O_DIRECTORY : kind === 'write' ? WRITE_FLAGS : OPEN_FLAGS);
     } catch (error) {
       // ELOOP (a component of real0 became a symlink), ENOTDIR, EISDIR and the rest: no descriptor exists to confirm,
-      // so no type is named; ENOENT says `not found` only under the leak rule.
-      throw errno(error) === 'ENOENT' ? await missing(path, roots, error) : new Refusal();
+      // so no type is named; ENOENT says `not found` only under the leak rule. A write refused permission names the
+      // path, which step 1 found in-root, so the message leaks nothing.
+      const code = errno(error);
+      if (kind === 'write' && (code === 'EACCES' || code === 'EPERM')) throw new Error(`not writable: ${path}`, { cause: error });
+      throw code === 'ENOENT' ? await missing(path, roots, error) : new Refusal();
     }
     try {
       const stat = await handle.stat({ bigint: true });
       await at('after-open', path);
       const real = await confirm(path, roots, stat);
-      if (kind === 'file' && !stat.isFile()) throw new Error(`not a regular file: ${path}`);
+      if (kind !== 'dir' && !stat.isFile()) throw new Error(`not a regular file: ${path}`);
       if (kind === 'dir' && !stat.isDirectory()) throw new Error(`not a directory: ${path}`);
       return { handle, stat, real, roots };
     } catch (error) {
@@ -189,15 +212,21 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     return { root: null, path: '', entries: entries.filter((entry) => entry !== null), truncated: false };
   }
 
-  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH }: FilesReadInput): Promise<FilesReadOutput> {
+  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false }: FilesReadInput): Promise<FilesReadOutput> {
     const { handle, stat, real } = await openConfirmed(appSessionId, path, 'file');
     try {
-      const size = Number(stat.size);
-      let chunk = await readFully(handle, Math.max(0, Math.min(length, size - offset)), offset);
-      const head = offset === 0 && chunk.length >= Math.min(BINARY_SNIFF_BYTES, size) ? chunk.subarray(0, BINARY_SNIFF_BYTES) : await readFully(handle, Math.min(BINARY_SNIFF_BYTES, size), 0);
+      // A hashed read is one read of the descriptor: the whole file into one buffer, hashed, and every byte answered
+      // (the chunk, the sniffed head, the settle step's extra bytes, `bytes` itself) taken from that buffer, so the chunk
+      // is always the hashed file's even when the file changes meanwhile; `utf8` is a strict decode of that same buffer.
+      // Past the cap no hash is answered.
+      const whole = hash && Number(stat.size) <= FILES_READ_MAX_LENGTH ? await readWhole(handle, Number(stat.size), FILES_READ_MAX_LENGTH) : null;
+      const bytesAt: ByteSource = whole ? async (count, position) => whole.subarray(position, position + count) : (count, position) => readFully(handle, count, position);
+      const size = whole ? whole.length : Number(stat.size);
+      let chunk = await bytesAt(Math.max(0, Math.min(length, size - offset)), offset);
+      const head = offset === 0 && chunk.length >= Math.min(BINARY_SNIFF_BYTES, size) ? chunk.subarray(0, BINARY_SNIFF_BYTES) : await bytesAt(Math.min(BINARY_SNIFF_BYTES, size), 0);
       const mime = fileMime(basename(real), head);
       const encoding = isTextMime(mime) ? 'utf8' : 'base64';
-      if (encoding === 'utf8') chunk = await settleText(handle, chunk, offset, size);
+      if (encoding === 'utf8') chunk = await settleText(bytesAt, chunk, offset, size);
       return {
         encoding,
         content: chunk.toString(encoding),
@@ -206,9 +235,56 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
         length: chunk.length,
         truncated: offset + chunk.length < size,
         mime,
+        hash: whole ? sha256(whole) : null,
+        utf8: whole ? isUtf8(whole) : null,
       };
     } finally {
       await handle.close();
+    }
+  }
+
+  // E5's hash-checked save (E5 execution document, Interfaces "The write"): `read`'s boundary opened read-write, then,
+  // inside the file's critical section, the compare against the bytes read through the descriptor and the write in
+  // place through it (truncate, write every byte, fsync). In place rather than temp-and-rename: a rename is by path into
+  // a directory confirmed earlier (the race the boundary closes) and replaces the inode (mode, hard links, xattrs).
+  async function write({ appSessionId, path, content, expectedHash }: FilesWriteInput): Promise<FilesWriteOutput> {
+    const bytes = Buffer.from(content, 'utf8');
+    if (bytes.length > FILES_WRITE_MAX_BYTES) throw new Error('content too large');
+    const { handle, stat } = await openConfirmed(appSessionId, path, 'write');
+    const tooLarge = () => new Error(`too large to edit: ${path}`);
+    try {
+      if (Number(stat.size) > FILES_WRITE_MAX_BYTES) throw tooLarge();
+      return await exclusive(`${stat.dev}:${stat.ino}`, async () => {
+        const now = await handle.stat({ bigint: true }); // the cap applies to the size as it is inside the section
+        const current = Number(now.size) <= FILES_WRITE_MAX_BYTES ? await readWhole(handle, Number(now.size), FILES_WRITE_MAX_BYTES) : null;
+        if (current === null) throw tooLarge();
+        const found = sha256(current);
+        if (found !== expectedHash) return { status: 'conflict', hash: found };
+        await handle.truncate(0);
+        for (let written = 0; written < bytes.length; ) {
+          written += (await handle.write(bytes, written, bytes.length - written, written)).bytesWritten;
+        }
+        await handle.sync();
+        return { status: 'ok', hash: sha256(bytes) };
+      });
+    } finally {
+      await handle.close();
+    }
+  }
+
+  // Runs `task` after every earlier task of the same key has settled, and before any later one starts.
+  async function exclusive<T>(key: string, task: () => Promise<T>): Promise<T> {
+    const before = writing.get(key) ?? Promise.resolve();
+    let leave!: () => void;
+    const done = new Promise<void>((resolve) => (leave = resolve));
+    const tail = before.then(() => done);
+    writing.set(key, tail);
+    await before;
+    try {
+      return await task();
+    } finally {
+      leave();
+      if (writing.get(key) === tail) writing.delete(key);
     }
   }
 
@@ -266,6 +342,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
   return {
     list,
     read,
+    write,
     watch,
     // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found;
     // a release of the window meanwhile (a navigation) took the page's holds, and a hold under the same key is the new
@@ -373,6 +450,21 @@ async function missingWithin(path: string, roots: readonly string[]): Promise<bo
   }
 }
 
+// Bytes of one file at a position: from the descriptor (`readFully`), or from a buffer a hashed read already holds.
+type ByteSource = (length: number, position: number) => Promise<Buffer>;
+
+const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+
+// The whole file from the descriptor's start to its end, `expected` (its fstat size) a hint: a file grown since is read
+// to its new end, and one that holds more than `cap` bytes answers null.
+async function readWhole(handle: FileHandle, expected: number, cap: number): Promise<Buffer | null> {
+  const first = await readFully(handle, expected + 1, 0);
+  if (first.length <= expected) return first;
+  const rest = await readFully(handle, cap + 1 - first.length, first.length);
+  const whole = Buffer.concat([first, rest]);
+  return whole.length > cap ? null : whole;
+}
+
 async function readFully(handle: FileHandle, length: number, position: number): Promise<Buffer> {
   const buffer = Buffer.alloc(length);
   let filled = 0;
@@ -388,16 +480,16 @@ async function readFully(handle: FileHandle, length: number, position: number): 
 // continuation reads concatenate exactly. Up to three trailing bytes of an incomplete sequence are withheld, then a
 // trailing `\r`; a chunk that withholding would leave empty reads forward instead (at most three bytes to finish the
 // character, one for the `\n`), so a pager always advances (C4's `readSpill` rule).
-async function settleText(handle: FileHandle, chunk: Buffer, offset: number, size: number): Promise<Buffer> {
+async function settleText(bytesAt: ByteSource, chunk: Buffer, offset: number, size: number): Promise<Buffer> {
   const more = (page: Buffer) => offset + page.length < size;
   if (!more(chunk)) return chunk;
   const cut = utf8Cut(chunk);
   if (cut.missing > 0) {
-    chunk = cut.end > 0 ? chunk.subarray(0, cut.end) : Buffer.concat([chunk, await readFully(handle, Math.min(cut.missing, size - offset - chunk.length), offset + chunk.length)]);
+    chunk = cut.end > 0 ? chunk.subarray(0, cut.end) : Buffer.concat([chunk, await bytesAt(Math.min(cut.missing, size - offset - chunk.length), offset + chunk.length)]);
   }
   if (more(chunk) && chunk.at(-1) === 0x0d) {
     if (chunk.length > 1) return chunk.subarray(0, -1);
-    const next = await readFully(handle, 1, offset + 1);
+    const next = await bytesAt(1, offset + 1);
     if (next[0] === 0x0a) return Buffer.concat([chunk, next]); // a lone `\r` not followed by `\n` splits no CRLF
   }
   return chunk;

@@ -1,8 +1,9 @@
 // X2 `files.*` (C8c execution document, Interfaces "`files.*`"; the C8 spec's *`files.*` read service*, K1): main's
-// read-only view of a session's own directories, for the Files tool and the file viewer. Owner `main` for every
+// view of a session's own directories, for the Files tool, the file viewer and (E5) the editor. Owner `main` for every
 // command. Every path is confined to the session's allowlist (the realpaths of its `directory`, `additionalDirectories`
 // and `worktree.path`) by the open-first boundary in `src/main/files/service.ts`; refusals answer `internal` with
-// `path outside the session's directories`. Nothing here writes a file.
+// `path outside the session's directories`. The one write is E5's `files.write`, the hash-checked save of a file that
+// already exists; nothing here creates, renames or deletes a file.
 import * as z from 'zod';
 import { extensionOf, mimeOf } from '@shared/files/mime';
 import { AppSessionIdSchema } from '@shared/graph/ids';
@@ -14,6 +15,8 @@ export const FILES_READ_MAX_LENGTH = 8 * 1024 * 1024; // one call's ceiling; the
 export const FILES_LIST_MAX_ENTRIES = 5000;
 // How much of a file's head decides its encoding (a NUL in it makes the file binary); main and the viewer share it.
 export const BINARY_SNIFF_BYTES = 8192;
+// E5: the editor's ceiling, on the file before the write (main reads it whole to compare) and on the content after it.
+export const FILES_WRITE_MAX_BYTES = FILES_READ_MAX_LENGTH;
 
 // Whether `files.openExternal` hands a file of this name to the OS (and the viewer offers the button): an allowlist of
 // the document and media kinds MAWS opens outside on purpose, because any installed app can register to launch a file
@@ -46,11 +49,18 @@ export const FilesListOutputSchema = z.strictObject({
 });
 export type FilesListOutput = z.infer<typeof FilesListOutputSchema>;
 
+// E5: a file's SHA-256 as lowercase hex, computed by main from the bytes it read or wrote through the descriptor, never
+// by the renderer.
+export const HashSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
 export const FilesReadInputSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   path: z.string(),
   offset: z.number().int().min(0).optional(),
   length: z.number().int().min(1).max(FILES_READ_MAX_LENGTH).optional(), // defaults to FILES_READ_DEFAULT_LENGTH
+  // E5: answer the whole file's hash with this chunk. Main then reads the whole file (up to FILES_READ_MAX_LENGTH) into
+  // one buffer, hashes it and slices the chunk from it, so the chunk's bytes are always the hashed file's.
+  hash: z.boolean().optional(),
 });
 export type FilesReadInput = z.infer<typeof FilesReadInputSchema>;
 
@@ -67,8 +77,33 @@ export const FilesReadOutputSchema = z.strictObject({
   length: z.number().int(),
   truncated: z.boolean(),
   mime: z.string(),
+  // E5: the whole file's hash when asked (`hash: true`); null when not asked, and for a file past
+  // FILES_READ_MAX_LENGTH (a head is never edited).
+  hash: HashSchema.nullable(),
+  // E5: with the hash, whether the hashed bytes are valid UTF-8 (main's strict decode of the whole buffer), so the
+  // renderer knows the text it holds re-encodes to the file's bytes exactly; null when not hashed. A byte-length
+  // comparison is no such test: a truncated multi-byte sequence decodes to U+FFFD, which may be as long.
+  utf8: z.boolean().nullable(),
 });
 export type FilesReadOutput = z.infer<typeof FilesReadOutputSchema>;
+
+// E5: write `content` (UTF-8) over an existing file only when the file's current hash is `expectedHash`. Confined
+// exactly as `files.read`; never creates a file and never follows a rename (it writes through the confirmed
+// descriptor). `content` is bounded in characters here; main refuses `content too large` when its UTF-8 bytes exceed
+// FILES_WRITE_MAX_BYTES, and `too large to edit: <path>` for a file past it.
+export const FilesWriteInputSchema = z.strictObject({
+  appSessionId: AppSessionIdSchema,
+  path: z.string(),
+  content: z.string().max(FILES_WRITE_MAX_BYTES),
+  expectedHash: HashSchema,
+});
+export type FilesWriteInput = z.infer<typeof FilesWriteInputSchema>;
+
+export const FilesWriteOutputSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('ok'), hash: HashSchema }), // the hash of what was written
+  z.strictObject({ status: z.literal('conflict'), hash: HashSchema }), // the file's current hash; nothing written
+]);
+export type FilesWriteOutput = z.infer<typeof FilesWriteOutputSchema>;
 
 const SessionPathSchema = z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string() });
 
@@ -87,6 +122,9 @@ export const commands = {
   'files.watch': { input: SessionPathSchema, output: z.void(), owner: 'main' },
   'files.unwatch': { input: SessionPathSchema, output: z.void(), owner: 'main' },
   'files.openExternal': { input: SessionPathSchema, output: FilesOpenExternalOutputSchema, owner: 'main' },
+  // E5 start: the hash-checked save. Not a read: never in the renderer's QUERY_COMMANDS.
+  'files.write': { input: FilesWriteInputSchema, output: FilesWriteOutputSchema, owner: 'main' },
+  // E5 end
 } as const satisfies Record<`files.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 // `invalidated`: the watched directory (path is its confirmed realpath) failed a re-confirmation and its watch was

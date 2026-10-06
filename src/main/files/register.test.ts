@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -70,6 +71,25 @@ describe('main answers files.* through the router', () => {
     });
     expect(await invoke('files.read', { appSessionId: 'A', path: '/etc/hosts' })).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
     expect(await invoke('files.list', { appSessionId: 'nope' })).toEqual({ ok: false, error: { code: 'internal', message: 'unknown app session: nope' } });
+  });
+
+  // E5: the hash-checked save through the router, its answers validated by the output schema.
+  it('writes a file over its hash, answers conflict over a stale one, and refuses a path outside', async () => {
+    await install();
+    const path = join(root, 'repo', 'src', 'a.ts');
+    const hashOf = (text: string) => createHash('sha256').update(text).digest('hex');
+    expect(await invoke('files.read', { appSessionId: 'A', path, hash: true })).toMatchObject({ ok: true, value: { hash: hashOf('export {};\n') } });
+    expect(await invoke('files.write', { appSessionId: 'A', path, content: 'export const a = 1;\n', expectedHash: hashOf('export {};\n') })).toEqual({
+      ok: true,
+      value: { status: 'ok', hash: hashOf('export const a = 1;\n') },
+    });
+    expect(readFileSync(path, 'utf8')).toBe('export const a = 1;\n');
+    expect(await invoke('files.write', { appSessionId: 'A', path, content: 'stale\n', expectedHash: hashOf('export {};\n') })).toEqual({
+      ok: true,
+      value: { status: 'conflict', hash: hashOf('export const a = 1;\n') },
+    });
+    expect(await invoke('files.write', { appSessionId: 'A', path: '/etc/hosts', content: '', expectedHash: hashOf('') })).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
+    expect(await invoke('files.write', { appSessionId: 'A', path, content: '' })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
   });
 
   it('fails invalid_input for a length above the ceiling, before the service is reached', async () => {

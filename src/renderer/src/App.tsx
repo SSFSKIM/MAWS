@@ -63,6 +63,9 @@ import { registerUsage } from './usage';
 // E9 start
 import { DictationKeys } from './composer';
 // E9 end
+// E5 start
+import { EditorDialogs } from './tools/code';
+// E5 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -186,6 +189,9 @@ export function App() {
       {/* E9 start: dictation's one controller, for the composer microphone's clicks and the composer.dictate hold once bound */}
       <DictationKeys />
       {/* E9 end */}
+      {/* E5 start: the editor's close sheet (registerEditor's guard, registered by C8c's registerCodeTools) */}
+      <EditorDialogs />
+      {/* E5 end */}
     </QueryClientProvider>
   );
 }

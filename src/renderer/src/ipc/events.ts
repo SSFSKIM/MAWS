@@ -19,6 +19,10 @@ import { queryClient } from './query';
 import { useFiles } from '../tools/code/files/store';
 import { useViewer } from '../tools/code/viewer/viewer-store';
 // C8c end
+// E5 start
+import { pushUnsavedFiles, unsavedPaths } from '../tools/code/viewer/viewer-store';
+import { EDITOR_COPY } from '../tools/code/copy';
+// E5 end
 // C8b start
 import { agentWorkClient, type AgentWorkClient } from '../tools/agents/client';
 // C8b end
@@ -183,10 +187,34 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
 // main's `files.changed` into the Files tool's listings and watches, then into the file viewer's tabs (in that order,
 // so an `invalidated` directory is being re-watched before the viewer waits on it).
 export function connectCodeEvents(client: MawsBridge = ipc): () => void {
-  return client.on('files.changed', (event) => {
+  const offFiles = client.on('files.changed', (event) => {
     useFiles.getState().applyChanged(event);
     useViewer.getState().applyChanged(event);
   });
+  // E5 start (M5): the quit guard's unsaved files. The window's dirty file tabs go to main on every change of the set,
+  // and main's Save all saves them and is answered with those left unsaved (after the saves' own pushes).
+  const offUnsaved = pushUnsavedFiles(client);
+  // A Save all that throws still answers (fix wave 1), every dirty tab unsaved, so main never waits out its bound.
+  const offSaveAll = client.on('layout.saveAll', ({ requestId }) =>
+    void useViewer
+      .getState()
+      .saveAll()
+      .catch((error: unknown) => {
+        console.error('[editor] Save all failed; answering every dirty tab unsaved', error);
+        return unsavedPaths(useViewer.getState().entries).map((path) => ({ path, message: EDITOR_COPY.unsaved }));
+      })
+      .then((failed) => client.invoke('layout.saveAllDone', { requestId, failed }))
+      .then((result) => {
+        if (!result.ok) console.warn('[editor] could not answer Save all', result.error);
+      })
+      .catch((error: unknown) => console.error('[editor] could not answer Save all', error)),
+  );
+  return () => {
+    offFiles();
+    offUnsaved();
+    offSaveAll();
+  };
+  // E5 end
 }
 // C8c end
 // C8b start: the agent tools' one pushed fact outside their stores (C8b execution document, Repository map). A task

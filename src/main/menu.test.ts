@@ -196,3 +196,13 @@ describe('the installed menu', () => {
     menu.stop();
   });
 });
+
+// E5 start: the editor's save in the File menu (E5 execution document, Interfaces *The close guard and the action*)
+describe('File ▸ Save file', () => {
+  it('follows the tab items as its own group, at ⌘S', () => {
+    const file = top(menuTemplate(ACTIONS, {}, ALL, vi.fn()), 'File')!.submenu as Item[];
+    expect(file.map((item) => item.id ?? item.type)).toEqual(['session.new', 'separator', 'tab.close', 'tab.reopen', 'separator', 'file.save']);
+    expect(byId(file, 'file.save')).toMatchObject({ label: 'Save file', accelerator: 'Cmd+S' });
+  });
+});
+// E5 end

@@ -439,7 +439,7 @@ it('keeps fallback notifications and quit-wait actions outside the hidden main r
   useLayout.getState().setPanel({ maximized: true, collapsed: false });
   render(<Shell />);
   act(() => {
-    fake.event('layout.quitWait', { waiting: { midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false } });
+    fake.event('layout.quitWait', { waiting: { midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] /* E5 */ } });
     fake.event('attention.notified', { appSessionId: A, attentionId: 'att-a', delivery: 'fallback', at: '2026-10-02T10:00:00Z' });
   });
   const quit = screen.getByRole('button', { name: 'Quit now' });

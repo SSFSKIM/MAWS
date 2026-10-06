@@ -4,6 +4,7 @@
 // first diff body (O2).
 import { registerSlot } from '../../app/slots';
 import { registerPanelTool } from '../../panel/host';
+import { registerEditor } from './editor/register';
 import { filesTool } from './files/FilesTool';
 import { DiffTab } from './review/DiffTab';
 import { reviewTool } from './review/ReviewTool';
@@ -19,11 +20,13 @@ export { ReviewSummary } from './review/ReviewSummary';
 export { reviewTool } from './review/ReviewTool';
 export { FileViewer } from './viewer/FileViewer';
 export { kindOf } from './viewer/kinds';
+export { EditorDialogs, useEditorDialog } from './editor/EditorDialogs'; // E5
+export { registerEditor } from './editor/register'; // E5
 
 // Registers the tools and slots. The disposer unregisters the tools, which closes their tabs (C8a's rule), so App.tsx
 // never calls it; tests and the harness may.
 export function registerCodeTools(): () => void {
-  const offs = [registerPanelTool(reviewTool), registerPanelTool(filesTool)];
+  const offs = [registerPanelTool(reviewTool), registerPanelTool(filesTool), registerEditor()]; // E5: the file guard and file.save
   registerSlot('fileTab', FileViewer);
   registerSlot('diffTab', DiffTab);
   return () => offs.forEach((off) => off());

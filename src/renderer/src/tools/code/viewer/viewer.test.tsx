@@ -113,11 +113,11 @@ function serve(files: Record<string, Served>, gate?: (offset: number) => Promise
     const served = typeof file === 'string' ? { text: file } : file;
     if ('refusal' in served) return fail(served.refusal);
     const mime = ('mime' in served && served.mime) || mimeOf(path);
-    if ('base64' in served) return ok({ encoding: 'base64', content: served.base64, bytes: served.bytes, offset: 0, length: served.bytes, truncated: false, mime });
+    if ('base64' in served) return ok({ encoding: 'base64', content: served.base64, bytes: served.bytes, offset: 0, length: served.bytes, truncated: false, mime, hash: null, utf8: null });
     const bytes = 'text' in served ? served.text.length : served.generated;
     const end = Math.min(bytes, offset + length);
     const content = 'text' in served ? served.text.slice(offset, end) : served.line.repeat(Math.ceil((end - offset) / served.line.length)).slice(0, end - offset);
-    return ok({ encoding: 'utf8', content, bytes, offset, length: end - offset, truncated: end < bytes, mime });
+    return ok({ encoding: 'utf8', content, bytes, offset, length: end - offset, truncated: end < bytes, mime, hash: null, utf8: null });
   });
 }
 
@@ -202,7 +202,7 @@ describe('viewer', () => {
       const offset = (input.offset as number | undefined) ?? 0;
       if (offset > 0 && refuse) return fail("path outside the session's directories");
       const end = Math.min(text.length, offset + MiB);
-      return ok({ encoding: 'utf8', content: text.slice(offset, end), bytes: text.length, offset, length: end - offset, truncated: end < text.length, mime: 'text/plain' });
+      return ok({ encoding: 'utf8', content: text.slice(offset, end), bytes: text.length, offset, length: end - offset, truncated: end < text.length, mime: 'text/plain', hash: null, utf8: null });
     });
     refuse = true;
     render(<FileViewer tab={fileTab('/r/half.txt')} />);
@@ -401,7 +401,7 @@ describe('viewer', () => {
       const offset = (input.offset as number | undefined) ?? 0;
       if (gone && offset > 0) return fail(`not found: /r/log.txt`);
       const end = Math.min(text.length, offset + MiB);
-      return ok({ encoding: 'utf8', content: text.slice(offset, end), bytes: text.length, offset, length: end - offset, truncated: end < text.length, mime: 'text/plain' });
+      return ok({ encoding: 'utf8', content: text.slice(offset, end), bytes: text.length, offset, length: end - offset, truncated: end < text.length, mime: 'text/plain', hash: null, utf8: null });
     });
     connect();
     render(<FileViewer tab={fileTab('/r/log.txt')} />);
@@ -421,7 +421,7 @@ describe('viewer', () => {
       if (name !== 'files.read') return ok();
       const n = reads++;
       await gates[n].promise;
-      return ok({ encoding: 'utf8', content: answers[n], bytes: 4, offset: 0, length: 4, truncated: false, mime: 'text/plain' });
+      return ok({ encoding: 'utf8', content: answers[n], bytes: 4, offset: 0, length: 4, truncated: false, mime: 'text/plain', hash: null, utf8: null });
     });
     openFile(A, '/r/a.txt');
     const first = render(<FileViewer tab={fileTab('/r/a.txt')} />);

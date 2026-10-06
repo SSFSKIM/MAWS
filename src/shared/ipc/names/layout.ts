@@ -5,10 +5,12 @@ export const commands = [
   'layout.get', 'layout.set', 'layout.list', 'layout.openExternal', 'layout.setEnabledActions', 'layout.pickFiles',
   'layout.saveTextFile', 'layout.captureChords',
   'layout.quitWait', 'layout.quitWaitAnswer', // C12
+  'layout.unsavedFiles', 'layout.saveAllDone', // E5
 ] as const;
 
 export const events = [
   'layout.action',
   'layout.quitWait', // C12
   'layout.selectAll', // Edit ▸ Select All (sitting finding, 2026-09-30)
+  'layout.saveAll', // E5
 ] as const;

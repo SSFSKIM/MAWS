@@ -210,7 +210,11 @@ const c11Commands = {
 // C12 start: "Quit when idle" (C12 execution document, Interfaces "The quit question"): main holds the quit and the
 // page shows the banner. `layout.quitWait` answers, and emits on every change, the busy report main is waiting on (null
 // when it is not waiting); `layout.quitWaitAnswer` is the banner's Quit now or Cancel.
-export const BusyReportSchema = z.strictObject({ midTurn: z.number().int().nonnegative(), backgroundWork: z.number().int().nonnegative(), busyTerminals: z.number().int().nonnegative(), terminalsUnknown: z.boolean() });
+export const BusyReportSchema = z.strictObject({ midTurn: z.number().int().nonnegative(), backgroundWork: z.number().int().nonnegative(), busyTerminals: z.number().int().nonnegative(), terminalsUnknown: z.boolean(),
+  // E5 start: the absolute paths of every window's dirty file tabs, sorted (E5 execution document, M5)
+  unsavedFiles: z.array(z.string()),
+  // E5 end
+});
 export const QuitWaitSchema = z.strictObject({ waiting: BusyReportSchema.nullable() });
 export type QuitWait = z.infer<typeof QuitWaitSchema>;
 const c12Commands = {
@@ -218,6 +222,20 @@ const c12Commands = {
   'layout.quitWaitAnswer': { input: z.strictObject({ action: z.enum(['quitNow', 'cancel']) }), output: z.void(), owner: 'main' },
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C12 end
+
+// E5 start: the quit guard and unsaved files (E5 execution document, Interfaces "The quit guard and unsaved files (M5)").
+// `layout.unsavedFiles` is a window's whole dirty set, sent on every change of it; main keeps one set per window and
+// forgets it when the window navigates or closes. `layout.saveAll` (an event) asks every window to save its dirty file
+// tabs; `layout.saveAllDone` is a window's answer once every save ended, listing the tabs not clean afterwards.
+const e5Commands = {
+  'layout.unsavedFiles': { input: z.strictObject({ paths: z.array(z.string()) }), output: z.void(), owner: 'main' },
+  'layout.saveAllDone': {
+    input: z.strictObject({ requestId: z.string(), failed: z.array(z.strictObject({ path: z.string(), message: z.string() })) }),
+    output: z.void(),
+    owner: 'main',
+  },
+} as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// E5 end
 
 export const commands = {
   'layout.get':          { input: z.strictObject({ key: LayoutKeySchema }), output: z.strictObject({ value: z.unknown().nullable() }), owner: 'main' },
@@ -230,6 +248,7 @@ export const commands = {
   ...c7Commands, // C7
   ...c11Commands, // C11
   ...c12Commands, // C12
+  ...e5Commands, // E5
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -238,4 +257,7 @@ export const events = {
   // Edit ▸ Select All, the menu's own item (src/main/menu.ts; sitting finding, 2026-09-30): main has run the editor
   // command in the focused page, and the terminal holding focus, if any, selects its buffer, which that command misses
   'layout.selectAll': z.strictObject({}),
+  // E5 start: main asks every window to save its dirty file tabs (the quit question's Save all)
+  'layout.saveAll': z.strictObject({ requestId: z.string() }),
+  // E5 end
 } as const satisfies Record<`layout.${string}`, z.ZodType>;

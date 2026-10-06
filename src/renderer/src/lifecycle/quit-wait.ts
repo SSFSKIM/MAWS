@@ -6,12 +6,19 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { QuitWait } from '@shared/ipc/schema/layout';
 import { ipc } from '../ipc/client';
 import { useNotices } from '../stores/notices';
+import { EDITOR_COPY } from '../tools/code/copy'; // E5 (M5)
 
 export const QUIT_WAIT_BANNER_ID = 'quit:when-idle';
 
 export function quitWaitText(r: NonNullable<QuitWait['waiting']>): string {
   const n = r.midTurn + r.backgroundWork + r.busyTerminals;
-  return `MAWS will quit when ${n} ${n === 1 ? 'thing finishes' : 'things finish'}`;
+  // E5 (M5): a file dirtied during the wait holds it too, until it is saved
+  const unsaved = r.unsavedFiles.length;
+  const parts = [
+    n > 0 ? `${n} ${n === 1 ? 'thing finishes' : 'things finish'}` : null,
+    unsaved > 0 ? `${EDITOR_COPY.unsavedFilesPart(unsaved)} ${unsaved === 1 ? 'is' : 'are'} saved` : null,
+  ].filter((part): part is string => part !== null);
+  return `MAWS will quit when ${parts.join(' and ')}`;
 }
 
 export function connectQuitWait(client: MawsBridge = ipc): () => void {
