@@ -1,0 +1,1 @@
+G1 terminal half: /Users/new/.local/share/claude/versions/2.1.291 -p --resume 2a8e4ccb-0d5c-448b-a06e-e0b6a7c6b6a7 --output-format stream-json --verbose --model haiku <prompt>: exit 0; system/init.tools 26 tools, mcp__maws__* []; mcp_servers []; result success "NONE"
