@@ -32,6 +32,8 @@ import { closeWidgetDialog, useWidgetDialog } from './WidgetDialog'; // W3
 import { registerSetupIntentHook, type HookResult, type SetupIntentHook, type SetupIntentPatch } from './setup-intent';
 import { currentSet } from '../stores/layout-model';
 import { registerReleasedResume } from './resume-seam'; // C12
+import { DictationKeys } from './dictation/DictationKeys'; // E9
+import { resetDictationStore, useDictationStore } from './dictation/store'; // E9
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -485,13 +487,14 @@ describe("composer DOM under C5's dispatcher", () => {
   });
 
   // W10 (C10): "model matters a bit more": the model chip toward the middle, the context ring at the outermost edge
-  it('orders the toolbar + · location · mode … model · context ring, the ring last', async () => {
+  it('orders the toolbar + · location · mode · mic … model · context ring, the ring last', async () => {
     live(A);
     mount([{ index: 0, id: A }]);
     const toolbar = within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools' });
     await waitFor(() => expect(within(toolbar).getByRole('button', { name: /^Context window/ })).toBeTruthy());
     const labels = within(toolbar).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? '');
-    expect(labels).toEqual(['Add files, photos or commands', expect.stringMatching(/^Location /), expect.stringMatching(/^Permission mode /), expect.stringMatching(/^Model /), expect.stringMatching(/^Context window/)]);
+    // E9: the microphone after the permission mode (and a plugin's mode slot), before the spacer
+    expect(labels).toEqual(['Add files, photos or commands', expect.stringMatching(/^Location /), expect.stringMatching(/^Permission mode /), 'Dictate', expect.stringMatching(/^Model /), expect.stringMatching(/^Context window/)]);
   });
 
   // W10 (C9): on an unstarted tab Add directory… patches the intent, and the project row lists the directories read-only
@@ -895,3 +898,86 @@ describe('a released session resumes on Send', () => {
   });
 });
 // C12 end
+
+// E9 start: push-to-talk dictation through the composer (E9 execution document, Design §6 to §8): the one app-level hold
+// resolves the focused pane's session, writes into that composer only, and shows its state in that toolbar.
+describe('dictation into the focused pane’s composer', () => {
+  const focusTabs = (focusedPane: 0 | 1, ids: AppSessionId[]) =>
+    useLayout.setState((s) => ({
+      main: {
+        ...s.main,
+        current: 'none',
+        sets: {
+          none: {
+            panes: ids.map((id) => ({ tabs: [{ id: `session:${id}`, kind: 'session' as const, appSessionId: id, pinned: false }], activeTabId: `session:${id}` })),
+            focusedPane,
+            splitRatio: 0.5,
+          },
+        },
+      },
+    }));
+  const altSpace = { code: 'Space', key: ' ', altKey: true };
+  const keyUp = (init: KeyboardEventInit) => act(async () => void document.body.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, ...init })));
+  const voice = (payload: Record<string, unknown>) => act(() => fake.event('voice.event', payload));
+  const captureId = () => (invoked('voice.start')[0] as { captureId: string }).captureId;
+  const dictationStatus = (index: 0 | 1) => within(composerOf(index)).queryByRole('status', { name: 'Dictation' });
+  const trustCard = () => <DockedCardFrame appSessionId={A} title="Trust this folder?" onAccept={() => {}} onDecline={null}>Trust?</DockedCardFrame>;
+
+  beforeEach(() => resetDictationStore());
+  afterEach(() => resetDictationStore());
+
+  it('holding ⌥Space in pane 1 writes greyed partials there only, and the release settles the final', async () => {
+    live(A);
+    live(B);
+    focusTabs(1, [A, B]);
+    mount([{ index: 0, id: A }, { index: 1, id: B }], <DictationKeys />);
+    act(() => editorOf(1).focus());
+    await key(editorOf(1), altSpace);
+    await key(editorOf(1), { ...altSpace, repeat: true });
+    expect(invoked('voice.start')).toEqual([{ captureId: expect.any(String), locale: null }]);
+    expect(dictationStatus(1)?.textContent).toBe('Asking for permission…');
+
+    voice({ kind: 'started', captureId: captureId(), locale: 'en-US' });
+    expect(dictationStatus(1)?.textContent).toBe('Listening…');
+    expect(dictationStatus(0)).toBeNull();
+    voice({ kind: 'partial', captureId: captureId(), text: 'hello' });
+    voice({ kind: 'partial', captureId: captureId(), text: 'hello world' });
+    expect(editorOf(1).editor.getText()).toBe('hello world');
+    expect([...editorOf(1).querySelectorAll('.text-fg-muted')].map((el) => el.textContent)).toEqual(['hello world']);
+    expect(editorOf(0).editor.getText()).toBe('');
+
+    await keyUp(altSpace);
+    expect(invoked('voice.stop')).toEqual([{ captureId: captureId() }]);
+    expect(dictationStatus(1)?.textContent).toBe('Finishing…');
+    voice({ kind: 'final', captureId: captureId(), text: 'Hello world.', timedOut: false });
+    expect(editorOf(1).editor.getText()).toBe('Hello world.');
+    expect(editorOf(1).querySelectorAll('.text-fg-muted')).toHaveLength(0);
+    expect(dictationStatus(1)).toBeNull();
+  });
+
+  it('a card over the box refuses: the notice shows in the dock and nothing starts', async () => {
+    live(A);
+    focusTabs(0, [A]);
+    dockCard(A, { id: 'c10:trust', render: trustCard });
+    mount([{ index: 0, id: A }], <DictationKeys />);
+    await within(composerOf(0)).findByRole('group', { name: 'Trust this folder?' });
+    await key(document.body, altSpace);
+    expect(invoked('voice.start')).toEqual([]);
+    expect(within(composerOf(0)).getByRole('note', { name: 'Dictation notice' }).textContent).toContain('Dictation needs a composer that can take text');
+  });
+
+  it('a card docking mid-capture keeps the words heard so far and cancels on main', async () => {
+    live(A);
+    focusTabs(0, [A]);
+    mount([{ index: 0, id: A }], <DictationKeys />);
+    act(() => editorOf(0).focus());
+    await key(editorOf(0), altSpace);
+    voice({ kind: 'started', captureId: captureId(), locale: 'en-US' });
+    voice({ kind: 'partial', captureId: captureId(), text: 'hello' });
+    act(() => void dockCard(A, { id: 'c10:trust', render: trustCard }));
+    await waitFor(() => expect(invoked('voice.cancel')).toEqual([{ captureId: captureId() }]));
+    expect(editorOf(0).editor.getText()).toBe('hello');
+    expect(useDictationStore.getState().capture).toBeNull();
+  });
+});
+// E9 end

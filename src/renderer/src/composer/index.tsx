@@ -12,6 +12,7 @@ import { editAndResubmitRow, editPromptRow } from './resubmit-seam';
 
 export { Composer, type ComposerProps } from './Composer';
 export { ComposerAppKeys } from './ComposerAppKeys';
+export { DictationKeys } from './dictation/DictationKeys'; // E9: the one dictation key and controller, mounted from App.tsx
 export { DockedCardFrame, type DockedCardFrameProps } from './docked/DockedCardFrame';
 export { dockCard, useDockedCards, type DockedCard } from './docked/registry';
 export { insertComposerText, prefillComposer, useComposerStore, type Prefill } from '../stores/composer';
