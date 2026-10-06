@@ -51,7 +51,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ReloadPluginsResponse } from '@shared/wire/control';
 import { availableOf, installedOf, listing, marketplacesOf } from './plugins/cli-result';
-import { PluginsRunner, type Timers } from './plugins/runner';
+import { PluginsRunner, SHUTDOWN_KILL_GRACE_MS, type Timers } from './plugins/runner';
 import { READ_LINES } from '@shared/plugins/cli';
 // E8 end
 
@@ -233,8 +233,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('engine.relayHealth', async ({ force }) => relayCheck(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
   handle('engine.shutdown', async ({ graceMs }) => {
-    plugins.stop(); // E8: a plugin CLI outlives nothing it should not (X13)
-    return table.shutdown({ graceMs });
+    // E8: a plugin CLI outlives nothing it should not (X13): answered only once every CLI's process group is gone, its
+    // SIGKILL sooner than a cancel's so the stop fits main's quit bound
+    const [result] = await Promise.all([table.shutdown({ graceMs }), plugins.stop(SHUTDOWN_KILL_GRACE_MS)]);
+    return result;
   });
   // C12 start: the memory budget (C12 execution document, Interfaces "X2 additions"). Both immediate: the policy is
   // evaluated at once against the previous sample (a release it makes is a stop the table starts, not awaited here),

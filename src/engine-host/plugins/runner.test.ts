@@ -1,10 +1,11 @@
 // E8 M1: the runner spawns the engine's plugin CLI (here a fake binary written into a temp directory, whose behaviour
 // each case writes) under the captured login-shell environment, serialises mutations, reports them as operations, and
 // reloads ready sessions after a successful one. Timers that would take minutes are shortened through the timers seam.
+import { spawn as nodeSpawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { validateEventPayload } from '@shared/ipc/validate';
@@ -30,8 +31,8 @@ beforeEach(() => {
   behave('');
 });
 let runner: PluginsRunner | null = null;
-afterEach(() => {
-  runner?.stop();
+afterEach(async () => {
+  await runner?.stop();
   runner = null;
   rmSync(root, { recursive: true, force: true });
 });
@@ -207,14 +208,64 @@ describe('PluginsRunner mutations', () => {
     expect(reloads).toEqual(['a']);
   });
 
-  it('stop kills every child it runs', async () => {
-    behave('sleep 30\n');
-    const { runner } = make();
-    await runner.start('install', { plugin: 'p@m' }, cwd);
+  it('stop resolves once every child is gone, a TERM-ignoring one through SIGKILL, and closes admission', async () => {
+    behave(`trap '' TERM\nsleep 30\n`);
+    const { runner, done } = make();
+    const { opId } = await runner.start('install', { plugin: 'p@m' }, cwd);
     await until(() => existsSync(join(fake, 'pid')) && readFileSync(join(fake, 'pid'), 'utf8').trim(), 'the pid');
     const pid = Number(readFileSync(join(fake, 'pid'), 'utf8'));
-    runner.stop();
-    await until(() => !alive(pid), 'the child to die');
+    await runner.stop();
+    expect(alive(pid)).toBe(false); // dead when stop resolves, not later
+    expect((await done(opId)).outcome).toMatchObject({ ok: false, error: { code: 'cancelled', message: 'stopped with the engine host' } });
+    await expect(runner.start('install', { plugin: 'p@m' }, cwd)).rejects.toThrow(/stopping/);
+    await expect(runner.read(READ_LINES.installed, cwd)).rejects.toThrow('stopped with the engine host');
+  });
+
+  it('a cancel while the binary is still being resolved completes cancelled and never spawns', async () => {
+    let release!: (check: BinaryCheck) => void;
+    const spawn = vi.fn(nodeSpawn);
+    const { runner, done, events } = make({ binary: () => new Promise<BinaryCheck>((r) => (release = r)), spawn: spawn as unknown as typeof nodeSpawn });
+    const { opId } = await runner.start('install', { plugin: 'p@m' }, cwd);
+    await until(() => events.some((e) => e.opId === opId && e.phase === 'started'), 'started');
+    expect(runner.cancel(opId)).toBe(true);
+    release(ok(bin));
+    expect((await done(opId)).outcome).toMatchObject({ ok: false, error: { code: 'cancelled', message: 'cancelled before the CLI finished' } });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(calls()).toEqual([]);
+  });
+
+  it('a stop while the environment is still being captured never spawns', async () => {
+    let release!: (env: Record<string, string>) => void;
+    const spawn = vi.fn(nodeSpawn);
+    const { runner, done, events } = make({ captureEnv: () => new Promise((r) => (release = r)), spawn: spawn as unknown as typeof nodeSpawn });
+    const { opId } = await runner.start('install', { plugin: 'p@m' }, cwd);
+    await until(() => events.some((e) => e.opId === opId && e.phase === 'started'), 'started');
+    await runner.stop();
+    release({ PATH: '/usr/bin:/bin' });
+    expect((await done(opId)).outcome).toMatchObject({ ok: false, error: { code: 'cancelled', message: 'stopped with the engine host' } });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('a cancel kills a TERM-ignoring helper the CLI started with its output redirected, after the CLI itself exited', async () => {
+    behave(`(trap '' TERM; exec sleep 30) >/dev/null 2>&1 </dev/null &\necho $! > "${fake}/helper"\nsleep 30\n`);
+    const { runner, done } = make();
+    const { opId } = await runner.start('marketplace-add', { source: 'owner/repo' }, cwd);
+    await until(() => existsSync(join(fake, 'helper')) && readFileSync(join(fake, 'helper'), 'utf8').trim(), 'the helper pid');
+    const helper = Number(readFileSync(join(fake, 'helper'), 'utf8'));
+    expect(alive(helper)).toBe(true);
+    expect(runner.cancel(opId)).toBe(true);
+    expect((await done(opId)).outcome).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    expect(alive(helper)).toBe(false);
+  });
+
+  it('decodes UTF-8 split across output chunks', async () => {
+    // U+2026 (E2 80 A6) written in two parts with a pause between them, on stderr (an output line) and stdout (the result)
+    behave(`printf 'Cloning \\342\\200' >&2; sleep 0.2; printf '\\246\\n' >&2\nprintf '{"command":"install","outcome":"ok","message":"done \\342\\200'; sleep 0.2; printf '\\246"}\\n'\n`);
+    const { runner, done, events } = make();
+    const { opId } = await runner.start('install', { plugin: 'p@m' }, cwd);
+    const finished = await done(opId);
+    expect(events.find((e) => e.opId === opId && e.phase === 'output')?.line).toBe('Cloning \u2026');
+    expect(finished.outcome).toMatchObject({ ok: true, result: { message: 'done \u2026' } });
   });
 });
 

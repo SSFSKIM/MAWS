@@ -1,13 +1,16 @@
-// The plugin CLI runner (E8 execution document, Interfaces "The runner"; D-1 to D-5): the engine host runs the engine's
-// own `claude plugin …` (the binary the launcher resolves, so the owner's choice in Settings › Engine applies) in a
-// process it owns, never writing the config home itself. The child gets the whole captured login-shell environment (a
-// private marketplace's clone needs SSH_AUTH_SOCK and the shell's PATH; CLAUDE_CONFIG_DIR travels in it as it does to
+// The plugin CLI runner (E8 execution document, Interfaces "The runner"; D-1 to D-5, D-15): the engine host runs the
+// engine's own `claude plugin …` (the binary the launcher resolves, so the owner's choice in Settings › Engine applies)
+// in a process it owns, never writing the config home itself. The child gets the whole captured login-shell environment
+// (a private marketplace's clone needs SSH_AUTH_SOCK and the shell's PATH; CLAUDE_CONFIG_DIR travels in it as it does to
 // the engine) less the nesting variables (inside a Claude Code session the CLI ignores `--accept-command`), plus the
 // updater off and a dumb terminal; its cwd is the operation's directory, where project and local scope write.
 // Reads run freely and answer the whole output; mutations are serialised in one queue and run as operations: a receipt
 // `{ opId }` at once, then `started`, the CLI's `output` lines, `reloading` and `done`, with `plugins.changed` as soon as
-// the CLI has ended. A child is killed at CLI_TIMEOUT_MS (SIGTERM, SIGKILL after KILL_GRACE_MS), on `cancel`, and on
-// `stop` (the host stopping); each runs in its own process group so a clone it started dies with it.
+// the CLI has ended. A child runs in its own process group, which the runner owns until the group is empty: at
+// CLI_TIMEOUT_MS, on `cancel` and on `stop` (the host stopping) the group gets SIGTERM and, at the grace, SIGKILL, and the
+// run ends only once no member remains, so a clone or helper the CLI started dies with it even after the CLI itself
+// exited. A cancel or stop that arrives while an operation is still resolving the binary or capturing the environment
+// completes it `cancelled` without spawning; after `stop` nothing new runs.
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
@@ -20,6 +23,11 @@ import { RELOADING_ACTIONS, reloadAfter, SETTLE_MS, type ReloadTarget } from './
 export { SETTLE_MS };
 export const CLI_TIMEOUT_MS = 600_000;
 export const KILL_GRACE_MS = 5_000;
+// The host stopping (the app's quit through `engine.shutdown`): SIGKILL sooner, so the whole stop fits main's 5 s quit
+// bound (src/main/lifecycle/quit-guard.ts SHUTDOWN_BOUND_MS) with REAP_GIVE_UP_MS and a poll to spare.
+export const SHUTDOWN_KILL_GRACE_MS = 2_000;
+const REAP_POLL_MS = 50; // how often a stopping group is probed for remaining members
+const REAP_GIVE_UP_MS = 1_000; // after SIGKILL, how long a member that still answers the probe is waited for
 
 // MAWS's and the engine's nesting variables: the CLI must not think it runs inside a Claude Code session or Electron.
 const DROPPED = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT', 'ELECTRON_RUN_AS_NODE', 'ELECTRON_RENDERER_URL', 'NODE_OPTIONS'];
@@ -50,7 +58,7 @@ export interface PluginsRunnerDeps {
 
 type Failure = Extract<PluginsOutcome, { ok: false }>['error']['code'];
 type Ended = { run: CliRun } | { failed: Failure; message: string };
-type Stop = (why: 'timeout' | 'cancelled' | 'stopped') => void;
+type StopReason = 'timeout' | 'cancelled' | 'stopped';
 
 interface Operation {
   opId: string;
@@ -60,16 +68,78 @@ interface Operation {
   cwd: string;
   target: string;
   state: 'queued' | 'running' | 'ended';
-  stop: Stop | null; // while the CLI runs
+  abort: 'cancelled' | 'stopped' | null; // asked while running, whether or not its CLI was spawned yet
+  group: OwnedGroup | null; // while its CLI's process group is owned
 }
 
 const FAILED_WORDS = { timeout: `the CLI was still running after ${CLI_TIMEOUT_MS / 60_000} minutes and was stopped`, cancelled: 'cancelled before the CLI finished', stopped: 'stopped with the engine host' } as const;
+
+// One spawned CLI and its process group. `stop` sends SIGTERM to the group, SIGKILL at the grace, and resolves once the
+// leader has been reaped and no member of the group remains (or REAP_GIVE_UP_MS after SIGKILL); it is idempotent.
+class OwnedGroup {
+  reason: StopReason | null = null;
+  private leaderExited = false;
+  private gone: Promise<void> | null = null;
+
+  constructor(
+    private readonly child: ChildProcess,
+    private readonly timers: Timers,
+  ) {
+    child.once('exit', () => (this.leaderExited = true));
+  }
+
+  stop(reason: StopReason, graceMs: number): Promise<void> {
+    if (this.gone) return this.gone;
+    this.reason = reason;
+    this.signal('SIGTERM');
+    this.gone = new Promise<void>((resolve) => {
+      const handles = new Set<unknown>();
+      const later = (fn: () => void, ms: number) => void handles.add(this.timers.setTimeout(fn, ms));
+      const finish = () => {
+        for (const handle of handles) this.timers.clearTimeout(handle);
+        handles.clear();
+        resolve();
+      };
+      later(() => {
+        this.signal('SIGKILL');
+        later(finish, REAP_GIVE_UP_MS);
+      }, graceMs);
+      const poll = () => (this.alive() ? later(poll, REAP_POLL_MS) : finish());
+      poll();
+    });
+    return this.gone;
+  }
+
+  private signal(sig: NodeJS.Signals): void {
+    try {
+      if (this.child.pid !== undefined) process.kill(-this.child.pid, sig); // the group: the CLI and whatever it started
+    } catch {
+      try {
+        this.child.kill(sig);
+      } catch {
+        // the leader is gone too
+      }
+    }
+  }
+
+  private alive(): boolean {
+    if (this.child.pid === undefined) return false; // never spawned
+    if (!this.leaderExited) return true; // an unreaped leader still holds the group
+    try {
+      process.kill(-this.child.pid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  }
+}
 
 export class PluginsRunner {
   private readonly spawn: typeof nodeSpawn;
   private readonly timers: Timers;
   private readonly operations = new Map<string, Operation>(); // queued or running
-  private readonly children = new Set<Stop>();
+  private readonly groups = new Set<OwnedGroup>(); // every process group a read or a mutation still owns
+  private closed = false; // `stop` ran: nothing new runs
   private queue: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: PluginsRunnerDeps) {
@@ -86,9 +156,10 @@ export class PluginsRunner {
 
   // Queued behind the running mutation; the receipt answers before any of its events.
   async start<A extends PluginsAction>(action: A, input: PluginsActionInputs[A], cwd: string): Promise<{ opId: string }> {
+    if (this.closed) throw new Error('the engine host is stopping: no plugin operation starts');
     const argv = commandLine(action, input);
     const i = input as { plugin?: string; source?: string; name?: string };
-    const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', state: 'queued', stop: null };
+    const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', state: 'queued', abort: null, group: null };
     this.operations.set(op.opId, op);
     this.queue = this.queue
       .then(() => new Promise<void>((resolve) => this.timers.setTimeout(resolve, 0))) // after the receipt's answer is posted
@@ -97,19 +168,30 @@ export class PluginsRunner {
     return { opId: op.opId };
   }
 
-  // Kills the CLI of a running operation, or drops a queued one; false once its CLI has ended (or for an unknown id).
+  // Stops the CLI of a running operation (or keeps one still preparing from spawning), or drops a queued one; false once
+  // its CLI has ended (or for an unknown id).
   cancel(opId: string): boolean {
     const op = this.operations.get(opId);
     if (!op || op.state === 'ended') return false;
-    if (op.state === 'running') op.stop?.('cancelled');
-    else this.finish(op, { ok: false, error: { code: 'cancelled', message: FAILED_WORDS.cancelled, failureCode: null, shownCommand: null } });
+    this.abort(op, 'cancelled', KILL_GRACE_MS);
     return true;
   }
 
-  // The host stops: every child is killed and every queued operation dropped.
-  stop(): void {
-    for (const op of [...this.operations.values()]) if (op.state === 'queued') this.cancel(op.opId);
-    for (const stop of [...this.children]) stop('stopped');
+  // The host stops: nothing new runs, every queued operation is dropped, every operation still preparing completes
+  // without spawning, and every owned process group is stopped; resolves once all of those groups are gone.
+  stop(graceMs = KILL_GRACE_MS): Promise<void> {
+    this.closed = true;
+    for (const op of [...this.operations.values()]) this.abort(op, 'stopped', graceMs);
+    return Promise.all([...this.groups].map((group) => group.stop('stopped', graceMs))).then(() => undefined);
+  }
+
+  private abort(op: Operation, reason: 'cancelled' | 'stopped', graceMs: number): void {
+    if (op.state === 'queued') {
+      this.finish(op, { ok: false, error: { code: 'cancelled', message: FAILED_WORDS[reason], failureCode: null, shownCommand: null } });
+      return;
+    }
+    op.abort ??= reason;
+    void op.group?.stop(op.abort, graceMs);
   }
 
   private async run(op: Operation): Promise<void> {
@@ -138,13 +220,25 @@ export class PluginsRunner {
     this.deps.emit({ opId: op.opId, action: op.action, target: op.target, phase: 'done', outcome, ...(reload && { reload }) });
   }
 
-  // One CLI run. `onLine` hears every non-empty line the CLI prints but a result line; `op` receives the stop handle.
+  // One CLI run. `onLine` hears every non-empty line the CLI prints but a result line; `op` is told of the group it owns.
   private async exec(args: readonly string[], cwd: string, onLine: ((line: string) => void) | null, op: Operation | null): Promise<Ended> {
+    // a stop or cancel asked while preparing ends the run without a spawn: checked after every await, the last one
+    // immediately before the synchronous spawn
+    const aborted = (): Ended | null => {
+      const reason = this.closed ? 'stopped' : (op?.abort ?? null);
+      return reason === null ? null : { failed: 'cancelled', message: FAILED_WORDS[reason] };
+    };
     const check = await this.deps.binary();
+    const afterBinary = aborted();
+    if (afterBinary) return afterBinary;
     if (!check.ok) return { failed: 'spawn_failed', message: check.error ?? `no engine binary at ${check.path}` };
     const isDirectory = await stat(cwd).then((s) => s.isDirectory(), () => false);
+    const afterStat = aborted();
+    if (afterStat) return afterStat;
     if (!isDirectory) return { failed: 'spawn_failed', message: `no directory at ${cwd}` };
     const env = pluginsEnvironment(await this.deps.captureEnv());
+    const afterEnv = aborted();
+    if (afterEnv) return afterEnv;
     return new Promise<Ended>((resolve) => {
       let child: ChildProcess;
       try {
@@ -153,27 +247,12 @@ export class PluginsRunner {
         resolve({ failed: 'spawn_failed', message: error instanceof Error ? error.message : String(error) });
         return;
       }
+      const group = new OwnedGroup(child, this.timers);
+      this.groups.add(group);
+      if (op) op.group = group;
+      const ceiling = this.timers.setTimeout(() => void group.stop('timeout', KILL_GRACE_MS), CLI_TIMEOUT_MS);
       const out: string[] = [];
       const err: string[] = [];
-      let why: 'timeout' | 'cancelled' | 'stopped' | null = null;
-      let killTimer: unknown = null;
-      let settled = false;
-      const signal = (sig: NodeJS.Signals) => {
-        try {
-          if (child.pid !== undefined) process.kill(-child.pid, sig); // the group: the CLI and whatever it started
-        } catch {
-          child.kill(sig);
-        }
-      };
-      const stop: Stop = (reason) => {
-        if (why !== null || settled) return;
-        why = reason;
-        signal('SIGTERM');
-        killTimer = this.timers.setTimeout(() => signal('SIGKILL'), KILL_GRACE_MS);
-      };
-      this.children.add(stop);
-      if (op) op.stop = stop;
-      const ceiling = this.timers.setTimeout(() => stop('timeout'), CLI_TIMEOUT_MS);
       const lineReader = (sink: string[]) => {
         let partial = '';
         const hear = (line: string) => {
@@ -181,8 +260,7 @@ export class PluginsRunner {
           if (trimmed.length > 0 && resultOf(trimmed) === null) onLine?.(trimmed);
         };
         return {
-          data: (chunk: Buffer) => {
-            const text = chunk.toString('utf8');
+          data: (text: string) => {
             sink.push(text);
             if (!onLine) return;
             const parts = (partial + text).split('\n');
@@ -194,22 +272,28 @@ export class PluginsRunner {
       };
       const stdout = lineReader(out);
       const stderr = lineReader(err);
-      child.stdout?.on('data', stdout.data);
-      child.stderr?.on('data', stderr.data);
+      // decoded per stream, so a character split across two chunks arrives whole
+      child.stdout?.setEncoding('utf8').on('data', stdout.data);
+      child.stderr?.setEncoding('utf8').on('data', stderr.data);
+      let settled = false;
       const settle = (ended: Ended) => {
         if (settled) return;
         settled = true;
         this.timers.clearTimeout(ceiling);
-        if (killTimer !== null) this.timers.clearTimeout(killTimer);
-        this.children.delete(stop);
-        if (op) op.stop = null;
+        this.groups.delete(group);
+        if (op) op.group = null;
         resolve(ended);
       };
-      child.on('error', (error) => settle({ failed: 'spawn_failed', message: error.message }));
+      child.on('error', (error) => {
+        if (child.pid === undefined) settle({ failed: 'spawn_failed', message: error.message }); // the spawn itself failed
+      });
       child.on('close', (code) => {
         stdout.end();
         stderr.end();
-        settle(why !== null ? { failed: why === 'timeout' ? 'timeout' : 'cancelled', message: FAILED_WORDS[why] } : { run: { stdout: out.join(''), stderr: err.join(''), code } });
+        const reason = group.reason;
+        if (reason === null) return settle({ run: { stdout: out.join(''), stderr: err.join(''), code } }); // its own end: ownership ends
+        // stopped: the group stays owned, and its SIGKILL due, until no member remains
+        void group.stop(reason, KILL_GRACE_MS).then(() => settle({ failed: reason === 'timeout' ? 'timeout' : 'cancelled', message: FAILED_WORDS[reason] }));
       });
     });
   }

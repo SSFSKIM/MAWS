@@ -18,7 +18,7 @@ import { handshakeResponder } from './conformance/session-harness';
 import { TESTED_ENGINE_VERSION } from './engine-compat';
 import { registerEngineIpc, type EngineIpcDeps } from './ipc';
 import { RELAY_URL } from './launch';
-import { CLI_TIMEOUT_MS, KILL_GRACE_MS, SETTLE_MS } from './plugins/runner';
+import { CLI_TIMEOUT_MS, KILL_GRACE_MS, SETTLE_MS, SHUTDOWN_KILL_GRACE_MS } from './plugins/runner';
 
 const REPO_ROOT = resolve(__dirname, '../..');
 const OK_RELAY = { url: RELAY_URL, ok: true, status: 200, latencyMs: 2, checkedAt: '2026-10-06T10:00:00.000Z', error: null };
@@ -51,7 +51,7 @@ const spec = (appSessionId: string, cwd: string): LaunchSpec =>
     resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay: null, inheritGrantsFrom: null,
   });
 
-const shortened = { setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms === SETTLE_MS ? 5 : ms === KILL_GRACE_MS ? 100 : ms === CLI_TIMEOUT_MS ? 60_000 : ms), clearTimeout: (h: unknown) => clearTimeout(h as NodeJS.Timeout) };
+const shortened = { setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms === SETTLE_MS ? 5 : ms === KILL_GRACE_MS || ms === SHUTDOWN_KILL_GRACE_MS ? 100 : ms === CLI_TIMEOUT_MS ? 60_000 : ms), clearTimeout: (h: unknown) => clearTimeout(h as NodeJS.Timeout) };
 
 function engineHost(deps: Partial<EngineIpcDeps> = {}) {
   const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
@@ -178,6 +178,17 @@ describe('E8 operations', () => {
       'plugin marketplace update m --json',
       'plugin marketplace remove m --scope project --json',
     ]);
+  });
+
+  it('engine.shutdown with no session answers only once a TERM-ignoring CLI is dead', async () => {
+    behave(`trap '' TERM\nsleep 30\n`);
+    const host = engineHost();
+    const { opId } = await host.call('plugins.install', { cwd: project, plugin: 'p@m' });
+    await until(() => existsSync(join(fake, 'pid')) && readFileSync(join(fake, 'pid'), 'utf8').trim(), 'the pid');
+    const pid = Number(readFileSync(join(fake, 'pid'), 'utf8'));
+    expect(await host.call('engine.shutdown', { graceMs: 5_000 })).toEqual({ stopped: 0, forced: 0 });
+    expect(() => process.kill(pid, 0)).toThrow(); // gone when shutdown answers
+    expect((await host.done(opId)).outcome).toMatchObject({ ok: false, error: { code: 'cancelled', message: 'stopped with the engine host' } });
   });
 
   it('engine.shutdown stops a running CLI with the host', async () => {
