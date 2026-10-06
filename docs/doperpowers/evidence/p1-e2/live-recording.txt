@@ -1,5 +1,31 @@
 E2 M2 live recording (2026-10-06): the four maws artifact tools through MAWS's own engine host (LiveHost)
 
+==== The kept recording: the second run (the case exactly as committed at c38dbab2), green ====
+Same command, engine, relay, model, mode and prompt as the first run below. Scratch: config home
+/private/tmp/maws-e2-config-HwgNrm, userData /private/tmp/maws-e2-live-gzIZtI, repository /private/tmp/maws-e2-repo-5uEyLu;
+appSessionId live-8e969ceb, engine session 2269c353-97d9-4e4f-a868-5aab4cf2b0c4.
+Vitest: Test Files 1 passed (1), Tests 1 passed (1), 30.41 s. Every assertion of the case held, including the reply check.
+Fixture seqs (spikes/protocol-probe/fixtures/pass3/p1-maws-artifacts.jsonl, now 455 rows):
+  - can_use_tool allowed once: Write 154, mcp__maws__artifact_create 176, mcp__maws__artifact_screenshot 200, Edit 338,
+    mcp__maws__artifact_update 359, mcp__maws__artifact_list 381, mcp__maws__artifact_update 408. No Agent.
+  - tools/call: artifact_create {id dash, html_path dashboard.html, title Dashboard} 183; artifact_screenshot {id dash}
+    207 (answered with the green 64×64 PNG; the engine's tool_result at 210 is [image, text, text]); artifact_update
+    {id dash} 366; artifact_list {} 388; artifact_update {id nope} 415 (refused with the exact noArtifact text).
+  - 442 result success, num_turns 10, total_cost_usd 0.06810895; reply "green 2 artifact_update no artifact nope in".
+  - 454 exit code 0 (session.stop).
+  - The store: record 10edca26-3f45-406b-b141-781c4e54fe4b.json (kind artifact, artifactId dash, title Dashboard, path on
+    v2, two versions with toolUseId and sourcePath <repo>/dashboard.html); v1.html background-color red, v2.html blue.
+  - The PNG original persisted under the scratch home only
+    (projects/-private-tmp-maws-e2-repo-5uEyLu/2269c353-…/tool-results/mcp-maws-blob-1791291194857-hx5xy2.png).
+Exports copied: the journal → spikes/protocol-probe/fixtures/pass3/p1-maws-artifacts.jsonl (provenance costUsd 0.0681),
+the engine transcript → test/fixtures/transcripts/p1-maws-artifacts.jsonl (80 records); the rows snapshot
+test/snapshots/transcript/pass3/p1-maws-artifacts.rows.json regenerated from it.
+A-15: before 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8; after 25 keys, shasum
+42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; byte-equal lists); the case's own check identical.
+Processes: none of the run's remained; scratch roots removed after the copies.
+Spend: second run US$0.0681; first run US$0.0651; M2 total US$0.1332.
+
+==== The first run (superseded; its fixture was replaced by the second run's) ====
 Case: test/live/maws-artifacts.live.test.ts, run as
   /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh env pnpm_config_verify_deps_before_run=false MAWS_LIVE=1 \
     pnpm -C <worktree> exec vitest run --project live test/live/maws-artifacts.live.test.ts
@@ -60,7 +86,7 @@ p1-maws-artifacts, costUsd 0.0651):
   test/fixtures/transcripts/p1-maws-artifacts.jsonl            ← <userData>/exports/p1-maws-artifacts-transcript.jsonl
                                                                  (the engine's session JSONL, redacted)
 
-Spend: US$0.0651 (one run, Haiku). M2 total US$0.0651.
+Spend (first run): US$0.0651 on Haiku.
 
 A-15 (the /tmp and /private/tmp project keys of ~/.claude.json, read only; the command in owner-file-check.txt):
   before the run: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8

@@ -207,8 +207,8 @@ describe('the maws artifact tools, live (E2 M2)', () => {
       // the reply: the colour the picture shows (green, which the prompt never names), the two versions, the error
       expect(ended.resultText).toMatch(/green/i);
       expect(ended.resultText).toMatch(/\b2\b/);
-      // counting "the first six words", the model may drop the quotes (the recording's reply: `green 2 artifact_update no
-      // artifact nope in this`)
+      // counting "the first six words", the model may drop the quotes (both recordings did: `green 2 artifact_update no
+      // artifact nope in`)
       expect(ended.resultText).toMatch(/no artifact "?nope"?/);
 
       // the store on disk: one artifact record with two versions copied under it, `path` on v2

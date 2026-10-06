@@ -12,3 +12,7 @@ M2 (2026-10-06, the live recording test/live/maws-artifacts.live.test.ts, one la
   before the launch: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
   after the launch:  25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8  (identical; byte-equal lists)
   the case's own check (sorted key lists before and after): identical
+
+M2 second run (2026-10-06, the case as committed at c38dbab2, one launch; its recording replaced the first)
+  before the launch: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after the launch:  25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8  (identical; byte-equal lists)
