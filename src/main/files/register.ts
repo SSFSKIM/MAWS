@@ -44,6 +44,7 @@ export function registerFilesHandlers(model: { record(appSessionId: AppSessionId
   const session = (id: string) => id as AppSessionId;
   registerMainHandler('files.list', ({ appSessionId, path }) => files.list({ appSessionId: session(appSessionId), path }));
   registerMainHandler('files.read', (input) => files.read({ ...input, appSessionId: session(input.appSessionId) }));
+  registerMainHandler('files.write', (input) => files.write({ ...input, appSessionId: session(input.appSessionId) })); // E5
   registerMainHandler('files.watch', async ({ appSessionId, path }, { sender }) => {
     const id = owner(sender);
     const epoch = epochOf(id);

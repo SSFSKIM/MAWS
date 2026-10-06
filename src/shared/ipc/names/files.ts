@@ -3,6 +3,7 @@
 // added there adds its name here.
 export const commands = [
   'files.list', 'files.read', 'files.watch', 'files.unwatch', 'files.openExternal',
+  'files.write', // E5
 ] as const;
 
 export const events = [

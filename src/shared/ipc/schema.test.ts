@@ -165,7 +165,7 @@ describe('ipc schema validates both directions', () => {
 
     // C8c start: the read-only files.* service over a session's own directories, owned by main.
     it('carries the C8c files.* entries, every command owned by main, with the read bounds', () => {
-      expect(Object.keys(files.commands).sort()).toEqual(['files.list', 'files.openExternal', 'files.read', 'files.unwatch', 'files.watch']);
+      expect(Object.keys(files.commands).sort()).toEqual(['files.list', 'files.openExternal', 'files.read', 'files.unwatch', 'files.watch', 'files.write']);
       for (const spec of Object.values(files.commands)) expect(spec.owner).toBe('main');
       expect(Object.keys(files.events)).toEqual(['files.changed']);
       const read = (extra: object) => validateCommandInput('files.read', { appSessionId: 'a', path: '/r/a.ts', ...extra }).ok;
@@ -178,7 +178,7 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('files.list', { appSessionId: 'a' }).ok).toBe(true);
       expect(validateCommandInput('files.list', { appSessionId: 'a', path: '/r', depth: 2 }).ok).toBe(false);
       expect(validateCommandInput('files.watch', { appSessionId: 'a' }).ok).toBe(false);
-      const out = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain' };
+      const out = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain', hash: null };
       expect(validateCommandOutput('files.read', out)).toEqual({ ok: true, value: out });
       expect(validateCommandOutput('files.read', { ...out, encoding: 'latin1' }).ok).toBe(false);
       const entry = { name: 'a', path: '/r/a', kind: 'other', size: 0, mtimeMs: 1, target: null };
@@ -188,6 +188,41 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('files.changed', { appSessionId: 'a', path: '/r', kind: 'renamed' }).ok).toBe(false);
     });
     // C8c end
+
+    // E5 start: files.write, the hash-checked save, and the hash files.read answers on request.
+    it('carries E5 files.write with the hash pattern and the content cap, and the read hash', () => {
+      const hash = 'a'.repeat(64);
+      expect(files.FILES_WRITE_MAX_BYTES).toBe(files.FILES_READ_MAX_LENGTH);
+      expect(files.HashSchema.safeParse('0123456789abcdef'.repeat(4)).success).toBe(true);
+      for (const bad of ['A'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), 'g'.repeat(64), ` ${'a'.repeat(63)}`]) {
+        expect(files.HashSchema.safeParse(bad).success, bad).toBe(false);
+      }
+
+      const write = (extra: object) => validateCommandInput('files.write', { appSessionId: 'a', path: '/r/a.ts', content: 'x', expectedHash: hash, ...extra }).ok;
+      expect(write({})).toBe(true);
+      expect(write({ content: '' })).toBe(true);
+      expect(write({ content: 'x'.repeat(files.FILES_WRITE_MAX_BYTES) })).toBe(true);
+      expect(write({ content: 'x'.repeat(files.FILES_WRITE_MAX_BYTES + 1) })).toBe(false);
+      expect(write({ expectedHash: 'A'.repeat(64) })).toBe(false);
+      expect(write({ expectedHash: null })).toBe(false);
+      expect(write({ create: true })).toBe(false);
+      expect(validateCommandInput('files.write', { appSessionId: 'a', path: '/r/a.ts', content: 'x' }).ok).toBe(false);
+
+      expect(validateCommandOutput('files.write', { status: 'ok', hash }).ok).toBe(true);
+      expect(validateCommandOutput('files.write', { status: 'conflict', hash }).ok).toBe(true);
+      expect(validateCommandOutput('files.write', { status: 'conflict', hash: null }).ok).toBe(false);
+      expect(validateCommandOutput('files.write', { status: 'denied', hash }).ok).toBe(false);
+      expect(validateCommandOutput('files.write', { status: 'ok', hash, path: '/r/a.ts' }).ok).toBe(false);
+
+      const read = (extra: object) => validateCommandInput('files.read', { appSessionId: 'a', path: '/r/a.ts', ...extra }).ok;
+      expect(read({ hash: true })).toBe(true);
+      expect(read({ hash: 'yes' })).toBe(false);
+      const out = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain' };
+      expect(validateCommandOutput('files.read', { ...out, hash }).ok).toBe(true);
+      expect(validateCommandOutput('files.read', out).ok).toBe(false); // the field is always answered, null when not hashed
+      expect(validateCommandOutput('files.read', { ...out, hash: 'A'.repeat(64) }).ok).toBe(false);
+    });
+    // E5 end
 
     it('names channels by kind so a command and an event of the same name never share one', () => {
       expect(commandChannel('engine.hostState')).toBe('maws:cmd:engine.hostState');
