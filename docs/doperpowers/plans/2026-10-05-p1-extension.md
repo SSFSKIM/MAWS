@@ -275,7 +275,7 @@ What exists, read-only, that the children build on or replace.
 - **Contracts:** consumes X5, X1; extends X1 (`subagent.message` emission, cross-session rows) through the ledger.
 - **Design inheritance:** §3 E [binding: edits through the session, P-11; the widget and tree are in, P-9]; the vault's widget layout and the Codex subagent panel [advisory].
 - **Required:** required.
-- **Status:** not-dispatched, dispatchable now.
+- **Status:** in-flight: Fable author dispatched 2026-10-06 (A-21 shape; document `docs/doperpowers/plans/2026-10-06-e7-orchestration.md`), executor follows the document's review.
 
 ### E8: Plugins, marketplaces and mods — plan
 
@@ -358,7 +358,7 @@ What exists, read-only, that the children build on or replace.
 | E4 In-app browser | decomposing | not-dispatched, blocked-by E0b, E1, E3 | its composite spec at dispatch |
 | E5 Editor | plan | in-flight (dispatched 2026-10-05 after E0b landed) | `docs/doperpowers/plans/2026-10-05-e5-editor.md` at dispatch |
 | E6 Source control | plan | document authored and reviewed 2026-10-06 (Fable author, bb22ea52, one adversarial round, eight findings folded, merged to master); plan-executor on Opus dispatched 2026-10-06 | `docs/doperpowers/plans/2026-10-06-e6-source-control.md` |
-| E7 Orchestration views | plan | not-dispatched, dispatchable now | execution document at dispatch |
+| E7 Orchestration views | plan | author dispatched 2026-10-06 (Fable, isolated worktree; adversarial review on Opus before hand-back) | `docs/doperpowers/plans/2026-10-06-e7-orchestration.md` at the author's hand-back |
 | E8 Plugins, marketplaces and mods | plan | landed 2026-10-06 (merged to master at 0eb56c11 from 7c9d89d8, code head 4f28bdd8; 43 commits over 76b58fe0; seven files conflicted with E9's merge, all additive, resolved on semantics by the architect with typecheck and the two affected suites green; gates on the code head: typecheck, lint, 6,012 units, `e2e:widgets` 24, `e2e:settings` 9, `e2e:panel` 23, the live run of sixteen steps on 2.1.291 under a scratch home; document review 7 P2 folded; three milestones each two task-review rounds; whole-branch reviewer-high two rounds, 1 P1 and 9 P2 fixed; nothing dismissed; master gate after the merge at 13199d89: typecheck clean and the full unit suite green, `/tmp/maws-review/gates/master-e8-merge.log`) | `docs/doperpowers/plans/2026-10-05-e8-plugins.md` (Outcomes written), `docs/doperpowers/evidence/p1-e8/` |
 | E9 Voice | plan | landed 2026-10-06 (merged to master at 75b352d2 from 0af16f74, code tree 3869830a; 62 commits over 76b58fe0; gates on the code tree: typecheck, lint, 6,061 units, `e2e:voice` 14, `e2e:c7` 29, unsigned `build:app`, packaged helper probed and packaged e2e 1; adversarial document review 7 findings folded; every task approved within two rounds; whole-branch reviewer-high two Important fixed, round two clean; the owner's three rulings applied as M6; the live Apple recognition and the two TCC dialogs are the owner's first hold; master gate on 75b352d2: typecheck clean, 6,073 units in 458 files, `/tmp/maws-review/gates/master-75b352d2.log`) | `docs/doperpowers/plans/2026-10-05-e9-voice.md` (Outcomes & Retrospective written), `docs/doperpowers/evidence/p1-e9/` |
 | E10 Detachable supervisor | plan | not-dispatched, blocked-by E1 | execution document at dispatch |
