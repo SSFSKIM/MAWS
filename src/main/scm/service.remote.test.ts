@@ -12,6 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { RemotePlan, ScmRemoteOutput } from '@shared/ipc/schema/scm';
 import { TrustStoreFixture } from '../../../test/support/trust-store';
+import type { GitRun } from '../git/runner';
 import type { KillFn, RemoteSpawnOptions, SpawnFn } from './remote-runner';
 import { ScmService, type ScmServiceDeps } from './service';
 
@@ -66,6 +67,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
   let mutate: ReturnType<typeof vi.fn<ScmServiceDeps['mutate']>>;
   let env: NodeJS.ProcessEnv;
   let captured: Record<string, string>;
+  let pushReaders: Array<{ program: string; captured: Record<string, string> }>;
   let scm: ScmService;
 
   const ghCalls = (sub?: string) => spawned.filter((s) => s.program === GH && (sub === undefined || s.argv.slice(0, 2).join(' ') === sub));
@@ -73,20 +75,26 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
   const lastPush = () => pushes().at(-1)!.child;
 
   function service(): ScmService {
+    const read: GitRun = async (directory, args) => {
+      const command = args.join(' ');
+      if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`; // the trust key's read
+      if (command === 'remote') return remotes;
+      if (command === UPSTREAM_FORMAT) return '*\0origin\0refs/heads/main\n';
+      if (command === 'for-each-ref --format=%(HEAD)%00%(upstream:remotename) refs/heads') return '*\0origin\n';
+      if (command === 'remote get-url --push --all origin') return pushUrls.map((url) => `${url}\n`).join('');
+      if (command === 'remote get-url origin') return 'https://github.com/o/r.git\n';
+      if (args[0] === 'check-ref-format') return `${args[2]}\n`;
+      if (command === 'symbolic-ref -q refs/remotes/origin/HEAD') return 'refs/remotes/origin/main\n';
+      if (args[0] === 'log') return `${'c'.repeat(40)}\0x\n`; // the new commit's sha and subject
+      throw new Error(`unexpected read: git ${command}`);
+    };
     return new ScmService({
       records: (id) => (id === ID || id === OTHER ? { directory: root, worktree: null } : null),
-      read: async (directory, args) => {
-        const command = args.join(' ');
-        if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`; // the trust key's read
-        if (command === 'remote') return remotes;
-        if (command === UPSTREAM_FORMAT) return '*\0origin\0refs/heads/main\n';
-        if (command === 'for-each-ref --format=%(HEAD)%00%(upstream:remotename) refs/heads') return '*\0origin\n';
-        if (command === 'remote get-url --push --all origin') return pushUrls.map((url) => `${url}\n`).join('');
-        if (command === 'remote get-url origin') return 'https://github.com/o/r.git\n';
-        if (args[0] === 'check-ref-format') return `${args[2]}\n`;
-        if (command === 'symbolic-ref -q refs/remotes/origin/HEAD') return 'refs/remotes/origin/main\n';
-        if (args[0] === 'log') return `${'c'.repeat(40)}\0x\n`; // the new commit's sha and subject
-        throw new Error(`unexpected read: git ${command}`);
+      read,
+      // the plans' destination reads answer from the same fake, recording which git and capture they were made for
+      pushRead: (program, given) => {
+        pushReaders.push({ program, captured: given });
+        return read;
       },
       status: readStatus,
       mutate,
@@ -105,6 +113,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
     trust = new TrustStoreFixture();
     trust.write({ [root]: { hasTrustDialogAccepted: true } });
     captured = { HOME: root, CLAUDE_CONFIG_DIR: trust.configHome, PATH: '/nowhere' };
+    pushReaders = [];
     env = { MAWS_GIT: GIT, MAWS_GH: GH };
     status = {
       repoRoot: root, gitDir: `${root}/.git`, commonDir: `${root}/.git`, isWorktree: false, branch: 'main', head: HEAD, upstream: 'origin/main',
@@ -175,6 +184,8 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
         upstream: 'origin/main', expiresAt: '2026-10-06T12:05:00.000Z',
       });
       expect(pushes()).toEqual([]);
+      // the remote and its URLs were read by the git the push runs, under the capture it runs with
+      expect(pushReaders).toEqual([{ program: GIT, captured }]);
     });
 
     it('runs a valid token: revalidates on a fresh status, then spawns exactly the plan in its cwd, once', async () => {

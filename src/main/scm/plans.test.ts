@@ -77,7 +77,7 @@ function makeSources(world: World) {
   });
   const trusted = vi.fn(async () => world.trusted);
   const runGh = vi.fn<PlanSources['runGh']>(async () => world.repoView);
-  const sources: PlanSources = { cwd: '/repo', trusted, status, read, git: async () => '/opt/homebrew/bin/git', gh: async () => world.gh, runGh };
+  const sources: PlanSources = { cwd: '/repo', trusted, status, read, pushRead: read, git: async () => '/opt/homebrew/bin/git', gh: async () => world.gh, runGh };
   return { sources, read, status, trusted, runGh };
 }
 
@@ -508,7 +508,7 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
       const read = createGitRunner({ env: repo.serviceEnv() });
       const git = new GitService({ env: repo.serviceEnv() });
       const sources: PlanSources = {
-        cwd: repo.root, trusted: async () => true, status: () => git.status(repo.root), read, git: async () => '/usr/bin/git', gh: async () => GH,
+        cwd: repo.root, trusted: async () => true, status: () => git.status(repo.root), read, pushRead: read, git: async () => '/usr/bin/git', gh: async () => GH,
         runGh: async () => REPO_VIEW,
       };
       const draft = await planPush(sources, {});

@@ -10,11 +10,13 @@
 // revalidated before (plans.ts, the service).
 //
 // `runCollected` is the same spawn for the short `gh` reads (`repo view`, `auth status`, `pr view`, …): both streams
-// whole, the exit code, and a timeout or a failure to start answered as `failure` rather than thrown.
+// whole, the exit code, and a timeout or a failure to start answered as `failure` rather than thrown. `pushGitRead` is
+// the push's git for the local reads that name where a push goes.
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { RemotePlan, ScmRemoteLast, ScmRemoteOutput, ScmRunStarted } from '@shared/ipc/schema/scm';
+import { execGit, GIT_TIMEOUT_MS, spawnGit, type ExecFileFn, type GitRun } from '../git/runner';
 import { childEnvironment } from './remote-env';
 import { refusal } from './validate';
 
@@ -253,6 +255,16 @@ export function runCollected({ program, argv, cwd, captured, timeoutMs, spawn = 
     });
     child.on('close', (code: number | null, signal: NodeJS.Signals | null) => settle(failure === null ? code : null, signal));
   });
+}
+
+// A local git read made as the push would make it: `program` (the git the push runs) under the remote environment, so
+// what that git and that environment configure (`XDG_CONFIG_HOME`, the binary's own system config, a
+// `url.*.pushInsteadOf`) reads as the push will read it. Transport is refused outright (these reads never leave the
+// machine); the argv is the caller's read, unchanged.
+export function pushGitRead(program: string, captured: Record<string, string>, execFile: ExecFileFn = execGit): GitRun {
+  const env = { ...childEnvironment(captured, 'remote'), GIT_ALLOW_PROTOCOL: '' };
+  return async (directory, args, { timeoutMs = GIT_TIMEOUT_MS, acceptExitCodes = [] } = {}) =>
+    (await spawnGit({ binary: program, directory, args, env, timeoutMs, acceptExitCodes, execFile })).stdout;
 }
 
 // The first line holding anything, trimmed; null for blank text.

@@ -42,7 +42,7 @@ import { trustStateOf } from '../sessions/trust';
 import { PlanTable, planPr, planPush, revalidatePlan, type PlanSources } from './plans';
 import { GH_READ_TIMEOUT_MS, prChecksArgv, prViewArgv, readChecks, readGhProbe, readPrView } from './pr-state';
 import { childEnvironment } from './remote-env';
-import { BUSY_DETAIL, RemoteRunner, runCollected, type KillFn, type SpawnFn } from './remote-runner';
+import { BUSY_DETAIL, pushGitRead, RemoteRunner, runCollected, type KillFn, type SpawnFn } from './remote-runner';
 import { commitRefusal, discardTargets, isRefusal, refusal, stageTargets, UNTRUSTED_DETAIL, unstageTargets } from './validate';
 import { ghProgram, gitProgram } from './which';
 
@@ -63,6 +63,7 @@ export interface ScmServiceDeps {
   emit(event: ScmRemoteOutput): void;
   spawn?: SpawnFn; // the remote runner's and gh reads' seam for tests
   kill?: KillFn; // with `spawn`: a fake child's pid is no process group to signal
+  pushRead?: typeof pushGitRead; // the plans' destination reads (the push's git under the remote environment); tests
   now?: () => number;
 }
 
@@ -270,16 +271,20 @@ export class ScmService {
   }
 
   // What a plan reads, bound to the checkout: trust and the status read now, git and gh as the remote environment's PATH
-  // resolves them, gh's reads in the checkout under that environment.
+  // resolves them, the remote's names and URLs read by that git under that environment (as the push will read them),
+  // gh's reads in the checkout under that environment.
   private async sources(checkout: string): Promise<PlanSources> {
     const captured = await this.deps.captured();
     const remoteEnv = childEnvironment(captured, 'remote');
+    const git = gitProgram(remoteEnv, this.deps.env);
+    const pushReader = git.then((program) => (this.deps.pushRead ?? pushGitRead)(program, captured));
     return {
       cwd: checkout,
       trusted: async () => (await this.trust(checkout)).trusted,
       status: () => this.deps.status(checkout),
       read: this.deps.read,
-      git: () => gitProgram(remoteEnv, this.deps.env),
+      pushRead: async (directory, args, options) => (await pushReader)(directory, args, options),
+      git: () => git,
       gh: () => this.gh(false),
       runGh: (program, argv) => this.collect(program, argv, checkout, captured),
     };

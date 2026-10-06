@@ -33,7 +33,11 @@ export interface PlanSources {
   cwd: string; // the checkout: the run's cwd and every read's directory
   trusted(): Promise<boolean>; // the engine's trust for the checkout, read now
   status(): Promise<GitStatus>; // C4's fresh status; NotARepositoryError outside a repository
-  read: GitRun; // the read runner
+  read: GitRun; // the read runner: `check-ref-format`
+  // The git a push runs under the environment it runs in (pushGitRead): the `remote`, `for-each-ref` and `remote
+  // get-url` reads that name the remote, the upstream and the destinations, so they read the config the push will
+  // (`XDG_CONFIG_HOME`, that git's system config, a `pushInsteadOf`). Local reads still: transport is refused.
+  pushRead: GitRun;
   git(): Promise<string>; // the git a push runs (which.ts on the remote environment)
   gh(): Promise<ScmGhState>; // gh resolved and probed (Design §6)
   runGh(program: string, argv: string[]): Promise<CollectedRun>; // gh in the checkout under the remote environment
@@ -289,7 +293,7 @@ interface UpstreamFacts {
 
 // The current branch's upstream as git configured it.
 async function upstreamOf(sources: PlanSources): Promise<UpstreamFacts> {
-  const out = await sources.read(sources.cwd, ['for-each-ref', '--format=%(HEAD)%00%(upstream:remotename)%00%(upstream:remoteref)', 'refs/heads']);
+  const out = await sources.pushRead(sources.cwd, ['for-each-ref', '--format=%(HEAD)%00%(upstream:remotename)%00%(upstream:remoteref)', 'refs/heads']);
   const [, remote = '', ref = ''] = out.split('\n').find((line) => line.startsWith('*\0'))?.split('\0') ?? [];
   return { remote: remote === '' ? null : remote, ref: ref === '' ? null : ref };
 }
@@ -301,7 +305,7 @@ function isOwnUpstream(status: GitStatus, upstream: UpstreamFacts, branch: strin
 
 // The asked remote, else the upstream's, else `origin`, else the sole remote; always one `git remote` lists.
 async function chooseRemote(sources: PlanSources, asked: string | undefined, upstreamRemote: string | null): Promise<string | ScmRefusal> {
-  const names = (await sources.read(sources.cwd, ['remote'])).split('\n').filter((name) => name !== '');
+  const names = (await sources.pushRead(sources.cwd, ['remote'])).split('\n').filter((name) => name !== '');
   if (names.length === 0) return refusal('no_remote', 'This repository has no remote to push to');
   let remote: string | undefined;
   if (asked !== undefined) {
@@ -323,7 +327,7 @@ async function destinationOf(sources: PlanSources, remote: string): Promise<Pick
   if (pushUrls === null) return refusal('no_remote', `The remote ${JSON.stringify(remote)} has no URL to push to`);
   let remoteUrl: string | null = null;
   try {
-    remoteUrl = withoutUserInfo((await sources.read(sources.cwd, ['remote', 'get-url', remote])).trim()) || null;
+    remoteUrl = withoutUserInfo((await sources.pushRead(sources.cwd, ['remote', 'get-url', remote])).trim()) || null;
   } catch (error) {
     if (!(error instanceof GitCommandError)) throw error;
   }
@@ -332,7 +336,7 @@ async function destinationOf(sources: PlanSources, remote: string): Promise<Pick
 
 async function pushUrlsOf(sources: PlanSources, remote: string): Promise<string[] | null> {
   try {
-    const urls = (await sources.read(sources.cwd, ['remote', 'get-url', '--push', '--all', remote])).split('\n').filter((url) => url !== '');
+    const urls = (await sources.pushRead(sources.cwd, ['remote', 'get-url', '--push', '--all', remote])).split('\n').filter((url) => url !== '');
     return urls.length === 0 ? null : urls.map(withoutUserInfo);
   } catch (error) {
     if (error instanceof GitCommandError) return null;

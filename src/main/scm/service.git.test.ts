@@ -3,17 +3,20 @@
 // directory under the system temp root; global git configuration is kept out by the fixture's empty HOME. System
 // configuration is not: the mutating runner drops every inherited `GIT_*`, `GIT_CONFIG_NOSYSTEM` included, by design (a
 // panel commit is the one Terminal.app would make), so `/usr/bin/git`'s system gitconfig applies here as it does there.
-import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import type { ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { ScmMutation } from '@shared/ipc/schema/scm';
+import type { RemotePlan, ScmMutation } from '@shared/ipc/schema/scm';
 import { GitFixture, runGit } from '../../../test/support/git-fixture';
 import { TrustStoreFixture } from '../../../test/support/trust-store';
 import { createMutatingRunner } from '../git/mutate';
 import { createGitRunner } from '../git/runner';
 import { GitService } from '../git/service';
+import type { SpawnFn } from './remote-runner';
 import { ScmService } from './service';
 
 const ID = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
@@ -175,5 +178,62 @@ describe('scm service stages, unstages, discards and commits against a real repo
     await repo.write('c.txt', 'resolved\n');
     ok(await scm.stage({ appSessionId: ID, paths: ['c.txt'] }));
     expect(await porcelain()).toEqual(['M  c.txt']);
+  });
+});
+
+// A plan names where the push goes, so it reads the remote's URLs as the push will: with the git the push runs, under
+// the environment it runs in (E6 final review, finding 2). Here the capture's XDG_CONFIG_HOME names a config with a
+// `pushInsteadOf` rule that main's own environment (the read runner's PATH and HOME) never reads.
+describe('scm plans read their destinations under the push’s environment', () => {
+  let repo: GitFixture;
+  let trust: TrustStoreFixture;
+  let git: GitService;
+  let xdg: string;
+
+  beforeEach(async () => {
+    repo = await GitFixture.create();
+    await repo.git('remote', 'add', 'origin', 'https://github.com/o/r.git'); // never reached: only its URLs are read
+    xdg = realpathSync(mkdtempSync(join(tmpdir(), 'maws-scm-xdg-')));
+    mkdirSync(join(xdg, 'git'));
+    writeFileSync(join(xdg, 'git', 'config'), '[url "ssh://push.example.invalid/"]\n\tpushInsteadOf = https://github.com/\n');
+    trust = new TrustStoreFixture();
+    trust.write({ [repo.root]: { hasTrustDialogAccepted: true } });
+    git = new GitService({ env: repo.serviceEnv() });
+  });
+  afterEach(() => {
+    git.dispose();
+    trust.dispose();
+    repo.dispose();
+    rmSync(xdg, { recursive: true, force: true });
+  });
+
+  it('plans the push URL the capture’s config rewrites, and revalidates it the same way before spawning', async () => {
+    const captured = { PATH: '/usr/bin:/bin', HOME: repo.home, XDG_CONFIG_HOME: xdg, CLAUDE_CONFIG_DIR: trust.configHome };
+    const spawned: Array<{ program: string; argv: readonly string[] }> = [];
+    const spawn: SpawnFn = (program, argv) => {
+      spawned.push({ program, argv });
+      return Object.assign(new EventEmitter(), { pid: 1, stdout: new EventEmitter(), stderr: new EventEmitter() }) as unknown as ChildProcess;
+    };
+    const scm = new ScmService({
+      records: (id) => (id === ID ? { directory: repo.root, worktree: null } : null),
+      read: createGitRunner({ env: repo.serviceEnv() }),
+      status: (d) => git.status(d),
+      mutate: createMutatingRunner({ env: {}, captured: async () => captured }),
+      refresh: () => {},
+      captured: async () => captured,
+      env: {}, // the push's git is the capture's PATH's: /usr/bin/git
+      emit: () => {},
+      spawn,
+      kill: () => {},
+    });
+    try {
+      const plan = await scm.planPush({ appSessionId: ID });
+      expect(plan).toMatchObject({ program: '/usr/bin/git', remote: 'origin', remoteUrl: 'https://github.com/o/r.git', pushUrls: ['ssh://push.example.invalid/o/r.git'] });
+      const { token } = plan as RemotePlan;
+      expect(await scm.run({ appSessionId: ID, token }, 'push')).toEqual({ started: true, token });
+      expect(spawned).toEqual([{ program: '/usr/bin/git', argv: ['push', '--progress', '--set-upstream', 'origin', 'refs/heads/main:refs/heads/main'] }]);
+    } finally {
+      scm.dispose();
+    }
   });
 });
