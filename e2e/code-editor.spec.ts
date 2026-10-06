@@ -75,10 +75,14 @@ async function recordUpdated(page: Page): Promise<() => Promise<number>> {
 // How many loads of the viewer's entry have completed, landing anything or not (`data-loads`).
 const loads = async (viewer: Locator) => Number(await viewer.getAttribute('data-loads'));
 
-// The follow-the-file re-read of an own save's watcher event has completed, whatever it did: the count of completed
-// loads moved past `before`, read before the save.
-const ownReloadDone = (viewer: Locator, before: number) =>
-  expect.poll(() => loads(viewer), { timeout: MEASURED_WAIT_MS, message: 'the own save’s re-read completed' }).toBeGreaterThan(before);
+// Every load since `before` (the count read before the act) is over, whatever it did: the count of completed loads
+// moved past it and none is in flight (`data-pending`), since one write can raise two events and so two overlapping
+// loads, and the older one's completion alone leaves the newer in flight.
+const loadsSettledPast = (viewer: Locator, before: number, message: string) =>
+  expect
+    .poll(async () => ({ completed: (await loads(viewer)) > before, pending: await viewer.getAttribute('data-pending') }), { timeout: MEASURED_WAIT_MS, message })
+    .toEqual({ completed: true, pending: '0' });
+const ownReloadDone = (viewer: Locator, before: number) => loadsSettledPast(viewer, before, 'the own save’s re-reads completed');
 
 const frames = (page: Page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
@@ -124,7 +128,8 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       const beforeExternal = await loads(viewer);
       write(p, APP, `// changed on disk\n${read(p, APP)}`);
       await expect.poll(updated, { timeout: MEASURED_WAIT_MS, message: 'an external change draws Updated' }).toBe(1);
-      expect(await loads(viewer), 'the external change’s load is counted').toBeGreaterThan(beforeExternal);
+      await loadsSettledPast(viewer, beforeExternal, 'the external change’s loads are counted and none is in flight');
+      expect(await updated(), 'exactly one Updated for the external change').toBe(1);
       await expect.poll(async () => (await lineTexts(viewer))[0]).toBe('// changed on disk');
       await expect(viewer.locator('[data-updated]')).toHaveCount(1);
     });

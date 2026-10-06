@@ -270,6 +270,30 @@ describe('editor', () => {
       expect(entry()).toMatchObject({ text: '// mine\nconst a = 1;\n', theirs: null, dirty: false, updated: 0 });
     });
 
+    // One write can raise two events (the file's and its directory's), so two overlapping loads: the older one's answer
+    // moves `loads` while the newer is still in flight, and only `pending` back at 0 says every load is over.
+    it('keeps a load in flight pending after an older, superseded one completes', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      const attributes = () => [viewer().getAttribute('data-loads'), viewer().getAttribute('data-pending')];
+      await waitFor(() => expect(attributes()).toEqual(['1', '0']));
+      disk.files[APP] = 'const a = 2;\n';
+      const older = disk.hold('files.read');
+      changed(disk);
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(2));
+      const newer = disk.hold('files.read');
+      changed(disk); // supersedes the older load
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(3));
+      await waitFor(() => expect(attributes()).toEqual(['1', '2']));
+
+      await act(async () => older.release());
+      await waitFor(() => expect(attributes()).toEqual(['2', '1'])); // a completion, and the barrier still unsatisfied
+      expect(entry()).toMatchObject({ loads: 2, pending: 1, updated: 0, text: 'const a = 1;\n' });
+
+      await act(async () => newer.release());
+      await waitFor(() => expect(attributes()).toEqual(['3', '0']));
+      expect(entry()).toMatchObject({ loads: 3, pending: 0, updated: 1, text: 'const a = 2;\n' });
+    });
+
     it('keeps typing done during a save dirty against the content it submitted, which an undo returns to', async () => {
       const { disk } = await open({ [APP]: 'const a = 1;\n' });
       type('A');
