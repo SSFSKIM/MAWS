@@ -55,6 +55,9 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'engine.hostState':
       case 'pty.hostState':
         return HOSTS[name];
+      // E10: the supervisor's status the hosts store reads at connect (the engine host in the app, as under the harness)
+      case 'host.status':
+        return { transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', matches: null, reason: null, waitingLiveSessions: null, lastExit: null };
       case 'fs.state':
         return {
           configHome: '/Users/new/.claude',
