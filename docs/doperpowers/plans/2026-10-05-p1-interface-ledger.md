@@ -68,7 +68,7 @@ Index (`src/main/index/migrations.ts`, `PRAGMA user_version`): versions 1 to 3 t
 | `deliverables.*` | E2 | reserved |
 | `side.*` (open thread, send to main, side question) | E3 | reserved |
 | `browser.*` | E4 | reserved |
-| `files.write` | E5 | reserved |
+| `files.write {appSessionId, path, content, expectedHash}` → `{status:'ok'|'conflict', hash}`; `files.read` gains `hash: true` and answers `hash` and `utf8` as required output fields (siblings faking `files.read` must answer them); keymap action `file.save` (⌘S, File › Save file); the X10 seam `registerCommentComposer`/`openCommentComposer` and `FileLineAnchor` in `src/renderer/src/tools/code/anchor/anchor.ts`, which E3 registers its composer into (E3 may move the type under `src/shared/`) | E5 | named 2026-10-06 (interim hand-back) |
 | `scm.*` (stage, unstage, discard, commit, push, pr, prState) | E6 | reserved |
 | `tasks.edit` (a steer through the session, P-11) | E7 | reserved |
 | `plugins.env`, `plugins.list`, `plugins.available`, `plugins.install`, `plugins.update`, `plugins.uninstall`, `plugins.enable`, `plugins.disable`, `plugins.cancel`; events `plugins.operation`, `plugins.changed`; `marketplaces.list`, `marketplaces.add`, `marketplaces.update`, `marketplaces.remove`; `session.reloadSkills` beside `session.reloadPlugins` | E8 | named 2026-10-05 (interim hand-back) |
@@ -82,6 +82,7 @@ Files more than one child touches: `src/shared/graph/events.ts`, `src/shared/ipc
 ## 7. Record
 
 - 2026-10-05: opened at wave one's dispatch with the reservations above; E9 holds settings version 9 provisionally.
+- 2026-10-06 (E5 interim): E5 names `files.write`, the `files.read` extension, `file.save` and the X10 seam (§5); adds devDependencies `@codemirror/commands` 6.11.1 and `@codemirror/merge` 6.12.2 (exact); tokens `--code-conflict-*`. E3's author reads the seam before designing the comment composer.
 - 2026-10-06: E9 landed with the names below as recorded; `package.json` gains `build:helper`, `e2e:voice`, and `build:app` chained behind `build:helper`; `electron-builder.yml` gains the E9 block (extraResources, extendInfo, entitlements); `build/entitlements.mac.plist` added.
 - 2026-10-05 (E9 interim): E9 names `voice.*` (§5), takes settings version 9 (§4), appends `voice` to the settings TabRef section enum (§3) and adds the keymap action `composer.dictate` with a hold flag; `App.tsx` gains one E9 block mounting the dictation keys.
 - 2026-10-05 (E8 interim): E8 names its `plugins.*`, `marketplaces.*` and `session.reloadSkills` commands and events (§5) and releases settings version 10; E2, E4 and E10 renumbered to 10, 11, 12. Exception to §6's append-only rule, dated: E8 replaces two lines in place inside the C3 block of `src/shared/wire/control.ts` (`ReloadPluginsResponseSchema`, a lower-bound `Void` schema replaced by the fixture's shape) and makes `engine.shutdown` await its runner's stop; E1 edits the same file for `mcp_message`, so the architect merges the two on semantics.
