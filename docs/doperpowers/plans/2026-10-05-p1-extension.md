@@ -18,14 +18,14 @@ Status: design approved by the owner on 2026-10-05 after three grill rounds ("Ap
 
 P1 closes when, on the owner's Mac with the installed engine, every item below is observed in one sitting. Items are observable behaviour; the children's acceptance refines them.
 
-1. A Workflow run shows live in the panel widget, phases on the left and agents on the right with model names. Clicking an agent opens its transcript. Stop and resume work. The subagent topology tree shows nested agents with running and done states.
+1. A Workflow run shows live in the panel widget, phases on the left and agents on the right with model names. Clicking an agent opens its transcript. Stop works where the engine allows it. The subagent topology tree shows nested agents with running and done states.
 2. From MAWS the owner adds a marketplace, installs, updates, enables and disables a plugin, and reloads mods. The running session reflects it.
 3. The owner holds a key, speaks, and the text lands in the composer.
 4. The owner edits a file in a MAWS tab and saves. A conflict opens the merge view.
 5. The agent delivers a file through MAWS's tool. It appears as a row and opens in the viewer: PDF, HTML, image, video, audio, markdown. Artifacts keep versions.
 6. The owner pins a comment to an element in the in-app browser or in a delivered artifact. A side thread opens, the agent edits and replies there, the main conversation is not interrupted. "Send to main" works.
 7. The in-app browser imports a Chrome profile the owner chooses. The agent drives a tab through MAWS's browser tools. The owner takes over by clicking, and the agent resumes after.
-8. The agent asks a batch question through MAWS's tool. A capsule in the transcript opens the sheet in the panel with choices, free text, files, a repository, a design system and "decide for me". An async question does not block the turn.
+8. The agent asks a batch question through MAWS's tool. A capsule in the transcript opens the sheet in the panel with choices, free text, files or folders, a repository and "decide for me". An async question does not block the turn. (The design-system input waits for the editors composite, P-13.)
 9. The owner quits MAWS with a turn in flight and relaunches. The session is still there and still streaming.
 10. `/btw` opens a side pane with the answer; the main conversation is untouched.
 11. From the panel the owner stages, commits, pushes and opens a PR from the session's worktree. The summary row shows PR state and checks.
@@ -36,11 +36,13 @@ P1 closes when, on the owner's Mac with the installed engine, every item below i
 
 Three primitives are shared by most of the work and are the reason this phase was designed as a whole before it is cut: the tool server (A), the deliverables store and viewer (B), and anchored messages with side threads (C). The surfaces D to I build on them.
 
+Authority grades. **Binding**, because only the joint view could settle them: A's one server named `maws` served from the host with fallback-bearing descriptions; B's local-first store and sandboxed frames with no network; C's one mechanism with the side thread as default; D's agent control through MAWS's own tools over CDP, the copy-only profile import and the human-click takeover; I's detached process over a Unix socket; and every decision P-n in §7. Everything else in this section is advisory inheritance a child may overturn with evidence through a dated entry in §7.
+
 ### A. The MAWS tool server (the spine)
 
 One SDK-hosted MCP server named `maws`, declared in the initialize handshake (`initialize.sdkMcpServers`, SPEC 45 §45.21 of the engine library) for every MAWS-launched session and served from the engine host over the protocol's `mcp_message` round trip. This is how Claude Desktop builds every one of its extensions (its `ccd_pr`, `ccd_view.show_pane`, `preview_*`, scheduled-task and local artifact tools are all host MCP servers; `docs/doperpowers/evidence/extension-2026-10-05/claude-desktop-extensions.txt`). Codex does the same over native pipes.
 
-- **Tools in this phase:** `send_file` (files, caption, urgency; replaces the engine's SendUserFile, which is gated to Desktop entrypoints, SPEC 23 §23.4.2); `ask` (a question sheet: questions with modalities, each a choice set, free text, files, a repository, a design system or "decide for me"; `blocking: true | false`; the result is the answers or, for an async ask, an acknowledgement with the answers delivered later as a user message); `show_pane` (open a panel tool: diff, file, terminal, tasks, browser, deliverable); the browser tools (D); `artifact_create`, `artifact_update`, `artifact_list` (B). PR binding and scheduling tools wait for the next composite.
+- **Tools in this phase:** `send_file` (files, caption, urgency; replaces the engine's SendUserFile, which is gated to Desktop entrypoints, SPEC 23 §23.4.2); `ask` (a general batch-question sheet, the vault's "ask me for visual references" shape: questions with modalities, each a choice set with "Other", free text, a file or folder pick, a repository pick or "decide for me"; `blocking: true | false`; the result is the answers or, for an async ask, an acknowledgement with the answers delivered later as a user message; the design-system modality arrives with the editors composite, P-13); `show_pane` (open a panel tool: diff, file, terminal, tasks, browser, deliverable); the browser tools (D); `artifact_create`, `artifact_update`, `artifact_list` (B). PR binding and scheduling tools wait for the next composite.
 - **Data flow:** a tool call arrives in the engine host as an MCP request; the host emits an X1 event the renderer draws as a row (a capsule for `ask`, a delivery row for `send_file`, a browser action row); the surface answers through IPC; the host returns the MCP result. Fire-and-forget tools answer at once.
 - **Terminal interop (D-12):** a session resumed in the terminal lacks these tools and nothing breaks: each tool's description names its fallback (Write a file and name its path; AskUserQuestion; describe where to look). A session started in the terminal and taken over by MAWS gains them at the next launch only (the engine adds SDK servers at initialize and through `mcp_set_servers`; the child grounds whether the latter suffices mid-session).
 - **Contract X9 (binding once the cut lands):** the server name, tool names, input and output schemas, and the row each tool produces. The owner's skills and plugins may target `mcp__maws__*` names; they do not change without a dated Decision Log entry here.
@@ -111,11 +113,13 @@ Each is a findings-only spike recorded under `spikes/` with fixtures where the e
 
 ## 5. Ordering (advisory; decomposing fixes the edges)
 
-The spine (A) first, with S3. Deliverables (B) and anchored messages (C) after A, with S4 for C. The browser (D) after S1 and S2, and after C for comment mode. Orchestration (E), editor and source control (F), plugins (G), voice (H) and the supervisor (I) are independent of each other and of A. A finish child closes §2 item 13 and runs recomposition against §2.
+The spine (A) first, with S3. Deliverables (B) after A; anchored messages (C) after S4, independent of A. The browser (D) after S1 and S2, after A for its tools and after C for comment mode. Orchestration (E), editor and source control (F), plugins (G), voice (H) and the supervisor (I) are independent of each other and of A. A finish child closes §2 item 13 and runs recomposition against §2.
 
-## 6. Deferred (the composite after this one)
+## 6. Deferred and out of scope
 
-The docs, slides and design editors and the design system (on B's store); the sminos family chat integration; a PR inbox; a routines editor; the prewarmed spare session; realtime voice; a Spaces-like organiser of deliverables across sessions; plugin JavaScript modules on the engine surface; remote control; the replay scrubber; the all-accounts usage view (likely already met by the usage pill's popover; verify at recomposition).
+**Explicitly out of scope** (standing exclusions): claude.ai's Artifact, Docs and Cowork services (P-4); patching the engine (D-1); MAWS writing under `~/.claude` or `~/.claude.json` (the standing rule; E8 lets the engine or its CLI write); a MAWS plugin API beside the engine's `ui_surface_v1` (D-9); Windows and Linux (D-11); the Codex agent runtime as an engine (D-7).
+
+**Deferred** (the composite after this one). The docs, slides and design editors and the design system (on B's store; the design system is "what's extracted from existing projects or artifacts or what user and agent build together", the owner's definition of 2026-10-05, and the `ask` sheet gains it as an input then); the sminos family chat integration; a PR inbox; a routines editor; the prewarmed spare session; realtime voice; a Spaces-like organiser of deliverables across sessions; plugin JavaScript modules on the engine surface; remote control; the replay scrubber; the all-accounts usage view (likely already met by the usage pill's popover; verify at recomposition).
 
 ## 7. Decision log
 
@@ -139,8 +143,228 @@ The docs, slides and design editors and the design system (on B's store); the sm
 | A-6 | Dictation uses local Apple speech recognition through a bundled Swift helper. | No cloud dependency; Claude Desktop's gateway credential path is not available to MAWS. Advisory. |
 | A-7 | cua's Phase D adapter is not needed for MAWS's browser; the cua backlog is told. | P-5 makes the browser tools MAWS's own. |
 | A-8 | Spikes S1 to S4 run before the children they inform are cut. | The vendor contracts and engine schemas involved are unpublished or unverified. |
+| P-11 | The Tasks panel edits through the session: an edit sends a steer the agent executes with TaskUpdate; `~/.claude` stays read-only to MAWS; the panel shows the pending edit until the file changes. | Owner, 2026-10-05 (decomposing residue). The task store lives under `~/.claude` (SPEC 20 §20.2.3) and the standing rule forbids MAWS writing there; direct locked writes and read-only were the alternatives. |
+| P-12 | Source control: stage, unstage, discard and commit run through MAWS's git runner; push and open-PR run `git` and `gh` under the user's login-shell environment with its credential helpers, after a confirm that names the remote and branch. | Owner, 2026-10-05. MAWS's runner disables transport and credential helpers by design (`src/main/git/runner.ts:52-62`); the alternatives were local-only or everything through the agent. |
+| P-13 | The `ask` sheet is a general batch-question surface, not the fixed list of the vault's example; the design-system input waits for the editors composite, where the design system is "what's extracted from existing projects or artifacts or what user and agent build together". | Owner, 2026-10-05: "question sheet was example for 'batch question through sheet' … real design system object arrives with the editors." |
+| P-14 | The panel and reference taste sitting carried from P0 (C8-S) happens once, at the end, in the finish child, over P0's panels and P1's new surfaces together. | Owner, 2026-10-05. |
+| A-9 | The cut: two spike children (E0a engine probes, E0b Electron probes), nine plan children (E1 tool server, E2 deliverables, E3 anchored messages, E5 editor, E6 source control, E7 orchestration, E8 plugins, E9 voice, E10 supervisor), one decomposing child (E4 browser) and a finish child (E11). | Each child has one state owner and one verification strategy; §10 names the seams. Alternatives rejected: one child for the editor and source control (different state owners: files versus git with credentials), one plan for the browser (three state owners: the view and import, comment mode, the tools). |
+| A-10 | The in-app browser (E4) is a decomposing run at its dispatch, not cut today. | Its boundaries depend on E0b's findings (what imports, how CDP attaches); cutting it now would go stale. |
+| A-11 | An interface ledger opens when the second wave is dispatched, since E2, E3, E4 and E7 all extend X9, X1, the TabRef kinds and the settings and index versions before any of them lands. | The decomposing skill's rule for siblings extending one contract; P0's wave-2 ledger is the precedent. |
+| A-12 | Spike findings are written as `.txt` under `spikes/` and folded into this document by the architect. | Workers never create `.md` files (standing rule); the architect is this document's one writer. |
+| A-13 | At most four workers run at once, heavy runs through the slot script, the e2e load rule unchanged. | The owner's machine also runs ClaudeUsage's relay and the owner's own sessions. |
+| A-14 | Verification call: every plan child gets a whole-branch review at `doperpowers:reviewer-high` (the panel when the diff is panel-sized), each spike a `reviewer-medium` read of its findings and fixtures, the finish child a scale review of the P1 tree at level max; verified findings are fixed by separate workers, two rounds at most, tiny ones to the tracker. | The P0 retrospective: per-child reviews did not substitute for a scale review. |
 
-## 8. References
+# Roadmap
+
+The sections below extend the approved design into the composite spec for P1: the grounding against the code, the cut into children, the contracts that cross them, the ordering, and the record that tracks the unit to its retrospective. Decisions P-1 to P-14 and the design's binding marks are binding everywhere; the grades on the rest are given per child. One writer: the architect's session; children record residue in their own documents and the architect folds it in.
+
+## 9. Grounding baseline (2026-10-05, master 06fa09ac)
+
+What exists, read-only, that the children build on or replace.
+
+- **Initialize and controls.** The request is built in `src/engine-host/session.ts:558` from `appInitialize()` (`src/shared/engine/initialize.ts:6`: `supportedDialogKinds`, `perTaskStopAffordance`, `workspaceTrust`) plus `hooks` from the host hook registry; its type (`src/shared/wire/control.ts:130`) has no MCP field. Unknown inbound control subtypes emit `frame.unknown` (`normalizer-controls.ts:108`) and are answered `respondError("MAWS does not handle …")` (`session.ts:774, 791`). `--mcp-config` plumbing exists (`launch.ts:206`) and production never fills it (`launch-mapping.ts:65`). No MAWS-owned MCP server; nothing references cua in `src`.
+- **Fork.** `session.fork {appSessionId, target, message, rewindTo}` (`service-register.ts:27`, `service.ts:518`) maps to `resume: {sessionId, fork: true}` and `--fork-session` (`launch-mapping.ts:90`, `launch.ts:203`). Lineage lives only on the setup intent (`intent.ts:46`); `SessionRecord` has no parent field; `session.started.forked` comes from the JSONL's `forkedFrom` on the disk path only.
+- **Panel.** `registerPanelTool` (`panel/host.ts:459`) with `terminal`, `session-info`, `review`, `files`, `subagents`, `background`, `log` and R2's `plugin-pane`; summary rows Environment, Plugins, PushState, Subagents, BackgroundWork, Sources (`Summary.tsx:53-58`).
+- **Orchestration.** `WorkflowCard.tsx` shows phases `done/total` and an agent table from `workflow_phase` and `workflow_agent` rows; the Subagents tool's drill-in (`DrillIn.tsx:53`) draws a child transcript with the relay composer; agent rows carry a depth through `parentAgentId` (`task-graph.ts:543`) and indent, with no tree view. The Tasks checklist is read-only (`TaskChecklist.tsx:28`, `fs.tasks`); `engine-host/fs/tasks.ts` states "Read-only". Transcript rows: `SendMessage` → `agent_message` (to_child, from_child; `between` never produced); `ListAgents` absent; `subagent.message` is declared and never emitted; `SendUserFile` is a standalone 'other' cell ("Sent <file>").
+- **Git.** Reads `git.status`, `branches`, `diff`, `log`, `watch`, `unwatch`, `lsFiles`; mutations only `git.worktree.add`, `remove`, `deleteBranch`. The runner forces `core.fsmonitor=false`, empty credential helper, `hooksPath=/dev/null`, transport disabled (`runner.ts:52-62`), "MAWS never fetches, pushes or authenticates".
+- **Files and viewer.** `fileTab` slot → `FileViewer` (kinds `code | markdown | image | external | head`; PDF, HTML, audio and video open externally); CodeMirror read-only (`CodeView.tsx:41`); commands `files.list`, `read`, `watch`, `unwatch`, `openExternal`; no `files.write` (the only writer is `layout.saveTextFile`). `openFile` opens a main tab through `useLayout.openTab` (`open-file.ts:32`); TabRef kinds `session | agent | file | diff | diagnostics | settings`.
+- **Palette.** `plugins` (reads init's plugins and errors; writes only `session.reloadPlugins`), `mcp` (reads status; writes reconnect and toggle), `skills` (reads the skills dialog). No install, enable or marketplace action.
+- **Host boundary.** `utilityProcess.fork` with a `MessageChannelMain` (`src/main/hosts/supervisor.ts:103-107`); main calls `hosts.dispatch('engine-host', …)`; the host serves on `process.parentPort`'s port (`shared/host/runtime.ts:131`). The quit guard's `BusyReport {midTurn, backgroundWork, busyTerminals, terminalsUnknown}` (`quit-guard.ts:26`).
+- **Absent.** Browser (no `WebContentsView`, no debugger use; Playwright only in e2e), voice (the toolbar comment "no mic until dictation exists"), a preview-format declaration for AskUserQuestion (the card renders `preview` through a scriptless sandboxed iframe, `request-card/variants/Question.tsx:76-99`).
+- **Settings.** Version 8 (`settings/defaults.ts:10`), migrations a `switch` chain `fromV4 … fromV7`; new settings need version 9 and `fromV8`. The index has its own ordered migrations (`src/main/index/migrations.ts`).
+
+## 10. Children
+
+### E0a: Engine probes — spike (findings, never a merge)
+
+- **Purpose:** record on the installed engine, under a scratch config home through the relay, the wire facts the cut depends on and the published schemas lack: the SDK MCP round trip (`initialize.sdkMcpServers` with one `maws` tool: does init's `tools` list `mcp__maws__<tool>`, does the model call it, what `mcp_message` carries both ways, does `mcp_set_servers` add a server mid-session); `fork_conversation` (request and answer shapes; whether it starts a child without a new launch; what the JSONL records); `side_question` (shapes; the transcript records it leaves; whether the answer streams); and whether the handshake carries an AskUserQuestion preview-format declaration.
+- **Acceptance:** fixtures `spikes/protocol-probe/fixtures/pass3/p1-sdk-mcp-*`, `p1-fork-*`, `p1-side-question-*` recorded with provenance (engine version, scenario, cost) and admitted by the conformance suite; findings in `spikes/protocol-probe/findings-pass3-p1-extension.txt` answering each question yes, no or partly with the frame cited; the owner's `~/.claude` untouched (scratch `CLAUDE_CONFIG_DIR`, the standing owner-file check before and after).
+- **Edges:** blocked-by: —. blocks: E1 (the MCP facts), E3 (the fork and side-question facts).
+- **Contracts:** feeds X9's shapes and X11's lineage source.
+- **Design inheritance:** §3 A and C [binding for what to probe]; §4 S3 and S4 [the questions].
+- **Required:** required.
+- **Status:** not-dispatched, dispatchable now.
+
+### E0b: Electron probes — spike (findings, never a merge)
+
+- **Purpose:** on a probe app under `spikes/browser-probe/` (never MAWS's tree), establish what the in-app browser can be: Chrome profile import from a copy of a chosen profile's stores (cookies and history; saved passwords through the Safe Storage key after one Keychain consent, and whether Electron has any consumer for them, since it ships no password manager or autofill; which extension kinds load and which APIs work), and Playwright over CDP against a `WebContentsView` (`playwright-core` `connectOverCDP` to the view's debugger or a remote-debugging endpoint; accessibility snapshot with element refs; click and fill by ref; screenshot; attach cost; whether refs are stable enough to share with a comment-mode selection).
+- **Acceptance:** `spikes/browser-probe/` runs with `pnpm -C spikes/browser-probe start`; findings `spikes/browser-probe/findings.txt` with a yes, no or partly per capability, the consent surface each needs, and what a password import would require; no live Chrome profile is read in place (a copy under a scratch directory); no MAWS `src` change.
+- **Edges:** blocked-by: —. blocks: E4.
+- **Contracts:** feeds X9's browser tools and E4's cut.
+- **Design inheritance:** §3 D [binding: own tools over CDP; import is a copy]; §4 S1 and S2.
+- **Required:** required.
+- **Status:** not-dispatched, dispatchable now.
+
+### E1: The tool server: `ask`, `send_file`, `show_pane` — plan
+
+- **Purpose:** the spine. The `maws` SDK MCP server in the engine host, declared at initialize for every MAWS-launched session and served over `mcp_message`; its first three tools and the rows and surfaces they produce; the contract X9 the owner's skills can target.
+- **Acceptance:** **G1** every MAWS-launched session's init lists `mcp__maws__send_file`, `mcp__maws__ask` and `mcp__maws__show_pane`; a session resumed in the terminal lacks them and each tool's description names its fallback. **G2** `send_file {files, caption?, urgency?}` writes an X12 record and draws a delivery row with name, caption, Open externally and Reveal in Finder; the result acknowledges the row. **G3** blocking `ask`: a capsule row opens the Question sheet, an X5 tool, one instance per session, with a section per question (choice sets single or multi with Other, free text, file or folder pick through the native dialog returning paths, repository pick from MAWS's project list, "decide for me" per question); Submit returns the answers, Skip leaves a question unanswered and the result says so; the capsule shows answered and reopens read-only. **G4** async `ask` returns `{status: 'asked', askId}` at once; the sheet stays; Submit delivers the answers as a user message at the next tool boundary (a `priority: 'next'` steer) naming the ask id; the capsule shows pending then answered. **G5** `show_pane {pane: 'diff' | 'file' | 'terminal' | 'tasks' | 'deliverable' | 'browser', target?}` opens the X5 tool (a file in a main tab) and returns what it opened; an unknown pane or an absent tool returns a tool error, never a crash. **G6** a pending ask survives a renderer reload (the host holds it) and is cancelled with its session's exit, the result an error. **G7** E0a's fixtures drive the three tools through replay in an e2e group; the conformance suite admits `mcp_message`; unit tests pin the schemas and the fallback text.
+- **Edges:** blocked-by: E0a. blocks: E2, E4.
+- **Contracts:** owns X9; produces X12 (shape from E2 through the ledger); consumes X5, X1.
+- **Design inheritance:** §3 A [binding: one server named `maws`, SDK-hosted, served from the host, tool descriptions carry fallbacks, permissions as any MCP tool]; the modality list of `ask` [binding, P-13]; the sheet's layout [advisory: the vault's sheet shots, Claude Design's "ask me for visual references"]; declaring an AskUserQuestion preview format to the engine if E0a finds the field [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by E0a.
+
+### E2: Deliverables and the viewer — plan
+
+- **Purpose:** the store of what the agent delivered and the surface that shows it: the record, the panel list, the viewer kinds P0 opened externally, local HTML artifacts with versions, and the transcript rows that replace C6's "Sent <file>" cell.
+- **Acceptance:** **G1** the X12 record and store under the app's data directory, delivered files referenced in place, artifact versions copied; the record survives restart and is per session with a cross-session list. **G2** the Deliverables panel tool lists records newest first by kind; a row opens the viewer; back returns to the list; `show_pane 'deliverable'` opens one. **G3** the viewer draws PDF and HTML in sandboxed frames (no network by default, no top-level navigation, downloads blocked), video and audio in native players, images inline, markdown and code through the existing viewer; Open externally and Reveal always; a `deliverable` TabRef kind opens the same viewer in a main tab (X14). **G4** `artifact_create {id, html_path, title}`, `artifact_update {id, html_path}` and `artifact_list` on the `maws` server (X9 extension through the ledger); versions kept and switchable; `artifact_screenshot` returns a PNG image block to the agent; the frame's console errors appear on the artifact's row. **G5** every delivery and artifact version is a transcript row that opens the viewer; the `SendUserFile` cell row is retired; replay from disk draws the same rows from the tool calls. **G6** (conditional-on E3 landed) comment mode on an artifact element produces an X10 anchor through the shared comment composer.
+- **Edges:** blocked-by: E1. G6 blocked-by: E3. blocks: E4 (screenshot records, optional), E11.
+- **Contracts:** owns X12; extends X9 (artifact tools, through the ledger); consumes X5, X14; produces X10 (G6).
+- **Design inheritance:** §3 B [binding: local-first store, self-contained HTML artifacts registered through the tool, versions kept by MAWS, sandboxed frames with no network]; viewer placement [advisory, A-2]; storage layout [advisory, A-3]; Claude Desktop's `create_artifact` family (`claude-desktop-extensions.txt` §3) and Codex's artifact annotation copy (§7) [advisory].
+- **Required:** required (G6 conditional).
+- **Status:** not-dispatched, blocked-by E1.
+
+### E3: Anchored messages, side threads and `/btw` — plan
+
+- **Purpose:** the feedback channel: a comment pinned to something, carried to the agent with its anchor, opening a side thread by default or steering the main session; the side pane that hosts side threads and side questions; the lineage that keeps a side thread under its parent.
+- **Acceptance:** **G1** the X10 anchor shape and one shared comment composer with a destination control (Side thread, the default; Send to main) and an optional screenshot; the first producer is a file line in the viewer, so G1 is testable before E2 and E4. **G2** a side thread forks the parent at the current point (the launch flag or `fork_conversation`, per E0a), records X11 lineage persisted in the index (a migration), opens in the side pane (an X5 tool hosting a session transcript and composer, as the drill-in does) with the anchor shown at its head, carries the parent's directory and permission mode, can edit, and when its turn ends writes a summary row into the parent's transcript linking to the thread; the sidebar lists side threads under their parent. **G3** Send to main steers the parent at the next tool boundary with the anchor's text and the screenshot as an image block; the parent's transcript shows the anchor on that prompt. **G4** `/btw` sends the engine's `side_question` request and draws the answer in the same side pane; "Continue as a side thread" promotes it. **G5** a side thread resumed in the terminal is an ordinary forked session; MAWS reads its lineage from the record, and from the JSONL's `forkedFrom` when the record is absent.
+- **Edges:** blocked-by: E0a. blocks: E4; E2.G6; E5.G4; E6.G4 (gate-level).
+- **Contracts:** owns X10, X11; extends X1 (side-thread events) through the ledger; consumes X5, the C10 fork path.
+- **Design inheritance:** §3 C [binding: one mechanism; side thread default, P-6; `/btw` through `side_question`, A-5]; the fork means [advisory until E0a, A-4]; Claude Desktop's three side-chat mechanisms (`claude-desktop-extensions.txt` §1) [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by E0a.
+
+### E4: The in-app browser — decomposing at dispatch
+
+- **Purpose:** the shared browser: tabs the human and the agent use together, comment mode producing anchors, a Chrome profile imported by copy, MAWS's own browser tools on the spine, and the takeover rule.
+- **Acceptance:** coarse until its own cut: §2 items 6 (the browser half) and 7; the expected children are the view with tabs, chrome and profile import; comment mode on X10; the browser tools on X9 with the takeover state. Each child's gates emerge from the cut, which E0b's findings shape.
+- **Edges:** blocked-by: E0b, E1, E3. blocks: E11.
+- **Contracts:** extends X9 (browser tools, through the ledger); produces X10, X12 (screenshots); consumes X5, X14 (`browser` TabRef kind).
+- **Design inheritance:** §3 D [binding: the view is MAWS's; agent control is MAWS's own tools over CDP, P-5; import is a copy and each category opt-in, P-7; the human clicking pauses the agent on that tab]; Codex's browser chrome, error states and comment overlay (`codex-extensions.txt` §1) [advisory]; A-7.
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by E0b, E1, E3.
+
+### E5: The editor — plan
+
+- **Purpose:** editing a file by hand without leaving MAWS: CodeMirror editing in file tabs over the read-only viewer, save with stale-content detection, the merge view for conflicts, and a line gutter that produces anchors.
+- **Acceptance:** **G1** `files.write {path, content, expectedHash}` with the `files.*` refusals (normal paths under the allowlist roots only); save compares the hash and returns ok or conflict. **G2** a dirty tab shows it and the close guard asks; an external change through `files.watch` offers Reload or Keep mine. **G3** the merge view opens on a conflict (stale hash: theirs against mine; git conflict markers in the file) and writes the resolution. **G4** (conditional-on E3) a gutter action on a line opens the comment composer with a `file-line` anchor. **G5** the viewer's kinds, line jump and lazy loading are unchanged for read-only use; `Review` opens the editor at the changed line.
+- **Edges:** blocked-by: —. G4 blocked-by: E3. blocks: —.
+- **Contracts:** produces X10 (G4); consumes X5; extends `files.*` (through the ledger if E2 touches it).
+- **Design inheritance:** §3 F editor [binding: hash-checked save]; CodeMirror merge view [advisory]; Claude Desktop's `writeSessionFile` conflict semantics (`claude-desktop-extensions.txt` §2) [advisory].
+- **Required:** required (G4 conditional).
+- **Status:** not-dispatched, dispatchable now.
+
+### E6: Source control — plan
+
+- **Purpose:** the git operations the owner still did by hand: a Source control panel tool for status, staging, discard and commit through MAWS's runner, push and PR through the user's shell environment after a confirm, and PR state and checks on the summary row.
+- **Acceptance:** **G1** the panel tool shows staged, unstaged and untracked files with diffs (C8c's diff view); stage, unstage and discard (discard confirms and names the files) and commit with a message run through MAWS's runner in a new mutating mode that keeps transport disabled; the user's commit hooks run unless the owner's setting says otherwise. **G2** Push and Open PR run `git push` and `gh pr create` under the login-shell environment captured at startup, with credential helpers allowed, after a confirm naming the remote, the branch and the command; output and errors shown in the panel; nothing runs without the confirm. **G3** the summary's push-state row shows PR state and checks from `gh` with a bounded refresh and a manual refresh; absent `gh` shows the install state, as Codex does. **G4** (conditional-on E3, optional) a comment on a PR line opens the composer with a `pr-line` anchor.
+- **Edges:** blocked-by: —. G4 blocked-by: E3. blocks: —.
+- **Contracts:** consumes X5, C4's git service; produces X10 (G4).
+- **Design inheritance:** §3 F source control and P-12 [binding: local through MAWS's runner, remote under the shell environment after a confirm]; hooks behaviour [advisory]; Codex's PR detail states (`codex-extensions.txt` §5) and Claude Desktop's PR bar (`claude-desktop-extensions.txt` §5) [advisory].
+- **Required:** required (G4 optional).
+- **Status:** not-dispatched, dispatchable now.
+
+### E7: Orchestration views — plan
+
+- **Purpose:** what the terminal still showed better: the workflow widget, the subagent topology tree, cross-session message rows with reply, the Tasks panel that edits through the session, and scheduled loops listed.
+- **Acceptance:** **G1** a Workflow run opens from Background work into the widget: phases on the left with done and total, agents on the right with model name, state and elapsed; click an agent for its transcript in the drill-in; Stop where `perTaskStopAffordance` allows; the widget updates live and from disk. **G2** the Subagents tool's resting state is a tree: nested agents under their parents, running first, done folded under the parent with a count, click for the transcript; orphans marked as today. **G3** `ListAgents` results draw as a list; `SendMessage` to a cross-session recipient draws `between` with the recipient; a message from another session draws with the sender and a Reply composer that sends a steer the agent executes; teammates draw under their lead. **G4** the Tasks panel edits a task through the session (P-11): status change, reorder and new task send a steer; the pending edit shows until `fs.tasksChanged` confirms it. **G5** scheduled loops the engine exposes in the transcript (CronCreate calls and their records) are listed with next run and a link to the creating turn.
+- **Edges:** blocked-by: —. blocks: —.
+- **Contracts:** consumes X5, X1; extends X1 (`subagent.message` emission, cross-session rows) through the ledger.
+- **Design inheritance:** §3 E [binding: edits through the session, P-11; the widget and tree are in, P-9]; the vault's widget layout and the Codex subagent panel [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, dispatchable now.
+
+### E8: Plugins, marketplaces and mods — plan
+
+- **Purpose:** plugin and marketplace management from MAWS on Claude Desktop's model, so the owner never opens a terminal to install, update or enable a plugin or reload a mod.
+- **Acceptance:** **G0** (first milestone, findings) how the engine performs installs and enables (the `claude plugin` and `claude marketplace` CLI in a MAWS-owned process, the control protocol, or settings writes), what `reload_plugins` returns, and what the owner's installed marketplaces look like on disk; the route chosen with the owner's rule applied. **G1** marketplaces listed, added from a repository, URL or directory, refreshed and removed. **G2** plugins listed with source and state, installed, updated, uninstalled, enabled and disabled, with progress and the engine's errors shown. **G3** mods reloaded through `reload_plugins` and skills through `reload_skills` from the palette and the panel; errors surfaced as R1's notices. **G4** every write to user configuration is announced and confirmed; none is silent (the standing rule); the owner's `~/.claude` is written only by the engine or its CLI, never by MAWS directly.
+- **Edges:** blocked-by: —. blocks: —.
+- **Contracts:** consumes the palette's widget slot, X5.
+- **Design inheritance:** §3 G and P-10 [binding: Claude Desktop's model; the write rule]; `claude-desktop-extensions.txt` §8 [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, dispatchable now.
+
+### E9: Voice — plan
+
+- **Purpose:** push-to-talk dictation into the composer, so a prompt can be spoken.
+- **Acceptance:** **G1** a bound key (default configurable in the keymap) starts recording while held and shows a recording state in the composer; release stops. **G2** recognition runs locally through a bundled Swift helper over Apple's Speech framework, streaming partial text at the caret and the final text on release; the helper's absence or failure shows a reason. **G3** the microphone permission is requested on first use with the reason in the dialog; denial shows how to grant it. **G4** the packaged build carries the helper, signed as the app is; the e2e harness stubs recognition.
+- **Edges:** blocked-by: —. blocks: —.
+- **Contracts:** consumes the composer's insertion seam (C7).
+- **Design inheritance:** §3 H [binding: push-to-talk into the composer]; Apple speech [advisory, A-6].
+- **Required:** required.
+- **Status:** not-dispatched, dispatchable now.
+
+### E10: The detachable supervisor — plan
+
+- **Purpose:** sessions outlive the app: the engine host becomes a detached process the app reaches over a Unix socket, so a restart or an update loses no turn (D-16 amended).
+- **Acceptance:** **G1** the host runs detached under the app's data directory with a socket and a lock; the app starts it when absent and connects when present; main's `hosts.dispatch` is unchanged for callers (X13). **G2** quitting offers "Quit and keep sessions running" beside the busy report; after relaunch the sessions are listed live, the transcript catches up from the host's event ring and the disk with no duplicate or lost row, and a turn that was streaming is still streaming. **G3** the supervisor exits itself after holding no session for a configurable idle time and on Stop all; a crashed app leaves it serving; a crashed supervisor is reported and sessions resume from disk. **G4** the memory budget, the holder registry and the launch environment capture move with the host; terminals stay in the app and are reported as lost on relaunch. **G5** the e2e harness runs the host in-process as today under a flag, so replay suites are unchanged.
+- **Edges:** blocked-by: E1 (deliberately late: the host gains the tool server first). blocks: E11.
+- **Contracts:** owns X13.
+- **Design inheritance:** §3 I [binding: detached process over a Unix socket; reconnect and catch-up]; idle exit and lock layout [advisory]; D-16.
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by E1.
+
+### E11: Finish — plan
+
+- **Purpose:** what closes P1 as a whole: the three gaps carried from P0, the tracker's triage, the agents' pre-run of §2 and the owner's sitting, the scale review, and recomposition.
+- **Acceptance:** the panel and reference taste sitting over P0's panels and P1's surfaces (the owner, P-14) with its findings fixed or logged; the native terminal hands (Korean IME, modifier-click, sleep and wake) observed by the owner; a scale review of the P1 tree at level max with its verified findings fixed; the carried tracker rows closed or re-deferred with a reason; the agents' pre-run of §2 items 1 to 12 under a scratch config home with evidence; the owner's one sitting; §15 written.
+- **Edges:** blocked-by: E1 to E10. blocks: —.
+- **Contracts:** consumes all.
+- **Design inheritance:** §2 [binding]; P0's C12 finish pattern (`docs/doperpowers/plans/2026-09-29-c12-finish.md`) [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, deliberately late.
+
+## 11. Cross-child contracts
+
+- **X9 — the `maws` tool server** [owner E1; extended by E2 (artifact tools) and E4 (browser tools) through the interface ledger; binds every child that adds a tool]. The server name `maws`; tool names `send_file`, `ask`, `show_pane`, `artifact_create`, `artifact_update`, `artifact_list`, `artifact_screenshot`, `browser_tabs`, `browser_navigate`, `browser_snapshot`, `browser_act`, `browser_eval`, `browser_screenshot`; each tool's JSON schema, result shape and fallback description; the X1 event each call emits and the row it draws; the rule that a result returns when the surface answers or at once for fire-and-forget tools; permissions as any MCP tool. Written to outlive this unit: the owner's skills target `mcp__maws__*`; a change is a dated Decision Log entry here and, at closing, a charter contract.
+- **X10 — the anchor** [owner E3; produced by E2, E4, E5, E6]. `{ kind: 'browser-element' | 'artifact-element' | 'file-line' | 'pr-line' | 'none', locator: string, label: string, pageUrl?: string, path?: string, line?: number, screenshot?: { path, width, height } }` plus the serialisation the agent receives (text and an image block). The shared comment composer and its destination control are E3's component; producers call it, never re-implement it.
+- **X11 — side-thread lineage** [owner E3; consumed by the sidebar (C5), E7]. `SessionRecord.lineage?: { kind: 'side-thread' | 'fork', parentAppSessionId, parentEngineSessionId, anchor?: X10, openedBy: 'comment' | 'btw' | 'fork' }`, persisted in the index by a migration, filled from the launch intent and, on the disk path, from the JSONL's `forkedFrom` with `kind: 'fork'`.
+- **X12 — the deliverable record** [owner E2; produced by E1, E4]. `{ id, appSessionId, kind: 'file' | 'artifact' | 'screenshot', path, title?, caption?, versions: [{ path, at }], toolUseId?, createdAt }`, stored under the app's data directory, delivered files referenced in place, artifact versions copied; the store's change event the panel and rows subscribe to.
+- **X13 — host transport invariance** [owner E10; binds E1, E2, E3, E7 and anyone touching the host]. The engine host's request and event surface stays transport-agnostic: no host API assumes the host dies with the app or shares memory with main; every session event stream carries a monotonic sequence number so a reconnecting client can ask for the tail; host-held state (pending asks, the deliverable store's writer) is designed to survive the app's absence.
+- **X14 — TabRef kinds** [owner: the architect through the ledger; extended by E2 (`deliverable`), E4 (`browser`)]. New main-tab kinds are added in `src/shared/ipc/schema/layout.ts` in ledger order with their restore semantics; a kind that cannot restore (a browser tab's page) restores to its tool's empty state.
+- **X15 — version allocation** [owner: the architect through the ledger]. Settings version 9 and up and index migrations are allocated in the ledger in landing order; a child never picks its own number.
+- **X5** (the charter's panel-tool contract) is consumed unchanged by E1, E2, E3, E4, E6, E7.
+
+## 12. Ordering and dependency map
+
+- **Wave 1, dispatchable now:** E0a, E0b (spikes, small); E1 (after E0a's fixtures, which the E1 executor may itself record first as its M1 if E0a has not finished); E8; E9. E5 and E6 can also start now; they touch different files. At most four workers at once (A-13), so the order within the wave is E0a, E0b, E8, E9, then E1 as a spike finishes, then E5, E6.
+- **Wave 2, after E1 lands:** E2, E3 (after E0a), E7. The interface ledger `docs/doperpowers/plans/2026-10-05-p1-interface-ledger.md` opens at this dispatch (A-11): every X9 tool, X1 event, TabRef kind, settings and index version added by a child in flight, with its owner, consumers and landing order.
+- **Wave 3:** E4 (its own decomposing run, after E0b, E1, E3), E10 (after E1; alone on the host's files).
+- **Wave 4:** E11.
+- Forced sequences: E0a → E1 → E2; E0a → E3 → E4; E0b → E4; E1 → E10; everything → E11. Everything else is parallel.
+
+## 13. Risks and mitigations
+
+- **Protocol churn.** The engine ships weekly and the installed version already exceeds the spec library; `fork_conversation` and `side_question` have no published schema. Mitigation: E0a records fixtures on the installed version; a child re-probes before it binds; the conformance suite admits new frames explicitly.
+- **Egress from sandboxed content.** HTML artifacts and PDFs run in frames. Mitigation: no network by default, no top-level navigation, downloads blocked, a content-security policy per frame (E2 G3); declared connectors are a later slice.
+- **Imported credentials.** Electron has no password manager; imported passwords have no consumer without autofill. Mitigation: E0b answers what a password import needs; E4's cut may ship cookies and history first and hold passwords until autofill exists; nothing imported is logged or copied outside the view's partition.
+- **Git with credentials.** Push and PR run with the user's helpers. Mitigation: a confirm naming remote, branch and command before every remote action (P-12); the mutating runner never runs remote commands.
+- **Orphan processes.** A detached supervisor can outlive its reason. Mitigation: idle exit, Stop all, a lock with the owning PID, a `doctor` row in Diagnostics (E10 G3).
+- **Load on the owner's machine.** Mitigation: A-13; the e2e load rule; heavy runs through the slot script.
+- **Terminal interop of new rows.** Deliveries, asks and side threads are MAWS rows a terminal never shows. Mitigation: each is also a plain tool call in the JSONL, so the terminal shows the call and its result text; the disk path draws the same rows from those calls (E2 G5, E3 G5).
+
+## 14. Tracking map
+
+| Child | Grain | Status | Ledger / artifact |
+|---|---|---|---|
+| E0a Engine probes | spike | not-dispatched, dispatchable now | `spikes/protocol-probe/findings-pass3-p1-extension.txt`, `fixtures/pass3/p1-*` |
+| E0b Electron probes | spike | not-dispatched, dispatchable now | `spikes/browser-probe/findings.txt` |
+| E1 Tool server | plan | not-dispatched, blocked-by E0a | execution document at dispatch |
+| E2 Deliverables and viewer | plan | not-dispatched, blocked-by E1 | execution document at dispatch |
+| E3 Anchored messages and side threads | plan | not-dispatched, blocked-by E0a | execution document at dispatch |
+| E4 In-app browser | decomposing | not-dispatched, blocked-by E0b, E1, E3 | its composite spec at dispatch |
+| E5 Editor | plan | not-dispatched, dispatchable now | execution document at dispatch |
+| E6 Source control | plan | not-dispatched, dispatchable now | execution document at dispatch |
+| E7 Orchestration views | plan | not-dispatched, dispatchable now | execution document at dispatch |
+| E8 Plugins, marketplaces and mods | plan | not-dispatched, dispatchable now | execution document at dispatch |
+| E9 Voice | plan | not-dispatched, dispatchable now | execution document at dispatch |
+| E10 Detachable supervisor | plan | not-dispatched, blocked-by E1 | execution document at dispatch |
+| E11 Finish | plan | not-dispatched, deliberately late | execution document at dispatch |
+
+## 15. Surprises and discoveries
+
+- 2026-10-05, grounding: the engine's SendUserFile and Artifact tools are both gated away from MAWS's launch (Desktop entrypoints; a first-party provider), which turned "integrate the engine's tools" into "build MAWS's own" before the owner ruled the same for product reasons (P-4).
+- 2026-10-05, grounding: Electron ships no password manager or autofill, so Codex's "import saved passwords" implies a consumer MAWS does not have; E0b measures what one would take.
+- 2026-10-05, grounding: the task store lives under `~/.claude`, which the standing rule keeps read-only to MAWS; the Tasks panel therefore edits through the session (P-11).
+- 2026-10-05, grounding: MAWS's git runner forbids transport and credential helpers by design; remote mutations need a second runner under the shell environment (P-12).
+- 2026-10-05, grounding: fork lineage is not persisted on the session record today; side threads need an index migration (X11).
+
+## 16. Outcomes and retrospective
+
+Pending — written when the unit closes. Closing is a recomposition check against §2 as written, then the retrospective.
+
+## 17. References
 
 - Charter: §1, §3 P1 and P2, D-5, D-9, D-12, D-16, D-20, §16, §19 entries of 2026-10-05, §20.
 - Reference inventories (2026-10-05, static source): `docs/doperpowers/evidence/extension-2026-10-05/codex-extensions.txt` (browser and annotations §1, MCP apps §3, plugins §4, PRs §5, automations §6, artifacts and Spaces §7), `claude-desktop-extensions.txt` (side chats §1, delivered files §2, artifacts §3, Launch §4, PRs §5, routines §6, plugins §8, voice §11a).
