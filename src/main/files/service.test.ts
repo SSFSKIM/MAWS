@@ -765,6 +765,28 @@ describe('files service write', () => {
     expect(readFileSync(inRoot('hard.ts'), 'utf8')).toBe('linked\n');
   });
 
+  // E5 M4 (M1's review): a descriptor write may take fewer bytes than asked; the write loops until every byte is down.
+  it('writes the whole content and answers its hash when each write call takes only part of what it is given', async () => {
+    const open = fs.promises.open.bind(fs.promises);
+    const asked: number[] = [];
+    vi.spyOn(fs.promises, 'open').mockImplementation(async (...args: Parameters<typeof fs.promises.open>) => {
+      const handle = await open(...args);
+      const write = handle.write.bind(handle) as (buffer: Buffer, offset: number, length: number, position: number) => Promise<{ bytesWritten: number; buffer: Buffer }>;
+      Object.assign(handle, {
+        write: (buffer: Buffer, offset: number, length: number, position: number) => {
+          asked.push(length);
+          return write(buffer, offset, Math.min(length, 7), position); // at most seven bytes per call
+        },
+      });
+      return handle;
+    });
+    const content = 'export const ünïcødé = "日本語";\n'.repeat(4);
+    const answer = await service().write({ appSessionId: A, path: file(), content, expectedHash: sha(ORIGINAL) });
+    expect(answer).toEqual({ status: 'ok', hash: sha(Buffer.from(content, 'utf8')) });
+    expect(readFileSync(file(), 'utf8')).toBe(content);
+    expect(asked.length).toBe(Math.ceil(Buffer.byteLength(content, 'utf8') / 7)); // one call per seven bytes: the loop resumed each time
+  });
+
   it('never creates a file: a missing in-root name, or one removed before the open, answers not found and nothing appears', async () => {
     const files = service();
     await expect(files.write({ appSessionId: A, path: inRoot('src', 'new.ts'), content: 'x', expectedHash: sha('') })).rejects.toThrow(new Error(`not found: ${inRoot('src', 'new.ts')}`));

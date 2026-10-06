@@ -140,6 +140,25 @@ describe('editor modes', () => {
       expect(doc()).toBe(numbered(10, { 2: 'mine 2' }));
     });
 
+    // E5 M4 (M3's review): a disk version the watcher never reported is still never overwritten by a resolution.
+    it('answers a save from the merge view with conflict when the disk moved on unseen, keeping the resolution and taking the newer version as the original', async () => {
+      const { disk } = await merging();
+      fireEvent.click(chunkControl(1, 'Take theirs'));
+      await waitFor(() => expect(within(bar()!).getByText('1 change from disk')).toBeTruthy());
+      const resolution = numbered(10, { 2: 'mine 2', 8: 'theirs 8' });
+      expect(doc()).toBe(resolution);
+      const third = numbered(10, { 8: 'theirs 8', 10: 'third 10' });
+      disk.files[APP] = third; // no files.changed: the watcher missed it
+      fireEvent.click(barButton('Save'));
+      await waitFor(() => expect(getOriginalDoc(view().state).toString()).toBe(third));
+      const write = disk.callsOf('files.write').at(-1)!;
+      expect(write.expectedHash).toBe(fakeHash(numbered(10, { 8: 'theirs 8' }))); // the version the merge view showed
+      expect(disk.files[APP]).toBe(third); // nothing written over it
+      expect(doc()).toBe(resolution);
+      expect(entry()).toMatchObject({ saving: false, saveError: null, dirty: true, theirs: { view: 'merge', text: third, hash: fakeHash(third) } });
+      expect(document.querySelector('.cm-editor')?.classList.contains('cm-merge-b')).toBe(true);
+    });
+
     it('keeps the merge view’s resolution across a hidden tab', async () => {
       const { shown } = await merging();
       fireEvent.click(chunkControl(0, 'Keep mine')); // changes only the original
