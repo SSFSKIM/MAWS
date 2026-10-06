@@ -1,42 +1,42 @@
 E7 (docs/doperpowers/plans/2026-10-06-e7-orchestration.md), M7 gates
-Branch worktree-agent-a71e0c1552b80bfc3, head 4ce7e409 (master db4870dc merged at b67219bb), 2026-10-06 (UTC times).
+Branch worktree-agent-a71e0c1552b80bfc3, head 056c61fe (master db4870dc merged at b67219bb), 2026-10-06 (UTC times).
 Every gate ran through the shared slot as
   /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh <command>
 one at a time, MAWS_E2E unset, pnpm_config_verify_deps_before_run=false. <wt> is the worktree
 /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a71e0c1552b80bfc3.
 
-1. pnpm -C <wt> typecheck                      16:14:51-16:15:28  exit 0
+1. pnpm -C <wt> typecheck                      16:24:36-16:25:13  exit 0
    tsc --noEmit over tsconfig.node.json, tsconfig.web.json and tsconfig.e2e.json: no output.
 
-2. pnpm -C <wt> lint                           16:15:28-16:15:51  exit 0
+2. pnpm -C <wt> lint                           16:25:14-16:25:38  exit 0
    eslint .: no output.
 
-3. pnpm -C <wt> test --maxWorkers=4            16:15:55-16:18:19  exit 0
+3. pnpm -C <wt> test --maxWorkers=4            16:26:11-16:28:35  exit 0
    Test Files  562 passed | 1 skipped (563)
         Tests  7543 passed | 1 skipped (7544)
    Type Errors  no errors
-   Duration  143.29s
-   (The output carries node's DEP0137 "Closing a FileHandle object on garbage collection" warning twice and the
+   Duration  143.30s
+   (The output carries node's DEP0137 "Closing a FileHandle object on garbage collection" warning and the
    MODULE_TYPELESS_PACKAGE_JSON warning for test/support/engine-pin.ts; neither names an E7 file. The conformance suite
    admits the e7-* journals beside E3's p1-side-thread-live*.)
 
 4. MAWS_E7_SHOTS=<wt>/docs/doperpowers/evidence/p1-e7 pnpm -C <wt> e2e:agents
-                                               16:18:21-16:19:39  exit 0
-   23 passed (52.4s), the E7 block's five among them (e2e-agents.txt); the screenshots g1..g5 in both themes beside
+                                               16:30:23-16:31:38  exit 0
+   23 passed (49.9s), the E7 block's five among them (e2e-agents.txt); the screenshots g1..g5 in both themes beside
    this file were written by this run.
 
-5. pnpm -C <wt> e2e:transcript                 16:19:43-16:23:07  exit 0
+5. pnpm -C <wt> e2e:transcript                 16:32:26-16:35:49  exit 0
    31 passed (3.0m)
 
-6. pnpm -C <wt> e2e:panel                      16:13:45-16:14:47  exit 0
-   23 passed (36.4s)
+6. pnpm -C <wt> e2e:panel                      16:35:53-16:36:54  exit 0
+   23 passed (35.5s)
    An earlier run on 0fd62825 (16:12:07-16:13:13, exit 1): 1 failed, 22 passed. Not timing: "plus lists registered
    tools and opens a tab" expected the harness's "+" menu without Tasks, which the agent tools register since M5
    (e2e:panel had not run on this branch since). Fixed in 4ce7e409 (the expectation gains Tasks before the page's
-   stub); this run is that head's.
+   stub); 4ce7e409 then passed every gate here (e2e:panel 23 passed), and 056c61fe adds one e2e step to G1.
 
 7. node --test <wt>/spikes/protocol-probe/fixtures.test.mjs
-                                               16:23:07-16:23:08  exit 0
+                                               16:36:54-16:36:54  exit 0
    # tests 159
    # pass 159
    # fail 0
