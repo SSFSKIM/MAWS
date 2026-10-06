@@ -11,7 +11,7 @@ To see it: launch a session in MAWS, send "Use the maws ask tool to ask me which
 ## Progress
 
 - [x] M1 — X9 and the `maws` server: `send_file`, `show_pane`, the preview format (A-17), `files.reveal` (2026-10-05 23:20; e71867bc plus the fix wave e503c8d7..fd23e2b7, reviewed clean in two rounds; the full unit suite is still behind the load gate, run by the controller before M5's acceptance)
-- [ ] M2 — `ask` in the host; the four fixtures recorded live; conformance admission (executed 2026-10-05 23:50 at b65ab57e, DONE_WITH_CONCERNS: the engine moved to 2.1.291, the async fixture's steer ran as its own turn; in review)
+- [x] M2 — `ask` in the host; the four fixtures recorded live; conformance admission (2026-10-06 00:40; b65ab57e plus the fix wave 37856046 and ed04d2a7..6ec7aabd, reviewed clean in two rounds; fixtures on 2.1.291, US$0.12, A-15 delta identical)
 - [ ] M3 — Transcript rows (the capsule, the delivery row), the pane bridge, the question-row refusal
 - [ ] M4 — The Question sheet (X5 tool)
 - [ ] M5 — The `tools` e2e group, the live sitting, evidence, acceptance
