@@ -62,6 +62,8 @@ import { registerUsage } from './usage';
 // W6 end
 // E1 start
 import { mawsTranscriptActions } from './tools/maws/actions';
+import { askSheetTool } from './tools/maws/ask/AskSheetTool';
+import { connectAsks } from './tools/maws/ask/connect';
 import { connectPaneShows } from './tools/maws/panes/connect';
 import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
 // E1 end
@@ -166,6 +168,11 @@ export function App() {
   // session; the capsule's and the delivery row's actions (the Question sheet, Open externally, Reveal in Finder)
   useEffect(() => connectPaneShows(), []);
   useEffect(() => registerMawsTranscriptActions(mawsTranscriptActions), []);
+  // M4: the Question sheet, registered once and never unregistered (C8a's rule above), and the live asks that open it
+  useEffect(() => {
+    registerPanelTool(askSheetTool);
+  }, []);
+  useEffect(() => connectAsks(), []);
   // E1 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
