@@ -459,6 +459,38 @@ describe('source control store applies no status of its own and resumes a run fr
     release();
   });
 
+  it('says once when the run’s exit came before the snapshot answered and is folded into it', async () => {
+    const ended = vi.fn();
+    let answer!: (value: unknown) => void;
+    const main = scmMain(async (name) => (name === 'scm.remote.last' ? ok(await new Promise((resolve) => (answer = resolve))) : ok()));
+    const store = createScmStore(validated(main.bridge), { onRunEnded: ended });
+    const release = store.getState().resume(A);
+    await tick();
+    main.emit('scm.remote.output', out(4, 'four\n'));
+    main.emit('scm.remote.output', exit(5, 0));
+    answer(snapshot()); // running at seq 3
+    await tick();
+    expect(store.getState().runs.get(A)).toMatchObject({ running: false, exitCode: 0, seq: 5 });
+    expect(ended).toHaveBeenCalledTimes(1);
+    main.emit('scm.remote.output', exit(5, 0));
+    expect(ended).toHaveBeenCalledTimes(1);
+    release();
+  });
+
+  it('says nothing when the snapshot’s run had ended and nothing came before it', async () => {
+    const ended = vi.fn();
+    let answer!: (value: unknown) => void;
+    const main = scmMain(async (name) => (name === 'scm.remote.last' ? ok(await new Promise((resolve) => (answer = resolve))) : ok()));
+    const store = createScmStore(validated(main.bridge), { onRunEnded: ended });
+    const release = store.getState().resume(A);
+    await tick();
+    main.emit('scm.remote.output', exit(5, 0)); // already folded into the ended snapshot
+    answer(snapshot({ running: false, exitCode: 0, seq: 5 }));
+    await tick();
+    expect(ended).not.toHaveBeenCalled();
+    release();
+  });
+
   it('keeps another session’s events of the snapshot’s run that came before it, past its seq', async () => {
     let answer!: (value: unknown) => void;
     const main = scmMain(async (name) => (name === 'scm.remote.last' ? ok(await new Promise((resolve) => (answer = resolve))) : ok()));

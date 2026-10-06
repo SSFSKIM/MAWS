@@ -101,19 +101,19 @@ export function PrSheet({ appSessionId, ui, status, scm, directory }: { appSessi
       <SheetForm canSubmit={ready !== null && !submitting} onSubmit={() => ready && void run(ready)} submitLabel={SCM_COPY.prSubmit} submitClass={PRIMARY}>
         <label className="flex flex-col gap-1 text-ui-sm text-fg-muted">
           {SCM_COPY.titleField}
-          <input type="text" aria-label={SCM_COPY.titleField} maxLength={256} disabled={fields === null} value={fields?.title ?? ''} onChange={(event) => edit({ title: event.target.value })} className={FIELD} />
+          <input type="text" aria-label={SCM_COPY.titleField} maxLength={256} disabled={fields === null || submitting} value={fields?.title ?? ''} onChange={(event) => edit({ title: event.target.value })} className={FIELD} />
         </label>
         <label className="flex flex-col gap-1 text-ui-sm text-fg-muted">
           {SCM_COPY.bodyField}
-          <textarea aria-label={SCM_COPY.bodyField} rows={4} maxLength={65536} disabled={fields === null} value={fields?.body ?? ''} onChange={(event) => edit({ body: event.target.value })} className={`${FIELD} resize-y`} />
+          <textarea aria-label={SCM_COPY.bodyField} rows={4} maxLength={65536} disabled={fields === null || submitting} value={fields?.body ?? ''} onChange={(event) => edit({ body: event.target.value })} className={`${FIELD} resize-y`} />
         </label>
         <div className="flex items-end gap-3">
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-ui-sm text-fg-muted">
             {SCM_COPY.baseField}
-            <input type="text" aria-label={SCM_COPY.baseField} maxLength={256} disabled={fields === null} value={fields?.base ?? ''} onChange={(event) => edit({ base: event.target.value })} className={`${FIELD} font-mono`} />
+            <input type="text" aria-label={SCM_COPY.baseField} maxLength={256} disabled={fields === null || submitting} value={fields?.base ?? ''} onChange={(event) => edit({ base: event.target.value })} className={`${FIELD} font-mono`} />
           </label>
           <label className="flex items-center gap-1.5 pb-1 text-ui-sm text-fg">
-            <input type="checkbox" disabled={fields === null} checked={fields?.draft ?? false} onChange={(event) => edit({ draft: event.target.checked })} className={CHOICE} />
+            <input type="checkbox" disabled={fields === null || submitting} checked={fields?.draft ?? false} onChange={(event) => edit({ draft: event.target.checked })} className={CHOICE} />
             {SCM_COPY.draftField}
           </label>
         </div>

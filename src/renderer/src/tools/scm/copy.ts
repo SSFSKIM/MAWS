@@ -120,6 +120,8 @@ export const SCM_COPY = {
   pushCommits: (n: number, upstream: string) => `Push ${plural(n, 'commit')} to ${upstream}`,
   publishBranch: (branch: string) => `Publish ${branch}`,
   nothingToPush: 'Nothing to push',
+  pullFirst: 'Pull in a terminal first',
+  noRemote: 'No remote to push to',
   trustToPush: 'Trust the folder to push',
   checkOutToPush: 'Check out a branch to push',
   openPrFor: (branch: string) => `Open a pull request for ${branch}`,

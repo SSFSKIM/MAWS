@@ -54,7 +54,7 @@ export function PushSheet({ appSessionId, ui, status, scm }: { appSessionId: App
         <PlanRows>
           <PlanRow name="remote" label={SCM_COPY.remote}>
             {remotes.length > 1 ? (
-              <select aria-label={SCM_COPY.remote} value={remote ?? shown?.remote ?? scm?.defaultRemote ?? ''} onChange={(event) => pick(event.target.value)} className={`${FIELD} py-0.5 text-ui-sm`}>
+              <select aria-label={SCM_COPY.remote} disabled={submitting} value={remote ?? shown?.remote ?? scm?.defaultRemote ?? ''} onChange={(event) => pick(event.target.value)} className={`${FIELD} py-0.5 text-ui-sm`}>
                 {remotes.map((candidate) => (
                   <option key={candidate.name} value={candidate.name}>
                     {candidate.name}

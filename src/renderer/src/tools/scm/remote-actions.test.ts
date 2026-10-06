@@ -28,7 +28,19 @@ describe('pushAction: Push, or Publish for a branch with no upstream of its own'
 
   it('is disabled with a title when nothing is ahead of an own upstream', () => {
     expect(pushAction({ status: statusOf({ ahead: 0 }), remotes, trusted: true })).toEqual({ label: 'Push', title: 'Nothing to push', disabled: true });
-    expect(pushAction({ status: statusOf({ ahead: 0, behind: 2 }), remotes, trusted: true })).toMatchObject({ disabled: true });
+  });
+
+  it('says to pull first when the branch is behind its own upstream (main never force-pushes)', () => {
+    expect(pushAction({ status: statusOf({ ahead: 2, behind: 1 }), remotes, trusted: true })).toEqual({ label: 'Push', title: 'Pull in a terminal first', disabled: true });
+    expect(pushAction({ status: statusOf({ ahead: 0, behind: 1 }), remotes, trusted: true })).toEqual({ label: 'Push', title: 'Pull in a terminal first', disabled: true });
+    // behind another branch's upstream is not main's refusal: Publish re-points it
+    expect(pushAction({ status: statusOf({ branch: 'feature', upstream: 'origin/main', behind: 3 }), remotes, trusted: true })).toMatchObject({ label: 'Publish', disabled: false });
+  });
+
+  it('is disabled with a reason when the checkout has no remote', () => {
+    expect(pushAction({ status: statusOf({ branch: 'feature', upstream: null }), remotes: [], trusted: true })).toEqual({ label: 'Publish', title: 'No remote to push to', disabled: true });
+    expect(pushAction({ status: statusOf({ upstream: null }), remotes: [], trusted: true })).toMatchObject({ disabled: true, title: 'No remote to push to' });
+    expect(prAction({ status: statusOf({ upstream: null }), remotes: [], trusted: true })).toMatchObject({ disabled: true, title: 'No remote to push to' });
   });
 
   it('publishes a branch with no upstream, or one tracking another branch', () => {

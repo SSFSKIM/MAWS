@@ -13,13 +13,14 @@ import type { StoreApi } from 'zustand/vanilla';
 import { create, type UseBoundStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
-import type { GitDiff, GitDiffInput, GitStatus } from '@shared/ipc/schema/git';
-import type { RemotePlan, ScmDiscardInput, ScmMutation, ScmRemoteOutput, ScmStatus } from '@shared/ipc/schema/scm';
+import type { GitDiff, GitDiffInput } from '@shared/ipc/schema/git';
+import type { RemotePlan, ScmDiscardInput, ScmMutation, ScmRemoteOutput } from '@shared/ipc/schema/scm';
 import { ipc } from '../../ipc/client';
-import { queryClient, useCommand } from '../../ipc/query';
+import { queryClient } from '../../ipc/query';
 import { useGit } from '../../stores/git';
 import { REVIEW_SCOPE_BYTES_CAP, splitPatch } from '../code/review/review-model';
 import type { FileDiff, ScopeDiff } from '../code/review/review-store';
+import { PR_STATE_QUERIES } from './queries';
 import { advanceRun, runFromSnapshot, runStarted, type RemoteRun } from './remote-run';
 import type { ScmUi } from './view-state';
 
@@ -248,6 +249,8 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
             let run = seeded;
             for (const event of pending) if (seeded === null ? event.appSessionId === appSessionId : event.token === seeded.token) run = advanceRun(run, event);
             set((s) => ({ runs: mapWith(s.runs, appSessionId, run) }));
+            // An exit among the events folded here is an end seen live, as the listener's would be (once).
+            if (run !== seeded && run !== null && !run.running && (seeded === null || seeded.running)) options.onRunEnded?.(appSessionId);
           });
         }
         const mine = r;
@@ -296,24 +299,7 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
 
 // A push moves the upstream and a PR run creates the PR, and main drops its PR cache for the checkout when a run ends
 // (Design §6): every shown PR state is read again then.
-export const useScm = createScmStore(ipc, { git: useGit, onRunEnded: () => void queryClient.invalidateQueries({ queryKey: ['maws', 'scm.pr.state'] }) });
-
-// The checkout's trust, remotes and gh state (Design §6): a read query, so the tool's header and the summary's row
-// share one answer.
-export function useScmStatus(appSessionId: AppSessionId) {
-  return useCommand('scm.status', { appSessionId });
-}
-
-// The branch's PR and its checks (Design §6): one query per session, which the tool's header and the summary's row
-// share (two surfaces cost one poll), polled every 2 minutes only while one of them is mounted and the window is shown,
-// and asked only for a branch of a trusted checkout with a remote.
-export const PR_STATE_POLL = { staleTime: 60_000, refetchInterval: 120_000, refetchIntervalInBackground: false } as const;
-export function prStateEnabled(status: GitStatus | null, scm: ScmStatus | undefined): boolean {
-  return status !== null && status.branch !== null && scm !== undefined && scm.trusted && scm.remotes.length > 0;
-}
-export function usePrState(appSessionId: AppSessionId, enabled: boolean) {
-  return useCommand('scm.pr.state', { appSessionId, refresh: false }, { ...PR_STATE_POLL, enabled });
-}
+export const useScm = createScmStore(ipc, { git: useGit, onRunEnded: () => void queryClient.invalidateQueries({ queryKey: PR_STATE_QUERIES }) });
 
 // A link out of the app (a PR, gh's install page) through main's `layout.openExternal`.
 export function openLink(url: string): void {

@@ -27,7 +27,8 @@ import { PrSheet } from './PrSheet';
 import { PushSheet } from './PushSheet';
 import { RemoteActions } from './RemoteActions';
 import { ScmDiff } from './ScmDiff';
-import { useScm, useScmStatus } from './store';
+import { SCM_STATUS_QUERIES, useScmStatus } from './queries';
+import { useScm } from './store';
 import { applyRequest, followSelection, selectFile, toggleCollapsed, type ScmUi } from './view-state';
 
 export interface ScmShellProps {
@@ -55,7 +56,7 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
   // learns of only through `session.setup`: every phase re-reads `scm.status` (its query is shared with the summary's
   // row), so the untrusted notice clears without a remount. A re-shown tool (the host remounts it) and the window coming
   // back into view (TanStack v5 listens to `visibilitychange`, not to window focus) re-read a stale query too.
-  useEffect(() => ipc.on('session.setup', () => void queryClient.invalidateQueries({ queryKey: ['maws', 'scm.status'] })), []);
+  useEffect(() => ipc.on('session.setup', () => void queryClient.invalidateQueries({ queryKey: SCM_STATUS_QUERIES })), []);
   const groups = useMemo(() => groupsOf(status), [status]);
 
   // An open() waiting is applied once the status is known; a watch that failed consumes it.
@@ -97,7 +98,7 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
         <p data-scm-header className="m-0 min-w-0 flex-1 truncate text-ui-sm text-fg">
           {headerOf(status)}
         </p>
-        <RemoteActions appSessionId={appSessionId} ui={ui} status={status} scm={scm.data} trusted={trusted} />
+        <RemoteActions appSessionId={appSessionId} ui={ui} status={status} directory={directory} scm={{ data: scm.data, error: scm.error?.message }} trusted={trusted} />
       </div>
       {scm.data && !scm.data.trusted ? (
         <p role="status" data-scm-untrusted className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-ui-sm text-warning">

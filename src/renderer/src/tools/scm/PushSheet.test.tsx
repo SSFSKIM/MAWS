@@ -36,8 +36,8 @@ afterEach(() => {
   cleanup();
 });
 
-describe('push and PR sheets show the plan’s command and destination and run only its token: Push', () => {
-  it('shows the plan’s remote, destination, branch, count and exact command, and pushes only its token', async () => {
+describe("push and PR sheets show the plan's command and destination and run only its token", () => {
+  it('Push: shows the plan’s remote, destination, branch, count and exact command, and pushes only its token', async () => {
     const sheet = open();
     await waitFor(() => expect(commandOf(sheet)).toBe('/usr/bin/git push --progress origin refs/heads/main:refs/heads/main'));
     expect(main.callsOf('scm.push.plan')).toEqual([{ appSessionId: A }]); // main picks the default remote
@@ -54,13 +54,13 @@ describe('push and PR sheets show the plan’s command and destination and run o
     expect(useScm.getState().runs.get(A)).toMatchObject({ token: TOKEN, kind: 'push', plan: planOf(), running: true });
   });
 
-  it('lists every push destination, one per line, a bare path as it is', async () => {
+  it('Push: lists every push destination, one per line, a bare path as it is', async () => {
     main.state.answers['scm.push.plan'] = () => ok(planOf({ pushUrls: ['https://github.com/o/r.git', '/tmp/scratch/push.git'] }));
     const sheet = open();
     await waitFor(() => expect(destinationsOf(sheet)).toEqual(['github.com/o/r', '/tmp/scratch/push.git']));
   });
 
-  it('says it sets upstream from the plan’s argv, and that a branch tracking another branch is re-pointed', async () => {
+  it('Push: says it sets upstream from the plan’s argv, and that a branch tracking another branch is re-pointed', async () => {
     const publish = planOf({ branch: 'feature', upstream: 'origin/feature', argv: ['push', '--progress', '--set-upstream', 'origin', 'refs/heads/feature:refs/heads/feature'] });
     main.state.answers['scm.push.plan'] = () => ok(publish);
     let sheet = open(statusOf({ branch: 'feature', upstream: null, ahead: 0 }));
@@ -80,7 +80,7 @@ describe('push and PR sheets show the plan’s command and destination and run o
     expect(rowOf(sheet, 'branch')).not.toContain('sets upstream');
   });
 
-  it('re-plans for the remote picked when the checkout has several, keeping Push off until the new plan is shown', async () => {
+  it('Push: re-plans for the remote picked when the checkout has several, keeping Push off until the new plan is shown', async () => {
     const scm = scmStatusOf({ remotes: [{ name: 'origin', url: 'https://github.com/o/r.git' }, { name: 'fork', url: 'git@github.com:me/r.git' }] });
     const sheet = open(statusOf({ ahead: 1 }), scm);
     await waitFor(() => expect(submitOf(sheet).disabled).toBe(false));
@@ -93,11 +93,16 @@ describe('push and PR sheets show the plan’s command and destination and run o
     expect(main.callsOf('scm.push')).toEqual([]);
     answer.resolve(ok(planOf({ token: OTHER_TOKEN, remote: 'fork', pushUrls: ['git@github.com:me/r.git'], argv: ['push', '--progress', '--set-upstream', 'fork', 'refs/heads/main:refs/heads/main'] })));
     await waitFor(() => expect(destinationsOf(sheet)).toEqual(['github.com/me/r']));
+    const run = deferred<ReturnType<typeof ok>>();
+    main.state.answers['scm.push'] = () => run.promise;
     fireEvent.click(submitOf(sheet));
     await waitFor(() => expect(main.callsOf('scm.push')).toEqual([{ appSessionId: A, token: OTHER_TOKEN }]));
+    expect((within(sheet).getByRole('combobox', { name: 'Remote' }) as HTMLSelectElement).disabled).toBe(true); // a re-plan uses the remote shown
+    run.resolve(ok({ started: true, token: OTHER_TOKEN }));
+    await waitFor(() => expect(ui.getState().sheet).toBeNull());
   });
 
-  it('shows each plan refusal in main’s words with no way to submit', async () => {
+  it('Push: shows each plan refusal in main’s words with no way to submit', async () => {
     for (const [code, detail] of [
       ['behind', 'main is 2 commits behind origin/main. Pull in a terminal first; MAWS never force-pushes'],
       ['detached', 'HEAD is detached; check out a branch to push it'],
@@ -115,7 +120,7 @@ describe('push and PR sheets show the plan’s command and destination and run o
     expect(main.callsOf('scm.push')).toEqual([]);
   });
 
-  it('re-plans with the sentence of what changed when the run answers changed, and pushes the new token', async () => {
+  it('Push: re-plans with the sentence of what changed when the run answers changed, and pushes the new token', async () => {
     main.state.answers['scm.push'] = () => ok(refusal('changed', 'head changed since the sheet opened; review it again'));
     const sheet = open();
     await waitFor(() => expect(submitOf(sheet).disabled).toBe(false));
@@ -134,7 +139,7 @@ describe('push and PR sheets show the plan’s command and destination and run o
     await waitFor(() => expect(ui.getState().sheet).toBeNull());
   });
 
-  it('keeps the plan when a run is already in flight (the token is not spent), and a failed call too', async () => {
+  it('Push: keeps the plan when a run is already in flight (the token is not spent), and a failed call too', async () => {
     main.state.answers['scm.push'] = () => ok(refusal('busy', 'A push or pull request is already running for this checkout'));
     const sheet = open();
     await waitFor(() => expect(submitOf(sheet).disabled).toBe(false));
@@ -152,7 +157,7 @@ describe('push and PR sheets show the plan’s command and destination and run o
     expect(main.callsOf('scm.push.plan')).toHaveLength(1);
   });
 
-  it('closes on Cancel without pushing anything', async () => {
+  it('Push: closes on Cancel without pushing anything', async () => {
     const sheet = open();
     await waitFor(() => expect(submitOf(sheet).disabled).toBe(false));
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));

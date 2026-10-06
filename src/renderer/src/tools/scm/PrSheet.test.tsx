@@ -42,8 +42,8 @@ afterEach(() => {
   cleanup();
 });
 
-describe('push and PR sheets show the plan’s command and destination and run only its token: Open PR', () => {
-  it('plans on open with the defaults, shows gh’s repository, the head and the exact command, and creates with only its token', async () => {
+describe("push and PR sheets show the plan's command and destination and run only its token", () => {
+  it('Open PR: plans on open with the defaults, shows gh’s repository, the head and the exact command, and creates with only its token', async () => {
     const sheet = open();
     await waitFor(() => expect(commandOf(sheet)).toBe("/opt/homebrew/bin/gh pr create --repo o/r --head main --base main --title=main --body="));
     expect(main.callsOf('scm.pr.plan')).toEqual([planInput()]);
@@ -60,7 +60,7 @@ describe('push and PR sheets show the plan’s command and destination and run o
     expect(useScm.getState().runs.get(A)).toMatchObject({ token: TOKEN, kind: 'pr', running: true });
   });
 
-  it('defaults the title to HEAD’s subject when the branch is one commit past the default base', async () => {
+  it('Open PR: defaults the title to HEAD’s subject when the branch is one commit past the default base', async () => {
     main.state.answers['git.log'] = () => ok({ commits: [{ sha: 'a'.repeat(40), shortSha: 'aaaaaaa', author: 'o', authoredAt: '2026-10-06T10:00:00Z', subject: 'Fix the login flow', parents: [] }] });
     main.state.answers['git.worktree.branch'] = () => ok({ repoRoot: DIR, branch: 'fix-login', head: 'a'.repeat(40), checkedOutAt: DIR, base: 'main', ahead: 1, merged: false });
     const sheet = open(statusOf({ branch: 'fix-login', upstream: 'origin/fix-login' }));
@@ -70,12 +70,12 @@ describe('push and PR sheets show the plan’s command and destination and run o
     await waitFor(() => expect(main.callsOf('scm.pr.plan')).toEqual([planInput({ title: 'Fix the login flow' })]));
   });
 
-  it('defaults the title to the branch name in words otherwise', async () => {
+  it('Open PR: defaults the title to the branch name in words otherwise', async () => {
     const sheet = open(statusOf({ branch: 'fix-login_flow', upstream: 'origin/fix-login_flow' }));
     await waitFor(() => expect(field(sheet, 'Title').value).toBe('fix login flow'));
   });
 
-  it('re-plans 300 ms after the last edit, once, with Create off from the first keystroke until that plan is shown', async () => {
+  it('Open PR: re-plans 300 ms after the last edit, once, with Create off from the first keystroke until that plan is shown', async () => {
     const sheet = open();
     await waitFor(() => expect(submitOf(sheet).disabled).toBe(false));
     fireEvent.change(field(sheet, 'Title'), { target: { value: 'Panel' } });
@@ -99,7 +99,7 @@ describe('push and PR sheets show the plan’s command and destination and run o
     await waitFor(() => expect(main.callsOf('scm.pr.create')).toEqual([{ appSessionId: A, token: OTHER_TOKEN }]));
   });
 
-  it('keeps Create off for a plan answered for fields since edited, and drops an answer a newer ask superseded', async () => {
+  it('Open PR: keeps Create off for a plan answered for fields since edited, and drops an answer a newer ask superseded', async () => {
     const answers = [deferred<ReturnType<typeof ok>>(), deferred<ReturnType<typeof ok>>(), deferred<ReturnType<typeof ok>>()];
     main.state.answers['scm.pr.plan'] = () => answers[main.callsOf('scm.pr.plan').length - 1]!.promise;
     const sheet = open();
@@ -123,7 +123,7 @@ describe('push and PR sheets show the plan’s command and destination and run o
     await waitFor(() => expect(main.callsOf('scm.pr.create')).toEqual([{ appSessionId: A, token: OTHER_TOKEN }]));
   });
 
-  it('asks for a title and a base before planning', async () => {
+  it('Open PR: asks for a title and a base before planning', async () => {
     const sheet = open(statusOf(), scmStatusOf({ defaultBase: null }));
     await waitFor(() => expect(within(sheet).getByText('Name the base branch')).toBeTruthy());
     expect(main.callsOf('scm.pr.plan')).toEqual([]);
@@ -135,7 +135,7 @@ describe('push and PR sheets show the plan’s command and destination and run o
     expect(submitOf(sheet).disabled).toBe(true);
   });
 
-  it('offers Push first on not_pushed, which swaps to the Push sheet', async () => {
+  it('Open PR: offers Push first on not_pushed, which swaps to the Push sheet', async () => {
     main.state.answers['scm.pr.plan'] = () => ok(refusal('not_pushed', 'main has 1 commit not pushed; push first'));
     const sheet = open();
     await waitFor(() => expect(within(sheet).getByText('main has 1 commit not pushed; push first')).toBeTruthy());
@@ -144,7 +144,7 @@ describe('push and PR sheets show the plan’s command and destination and run o
     expect(ui.getState().sheet).toEqual({ kind: 'push' });
   });
 
-  it('offers the install page when gh is missing and a terminal signed in to gh when it is signed out', async () => {
+  it('Open PR: offers the install page when gh is missing and a terminal signed in to gh when it is signed out', async () => {
     main.state.answers['scm.pr.plan'] = () => ok(refusal('gh_missing', 'The GitHub CLI (gh) is not installed'));
     let sheet = open();
     await waitFor(() => expect(within(sheet).getByText('The GitHub CLI (gh) is not installed')).toBeTruthy());
@@ -162,7 +162,22 @@ describe('push and PR sheets show the plan’s command and destination and run o
     expect(main.callsOf('scm.pr.create')).toEqual([]);
   });
 
-  it('re-plans with the sentence of what changed when the create answers changed', async () => {
+  it('Open PR: locks the fields while the create is in flight, so a re-plan asks for what the sheet shows', async () => {
+    const answer = deferred<ReturnType<typeof ok>>();
+    main.state.answers['scm.pr.create'] = () => answer.promise;
+    const sheet = open();
+    await waitFor(() => expect(submitOf(sheet).disabled).toBe(false));
+    fireEvent.click(submitOf(sheet));
+    await waitFor(() => expect(main.callsOf('scm.pr.create')).toHaveLength(1));
+    for (const name of ['Title', 'Body', 'Base']) expect(field(sheet, name).disabled).toBe(true);
+    expect((within(sheet).getByRole('checkbox', { name: 'Draft' }) as HTMLInputElement).disabled).toBe(true);
+    main.state.answers['scm.pr.plan'] = () => ok(prPlanOf({ token: OTHER_TOKEN }));
+    answer.resolve(ok(refusal('changed', 'head changed since the sheet opened; review it again')));
+    await waitFor(() => expect(field(sheet, 'Title').disabled).toBe(false));
+    await waitFor(() => expect(main.callsOf('scm.pr.plan')).toEqual([planInput(), planInput()]));
+  });
+
+  it('Open PR: re-plans with the sentence of what changed when the create answers changed', async () => {
     main.state.answers['scm.pr.create'] = () => ok(refusal('changed', 'upstream changed since the sheet opened; review it again'));
     const sheet = open();
     await waitFor(() => expect(submitOf(sheet).disabled).toBe(false));

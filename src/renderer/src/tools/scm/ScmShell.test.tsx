@@ -20,6 +20,8 @@ import { createScmUi, type ScmUi } from './view-state';
 
 // The highlighter would load shiki's grammars; the diff paints plain until it is ready, which here is never.
 vi.mock('@git-diff-view/shiki', () => ({ getDiffViewHighlighter: () => new Promise(() => {}) }));
+const openTerminal = vi.hoisted(() => vi.fn(() => 'terminal-1'));
+vi.mock('../terminal', () => ({ openTerminal }));
 stubCanvas();
 
 let main: ReturnType<typeof scmMain>;
@@ -329,6 +331,34 @@ describe('the header’s Push and Open PR open their sheets, and the Output foll
     const status = statusOf({ files: SCRATCH_FILES, ahead: 0 });
     act(() => main.emit('git.changed', { repoRoot: DIR, status, reason: 'refs' }));
     await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(2));
+  });
+
+  it('says in the row’s words why an open PR cannot be read when gh is missing or signed out, with the way out', async () => {
+    main.state.status = statusOf({ files: SCRATCH_FILES, ahead: 0 });
+    main.state.answers['scm.pr.state'] = () => ok(prStateOf({ gh: { state: 'missing' }, error: 'gh_missing' }));
+    renderShell();
+    const note = () => document.querySelector('[data-scm-gh-note]');
+    await waitFor(() => expect(note()?.textContent).toBe('GitHub CLI not installed · Install'));
+    fireEvent.click(within(note() as HTMLElement).getByRole('button', { name: 'Install' }));
+    await waitFor(() => expect(main.callsOf('layout.openExternal')).toEqual([{ url: 'https://cli.github.com' }]));
+    cleanup();
+    queryClient.clear();
+
+    const signedOut = { state: 'unauthenticated', path: '/opt/homebrew/bin/gh', version: '2.97.0', detail: 'You are not logged into any GitHub hosts.' } as const;
+    main.state.scm = scmStatusOf({ gh: signedOut });
+    main.state.answers['scm.pr.state'] = () => ok(prStateOf({ gh: signedOut, error: 'gh_unauthenticated' }));
+    renderShell();
+    await waitFor(() => expect(note()?.textContent).toBe('GitHub CLI not signed in · Sign in'));
+    fireEvent.click(within(note() as HTMLElement).getByRole('button', { name: 'Sign in' }));
+    expect(openTerminal).toHaveBeenCalledWith({ appSessionId: A, cwd: DIR, command: 'gh auth login' });
+  });
+
+  it('says nothing of gh when it is ready', async () => {
+    main.state.scm = scmStatusOf({ gh: { state: 'ready', path: '/opt/homebrew/bin/gh', version: '2.97.0' } });
+    renderShell();
+    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(1));
+    await wait(20);
+    expect(document.querySelector('[data-scm-gh-note]')).toBeNull();
   });
 
   it('asks nothing of gh and offers neither action in an untrusted checkout', async () => {

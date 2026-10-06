@@ -10,11 +10,12 @@
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../ipc/client';
-import { queryClient, useCommand } from '../../ipc/query';
+import { queryClient } from '../../ipc/query';
 import { useGit } from '../../stores/git';
 import { useLayout } from '../../stores/layout';
 import { activeTab, sessionOfTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
+import { prStateEnabled, prStateKey, scmStatusKey, usePrState, useScmStatus } from '../../tools/scm/queries';
 import { openTerminal } from '../../tools/terminal';
 import { SUMMARY_COPY } from '../copy';
 import { panelHost, usePanelHost } from '../host';
@@ -25,11 +26,6 @@ import { actionClass, Row, Section } from './Section';
 const SCM_TOOL_ID = 'source-control'; // E6's tool id (the tool's module stays out of the summary's graph)
 const GH_INSTALL_URL = 'https://cli.github.com';
 const GH_SIGN_IN = 'gh auth login';
-const PR_STATE_STALE_MS = 60_000; // main keeps an answer 60 s; a remount within that reads the cached one
-const PR_STATE_POLL_MS = 120_000;
-
-const statusKey = (appSessionId: AppSessionId) => ['maws', 'scm.status', { appSessionId }];
-const prStateKey = (appSessionId: AppSessionId) => ['maws', 'scm.pr.state', { appSessionId, refresh: false }];
 
 // Inline actions read as links within the row's sentence (`PR #12`, `Install`, `Sign in`).
 const linkClass = 'rounded-sm text-accent outline-accent hover:underline focus-visible:outline-2';
@@ -85,26 +81,15 @@ function useSessionOf(directory: string): AppSessionId | null {
 }
 
 function PrRow({ appSessionId, directory, root, branch }: { appSessionId: AppSessionId; directory: string; root: string; branch: string }) {
-  const scm = useCommand('scm.status', { appSessionId });
-  const asking = scm.data !== undefined && scm.data.trusted && scm.data.remotes.length > 0;
-  const pr = useCommand(
-    'scm.pr.state',
-    { appSessionId, refresh: false },
-    { staleTime: PR_STATE_STALE_MS, refetchInterval: PR_STATE_POLL_MS, refetchIntervalInBackground: false, enabled: asking },
-  );
+  // The queries the tool's header shares (tools/scm/queries.ts): the bounded poll, the rule for asking, and the re-read
+  // when the head or refs move.
+  const scm = useScmStatus(appSessionId);
+  const pr = usePrState(appSessionId, { root, enabled: prStateEnabled(branch, scm.data) });
   const [refreshing, setRefreshing] = useState(false);
 
-  // A push or a new upstream moves the PR state; a worktree edit does not.
-  useEffect(
-    () =>
-      ipc.on('git.changed', (event) => {
-        if (event.repoRoot === root && (event.reason === 'head' || event.reason === 'refs')) void queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId) });
-      }),
-    [root, appSessionId],
-  );
   // Trust is recorded in main by a session's setup, which the renderer learns of only through `session.setup` (as the
   // tool's body re-reads it).
-  useEffect(() => ipc.on('session.setup', () => void queryClient.invalidateQueries({ queryKey: statusKey(appSessionId) })), [appSessionId]);
+  useEffect(() => ipc.on('session.setup', () => void queryClient.invalidateQueries({ queryKey: scmStatusKey(appSessionId) })), [appSessionId]);
   const behind = prStateBehind(scm.data, pr.data);
   useEffect(() => {
     if (behind) void queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId) });
@@ -124,7 +109,7 @@ function PrRow({ appSessionId, directory, root, branch }: { appSessionId: AppSes
         if (result.ok) queryClient.setQueryData(prStateKey(appSessionId), result.value);
         else await queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId) });
       }
-      await queryClient.invalidateQueries({ queryKey: statusKey(appSessionId) });
+      await queryClient.invalidateQueries({ queryKey: scmStatusKey(appSessionId) });
     } finally {
       setRefreshing(false);
     }

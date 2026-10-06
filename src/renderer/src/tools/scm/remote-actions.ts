@@ -27,13 +27,17 @@ interface ActionInput {
   trusted: boolean | null; // null while `scm.status` is read
 }
 
-// Push the commits ahead of the branch's own upstream (off when there are none), or Publish a branch that has no
-// upstream of its own name: main's plan carries `--set-upstream` for both, re-pointing a branch that tracks another.
+// Push the commits ahead of the branch's own upstream (off when there are none, or when the branch is behind it), or
+// Publish a branch that has no upstream of its own name: main's plan carries `--set-upstream` for both, re-pointing a
+// branch that tracks another. Off without a remote to push to.
 export function pushAction({ status, remotes, trusted }: ActionInput): HeaderAction {
   const off = (title: string, label: string = SCM_COPY.push): HeaderAction => ({ label, title, disabled: true });
   if (trusted !== true) return off(trusted === false ? SCM_COPY.trustToPush : '');
   if (status.branch === null) return off(SCM_COPY.checkOutToPush);
-  if (!ownUpstream(status, remotes)) return { label: SCM_COPY.publish, title: SCM_COPY.publishBranch(status.branch), disabled: false };
+  const own = ownUpstream(status, remotes);
+  if (remotes !== null && remotes.length === 0) return off(SCM_COPY.noRemote, own ? SCM_COPY.push : SCM_COPY.publish);
+  if (!own) return { label: SCM_COPY.publish, title: SCM_COPY.publishBranch(status.branch), disabled: false };
+  if (status.behind > 0) return off(SCM_COPY.pullFirst); // main's `behind`: MAWS never force-pushes
   if (status.ahead === 0) return off(SCM_COPY.nothingToPush);
   return { label: SCM_COPY.push, title: SCM_COPY.pushCommits(status.ahead, status.upstream!), disabled: false };
 }
@@ -43,6 +47,7 @@ export function prAction({ status, remotes, trusted }: ActionInput): HeaderActio
   const off = (title: string): HeaderAction => ({ label: SCM_COPY.openPr, title, disabled: true });
   if (trusted !== true) return off(trusted === false ? SCM_COPY.trustToOpenPr : '');
   if (status.branch === null) return off(SCM_COPY.checkOutToOpenPr);
+  if (remotes !== null && remotes.length === 0) return off(SCM_COPY.noRemote);
   if (!ownUpstream(status, remotes) || status.ahead > 0 || status.behind > 0) return off(SCM_COPY.pushFirst);
   return { label: SCM_COPY.openPr, title: SCM_COPY.openPrFor(status.branch), disabled: false };
 }
