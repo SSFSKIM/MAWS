@@ -322,6 +322,35 @@ describe('the header’s Push and Open PR open their sheets, and the Output foll
     await waitFor(() => expect(main.callsOf('layout.openExternal')).toEqual([{ url: 'https://github.com/o/r/pull/7' }]));
   });
 
+  // Main answers per branch; the query is the session's. An answer for another branch, or any answer once there is
+  // nothing to ask (a detached head), is no answer (E6 final review, finding 3).
+  it('drops the old branch’s PR link after a switch until the new branch’s answer, and on a detached head', async () => {
+    main.state.status = statusOf({ files: SCRATCH_FILES, ahead: 0 });
+    main.state.answers['scm.pr.state'] = () => {
+      const branch = main.state.status.branch;
+      return ok(prStateOf({ branch, pr: branch === 'main' ? prOf() : null, checkedAt: '2026-10-06T10:00:01.000Z' }));
+    };
+    renderShell();
+    await screen.findByRole('button', { name: 'Open PR #7 on GitHub' });
+
+    main.change(statusOf({ files: SCRATCH_FILES, branch: 'feature', upstream: 'origin/feature', ahead: 0 })); // no re-read yet
+    await waitFor(() => expect(document.querySelector('[data-scm-header]')?.textContent).toBe('⎇ feature · origin/feature · 0 ahead'));
+    expect(screen.queryByRole('button', { name: 'Open PR #7 on GitHub' })).toBeNull();
+    expect(remoteAction('pr')).toMatchObject({ disabled: false, title: 'Open a pull request for feature' });
+    act(() => main.emit('git.changed', { repoRoot: DIR, status: main.state.status, reason: 'head' }));
+    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(2));
+    await wait(20);
+    expect(remoteAction('pr')?.textContent).toBe('Open PR'); // feature has none
+
+    main.change(statusOf({ files: SCRATCH_FILES, ahead: 0 })); // back on main: its PR is asked again
+    act(() => main.emit('git.changed', { repoRoot: DIR, status: main.state.status, reason: 'head' }));
+    await screen.findByRole('button', { name: 'Open PR #7 on GitHub' });
+    main.change(statusOf({ files: SCRATCH_FILES, branch: null, upstream: null, ahead: 0 }));
+    await waitFor(() => expect(document.querySelector('[data-scm-header]')?.textContent).toBe('detached at 0123456'));
+    expect(screen.queryByRole('button', { name: 'Open PR #7 on GitHub' })).toBeNull();
+    expect(remoteAction('pr')?.disabled).toBe(true);
+  });
+
   it('reads the PR state again when the head or refs move, not on an index change', async () => {
     renderShell();
     await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(1));

@@ -12,7 +12,7 @@ import { SUMMARY_COPY } from '../../panel/copy';
 import { prLine } from '../../panel/summary/pr-line';
 import { openTerminal } from '../terminal';
 import { SCM_COPY } from './copy';
-import { prStateEnabled, usePrState } from './queries';
+import { usePrState } from './queries';
 import { openPrOf, prAction, pushAction, type HeaderAction } from './remote-actions';
 import { openLink } from './store';
 import type { ScmUi } from './view-state';
@@ -30,7 +30,7 @@ interface Props {
 }
 
 export function RemoteActions({ appSessionId, ui, status, directory, scm, trusted }: Props) {
-  const prState = usePrState(appSessionId, { root: status.repoRoot, enabled: prStateEnabled(status.branch, scm.data) });
+  const prState = usePrState(appSessionId, { root: status.repoRoot, branch: status.branch, scm: scm.data });
   const remotes = scm.data ? scm.data.remotes.map((remote) => remote.name) : null;
   const input = { status, remotes, trusted };
   const pr = openPrOf(prState.data);

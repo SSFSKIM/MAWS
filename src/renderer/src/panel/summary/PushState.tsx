@@ -15,7 +15,7 @@ import { useGit } from '../../stores/git';
 import { useLayout } from '../../stores/layout';
 import { activeTab, sessionOfTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
-import { prStateEnabled, prStateKey, scmStatusKey, usePrState, useScmStatus } from '../../tools/scm/queries';
+import { prStateKey, scmStatusKey, usePrState, useScmStatus } from '../../tools/scm/queries';
 import { openTerminal } from '../../tools/terminal';
 import { SUMMARY_COPY } from '../copy';
 import { panelHost, usePanelHost } from '../host';
@@ -84,7 +84,7 @@ function PrRow({ appSessionId, directory, root, branch }: { appSessionId: AppSes
   // The queries the tool's header shares (tools/scm/queries.ts): the bounded poll, the rule for asking, and the re-read
   // when the head or refs move.
   const scm = useScmStatus(appSessionId);
-  const pr = usePrState(appSessionId, { root, enabled: prStateEnabled(branch, scm.data) });
+  const pr = usePrState(appSessionId, { root, branch, scm: scm.data });
   const [refreshing, setRefreshing] = useState(false);
 
   // Trust is recorded in main by a session's setup, which the renderer learns of only through `session.setup` (as the

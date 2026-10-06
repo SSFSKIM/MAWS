@@ -156,6 +156,41 @@ describe('push state row shows PR state, install and sign-in states and opens th
     expect(fake.invoked('scm.pr.state')).toHaveLength(2);
   });
 
+  // Main answers per branch; the query is the session's (E6 final review, finding 3).
+  describe('an answer for another branch is no answer', () => {
+    const setStatus = (status: GitStatus) =>
+      act(() => useGit.setState((s) => ({ entries: new Map(s.entries).set(DIR, { ...s.entries.get(DIR)!, status }) })));
+    const OTHER: GitStatus = { ...GIT, branch: 'other', upstream: 'origin/other', head: '1234567abcdef' };
+
+    it('after a switch, says nothing of the old branch’s PR until the new branch’s answer', async () => {
+      await mount();
+      await lineReads('PR #12 Open · 2 passed, 1 pending');
+      let answer: (value: ScmPrState) => void = () => {};
+      const invoke = fake.client.invoke;
+      fake.client.invoke = (async (command: CommandName, input: never) =>
+        command === 'scm.pr.state' ? new Promise((resolve) => (answer = (value) => resolve({ ok: true, value }))) : invoke(command, input)) as never;
+      setStatus(OTHER);
+      act(() => fake.event('git.changed', { repoRoot: DIR, status: OTHER, reason: 'head' }));
+      await settle();
+      expect(within(push()).getByText('Up to date with origin/other')).toBeTruthy();
+      expect(prLine()).toBeNull();
+      act(() => answer({ ...PR, checkedAt: '2026-10-06T10:02:00.000Z', branch: 'other', pr: null }));
+      await lineReads('No PR for other');
+    });
+
+    it('hides on a detached head, and back on another branch shows no PR of the branch it left', async () => {
+      await mount();
+      await lineReads('PR #12 Open · 2 passed, 1 pending');
+      setStatus({ ...GIT, branch: null, upstream: null });
+      await settle();
+      expect(screen.queryByRole('region', { name: 'Push state' })).toBeNull();
+      setStatus(OTHER); // no head event: the shared query still holds feature's answer
+      await settle();
+      expect(within(push()).getByText('Up to date with origin/other')).toBeTruthy();
+      expect(prLine()).toBeNull();
+    });
+  });
+
   it('the push text opens Source control in the shown session once the tool is registered, and is plain text before', async () => {
     const user = userEvent.setup();
     const view = await mount();
