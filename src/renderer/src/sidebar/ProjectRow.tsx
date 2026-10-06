@@ -96,8 +96,8 @@ export function ProjectRow({ entry, open, sessions, more, onToggle, onShowMore }
         line
       )}
       <DisclosureBody open={open} role="group" aria-label={name} className="pt-px pb-2">
-        {shown.sessions.map(({ record, nestedUnder }) => (
-          <SessionRow key={record.appId} record={record} level={nestedUnder === null ? 2 : 3} /* E3: under its lineage parent */ />
+        {shown.sessions.map(({ record, depth }) => (
+          <SessionRow key={record.appId} record={record} level={2 + depth} /* E3: under its lineage parent, at its real depth */ />
         ))}
         {shown.more > 0 && <ShowMoreRow id={moreNodeId(key)} level={2} onShow={() => onShowMore(key)} />}
       </DisclosureBody>

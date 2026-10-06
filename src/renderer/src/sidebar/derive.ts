@@ -131,6 +131,7 @@ export function projectSessions({ sessions, digests, rows, sort, matches }: Proj
 export interface SessionTreeRow {
   record: SessionRecord;
   nestedUnder: AppSessionId | null; // the parent it is drawn under; null for a root
+  depth: number; // 0 for a root, its parent's plus one below it (the tree's real depth; the row's indent is capped)
 }
 export interface SessionTree {
   root: SessionRecord;
@@ -150,15 +151,15 @@ export function nestLineage(sorted: readonly SessionRecord[]): SessionTree[] {
   }
   for (const list of children.values()) list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const placed = new Set<AppSessionId>();
-  const grow = (record: SessionRecord, nestedUnder: AppSessionId | null, rows: SessionTreeRow[]) => {
+  const grow = (record: SessionRecord, nestedUnder: AppSessionId | null, depth: number, rows: SessionTreeRow[]) => {
     placed.add(record.appId);
-    rows.push({ record, nestedUnder });
-    for (const child of children.get(record.appId) ?? []) if (!placed.has(child.appId)) grow(child, record.appId, rows);
+    rows.push({ record, nestedUnder, depth });
+    for (const child of children.get(record.appId) ?? []) if (!placed.has(child.appId)) grow(child, record.appId, depth + 1, rows);
   };
   const trees: SessionTree[] = [];
   const plant = (record: SessionRecord) => {
     const rows: SessionTreeRow[] = [];
-    grow(record, null, rows);
+    grow(record, null, 0, rows);
     trees.push({ root: record, rows });
   };
   for (const record of sorted) if (parentOf(record) === null) plant(record);

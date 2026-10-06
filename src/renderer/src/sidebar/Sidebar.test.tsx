@@ -863,6 +863,16 @@ describe('the sidebar’s lineage nesting', () => {
     expect(document.activeElement).toBe(row('Charter + research'));
   });
 
+  it('a thread of a thread carries its real depth in aria-level, indented as its parent is', () => {
+    fillStores({ ...nine, sessions: [...nine.sessions, child('side-1', 'x.ts:42', 'side-thread', 1), child('side-2', 'Nested thread', 'side-thread', 2, 'side-1')] });
+    expand('proj-maws');
+    render(<Sidebar />);
+    expect(row('x.ts:42').getAttribute('aria-level')).toBe('3');
+    expect(row('Nested thread').getAttribute('aria-level')).toBe('4');
+    expect(within(row('Nested thread')).getByTestId('row-nested').textContent).toBe('↳');
+    expect(row('Nested thread').className).toBe(row('x.ts:42').className); // the visual indent stays one step
+  });
+
   it('a thread whose parent is not listed is a root saying whose it is', () => {
     fillStores({ ...nine, sessions: [...nine.sessions.filter((r) => r.appId !== parent().appId), child('side-1', 'Renamed thread', 'side-thread', 1)] });
     expand('proj-maws');

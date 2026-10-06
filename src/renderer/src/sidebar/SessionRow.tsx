@@ -24,12 +24,13 @@ import { displayTitle } from '../sessions/title';
 
 export const SESSION_DRAG_TYPE = 'application/x-maws-session';
 
-export function SessionRow({ record, level }: { record: SessionRecord; level: 1 | 2 | 3 }) {
+export function SessionRow({ record, level }: { record: SessionRecord; level: number }) {
   const id = record.appId;
   const digest = useSessions((s) => s.digests.get(id));
-  // E3 start: a side thread or fork nested under its parent (level 3) is indented a step, marked `↳` and captioned by
-  // its anchor's label; one listed as a root says whose it is (the parent's title when the store holds it)
-  const nested = level === 3;
+  // E3 start: a side thread or fork nested under its parent (level 3 and deeper, its real depth for assistive tech) is
+  // indented one step whatever its depth, marked `↳` and captioned by its anchor's label; one listed as a root says
+  // whose it is (the parent's title when the store holds it)
+  const nested = level >= 3;
   const parentTitle = useSessions((s) => {
     const parent = record.lineage === null ? undefined : s.records.get(record.lineage.parentAppSessionId);
     return parent === undefined ? null : displayTitle(parent);
