@@ -1320,6 +1320,35 @@ describe('EngineSession (C12): the stop precedence, busy, lastUsedAt, keepAlive 
     expect(b.session.status().exit?.reason).toBe('stop');
   });
 
+  // E10: the supervisor's idle-row release is a release like the budget's, with no budget detail
+  it("an idle release writes end_session { reason: 'stop' } and exits with reason idle and no budget detail; an explicit stop overrides it, and it never overrides one", async () => {
+    const { session, transport, journal, events } = parked();
+    await session.start();
+    const stopping = session.stop('idle');
+    await flush();
+    expect(transport.requestsOf('end_session').map((r) => r.request.reason)).toEqual(['stop']);
+    transport.exit(0);
+    await stopping;
+    expect(session.status().exit).toMatchObject({ reason: 'idle', release: null });
+    expect(exitRow(journal)).toMatchObject({ reason: 'idle', budget: null });
+    expect(events.filter((e) => e.kind === 'process.exited')).toMatchObject([{ reason: 'idle', budget: null }]);
+    const b = parked();
+    await b.session.start();
+    void b.session.stop('idle');
+    const archiving = b.session.stop('archive');
+    b.transport.exit(0);
+    await archiving;
+    expect(b.session.status().exit?.reason).toBe('archive');
+    const c = parked();
+    await c.session.start();
+    const stopped = c.session.stop('stop');
+    void c.session.stop('idle');
+    void c.session.stop('budget', { release: RELEASE });
+    c.transport.exit(0);
+    await stopped;
+    expect(c.session.status().exit).toMatchObject({ reason: 'stop', release: null });
+  });
+
   it('busy: a message written but not yet started, emitted on the change, with no turn open yet', async () => {
     const { session, transport } = setup();
     await session.start();

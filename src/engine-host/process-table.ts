@@ -19,12 +19,20 @@
 // so the state keeps the totals Session info shows, but nothing is over, so nothing is released and no banner flag rises:
 // engine processes never exit on their own (charter §4.4's pre-C12 rule). On again, a policy change evaluates at once.
 // The exited-row cap is hygiene and holds either way.
+//
+// E10: the supervisor's idle-row release (E10 execution document, §Design 1 "Idle exit, and idle rows"; charter §4.4 as
+// amended by A-29). While no app is connected, or under an armed exit-when-idle (the policy's `active`, which the
+// supervisor sets), a ready row that has held no hard reason for the idle time is stopped with reason `idle`: a release
+// like the budget's (kept in the released set, resumed from disk at its next use), whether or not the budget is on,
+// since its reason is that no app is there to use the process, not memory. A row's clock starts at the later of the
+// moment its last hard reason cleared and the moment the release became active; one timer serves every row, and each
+// row is read again when it fires.
 import { execFile } from 'node:child_process';
 import { totalmem } from 'node:os';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { BudgetState } from '@shared/ipc/schema/engine';
-import { defaultBudgetKiB, evaluate, EXITED_ROWS_MAX, type BudgetPolicy, type BudgetVerdict } from './budget';
+import { defaultBudgetKiB, evaluate, EXITED_ROWS_MAX, isIdleRow, type BudgetPolicy, type BudgetVerdict } from './budget';
 import type { EngineSession } from './session';
 
 export const MEMORY_SAMPLE_MS = 10_000;
@@ -90,6 +98,12 @@ export class ProcessTable {
   private readonly dropListeners = new Set<(appSessionId: AppSessionId) => void>();
   private readonly exitsSeen = new WeakSet<EngineSession>();
   // C12 end
+  // E10 start: the idle-row release and the row set's listeners
+  private idlePolicy: { idleMs: number | null; activeSince: number | null } = { idleMs: null, activeSince: null };
+  private readonly idleSince = new Map<EngineSession, number>(); // ready rows with no hard reason, since when
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly rowsListeners = new Set<() => void>();
+  // E10 end
 
   constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number; exitedRowsMax?: number /* C12 */ } = {}) {
     this.ps = opts.ps ?? runPs;
@@ -117,8 +131,10 @@ export class ProcessTable {
     this.rows.set(appSessionId, session);
     session.on('status', (status) => {
       if (status.process === 'exited') this.exitedRow(session, status); // C12
+      this.trackIdle(session, status); // E10
       for (const listener of this.listeners) listener(status);
     });
+    this.rowsChanged(); // E10
     void session.start();
     return { status: 'launching', session };
   }
@@ -130,8 +146,76 @@ export class ProcessTable {
     const row = this.rows.get(appSessionId);
     if (!row || row.status().process !== 'exited') return false;
     this.released.delete(appSessionId); // C12
-    return this.rows.delete(appSessionId);
+    this.rows.delete(appSessionId);
+    this.rowsChanged(); // E10
+    return true;
   }
+
+  // E10 start ---------------------------------------------------------------------------------------------------------
+  // Told whenever a row enters or leaves the table (a launch, an archive's or a forget's release, the exited-row cap),
+  // which no status announces: the supervisor's row count and its clocks follow it.
+  onRowsChanged(listener: () => void): () => void {
+    this.rowsListeners.add(listener);
+    return () => this.rowsListeners.delete(listener);
+  }
+
+  private rowsChanged(): void {
+    for (const listener of this.rowsListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.log(`rows listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  // The idle-row release's policy, set by the supervisor on every change: `idleMs` null is never; `active` while no
+  // client is connected or exit-when-idle is armed. An activation keeps its start across a new idle time.
+  setIdleRelease(policy: { idleMs: number | null; active: boolean }): void {
+    this.idlePolicy = { idleMs: policy.idleMs, activeSince: policy.active ? (this.idlePolicy.activeSince ?? Date.now()) : null };
+    this.scheduleIdleRelease();
+  }
+
+  // Each status of a row's own process: an idle row's clock starts when it becomes idle and stops when it is not.
+  private trackIdle(session: EngineSession, status: EngineSessionStatus): void {
+    const idle = this.rows.get(status.appSessionId) === session && isIdleRow(status, this.stateful);
+    if (idle === this.idleSince.has(session)) return;
+    if (idle) this.idleSince.set(session, Date.now());
+    else this.idleSince.delete(session);
+    this.scheduleIdleRelease();
+  }
+
+  private scheduleIdleRelease(): void {
+    if (this.idleTimer !== null) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    const { idleMs, activeSince } = this.idlePolicy;
+    if (idleMs === null || activeSince === null || this.shuttingDown || this.idleSince.size === 0) return;
+    const due = Math.min(...[...this.idleSince.values()].map((since) => Math.max(since, activeSince) + idleMs));
+    this.idleTimer = setTimeout(() => this.releaseIdleRows(), Math.max(0, due - Date.now()));
+    (this.idleTimer as { unref?: () => void }).unref?.();
+  }
+
+  // The timer fired: every row whose clock has run out is read again and, still idle, stopped as `idle`, in the same
+  // synchronous step as the read (as the budget's release), so no event can land between the verdict and the stop.
+  private releaseIdleRows(): void {
+    this.idleTimer = null;
+    const { idleMs, activeSince } = this.idlePolicy;
+    if (idleMs === null || activeSince === null || this.shuttingDown) return;
+    const now = Date.now();
+    for (const [session, since] of [...this.idleSince]) {
+      const status = session.status();
+      if (this.rows.get(status.appSessionId) !== session || !isIdleRow(status, this.stateful)) {
+        this.idleSince.delete(session);
+        continue;
+      }
+      if (now < Math.max(since, activeSince) + idleMs) continue;
+      this.idleSince.delete(session);
+      this.log(`idle release of ${status.appSessionId}: no hard reason for ${idleMs} ms with no app connected or exit-when-idle armed`);
+      session.stop('idle').catch((error: unknown) => this.log(`idle release of ${status.appSessionId} failed: ${error instanceof Error ? error.message : String(error)}`));
+    }
+    this.scheduleIdleRelease();
+  }
+  // E10 end -----------------------------------------------------------------------------------------------------------
 
   get(appSessionId: AppSessionId): EngineSession | undefined {
     return this.rows.get(appSessionId);
@@ -277,7 +361,7 @@ export class ProcessTable {
     // relaunch replaced it, must not mark the new launch released)
     if (this.exitsSeen.has(session) || this.rows.get(status.appSessionId) !== session) return;
     this.exitsSeen.add(session);
-    if (status.exit?.reason === 'budget') this.released.add(status.appSessionId);
+    if (status.exit?.reason === 'budget' || status.exit?.reason === 'idle' /* E10 */) this.released.add(status.appSessionId);
     if (this.releasing === session) {
       this.releasing = null;
       this.budget = { ...this.budget, releasing: null };
@@ -286,8 +370,9 @@ export class ProcessTable {
     // an exited row that still holds a queue neither counts nor goes (whole-branch review): session.queue.edit and remove
     // need it for what the list shows from disk; once its queue is empty the next exit's cap picks it up. Nor does a
     // released row: main archives a released session only through its row (record-actions `releasedByHost`), and the
-    // archive's release is what clears the released id. Released rows are bounded by the sessions the budget released
-    // in this host's run, each with a stream capped at EXITED_RING, and leave at the id's next launch or archive.
+    // archive's release is what clears the released id. Released rows are bounded by the sessions the budget (E10: or
+    // the idle clock) released in this host's run, each with a stream capped at EXITED_RING, and leave at the id's next
+    // launch or archive.
     const exited = [...this.rows].filter(([id, row]) => row.lifecycle === 'exited' && row.status().queue.length === 0 && !this.released.has(id));
     if (exited.length <= this.exitedRowsMax) return;
     // the row whose exit is being delivered is never dropped, so the excess comes from the others (a tied or earlier
@@ -304,6 +389,7 @@ export class ProcessTable {
         }
       }
     }
+    if (oldest.length > 0) this.rowsChanged(); // E10
   }
   // C12 end -----------------------------------------------------------------------------------------------------------
 
@@ -312,6 +398,7 @@ export class ProcessTable {
   // counts in neither, one already in its ladder is awaited on that ladder.
   async shutdown(opts: { graceMs: number }): Promise<{ stopped: number; forced: number }> {
     this.shuttingDown = true; // close admission synchronously, before any stop yields
+    this.scheduleIdleRelease(); // E10: clears the idle clock; the ladder below stops every row as `quit`
     const live = this.list().filter((s) => s.status().process !== 'exited');
     const results = await Promise.all(live.map(async (session) => ({ session, result: await session.stop('quit', { graceMs: opts.graceMs }) })));
     let stopped = 0;

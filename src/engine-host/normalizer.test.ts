@@ -445,11 +445,13 @@ describe('normaliser: meta rows, system subtypes and the unknown', () => {
       metaRow({ event: 'exit', code: 0, signal: null, reason: 'budget', lostAttentionCount: 0, budget: { limitKiB: 8_388_608, totalKiB: 9_000_000 } }),
       metaRow({ event: 'exit', code: 0, signal: null, reason: 'stop', lostAttentionCount: 0, budget: null }),
       metaRow({ event: 'exit', code: 0, signal: null, reason: 'stop', lostAttentionCount: 0 }),
+      metaRow({ event: 'exit', code: 0, signal: null, reason: 'idle', lostAttentionCount: 0, budget: null }), // E10: the supervisor's idle release
     ]);
     expect(only(events, 'process.exited').map((e) => [e.reason, e.budget])).toEqual([
       ['budget', { limitKiB: 8_388_608, totalKiB: 9_000_000 }],
       ['stop', null],
       ['stop', null],
+      ['idle', null],
     ]);
   });
 

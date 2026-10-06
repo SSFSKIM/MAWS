@@ -30,7 +30,7 @@ export const CompactEngineSchema = z.strictObject({
   engineState: StatusShape.engineState,
   turn: CompactTurnSchema,
   pendingRequests: StatusShape.pendingRequests,
-  exit: z.strictObject({ reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */]), release: StatusShape.exit.unwrap().shape.release.optional() /* C12 */ }).optional(),
+  exit: z.strictObject({ reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */, 'idle' /* E10 */]), release: StatusShape.exit.unwrap().shape.release.optional() /* C12 */ }).optional(),
   // C12 start: what a budget scenario needs beyond C5's fields (the stop sheet's disclosure, the blocked reasons' counts,
   // the stateful server's name); each absent means empty
   backgroundTasks: StatusShape.backgroundTasks.optional(),

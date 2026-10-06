@@ -174,7 +174,7 @@ export class EngineSession {
   private starting: Promise<void> | null = null;
   private processState: ProcessState = 'starting';
   private exitInfo: EngineSessionStatus['exit'] = null;
-  private stopReason: 'stop' | 'archive' | 'quit' | 'budget' | null = null; // C12: 'budget'
+  private stopReason: 'stop' | 'archive' | 'quit' | 'budget' | 'idle' | null = null; // C12: 'budget'; E10: 'idle'
   // C12 start: the release a budget stop carries until the exit; the last use (the launch until the first command)
   private release: BudgetRelease | null = null;
   private lastUsedAt: string;
@@ -265,7 +265,7 @@ export class EngineSession {
         if (!this.handshakeDone || !this.client) return false;
         this.surface.detach(this.client); // R2: off the roster first, on the same pipe
         // C12: `budget` is MAWS's own reason and never goes to the engine; a release ends the process as a stop does
-        endSession(this.client, { reason: this.stopReason === 'budget' || this.stopReason === null ? 'stop' : this.stopReason }).catch(() => {}); // the exit is the answer that matters
+        endSession(this.client, { reason: this.stopReason === 'budget' || this.stopReason === 'idle' /* E10 */ || this.stopReason === null ? 'stop' : this.stopReason }).catch(() => {}); // the exit is the answer that matters
         return true;
       },
       stopResult: () => this.stopResult(),
@@ -474,16 +474,18 @@ export class EngineSession {
   // never replaces a recorded reason; an explicit stop, archive or quit replaces a recorded release, so an archive or
   // quit during a release's ladder exits as itself; explicit reasons keep the first among themselves. The one ladder
   // already running keeps its end_session.
-  stop(reason?: 'stop' | 'archive' | 'quit', opts?: { graceMs?: number }): Promise<StopResult>;
+  // E10: `idle`, the supervisor's idle-row release, is a release like the budget's (MAWS's own reason, `stop` on the
+  // wire, never replacing a recorded reason, replaced by an explicit one) with no budget detail.
+  stop(reason?: 'stop' | 'archive' | 'quit' | 'idle', opts?: { graceMs?: number }): Promise<StopResult>;
   stop(reason: 'budget', opts: { graceMs?: number; release: BudgetRelease }): Promise<StopResult>;
-  stop(reason: 'stop' | 'archive' | 'quit' | 'budget' = 'stop', opts: { graceMs?: number; release?: BudgetRelease } = {}): Promise<StopResult> {
+  stop(reason: 'stop' | 'archive' | 'quit' | 'budget' | 'idle' = 'stop', opts: { graceMs?: number; release?: BudgetRelease } = {}): Promise<StopResult> {
     if (this.processState === 'exited') return this.exited.then(() => this.stopResult()); // its store writes settled too
-    if (reason === 'budget') {
+    if (reason === 'budget' || reason === 'idle') {
       if (this.stopReason === null) {
-        this.stopReason = 'budget';
-        this.release = opts.release ?? null;
+        this.stopReason = reason;
+        this.release = reason === 'budget' ? (opts.release ?? null) : null;
       }
-    } else if (this.stopReason === null || this.stopReason === 'budget') {
+    } else if (this.stopReason === null || this.stopReason === 'budget' || this.stopReason === 'idle') {
       this.stopReason = reason;
       this.release = null;
     }
