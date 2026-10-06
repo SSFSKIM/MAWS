@@ -5,7 +5,7 @@ import { scmTool } from './ScmTool';
 
 export { groupsOf } from './groups';
 export { SCM_TOOL_ID, scmTool } from './ScmTool';
-export { useScm } from './store';
+export { connectScmRunEnds, useScm } from './store';
 export type { ScmParams } from './view-state';
 
 // Registers the tool. The disposer unregisters it, which closes its tabs (C8a's rule), so App.tsx never calls it; tests

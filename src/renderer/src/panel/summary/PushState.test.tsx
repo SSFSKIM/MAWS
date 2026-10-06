@@ -12,6 +12,7 @@ import { fakeClient, type FakeClient } from '../../../../../test/support/fake-cl
 import { queryClient } from '../../ipc/query';
 import { A, probeTool, resetPanelStores, TestHost } from '../../test-support/panel';
 import { useGit } from '../../stores/git';
+import { connectScmRunEnds } from '../../tools/scm/store';
 import { panelHost, registerPanelTool } from '../host';
 import { PushState } from './PushState';
 
@@ -169,6 +170,26 @@ describe('push state row shows PR state, install and sign-in states and opens th
     act(() => fake.event('git.changed', { repoRoot: DIR, status: GIT, reason: 'head' }));
     await settle();
     expect(fake.invoked('scm.status')).toHaveLength(3);
+  });
+
+  // A `gh pr create` that ends while the owner is on the Session overview: no Source control body is mounted, and the
+  // row's fresh "No PR" is asked again then, not at the next poll (E6 final review, finding 5).
+  it('asks the PR state again when a run ends while no Source control tool is mounted', async () => {
+    let answer: ScmPrState = { ...PR, pr: null };
+    bridge({ 'scm.pr.state': () => answer });
+    const disconnect = connectScmRunEnds(); // as App.tsx's E6 block connects it
+    try {
+      await mount();
+      await lineReads('No PR for feature');
+      answer = PR; // main now answers the PR the run created
+      act(() => fake.event('scm.remote.output', { appSessionId: A, token: '6f1c2e0a-0000-4000-8000-000000000001', seq: 1, kind: 'stdout', text: 'https://github.com/o/r/pull/12\n' }));
+      await settle();
+      expect(prLine()?.textContent).toBe('No PR for feature');
+      act(() => fake.event('scm.remote.output', { appSessionId: A, token: '6f1c2e0a-0000-4000-8000-000000000001', seq: 2, kind: 'exit', exitCode: 0, signal: null }));
+      await lineReads('PR #12 Open · 2 passed, 1 pending');
+    } finally {
+      disconnect();
+    }
   });
 
   // Main answers per branch; the query is the session's (E6 final review, finding 3).

@@ -11,11 +11,13 @@ import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmRemoteOutput } from '@shared/ipc/schema/scm';
 import { isolatedGitEnv } from '../../../../../test/support/git-env';
 import { createClient } from '../../ipc/client';
+import { queryClient } from '../../ipc/query';
 import { createGitStore } from '../../stores/git';
 import { fail, installFakeMain, ok, type Handler } from '../../test-support/code';
 import { A, B, DIR, OTHER_TOKEN, planOf, refusal, statusOf, TOKEN } from '../../test-support/scm';
 import { REVIEW_SCOPE_BYTES_CAP, splitPatch } from '../code/review/review-model';
-import { createScmStore, diffOf, fileDiffOf, SCM_REFRESH_MS, type ScmDiffTarget } from './store';
+import { prStateKey, scmStatusKey } from './queries';
+import { connectScmRunEnds, createScmStore, diffOf, fileDiffOf, SCM_REFRESH_MS, type ScmDiffTarget } from './store';
 import { createScmUi, forSession } from './view-state';
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -440,55 +442,27 @@ describe('source control store applies no status of its own and resumes a run fr
     release();
   });
 
-  it('says once when a run it follows ends, so the PR state is asked again; never for a run that had ended before', async () => {
-    const ended = vi.fn();
-    const main = scmMain((name) => (name === 'scm.remote.last' ? ok(snapshot({ running: false, exitCode: 0 })) : ok()));
-    const store = createScmStore(validated(main.bridge), { onRunEnded: ended });
-    const release = store.getState().resume(A);
-    await tick();
-    expect(store.getState().runs.get(A)).toMatchObject({ running: false });
-    expect(ended).not.toHaveBeenCalled(); // the snapshot's run ended before this mount
-    store.getState().started(A, planOf({ token: OTHER_TOKEN, kind: 'pr' }));
-    main.emit('scm.remote.output', out(1, 'https://github.com/o/r/pull/7\n', OTHER_TOKEN));
-    expect(ended).not.toHaveBeenCalled();
-    main.emit('scm.remote.output', exit(2, 0, OTHER_TOKEN));
-    expect(ended).toHaveBeenCalledTimes(1);
-    expect(ended).toHaveBeenCalledWith(A);
-    main.emit('scm.remote.output', exit(2, 0, OTHER_TOKEN)); // a repeat is no new end
-    expect(ended).toHaveBeenCalledTimes(1);
-    release();
-  });
-
-  it('says once when the run’s exit came before the snapshot answered and is folded into it', async () => {
-    const ended = vi.fn();
-    let answer!: (value: unknown) => void;
-    const main = scmMain(async (name) => (name === 'scm.remote.last' ? ok(await new Promise((resolve) => (answer = resolve))) : ok()));
-    const store = createScmStore(validated(main.bridge), { onRunEnded: ended });
-    const release = store.getState().resume(A);
-    await tick();
-    main.emit('scm.remote.output', out(4, 'four\n'));
-    main.emit('scm.remote.output', exit(5, 0));
-    answer(snapshot()); // running at seq 3
-    await tick();
-    expect(store.getState().runs.get(A)).toMatchObject({ running: false, exitCode: 0, seq: 5 });
-    expect(ended).toHaveBeenCalledTimes(1);
-    main.emit('scm.remote.output', exit(5, 0));
-    expect(ended).toHaveBeenCalledTimes(1);
-    release();
-  });
-
-  it('says nothing when the snapshot’s run had ended and nothing came before it', async () => {
-    const ended = vi.fn();
-    let answer!: (value: unknown) => void;
-    const main = scmMain(async (name) => (name === 'scm.remote.last' ? ok(await new Promise((resolve) => (answer = resolve))) : ok()));
-    const store = createScmStore(validated(main.bridge), { onRunEnded: ended });
-    const release = store.getState().resume(A);
-    await tick();
-    main.emit('scm.remote.output', exit(5, 0)); // already folded into the ended snapshot
-    answer(snapshot({ running: false, exitCode: 0, seq: 5 }));
-    await tick();
-    expect(ended).not.toHaveBeenCalled();
-    release();
+  // One listener for the window's life (App.tsx's E6 block connects it), not one per mounted body: a run that ends while
+  // no tool is shown still has every PR state asked again (E6 final review, finding 5).
+  it('reads every PR state again when any run ends, mounted or not; output chunks and a disconnected listener do not', async () => {
+    const main = scmMain();
+    const client = validated(main.bridge);
+    const prA = prStateKey(A);
+    const prB = prStateKey(B);
+    const statusA = scmStatusKey(A);
+    queryClient.clear();
+    for (const key of [prA, prB, statusA]) queryClient.setQueryData(key, {});
+    const invalidated = (key: readonly unknown[]) => queryClient.getQueryState(key)?.isInvalidated;
+    const disconnect = connectScmRunEnds(client);
+    main.emit('scm.remote.output', out(1, 'Enumerating objects\n'));
+    expect([invalidated(prA), invalidated(prB)]).toEqual([false, false]);
+    main.emit('scm.remote.output', exit(2, 0, OTHER_TOKEN)); // a run no store follows
+    expect([invalidated(prA), invalidated(prB), invalidated(statusA)]).toEqual([true, true, false]);
+    disconnect();
+    for (const key of [prA, prB]) queryClient.setQueryData(key, {});
+    main.emit('scm.remote.output', exit(3, 1));
+    expect([invalidated(prA), invalidated(prB)]).toEqual([false, false]);
+    queryClient.clear();
   });
 
   it('keeps another session’s events of the snapshot’s run that came before it, past its seq', async () => {

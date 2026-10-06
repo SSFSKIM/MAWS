@@ -74,7 +74,7 @@ import { connectPaneShows } from './tools/maws/panes/connect';
 import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
 // E1 end
 // E6 start
-import { registerScmTool } from './tools/scm';
+import { connectScmRunEnds, registerScmTool } from './tools/scm';
 // E6 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
@@ -188,6 +188,8 @@ export function App() {
   useEffect(() => {
     registerScmTool();
   }, []);
+  // and a run's end reads every PR state again, whether or not a Source control body is mounted
+  useEffect(() => connectScmRunEnds(), []);
   // E6 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.

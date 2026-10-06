@@ -92,7 +92,6 @@ function mapWithout<K, V>(map: ReadonlyMap<K, V>, drop: (key: K) => boolean): Ma
 
 export interface ScmStoreOptions {
   git?: typeof useGit; // C8a's store, whose new statuses re-read the held diffs
-  onRunEnded?(appSessionId: AppSessionId): void; // a run the session follows ended live (not one a snapshot found ended)
 }
 
 export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}): UseBoundStore<StoreApi<ScmStore>> {
@@ -237,9 +236,7 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
             if (entry.pending) return void entry.pending.push(event);
             const run = get().runs.get(appSessionId) ?? null;
             if (event.appSessionId !== appSessionId && event.token !== run?.token) return;
-            const next = advanceRun(run, event);
-            setRun(appSessionId, next);
-            if (!next.running && (run === null || run.token !== next.token || run.running)) options.onRunEnded?.(appSessionId);
+            setRun(appSessionId, advanceRun(run, event));
           });
           void settled(client.invoke('scm.remote.last', { appSessionId })).then((result) => {
             if (resumed.get(appSessionId) !== entry) return; // released meanwhile
@@ -249,8 +246,6 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
             let run = seeded;
             for (const event of pending) if (seeded === null ? event.appSessionId === appSessionId : event.token === seeded.token) run = advanceRun(run, event);
             set((s) => ({ runs: mapWith(s.runs, appSessionId, run) }));
-            // An exit among the events folded here is an end seen live, as the listener's would be (once).
-            if (run !== seeded && run !== null && !run.running && (seeded === null || seeded.running)) options.onRunEnded?.(appSessionId);
           });
         }
         const mine = r;
@@ -297,9 +292,17 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
   return store;
 }
 
+export const useScm = createScmStore(ipc, { git: useGit });
+
 // A push moves the upstream and a PR run creates the PR, and main drops its PR cache for the checkout when a run ends
-// (Design §6): every shown PR state is read again then.
-export const useScm = createScmStore(ipc, { git: useGit, onRunEnded: () => void queryClient.invalidateQueries({ queryKey: PR_STATE_QUERIES }) });
+// (Design §6): every PR state is read again at a run's `exit` chunk. One listener for the window's life, connected by
+// App.tsx's E6 block, not one per resumed session: a run that ends while no Source control body is mounted (the owner
+// on the Session overview) still reaches the summary's row.
+export function connectScmRunEnds(client: MawsBridge = ipc): () => void {
+  return client.on('scm.remote.output', (event) => {
+    if (event.kind === 'exit') void queryClient.invalidateQueries({ queryKey: PR_STATE_QUERIES });
+  });
+}
 
 // A link out of the app (a PR, gh's install page) through main's `layout.openExternal`.
 export function openLink(url: string): void {

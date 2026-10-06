@@ -15,7 +15,7 @@ import { fail, ok } from '../../test-support/code';
 import { A, DIR, planOf, prOf, prStateOf, refusal, SCRATCH_FILES, scmFile, scmMain, scmStatusOf, scmUntracked, statusOf, stubCanvas, TOKEN } from '../../test-support/scm';
 import { useViewer } from '../code/viewer/viewer-store';
 import { ScmShell } from './ScmShell';
-import { SCM_REFRESH_MS, useScm } from './store';
+import { connectScmRunEnds, SCM_REFRESH_MS, useScm } from './store';
 import { createScmUi, type ScmUi } from './view-state';
 
 // The highlighter would load shiki's grammars; the diff paints plain until it is ready, which here is never.
@@ -49,7 +49,12 @@ beforeEach(() => {
   useViewer.getState().reset();
   main = scmMain();
   ui = createScmUi({ session: A });
-  off = connectPanelEvents(); // C4's change events into C8a's store, as App.tsx connects them
+  const offPanel = connectPanelEvents(); // C4's change events into C8a's store, as App.tsx connects them
+  const offRunEnds = connectScmRunEnds(); // a run's end reads the PR state again, as App.tsx connects it
+  off = () => {
+    offPanel();
+    offRunEnds();
+  };
 });
 afterEach(() => {
   cleanup();
