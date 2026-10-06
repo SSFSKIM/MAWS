@@ -7,7 +7,7 @@ import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { withQuestionIds } from '@shared/maws/ask'; // E1
+import { withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
@@ -210,7 +210,7 @@ interface AskRecord {
   askId: string | null; // the result's, when it named one
   answers: AskAnswer[] | null; // from `maws.ask.answered`, else an answered result
   asked: boolean; // acknowledged without answers: an async ask
-  cancelled: boolean;
+  cancelled: AskCancelReason | null; // from `maws.ask.cancelled`: why
   resulted: boolean;
   error: string | null;
 }
@@ -383,7 +383,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction, from: null, to: null, text: agentMessageCopy(direction, to || null, str(input.message, str(input.content))) } });
         } else if (presentation === 'ask') { // E1
           const input = AskInputSchema.safeParse(event.input);
-          asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: false, resulted: false, error: null });
+          asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: null, resulted: false, error: null });
           items.push({ kind: 'ask', toolUseId: event.toolUseId });
         } else if (presentation === 'delivery') { // E1
           const input = SendFileInputSchema.safeParse(event.input);
@@ -556,7 +556,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (!ask) break;
         if (event.kind === 'maws.ask.opened') ask.opened = event;
         else if (event.kind === 'maws.ask.answered') ask.answers = event.answers;
-        else ask.cancelled = true;
+        else ask.cancelled = event.reason;
         break;
       }
       case 'maws.delivery.file': {
@@ -907,18 +907,20 @@ function resultOfDelivery(delivery: DeliveryRecord, result: Event<'tool.result'>
 // The capsule's state, whatever order its sources arrived in: answers from any source (the event, the result, the steer)
 // win; then a cancellation; then the result's error; then an acknowledged async ask. A blocking ask whose turn closed
 // with no result and no cancellation (a session that ended mid-ask, read from disk, where no meta row says so) can no
-// longer be answered, so it reads cancelled rather than waiting forever.
+// longer be answered, so it reads cancelled rather than waiting forever; no event says why, so it carries no reason
+// (`cancelReason` is the event's, for a cancelled row only).
 function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: ReadonlyMap<string, AskAnswer[]> | undefined): RowOf<'ask'> {
   const { use, input, opened } = ask;
   const askId = opened?.askId ?? ask.askId ?? use.toolUseId;
   const blocking = opened?.blocking ?? input?.blocking ?? true;
   const answers = ask.answers ?? steers?.get(askId) ?? null;
   const asked = ask.asked || opened?.blocking === false;
-  const state: RowOf<'ask'>['state'] = answers !== null ? 'answered' : ask.cancelled ? 'cancelled' : ask.error !== null ? 'error' : asked ? 'asked' : !ask.resulted && context.closed ? 'cancelled' : 'pending';
+  const state: RowOf<'ask'>['state'] = answers !== null ? 'answered' : ask.cancelled !== null ? 'cancelled' : ask.error !== null ? 'error' : asked ? 'asked' : !ask.resulted && context.closed ? 'cancelled' : 'pending';
   return {
     id: rowId.ask(use.toolUseId), turnId, at: use.at, kind: 'ask', toolUseId: use.toolUseId, askId,
     title: opened ? opened.title : (input?.title ?? null), context: opened ? opened.context : (input?.context ?? null), blocking,
     questions: opened?.questions ?? (input ? withQuestionIds(input.questions) : []), state, answers, error: ask.error,
+    cancelReason: state === 'cancelled' ? ask.cancelled : null,
   };
 }
 

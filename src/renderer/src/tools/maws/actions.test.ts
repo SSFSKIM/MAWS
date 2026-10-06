@@ -13,7 +13,7 @@ import { mawsTranscriptActionsOver } from './actions';
 const PATH = '/repo/hello.txt';
 const ASK: AskRowData = {
   askId: 'toolu_a', toolUseId: 'toolu_a' as never, title: null, context: null, blocking: true, questions: [{ id: 'q1', question: 'Proceed?', modality: 'text' }], state: 'answered',
-  answers: [{ id: 'q1', question: 'Proceed?', status: 'answered', value: 'yes' }], error: null,
+  answers: [{ id: 'q1', question: 'Proceed?', status: 'answered', value: 'yes' }], error: null, cancelReason: null,
 };
 
 describe('the delivery row’s actions', () => {

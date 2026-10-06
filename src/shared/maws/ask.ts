@@ -19,6 +19,12 @@ export const PendingAskSchema = z.strictObject({
 });
 export type PendingAsk = z.infer<typeof PendingAskSchema>;
 
+// Why an ask was cancelled (`maws.ask.cancelled.reason`): the process ended (`exit`), or the engine withdrew its call
+// (`withdrawn`: its control request cancelled, or the call abandoned by MCP's `notifications/cancelled`, as when the
+// user interrupts the turn while a blocking ask waits).
+export const AskCancelReasonSchema = z.enum(['exit', 'withdrawn']);
+export type AskCancelReason = z.infer<typeof AskCancelReasonSchema>;
+
 // The questions as an ask holds them: each with its id, `q<n>` by position where the model gave none, so the host's
 // table, the `maws.ask.opened` event and the answers all name a question the same way.
 export function withQuestionIds(questions: readonly AskQuestion[]): AskQuestion[] {

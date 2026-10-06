@@ -164,9 +164,19 @@ describe('the ask capsule', () => {
     b.turn('u2');
     b.end(['u2']);
     b.emit('maws.ask.cancelled', { askId: 'toolu_a', toolUseId: tool('toolu_a'), reason: 'exit' });
-    expect(capsule(rowsOf(applyEvents(createState(null, null), b.events)))).toMatchObject({ state: 'cancelled', turnId: 'turn:u1' });
+    expect(capsule(rowsOf(applyEvents(createState(null, null), b.events)))).toMatchObject({ state: 'cancelled', cancelReason: 'exit', turnId: 'turn:u1' });
     b.emit('maws.ask.answered', { askId: 'toolu_a', toolUseId: tool('toolu_a'), answers: ANSWERS, delivery: 'steer' });
-    expect(capsule(rowsOf(applyEvents(createState(null, null), b.events)))).toMatchObject({ state: 'answered' });
+    expect(capsule(rowsOf(applyEvents(createState(null, null), b.events)))).toMatchObject({ state: 'answered', cancelReason: null });
+  });
+
+  // E1 review: an interrupted turn withdraws a blocking ask while the session lives on; the row says why it was cancelled
+  it('a withdrawn ask carries its reason onto the row; only a cancelled ask has one', () => {
+    const b = builder();
+    b.turn('u1');
+    askCall(b, 'toolu_a');
+    expect(capsule(rowsOf(applyEvents(createState(null, null), b.events)))).toMatchObject({ state: 'pending', cancelReason: null });
+    b.emit('maws.ask.cancelled', { askId: 'toolu_a', toolUseId: tool('toolu_a'), reason: 'withdrawn' });
+    expect(capsule(rowsOf(applyEvents(createState(null, null), b.events)))).toMatchObject({ state: 'cancelled', cancelReason: 'withdrawn' });
   });
 
   it('a blocking ask whose turn closed with no answer and no result reads cancelled (a disk session that ended mid-ask)', () => {
@@ -174,7 +184,7 @@ describe('the ask capsule', () => {
     b.turn('u1');
     askCall(b, 'toolu_a');
     b.emit('process.exited', { code: 0, signal: null, reason: 'stop', lostAttentionCount: 0, budget: null });
-    expect(capsule(rowsOf(applyEvents(createState(null, null), b.events)))).toMatchObject({ state: 'cancelled' });
+    expect(capsule(rowsOf(applyEvents(createState(null, null), b.events)))).toMatchObject({ state: 'cancelled', cancelReason: null }); // no event says why
   });
 
   // M5 fix: a blocking ask lost at the exit is named a question on the exit row, beside any approval lost with it

@@ -4,6 +4,7 @@
 import * as z from 'zod';
 import { DENIAL_KINDS, PLAN_OUTCOMES, SAFEGUARD_VERDICTS } from '@shared/graph/enums';
 import { ContentBlockSchema, QuestionSchema, TokenUsageSchema } from '@shared/graph/events';
+import { AskCancelReasonSchema } from '@shared/maws/ask'; // E1
 import { AskAnswerSchema, AskQuestionSchema } from '@shared/maws/tools'; // E1
 import { TOOL_CATEGORIES } from './rows';
 
@@ -91,7 +92,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
   // E1 start
   z.strictObject({
     ...base, kind: z.literal('ask'), toolUseId: z.string(), askId: z.string(), title: nullable(z.string()), context: nullable(z.string()), blocking: z.boolean(), questions: z.array(AskQuestionSchema),
-    state: z.enum(['pending', 'asked', 'answered', 'cancelled', 'error']), answers: nullable(z.array(AskAnswerSchema)), error: nullable(z.string()),
+    state: z.enum(['pending', 'asked', 'answered', 'cancelled', 'error']), answers: nullable(z.array(AskAnswerSchema)), error: nullable(z.string()), cancelReason: nullable(AskCancelReasonSchema),
   }),
   z.strictObject({
     ...base, kind: z.literal('delivery'), toolUseId: z.string(), files: z.array(z.strictObject({ path: z.string(), name: z.string(), id: nullable(z.string()) })), caption: nullable(z.string()),

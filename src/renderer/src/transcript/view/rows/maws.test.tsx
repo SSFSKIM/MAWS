@@ -64,7 +64,7 @@ describe('the ask capsule', () => {
   it('asked, cancelled and error read their chips; a child transcript’s capsule opens its parent session’s sheet', () => {
     const base: RowOf<'ask'> = {
       id: 'ask:t1' as never, turnId: null, at: '2026-10-06T00:00:00.000Z', kind: 'ask', toolUseId: 't1' as never, askId: 't1', title: 'Setup', context: null, blocking: false,
-      questions: [{ id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }] }], state: 'asked', answers: null, error: null,
+      questions: [{ id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }] }], state: 'asked', answers: null, error: null, cancelReason: null,
     };
     const chip = (row: RowOf<'ask'>) => {
       const view = renderRow(row, { storeKey: APP });
@@ -73,7 +73,9 @@ describe('the ask capsule', () => {
       return text;
     };
     expect(chip(base)).toBe('Asked, answer when ready');
-    expect(chip({ ...base, state: 'cancelled' })).toBe('Cancelled, the session ended');
+    expect(chip({ ...base, state: 'cancelled' })).toBe('Cancelled, the session ended'); // the disk path: no reason known
+    expect(chip({ ...base, state: 'cancelled', cancelReason: 'exit' })).toBe('Cancelled, the session ended');
+    expect(chip({ ...base, state: 'cancelled', cancelReason: 'withdrawn' })).toBe('Cancelled, the turn was interrupted');
     expect(chip({ ...base, state: 'error', error: 'ask: invalid arguments: questions: Too small' })).toBe('ask: invalid arguments: questions: Too small');
     const { actions } = renderRow(base, { storeKey: `${APP}:agent-1` });
     expect(screen.getByText('Setup')).toBeTruthy();

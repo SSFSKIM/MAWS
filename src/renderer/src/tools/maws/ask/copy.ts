@@ -1,4 +1,6 @@
 // Every sentence of the Question sheet (E1 execution document, M4; the request card's copy conventions).
+import type { AskCancelReason } from '@shared/maws/ask';
+
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export const SHEET = {
@@ -35,7 +37,8 @@ export const SHEET = {
   readFailed: "Couldn't read this session's questions",
   dismiss: 'Dismiss',
   // read-only
-  cancelled: 'This session ended before you answered',
+  // a cancelled ask, by why (null: no event said, as on the disk path)
+  cancelled: (reason: AskCancelReason | null) => (reason === 'withdrawn' ? 'The turn was interrupted before you answered' : 'This session ended before you answered'),
   answered: 'Answered',
   notHeld: 'MAWS no longer holds this ask, so it cannot be answered here.',
   answerSkipped: 'Skipped',

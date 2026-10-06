@@ -5,6 +5,7 @@ import type * as z from 'zod';
 import type { DenialKind, PLAN_OUTCOMES, SafeguardVerdict } from '@shared/graph/enums';
 import type { ContentBlock, Question, TokenUsage } from '@shared/graph/events';
 import type { AgentId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
+import type { AskCancelReason } from '@shared/maws/ask'; // E1
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // E1
 
 export type TurnId = string & z.$brand<'TurnId'>; // `turn:<userMessageUuid>`; `turn:e<eventId>` for engine-initiated turns or a user message without uuid
@@ -66,7 +67,7 @@ export type Row = RowBase &
     | { kind: 'local_command'; messageUuid: MessageUuid | null; text: string } // the engine's `<local-command-stdout>` echo after a slash command (C3's `origin: 'local-command'`), tags stripped; a replayed row, never a bubble
     // E1 start: the `maws` server's rows (E1 execution document, Interfaces "The renderer"): an `ask` call's capsule and
     // a `send_file` call's delivery row, derived from the calls themselves and refined by the `maws.*` events
-    | { kind: 'ask'; toolUseId: ToolUseId; askId: string; title: string | null; context: string | null; blocking: boolean; questions: AskQuestion[]; state: 'pending' | 'asked' | 'answered' | 'cancelled' | 'error'; answers: AskAnswer[] | null; error: string | null }
+    | { kind: 'ask'; toolUseId: ToolUseId; askId: string; title: string | null; context: string | null; blocking: boolean; questions: AskQuestion[]; state: 'pending' | 'asked' | 'answered' | 'cancelled' | 'error'; answers: AskAnswer[] | null; error: string | null; cancelReason: AskCancelReason | null /* why a cancelled ask was cancelled, when an event said; else null */ }
     | { kind: 'delivery'; toolUseId: ToolUseId; files: { path: string; name: string; id: string | null }[]; caption: string | null; urgency: 'normal' | 'high'; error: string | null }
     // E1 end
   );

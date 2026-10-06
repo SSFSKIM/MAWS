@@ -141,6 +141,7 @@
     "askId": "toolu_016zBCDTWVXbAqbGdLyd1Zzj",
     "at": "2026-10-06T06:35:37.370Z",
     "blocking": false,
+    "cancelReason": null,
     "context": null,
     "error": null,
     "id": "ask:toolu_016zBCDTWVXbAqbGdLyd1Zzj",

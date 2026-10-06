@@ -112,7 +112,7 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
     return (
       <>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <Header title={ask.title} status={SHEET.cancelled} context={ask.context} />
+          <Header title={ask.title} status={SHEET.cancelled(ask.cancelReason)} context={ask.context} />
           <ReadOnly questions={ask.questions} answers={null} />
         </div>
         <Footer>
@@ -182,7 +182,7 @@ function Sheet({ appSessionId, ctx }: { appSessionId: AppSessionId; ctx: PanelTo
   } else if (shown.kind === 'historical') {
     const { ask } = shown;
     const waiting = ask.state === 'pending' || ask.state === 'asked';
-    const status = ask.state === 'answered' ? SHEET.answered : ask.state === 'cancelled' ? SHEET.cancelled : ask.state === 'error' ? ask.error : waiting && state.loaded ? SHEET.notHeld : null;
+    const status = ask.state === 'answered' ? SHEET.answered : ask.state === 'cancelled' ? SHEET.cancelled(ask.cancelReason) : ask.state === 'error' ? ask.error : waiting && state.loaded ? SHEET.notHeld : null;
     body = (
       <div className="min-h-0 flex-1 overflow-y-auto" data-ask-readonly="">
         <Header title={ask.title} status={status} tone={ask.state === 'error' ? 'danger' : 'muted'} context={ask.context} />

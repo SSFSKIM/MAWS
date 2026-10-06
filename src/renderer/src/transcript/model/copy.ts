@@ -393,6 +393,7 @@ export const ASK = {
   title: 'Questions', // the capsule's heading when the ask has no title
   count: (n: number) => `Asked ${plural(n, 'question')}`,
   state: { pending: 'Waiting for you', asked: 'Asked, answer when ready', answered: 'Answered', cancelled: 'Cancelled, the session ended' },
+  withdrawn: 'Cancelled, the turn was interrupted', // a cancelled ask whose call the engine withdrew (`cancelReason: 'withdrawn'`)
   open: 'Open',
   viewAnswers: 'View answers',
   notAnswered: 'Not answered',

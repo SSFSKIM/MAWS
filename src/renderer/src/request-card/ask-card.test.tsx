@@ -47,7 +47,7 @@ describe('the request card for a blocking ask', () => {
     expect(screen.getByText('2 questions')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Open the Question sheet' }));
     expect(openAsk).toHaveBeenCalledWith(APP, {
-      askId: 'toolu_ask', toolUseId: 'toolu_ask', title: 'Release setup', context: null, blocking: true, questions: askOpened().questions, state: 'pending', answers: null, error: null,
+      askId: 'toolu_ask', toolUseId: 'toolu_ask', title: 'Release setup', context: null, blocking: true, questions: askOpened().questions, state: 'pending', answers: null, error: null, cancelReason: null,
     });
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Open the Question sheet']); // no Open session, nothing that answers
     expect(fake.invoked('session.answer')).toEqual([]);

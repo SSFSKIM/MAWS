@@ -13,7 +13,7 @@ export type AskOpenedEvent = Extract<SessionEvent, { kind: 'maws.ask.opened' }>;
 // The ask as its capsule would hand it over while pending (the askId is the tool-use id whenever the call carried one).
 const rowDataOf = (request: AskOpenedEvent): AskRowData => ({
   askId: request.askId, toolUseId: (request.toolUseId ?? request.askId) as ToolUseId, title: request.title, context: request.context, blocking: request.blocking,
-  questions: request.questions, state: 'pending', answers: null, error: null,
+  questions: request.questions, state: 'pending', answers: null, error: null, cancelReason: null,
 });
 
 export function AskBody({ appSessionId, request }: { appSessionId: AppSessionId; request: AskOpenedEvent }) {

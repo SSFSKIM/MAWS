@@ -258,11 +258,20 @@ describe('the asks a session holds', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(screen.getByText('No open questions')).toBeTruthy();
   });
+
+  // E1 review: an interrupted turn withdraws the ask while the session lives on
+  it('an ask the engine withdrew says the turn was interrupted', async () => {
+    await mountWithAsk();
+    applyAskEvents(A, [{ kind: 'maws.ask.cancelled', askId: 'toolu_a', toolUseId: 'toolu_a', reason: 'withdrawn', id: 'e1', sessionId: 's', at: '', seq: 1, agentId: null, parentToolUseId: null } as never]);
+    expect(await screen.findByText('The turn was interrupted before you answered')).toBeTruthy();
+    expect(screen.queryByText('This session ended before you answered')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Submit/ })).toBeNull();
+  });
 });
 
 describe('a capsule’s ask, read-only', () => {
   const ANSWERED: AskRowData = {
-    askId: 'toolu_old', toolUseId: 'toolu_old' as ToolUseId, title: null, context: null, blocking: true, questions: QUESTIONS, state: 'answered', error: null,
+    askId: 'toolu_old', toolUseId: 'toolu_old' as ToolUseId, title: null, context: null, blocking: true, questions: QUESTIONS, state: 'answered', error: null, cancelReason: null,
     answers: [
       { id: 'q1', question: 'Which colour?', status: 'answered', value: [], otherText: 'Teal' },
       { id: 'q2', question: 'Which days?', status: 'answered', value: ['Mon', 'Wed'] },
@@ -288,6 +297,21 @@ describe('a capsule’s ask, read-only', () => {
     expect(screen.queryByRole('button', { name: /^Submit/ })).toBeNull();
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull();
+  });
+
+  it('a cancelled capsule says why: the turn was interrupted, else the session ended', () => {
+    const shown = (historical: AskRowData) => {
+      const state = askSheetTool.createState({ appSessionId: A, session: null, instanceId: 'ask-sheet:t', params: { askId: historical.askId, historical } });
+      const Body = askSheetTool.render;
+      const view = render(<Body state={state} ctx={ctx()} />);
+      const text = view.container.textContent;
+      view.unmount();
+      return text;
+    };
+    const cancelled = { ...ANSWERED, state: 'cancelled', answers: null } as const;
+    expect(shown({ ...cancelled, cancelReason: 'withdrawn' })).toContain('The turn was interrupted before you answered');
+    expect(shown({ ...cancelled, cancelReason: 'exit' })).toContain('This session ended before you answered');
+    expect(shown(cancelled)).toContain('This session ended before you answered'); // the disk path: no reason known
   });
 
   it('a pending capsule the host turns out not to hold says so, still read-only', async () => {

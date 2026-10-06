@@ -13,7 +13,7 @@ type AskRow = Extract<Row, { kind: 'ask' }>;
 
 // The row without its base: what the sheet is handed.
 export const askRowData = (row: AskRow): AskRowData => ({
-  askId: row.askId, toolUseId: row.toolUseId, title: row.title, context: row.context, blocking: row.blocking, questions: row.questions, state: row.state, answers: row.answers, error: row.error,
+  askId: row.askId, toolUseId: row.toolUseId, title: row.title, context: row.context, blocking: row.blocking, questions: row.questions, state: row.state, answers: row.answers, error: row.error, cancelReason: row.cancelReason,
 });
 
 function AnswerLine({ question, row }: { question: AskQuestion; row: AskRow }) {
@@ -34,7 +34,7 @@ function AnswerLine({ question, row }: { question: AskQuestion; row: AskRow }) {
 export function AskCapsule({ row }: { row: AskRow }) {
   const actions = useActions();
   const appSessionId = useRowSession();
-  const chip = row.state === 'error' ? (row.error ?? '') : ASK.state[row.state];
+  const chip = row.state === 'error' ? (row.error ?? '') : row.state === 'cancelled' && row.cancelReason === 'withdrawn' ? ASK.withdrawn : ASK.state[row.state];
   return (
     <section className="transcript-ask" aria-label={row.title ?? ASK.title} data-ask-id={row.askId} data-ask-state={row.state}>
       <div className="transcript-ask-top">

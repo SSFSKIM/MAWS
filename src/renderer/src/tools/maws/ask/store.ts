@@ -3,8 +3,8 @@
 // asks are host memory): read from `maws.asks.list` when a sheet mounts for a session not yet read (a refused read is
 // shown and read again at the next mount or Retry) and again whenever the engine host is back at `ready` (a restarted
 // host lost its table), and followed through the live `maws.ask.*` events, an event about an ask winning over a
-// snapshot still on its way. A cancelled ask stays, marked, so the sheet can say
-// the session ended. Drafts live here, not in components, so switching tabs or sessions keeps half-filled answers.
+// snapshot still on its way. A cancelled ask stays, marked with why, so the sheet can say the session ended or the
+// turn was interrupted. Drafts live here, not in components, so switching tabs or sessions keeps half-filled answers.
 //
 // What the sheet shows (`shownAsk`): the selected ask when the store holds it; else the ask a capsule handed over
 // (`historical`, residue 14), read-only from its own data, which works after a reload and for a disk-only session;
@@ -13,13 +13,14 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import type { PendingAsk } from '@shared/maws/ask';
+import type { AskCancelReason, PendingAsk } from '@shared/maws/ask';
 import type { AskRowData } from '../../../transcript';
 import { SHEET } from './copy';
 import { canSubmit, EMPTY_DRAFT, toAnswers, type Draft, type ProjectRef } from './draft';
 
 export interface SheetAsk extends PendingAsk {
   state: 'pending' | 'cancelled';
+  cancelReason: AskCancelReason | null; // a cancelled ask's `maws.ask.cancelled.reason`; null while pending
 }
 
 export interface AskSheetState {
@@ -43,7 +44,7 @@ const stores = new Map<AppSessionId, StoreApi<AskSheetState>>();
 // A read in flight per session, and the asks an event spoke for since it left, with the last thing the event said: the
 // snapshot never overrides it, and a cancellation of an ask the store did not hold yet takes the snapshot's questions.
 interface Read {
-  touched: Map<string, 'opened' | 'answered' | 'cancelled'>;
+  touched: Map<string, 'opened' | 'answered' | { cancelled: AskCancelReason }>;
 }
 const reads = new Map<AppSessionId, Read>();
 const requested = new Set<AppSessionId>(); // sessions whose sheet asked for the host's table at least once
@@ -111,8 +112,8 @@ export async function loadAsks(appSessionId: AppSessionId, client: MawsBridge): 
   for (const [askId, ask] of listed) {
     if (asks.has(askId)) continue;
     const said = read.touched.get(askId);
-    if (said === undefined) asks.set(askId, { ...ask, state: 'pending' });
-    else if (said === 'cancelled') asks.set(askId, { ...ask, state: 'cancelled' });
+    if (said === undefined) asks.set(askId, { ...ask, state: 'pending', cancelReason: null });
+    else if (typeof said === 'object') asks.set(askId, { ...ask, state: 'cancelled', cancelReason: said.cancelled });
   }
   const drafts = new Map([...state.drafts].filter(([askId]) => asks.has(askId)));
   store.setState({ asks, drafts, loaded: true, reading: false, readError: null });
@@ -141,12 +142,12 @@ export function applyAskEvents(appSessionId: AppSessionId, events: readonly Sess
   const read = reads.get(appSessionId);
   const opened: string[] = [];
   for (const event of relevant) {
-    read?.touched.set(event.askId, event.kind === 'maws.ask.opened' ? 'opened' : event.kind === 'maws.ask.answered' ? 'answered' : 'cancelled');
+    read?.touched.set(event.askId, event.kind === 'maws.ask.opened' ? 'opened' : event.kind === 'maws.ask.answered' ? 'answered' : { cancelled: event.reason });
     const state = store.getState();
     switch (event.kind) {
       case 'maws.ask.opened': {
         const { askId, toolUseId, requestId, blocking, title, context, questions, at } = event;
-        const asks = new Map(state.asks).set(askId, { askId, toolUseId, requestId, blocking, title, context, questions, openedAt: at, state: 'pending' });
+        const asks = new Map(state.asks).set(askId, { askId, toolUseId, requestId, blocking, title, context, questions, openedAt: at, state: 'pending', cancelReason: null });
         store.setState({ asks });
         opened.push(askId);
         break;
@@ -159,7 +160,7 @@ export function applyAskEvents(appSessionId: AppSessionId, events: readonly Sess
         if (!ask) break;
         const drafts = new Map(state.drafts);
         drafts.delete(event.askId);
-        store.setState({ asks: new Map(state.asks).set(event.askId, { ...ask, state: 'cancelled' }), drafts });
+        store.setState({ asks: new Map(state.asks).set(event.askId, { ...ask, state: 'cancelled', cancelReason: event.reason }), drafts });
         break;
       }
     }

@@ -6,12 +6,12 @@
 // withdrew the call, or the process ended) settles it with a text nobody writes, since no one waits any more.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, AttentionId, SessionId } from '@shared/graph/ids';
-import type { PendingAsk } from '@shared/maws/ask';
+import type { AskCancelReason, PendingAsk } from '@shared/maws/ask';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { toolError, type McpToolResult } from './server';
 
 export type AskSettle = { blocking: true; resolve: (result: McpToolResult) => void } | { blocking: false };
-export type AskCancelReason = 'exit' | 'withdrawn';
+export type { AskCancelReason } from '@shared/maws/ask';
 
 // What a cancelled blocking call settles with; never written, since its call was aborted and no one waits for it.
 const CANCELLED: Record<AskCancelReason, string> = { exit: TOOL_ERRORS.sessionEnded, withdrawn: 'ask: the engine withdrew the call' };

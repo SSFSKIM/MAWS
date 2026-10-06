@@ -39,7 +39,7 @@ const opened = (askId: string, over: Partial<PendingAsk> = {}) => {
   return ev('maws.ask.opened', { askId, toolUseId: ask.toolUseId, requestId: ask.requestId, blocking: ask.blocking, title: ask.title, context: ask.context, questions: ask.questions });
 };
 const answered = (askId: string) => ev('maws.ask.answered', { askId, toolUseId: askId as ToolUseId, answers: [], delivery: 'result' });
-const cancelled = (askId: string) => ev('maws.ask.cancelled', { askId, toolUseId: askId as ToolUseId, reason: 'exit' });
+const cancelled = (askId: string, reason: 'exit' | 'withdrawn' = 'exit') => ev('maws.ask.cancelled', { askId, toolUseId: askId as ToolUseId, reason });
 
 const state = () => askSheet(A).getState();
 const shown = () => shownAsk(state());
@@ -127,9 +127,9 @@ describe('loading the host’s table', () => {
   it('a cancellation that lands while the first read is out keeps the ask, cancelled, with the snapshot’s questions', async () => {
     const fake = fakeClient();
     ensureLoaded(A, fake.client); // an empty store: a restored sheet after a reload
-    applyAskEvents(A, [cancelled('a1')]);
+    applyAskEvents(A, [cancelled('a1', 'withdrawn')]);
     await fake.reply('maws.asks.list', { asks: [pending('a1'), pending('a2')] });
-    expect([...state().asks.values()].map((ask) => [ask.askId, ask.state])).toEqual([['a1', 'cancelled'], ['a2', 'pending']]);
+    expect([...state().asks.values()].map((ask) => [ask.askId, ask.state, ask.cancelReason])).toEqual([['a1', 'cancelled', 'withdrawn'], ['a2', 'pending', null]]);
     expect(state().asks.get('a1')?.questions).toEqual(QUESTIONS);
     applyAskEvents(A, [answered('a2')]);
     expect(shown()).toMatchObject({ kind: 'live', ask: { askId: 'a1', state: 'cancelled' } });
@@ -154,7 +154,14 @@ describe('live events', () => {
     expect(state().drafts.has('a1')).toBe(false);
     expect(shown()).toMatchObject({ kind: 'live', ask: { askId: 'a2' } }); // the next pending ask
     applyAskEvents(A, [cancelled('a2')]);
-    expect(shown()).toMatchObject({ kind: 'live', ask: { askId: 'a2', state: 'cancelled' } });
+    expect(shown()).toMatchObject({ kind: 'live', ask: { askId: 'a2', state: 'cancelled', cancelReason: 'exit' } });
+  });
+
+  it('cancelled keeps why: a withdrawn ask is marked withdrawn, an opened one has no reason', () => {
+    applyAskEvents(A, [opened('a1')]);
+    expect(state().asks.get('a1')).toMatchObject({ state: 'pending', cancelReason: null });
+    applyAskEvents(A, [cancelled('a1', 'withdrawn')]);
+    expect(state().asks.get('a1')).toMatchObject({ state: 'cancelled', cancelReason: 'withdrawn' });
   });
 
   it('returns the asks a batch opened that are still pending at its end', () => {
@@ -166,7 +173,7 @@ describe('live events', () => {
 describe('selection', () => {
   const HISTORICAL: AskRowData = {
     askId: 'old', toolUseId: 'old' as ToolUseId, title: 'Before', context: null, blocking: true, questions: QUESTIONS, state: 'answered',
-    answers: [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Red'] }, { id: 'q2', question: 'What title?', status: 'skipped' }], error: null,
+    answers: [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Red'] }, { id: 'q2', question: 'What title?', status: 'skipped' }], error: null, cancelReason: null,
   };
 
   it('a capsule’s ask the store does not hold is shown from its own data, also before any read', () => {
@@ -368,7 +375,7 @@ describe('connectAsks', () => {
       const { probe, fake, off } = connected();
       fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
       fake.event('session.eventBatch', { appSessionId: A, events: [opened('a2')] });
-      const row: AskRowData = { askId: 'a1', toolUseId: 'a1' as ToolUseId, title: 'Setup', context: null, blocking: true, questions: QUESTIONS, state: 'pending', answers: null, error: null };
+      const row: AskRowData = { askId: 'a1', toolUseId: 'a1' as ToolUseId, title: 'Setup', context: null, blocking: true, questions: QUESTIONS, state: 'pending', answers: null, error: null, cancelReason: null };
       mawsTranscriptActionsOver(fake.client).openAsk(A, row);
       await Promise.resolve();
       await Promise.resolve();
