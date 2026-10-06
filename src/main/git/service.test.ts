@@ -346,11 +346,11 @@ describe('git.diff untracked scope', () => {
     }
   });
 
-  it.each([
-    [['diff.mnemonicPrefix', 'true']],
-    [['diff.noprefix', 'true']],
-    [['diff.srcPrefix', 'old:'], ['diff.dstPrefix', 'new:']],
-  ])('answers whatever prefixes the configuration asks for (%j)', async (...settings: [string, string][]) => {
+  it.each<{ settings: [string, string][] }>([
+    { settings: [['diff.mnemonicPrefix', 'true']] },
+    { settings: [['diff.noprefix', 'true']] },
+    { settings: [['diff.srcPrefix', 'old:'], ['diff.dstPrefix', 'new:']] },
+  ])('answers whatever prefixes the configuration asks for ($settings)', async ({ settings }) => {
     for (const [key, value] of settings) await repo.git('config', key, value);
     await repo.write('new.txt', 'one\n');
     const diff = await service.diff({ directory: repo.root, scope: 'untracked', path: 'new.txt' });
