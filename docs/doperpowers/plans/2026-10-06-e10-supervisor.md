@@ -585,6 +585,10 @@ The executor replaces these lines with what actually ran and what it printed.
   Rationale: the executor's report (task 7).
   Date/Author: 2026-10-06, the E10 controller.
 
+- Decision: Task 2.5 as built (f228522c, 682e029e, 203330f8). `HostBridge.request` settles `{kind: 'noClient'}` at once while `hasClient()` is false (`hasClient` optional, absent meaning connected); `show_pane` and `artifact_screenshot` answer `TOOL_ERRORS.appNotOpen(tool)` ("show_pane: MAWS is not open; the pane cannot be shown", "artifact_screenshot: MAWS is not open; the artifact cannot be captured"). Since `hasClient` means connected and ready, a bridge request during main's resync (bounded at 30 s) fails fast too, accepted. The sweep kills a ledger row only when its recorded start time is non-empty and matches the process now; SIGTERM to the engine, then after 5 s (polled at 200 ms, ending early) SIGKILL to its process group, falling back to the pid, each row re-checked first; `orphansKilled` counts the rows signalled. The process table starts writing `live.json` when the sweep ends (launches during its ≤5 s are recorded then; a crash inside that window leaves them unswept, accepted), rewrites it only when the live set changes, and reads each engine's start time once. The shell capture is invalidated at a welcomed client in detached mode only. Daily pruning runs in both modes and keeps every launch the table still holds (`pruneJournals` gains an additive `keep` set in `journal.ts`).
+  Rationale: the executor's report (task 8).
+  Date/Author: 2026-10-06, the E10 controller.
+
 Residue decisions (the design above carries each with its reason; the architect folded them as A-29, which accepts every one and rules the three that were marked ★ (10, 11, 21) and the `[parent-impact]` items, overturnable by the owner):
 
 1. The supervisor is the engine-host bundle itself, run by the Electron binary as Node (`process.execPath`, `ELECTRON_RUN_AS_NODE=1`) in dev and packaged alike; the `runAsNode` fuse must stay enabled and M4 guards it. Rejected: a bundled Node, a second Electron instance, a separate supervisor entry.
