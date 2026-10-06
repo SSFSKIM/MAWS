@@ -46,7 +46,7 @@ const RECORDED = {
 
 const AT = '2026-10-06T12:00:00.000Z';
 
-// The prelude's `get_status` answer (replay-handshake.jsonl seq 5) without its `Anthropic base URL` row.
+// The prelude's `get_status` answer (replay-handshake.jsonl seq 5) without the relay's rows (`Anthropic base URL`, `Auth token`).
 const PRELUDE_STATUS_ANSWER = 5;
 function directStatus(frame: Frame): Frame {
   type Status = { response: { response: { sections: { title: string; rows: { label: string; value: string }[] }[] } } };
