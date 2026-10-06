@@ -4,12 +4,14 @@
 // host's event feed below; in mode `scenario` only the stub source, and the read model refuses C4's source unstarted,
 // so the index never scans.
 import type { WebContents, WebContentsDidStartNavigationEventParams } from 'electron';
+import type { SessionEvent } from '@shared/graph/events'; // E3
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
 import { isAppSynthesised } from '@shared/sessions/app-events';
 import type { HostSupervisor } from '../hosts/supervisor';
 import { emit, onEmitted } from '../ipc/events';
 import { CommandFailure, interceptCommand, registerMainHandler } from '../ipc/router';
+import { isSideThreadEvent } from '../side/side-threads'; // E3
 import { SessionReadModel, type SessionSource } from './read-model';
 import { launchMode, scenarioClock, scenarioPath } from './select-source';
 import { stubSource } from './stub-source';
@@ -20,6 +22,9 @@ export interface SessionsOptions {
   appRoot: string;
   hosts: Pick<HostSupervisor, 'onEvent' | 'onState' | 'dispatch'>; // C12: onState
   indexSource?: SessionSource; // C4's IndexSessionSource: the records, projects and seed digests, and the unread rule
+  // E3 (Design §5): app events kept elsewhere than the read model, answered with its own by `session.appEvents` (the
+  // side-thread rows, re-synthesised from the index)
+  appEventsExtra?: (appSessionId: AppSessionId) => SessionEvent[];
 }
 
 export interface Sessions {
@@ -63,24 +68,33 @@ export function emittedAttentionSource(tap: typeof onEmitted = onEmitted): Sessi
 }
 
 // Debt wave 5 (C10 · C6): the events main itself synthesises for a session (C10's route notice), tapped from main's
-// `session.eventBatch` as the renderer receives them, so the read model keeps what nothing else stores.
+// `session.eventBatch` as the renderer receives them, so the read model keeps what nothing else stores. E3: the
+// side-thread rows are stored by the index and come back from it (`appEventsExtra`); kept here too, a parent with many
+// threads would push its notices out of the capped store.
 export function emittedAppEventsSource(tap: typeof onEmitted = onEmitted): SessionSource {
   return {
     start: (writer) =>
       tap('session.eventBatch', ({ appSessionId, events }) => {
         const id = appSessionId as AppSessionId;
-        const ours = events.filter((event) => isAppSynthesised(id, event));
+        const ours = events.filter((event) => isAppSynthesised(id, event) && !isSideThreadEvent(event)); // E3
         if (ours.length > 0) writer.observeAppEvents(id, ours);
       }),
   };
 }
 
-export function startSessions({ env, packaged, appRoot, hosts, indexSource }: SessionsOptions): Sessions {
+// E3: the read model's kept events, then the extra provider's, once per id.
+function appEventsOf(model: SessionReadModel, appSessionId: AppSessionId, extra: SessionsOptions['appEventsExtra']): SessionEvent[] {
+  const events = [...model.appEvents(appSessionId), ...(extra?.(appSessionId) ?? [])];
+  const seen = new Set<string>();
+  return events.filter((event) => !seen.has(event.id) && (seen.add(event.id), true));
+}
+
+export function startSessions({ env, packaged, appRoot, hosts, indexSource, appEventsExtra }: SessionsOptions): Sessions {
   const mode = launchMode(env, packaged);
   const model = new SessionReadModel(mode);
   registerMainHandler('session.digests', () => ({ digests: model.digests() }));
   registerMainHandler('session.launchMode', () => ({ mode }));
-  registerMainHandler('session.appEvents', ({ appSessionId }) => ({ events: model.appEvents(appSessionId as AppSessionId) })); // debt wave 5
+  registerMainHandler('session.appEvents', ({ appSessionId }) => ({ events: appEventsOf(model, appSessionId as AppSessionId, appEventsExtra) })); // debt wave 5; E3: the extra
   // Visibility is the union of the pages displaying a session, not a sticky app-wide flag.
   const pages = new Map<WebContents, { ids: Set<AppSessionId>; release(): void }>();
   const refreshVisibility = (id: AppSessionId) => model.setVisible(id, [...pages.values()].some((page) => page.ids.has(id)));

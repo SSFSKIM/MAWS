@@ -80,6 +80,9 @@ import { startVoice } from './voice/register';
 // E5 start
 import { trackUnsavedFiles } from './lifecycle/quit-guard';
 // E5 end
+// E3 start
+import { sideThreadEvents, startSideThreads } from './side/side-threads';
+// E3 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -144,7 +147,17 @@ void startWithProfileLock(app, () => {
   registerOpenExternal();
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
-  const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource });
+  const sessions = startSessions({
+    env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource,
+    // E3: a parent's side-thread rows, re-synthesised from the index (none while the index is unavailable)
+    appEventsExtra: (appSessionId) => {
+      try {
+        return sideThreadEvents(index, appSessionId);
+      } catch {
+        return [];
+      }
+    },
+  });
   const sessionsDir = join(app.getPath('userData'), 'sessions');
   const intents = new FileIntentStore(join(sessionsDir, 'intents'));
   const stopChatPanels = registerChatPanels(layout, sessions.model, intents);
@@ -262,6 +275,10 @@ void startWithProfileLock(app, () => {
   // W7: a live MAWS process yields when a terminal or job that resumed its session starts writing into it
   const stopYield = startYield({ dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), sessions: index.sessions, emit });
   app.on('will-quit', stopYield);
+  // E3 start: each live turn end of a side thread summarises it in its parent's transcript (E3 execution document, Design §5)
+  const stopSideThreads = startSideThreads({ onEvent: (name, listener) => hosts.onEvent(name, listener), emit, sessions: index.sessions, sideThreads: index.sideThreads });
+  app.on('will-quit', stopSideThreads);
+  // E3 end
 
   // C11 start: the plumbing of settings v3 (C11 execution document, M1). The engine host's binary configuration follows
   // settings.engine; ClaudeUsage's hand-off and status; the reveal guard; the export's Save as….
