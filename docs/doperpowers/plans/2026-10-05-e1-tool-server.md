@@ -10,7 +10,7 @@ To see it: launch a session in MAWS, send "Use the maws ask tool to ask me which
 
 ## Progress
 
-- [ ] M1 — X9 and the `maws` server: `send_file`, `show_pane`, the preview format (A-17), `files.reveal` (executed 2026-10-05 22:35 at e71867bc, DONE_WITH_CONCERNS: the full suite waits for the load gate; in review)
+- [x] M1 — X9 and the `maws` server: `send_file`, `show_pane`, the preview format (A-17), `files.reveal` (2026-10-05 23:20; e71867bc plus the fix wave e503c8d7..fd23e2b7, reviewed clean in two rounds; the full unit suite is still behind the load gate, run by the controller before M5's acceptance)
 - [ ] M2 — `ask` in the host; the four fixtures recorded live; conformance admission
 - [ ] M3 — Transcript rows (the capsule, the delivery row), the pane bridge, the question-row refusal
 - [ ] M4 — The Question sheet (X5 tool)
