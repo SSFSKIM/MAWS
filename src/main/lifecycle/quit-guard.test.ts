@@ -206,6 +206,8 @@ describe('the quit guard', () => {
       engines: noEngines,
       unsavedFiles: () => [], // E5
       saveAll: vi.fn(async (): Promise<ReadonlyMap<string, string>> => new Map()), // E5
+      keepOffered: () => false, // E10: utility mode
+      keepDefault: () => true, // E10
       ...over,
     };
     return { deps, control: installQuitGuard(model, deps) };
@@ -224,7 +226,7 @@ describe('the quit guard', () => {
     const { deps } = guard(modelWith(midTurn(2)));
     expect(electron.app.attempt()).toBe(false);
     await settle();
-    expect(deps.ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 2, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] }, FIRST);
+    expect(deps.ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 2, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] }, FIRST, null); // E10: keep not offered
     expect(deps.shutdownEngine).not.toHaveBeenCalled();
     expect(electron.app.quits).toBe(0);
     expect(electron.app.attempt()).toBe(false);
@@ -403,7 +405,7 @@ describe('quit when idle', () => {
 });
 
 function guardDeps(model: ReturnType<typeof modelWith>, over: Partial<Parameters<typeof installQuitGuard>[1]>) {
-  return installQuitGuard(model, { pty: noTerminals, ask: async () => 'cancel', shutdownEngine: vi.fn(async () => {}), publish: () => {}, engines: noEngines, unsavedFiles: () => [] /* E5 */, saveAll: async () => new Map() /* E5 */, ...over });
+  return installQuitGuard(model, { pty: noTerminals, ask: async () => 'cancel', shutdownEngine: vi.fn(async () => {}), publish: () => {}, engines: noEngines, unsavedFiles: () => [] /* E5 */, saveAll: async () => new Map() /* E5 */, keepOffered: () => false /* E10 */, keepDefault: () => true /* E10 */, ...over });
 }
 
 // A pty host whose every `pty.list` answers when the test says; one terminal, busy while `busy` is true.
@@ -633,7 +635,7 @@ describe('the report is fresh when it decides', () => {
     model.apply(status('a', { turn: humanTurn })); // a turn starts during the read
     await d.answer(0);
     expect(electron.app.quits).toBe(0);
-    expect(ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] }, FIRST);
+    expect(ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] }, FIRST, null);
   });
 
   it('while waiting, a read that a status change overtook does not quit on its zero', async () => {
@@ -715,6 +717,8 @@ describe('unsaved files in the quit question', () => {
       engines: noEngines,
       unsavedFiles: (): readonly string[] => [],
       saveAll: vi.fn(async (): Promise<ReadonlyMap<string, string>> => new Map()),
+      keepOffered: () => false, // E10: utility mode
+      keepDefault: () => true, // E10
       ...over,
     };
     return { deps, control: installQuitGuard(model, deps) };
@@ -726,7 +730,7 @@ describe('unsaved files in the quit question', () => {
     const { deps } = guard(modelWith([status('idle')]), { unsavedFiles: () => ['/r/a.ts'] });
     expect(electron.app.attempt()).toBe(false);
     await settle();
-    expect(deps.ask).toHaveBeenCalledExactlyOnceWith(unsaved('/r/a.ts'), FIRST); // nothing busy, but a file unsaved: asked
+    expect(deps.ask).toHaveBeenCalledExactlyOnceWith(unsaved('/r/a.ts'), FIRST, null); // nothing busy, but a file unsaved: asked
     expect(electron.app.quits).toBe(0);
   });
 
@@ -1049,3 +1053,145 @@ describe('the unsaved files each window pushes', () => {
   });
 });
 // E5 end
+
+// E10 start: keeping the sessions running at quit (E10 execution document, §Design 5; ruled by A-29). In detached mode a
+// non-zero report is asked with "Quit and keep sessions running" first, the default button by the setting; keep leaves
+// the supervisor its sessions (no shutdown, no SIGKILL rung) and quits; every other answer stops them as before.
+describe('keeping sessions running at quit', () => {
+  const offer = (isDefault: boolean, kept = 1) => ({ isDefault, kept: () => kept });
+  function guard(model: ReturnType<typeof modelWith>, over: Partial<Parameters<typeof installQuitGuard>[1]> = {}) {
+    const deps = {
+      pty: noTerminals,
+      ask: vi.fn(async (): Promise<'quit' | 'cancel' | 'when_idle' | 'save_all' | 'keep'> => 'cancel'),
+      shutdownEngine: vi.fn(async () => {}),
+      publish: vi.fn(),
+      engines: noEngines,
+      unsavedFiles: (): readonly string[] => [],
+      saveAll: vi.fn(async (): Promise<ReadonlyMap<string, string>> => new Map()),
+      keepOffered: () => true, // detached mode
+      keepDefault: () => true,
+      ...over,
+    };
+    return { deps, control: installQuitGuard(model, deps) };
+  }
+
+  it('offers keep first, the default button when the setting says so and Quit otherwise; Cancel stays the cancel button', () => {
+    const report = { ...NONE, midTurn: 2 };
+    expect(quitQuestion(report, 'Quit', new Map(), offer(true))).toEqual({
+      type: 'warning',
+      buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'],
+      defaultId: 0,
+      cancelId: 3,
+      message: '2 sessions mid-turn',
+      detail: 'Quitting stops them. Transcripts stay on disk and can be resumed.',
+    });
+    expect(quitQuestion(report, 'Quit', new Map(), offer(false))).toMatchObject({ defaultId: 1, cancelId: 3 });
+    expect(quitQuestion(report, 'Quit', new Map(), null)).toEqual(quitQuestion(report, 'Quit')); // not offered: as before
+  });
+
+  it('says terminals close with the app when a terminal is busy (or did not answer) and keep is offered', () => {
+    const detail = 'Quitting stops them. Transcripts stay on disk and can be resumed.\nTerminals close with the app.';
+    expect(quitQuestion({ ...NONE, midTurn: 1, busyTerminals: 2 }, 'Quit', new Map(), offer(true)).detail).toBe(detail);
+    expect(quitQuestion({ ...NONE, busyTerminals: 1, terminalsUnknown: true }, 'Quit', new Map(), offer(true)).detail).toBe(detail);
+    expect(quitQuestion({ ...NONE, midTurn: 1 }, 'Quit', new Map(), offer(true)).detail).not.toContain('Terminals');
+    expect(quitQuestion({ ...NONE, busyTerminals: 1 }, 'Quit').detail).not.toContain('Terminals'); // keep not offered
+  });
+
+  it('with unsaved files E5’s question comes first, unchanged, and keep is not among its answers', async () => {
+    const report = { ...NONE, midTurn: 1, unsavedFiles: ['/r/a.ts'] };
+    expect(quitQuestion(report, 'Quit', new Map(), offer(true))).toEqual(quitQuestion(report, 'Quit'));
+    const show = vi.fn().mockResolvedValueOnce({ response: 0 });
+    expect(await askToQuit(report, { env: {}, show }, FIRST, offer(true))).toBe('save_all');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await askToQuit(report, { env: { MAWS_E2E: '1', MAWS_E2E_QUIT_ANSWER: 'keep' }, show }, FIRST, offer(true))).toBe('quit');
+    log.mockRestore();
+  });
+
+  it('maps the four buttons, and logs a keep with the sessions it keeps', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const show = vi.fn();
+    for (const response of [0, 1, 2, 3]) show.mockResolvedValueOnce({ response });
+    const report = { ...NONE, midTurn: 2 };
+    const answers = [];
+    for (let i = 0; i < 4; i += 1) answers.push(await askToQuit(report, { env: {}, show }, FIRST, offer(true, 2)));
+    expect(answers).toEqual(['keep', 'quit', 'when_idle', 'cancel']);
+    expect(show).toHaveBeenCalledWith(quitQuestion(report, 'Quit', new Map(), offer(true, 2)));
+    expect(log.mock.calls.map(([line]) => line)).toEqual(['quit-guard: 2 mid-turn, answered keep, 2 sessions kept']);
+    log.mockRestore();
+  });
+
+  it('under MAWS_E2E answers keep only when it is offered, with the kept count in the line the e2e reads', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const show = vi.fn();
+    const env = { MAWS_E2E: '1', MAWS_E2E_QUIT_ANSWER: 'keep' };
+    expect(await askToQuit({ ...NONE, midTurn: 1 }, { env, show }, FIRST, offer(false, 1))).toBe('keep');
+    expect(await askToQuit({ ...NONE, midTurn: 1 }, { env, show }, FIRST, null)).toBe('quit'); // utility mode: not offered
+    expect(show).not.toHaveBeenCalled();
+    expect(log.mock.calls.map(([line]) => line)).toEqual(['quit-guard: 1 mid-turn, auto-answered keep, 1 session kept', 'quit-guard: 1 mid-turn, auto-answered quit']);
+    log.mockRestore();
+  });
+
+  it('asks with keep in detached mode, its default read from the setting at each question, and counts the sessions not exited', async () => {
+    let keepDefault = true;
+    const ask = vi.fn(async (): Promise<'cancel'> => 'cancel');
+    guard(modelWith([...midTurn(2), status('idle'), status('gone', { process: 'exited' })]), { ask, keepDefault: () => keepDefault });
+    electron.app.attempt();
+    await settle();
+    keepDefault = false;
+    electron.app.attempt();
+    await settle();
+    const offers = ask.mock.calls.map((call) => (call as unknown[])[2] as { isDefault: boolean; kept(): number });
+    expect(offers.map((o) => o.isDefault)).toEqual([true, false]);
+    expect(offers[0]!.kept()).toBe(3); // the idle live session is kept too; the exited one is not a session kept
+  });
+
+  it('is not offered in utility mode', async () => {
+    const { deps } = guard(modelWith(midTurn(1)), { keepOffered: () => false });
+    electron.app.attempt();
+    await settle();
+    expect(deps.ask).toHaveBeenCalledExactlyOnceWith({ ...NONE, midTurn: 1 }, FIRST, null);
+  });
+
+  it('keep skips the shutdown and the SIGKILL rung, then quits once', async () => {
+    const kill = vi.fn();
+    const ps = vi.fn(async () => '');
+    const { deps } = guard(modelWith(midTurn(1)), { ask: vi.fn(async () => 'keep' as const), engines: { hostPid: () => 500, ps, kill } });
+    expect(electron.app.attempt()).toBe(false);
+    await settle();
+    expect(deps.shutdownEngine).not.toHaveBeenCalled();
+    expect(ps).not.toHaveBeenCalled();
+    expect(kill).not.toHaveBeenCalled();
+    expect(electron.app.quits).toBe(1);
+    expect(deps.ask).toHaveBeenCalledOnce();
+  });
+
+  it('an unbusy quit in detached mode asks nothing and stops every session as today; so does Quit', async () => {
+    const idle = guard(modelWith([status('idle')]));
+    electron.app.attempt();
+    await settle();
+    expect(idle.deps.ask).not.toHaveBeenCalled();
+    expect(idle.deps.shutdownEngine).toHaveBeenCalledOnce();
+    expect(electron.app.quits).toBe(1);
+
+    electron.app.reset();
+    const busy = guard(modelWith(midTurn(1)), { ask: vi.fn(async () => 'quit' as const) });
+    electron.app.attempt();
+    await settle();
+    expect(busy.deps.shutdownEngine).toHaveBeenCalledOnce();
+    expect(electron.app.quits).toBe(1);
+  });
+
+  it('after Save all the ordinary question follows with keep, and keep is honoured there', async () => {
+    let files = ['/r/a.ts'];
+    const ask = vi.fn<(r: unknown) => Promise<'save_all' | 'keep'>>().mockResolvedValueOnce('save_all').mockResolvedValueOnce('keep');
+    const saveAll = vi.fn(async () => ((files = []), new Map<string, string>()));
+    const { deps } = guard(modelWith(midTurn(1)), { unsavedFiles: () => files, saveAll, ask });
+    electron.app.attempt();
+    await settle();
+    await settle();
+    expect(ask.mock.calls.map(([r]) => r)).toEqual([{ ...NONE, midTurn: 1, unsavedFiles: ['/r/a.ts'] }, { ...NONE, midTurn: 1 }]);
+    expect(deps.shutdownEngine).not.toHaveBeenCalled();
+    expect(electron.app.quits).toBe(1);
+  });
+});
+// E10 end

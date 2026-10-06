@@ -24,15 +24,23 @@
 // all (the renderer answers it as the conflict it is). Under MAWS_E2E a question asked again about unsaved files is
 // answered Cancel, so a save that keeps failing cannot loop a test.
 // E5 end
+// E10 start: keeping the sessions running (E10 execution document, §Design 5; ruled by A-29). In detached mode the engine
+// host is the supervisor, which outlives the app, so a non-zero report is asked with "Quit and keep sessions running"
+// first (the default button when the setting says so, else Quit; Cancel stays the cancel button). Keep skips the engine
+// shutdown and the SIGKILL rung and quits: will-quit then closes the supervisor's socket without an exit, and it serves
+// its sessions on. Every other quit stops the sessions as before (shutdownEngine). With files unsaved E5's question
+// comes first, unchanged; after Save all the ordinary question, keep included, follows. An unbusy quit is never asked.
+// E10 end
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto'; // E5
 import { basename } from 'node:path'; // E5
 import { app, type MessageBoxOptions } from 'electron';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionReadModel } from '../sessions/read-model';
+import { QUIT_KEEP } from './copy'; // E10
 
 // C12 start
-export type QuitAnswer = 'quit' | 'when_idle' | 'cancel' | 'save_all' /* E5 */;
+export type QuitAnswer = 'quit' | 'when_idle' | 'cancel' | 'save_all' /* E5 */ | 'keep' /* E10 */;
 // terminalsUnknown: a live pty host did not list its terminals in time, so they count as one busy terminal, said so
 // E5: unsavedFiles, the absolute paths of every window's dirty file tabs, sorted
 export interface BusyReport { midTurn: number; backgroundWork: number; busyTerminals: number; terminalsUnknown: boolean; unsavedFiles: string[] }
@@ -142,6 +150,10 @@ export async function killEngines(statuses: readonly EngineSessionStatus[], deps
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
+// E10: keep is offered (detached mode), as the default button or not; `kept()` counts the sessions a keep leaves
+// running, read when the answer is logged
+export interface KeepOffer { isDefault: boolean; kept(): number }
+
 // E5: the unsaved question's detail names the files by basename, at most five. A file the last Save all could not save
 // gets a line of its own with the reason its window gave (`app.ts: Changed on disk since you opened it`); the others
 // share the `Unsaved:` line.
@@ -155,7 +167,12 @@ function unsavedDetail(paths: readonly string[], reasons: ReadonlyMap<string, st
   return [...named, ...(listing ? [listing] : [])].join('\n');
 }
 
-export function quitQuestion(report: BusyReport, verb: 'Quit' | 'Restart', reasons: ReadonlyMap<string, string> = new Map() /* E5 */): MessageBoxOptions {
+export function quitQuestion(
+  report: BusyReport,
+  verb: 'Quit' | 'Restart',
+  reasons: ReadonlyMap<string, string> = new Map(), // E5
+  keep: KeepOffer | null = null, // E10
+): MessageBoxOptions {
   const parts = [
     report.midTurn > 0 ? `${plural(report.midTurn, 'session', 'sessions')} mid-turn` : null,
     report.backgroundWork > 0 ? `${plural(report.backgroundWork, 'session', 'sessions')} running background work` : null,
@@ -176,6 +193,17 @@ export function quitQuestion(report: BusyReport, verb: 'Quit' | 'Restart', reaso
     };
   }
   // E5 end
+  // E10: keep first; terminals cannot be kept, which the detail says when one is busy
+  if (keep) {
+    return {
+      type: 'warning',
+      buttons: [QUIT_KEEP.button, verb, `${verb} when idle`, 'Cancel'],
+      defaultId: keep.isDefault ? 0 : 1,
+      cancelId: 3,
+      message: parts.join(' · '),
+      detail: [stops, ...(report.busyTerminals > 0 ? [QUIT_KEEP.terminalsClose] : [])].join('\n'),
+    };
+  }
   return {
     type: 'warning',
     buttons: [verb, `${verb} when idle`, 'Cancel'],
@@ -204,31 +232,37 @@ export interface QuitRound { round: number; reasons: ReadonlyMap<string, string>
 const FIRST_ROUND: QuitRound = { round: 0, reasons: new Map() };
 
 // The question as the app asks it: the native dialog, or under `MAWS_E2E=1` the answer `MAWS_E2E_QUIT_ANSWER` gives
-// (quit by default; C12: `cancel` and `when_idle` too; E5: `save_all`, each only when the question offers it), logged to
-// stderr for the smoke to read. E5: under MAWS_E2E a later question of the flight that still names unsaved files is
-// answered `cancel`, so a Save all that keeps failing ends the flight instead of looping; a later ordinary question (Save
-// all saved everything, sessions still busy) cannot loop, none of its answers asking again, and is answered as at first.
+// (quit by default; C12: `cancel` and `when_idle` too; E5: `save_all`; E10: `keep`; each only when the question offers
+// it), logged to stderr for the smoke to read. E5: under MAWS_E2E a later question of the flight that still names
+// unsaved files is answered `cancel`, so a Save all that keeps failing ends the flight instead of looping; a later
+// ordinary question (Save all saved everything, sessions still busy) cannot loop, none of its answers asking again, and
+// is answered as at first. E10: a keep, scripted or chosen, is logged with the sessions it keeps.
 export async function askToQuit(
   report: BusyReport, // C12: the report, not C5's mid-turn count
   deps: { env: Record<string, string | undefined>; show(options: MessageBoxOptions): Promise<{ response: number }> },
   asked: QuitRound = FIRST_ROUND, // E5
+  keep: KeepOffer | null = null, // E10
 ): Promise<QuitAnswer> {
-  // E5: the question's three buttons as answers, in order; with unsaved files Save all, Quit anyway (a quit) and Cancel
-  const offered: readonly QuitAnswer[] = report.unsavedFiles.length > 0 ? ['save_all', 'quit', 'cancel'] : ['quit', 'when_idle', 'cancel'];
+  // E5: the question's buttons as answers, in order; with unsaved files Save all, Quit anyway (a quit) and Cancel
+  const unsaved = report.unsavedFiles.length > 0;
+  const offered: readonly QuitAnswer[] = unsaved ? ['save_all', 'quit', 'cancel'] : keep ? ['keep', 'quit', 'when_idle', 'cancel'] /* E10 */ : ['quit', 'when_idle', 'cancel'];
+  const kept = (answer: QuitAnswer) => (answer === 'keep' && keep ? `, ${plural(keep.kept(), 'session', 'sessions')} kept` : ''); // E10
   if (deps.env.MAWS_E2E === '1') {
-    const repeated = asked.round > 0 && report.unsavedFiles.length > 0;
+    const repeated = asked.round > 0 && unsaved;
     const answer: QuitAnswer = repeated ? 'cancel' : (offered.find((a) => a === deps.env.MAWS_E2E_QUIT_ANSWER) ?? 'quit');
-    console.error(`quit-guard: ${logParts(report)}, auto-answered ${answer}`);
+    console.error(`quit-guard: ${logParts(report)}, auto-answered ${answer}${kept(answer)}`);
     return answer;
   }
-  const { response } = await deps.show(quitQuestion(report, 'Quit', asked.reasons));
-  return offered[response] ?? 'cancel'; // C12: three buttons
+  const { response } = await deps.show(quitQuestion(report, 'Quit', asked.reasons, keep));
+  const answer = offered[response] ?? 'cancel'; // C12: three buttons (E10: four with keep)
+  if (answer === 'keep') console.error(`quit-guard: ${logParts(report)}, answered keep${kept(answer)}`); // E10
+  return answer;
 }
 
 // C12 start
 export interface QuitGuardDeps {
   pty: QuitPty;
-  ask(report: BusyReport, asked: QuitRound /* E5 */): Promise<QuitAnswer>;
+  ask(report: BusyReport, asked: QuitRound /* E5 */, keep: KeepOffer | null /* E10 */): Promise<QuitAnswer>;
   shutdownEngine(): Promise<void>;
   engines: EngineKill; // debt wave 6: the SIGKILL rung past the bound
   publish(waiting: BusyReport | null): void; // the page's "MAWS will quit when … finish" banner
@@ -240,6 +274,10 @@ export interface QuitGuardDeps {
   // answers gave by path for the files not saved
   saveAll(): Promise<ReadonlyMap<string, string>>;
   // E5 end
+  // E10 start
+  keepOffered(): boolean; // the engine host runs detached: its sessions can outlive the app
+  keepDefault(): boolean; // the setting `supervisor.keepRunningDefault`: keep is the default button
+  // E10 end
 }
 
 export interface QuitGuard {
@@ -265,11 +303,13 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
     wait = null;
     deps.publish(null);
   };
-  // Every quit, busy or not: the engines end through their ladders, bounded, then the one final app.quit()
-  const quit = (): Promise<void> => {
+  // Every quit, busy or not: the engines end through their ladders, bounded, then the one final app.quit(). E10: a keep
+  // leaves them running (no shutdown, no SIGKILL rung) and quits.
+  const quit = (keep = false): Promise<void> => {
     if (quitting) return quitting;
     stopWaiting();
     quitting = (async () => {
+      if (keep) return finalQuit(); // the answer's log line names the sessions kept (askToQuit)
       try {
         await within(deps.shutdownEngine(), SHUTDOWN_BOUND_MS);
       } catch (error) {
@@ -347,12 +387,15 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
         for (let r = first, round = 0; ; r = await report(), round += 1) {
           if (quitting) return;
           if (total(r) === 0) return quit();
-          const answer = await deps.ask(r, { round, reasons }).catch((error: unknown) => {
+          // E10: keep is offered in detached mode, its default read at each question; it keeps every live session
+          const keep = deps.keepOffered() ? { isDefault: deps.keepDefault(), kept: () => model.engineStatuses().filter((s) => s.process !== 'exited').length } : null;
+          const answer = await deps.ask(r, { round, reasons }, keep).catch((error: unknown) => {
             console.error('[quit-guard] the quit question failed; treating it as Cancel', error);
             return 'cancel' as const;
           });
           if (quitting) return; // the banner's Quit now answered first
           if (answer === 'quit') return quit();
+          if (answer === 'keep') return quit(true); // E10
           if (answer === 'when_idle') return startWaiting(r);
           // Cancel keeps the app, and leaves a wait already under way as it was (the banner has its own Cancel)
           if (answer !== 'save_all') return;
