@@ -40,7 +40,7 @@ export function CommitForm({ appSessionId, ui, groups, trusted }: { appSessionId
     }
   };
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || !event.metaKey) return;
+    if (event.key !== 'Enter' || !event.metaKey || event.nativeEvent.isComposing) return; // an IME's Enter commits the composition
     event.preventDefault();
     void commit();
   };

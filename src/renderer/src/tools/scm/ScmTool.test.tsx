@@ -22,7 +22,7 @@ let main: ReturnType<typeof scmMain>;
 
 const openScm = (params?: ScmParams, pin = false) => act(() => void panelHost.addTool(SCM_TOOL_ID, { appSessionId: A, params, pin }));
 const draft = () => screen.getByRole('textbox', { name: 'Commit message' }) as HTMLTextAreaElement;
-const selectedRow = () => document.querySelector<HTMLElement>('[data-scm-row][aria-selected="true"]')?.dataset.path ?? null;
+const selectedRow = () => document.querySelector<HTMLElement>('[data-scm-select][aria-current="true"]')?.closest<HTMLElement>('[data-scm-row]')?.dataset.path ?? null;
 const fileHeader = () => document.querySelector('[data-scm-file-header]')?.textContent;
 
 beforeEach(() => {

@@ -9,6 +9,8 @@ import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import { ipc } from '../../ipc/client';
+import { queryClient } from '../../ipc/query';
 import { NOT_A_REPOSITORY } from '../../sessions/branch-label';
 import { useGit } from '../../stores/git';
 import { openFile } from '../code/open-file';
@@ -16,7 +18,7 @@ import { CommitForm } from './CommitForm';
 import { SCM_COPY } from './copy';
 import { DiscardSheet } from './DiscardSheet';
 import { FileRow, type RowActions } from './FileRow';
-import { groupsOf, SCM_GROUPS, type ScmEntry, type ScmGroupName, type ScmGroups } from './groups';
+import { checkoutPath, groupsOf, SCM_GROUPS, type ScmEntry, type ScmGroupName, type ScmGroups } from './groups';
 import { Notice } from './Notice';
 import { ScmDiff } from './ScmDiff';
 import { useScm, useScmStatus } from './store';
@@ -42,6 +44,11 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
   const scm = useScmStatus(appSessionId);
   // Known from `scm.status`, or null while it is read; a failed read is said and gates the actions as untrusted would.
   const trusted = scm.data ? scm.data.trusted : scm.isError ? false : null;
+  // Trust is recorded in main by a session's setup (C10's Trust and start, the `trusting` phase), which the renderer
+  // learns of only through `session.setup`: every phase re-reads `scm.status` (its query is shared with the summary's
+  // row), so the untrusted notice clears without a remount. Window focus and a re-shown tool (the host remounts it)
+  // re-read it too, as TanStack's defaults do for a stale query.
+  useEffect(() => ipc.on('session.setup', () => void queryClient.invalidateQueries({ queryKey: ['maws', 'scm.status'] })), []);
   const groups = useMemo(() => groupsOf(status), [status]);
 
   // An open() waiting is applied once the status is known; a watch that failed consumes it.
@@ -72,7 +79,7 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
     stage: (paths) => void useScm.getState().stage(ui, appSessionId, paths),
     unstage: (paths) => void useScm.getState().unstage(ui, appSessionId, paths),
     discard: (entries) => ui.setState({ sheet: { kind: 'discard', entries } }),
-    open: (path) => openFile(appSessionId, joinPath(status.repoRoot, path), null),
+    open: (path) => openFile(appSessionId, checkoutPath(status.repoRoot, path), null),
   };
   const selectedEntry = selected === null ? null : (groups[selected.group].find((candidate) => candidate.path === selected.path) ?? null);
   const empty = SCM_GROUPS.every((name) => groups[name].length === 0);
@@ -89,7 +96,7 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
         <p role="status" data-scm-untrusted className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-ui-sm text-warning">
           {SCM_COPY.untrusted}
         </p>
-      ) : scm.error ? (
+      ) : !scm.data && scm.error ? (
         <p role="status" data-scm-status-failed className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-ui-sm text-danger">
           {SCM_COPY.statusFailed(scm.error.message)}
         </p>
@@ -115,8 +122,6 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
     </div>
   );
 }
-
-const joinPath = (root: string, path: string) => `${root.replace(/\/+$/, '')}/${path}`;
 
 function headerOf(status: GitStatus): string {
   const parts = [status.branch !== null ? SCM_COPY.branch(status.branch) : SCM_COPY.detached(status.head)];
@@ -176,7 +181,7 @@ function GroupSection({ name, groups, ui, selected, enabled, actions }: { name: 
         <GroupActions name={name} entries={entries} enabled={enabled} actions={actions} />
       </div>
       {collapsed || entries.length === 0 ? null : (
-        <ul role="listbox" aria-label={title} className="m-0 list-none p-0">
+        <ul aria-label={title} className="m-0 list-none p-0">
           {entries.map((entry) => (
             <FileRow key={entry.path} group={name} entry={entry} selected={selected?.group === name && selected.path === entry.path} enabled={enabled} actions={actions} />
           ))}

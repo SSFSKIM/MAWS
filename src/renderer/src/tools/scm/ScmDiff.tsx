@@ -14,7 +14,7 @@ import { useViewer } from '../code/viewer/viewer-store';
 import '../code/code.css';
 import { SCM_COPY } from './copy';
 import { changeWords, openable } from './FileRow';
-import type { ScmEntry, ScmGroupName } from './groups';
+import { checkoutPath, type ScmEntry, type ScmGroupName } from './groups';
 import { diffOf, fileDiffOf, useScm, type ScmDiffTarget } from './store';
 import { selectionKey, type ScmUi } from './view-state';
 
@@ -30,6 +30,8 @@ const Note = ({ children, role }: { children: ReactNode; role?: 'status' }) => (
 );
 
 // What the selection reads: null for a conflict and for a directory entry, which have no diff to draw.
+const NOT_UNTRACKED = 'not an untracked file:'; // C4's refusal of the `untracked` scope (src/main/git/service.ts)
+
 export function diffTarget(directory: string, group: ScmGroupName, path: string): ScmDiffTarget | null {
   if (group === 'staged') return { directory, scope: 'staged' };
   if (group === 'unstaged') return { directory, scope: 'worktree' };
@@ -37,10 +39,9 @@ export function diffTarget(directory: string, group: ScmGroupName, path: string)
   return null;
 }
 
-const joinPath = (root: string, path: string) => `${root.replace(/\/+$/, '')}/${path}`;
-
 // The selected file's patch: undefined while it is read, null when its scope's diff does not hold it (nothing to draw).
 // An untracked read answers the one file; a scope's split is keyed by path; past the scope's cap, the file read alone.
+// (An untracked read past the cap answers no split at all; the body says it is too large before asking here.)
 function fileOf(target: ScmDiffTarget | null, split: ReadonlyMap<string, PatchFile> | null | undefined, fetched: FileDiff | undefined, path: string): PatchFile | null | undefined {
   if (target === null) return null;
   if (split === undefined) return undefined;
@@ -64,8 +65,20 @@ export function ScmDiff({ appSessionId, directory, repoRoot, ui, group, entry }:
   }, [fetchOne, target, path, scope]);
 
   const file = fileOf(target, split, fetched, path);
+  // An untracked file past the scope cap came back as the list alone, and is whole or nothing: too large to draw.
+  const untrackedPastCap = target?.scope === 'untracked' && split === null;
   const failure = scope?.status === 'error' ? scope.message : fetched?.status === 'error' ? fetched.message : null;
-  const open = openable(entry) ? (line: number | null) => openFile(appSessionId, joinPath(repoRoot, path), line) : null;
+  const open = openable(entry) ? (line: number | null) => openFile(appSessionId, checkoutPath(repoRoot, path), line) : null;
+  const tooLargeNote = (line: number | null) => (
+    <Note>
+      {SCM_COPY.tooLarge}{' '}
+      {open ? (
+        <button type="button" className="text-accent hover:underline" onClick={() => open(line)}>
+          {SCM_COPY.openTheFile}
+        </button>
+      ) : null}
+    </Note>
+  );
 
   return (
     <section data-scm-diff={selectionKey({ group, path })} className="flex min-h-0 flex-1 flex-col">
@@ -84,8 +97,10 @@ export function ScmDiff({ appSessionId, directory, repoRoot, ui, group, entry }:
       ) : target === null ? (
         <Note>{SCM_COPY.directoryNote}</Note>
       ) : failure !== null ? (
-        // C4 refuses an untracked path its fresh status does not list ("not an untracked file: …"): no diff to show.
-        <Note role="status">{target.scope === 'untracked' ? SCM_COPY.noDiff : SCM_COPY.unavailable(failure)}</Note>
+        // C4 refuses an untracked path its fresh status does not list: no diff to show. Any other failure says itself.
+        <Note role="status">{failure.startsWith(NOT_UNTRACKED) ? SCM_COPY.noDiff : SCM_COPY.unavailable(failure)}</Note>
+      ) : untrackedPastCap ? (
+        tooLargeNote(1)
       ) : file === undefined ? (
         <Note>{SCM_COPY.loading}</Note>
       ) : file === null ? (
@@ -95,14 +110,7 @@ export function ScmDiff({ appSessionId, directory, repoRoot, ui, group, entry }:
       ) : file.hunks.length === 0 ? (
         <Note>{SCM_COPY.noContent}</Note>
       ) : tooLarge(file) ? (
-        <Note>
-          {SCM_COPY.tooLarge}{' '}
-          {open ? (
-            <button type="button" className="text-accent hover:underline" onClick={() => open(firstChangedLine(file.hunks[0]))}>
-              {SCM_COPY.openTheFile}
-            </button>
-          ) : null}
-        </Note>
+        tooLargeNote(firstChangedLine(file.hunks[0]))
       ) : (
         <Hunks key={selectionKey({ group, path })} ui={ui} file={file} />
       )}

@@ -61,8 +61,8 @@ function Action({ label, glyph, git = true, enabled, onClick }: { label: string;
 export function FileRow({ group, entry, selected, enabled, actions }: { group: ScmGroupName; entry: ScmEntry; selected: boolean; enabled: boolean; actions: RowActions }) {
   const { path } = entry;
   return (
-    <li role="option" aria-selected={selected} data-scm-row data-path={path} className={`group flex h-6 items-center pr-2 hover:bg-bg-hover ${selected ? 'bg-bg-active' : ''}`}>
-      <button type="button" data-scm-select title={path} onClick={() => actions.select({ group, path })} className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-3 text-left text-ui text-fg">
+    <li data-scm-row data-path={path} data-selected={selected || undefined} className={`group flex h-6 items-center pr-2 hover:bg-bg-hover ${selected ? 'bg-bg-active' : ''}`}>
+      <button type="button" data-scm-select aria-current={selected || undefined} title={path} onClick={() => actions.select({ group, path })} className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-3 text-left text-ui text-fg">
         <span data-change={entry.change} title={changeWords(entry)} className={`w-3 shrink-0 text-center font-mono text-ui-sm ${LETTER_TONE[entry.change]}`}>
           {SCM_COPY.letters[entry.change]}
         </span>

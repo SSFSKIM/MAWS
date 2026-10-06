@@ -65,6 +65,9 @@ export function groupsOf(status: GitStatus | null): ScmGroups {
   return groups;
 }
 
+// Where a listed path lives on disk: under git's own spelling of the repository's root.
+export const checkoutPath = (repoRoot: string, path: string) => `${repoRoot.replace(/\/+$/, '')}/${path}`;
+
 export function isListed(groups: ScmGroups, selection: ScmSelection): boolean {
   return groups[selection.group].some((entry) => entry.path === selection.path);
 }

@@ -63,6 +63,7 @@ describe('the commit form', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /Skip hooks/ }));
     expect(ui.getState().noVerify).toBe(true);
     fireEvent.keyDown(message(), { key: 'Enter' }); // Enter alone is a newline
+    fireEvent.keyDown(message(), { key: 'Enter', metaKey: true, isComposing: true }); // an IME (Hangul) committing its composition
     expect(main.callsOf('scm.commit')).toEqual([]);
     fireEvent.keyDown(message(), { key: 'Enter', metaKey: true });
     await waitFor(() => expect(main.callsOf('scm.commit')).toEqual([{ appSessionId: A, message: 'From the panel\n\nThe body.', noVerify: true }]));

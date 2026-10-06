@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StoreApi } from 'zustand/vanilla';
 import { connectPanelEvents } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
+import { REVIEW_FILE_LINES_CAP, REVIEW_SCOPE_BYTES_CAP } from '../code/review/review-model';
 import { useGit } from '../../stores/git';
 import { useLayout } from '../../stores/layout';
 import { fail, ok } from '../../test-support/code';
@@ -75,7 +76,8 @@ describe('source control tool renders groups, selects a file and draws its hunks
     expect(document.querySelector('[data-scm-file-header]')?.textContent).toBe('src/app.ts · Modified');
     expect(screen.getByText('Showing hunk 1 of 1')).toBeTruthy();
     expect(main.callsOf('git.diff')).toContainEqual({ directory: DIR, scope: 'worktree' });
-    expect(rowButton('Unstaged', 'src/app.ts').closest('[data-scm-row]')?.getAttribute('aria-selected')).toBe('true');
+    expect(rowButton('Unstaged', 'src/app.ts').getAttribute('aria-current')).toBe('true');
+    expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
 
     fireEvent.click(rowButton('Staged', 'src/staged.ts'));
     await waitFor(() => expect(document.querySelector('[data-scm-file-header]')?.textContent).toBe('src/staged.ts · Added'));
@@ -227,6 +229,28 @@ describe('source control tool renders groups, selects a file and draws its hunks
     for (const action of document.querySelectorAll<HTMLButtonElement>('[data-scm-action]')) expect(action.disabled).toBe(true);
   });
 
+  it('clears the untrusted notice once a session’s setup records trust in-app, without a remount', async () => {
+    main.state.scm = scmStatusOf({ trusted: false });
+    renderShell();
+    await waitFor(() => expect(screen.getByText('MAWS runs git here only after you trust the folder in a session')).toBeTruthy());
+    await waitFor(() => expect(rowsOf('Unstaged')).toEqual(['src/app.ts']));
+    main.state.scm = scmStatusOf({ trusted: true }); // C10's Trust and start recorded it in main
+    act(() => main.emit('session.setup', { appSessionId: A, phase: 'launching', detail: null, outcome: null }));
+    await waitFor(() => expect(screen.queryByText('MAWS runs git here only after you trust the folder in a session')).toBeNull());
+    expect((screen.getByRole('button', { name: 'Stage src/app.ts' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('keeps the actions and says nothing when a re-read of scm.status fails over a cached answer', async () => {
+    renderShell();
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Stage src/app.ts' }) as HTMLButtonElement).disabled).toBe(false));
+    main.state.answers['scm.status'] = () => fail('engine host restarting');
+    act(() => main.emit('session.setup', { appSessionId: A, phase: 'ready', detail: null, outcome: null }));
+    await waitFor(() => expect(main.callsOf('scm.status')).toHaveLength(2));
+    await wait(20);
+    expect(screen.queryByText(/Source control unavailable/)).toBeNull();
+    expect((screen.getByRole('button', { name: 'Stage src/app.ts' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('says Not a git repository and nothing else outside a repository', async () => {
     main.state.watchError = 'not a git repository';
     renderShell();
@@ -255,4 +279,65 @@ describe('source control tool renders groups, selects a file and draws its hunks
   });
 });
 
+describe('the diff body’s other states', () => {
+  const note = () => document.querySelector('[data-scm-note]')?.textContent;
+  const select = async (name: string, path: string) => {
+    renderShell();
+    await waitFor(() => expect(rowsOf(name)).toContain(path));
+    fireEvent.click(rowButton(name, path));
+  };
+
+  it('reads one file on its own when its scope is past the cap, and draws it', async () => {
+    main.state.diffs.worktree = { patch: APP_PATCH_HEAD + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP), files: [{ path: 'src/app.ts', oldPath: null, insertions: 1, deletions: 0, binary: false }] };
+    main.state.fileDiffs.set('src/app.ts', { patch: APP_PATCH_HEAD, files: [] });
+    await select('Unstaged', 'src/app.ts');
+    await waitFor(() => expect(document.querySelector('[data-review-block]')).not.toBeNull());
+    expect(main.callsOf('git.diff')).toContainEqual({ directory: DIR, scope: 'worktree', path: 'src/app.ts' });
+  });
+
+  it('says a binary file is binary', async () => {
+    main.change(statusOf({ files: [scmFile('logo.png', '.', 'M')] }));
+    main.state.diffs.worktree = { patch: 'diff --git a/logo.png b/logo.png\nindex 1111111..2222222 100644\nBinary files a/logo.png and b/logo.png differ\n', files: [{ path: 'logo.png', oldPath: null, insertions: 0, deletions: 0, binary: true }] };
+    await select('Unstaged', 'logo.png');
+    await waitFor(() => expect(note()).toBe('Binary file'));
+  });
+
+  it('says a file past the line cap is too large and offers it at its first changed line', async () => {
+    const lines = Array.from({ length: REVIEW_FILE_LINES_CAP + 1 }, (_, i) => `+line ${i}`);
+    main.state.diffs.worktree = { patch: ['diff --git a/src/app.ts b/src/app.ts', 'index 1..2 100644', '--- a/src/app.ts', '+++ b/src/app.ts', `@@ -3,0 +4,${lines.length} @@`, ...lines, ''].join('\n'), files: [] };
+    const openTab = vi.fn();
+    const original = useLayout.getState().openTab;
+    useLayout.setState({ openTab });
+    try {
+      await select('Unstaged', 'src/app.ts');
+      await waitFor(() => expect(note()).toBe('Diff too large to display. Open the file'));
+      fireEvent.click(screen.getByRole('button', { name: 'Open the file' }));
+      expect(openTab).toHaveBeenCalledWith({ kind: 'file', path: `${DIR}/src/app.ts`, line: 4, appSessionId: A });
+    } finally {
+      useLayout.setState({ openTab: original });
+    }
+  });
+
+  it('says an untracked file past the scope cap is too large, rather than loading forever', async () => {
+    main.state.untracked.set('untracked.txt', UNTRACKED_HEAD + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP));
+    await select('Untracked', 'untracked.txt');
+    await waitFor(() => expect(note()).toBe('Diff too large to display. Open the file'));
+    expect(main.callsOf('git.diff').filter((input) => input.path !== undefined && input.scope !== 'untracked')).toEqual([]);
+  });
+
+  it('says no diff for an untracked file C4 no longer lists', async () => {
+    main.state.untracked.delete('untracked.txt');
+    await select('Untracked', 'untracked.txt');
+    await waitFor(() => expect(note()).toBe('No diff for this entry'));
+  });
+
+  it('says any other failure of an untracked read in its own words', async () => {
+    main.state.answers['git.diff'] = () => fail('timed out after 10 s');
+    await select('Untracked', 'untracked.txt');
+    await waitFor(() => expect(note()).toBe('Diff unavailable: timed out after 10 s'));
+  });
+});
+
+const APP_PATCH_HEAD = 'diff --git a/src/app.ts b/src/app.ts\nindex 1111111..2222222 100644\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1,2 +1,3 @@\n one\n+two\n three\n';
+const UNTRACKED_HEAD = 'diff --git a/untracked.txt b/untracked.txt\nnew file mode 100644\nindex 0000000..4444444\n--- /dev/null\n+++ b/untracked.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n';
 const UNTRACKED_STAGED = 'diff --git a/untracked.txt b/untracked.txt\nnew file mode 100644\nindex 0000000..4444444\n--- /dev/null\n+++ b/untracked.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n';

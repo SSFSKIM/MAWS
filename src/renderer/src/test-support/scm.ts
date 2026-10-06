@@ -61,7 +61,7 @@ export const STAGED_PATCH = 'diff --git a/src/staged.ts b/src/staged.ts\nnew fil
 export const UNTRACKED_PATCH = 'diff --git a/untracked.txt b/untracked.txt\nnew file mode 100644\nindex 0000000..4444444\n--- /dev/null\n+++ b/untracked.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n';
 const diffFile = (path: string, insertions: number, deletions = 0) => ({ path, oldPath: null, insertions, deletions, binary: false });
 
-type ScmCommand = 'scm.stage' | 'scm.unstage' | 'scm.discard' | 'scm.commit' | 'scm.status';
+type ScmCommand = 'scm.stage' | 'scm.unstage' | 'scm.discard' | 'scm.commit' | 'scm.status' | 'git.diff';
 
 // Main as the Source control body reads it: C4's watch and diffs over a scripted status, `scm.status`, and the four
 // mutations (each `{ ok: true }` with the current status unless the case scripts an answer). `change` replaces the
@@ -76,6 +76,7 @@ export function scmMain(init: { status?: GitStatus; scm?: ScmStatus } = {}) {
       staged: { patch: STAGED_PATCH, files: [diffFile('src/staged.ts', 1)] },
     } as Record<'worktree' | 'staged', GitDiff>,
     untracked: new Map<string, string>([['untracked.txt', UNTRACKED_PATCH]]),
+    fileDiffs: new Map<string, GitDiff>(), // one file of a staged or worktree scope, read alone past the scope's cap
     answers: {} as Partial<Record<ScmCommand, (input: Record<string, unknown>) => Answer | Promise<Answer>>>,
   };
   const fake = installFakeMain((name, input) => {
@@ -85,10 +86,16 @@ export function scmMain(init: { status?: GitStatus; scm?: ScmStatus } = {}) {
       case 'git.unwatch':
         return ok();
       case 'git.diff': {
+        const scripted = state.answers['git.diff'];
+        if (scripted) return scripted(input);
         const scope = input.scope as string;
         if (scope === 'untracked') {
           const patch = state.untracked.get(input.path as string);
           return patch === undefined ? fail(`not an untracked file: ${input.path as string}`) : ok({ patch, files: [diffFile(input.path as string, 2)] });
+        }
+        if (typeof input.path === 'string') {
+          const one = state.fileDiffs.get(input.path);
+          return one === undefined ? fail(`no file diff scripted for ${input.path}`) : ok(one);
         }
         return ok(scope === 'staged' ? state.diffs.staged : state.diffs.worktree);
       }
