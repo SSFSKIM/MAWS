@@ -350,19 +350,46 @@ describe('connectAsks', () => {
       off();
     });
 
+    it('every ask a background batch opened waits: with the last resolved, the earlier one opens', async () => {
+      await show(B);
+      const { probe, fake, off } = connected();
+      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1'), opened('a2')] });
+      fake.event('session.eventBatch', { appSessionId: A, events: [cancelled('a2')] });
+      await show(A);
+      expect(probe.created.map((init) => init.params)).toEqual([{ askId: 'a1' }]);
+      off();
+    });
+
     // The Overview card's or the hover card's button: the person's own way to the session, through `openAsk`, whose
-    // addTool opens the session before it writes its tab; the waiting ask then lands on that one tab
-    it('a waiting ask opened from a card goes to its session with one sheet tab', async () => {
+    // addTool opens the session before it writes its tab. The sheet lands on that one tab with the clicked ask, and the
+    // asks that waited are the person's now: nothing re-targets the sheet afterwards.
+    it('a waiting ask opened from a card goes to its session with one sheet tab, the clicked ask kept', async () => {
       await show(B);
       const { probe, fake, off } = connected();
       fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a2')] });
       const row: AskRowData = { askId: 'a1', toolUseId: 'a1' as ToolUseId, title: 'Setup', context: null, blocking: true, questions: QUESTIONS, state: 'pending', answers: null, error: null };
       mawsTranscriptActionsOver(fake.client).openAsk(A, row);
       await Promise.resolve();
+      await Promise.resolve();
       expect(shownSession()).toBe(A);
       expect(panelOf(A)?.tabs.map((t) => t.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
-      expect(probe.created).toHaveLength(1);
+      expect(probe.created.map((init) => init.params)).toEqual([{ askId: 'a1', historical: row }]);
+      expect(probe.opens).toEqual([]); // never re-targeted to a2
+      await show(B);
+      await show(A);
+      expect(probe.opens).toEqual([]);
       off();
+    });
+
+    it('a session shown just before the connection is disposed opens nothing', async () => {
+      await show(B);
+      const { probe, fake, off } = connected();
+      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+      useLayout.setState({ main: mainShowing(A) }); // the deferred open is queued...
+      off(); // ...and the connection goes before it runs
+      await Promise.resolve();
+      expect(probe.created).toEqual([]);
     });
 
     it('stops following the shown session once disconnected', async () => {
