@@ -581,6 +581,19 @@ Questions for the owner beyond these: whether amend (`--amend`) and stash belong
   Rationale: the draft kept the output in main for ten minutes with no way to read it; after a renderer reload during a push the run continued with no token, output or exit visible. Alternative rejected: cancelling every run on a renderer navigation (a push half done is worse than one the owner can watch).
   Date/Author: 2026-10-06, E6 author.
 
+- Decision (executor pre-flight, refresh pass): parent re-pinned at blob `72ee2016d77961940564c003cd4aef374d72b771` (master 13199d89). Since the grounding commit 2193e0db, E8 landed (`plugins.*`, `marketplaces.*` composed before `voice` in `schema.ts`/`names.ts`; `Summary.tsx`, `Summary.test.tsx`, `panel/copy.ts` edited for the plugins row) and the ledger recorded E6's names; `voice` is still the last namespace, so the E6 block goes after it as written. Every interface E6 consumes was re-read on 13199d89 and holds (`trustStateOf`, `captureShellEnvironment`, `PARENT_SESSION_VARIABLES`, `openTerminal`, `Sheet`/`SheetForm`, `createGitRunner`, `engineEnv`, `PushState`); line numbers in Grounding into the files E8 touched may be off by a few lines, the names are not.
+  Date/Author: 2026-10-06, E6 executor.
+- Decision (executor pre-flight): the Plan of Work runs as eleven tasks of the execution loop, each a fresh `doperpowers:task-executor` reviewed by a `doperpowers:task-reviewer`: (1) T1.1+T1.2, (2) T1.3+T1.4+T1.5, (3) T2.1+T2.2, (4) T2.3+T2.4, (5) T3.1, (6) T3.2+T3.3+T3.4, (7) T4.1, (8) T4.2+T4.3, (9) M5, (10) T6.1+T6.2, (11) T6.3+T6.4 (the gates through the slot, the evidence). Milestones are ticked when all their tasks are reviewed clean.
+  Rationale: M1, M2 and M3 each carry more than one executor can hold reliably (A-21's evidence: single workers hit their context limit); the splits follow the document's own review groupings, so every review round still covers a unit the document names.
+  Date/Author: 2026-10-06, E6 executor.
+- Decision (executor pre-flight, M5): E5 has not landed on master (`src/renderer/src/tools/code/anchor/anchor.ts` is absent at 13199d89); E5's in-flight branch carries the module with `FileLineAnchor`, `fileLineAnchor`, `registerCommentComposer` and `openCommentComposer`, and E3 has not landed. Unless E5 lands on master before M5 runs (then the branch merges master and M5 adds beside E5's names), M5 creates the file at E5's path exporting `PrLineAnchor` and `prLineAnchor` only, never a copy of E5's names, and the architect resolves the add/add at E5's or E6's landing, whichever is second; the PR diff surface is Deferred (E3 absent).
+  Rationale: Design §9's last sentence; a copy of E5's seam would be a second composer seam to reconcile, the one thing X10 forbids.
+  Date/Author: 2026-10-06, E6 executor.
+- Decision (executor pre-flight, evidence): the screenshots of T6.4 are taken in both themes (`scm-panel-light.png`, `scm-panel-dark.png`, and so for each of the four), by the spec when `MAWS_E6_SHOTS` names a directory; the dispatch brief asks for both themes and the document named one set.
+  Date/Author: 2026-10-06, E6 executor.
+- Decision (executor pre-flight): the brief confirms the owner's two open questions stand as the author left them: amend and stash are a later child (not built), and the PR body defaults to empty.
+  Date/Author: 2026-10-06, E6 executor.
+
 ## Deferred
 
 - Amend, stash, branch creation and checkout from the panel; `--force-with-lease`; pull and fetch (the terminal, or the agent, for now).
