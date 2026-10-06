@@ -243,7 +243,7 @@ describe('the policies installed on a session and a window', () => {
     expect(download.cancel).toHaveBeenCalled();
     expect(allowed.preventDefault).not.toHaveBeenCalled();
     expect(save.preventDefault).toHaveBeenCalled();
-    expect(await logLines()).toEqual([`blocked-download ${FRAME}`, 'blocked-download blob:chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/5b1e']);
+    await vi.waitFor(async () => expect(await logLines()).toEqual([`blocked-download ${FRAME}`, 'blocked-download blob:chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/5b1e']));
   });
 
   it('writes no seam line outside the e2e', async () => {
@@ -268,7 +268,7 @@ describe('the policies installed on a session and a window', () => {
     expect(fromViewer.preventDefault).toHaveBeenCalled();
     expect(allowed.preventDefault).not.toHaveBeenCalled();
     expect(app.preventDefault).not.toHaveBeenCalled();
-    expect(await logLines()).toEqual(['blocked-navigation https://example.invalid/', 'blocked-navigation https://example.invalid/pdf-link']);
+    await vi.waitFor(async () => expect(await logLines()).toEqual(['blocked-navigation https://example.invalid/', 'blocked-navigation https://example.invalid/pdf-link']));
   });
 
   class PermissionSession {

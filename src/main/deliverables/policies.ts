@@ -157,9 +157,12 @@ function beneathRead(read: () => FrameLike | null | undefined): boolean | null {
 
 export type SeamEnv = NodeJS.ProcessEnv; // MAWS_E2E and MAWS_E2E_OPEN_LOG, the e2e's seam log (as the files service reads them)
 
+// One write at a time, so the log keeps the order the policies ran in (two concurrent appends may land either way).
+let seamWrites: Promise<void> = Promise.resolve();
 function seam(env: SeamEnv, line: string): void {
-  if (env.MAWS_E2E !== '1' || !env.MAWS_E2E_OPEN_LOG) return;
-  appendFile(env.MAWS_E2E_OPEN_LOG, `${line}\n`).catch((error: unknown) => console.warn('[deliverables] could not write the e2e seam log', error));
+  const path = env.MAWS_E2E_OPEN_LOG;
+  if (env.MAWS_E2E !== '1' || !path) return;
+  seamWrites = seamWrites.then(() => appendFile(path, `${line}\n`)).catch((error: unknown) => console.warn('[deliverables] could not write the e2e seam log', error));
 }
 
 // The session's request filter (its only `onBeforeRequest` listener: nothing else in main installs one) and download
