@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
-import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
 import { item, record } from '../../../test/support/builders';
 import { SessionReadModel } from '../sessions/read-model';
 import { PERSIST_RETRY_MS, startAttentionService } from './service';
@@ -39,7 +39,7 @@ describe('attention startup', () => {
       emit: (name, payload) => { if (name === 'attention.changed') observe((payload as { items: AttentionItem[] }).items); },
       store: { list: () => new Promise((resolve) => { loaded = resolve; }), replaceForSession: async () => {}, retireForSession: async () => {} },
     });
-    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V8, openWindow: () => { throw new Error('not clicked'); } });
+    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V9, openWindow: () => { throw new Error('not clicked'); } });
     const old = item(id, 'error', '2026-10-01T00:00:00Z');
     loaded([old]); // window still hidden/unfocused while the persisted table arrives
     await service.ready;
@@ -71,7 +71,7 @@ describe('attention startup', () => {
       emit: (name, payload) => { if (name === 'attention.changed') { const change = payload as { appSessionId: AppSessionId; items: AttentionItem[] }; observe(change.appSessionId, change.items); } },
       store: { list, replaceForSession: async () => {}, retireForSession: async () => {} },
     });
-    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V8, openWindow: () => { throw new Error('not clicked'); } });
+    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V9, openWindow: () => { throw new Error('not clicked'); } });
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(list).toHaveBeenCalledTimes(2);

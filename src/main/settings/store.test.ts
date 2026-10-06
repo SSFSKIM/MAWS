@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
 import { DEFAULT_SETTINGS, openSettingsStore, resolveTheme } from './store';
 
 let dir: string;
@@ -15,13 +15,13 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const v3 = (theme: string) => ({ ...SETTINGS_DEFAULTS_V8, theme });
+const v3 = (theme: string) => ({ ...SETTINGS_DEFAULTS_V9, theme });
 // W7: a file an earlier version wrote has no budget switch; W13: and, before version 8, the engine's pin
 const PIN = { pinnedVersion: '2.1.283' };
-const { memoryBudget: _switch, ...ENGINE_V8_LESS_SWITCH } = SETTINGS_DEFAULTS_V8.engine;
+const { memoryBudget: _switch, ...ENGINE_V8_LESS_SWITCH } = SETTINGS_DEFAULTS_V9.engine;
 void _switch;
 const ENGINE_BEFORE_V7 = { ...ENGINE_V8_LESS_SWITCH, ...PIN };
-const before8 = (theme: string) => ({ ...v3(theme), version: 7, engine: { ...SETTINGS_DEFAULTS_V8.engine, ...PIN } });
+const before8 = (theme: string) => ({ ...v3(theme), version: 7, engine: { ...SETTINGS_DEFAULTS_V9.engine, ...PIN } });
 const before7 = (theme: string) => ({ ...v3(theme), engine: ENGINE_BEFORE_V7 });
 // W3: nor, before version 6, a permissions section
 const before6 = (theme: string) => {
@@ -137,9 +137,9 @@ describe('settings store', () => {
     const store = openSettingsStore(file);
     store.update({ keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null }, notifications: { enabled: false, sound: true } });
     expect(openSettingsStore(file).settings).toEqual({
-      ...SETTINGS_DEFAULTS_V8,
+      ...SETTINGS_DEFAULTS_V9,
       keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null },
-      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V8.notifications.kinds },
+      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V9.notifications.kinds },
     });
   });
 
@@ -163,7 +163,7 @@ describe('settings migrate v1 and v2 to v3', () => {
   it("migrates C5's version 2 file keeping its keymap override and notification policy, and rewrites it once", () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     writeFileSync(file, readFileSync(join(FIXTURES, 'v2.json')));
-    const migrated = { ...v3('system'), keymap: { 'attention.next': 'Cmd+Alt+J' }, notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V8.notifications.kinds } };
+    const migrated = { ...v3('system'), keymap: { 'attention.next': 'Cmd+Alt+J' }, notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V9.notifications.kinds } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
     expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 2 to 8$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8
@@ -179,7 +179,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     void _m;
     void _s;
     writeFileSync(file, JSON.stringify({ ...before6('dark'), version: 3, engine: { ...engineV3, subagentModel: 'haiku' }, appearance: { monoFont: null } }));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V8.engine, subagentModel: 'haiku' } };
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V9.engine, subagentModel: 'haiku' } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
     expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 3 to 8$/));
@@ -212,7 +212,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v6 = { ...before7('dark'), version: 6, engine: { ...ENGINE_BEFORE_V7, memoryBudgetMiB: 6144 } };
     writeFileSync(file, JSON.stringify(v6));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V8.engine, memoryBudgetMiB: 6144 } };
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V9.engine, memoryBudgetMiB: 6144 } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
     expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 6 to 8$/));
@@ -224,7 +224,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v7 = before8('dark');
     writeFileSync(file, JSON.stringify({ ...v7, engine: { ...v7.engine, binaryPath: '/opt/claude', pinnedVersion: '2.1.290' } }));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V8.engine, binaryPath: '/opt/claude' } };
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V9.engine, binaryPath: '/opt/claude' } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
     expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 7 to 8$/));

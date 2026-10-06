@@ -6,7 +6,7 @@ import * as z from 'zod';
 import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
 import { ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
-export const SETTINGS_DEFAULTS_V8: Settings = {
+export const SETTINGS_DEFAULTS_V9: Settings = {
   version: 8, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
@@ -57,7 +57,7 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 });
 // C12 end
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V8);
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V9);
 
 // W13: v7 → v8, the pin dropped (charter D-1 as amended 2026-10-01): a chosen binaryPath stays chosen
 const fromV7 = (v7: SettingsV7): Settings => {

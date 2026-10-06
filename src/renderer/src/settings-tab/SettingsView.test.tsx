@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
 import { useAttention } from '../stores/attention';
 import { useNotices } from '../stores/notices';
@@ -21,7 +21,7 @@ import { useSessions } from '../stores/sessions';
 
 let b: SettingsBridge;
 
-function renderView(initial: Settings = SETTINGS_DEFAULTS_V8, section: Parameters<typeof SettingsView>[0]['section'] = null) {
+function renderView(initial: Settings = SETTINGS_DEFAULTS_V9, section: Parameters<typeof SettingsView>[0]['section'] = null) {
   b = settingsBridge(initial);
   window.maws = b.bridge;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -206,7 +206,7 @@ describe('settings tab writes one field per row', () => {
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
       scrolled.push(this.getAttribute('aria-labelledby') ?? '');
     });
-    renderView(SETTINGS_DEFAULTS_V8, 'keyboard');
+    renderView(SETTINGS_DEFAULTS_V9, 'keyboard');
     expect(scrolled.at(-1)).toMatch(/keyboard/);
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
   });
@@ -260,7 +260,7 @@ describe('settings tab: the memory budget rows', () => {
   });
 
   it('Memory budget: a value below 0.5 GB or not a number is refused in words and the field goes back', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine, memoryBudgetMiB: 6144 } });
+    renderView({ ...SETTINGS_DEFAULTS_V9, engine: { ...SETTINGS_DEFAULTS_V9.engine, memoryBudgetMiB: 6144 } });
     const field = within(row('Limit')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
     expect(field.value).toBe('6.0');
     for (const typed of ['0.4', 'lots']) {
@@ -274,7 +274,7 @@ describe('settings tab: the memory budget rows', () => {
 
   // W7: the switch (settings version 7), on by default; off hides the limit and the stateful servers
   it('Memory budget: a switch, on by default, writes the switch whole; off hides the limit and the stateful servers and says what off means', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine, memoryBudgetMiB: 6144 } });
+    renderView({ ...SETTINGS_DEFAULTS_V9, engine: { ...SETTINGS_DEFAULTS_V9.engine, memoryBudgetMiB: 6144 } });
     const toggle = within(row('Memory budget')).getByRole('switch', { name: 'Release idle sessions to stay under a memory limit' });
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     expect(row('Limit')).toBeTruthy();

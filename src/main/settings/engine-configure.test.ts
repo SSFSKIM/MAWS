@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'; // C12: afterEach, beforeEach
 import type { CommandResult, HostState, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
 import { CONFIGURE_WAIT_MS, startEngineConfigure, type EngineConfigureDeps } from './engine-configure'; // C12: CONFIGURE_WAIT_MS
 import { REQUEST_TIMEOUT_MS, RESTART_BACKOFF_MS } from '../hosts/supervisor'; // C12
 
@@ -12,7 +12,7 @@ const TOTAL_MEM = 32 * 1024 ** 3;
 const DEFAULT_LIMIT_KIB = 8 * 1024 * 1024;
 
 function harness(initial: HostState['state'] = 'starting', dispatch?: EngineConfigureDeps['dispatch']) {
-  let settings: Settings = SETTINGS_DEFAULTS_V8;
+  let settings: Settings = SETTINGS_DEFAULTS_V9;
   const settingsListeners = new Set<(s: Settings) => void>();
   const stateListeners = new Set<(s: HostState) => void>();
   let current = host(initial);
@@ -63,12 +63,12 @@ describe('engine.configure is sent after the settings load and on every change o
 
   it('sends on a change of the binary path, and not on any other change', async () => { // C12: async, one push at a time
     const h = harness('ready');
-    h.change({ ...SETTINGS_DEFAULTS_V8, theme: 'dark', gateway: { ...SETTINGS_DEFAULTS_V8.gateway, relayUnreachable: 'wait' } });
-    h.change({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine, subagentModel: 'haiku' } }); // C10's launch reads it, not the host
+    h.change({ ...SETTINGS_DEFAULTS_V9, theme: 'dark', gateway: { ...SETTINGS_DEFAULTS_V9.gateway, relayUnreachable: 'wait' } });
+    h.change({ ...SETTINGS_DEFAULTS_V9, engine: { ...SETTINGS_DEFAULTS_V9.engine, subagentModel: 'haiku' } }); // C10's launch reads it, not the host
     expect(h.dispatch).toHaveBeenCalledOnce();
-    h.change({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine /* C12 */, binaryPath: '/opt/claude', subagentModel: null } });
+    h.change({ ...SETTINGS_DEFAULTS_V9, engine: { ...SETTINGS_DEFAULTS_V9.engine /* C12 */, binaryPath: '/opt/claude', subagentModel: null } });
     await h.configure.applied(); // C12
-    h.change({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine /* C12 */, binaryPath: '/opt/claude', subagentModel: 'sonnet' } });
+    h.change({ ...SETTINGS_DEFAULTS_V9, engine: { ...SETTINGS_DEFAULTS_V9.engine /* C12 */, binaryPath: '/opt/claude', subagentModel: 'sonnet' } });
     await h.configure.applied(); // C12
     expect(h.dispatch.mock.calls).toEqual([
       [{ binaryPath: null }],
@@ -93,7 +93,7 @@ describe('engine.configure is sent after the settings load and on every change o
 // C12 start: the memory budget's policy (C12 execution document, Interfaces "Settings, version 4"): pushed whenever the
 // host is ready and whenever the budget or the stateful list changes; the default is 25% of physical memory.
 describe('engine.policy.set follows settings.engine’s budget and stateful servers', () => {
-  const engine = (over: Partial<Settings['engine']>): Settings => ({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine, ...over } });
+  const engine = (over: Partial<Settings['engine']>): Settings => ({ ...SETTINGS_DEFAULTS_V9, engine: { ...SETTINGS_DEFAULTS_V9.engine, ...over } });
 
   it('pushes the default (25% of physical memory, no stateful servers) once the host is ready, and again after a restart', () => {
     const h = harness('starting');
@@ -111,7 +111,7 @@ describe('engine.policy.set follows settings.engine’s budget and stateful serv
 
   it('pushes on a change of the budget or the stateful list, in KiB, and on nothing else', () => {
     const h = harness('ready');
-    h.change({ ...SETTINGS_DEFAULTS_V8, theme: 'dark' });
+    h.change({ ...SETTINGS_DEFAULTS_V9, theme: 'dark' });
     h.change(engine({ subagentModel: 'haiku' }));
     h.change(engine({ binaryPath: '/opt/claude' })); // the binary's own push, not the policy's
     expect(h.policy).toHaveBeenCalledOnce();
@@ -168,7 +168,7 @@ describe('engine.policy.set follows settings.engine’s budget and stateful serv
 // which the host resolves per launch); pushes are serialized, the latest settings winning; `applied` answers
 // `settings.engineApplied`, and the launch gate waits for the push for the settings as they stand.
 describe('main configures the host with the chosen binary or the installed one', () => {
-  const engine = (over: Partial<Settings['engine']>): Settings => ({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine, ...over } });
+  const engine = (over: Partial<Settings['engine']>): Settings => ({ ...SETTINGS_DEFAULTS_V9, engine: { ...SETTINGS_DEFAULTS_V9.engine, ...over } });
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   it('a chosen binary path goes as chosen; "Use installed" sends null again', async () => {
