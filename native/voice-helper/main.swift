@@ -149,6 +149,8 @@ final class Capture {
     var phase: Phase = .starting
     /// Set by `cancel` (and by `quit`); every asynchronous continuation checks it before acting.
     var ended = false
+    /// Set when the helper itself called `task.cancel()`; the task's cancellation error is then not a failure.
+    var taskCancelled = false
     var lastPartial = ""
     var recognizer: SFSpeechRecognizer?
     var request: SFSpeechAudioBufferRecognitionRequest?
@@ -180,7 +182,10 @@ func end(_ capture: Capture, cancelTask: Bool) {
         engine.inputNode.removeTap(onBus: 0)
     }
     capture.request?.endAudio()
-    if cancelTask { capture.task?.cancel() }
+    if cancelTask, let task = capture.task {
+        capture.taskCancelled = true
+        task.cancel()
+    }
     capture.engine = nil
     capture.request = nil
     capture.task = nil
@@ -321,7 +326,30 @@ func startAudio(_ capture: Capture) {
     emit([("type", .string("started")), ("id", .string(capture.id)), ("locale", .string(capture.locale))])
 }
 
+// Apple's task errors that are not recognition failures (Design §1). The domains and codes are undocumented
+// constants of the Speech framework's private services, as they appear in the errors it delivers.
+let assistantErrorDomain = "kAFAssistantErrorDomain"
+let localSpeechErrorDomain = "kLSRErrorDomain"
+let noSpeechDetectedCode = 1110
+let taskCancelledCodes: Set<Int> = [216, 301]
+
+/// "No speech detected": what a hold with nothing said produces after `endAudio()`.
+func isNoSpeech(_ error: Error) -> Bool {
+    let error = error as NSError
+    return error.domain == assistantErrorDomain && error.code == noSpeechDetectedCode
+}
+
+/// The error a recognition task reports when it was cancelled.
+func isTaskCancellation(_ error: Error) -> Bool {
+    let error = error as NSError
+    return (error.domain == assistantErrorDomain || error.domain == localSpeechErrorDomain)
+        && taskCancelledCodes.contains(error.code)
+}
+
 func recognized(_ capture: Capture, result: SFSpeechRecognitionResult?, error: Error?) {
+    if result == nil, let error, capture.taskCancelled, isTaskCancellation(error) {
+        return // the helper's own `task.cancel()`: the capture was already answered (`cancelled`, `final` or `error`)
+    }
     guard isLive(capture) else { return }
     if let result {
         let text = result.bestTranscription.formattedString
@@ -334,12 +362,15 @@ func recognized(_ capture: Capture, result: SFSpeechRecognitionResult?, error: E
         return
     }
     guard let error else { return }
-    if capture.phase == .stopping {
-        // The hold has ended: what was heard is the answer. Apple reports "no speech detected" as an error
-        // when nothing was said, which is a final of "" rather than a failure.
-        log("task error while stopping id=\(capture.id): \(error.localizedDescription)")
+    if isNoSpeech(error) {
+        // Nothing (more) was heard: what was heard is the answer, usually "".
+        log("no speech id=\(capture.id)")
         emitFinal(capture, text: capture.lastPartial, timedOut: false)
     } else {
+        // Any other error with no final result, before or after `stop`, a cancellation the helper did not
+        // issue included, is a failure.
+        let ns = error as NSError
+        log("task error id=\(capture.id) domain=\(ns.domain) code=\(ns.code)")
         fail(capture, code: "recognition_failed", message: error.localizedDescription)
     }
 }
@@ -431,7 +462,6 @@ state.async { emit([("type", .string("ready")), ("protocol", .int(1))]) }
 
 Thread.detachNewThread {
     while let line = readLine(strippingNewline: true) {
-        if line.trimmingCharacters(in: .whitespaces).isEmpty { continue }
         state.async { handle(line: line) }
     }
     state.async { quit() } // EOF: the parent is gone
