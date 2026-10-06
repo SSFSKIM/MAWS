@@ -572,6 +572,27 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
     expect(supervisor.facts('engine-host').lastExit).toMatchObject({ code: null, signal: null });
   });
 
+  it('a stop-all that outlives the request deadline still makes the close that follows deliberate (it may still be stopping)', async () => {
+    let finish!: () => void;
+    const self: FakeSupervisor = await startFake({
+      register: (on) => on('host.stopAll', () => new Promise((resolve) => (finish = () => resolve({ stopped: 1, forced: 0 })))),
+    });
+    await supervisor.start();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const restarting = supervisor.restartSupervisor({ stopSessions: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(restarting).resolves.toMatchObject({ ok: false, error: { code: 'timeout' } });
+    } finally {
+      vi.useRealTimers();
+    }
+    finish();
+    await self.die();
+    await until(() => state().state === 'ready' && state().pid !== self.pid);
+    expect(state().restarts).toBe(0);
+    expect(supervisor.facts('engine-host').lastExit).toBeNull();
+  });
+
   it('a crash records the last exit: the code and signal of a supervisor this run spawned, the time', async () => {
     await supervisor.start(); // spawned by this run
     const first = candidates[0];

@@ -473,7 +473,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       const undo = transport.expectExit(); // its close after the answer is deliberate
       const result = await dispatch(host.owner, 'host.stopAll', { graceMs: STOP_ALL_GRACE_MS });
       if (result.ok) return restarted;
-      undo?.();
+      if (result.error.code !== 'timeout') undo?.(); // past the deadline it may still be stopping, then exit as asked
       return { ok: false, error: result.error };
     }
     if (host.state.state !== 'crashed') return restarted; // starting or restarting: the attempt under way reaches the newest
