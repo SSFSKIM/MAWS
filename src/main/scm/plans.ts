@@ -22,7 +22,7 @@ import type { GitStatus } from '@shared/ipc/schema/git';
 import type { RemotePlan, ScmGhState, ScmPrPlanInput, ScmPushPlanInput, ScmRefusal } from '@shared/ipc/schema/scm';
 import { GitCommandError, NotARepositoryError, type GitRun } from '../git/runner';
 import { withoutUserInfo } from '../git/service';
-import type { CollectedRun } from './remote-runner';
+import { runReason, type CollectedRun } from './remote-runner';
 import { isRefusal, refusal, UNTRUSTED_DETAIL } from './validate';
 
 export const PLAN_TTL_MS = 5 * 60_000;
@@ -134,7 +134,7 @@ export async function planPr(sources: PlanSources, input: Omit<ScmPrPlanInput, '
   const view = await sources.runGh(gh.path, ['repo', 'view', '--json', 'nameWithOwner,url']);
   const repository = view.exitCode === 0 ? repositoryOf(view.stdout) : null;
   if (repository === null) {
-    return refusal('no_remote', view.failure ?? firstLine(view.stderr) ?? 'gh resolved no GitHub repository for this checkout', joinStreams(view));
+    return refusal('no_remote', runReason(view, 'gh resolved no GitHub repository for this checkout'), joinStreams(view));
   }
   const named = await branchNameRefusal(sources, base);
   if (named !== null) return named;
@@ -320,6 +320,5 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
 }
 
 const commits = (n: number) => `${n} commit${n === 1 ? '' : 's'}`;
-const firstLine = (text: string) => text.split('\n').find((line) => line.trim() !== '')?.trim() ?? null;
 const joinStreams = ({ stdout, stderr }: { stdout: string; stderr: string }) =>
   [stdout, stderr].filter((part) => part !== '').map((part) => part.replace(/\n$/, '')).join('\n');

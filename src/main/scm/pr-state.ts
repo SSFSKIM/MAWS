@@ -4,7 +4,7 @@
 // failed, with its JSON on stdout all the same), so stdout's shape decides wherever it can; "no pull requests found" is
 // an answer ("No PR for <branch>"), apart from a failure to ask ("PR state unavailable · <reason>").
 import type { ScmCheck, ScmGhState, ScmPrState } from '@shared/ipc/schema/scm';
-import type { CollectedRun } from './remote-runner';
+import { firstLine, runReason, type CollectedRun } from './remote-runner';
 
 export const GH_READ_TIMEOUT_MS = 30_000;
 const PR_VIEW_FIELDS = 'number,url,title,state,isDraft,reviewDecision,baseRefName,headRefName,mergeStateStatus';
@@ -79,10 +79,9 @@ export function readGhProbe(path: string, version: CollectedRun, auth: Collected
   return { state: 'ready', path, version: versionLine };
 }
 
-// Why a collected run gave no answer: its failure (a timeout, a program that could not start), else the first line it
-// printed (stderr first), else its exit code.
+// `runReason`, then what gh printed on stdout, then its exit code.
 function reason(run: CollectedRun, what: string): string {
-  return run.failure ?? firstLine(run.stderr) ?? firstLine(run.stdout) ?? `${what} exited with code ${run.exitCode}`;
+  return runReason(run, firstLine(run.stdout) ?? `${what} exited with code ${run.exitCode}`);
 }
 
 function parse(text: string): unknown {
@@ -95,4 +94,3 @@ function parse(text: string): unknown {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const textOrNull = (value: unknown) => (typeof value === 'string' && value !== '' ? value : null);
-const firstLine = (text: string) => text.split('\n').find((line) => line.trim() !== '')?.trim() ?? null;

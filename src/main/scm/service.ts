@@ -79,16 +79,18 @@ interface Kept<T> {
 
 export class ScmService {
   private readonly chains = new Map<string, Promise<unknown>>();
+  private admission: Promise<unknown> = Promise.resolve(); // the last key resolved for a chain (admit)
   private readonly now: () => number;
   private readonly plans: PlanTable;
   private readonly runner: RemoteRunner;
   private ghProbe: Kept<Promise<ScmGhState>> | null = null;
   private readonly prStates = new Map<string, Map<string, Kept<ScmPrState>>>(); // checkout key, then branch
+  private readonly runsEnded = new Map<string, number>(); // checkout key: how many of its runs ended (a read keeps its answer only if none did meanwhile)
 
   constructor(private readonly deps: ScmServiceDeps) {
     this.now = deps.now ?? Date.now;
     this.plans = new PlanTable(this.now);
-    this.runner = new RemoteRunner({ emit: deps.emit, spawn: deps.spawn, kill: deps.kill, now: this.now, onExit: (key) => this.prStates.delete(key) });
+    this.runner = new RemoteRunner({ emit: deps.emit, spawn: deps.spawn, kill: deps.kill, now: this.now, onExit: (key) => this.runEnded(key) });
   }
 
   // Trust, the remotes, the defaults a push or PR would start from and gh's state; answered for any checkout, trusted or
@@ -178,14 +180,15 @@ export class ScmService {
   // flight); then the token, then the revalidation in the checkout's turn, then the spawn only when nothing moved.
   async run({ appSessionId, token }: ScmRunInput, kind: 'push' | 'pr'): Promise<ScmRunStarted> {
     const checkout = this.checkout(appSessionId);
-    const key = await keyOf(checkout);
-    if (this.runner.isRunning(key)) return refusal('busy', BUSY_DETAIL);
-    const issued = this.plans.consume(token, { appSessionId, key, kind });
-    if (isRefusal(issued)) return issued;
-    return this.serial(key, async (): Promise<ScmRunStarted> => {
-      const moved = await revalidatePlan(await this.sources(checkout), issued);
-      if (moved !== null) return moved;
-      return this.runner.start({ appSessionId, key, plan: issued.plan, captured: await this.deps.captured() });
+    return this.admit(checkout, async (key): Promise<ScmRunStarted> => {
+      if (this.runner.isRunning(key)) return refusal('busy', BUSY_DETAIL);
+      const issued = this.plans.consume(token, { appSessionId, key, kind });
+      if (isRefusal(issued)) return issued;
+      return this.serial(key, async (): Promise<ScmRunStarted> => {
+        const moved = await revalidatePlan(await this.sources(checkout), issued);
+        if (moved !== null) return moved;
+        return this.runner.start({ appSessionId, key, plan: issued.plan, captured: await this.deps.captured() });
+      });
     });
   }
 
@@ -201,7 +204,8 @@ export class ScmService {
 
   // The current branch's PR and its checks. Without an answer to ask for (untrusted, not a repository, detached, no
   // remote, gh missing or signed out) `pr` is null and `error` names the refusal; a failure to ask is gh's reason. An
-  // answer is kept 60 s per checkout and branch, a failure is not; `refresh` asks gh again and probes gh itself again.
+  // answer is kept 60 s per checkout and branch, a failure is not, nor one a run of the checkout ended under; `refresh`
+  // asks gh again and probes gh itself again.
   async prState({ appSessionId, refresh }: ScmPrStateInput): Promise<ScmPrState> {
     const checkout = this.checkout(appSessionId);
     const [trusted, gh] = await Promise.all([this.trust(checkout).then((trust) => trust.trusted), this.gh(refresh)]);
@@ -220,15 +224,18 @@ export class ScmService {
     if ((await this.remoteNames(checkout)).length === 0) return answer(branch, 'no_remote');
     if (gh.state === 'missing') return answer(branch, 'gh_missing');
     if (gh.state === 'unauthenticated') return answer(branch, 'gh_unauthenticated');
+    // git refuses such a name, but a ref written by hand can carry one; gh would read it as an option
+    if (branch.startsWith('-')) return answer(branch, `MAWS does not ask gh about a branch named ${JSON.stringify(branch)}`);
 
     const key = await keyOf(checkout);
+    const ended = this.runsEnded.get(key) ?? 0;
     const kept = this.prStates.get(key)?.get(branch);
     if (!refresh && kept !== undefined && this.now() - kept.at < PR_STATE_KEPT_MS) return kept.value;
     const captured = await this.deps.captured();
     const view = readPrView(await this.collect(gh.path, prViewArgv(branch), checkout, captured));
     const pr = view.pr === null ? null : { ...view.pr, checks: readChecks(await this.collect(gh.path, prChecksArgv(branch), checkout, captured)) };
     const value = answer(branch, view.error, pr);
-    if (view.error === null) {
+    if (view.error === null && (this.runsEnded.get(key) ?? 0) === ended) {
       const branches = this.prStates.get(key) ?? new Map<string, Kept<ScmPrState>>();
       branches.set(branch, { at: this.now(), value });
       this.prStates.set(key, branches);
@@ -236,11 +243,18 @@ export class ScmService {
     return value;
   }
 
+  // A run of the checkout ended: its PR state moved (a push, a new PR), and a read still out may hold the state before it.
+  private runEnded(key: string): void {
+    this.prStates.delete(key);
+    this.runsEnded.set(key, (this.runsEnded.get(key) ?? 0) + 1);
+  }
+
   // The app is quitting: every remote run is asked to stop; plans, caches and latest runs are dropped.
   dispose(): void {
     this.runner.dispose();
     this.plans.clear();
     this.prStates.clear();
+    this.runsEnded.clear();
     this.ghProbe = null;
     this.chains.clear();
   }
@@ -275,8 +289,9 @@ export class ScmService {
     return runCollected({ program, argv, cwd, captured, timeoutMs: GH_READ_TIMEOUT_MS, spawn: this.deps.spawn, kill: this.deps.kill });
   }
 
-  // gh resolved on the captured PATH (`MAWS_GH` first) and probed with `--version` and `auth status --active`, kept 10
-  // minutes per process; concurrent callers share one probe.
+  // gh resolved on the captured PATH (`MAWS_GH` first) and probed with `--version` and `auth status --active`;
+  // concurrent callers share one probe. Only a `ready` answer is kept (10 minutes per process): a missing or signed-out
+  // gh is probed again on the next ask, so an install or `gh auth login` shows at once.
   private gh(refresh: boolean): Promise<ScmGhState> {
     const kept = this.ghProbe;
     if (!refresh && kept !== null && this.now() - kept.at < GH_PROBE_KEPT_MS) return kept.value;
@@ -290,7 +305,11 @@ export class ScmService {
       ]);
       return readGhProbe(path, version, auth);
     })();
-    this.ghProbe = { at: this.now(), value };
+    const probe = { at: this.now(), value };
+    this.ghProbe = probe;
+    void value.then((state) => {
+      if (state.state !== 'ready' && this.ghProbe === probe) this.ghProbe = null;
+    });
     return value;
   }
 
@@ -303,7 +322,7 @@ export class ScmService {
     facts: (checkout: string) => Promise<{ commit?: { sha: string; subject: string } }> = async () => ({}),
   ): Promise<ScmMutation> {
     const checkout = this.checkout(appSessionId);
-    return this.serial(await keyOf(checkout), async (): Promise<ScmMutation> => {
+    return this.admit(checkout, (key) => this.serial(key, async (): Promise<ScmMutation> => {
       if (!(await this.trust(checkout)).trusted) return refusal('untrusted', UNTRUSTED_DETAIL);
       let before: GitStatus;
       try {
@@ -328,7 +347,16 @@ export class ScmService {
       }
       const status = await this.deps.status(checkout);
       return { ok: true, status, output: joinOutput(outputs), ...(await facts(checkout)) };
-    });
+    }));
+  }
+
+  // The checkout's key, resolved in call order: `enter` runs for each call in the order the calls were made, so work
+  // reaches its chain in the order the owner asked for it, even when a later call's realpath answers first. `enter`
+  // must reach `serial` without awaiting.
+  private admit<T>(checkout: string, enter: (key: string) => Promise<T>): Promise<T> {
+    const key = this.admission.then(() => keyOf(checkout)); // keyOf never rejects
+    this.admission = key;
+    return key.then(enter);
   }
 
   // One promise chain per key: work starts after every earlier work of the key settled, whichever way it settled.

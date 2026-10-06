@@ -11,6 +11,23 @@ import { TrustStoreFixture } from '../../../test/support/trust-store';
 import { GitCommandError, GitTimeoutError, NotARepositoryError } from '../git/runner';
 import { ScmService, type ScmServiceDeps } from './service';
 
+// `realpath` as node answers it, except that a test may hold the first call for one path until it releases it.
+const fsGate = vi.hoisted(() => ({ path: null as string | null, held: null as Promise<void> | null }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    realpath: async (path: string) => {
+      if (path === fsGate.path && fsGate.held !== null) {
+        const held = fsGate.held;
+        fsGate.path = null;
+        await held;
+      }
+      return actual.realpath(path);
+    },
+  };
+});
+
 const ID = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const OTHER = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
 
@@ -248,6 +265,28 @@ describe('scm service', () => {
       release();
       await Promise.all([first, second]);
       expect(order).toEqual(['status 1', 'mutate :(top,literal)a.txt', 'status 2', 'status 3', 'mutate :(top,literal)u.txt', 'status 4']);
+    });
+
+    it('applies two clicks in the order they were made even when the second checkout path resolves first', async () => {
+      const link = join(tmpdir(), `maws-scm-order-${process.pid}-${Date.now()}`);
+      symlinkSync(root, link);
+      let release!: () => void;
+      fsGate.path = root;
+      fsGate.held = new Promise<void>((resolve) => { release = resolve; });
+      try {
+        records.set(OTHER, { directory: link, worktree: null });
+        const scm = service();
+        const first = scm.stage({ appSessionId: ID, paths: ['a.txt'] }); // its realpath is held
+        const second = scm.stage({ appSessionId: OTHER, paths: ['u.txt'] }); // another spelling, answered at once
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        release();
+        await Promise.all([first, second]);
+        expect(mutate.mock.calls.map(([, args]) => args.at(-1))).toEqual([':(top,literal)a.txt', ':(top,literal)u.txt']);
+      } finally {
+        fsGate.path = null;
+        fsGate.held = null;
+        rmSync(link, { force: true });
+      }
     });
 
     it('keys the chain by realpath, so two spellings of one checkout share it, and a refusal does not break it', async () => {

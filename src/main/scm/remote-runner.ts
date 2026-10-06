@@ -255,6 +255,17 @@ export function runCollected({ program, argv, cwd, captured, timeoutMs, spawn = 
   });
 }
 
+// The first line holding anything, trimmed; null for blank text.
+export function firstLine(text: string): string | null {
+  return text.split('\n').find((line) => line.trim() !== '')?.trim() ?? null;
+}
+
+// Why a collected run gave no answer, read one way by every caller: its failure (a timeout, a program that could not
+// start), else the first line it printed on stderr, else the caller's fallback.
+export function runReason(run: Pick<CollectedRun, 'failure' | 'stderr'>, fallback: string): string {
+  return run.failure ?? firstLine(run.stderr) ?? fallback;
+}
+
 // The longest prefix of `text` within `bytes` UTF-8 bytes, never ending inside a character.
 function utf8Prefix(text: string, bytes: number): string {
   if (bytes <= 0) return '';

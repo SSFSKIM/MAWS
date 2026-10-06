@@ -57,6 +57,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
   let pushUrls: string[];
   let clock: number;
   let gh: Record<string, GhAnswer>;
+  let held: Map<string, (() => void) | null>; // gh reads a test answers itself: key → the answer, once asked
   let spawned: Array<{ program: string; argv: readonly string[]; options: RemoteSpawnOptions; child: FakeChild }>;
   let spawn: ReturnType<typeof vi.fn<SpawnFn>>;
   let kill: ReturnType<typeof vi.fn<KillFn>>;
@@ -120,6 +121,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       'pr checks': { exitCode: 8, stdout: fixture('gh-pr-checks-mixed.json') },
       'pr create': { exitCode: 0, stdout: 'https://github.com/o/r/pull/7\n' },
     };
+    held = new Map();
     spawned = [];
     let pid = 9000;
     spawn = vi.fn<SpawnFn>((program, argv, options) => {
@@ -129,13 +131,13 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
         const key = argv[0] === '--version' ? '--version' : argv.slice(0, 2).join(' ');
         const answer = gh[key] ?? { exitCode: 1, stderr: `fake gh: unexpected ${argv.join(' ')}\n` };
         // gh reads answer at once; a `pr create` run is driven like a push when a test holds it
-        if (key !== 'pr create') {
-          setImmediate(() => {
-            if (answer.stdout) child.out(answer.stdout);
-            if (answer.stderr) child.err(answer.stderr);
-            child.close(answer.exitCode);
-          });
-        }
+        const respond = () => {
+          if (answer.stdout) child.out(answer.stdout);
+          if (answer.stderr) child.err(answer.stderr);
+          child.close(answer.exitCode);
+        };
+        if (held.has(key)) held.set(key, respond);
+        else if (key !== 'pr create') setImmediate(respond);
       }
       return child as unknown as ChildProcess;
     });
@@ -262,6 +264,27 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       expect(ghCalls('repo view').map((s) => s.options.cwd)).toEqual([root]);
       expect(await scm.run({ appSessionId: ID, token: plan.token }, 'pr')).toEqual({ started: true, token: plan.token });
       expect(ghCalls('pr create').map((s) => s.argv)).toEqual([plan.argv]);
+    });
+
+    it('probes gh again after a refused PR plan, so the re-plan after Sign in issues a token', async () => {
+      gh['auth status'] = { exitCode: 1, stderr: fixture('gh-auth-status-signed-out.txt') };
+      status = { ...status, ahead: 0 };
+      const input = { appSessionId: ID, title: 'Panel PR', body: '', base: 'main', draft: false };
+      expect(await scm.planPr(input)).toMatchObject({ refused: 'gh_unauthenticated' });
+      gh['auth status'] = { exitCode: 0 }; // `gh auth login` in the terminal
+      expect(await scm.planPr(input)).toHaveProperty('token');
+      expect(ghCalls('auth status')).toHaveLength(2);
+      // a ready answer is kept
+      await scm.planPr(input);
+      expect(ghCalls('auth status')).toHaveLength(2);
+    });
+
+    it('probes gh again after it was missing, so an install shows on the next ask', async () => {
+      env = { MAWS_GIT: GIT };
+      scm = service();
+      expect((await scm.status(ID)).gh).toEqual({ state: 'missing' });
+      env.MAWS_GH = GH; // the deps' env object: gh is now found
+      expect((await scm.status(ID)).gh).toMatchObject({ state: 'ready' });
     });
 
     it('answers gh_missing for a PR plan when gh is not on the captured PATH', async () => {
@@ -404,8 +427,31 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       gh['auth status'] = { exitCode: 1, stderr: fixture('gh-auth-status-signed-out.txt') };
       expect(await scm.prState({ appSessionId: ID, refresh: false })).toMatchObject({ gh: { state: 'unauthenticated' }, pr: null, error: 'gh_unauthenticated' });
       gh['auth status'] = { exitCode: 0 };
-      expect(await scm.prState({ appSessionId: ID, refresh: false })).toMatchObject({ error: 'gh_unauthenticated' }); // cached
       expect(await scm.prState({ appSessionId: ID, refresh: true })).toMatchObject({ gh: { state: 'ready' }, pr: { number: 12 }, error: null });
+    });
+
+    it('keeps no pre-run answer that was in flight when a run of the checkout ended', async () => {
+      held.set('pr view', null);
+      const reading = scm.prState({ appSessionId: ID, refresh: false });
+      await vi.waitFor(() => expect(held.get('pr view')).toBeTypeOf('function'), { timeout: 5_000 });
+      const plan = await planPush();
+      await scm.run({ appSessionId: ID, token: plan.token }, 'push');
+      lastPush().close(0); // the run ends while the read is still out
+      held.get('pr view')!();
+      held.delete('pr view');
+      expect(await reading).toMatchObject({ pr: { number: 12 } }); // answered, but not kept
+      await scm.prState({ appSessionId: ID, refresh: false });
+      expect(ghCalls('pr view')).toHaveLength(2);
+      await scm.prState({ appSessionId: ID, refresh: false }); // the post-run answer is kept
+      expect(ghCalls('pr view')).toHaveLength(2);
+    });
+
+    it('never hands gh a branch beginning with - as a positional', async () => {
+      status = { ...status, branch: '-x' };
+      expect(await scm.prState({ appSessionId: ID, refresh: false })).toMatchObject({
+        branch: '-x', pr: null, error: 'MAWS does not ask gh about a branch named "-x"',
+      });
+      expect(ghCalls('pr view')).toEqual([]);
     });
 
     it('answers gh_missing without running gh', async () => {
