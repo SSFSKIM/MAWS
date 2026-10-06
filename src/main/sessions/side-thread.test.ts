@@ -60,6 +60,8 @@ describe('side threads', () => {
     const lineage = { kind: 'side-thread', parentAppSessionId: parent.appId, parentEngineSessionId: SID, anchor, openedBy: 'comment' };
     expect(h.index.sessions.get(child)!.lineage).toEqual(lineage);
     expect(h.host.calledWith('session.renameSession')).toEqual([{ appSessionId: child, title: 'src/x.ts:42' }]);
+    // M5: until the engine's title is read back, the record is titled by the same name, never by the anchored prompt
+    expect(h.index.sessions.get(child)!.title).toEqual({ text: 'src/x.ts:42', source: 'none' });
 
     const opened = parentEvents(parent.appId);
     expect(opened).toEqual([
@@ -81,6 +83,7 @@ describe('side threads', () => {
     expect(sent(child)).toEqual([[{ type: 'text', text: promotionMessage(exchanges, 'Spell it backwards.') }]]);
     expect(h.index.sessions.get(child)!.lineage).toEqual({ kind: 'side-thread', parentAppSessionId: parent.appId, parentEngineSessionId: SID, openedBy: 'btw' });
     expect(h.host.calledWith('session.renameSession')).toEqual([{ appSessionId: child, title: 'Side question' }]);
+    expect(h.index.sessions.get(child)!.title).toEqual({ text: 'Side question', source: 'none' }); // M5
     expect(parentEvents(parent.appId)).toEqual([expect.objectContaining({ kind: 'side.thread.opened', anchor: null, openedBy: 'btw' })]);
   });
 

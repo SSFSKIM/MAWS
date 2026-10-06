@@ -34,7 +34,7 @@ import {
   type Setup,
 } from './setup-steps';
 import { trustStateOf } from './trust';
-import { openedEvent, SIDE_QUESTION_TITLE } from '../side/side-threads'; // E3
+import { openedEvent, sideThreadTitle } from '../side/side-threads'; // E3
 
 export { SetupFailure, type Setup } from './setup-steps';
 
@@ -280,7 +280,7 @@ async function finishBinding(s: Setup, run: IntentRun, intent: SetupIntent, engi
 // index's override when the engine refuses: the copied history would otherwise title it by the parent's prompt), then
 // its row in the parent's transcript. Nothing here rolls back: the thread runs whatever the bookkeeping does.
 async function bindSideThread(s: Setup, appSessionId: AppSessionId, lineage: Lineage): Promise<void> {
-  const title = lineage.openedBy === 'btw' ? SIDE_QUESTION_TITLE : lineage.anchor?.label.trim() || SIDE_QUESTION_TITLE;
+  const title = sideThreadTitle(lineage);
   await hostCall(s.dispatch, 'session.renameSession', { appSessionId, title }).catch((error: unknown) => {
     s.log(`the side thread ${appSessionId} is named in the index, since the engine refused: ${messageOf(error)}`);
     try {

@@ -6,12 +6,19 @@
 // times the live run emitted (so they bypass the read model's capped store of app events).
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, EventId, SessionId } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
+import type { Lineage, SessionRecord } from '@shared/graph/session';
 import type { Emit, HostEvents } from '../sessions/context';
 import type { SideThreadRow, SideThreadStore } from '../index/side-threads';
 
 // The title a `/btw` promotion's thread takes (a comment's takes its anchor's label).
 export const SIDE_QUESTION_TITLE = 'Side question';
+
+// A side thread's name: what `finishBinding` renames it to through the engine, and (M5) the first prompt its record is
+// seeded with, so the row is never titled by the anchored text (its lead, preamble and tag) before the engine's title
+// is read back from its store.
+export function sideThreadTitle(lineage: Pick<Lineage, 'openedBy' | 'anchor'>): string {
+  return lineage.openedBy === 'btw' ? SIDE_QUESTION_TITLE : lineage.anchor?.label.trim() || SIDE_QUESTION_TITLE;
+}
 
 export const isSideThreadEvent = (event: SessionEvent): boolean => event.kind === 'side.thread.opened' || event.kind === 'side.thread.summarised';
 
