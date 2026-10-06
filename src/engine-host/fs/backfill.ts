@@ -8,6 +8,7 @@ import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, Sess
 import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
 import { slashCommandLine } from '@shared/wire/local-command';
 import { INTERRUPT_MARKER } from '../normalizer-support';
+import { peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
 export const SPILL_MARKER = /(?:Full output saved to|were saved to|was saved to):? (\/[^\r\n]+\.(?:txt|json))(?=[.;\s]|$)/;
@@ -108,6 +109,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
       break;
     case 'attachment': // context injections: on the chain, nothing to show, except a relay's receipt in a child and a prompt taken mid-turn (W1)
       if (taskNotificationAttachment(record, uuid, ctx, base, events)) break;
+      if (peerQueuedMessage(record, uuid, base, events)) break; // E7
       if (ctx.agentId === null) steeredPrompt(record, base, events);
       else coordinatorMessage(record, uuid, ctx, base, events);
       break;
@@ -159,6 +161,36 @@ function steeredPrompt(record: TranscriptRecord, base: Base, events: SessionEven
   events.push({ ...base(), kind: 'command.lifecycle', commandUuid: messageUuid, state: 'started' });
 }
 
+// E7 start: a message from another session, or an in-process agent's SendMessage to this conversation (E7 execution
+// document, Design §4, Decision Log 22; M0's e7-peer-transcripts). Delivered while the session was idle it is a `user`
+// record of the peer origin, `isMeta`, after which the engine runs a turn of its own (the live stream opens it at the
+// engine's `system/init`, with no prompt uuid, and its result names none: pass3/e7-peer-a seq 71-156), so it opens that
+// turn here too. Taken into a running turn at a tool boundary it is a `queued_command` attachment whose `prompt` is the
+// bare envelope the live frame carries, under that frame's uuid (`source_uuid`), and whose `rendered` text adds the
+// header and reply suffix the model read. Each becomes the live stream's synthetic peer `user.message` and the parsed
+// event beside it, from the parser the live normaliser uses.
+function peerMessage(record: TranscriptRecord, uuid: MessageUuid, content: string, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+  ctx.lastTurnUserUuid = null;
+  ctx.inToolLoop = false;
+  ctx.lastAssistantWasApiError = false;
+  events.push({ ...base(), kind: 'turn.started', userMessageUuid: null, origin: 'peer' });
+  events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: record.isMeta === true, origin: 'peer', bash: null });
+  const companion = peerEventsOf(content, uuid, record.origin);
+  if (companion) events.push({ ...base(), ...companion });
+}
+
+function peerQueuedMessage(record: TranscriptRecord, uuid: MessageUuid, base: Base, events: SessionEvent[]): boolean {
+  const attachment = record.attachment as { type?: unknown; prompt?: unknown; source_uuid?: unknown; origin?: { kind?: unknown } } | undefined;
+  if (attachment?.type !== 'queued_command' || attachment.origin?.kind !== 'peer' || typeof attachment.prompt !== 'string') return false;
+  const messageUuid = typeof attachment.source_uuid === 'string' && attachment.source_uuid.length > 0 ? (attachment.source_uuid as MessageUuid) : uuid;
+  events.push({ ...base(), kind: 'user.message', messageUuid, content: attachment.prompt, isReplay: false, isSynthetic: true, origin: 'peer', bash: null });
+  const rendered = Array.isArray(record.rendered) ? (record.rendered as { content?: unknown }[]).find((part) => typeof part?.content === 'string')?.content as string | undefined : undefined;
+  const companion = (rendered === undefined ? null : peerEventsOf(rendered, messageUuid, attachment.origin)) ?? peerEventsOf(attachment.prompt, messageUuid, attachment.origin);
+  if (companion) events.push({ ...base(), ...companion });
+  return true;
+}
+// E7 end
+
 // Desktop's history adapter unwraps queued task notifications as user records. At a tool boundary they are synthetic
 // context for the running turn, not a new prompt; outside the loop they can trigger an engine follow-up. Old records
 // lack source_uuid; their tool-use identity is the only stable delivery identity available.
@@ -186,6 +218,12 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
   };
   if (marker) ctx.inToolLoop = false; // an interrupt ends the loop: no model call follows
+  // E7 start
+  if (typeof content === 'string' && !marker && (record.origin as { kind?: unknown } | undefined)?.kind === 'peer') {
+    peerMessage(record, uuid, content, ctx, base, events);
+    return;
+  }
+  // E7 end
   if (typeof content === 'string' && marker) {
     events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: isMeta, origin: 'interrupt-marker', bash: null });
     return;

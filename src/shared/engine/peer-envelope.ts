@@ -8,7 +8,7 @@
 // `pass3/e7-peer-a` seq 73 and 258, `e7-peer-transcripts/db45d92e…` line 74). The envelope is `<cross-session-message
 // …>` from another session or `<agent-message from="<agentId>">` from an in-process agent's SendMessage to the main
 // conversation (C8b, `test/fixtures/engine/handback-pointer.jsonl` seq 207).
-import type { EventPayload } from '../graph/events';
+import type { ContentBlock, EventPayload } from '../graph/events';
 import type { AgentId, MessageUuid } from '../graph/ids';
 
 export interface PeerEnvelope {
@@ -89,6 +89,11 @@ export function peerLabel(from: string, fromName: string | null): string {
   if (from.startsWith('uds:')) return from.slice(from.lastIndexOf('/') + 1).replace(/\.sock$/, '');
   if (from.startsWith('bridge:')) return '(untitled)';
   return from || 'peer';
+}
+
+// A message's text as both emission sites read it: the string, or its text blocks joined.
+export function messageText(content: string | ContentBlock[]): string {
+  return typeof content === 'string' ? content : content.filter((block) => block.type === 'text' && typeof block.text === 'string').map((block) => block.text as string).join('\n');
 }
 
 // The X1 event a peer `user` frame or record stands for beside its `user.message` (Design §4): `peer.message` for a

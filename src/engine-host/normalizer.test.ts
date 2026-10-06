@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { JournalRow } from '@shared/wire/journal';
-import { loadJournal } from '../../test/support/fixtures';
+import { loadEngineJournal, loadJournal } from '../../test/support/fixtures';
 import { Normalizer, type NormalizerWarning } from './normalizer';
 import { spillPathOf } from './normalizer-support';
 
@@ -730,3 +730,45 @@ describe('maws tools/call admission follows the server envelope (E1)', () => {
     expect(kinds(events.filter((e) => e.kind.startsWith('maws.')))).toEqual(['maws.pane.shown']); // the well-formed one alone
   });
 });
+
+// E7 start: a message from another session, beside the user.message that carries it (E7 execution document, Design §4,
+// over M0's recorded frames: pass3/e7-peer-a and e7-peer-b; C8b's hand-back: test/fixtures/engine/handback-pointer)
+describe('peer messages (E7)', () => {
+  const replay = (rows: JournalRow[]) => {
+    const n = make({ sessionId: null });
+    return rows.flatMap((row) => n.push(row).map((event) => SessionEventSchema.parse(event)));
+  };
+  const peerA = replay(loadJournal('pass3', 'e7-peer-a'));
+
+  it('emits peer.message right after the peer user.message of an idle delivery, the same row and uuid', () => {
+    const at = peerA.findIndex((e) => e.kind === 'user.message' && e.seq === 73);
+    expect(peerA[at]).toMatchObject({ kind: 'user.message', origin: 'peer', isSynthetic: true });
+    expect(peerA[at + 1]).toMatchObject({
+      kind: 'peer.message', seq: 73, agentId: null, parentToolUseId: null, messageUuid: 'c2291cea-3cc9-4f6d-bdec-321a085cc0f7', from: 'uds:/tmp/cc-socks/10562.sock',
+      fromSession: null, fromName: 'repo-b-gen1il-79', fromMode: 'prompting', fromPlugin: null, hopChain: [], text: 'E7 probe: hello from B', midTurn: false, lineage: 'peer', replyable: true,
+    });
+  });
+
+  it('emits it for the bare envelope delivered mid-turn, and nowhere else in the session', () => {
+    expect(only(peerA, 'peer.message').map((e) => [e.seq, e.midTurn, e.text])).toEqual([[73, false, 'E7 probe: hello from B'], [258, true, 'E7 probe: second message while you work']]);
+    expect(only(peerA, 'subagent.message')).toEqual([]);
+  });
+
+  it("fills the hop chain from the frame's origin", () => {
+    const peerB = replay(loadJournal('pass3', 'e7-peer-b'));
+    expect(only(peerB, 'peer.message').map((e) => [e.seq, e.hopChain])).toEqual([[106, ['b4a75fd9e01cdb83eea3f9ee']], [142, []]]);
+  });
+
+  it("emits subagent.message for an in-process agent's hand-back", () => {
+    const events = replay(loadEngineJournal('handback-pointer'));
+    const at = events.findIndex((e) => e.kind === 'user.message' && e.seq === 207);
+    expect(events[at + 1]).toMatchObject({ kind: 'subagent.message', seq: 207, direction: 'from_child', fromAgentId: 'a6a89722837fede78', toAgentId: null });
+    expect(only(events, 'peer.message')).toEqual([]);
+  });
+
+  it('emits nothing beside a peer frame whose text is no envelope', () => {
+    const frame = { type: 'user', uuid: 'p-1', session_id: 'sess-1', isReplay: true, isSynthetic: true, message: { role: 'user', content: 'plain words' }, origin: { kind: 'peer', from: 'uds:/x.sock' } };
+    expect(kinds(feed(make(), [inRow(frame)]))).toEqual(['user.message']);
+  });
+});
+// E7 end

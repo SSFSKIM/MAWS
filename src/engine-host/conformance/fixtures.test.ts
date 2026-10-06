@@ -631,6 +631,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       // E1 M2: pass3/p1-maws-* (every recorded ask is answered before the stop, so no fixture yields maws.ask.cancelled;
       // session-maws.test.ts pins it over a scripted session)
       'maws.ask.opened', 'maws.ask.answered', 'maws.delivery.file', 'maws.pane.shown',
+      'peer.message', // E7 M1: pass3/e7-peer-a and e7-peer-b (no pass journal carries an in-process agent's message: subagent.message is pinned over test/fixtures/engine/handback-pointer in normalizer.test.ts)
     ].sort());
     void kinds;
   });

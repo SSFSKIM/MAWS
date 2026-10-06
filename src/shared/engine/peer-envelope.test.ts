@@ -2,7 +2,7 @@
 // C8b's recorded hand-back (test/fixtures/engine/handback-pointer.jsonl) and SPEC 38 §38.23's literals.
 import { describe, expect, it } from 'vitest';
 import { loadEngineJournal, loadJournal, loadTranscript } from '../../../test/support/fixtures';
-import { handbackReport, parsePeerMessage, peerEventsOf, peerLabel } from './peer-envelope';
+import { handbackReport, messageText, parsePeerMessage, peerEventsOf, peerLabel } from './peer-envelope';
 
 const frameOf = (rows: ReturnType<typeof loadJournal>, seq: number) => rows.find((row) => row.seq === seq)!.frame as { uuid: string; message: { content: string }; origin: Record<string, unknown> };
 const PEER_A = loadJournal('pass3', 'e7-peer-a');
@@ -141,5 +141,12 @@ describe('peerEventsOf', () => {
 
   it('gives nothing for a text the parser refuses', () => {
     expect(peerEventsOf('hello', null, { kind: 'peer', from: 'uds:/x.sock', body: 'hello' })).toBeNull();
+  });
+});
+
+describe('messageText', () => {
+  it('is the string, or the text blocks joined', () => {
+    expect(messageText('plain')).toBe('plain');
+    expect(messageText([{ type: 'text', text: 'one' }, { type: 'image', source: {} }, { type: 'text', text: 'two' }])).toBe('one\ntwo');
   });
 });
