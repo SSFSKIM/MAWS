@@ -10,8 +10,8 @@
 // its own, and cancel removes it unrecorded.
 import { Extension } from '@tiptap/core';
 import { closeHistory } from '@tiptap/pm/history';
-import { Fragment, type Schema } from '@tiptap/pm/model';
-import { Plugin, PluginKey, Selection, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
+import { Fragment, type ResolvedPos, type Schema } from '@tiptap/pm/model';
+import { NodeSelection, Plugin, PluginKey, Selection, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import type { JSONContent } from '@tiptap/core';
 
@@ -95,18 +95,65 @@ const unrecorded = (tr: Transaction) => tr.setMeta('addToHistory', false);
 
 // The selection the human sees, when ProseMirror has not read it yet: a key handled ahead of ProseMirror's own keydown
 // (C5's capture-phase dispatcher) runs before it flushes the DOM selection the last arrow keys moved, so the state's
-// can be several keystrokes stale. When the window's selection lies inside the editor and its words would start
-// elsewhere, it becomes the state's selection (unrecorded); otherwise the state's stands as it is (Select All's
-// AllSelection, a chip's NodeSelection).
+// can be several keystrokes stale. When the window's selection lies inside the editor and is not simply how the state's
+// selection is drawn, it becomes the state's selection (unrecorded); a selection the DOM does draw stands as it is
+// (Select All's AllSelection, a chip's NodeSelection).
 export function syncSelectionFromDOM(view: EditorView): void {
   const dom = view.dom.ownerDocument.getSelection();
   const anchor = dom?.anchorNode;
   const focus = dom?.focusNode;
   if (!dom || !anchor || !focus || !view.dom.contains(anchor) || !view.dom.contains(focus)) return;
-  const { doc, selection } = view.state;
-  const read = TextSelection.between(doc.resolve(view.posAtDOM(anchor, dom.anchorOffset)), doc.resolve(view.posAtDOM(focus, dom.focusOffset)));
-  if (startAfter(read) !== startAfter(selection)) view.dispatch(unrecorded(view.state.tr.setSelection(read)));
+  const read = readSelection(view, dom, anchor, focus);
+  if (!drawnAs(read, view.state.selection)) view.dispatch(unrecorded(view.state.tr.setSelection(read)));
 }
+
+// The DOM selection as a document selection, read the way ProseMirror's own (internal) `selectionFromDOM` does over the
+// public `posAtDOM`: positions with bias 1, and a caret inside a selectable atom's node view (a pasted chip), off its
+// edges, selects the atom; inside a mention (not selectable) bias 1 reads it as the position after the chip. A caret
+// between blocks (on the editor root) moves back into the text block before it, where `startAfter` would put the words,
+// rather than forward into the next one.
+function readSelection(view: EditorView, dom: globalThis.Selection, anchor: Node, focus: Node): Selection {
+  const { doc } = view.state;
+  const $head = doc.resolve(view.posAtDOM(focus, dom.focusOffset, 1));
+  if (!dom.isCollapsed) return TextSelection.between(doc.resolve(view.posAtDOM(anchor, dom.anchorOffset, 1)), $head);
+  const atom = atomHolding(view, $head, focus, dom.focusOffset);
+  if (atom !== null) return NodeSelection.create(doc, atom);
+  if ($head.parent.inlineContent) return TextSelection.between($head, $head);
+  return Selection.findFrom($head, -1, true) ?? Selection.near($head);
+}
+
+// The position of the selectable atom beside `$head` whose node view holds the DOM caret away from its edges, if any.
+function atomHolding(view: EditorView, $head: ResolvedPos, focus: Node, offset: number): number | null {
+  const { nodeBefore, nodeAfter, pos: at } = $head;
+  const beside = [nodeBefore && ([nodeBefore, at - nodeBefore.nodeSize] as const), nodeAfter && ([nodeAfter, at] as const)];
+  for (const [node, pos] of beside.filter((entry) => entry !== null)) {
+    const nodeDOM = view.nodeDOM(pos);
+    if (!node.isAtom || !NodeSelection.isSelectable(node) || !nodeDOM?.contains(focus)) continue;
+    if (!node.isInline || !onEdge(focus, offset, nodeDOM)) return pos;
+  }
+  return null;
+}
+
+// Whether a DOM position sits at the very start or end of `outer`, however deep inside it.
+function onEdge(node: Node, offset: number, outer: Node): boolean {
+  let atStart = offset === 0;
+  let atEnd = offset === (node.nodeType === node.TEXT_NODE ? (node.nodeValue ?? '').length : node.childNodes.length);
+  for (let at = node; atStart || atEnd; ) {
+    if (at === outer) return true;
+    const parent = at.parentNode;
+    if (!parent) return false;
+    const index = Array.prototype.indexOf.call(parent.childNodes, at);
+    atStart &&= index === 0;
+    atEnd &&= index === parent.childNodes.length - 1;
+    at = parent;
+  }
+  return false;
+}
+
+// Whether `read` is how the DOM draws `selection`: the same ends, or the ends it has as a text selection (an
+// AllSelection is drawn over the first and last text positions).
+const drawnAs = (read: Selection, selection: Selection) =>
+  [selection, TextSelection.between(selection.$anchor, selection.$head)].some((s) => s.anchor === read.anchor && s.head === read.head);
 
 export function openInterim(view: EditorView, at: number): void {
   view.dispatch(unrecorded(view.state.tr.setMeta(dictationKey, { from: at, to: at } satisfies RangeMeta)));

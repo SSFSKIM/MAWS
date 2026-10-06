@@ -12,7 +12,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
 import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore } from '../../stores/composer';
-import { docOf, mentionNode, paragraph, textNode, type ComposerDoc } from './doc';
+import { docOf, mentionNode, paragraph, pastedNode, textNode, type ComposerDoc } from './doc';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
 import type { Serialized } from './serialize';
 
@@ -302,22 +302,86 @@ describe('editor dictation replaces interim text and settles the final', () => {
   });
 
   // The hold's keydown reaches the controller (C5's capture-phase dispatcher) before ProseMirror reads the DOM selection
-  // the last arrow keys moved, so the state's caret can be stale; the words go where the human sees the caret (M5 gate).
-  it('opens the range at the DOM caret when ProseMirror has not yet read it', async () => {
-    const { handle, editor, content } = await mount(ALPHA_BETA, 11); // the state's caret at the end
-    const unseen = (event: Event) => event.stopImmediatePropagation(); // ProseMirror's selectionchange listener never runs
-    window.addEventListener('selectionchange', unseen, true);
-    try {
-      const words = content.querySelector('p')!.firstChild!; // the text node 'alpha beta'
-      act(() => void window.getSelection()!.collapse(words, 'alpha'.length));
+  // the last arrow keys moved, so the state's selection can be stale; the words go where the human sees the caret, and a
+  // selection the human sees is the one kept (M5 gate, and its review round 1).
+  describe('reads the selection ProseMirror has not seen yet', () => {
+    // Moves the window's selection with ProseMirror's selectionchange listener held off, as a key handled ahead of it does.
+    const unseen = (event: Event) => event.stopImmediatePropagation();
+    beforeEach(() => window.addEventListener('selectionchange', unseen, true));
+    afterEach(() => window.removeEventListener('selectionchange', unseen, true));
+    const moveDOMSelection = (anchor: Node, anchorOffset: number, focus = anchor, focusOffset = anchorOffset) =>
+      act(() => void window.getSelection()!.setBaseAndExtent(anchor, anchorOffset, focus, focusOffset));
+    const selection = (editor: TiptapEditor) => ({ anchor: editor.state.selection.anchor, head: editor.state.selection.head });
+
+    it('opens the range at the DOM caret', async () => {
+      const { handle, editor, content } = await mount(ALPHA_BETA, 11); // the state's caret at the end
+      moveDOMSelection(content.querySelector('p')!.firstChild!, 'alpha'.length); // the text node 'alpha beta'
       expect(editor.state.selection.from).toBe(11);
       const sink = handle.current!.beginDictation(() => {})!;
       act(() => sink.partial('hello world'));
       expect(text(editor)).toBe('alpha hello world beta');
       expect(interim(content)).toEqual([' hello world']);
-    } finally {
-      window.removeEventListener('selectionchange', unseen, true);
-    }
+    });
+
+    it('keeps a backward selection ending where the state’s caret stands', async () => {
+      const { handle, editor, content } = await mount(ALPHA_BETA, AFTER_ALPHA);
+      moveDOMSelection(content.querySelector('p')!.firstChild!, 'alpha'.length, content.querySelector('p')!.firstChild!, 0); // Shift+Home
+      const sink = handle.current!.beginDictation(() => {})!;
+      expect(selection(editor)).toEqual({ anchor: AFTER_ALPHA, head: 1 });
+      act(() => sink.cancel());
+      expect(selection(editor)).toEqual({ anchor: AFTER_ALPHA, head: 1 });
+    });
+
+    it('collapses a stale selection the DOM caret no longer shows, at its same end', async () => {
+      const { handle, editor, content } = await mount(ALPHA_BETA, 1, { to: AFTER_ALPHA });
+      moveDOMSelection(content.querySelector('p')!.firstChild!, 'alpha'.length); // Right collapsed the selection at its end
+      const sink = handle.current!.beginDictation(() => {})!;
+      expect(selection(editor)).toEqual({ anchor: AFTER_ALPHA, head: AFTER_ALPHA });
+      act(() => sink.final('hello'));
+      expect(text(editor)).toBe('alpha hello beta');
+    });
+
+    // As ProseMirror reads it: a selectable chip (a pasted one) is selected, a mention (not selectable) gives the caret
+    // after it; the words go after the chip either way. Only a caret at the chip's own leading edge stays before it.
+    const chips = (editor: TiptapEditor) => editor.state.doc.textBetween(0, editor.state.doc.content.size, '\n', '[chip]');
+    const PASTED = docOf([paragraph(textNode('see '), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text #1', lines: 3, text: 'a\nb\nc' }), textNode(' ok'))]);
+    const MENTION = docOf([paragraph(textNode('see '), mentionNode({ id: 'src/a.ts', label: 'a.ts', kind: 'file' }), textNode(' ok'))]);
+    const CHIP = 5; // 'see ' is 1..5, the chip 5..6
+
+    it('a caret inside a pasted chip’s label selects the chip, and the words go after it', async () => {
+      const { handle, editor, content } = await mount(PASTED, 1);
+      moveDOMSelection(content.querySelector('[data-pasted]')!.firstChild!, 2);
+      const sink = handle.current!.beginDictation(() => {})!;
+      expect([editor.state.selection.from, editor.state.selection.to]).toEqual([CHIP, CHIP + 1]);
+      act(() => sink.final('now'));
+      expect(chips(editor)).toBe('see [chip] now ok');
+    });
+
+    it('a caret inside a mention’s label puts the words after it', async () => {
+      const { handle, editor, content } = await mount(MENTION, 1);
+      moveDOMSelection(content.querySelector('[data-mention]')!.lastChild!, 1); // inside the label 'a.ts'
+      const sink = handle.current!.beginDictation(() => {})!;
+      act(() => sink.final('now'));
+      expect(chips(editor)).toBe('see [chip] now ok');
+    });
+
+    it('a caret at a chip’s leading edge puts the words before it', async () => {
+      const { handle, editor } = await mount(PASTED, 1);
+      moveDOMSelection(editor.view.nodeDOM(CHIP)!, 0);
+      const sink = handle.current!.beginDictation(() => {})!;
+      expect(selection(editor)).toEqual({ anchor: CHIP, head: CHIP });
+      act(() => sink.final('now'));
+      expect(chips(editor)).toBe('see now[chip] ok');
+    });
+
+    it('a caret on the editor root between two paragraphs puts the words at the end of the first', async () => {
+      const two = docOf([paragraph(textNode('one')), paragraph(textNode('two'))]);
+      const { handle, editor, content } = await mount(two, 1);
+      moveDOMSelection(content, 1); // between the paragraphs
+      const sink = handle.current!.beginDictation(() => {})!;
+      act(() => sink.final('hello'));
+      expect(editor.getJSON()).toEqual(docOf([paragraph(textNode('one hello')), paragraph(textNode('two'))]));
+    });
   });
 
   it('focuses an unfocused editor at the end before opening the range', async () => {

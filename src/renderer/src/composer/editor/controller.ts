@@ -504,7 +504,7 @@ export class EditorController {
     const editor = this.editor;
     if (!editor || editor.isDestroyed || this.busy || submissions.has(this.inputs.appSessionId) || this.inputs.disabled !== null) return null;
     this.endDictation('remove'); // one sink at a time
-    if (editor.isFocused) syncSelectionFromDOM(editor.view); // the caret the arrow keys moved, which ProseMirror may not have read
+    if (editor.isFocused) syncSelectionFromDOM(editor.view); // the selection the arrow keys moved, which ProseMirror may not have read
     else editor.commands.focus('end');
     editor.view.focus();
     const at = dictationStart(editor.state);
