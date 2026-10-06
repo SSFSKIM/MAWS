@@ -88,7 +88,7 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // E7 (P1, docs/doperpowers/plans/2026-10-06-e7-orchestration.md M0): two peer sessions messaging each other, CronCreate
     // with its fires and the resume, a named agent under the teams gate, on the installed 2.1.291
     const e7 = ['e7-cron', 'e7-cron-resume', 'e7-peer-a', 'e7-peer-b', 'e7-team'];
-    expect(listJournals('pass3')).toEqual(['engine-turn-release','fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e7].sort());
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e7].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {

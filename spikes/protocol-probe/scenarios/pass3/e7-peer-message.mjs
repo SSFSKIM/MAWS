@@ -10,7 +10,7 @@
 // has (the failure result). If ListAgents says messaging is off, or A never receives B's message, the finding is recorded
 // and the scenario ends there (Design §4 then ships on hand-built frames).
 import {launch,scratchRun,removeRun,initPayload,success,check,endAsStop,records,transcriptPath,join,writeFileSync,existsSync} from './p1-common.mjs';
-import {realpathSync,readFileSync} from 'node:fs';
+import {realpathSync,readFileSync,rmSync} from 'node:fs';
 import {E7,E7_DEBUG,allowAll,blocks,textOf,toolUsesAfter,pairsAfter,waitToolUse,waitResultOf,lifecycleOf,resultsAfter,framesBetween,steer,prompt,snapshotDir,copyRedacted,deferred,idle,cost} from './e7-common.mjs';
 import {scratch,root} from '../../harness.mjs';
 
@@ -35,6 +35,9 @@ function parseListing(text){
  const rows=section?section.split('\n').filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim().split('  ·  ')):[];
  return {self,selfName:self?.replace(/ \[[^\]]+\]$/,'')??null,peers:rows.map(([primary,...extras])=>({primary,name:primary.replace(/ \[[^\]]+\]$/,''),extras}))};
 }
+// the registry as the sessions published it; a `<pid>.<sha256>.key` file is recorded by its key names only (its
+// peerToken is the inbox's credential)
+const registry=dir=>Object.fromEntries(Object.entries(snapshotDir(dir)).map(([k,v])=>k.endsWith('.key')?[k,{mtimeMs:v.mtimeMs,size:v.size,keyNames:Object.keys(JSON.parse(v.content)).sort()}]:[k,v]));
 const bothIdle=async(a,b)=>{for(let i=0;i<2;i++){await idle(a,180000,4000);await idle(b,180000,4000);}};
 
 export default async()=>{
@@ -58,7 +61,7 @@ export default async()=>{
   try{
    // 0. B answers one turn; the registry as both sessions published it.
    check(B,'B answered its first turn',(await B.turn(READY)).subtype==='success');
-   both({event:'e7_registry',when:'after B ready',records:snapshotDir(join(run.home,'sessions')),sockets:existsSync('/tmp/cc-socks')?'present':'absent'});
+   both({event:'e7_registry',when:'after B ready',records:registry(join(run.home,'sessions')),sockets:existsSync('/tmp/cc-socks')?'present':'absent'});
 
    // 1. A lists the agents it can message.
    let from=A.seq;await A.turn(LIST);
@@ -103,14 +106,14 @@ export default async()=>{
    // 5. The failure form: a name no session has.
    from=A.seq;await A.turn(NOBODY);
    A.note({event:'e7_send_failure',pairs:pairsAfter(A,from,'SendMessage'),results:resultsAfter(A,from)});
-   both({event:'e7_registry',when:'end',records:snapshotDir(join(run.home,'sessions'))});
+   both({event:'e7_registry',when:'end',records:registry(join(run.home,'sessions'))});
   }finally{both({event:'e7_spend',a:cost(A),b:cost(B)});}
  }finally{
   done.resolve();
   ready.a.resolve({});ready.b.resolve({});
   const out=await settled;
   // the disk form: both sessions' JSONL, for backfill.ts (Design §4, §8)
-  const dir=join(root,'fixtures/pass3/e7-peer-transcripts');
+  const dir=join(root,'fixtures/pass3/e7-peer-transcripts');rmSync(dir,{recursive:true,force:true});
   for(const [role,id,r] of [['a',ids.a,run],['b',ids.b,runB]]){if(!id)continue;const file=transcriptPath(r,id);if(existsSync(file))copyRedacted(file,join(dir,`${id}.jsonl`));console.log('e7-peer',role,id,existsSync(file)?records(file).length+' records':'no transcript');}
   removeRun(run);
   const failed=out.filter(o=>o.status==='rejected');if(failed.length)throw failed[0].reason;

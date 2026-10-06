@@ -11,7 +11,7 @@ export {idle,turnOpen};
 
 export const E7={child:'E7',document:'docs/doperpowers/plans/2026-10-06-e7-orchestration.md',pin:'c2269755fde4bb2f3a8e34b2014352a3dd640132',spike:'E7 M0'};
 // The engine's debug lines about what E7 probes (messaging, the registry, scheduling, teams).
-export const E7_DEBUG=/uds-messaging|cross-session|peer|inbox|sessionRegistry|ScheduledTasks|ListAgents|SendMessage|cron|schedul|Task(Create|Update|List|Get)|todo|team|teammate|amber_flint/i;
+export const E7_DEBUG=/uds-messaging|cross-session|peer|inbox|sessionRegistry|ScheduledTasks|ListAgents|SendMessage|cron|schedul|team|teammate|amber_flint/i;
 
 export const sys=(f,subtype)=>f.type==='system'&&f.subtype===subtype;
 export const blocks=f=>Array.isArray(f.message?.content)?f.message.content:[];
