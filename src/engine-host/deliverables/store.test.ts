@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -35,6 +35,32 @@ describe('the deliverable store (X12, residue 7)', () => {
     await writeFile(join(userData, 'deliverables', A, 'stray.json'), '{"not":"a record"}');
     expect((await store.list(A)).map((r) => r.id)).toEqual([ID2, ID1]);
     expect(await store.list('app-2' as AppSessionId)).toEqual([]);
+  });
+
+  // fix wave: a malformed record, a schema miss and a record removed mid-listing are passed over; a record the store
+  // cannot read is an error, never a silent gap in the list
+  it('passes over an unparsable record and one removed mid-listing, and leaves the rest', async () => {
+    const store = new FileDeliverableStore(userData);
+    await store.write(record(ID1, '2026-10-05T00:00:01.000Z'));
+    const dir = join(userData, 'deliverables', A);
+    await writeFile(join(dir, 'torn.json'), '{"id": "6f1c');
+    expect((await store.list(A)).map((r) => r.id)).toEqual([ID1]);
+    // a record readdir named and a delete removed before it was read
+    const racing = new FileDeliverableStore(userData, { readFile: async (path) => (path.endsWith(`${ID2}.json`) ? Promise.reject(Object.assign(new Error('ENOENT: gone'), { code: 'ENOENT' })) : readFile(path, 'utf8')) });
+    await writeFile(join(dir, `${ID2}.json`), '{}');
+    expect((await racing.list(A)).map((r) => r.id)).toEqual([ID1]);
+  });
+
+  it('propagates a record it cannot read (EACCES)', async () => {
+    const store = new FileDeliverableStore(userData);
+    await store.write(record(ID1, '2026-10-05T00:00:01.000Z'));
+    const file = join(userData, 'deliverables', A, `${ID1}.json`);
+    await chmod(file, 0o000);
+    try {
+      await expect(store.list(A)).rejects.toMatchObject({ code: 'EACCES' });
+    } finally {
+      await chmod(file, 0o644);
+    }
   });
 
   it('refuses a record that is not X12 before touching the disk, and an unsafe session id', async () => {

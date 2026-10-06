@@ -13,7 +13,12 @@ export interface DeliverableWriter {
 }
 
 export class FileDeliverableStore implements DeliverableWriter {
-  constructor(private readonly userData: string) {}
+  private readonly readRecord: (path: string) => Promise<string>;
+
+  // `readFile`: a test seam for a record removed between the listing and its read
+  constructor(private readonly userData: string, opts: { readFile?: (path: string) => Promise<string> } = {}) {
+    this.readRecord = opts.readFile ?? ((path) => readFile(path, 'utf8'));
+  }
 
   async write(record: DeliverableRecord): Promise<void> {
     const checked = DeliverableRecordSchema.parse(record);
@@ -25,15 +30,18 @@ export class FileDeliverableStore implements DeliverableWriter {
     await rename(temp, file);
   }
 
-  // The session's records, oldest first; a file that does not parse as a record is passed over.
+  // The session's records, oldest first. A file that does not parse as a record, and one removed after the listing named
+  // it, are passed over; any other failure to read one (EACCES, EISDIR, …) rejects, so no record silently goes missing.
   async list(appSessionId: AppSessionId): Promise<DeliverableRecord[]> {
     const dir = this.dirOf(appSessionId);
     const names = await readdir(dir).catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? [] : Promise.reject(error)));
     const records: DeliverableRecord[] = [];
     for (const name of names.filter((n) => n.endsWith('.json'))) {
+      const text = await this.readRecord(join(dir, name)).catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? null : Promise.reject(error)));
+      if (text === null) continue;
       let json: unknown;
       try {
-        json = JSON.parse(await readFile(join(dir, name), 'utf8'));
+        json = JSON.parse(text);
       } catch {
         continue;
       }
