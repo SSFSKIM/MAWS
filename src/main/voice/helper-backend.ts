@@ -1,8 +1,10 @@
 // The helper backend (E9 execution document, Design §2): spawns the bundled Swift helper lazily on the first `probe` or
 // `start`, waits for its `ready` line, and keeps it warm for later captures (a warm helper answers a hold in tens of
-// milliseconds); after 10 idle minutes it sends `quit` and the next use respawns. A helper exit during a capture is that
-// capture's `helper_crashed`. Every stdout line is validated against the protocol's schema; a line that fails is logged
-// and dropped, never thrown into the service.
+// milliseconds); after 10 idle minutes it is retired and the next use respawns. A helper exit during a capture is that
+// capture's `helper_crashed`. Retiring is synchronous and final (`quit`, stdin EOF, SIGTERM at once): `dispose` runs at
+// `will-quit`, after which no timer of main's can be trusted to fire, and the helper's own parent watch is the second
+// line. Every stdout line is validated against the protocol's schema; a line that fails is logged and dropped, never
+// thrown into the service.
 //
 // Cancellation crosses the ready wait: `start` registers its capture before awaiting the helper, `cancel` flags it, and a
 // flagged capture never writes its `start` line, so a hold released during a cold spawn never opens the microphone.
@@ -14,9 +16,8 @@ import type { HelperEvent, VoiceBackend } from './backend';
 import { encodeCommand, HelperEventSchema, isCaptureEvent, LineSplitter, type HelperCommand, type HelperProbe } from './protocol';
 
 export const HELPER_READY_MS = 5_000; // from spawn to the `ready` line
-export const HELPER_IDLE_MS = 10 * 60_000; // with nothing to do, the helper is asked to quit
-export const HELPER_TERM_MS = 1_000; // after `quit`, SIGTERM
-export const HELPER_KILL_MS = 3_000; // after `quit`, SIGKILL
+export const HELPER_PROBE_MS = 5_000; // from the `probe` line to its answer; past it the helper is killed
+export const HELPER_IDLE_MS = 10 * 60_000; // with nothing to do, the helper is retired
 export const HELPER_PROBE_CACHE_MS = 10_000; // the Settings tab and the toolbar do not re-probe on every render
 export const HELPER_LINE_MAX = 64 * 1024; // a longer stdout line is dropped unread
 
@@ -41,7 +42,7 @@ export function isExecutableFile(path: string): boolean {
 
 // What the backend needs of a child process; `child_process.spawn` with piped stdio is one.
 export interface HelperChild {
-  readonly stdin: { write(chunk: string): boolean; on(event: 'error', listener: (error: Error) => void): unknown };
+  readonly stdin: { write(chunk: string): boolean; end(): unknown; on(event: 'error', listener: (error: Error) => void): unknown };
   readonly stdout: { setEncoding(encoding: 'utf8'): unknown; on(event: 'data', listener: (chunk: string) => void): unknown };
   readonly stderr: { setEncoding(encoding: 'utf8'): unknown; on(event: 'data', listener: (chunk: string) => void): unknown };
   kill(signal: NodeJS.Signals): boolean;
@@ -101,9 +102,18 @@ export class HelperBackend implements VoiceBackend {
     const helper = this.ensure();
     const failure = await helper.ready;
     if (failure !== null) return unprobed({ state: 'failed', path, message: failure });
+    // `close` may have been read between `ready` and this continuation: nothing would answer a probe written now
+    if (helper.exited) return unprobed({ state: 'failed', path, message: 'the helper exited before it was probed' });
     this.clearIdle();
     const answer = await new Promise<HelperProbe | string>((resolve) => {
-      helper.probes.push(resolve);
+      const timer = setTimeout(() => {
+        this.gone(helper, `probe timed out: the helper did not answer within ${HELPER_PROBE_MS / 1000} s`); // answers this probe
+        helper.child.kill('SIGKILL');
+      }, HELPER_PROBE_MS);
+      helper.probes.push((reply) => {
+        clearTimeout(timer);
+        resolve(reply);
+      });
       this.write(helper, { cmd: 'probe', locale });
     });
     this.touch();
@@ -250,12 +260,14 @@ export class HelperBackend implements VoiceBackend {
     helper.child.stdin.write(encodeCommand(command));
   }
 
-  // Asks the helper to quit; signals follow while it still runs.
+  // Ends the helper now: `quit`, then EOF (itself an exit for the helper), then SIGTERM for one wedged on its queue. The
+  // helper holds nothing worth a grace period, and no timer is left behind.
   private retire(helper: Helper): void {
     if (this.helper === helper) this.helper = null;
+    if (helper.exited) return;
     this.write(helper, { cmd: 'quit' });
-    setTimeout(() => helper.exited || helper.child.kill('SIGTERM'), HELPER_TERM_MS);
-    setTimeout(() => helper.exited || helper.child.kill('SIGKILL'), HELPER_KILL_MS);
+    helper.child.stdin.end();
+    helper.child.kill('SIGTERM');
   }
 
   private clearIdle(): void {

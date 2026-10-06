@@ -465,6 +465,16 @@ func handle(line: String) {
 
 signal(SIGPIPE, SIG_IGN)
 
+// The parent watch (Design §2): main's SIGTERM at `will-quit` is the first line, this is the second. It runs on its own
+// global queue, so a helper wedged on `state` still exits when the app is gone. The pid is checked again after the
+// watch is armed, so a parent that died in between is not missed (a watch on a gone pid never fires).
+let parent = getppid()
+if parent == 1 { exit(0) } // already orphaned
+let parentWatch = DispatchSource.makeProcessSource(identifier: parent, eventMask: .exit, queue: .global())
+parentWatch.setEventHandler { exit(0) }
+parentWatch.resume()
+if getppid() != parent { exit(0) }
+
 // `ready` is queued before the reader starts, so it is always the first line.
 state.async { emit([("type", .string("ready")), ("protocol", .int(1))]) }
 

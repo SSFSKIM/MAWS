@@ -6,11 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HelperEvent } from './backend';
 import {
   HELPER_IDLE_MS,
-  HELPER_KILL_MS,
   HELPER_LINE_MAX,
   HELPER_PROBE_CACHE_MS,
+  HELPER_PROBE_MS,
   HELPER_READY_MS,
-  HELPER_TERM_MS,
   HelperBackend,
   helperPath,
   isExecutableFile,
@@ -26,12 +25,16 @@ const PROBE = { type: 'probe', locales: ['en-US', 'ko-KR'], systemLocale: 'ko-KR
 class FakeChild extends EventEmitter implements HelperChild {
   readonly written: Record<string, unknown>[] = [];
   readonly signals: string[] = [];
+  stdinEnded = false;
   readonly stdout = Object.assign(new EventEmitter(), { setEncoding: () => {} });
   readonly stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} });
   readonly stdin = Object.assign(new EventEmitter(), {
     write: (chunk: string) => {
       for (const line of chunk.split('\n').filter(Boolean)) this.written.push(JSON.parse(line) as Record<string, unknown>);
       return true;
+    },
+    end: () => {
+      this.stdinEnded = true;
     },
   });
   say(line: object | string): void {
@@ -185,6 +188,43 @@ describe('helper backend spawns, times out, and reports a crash', () => {
       h.child().exit(1);
       await expect(status).resolves.toMatchObject({ helper: { state: 'failed', path: PATH } });
     });
+
+    it('answers the helper failed when no reply comes within 5 s, kills it, and respawns on the next probe', async () => {
+      const h = setup();
+      const status = h.backend.probe(null);
+      h.child().ready();
+      await settle();
+      expect(h.child().commands()).toEqual(['probe']);
+      vi.advanceTimersByTime(HELPER_PROBE_MS - 1);
+      expect(h.child().signals).toEqual([]);
+      vi.advanceTimersByTime(1);
+      await expect(status).resolves.toMatchObject({ helper: { state: 'failed', path: PATH, message: expect.stringContaining('probe timed out') }, permission: null, locales: [] });
+      expect(h.children[0]!.signals).toEqual(['SIGKILL']);
+      h.children[0]!.say(PROBE); // a reply after the deadline answers nothing
+      const again = h.backend.probe(null);
+      expect(h.spawn).toHaveBeenCalledTimes(2);
+      h.child().ready();
+      await settle();
+      h.child().say(PROBE);
+      await expect(again).resolves.toMatchObject({ helper: { state: 'ready' } });
+      expect(vi.getTimerCount()).toBe(1); // the idle quit only: the answered probe left no deadline behind
+    });
+
+    it('answers the helper failed without probing when it closed between ready and the probe', async () => {
+      const h = setup();
+      const status = h.backend.probe(null);
+      h.child().ready();
+      h.child().exit(1); // read before the awaiting probe resumes
+      await expect(status).resolves.toMatchObject({ helper: { state: 'failed', path: PATH, message: expect.stringContaining('exited') } });
+      expect(h.children[0]!.written).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0); // no probe deadline, no idle quit for a helper that is gone
+      const again = h.backend.probe(null);
+      expect(h.spawn).toHaveBeenCalledTimes(2);
+      h.child().ready();
+      await settle();
+      h.child().say(PROBE);
+      await expect(again).resolves.toMatchObject({ helper: { state: 'ready' } });
+    });
   });
 
   describe('a capture', () => {
@@ -329,34 +369,43 @@ describe('helper backend spawns, times out, and reports a crash', () => {
       expect(child.commands()).toEqual(['start']);
       vi.advanceTimersByTime(1);
       expect(child.commands()).toEqual(['start', 'quit']);
-      child.exit(0);
-      vi.advanceTimersByTime(HELPER_KILL_MS);
-      expect(child.signals).toEqual([]);
+      expect(child.stdinEnded).toBe(true);
+      expect(child.signals).toEqual(['SIGTERM']);
+      expect(vi.getTimerCount()).toBe(0);
+      child.exit(null, 'SIGTERM');
       h.start(B);
       expect(h.spawn).toHaveBeenCalledTimes(2);
     });
 
-    it('writes quit on dispose, then SIGTERM after 1 s and SIGKILL after 3 s while it still runs', async () => {
+    it('on dispose writes quit, ends stdin and sends SIGTERM at once, leaving no timer behind', async () => {
       const h = setup();
       const child = await started(h);
+      child.say({ type: 'final', id: A, text: '', timedOut: false }); // arms the idle quit
+      expect(vi.getTimerCount()).toBe(1);
       h.backend.dispose();
-      expect(child.commands().at(-1)).toBe('quit');
-      vi.advanceTimersByTime(HELPER_TERM_MS - 1);
-      expect(child.signals).toEqual([]);
-      vi.advanceTimersByTime(1);
+      expect(child.commands()).toEqual(['start', 'quit']);
+      expect(child.stdinEnded).toBe(true);
       expect(child.signals).toEqual(['SIGTERM']);
-      vi.advanceTimersByTime(HELPER_KILL_MS - HELPER_TERM_MS);
-      expect(child.signals).toEqual(['SIGTERM', 'SIGKILL']);
-      child.exit(null, 'SIGKILL');
-      expect(h.events).toEqual([]); // a disposed backend reports no crash
+      expect(vi.getTimerCount()).toBe(0);
+      child.exit(null, 'SIGTERM');
+      expect(h.events).toEqual([{ type: 'final', id: A, text: '', timedOut: false }]); // a disposed backend reports no crash
     });
 
-    it('sends no signal on dispose when the helper exits on quit', async () => {
+    it('ends a capture’s helper on dispose without reporting it crashed', async () => {
       const h = setup();
       const child = await started(h);
       h.backend.dispose();
-      child.exit(0);
-      vi.advanceTimersByTime(HELPER_KILL_MS);
+      expect(child.signals).toEqual(['SIGTERM']);
+      child.exit(null, 'SIGTERM');
+      expect(h.events).toEqual([]);
+    });
+
+    it('signals nothing on dispose when the helper already exited', async () => {
+      const h = setup();
+      const child = await started(h);
+      child.exit(null, 'SIGSEGV');
+      h.backend.dispose();
+      expect(child.commands()).toEqual(['start']);
       expect(child.signals).toEqual([]);
     });
 
