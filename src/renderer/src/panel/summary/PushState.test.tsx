@@ -2,7 +2,7 @@
 // control, and a second row says the PR's state from `scm.status` and `scm.pr.state` (shared with the tool's header by
 // query key), with Install, Sign in and a manual refresh; the PR state is polled only while there is something to ask.
 import { QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName } from '@shared/ipc/schema';
@@ -51,6 +51,8 @@ function bridge(over: Partial<Record<CommandName, unknown>> = {}) {
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 const push = () => screen.getByRole('region', { name: 'Push state' });
 const prLine = () => within(push()).queryByTestId('pr-line');
+// The line answers after main's two reads, however many turns that takes under load.
+const lineReads = (text: string) => waitFor(() => expect(prLine()?.textContent).toBe(text));
 
 async function mount() {
   const view = render(<TestHost />);
@@ -72,7 +74,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
   it('reads the PR, its state and its checks, polling the shared query with refresh off; the number opens the PR', async () => {
     const user = userEvent.setup();
     await mount();
-    expect(prLine()?.textContent).toBe('PR #12 Open · 2 passed, 1 pending');
+    await lineReads('PR #12 Open · 2 passed, 1 pending');
     expect(fake.invoked('scm.status')).toEqual([{ appSessionId: A }]);
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }]);
     await user.click(within(push()).getByRole('button', { name: 'PR #12' }));
@@ -82,42 +84,41 @@ describe('push state row shows PR state, install and sign-in states and opens th
   it('Refresh asks gh again, shows its answer and re-reads scm.status', async () => {
     const user = userEvent.setup();
     await mount();
+    await lineReads('PR #12 Open · 2 passed, 1 pending');
     const refresh = within(push()).getByRole('button', { name: 'Refresh PR state' });
     expect(refresh.getAttribute('title')).toMatch(/^Checked /);
     await user.click(refresh);
-    await settle();
+    await lineReads('PR #12 Open · 3 passed');
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }, { appSessionId: A, refresh: true }]);
-    expect(prLine()?.textContent).toBe('PR #12 Open · 3 passed');
-    expect(fake.invoked('scm.status')).toEqual([{ appSessionId: A }, { appSessionId: A }]);
+    await waitFor(() => expect(fake.invoked('scm.status')).toEqual([{ appSessionId: A }, { appSessionId: A }]));
   });
 
   it('says No PR for the branch, and why the PR state is unavailable', async () => {
     bridge({ 'scm.pr.state': { ...PR, pr: null } });
     let view = await mount();
-    expect(prLine()?.textContent).toBe('No PR for feature');
+    await lineReads('No PR for feature');
     view.unmount();
     bridge({ 'scm.pr.state': { ...PR, pr: null, error: 'gh pr view: HTTP 502' } });
     view = await mount();
-    expect(prLine()?.textContent).toBe('PR state unavailable · gh pr view: HTTP 502');
+    await lineReads('PR state unavailable · gh pr view: HTTP 502');
     view.unmount();
     bridge();
     const invoke = fake.client.invoke;
     fake.client.invoke = (async (command: CommandName, input: never) =>
       command === 'scm.status' ? { ok: false, error: { code: 'internal', message: 'unknown app session: app-a' } } : invoke(command, input)) as never;
     await mount();
-    expect(prLine()?.textContent).toBe('PR state unavailable · unknown app session: app-a');
+    await lineReads('PR state unavailable · unknown app session: app-a');
   });
 
   it('asks for trust, and polls nothing, in an untrusted checkout or one without a remote', async () => {
     const user = userEvent.setup();
     bridge({ 'scm.status': { ...SCM, trusted: false } });
     const view = await mount();
-    expect(prLine()?.textContent).toBe('Trust this folder to see PR state');
+    await lineReads('Trust this folder to see PR state');
     expect(fake.invoked('scm.pr.state')).toEqual([]);
     // Refresh re-reads trust and asks gh nothing
     await user.click(within(push()).getByRole('button', { name: 'Refresh PR state' }));
-    await settle();
-    expect(fake.invoked('scm.status')).toHaveLength(2);
+    await waitFor(() => expect(fake.invoked('scm.status')).toHaveLength(2));
     expect(fake.invoked('scm.pr.state')).toEqual([]);
     view.unmount();
     bridge({ 'scm.status': { ...SCM, remotes: [] } });
@@ -131,14 +132,14 @@ describe('push state row shows PR state, install and sign-in states and opens th
     const addTool = vi.spyOn(panelHost, 'addTool');
     bridge({ 'scm.status': { ...SCM, gh: { state: 'missing' } }, 'scm.pr.state': { ...PR, gh: { state: 'missing' }, pr: null, error: 'gh_missing', checkedAt: SCM.checkedAt } });
     const view = await mount();
-    expect(prLine()?.textContent).toBe('GitHub CLI not installed · Install');
+    await lineReads('GitHub CLI not installed · Install');
     await user.click(within(push()).getByRole('button', { name: 'Install' }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://cli.github.com' }]);
     view.unmount();
     const signedOut: ScmGhState = { state: 'unauthenticated', path: '/bin/gh', version: null, detail: 'You are not logged into any GitHub hosts' };
     bridge({ 'scm.status': { ...SCM, gh: signedOut }, 'scm.pr.state': { ...PR, gh: signedOut, pr: null, error: 'gh_unauthenticated', checkedAt: SCM.checkedAt } });
     await mount();
-    expect(prLine()?.textContent).toBe('GitHub CLI not signed in · Sign in');
+    await lineReads('GitHub CLI not signed in · Sign in');
     await user.click(within(push()).getByRole('button', { name: 'Sign in' }));
     expect(addTool).toHaveBeenCalledWith('terminal', { appSessionId: A, params: { cwd: DIR, command: 'gh auth login' } });
   });
@@ -175,14 +176,14 @@ describe('push state row shows PR state, install and sign-in states and opens th
     let scm: ScmStatus = { ...SCM, trusted: false };
     bridge({ 'scm.status': () => scm });
     await mount();
-    expect(prLine()?.textContent).toBe('Trust this folder to see PR state');
+    await lineReads('Trust this folder to see PR state');
     await user.click(within(push()).getByRole('button', { name: 'Refresh PR state' }));
     await settle();
-    expect(prLine()?.textContent).toBe('Trust this folder to see PR state');
+    await lineReads('Trust this folder to see PR state');
     scm = { ...SCM, checkedAt: '2026-10-06T10:02:00.000Z' }; // main records the trust in the `trusting` phase
     act(() => fake.event('session.setup', { appSessionId: A, phase: 'trusting', detail: null, outcome: null }));
     for (let i = 0; i < 4; i++) await settle();
-    expect(prLine()?.textContent).toBe('PR #12 Open · 2 passed, 1 pending');
+    await lineReads('PR #12 Open · 2 passed, 1 pending');
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }]);
   });
 
@@ -191,20 +192,20 @@ describe('push state row shows PR state, install and sign-in states and opens th
     const answers: ScmPrState[] = [{ ...PR, checkedAt: '2026-10-06T09:59:00.000Z', gh: signedOut, pr: null, error: 'gh_unauthenticated' }, PR];
     bridge({ 'scm.pr.state': () => answers.shift() ?? PR });
     await mount();
+    await lineReads('PR #12 Open · 2 passed, 1 pending');
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }, { appSessionId: A, refresh: false }]);
-    expect(prLine()?.textContent).toBe('PR #12 Open · 2 passed, 1 pending');
   });
 
   it('polls the PR state every 2 minutes while the row is shown, and not at all once it is gone', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const view = await mount();
+    await lineReads('PR #12 Open · 2 passed, 1 pending'); // the line's own render wakes the wait (its interval is faked)
     expect(fake.invoked('scm.pr.state')).toHaveLength(1);
     act(() => vi.advanceTimersByTime(119_999));
     await settle();
     expect(fake.invoked('scm.pr.state')).toHaveLength(1);
     act(() => vi.advanceTimersByTime(1));
-    await settle();
-    expect(fake.invoked('scm.pr.state')).toHaveLength(2);
+    await vi.waitFor(() => expect(fake.invoked('scm.pr.state')).toHaveLength(2)); // vitest's wait runs on real timers
     view.unmount();
     act(() => vi.advanceTimersByTime(600_000));
     await settle();
