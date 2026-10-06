@@ -53,6 +53,10 @@ import { PaneBridge, type PaneShowRequest } from './tool-server/panes';
 import { MawsToolServer, toolText } from './tool-server/server';
 import { mawsTools } from './tool-server/tools';
 // E1 end
+// E3 start
+import type { SideQuestionRequest } from '@shared/wire/control';
+import { SideQuestionLog } from './side-questions';
+// E3 end
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
 
 export { HostHookRegistry } from './host-hooks';
@@ -142,6 +146,7 @@ export class EngineSession {
   private readonly panes: PaneBridge;
   private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
   private askItems = new Map<string, AttentionItem>(); // E1 M4b: the blocking asks' attention items, published with the broker's
+  readonly sideQuestions = new SideQuestionLog(); // E3: this process's `/btw` exchanges (host memory, X13)
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
   private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */ };
@@ -372,6 +377,17 @@ export class EngineSession {
   asks(): PendingAsk[] {
     return this.askTable.list();
   }
+
+  // E3 start: a side question (`session.sideQuestion`), sent through the caller's operation table with the log's
+  // history and entered in the log under the operation id its request was written under; the table's completion
+  // settles it (ipc.ts)
+  async sideQuestion(question: string, start: (request: SideQuestionRequest) => Promise<{ opId: string }>): Promise<{ opId: string }> {
+    const ask = this.sideQuestions.ask(question, new Date().toISOString());
+    const receipt = await start(ask.history === undefined ? { question } : { question, history: ask.history });
+    ask.bind(receipt.opId);
+    return receipt;
+  }
+  // E3 end
 
   // E1 M2 (residue 12): the human's answers to one ask (`maws.ask.answer`), checked against its questions first (a
   // mismatch throws AskAnswerMismatch and writes nothing), then claimed, written, and committed only once the write
@@ -1095,6 +1111,7 @@ export class EngineSession {
     this.toolServer.processExited(); // a blocking ask's call aborts with it, cancelling the ask (meta row)
     this.panes.processExited();
     for (const ask of this.askTable.cancelAll('exit')) this.askCancelled(ask, 'exit'); // E1 M2: the async asks, before the exit row
+    this.sideQuestions.processExited(new Date().toISOString()); // E3: no answer comes once the process is gone
     this.client?.close('the process exited');
     this.clearAndImplement.processExited();
     this.bashMode.processExited();
