@@ -10,6 +10,8 @@ import { useSettings } from '../stores/settings';
 
 export const BINARY: BinaryInfo = { path: '/Users/owner/.local/share/claude/versions/2.1.287', testedVersion: '2.1.283', version: '2.1.287', ok: true, error: null }; // W13: the installed one
 
+export const VOICE_HELPER = '/Applications/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper'; // E9
+
 export interface SettingsBridge {
   bridge: MawsBridge;
   sets: SettingsPatch[];
@@ -42,6 +44,18 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V9): Settin
     'engine.relayHealth': () => ({ url: 'http://127.0.0.1:8641', ok: true, status: 200, latencyMs: 2, checkedAt: new Date().toISOString(), error: null }),
     'layout.pickFiles': () => ({ files: [] }),
     'layout.captureChords': () => undefined,
+    // E9 start: Settings › Voice's probe (never prompts) and the denial rows' System Settings button
+    'voice.status': (input) => ({
+      helper: { state: 'ready', path: VOICE_HELPER },
+      backend: 'helper',
+      permission: { microphone: 'authorized', speech: 'authorized' },
+      systemLocale: 'ko-KR',
+      locale: (input as { locale: string | null }).locale ?? 'ko-KR',
+      supportsOnDevice: true,
+      locales: ['ko-KR', 'en-US', 'fr-FR'],
+    }),
+    'voice.openPrivacySettings': () => undefined,
+    // E9 end
   };
   const bridge = {
     invoke: vi.fn(async (name: string, input: unknown) => {

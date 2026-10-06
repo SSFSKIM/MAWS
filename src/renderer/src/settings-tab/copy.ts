@@ -5,6 +5,7 @@ export const SECTIONS = {
   engine: 'Engine',
   gateway: 'Gateway',
   keyboard: 'Keyboard',
+  voice: 'Voice', // E9
   appearance: 'Appearance',
   notifications: 'Notifications',
 } as const;
@@ -105,6 +106,40 @@ export const KEYBOARD = {
   cancel: 'Cancel',
   table: 'Key bindings',
 };
+
+// E9 start: Settings › Voice (E9 execution document, Design §9; M4): the hold that dictates, the recognition language
+// (settings version 9), and what main's probe reports. Recognition is on-device only, so a language without a model on
+// this Mac is refused at the hold and said so here.
+export const VOICE = {
+  shortcut: 'Shortcut',
+  changeInKeyboard: 'Change in Keyboard',
+  shortcutNote: "Hold it anywhere in the window to dictate into the focused composer; the microphone in the composer's toolbar does the same.",
+  language: 'Language',
+  system: (locale: string | null) => (locale === null ? 'System' : `System (${locale})`),
+  noOnDeviceMark: 'no on-device model',
+  languageNote: "Dictation runs on this Mac through Apple's speech recognition; MAWS stores no audio and no transcript.",
+  helper: 'Helper',
+  helperFound: 'Found at',
+  helperMissing: 'Not found at',
+  helperBuild: 'run pnpm build:helper',
+  helperFailed: (message: string) => `Did not start · ${message}`,
+  scripted: 'scripted recognizer (test harness)',
+  reading: 'Reading…',
+  microphone: 'Microphone',
+  speech: 'Speech recognition',
+  permission: {
+    authorized: 'Allowed',
+    notDetermined: 'Not asked yet · macOS asks on the first hold',
+    denied: 'Off for MAWS',
+    restricted: 'Off for MAWS and cannot be turned on here',
+  },
+  permissionUnknown: 'Unknown until the helper answers',
+  openSystemSettings: 'Open System Settings',
+  recognition: 'Recognition',
+  onDevice: 'On this Mac',
+  noOnDevice: 'No on-device model · download it in System Settings › Keyboard › Dictation',
+};
+// E9 end
 
 export const APPEARANCE = {
   theme: 'Theme',
