@@ -79,21 +79,26 @@ function ScheduledItem({ row, now, onOpen }: { row: ScheduledRow; now: number; o
   ].filter((part): part is string => part !== false);
   return (
     <li data-scheduled={row.id} data-store={row.store} className={`mx-3 flex flex-col gap-0.5 rounded-sm px-2 py-1.5 text-ui-sm ${row.dormant ? 'text-fg-faint' : 'text-fg'}`}>
+      {/* the schedule keeps the first line with the link; its kind and store go under it with the prompt, so a narrow
+          panel truncates the prompt, never the schedule to a letter */}
       <div className="flex min-h-6 items-center gap-2">
-        <span data-part="schedule" title={row.schedule} className="min-w-0 truncate">
+        <span data-part="schedule" title={row.schedule} className="min-w-0 flex-1 truncate">
           {row.schedule}
         </span>
-        <span data-part="kind" className={`shrink-0 ${row.dormant ? '' : 'text-fg-muted'}`}>
-          {kind}
-        </span>
         {row.link !== null && (
-          <button type="button" onClick={() => onOpen(row)} className={`ml-auto ${ACTION}`}>
+          <button type="button" onClick={() => onOpen(row)} className={`shrink-0 ${ACTION}`}>
             {SCHEDULED_COPY.openTurn}
           </button>
         )}
       </div>
-      <p data-part="prompt" title={row.prompt} className={`truncate ${row.dormant ? '' : 'text-fg-muted'}`}>
-        {row.prompt}
+      <p className={`flex min-w-0 gap-1.5 ${row.dormant ? '' : 'text-fg-muted'}`}>
+        <span data-part="kind" className="shrink-0">
+          {kind}
+        </span>
+        <span aria-hidden>·</span>
+        <span data-part="prompt" title={row.prompt} className="min-w-0 truncate">
+          {row.prompt}
+        </span>
       </p>
       <p data-part="when" className={`tabular-nums ${row.dormant ? '' : 'text-fg-muted'}`}>
         {row.dormant ? (
