@@ -29,6 +29,7 @@ const SCAN_RESULT = { projects: 0, sessions: 0, changed: 0, durationMs: 1 };
 function scriptedHost(state: HostState['state'] = 'ready') {
   const listeners = new Map<string, Set<Listener>>();
   const stateListeners = new Set<(s: HostState) => void>();
+  const streamingListeners = new Set<() => void>(); // E10
   const calls: { name: CommandName; input: unknown }[] = [];
   // What a host with an empty store answers, unless a test says otherwise.
   const answers = new Map<CommandName, (input: unknown) => unknown>([
@@ -51,6 +52,12 @@ function scriptedHost(state: HostState['state'] = 'ready') {
       stateListeners.add(listener);
       return () => stateListeners.delete(listener);
     },
+    // E10 start
+    onStreaming: (_owner, listener) => {
+      streamingListeners.add(listener);
+      return () => streamingListeners.delete(listener);
+    },
+    // E10 end
     snapshot: () => current,
   };
   return {
@@ -66,6 +73,10 @@ function scriptedHost(state: HostState['state'] = 'ready') {
     setState(next: HostState['state']) {
       current = { ...current, state: next, revision: current.revision + 1 };
       stateListeners.forEach((l) => l(current));
+    },
+    // E10: the host's ready line has gone (after main's resync): its events reach main from here
+    stream() {
+      streamingListeners.forEach((l) => l());
     },
   };
 }
@@ -171,19 +182,39 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     }
   });
 
-  it('syncs when the engine host becomes ready, and again after it restarts (its bindings died with it)', async () => {
+  // E10: fs.scan's discoveries come back only as fs.sessionChanged events, which the host emits from its ready line on,
+  // so the sync waits for the host to stream rather than for the `ready` state (reached at the welcome, before main's resync)
+  it('syncs once the engine host streams, and again after it restarts (its bindings died with it)', async () => {
     const fake = scriptedHost('starting');
     begin(fake.host);
     await settle();
     expect(fake.names()).toEqual([]);
     fake.setState('ready');
     await settle();
+    expect(fake.names()).toEqual([]); // ready, but still pulled from: nothing it would announce could reach main yet
+    fake.stream();
+    await settle();
     expect(fake.names()).toEqual(['fs.scan', 'fs.state']);
     fake.setState('crashed');
     fake.setState('restarting');
     fake.setState('ready');
+    fake.stream();
     await settle();
     expect(fake.names()).toEqual(['fs.scan', 'fs.state', 'fs.scan', 'fs.state']);
+  });
+
+  // E10: the reset stays at every transition, `ready` included, so a kept session's burst status re-marks it self after it
+  it('a kept live session reads self again from the burst status that follows the ready transition', async () => {
+    const disk = summary();
+    const appId = index.sessions.upsertFromSummary(disk).record.appId;
+    const fake = scriptedHost('starting');
+    begin(fake.host);
+    index.sessions.applyEngineStatus(appId, { holder: { kind: 'self' } }); // what the last app run left
+    fake.setState('ready');
+    expect(index.sessions.get(appId)?.holder).toEqual({ kind: 'none' });
+    fake.stream();
+    fake.fire('session.status', { appSessionId: appId, status: status(appId, { engineSessionId: disk.sessionId }) });
+    expect(index.sessions.get(appId)?.holder.kind).toBe('self');
   });
 
   it('releases self ownership on host loss and refreshes from disk after an empty replacement registry', async () => {
@@ -608,6 +639,7 @@ function inProcessHost(configHome: string) {
       return () => listeners.get(name)!.delete(listener);
     }) as SourceHost['onEvent'],
     onState: () => () => {},
+    onStreaming: () => () => {}, // E10
     snapshot: () => ({ state: 'ready', pid: 1, restarts: 0, revision: 1 }),
   };
   return {

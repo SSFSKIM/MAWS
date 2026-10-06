@@ -113,6 +113,7 @@ export class FakeEngineHost {
 
   // IndexSessionSource's view of the host: never ready, so it does not sync; it still folds statuses.
   onState = (): (() => void) => () => {};
+  onStreaming = (): (() => void) => () => {}; // E10
   snapshot = (): HostState => this.hostState;
 
   emitEvent<N extends EventName>(name: N, payload: EventPayload<N>): void {
