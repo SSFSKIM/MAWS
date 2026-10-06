@@ -1,6 +1,6 @@
 // Exercise the actual startup callbacks with disk-backed intents/layout/history, without Electron or engine hosts.
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -114,4 +114,19 @@ describe('main setup-intent and shell-environment wiring', () => {
     await expect(invoke('session.history.list', { appSessionId: ID, limit: 10 })).resolves.toMatchObject({ entries: [{ display: 'from login shell', source: 'terminal' }] });
     expect((await state.deps!.env).CLAUDE_CONFIG_DIR).toBe(state.shellConfig);
   });
+
+  // E6 start: scm.* resolves the session's checkout from the read model and reads trust with the captured environment
+  it('registers every scm.* command and reads their trust from the same captured environment as the engine', async () => {
+    vi.stubEnv('MAWS_GH', ''); // gh is looked up on the capture's PATH, which has none: no gh runs here
+    const names = ['status', 'stage', 'unstage', 'discard', 'commit', 'push.plan', 'push', 'pr.plan', 'pr.create', 'remote.cancel', 'remote.last', 'pr.state'];
+    for (const name of names) expect(state.handlers.has(`scm.${name}`), name).toBe(true);
+    const checkout = realpathSync(join(state.root, 'additional'));
+    (state.model as { record: (id: AppSessionId) => unknown }).record = (id) => (id === ID ? { directory: checkout, worktree: null } : null);
+    const trusting = JSON.stringify({ projects: { [checkout]: { hasTrustDialogAccepted: true } } });
+    writeFileSync(join(state.root, 'dock-config', '.claude.json'), trusting); // the process's own config home: not the engine's
+    await expect(invoke('scm.status', { appSessionId: ID })).resolves.toMatchObject({ directory: checkout, repository: false, trusted: false, gh: { state: 'missing' } });
+    writeFileSync(join(state.shellConfig, '.claude.json'), trusting);
+    await expect(invoke('scm.status', { appSessionId: ID })).resolves.toMatchObject({ trusted: true, trustKey: checkout });
+  });
+  // E6 end
 });

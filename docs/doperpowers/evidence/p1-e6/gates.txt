@@ -1,0 +1,99 @@
+E6 gates (branch worktree-agent-a0a3902d6b5753395). Each gate ran through /tmp/maws-review/with-slot.sh after /tmp/maws-review/waitload20.sh; MAWS_E2E unset.
+
+== Final head 212d1f5a (re-run after the reload case's wrapper fix, and the unit suite's timing retry)
+head 212d1f5afc6cc7f01529c84ee75c308006593c66
+typecheck exit 0 (start 06:12:28, load { 19.41 19.22 24.85 })
+lint exit 0 (start 06:14:07, load { 19.68 20.17 24.65 })
+test exit 0 (start 06:14:31, load { 16.26 19.35 24.23 })
+e2e:scm exit 0 (start 06:17:08, load { 15.37 17.55 22.64 })
+done
+
+== Head bbaf3c93 (the whole-branch fix head; 212d1f5a differs only in e2e/support/scm-scratch.ts and two docs)
+head bbaf3c93607dd7ed31f3f1abc08d27ed876627a0
+typecheck exit 0 (start 05:57:51, load { 19.19 22.38 26.59 })
+lint exit 0 (start 05:58:34, load { 18.15 21.65 26.10 })
+test exit 1 (start 05:58:58, load { 18.50 21.49 25.94 })
+e2e:scm exit 1 (start 06:06:09, load { 18.77 30.78 31.07 })
+e2e:code exit 0 (start 06:07:06, load { 13.82 27.37 29.78 })
+e2e:panel exit 0 (start 06:08:45, load { 10.31 22.40 27.58 })
+done
+  test at bbaf3c93: 2 timeouts in src/renderer/src/tools/code/viewer/viewer.test.tsx (C8c/E5 viewer, untouched by E6) at load 18-31; that file alone then passed 62/62, and the retry at 212d1f5a passed 7138/7138.
+  e2e:scm at bbaf3c93: 7/8; the reload case's slow-git wrapper also slept on the plan's own reads once d3921280 routed them through the plan's git; fixed in 212d1f5a (sleeps on push only): 8/8 there.
+
+---- typecheck @212d1f5a (head and tail)
+$ pnpm --dir /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a0a3902d6b5753395 typecheck  (start 06:12:28, load { 19.41 19.22 24.85 })
+slot slot.1 acquired at 06:12:28 load { 19.41 19.22 24.85 }
+...
+$ pnpm --dir /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a0a3902d6b5753395 typecheck  (start 06:12:28, load { 19.41 19.22 24.85 })
+slot slot.1 acquired at 06:12:28 load { 19.41 19.22 24.85 }
+$ tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false
+exit 0 at 06:13:07
+
+---- lint @212d1f5a (head and tail)
+$ pnpm --dir /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a0a3902d6b5753395 lint  (start 06:14:07, load { 19.68 20.17 24.65 })
+slot slot.1 acquired at 06:14:07 load { 19.68 20.17 24.65 }
+...
+$ pnpm --dir /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a0a3902d6b5753395 lint  (start 06:14:07, load { 19.68 20.17 24.65 })
+slot slot.1 acquired at 06:14:07 load { 19.68 20.17 24.65 }
+$ eslint .
+exit 0 at 06:14:31
+
+---- test @212d1f5a (head and tail)
+$ pnpm --dir /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a0a3902d6b5753395 test --maxWorkers=4  (start 06:14:31, load { 16.26 19.35 24.23 })
+slot slot.1 acquired at 06:14:31 load { 16.26 19.35 24.23 }
+...
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:57934) [DEP0137] DeprecationWarning: Closing a FileHandle object on garbage collection is deprecated. Please close FileHandle objects explicitly using FileHandle.prototype.close(). In the future, an error will be thrown if a file descriptor is closed during garbage collection.
+
+ Test Files  534 passed | 1 skipped (535)
+      Tests  7138 passed | 1 skipped (7139)
+Type Errors  no errors
+   Start at  06:14:31
+   Duration  156.88s (tests 67%, import 15%, environment 9%, transform 6%, typecheck 2%)
+
+  Transform  |renderer-compiled| transforming modules took 18.76s · 33% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+
+exit 0 at 06:17:08
+
+---- e2e-scm @212d1f5a (head and tail)
+$ pnpm --dir /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a0a3902d6b5753395 e2e:scm  (start 06:17:08, load { 15.37 17.55 22.64 })
+slot slot.1 acquired at 06:17:08 load { 15.37 17.55 22.64 }
+...
+  ✓  3 e2e/scm.spec.ts:296:7 › source control over a scratch repository › opens a PR through gh with the confirmed repository and shows its state and checks (3.2s)
+
+  ✓  4 e2e/scm.spec.ts:333:7 › source control over a scratch repository › a reload during a slow push shows the run from the latest-run snapshot (5.8s)
+
+  ✓  5 e2e/scm.spec.ts:357:7 › source control over a scratch repository › without gh the row offers the install (1.5s)
+
+  ✓  6 e2e/scm.spec.ts:364:7 › source control over a scratch repository › with gh signed out the row offers the sign-in (1.6s)
+
+  ✓  7 e2e/scm.spec.ts:371:7 › source control over a scratch repository › an untrusted checkout is listed with every action disabled, and main refuses a stage (1.8s)
+
+  ✓  8 e2e/scm.spec.ts:394:7 › source control over a scratch repository › the tool and its sheets use tokens only in both themes (5.1s)
+
+  8 passed (30.9s)
+exit 0 at 06:18:03
+
+---- e2e-code @bbaf3c93 (head and tail)
+$ pnpm --dir /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a0a3902d6b5753395 e2e:code  (start 06:07:06, load { 13.82 27.37 29.78 })
+slot slot.1 acquired at 06:07:06 load { 13.82 27.37 29.78 }
+...
+  ✓  34 e2e/code-tools.spec.ts:638:7 › the product in stub mode over a scratch repository › Review with a path outside the roots is refused (2.2s)
+
+  ✓  35 e2e/code-tools.spec.ts:667:7 › the product in stub mode over a scratch repository › the Files tree and the viewer use tokens only in both themes (2.5s)
+
+  35 passed (1.2m)
+exit 0 at 06:08:45
+
+---- e2e-panel @bbaf3c93 (head and tail)
+$ pnpm --dir /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a0a3902d6b5753395 e2e:panel  (start 06:08:45, load { 10.31 22.40 27.58 })
+slot slot.1 acquired at 06:08:45 load { 10.31 22.40 27.58 }
+...
+  ✓  21 e2e/panel.spec.ts:844:7 › the #panel harness: strip, summary, R7 and themes › a Terminal tab works at the default side-column width (1.6s)
+  ✓  22 e2e/panel.spec.ts:953:7 › the product host over a scenario derived from C5’s records › the product host rests on the summary and follows the focused session (2.3s)
+  ✓  23 e2e/panel.spec.ts:994:7 › the product host over a scenario derived from C5’s records › unregistered tools are named (1.4s)
+
+  23 passed (37.8s)
+exit 0 at 06:09:47

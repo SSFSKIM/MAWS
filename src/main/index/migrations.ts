@@ -6,14 +6,29 @@ export interface Migration {
   sql: string;
 }
 
+// A column a released entry was amended to add after some database had already applied it, so that database lacks it.
+// The opener adds each one missing from a database at or past `version`, before the pending entries (which are written
+// against the amended history) and in their transaction. `definition` is what follows the column name in
+// `ALTER TABLE … ADD COLUMN`, so SQLite's limits on an added column apply to it. A repair holds at every later version
+// (a branch without it may have carried a database past the amended entry), so a later entry that drops or renames the
+// column, or its table, must bound the repair to the versions before it, or the opener would add the column back.
+export interface Repair {
+  version: number; // the amended entry
+  table: string;
+  column: string;
+  definition: string;
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     // The five tables of §4.4 as amended: what the engine does not hold. `sessions.summary` (beyond the document's
     // column list, advisory) keeps the last TranscriptSummary whole, so `SessionStore.summaries()` answers what discovery
     // said without a column per fact; the named columns stay for queries and the Title rule. `sessions.removed_at` marks
-    // an archive made by `fs.sessionRemoved` (not the owner's), which a returning transcript lifts (whole-branch review;
-    // v1 is unshipped, so it is part of v1).
+    // an archive made by `fs.sessionRemoved` (not the owner's), which a returning transcript lifts (whole-branch review).
+    // It was amended into this entry in the belief that v1 was unshipped; it had shipped, and the owner's database,
+    // created before the amendment, reached version 3 without the column (REPAIRS below adds it). The lesson: a released
+    // entry is never amended, even one believed unshipped; a repair entry carries the fix.
     sql: `
 CREATE TABLE projects (id TEXT PRIMARY KEY, directory TEXT NOT NULL UNIQUE, name TEXT NOT NULL, slug TEXT NOT NULL,
   origin TEXT NOT NULL CHECK (origin IN ('user','discovered')), hidden INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0,
@@ -62,3 +77,5 @@ UPDATE sessions SET summary = json_set(summary, '$.gitBranch', json('null')) WHE
 `,
   },
 ];
+
+export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

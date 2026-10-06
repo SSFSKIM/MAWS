@@ -591,6 +591,85 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
   });
 });
 
+// E6: a mutation from the panel asks for the root's status at once rather than after the debounce, through the
+// watcher's own refresh, so its compare-and-emit stays the one publication path.
+describe('git watcher refreshes a root on demand', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  async function watched() {
+    const fake = fakeWatch();
+    let current = status();
+    const read = vi.fn(async () => current);
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async () => null });
+    await watcher.watch(ROOT);
+    await vi.advanceTimersByTimeAsync(1000); // the settle pass
+    return { fake, read, emitted, watcher, set: (next: GitStatus) => (current = next) };
+  }
+  const staged = status({ dirty: true, files: [{ path: 'a.ts', oldPath: null, index: 'M', worktree: '.', untracked: false }] });
+
+  it('cancels the pending debounce, reads now and emits once the status differs', async () => {
+    const { fake, read, emitted, watcher, set } = await watched();
+    const reads = read.mock.calls.length;
+    set(staged);
+    fake.fire(ROOT, '.git/index'); // the debounce is pending
+    watcher.refreshNow(ROOT);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read.mock.calls.length).toBe(reads + 1);
+    expect(emitted.at(-1)).toEqual({ repoRoot: ROOT, status: staged, reason: 'index' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(read.mock.calls.length).toBe(reads + 1); // the cancelled debounce never runs
+    expect(emitted).toHaveLength(2);
+    watcher.refreshNow(ROOT); // nothing moved: read, and silent
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read.mock.calls.length).toBe(reads + 2);
+    expect(emitted).toHaveLength(2);
+    watcher.dispose();
+  });
+
+  it('does nothing for a root nobody watches', async () => {
+    const { read, emitted, watcher } = await watched();
+    const reads = read.mock.calls.length;
+    watcher.refreshNow('/elsewhere');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(read.mock.calls.length).toBe(reads);
+    expect(emitted).toHaveLength(1);
+    watcher.unwatch(ROOT);
+    watcher.refreshNow(ROOT); // closed with its last watcher
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(read.mock.calls.length).toBe(reads);
+    watcher.dispose();
+  });
+
+  it('marks again while a status is in flight, so exactly one more read follows it', async () => {
+    const fake = fakeWatch();
+    let release: (s: GitStatus) => void = () => {};
+    let n = 0;
+    const emitted: GitChanged[] = [];
+    const read = vi.fn(() => (n++ < 2 ? Promise.resolve(status()) : new Promise<GitStatus>((resolve) => (release = resolve))));
+    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async () => null });
+    await watcher.watch(ROOT);
+    await vi.advanceTimersByTimeAsync(300); // settle pass: read 2
+    fake.fire(ROOT, 'a.ts');
+    await vi.advanceTimersByTimeAsync(300); // read 3 starts and hangs
+    expect(read).toHaveBeenCalledTimes(3);
+    watcher.refreshNow(ROOT);
+    watcher.refreshNow(ROOT);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read).toHaveBeenCalledTimes(3); // none started while one is in flight
+    release(status());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read).toHaveBeenCalledTimes(4); // the one re-run, which reads what the mutation left
+    release(staged);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(emitted.at(-1)).toMatchObject({ status: staged });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(read).toHaveBeenCalledTimes(4);
+    watcher.dispose();
+  });
+});
+
 // Real repositories, real FSEvents. Each wait is bounded; the "within 1 s" pin is measured from the write.
 describe('git.changed from a watched fixture repository', () => {
   let repo: GitFixture;

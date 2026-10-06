@@ -73,6 +73,9 @@ import { connectAsks } from './tools/maws/ask/connect';
 import { connectPaneShows } from './tools/maws/panes/connect';
 import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
 // E1 end
+// E6 start
+import { connectScmRunEnds, registerScmTool } from './tools/scm';
+// E6 end
 // E2 start
 import { deliverablesTool } from './tools/deliverables/DeliverablesTool';
 import { DeliverableTab } from './tools/deliverables/DeliverableTab';
@@ -187,6 +190,14 @@ export function App() {
   }, []);
   useEffect(() => connectAsks(), []);
   // E1 end
+  // E6 start: the Source control tool in the panel's "+" menu (and `show_pane`'s `source-control`), registered once and
+  // never unregistered, as C8a's block does
+  useEffect(() => {
+    registerScmTool();
+  }, []);
+  // and a run's end reads every PR state again, whether or not a Source control body is mounted
+  useEffect(() => connectScmRunEnds(), []);
+  // E6 end
   // E2 start: the Deliverables tool and its main tab, registered once and never unregistered (C8a's rule above), and
   // the host's write announcements and main's console attribution into the deliverables store; the transcript's
   // artifact row and a delivered file's name open the viewer through openDeliverable

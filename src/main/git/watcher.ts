@@ -200,6 +200,21 @@ export class GitWatcher {
     for (const entry of directories?.values() ?? []) this.drop(entry.root, entry.count);
   }
 
+  // E6: re-read a watched root now rather than after the debounce (a mutation from the panel just moved it). The pending
+  // window is cancelled and its reasons ride this pass; a status in flight is followed by exactly one more. The pass is
+  // the ordinary one, so it emits only when the projection moved and `last` stays the watcher's alone. A root nobody
+  // watches has nobody to tell: nothing runs.
+  refreshNow(repoRoot: string): void {
+    const root = this.roots.get(repoRoot);
+    if (!root || root.closed) return;
+    if (root.timer) clearTimeout(root.timer);
+    root.timer = null;
+    root.windowStart = null;
+    root.retry = false; // as an event does: this pass replaces a pending retry after a timeout
+    if (root.inFlight) root.again = true;
+    else void this.refresh(root);
+  }
+
   dispose(): void {
     for (const root of [...this.roots.values()]) this.close(root);
     this.owners.clear();

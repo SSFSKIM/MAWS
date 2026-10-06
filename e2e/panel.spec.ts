@@ -960,6 +960,10 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await expect(title).toContainText(CHARTER);
       await expect(summary.getByRole('region', { name: 'Environment' })).toContainText('⎇ main');
       await expect(summary.getByRole('region', { name: 'Push state' })).toContainText('1 ahead of origin/main');
+      // E6 (a C8a test amended by E6): the push text opens Source control, and the row's PR line asks for trust, since the
+      // launch's config home trusts nothing.
+      await expect(summary.getByRole('region', { name: 'Push state' }).getByRole('button', { name: 'Open Source control' })).toHaveText('1 ahead of origin/main');
+      await expect(summary.getByRole('region', { name: 'Push state' })).toContainText('Trust this folder to see PR state');
       await expect(summary.getByRole('region', { name: 'Subagents' })).toContainText('2 working · 1 done'); // the fixture's digest
 
       // Fix sidebar drag in a split, focused: the summary follows; its probe directory does not exist on this machine.
@@ -1008,8 +1012,10 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       expect(disabled).toHaveLength(0); // C8b, C8c and C11: every summary row's tool is registered
 
       await panel.getByRole('button', { name: 'Add a tool' }).click();
-      // E2: Deliverables registers from App.tsx's E2 block, after MENU_ORDER's tools (the Question sheet is menu: false)
-      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Deliverables']); // by MENU_ORDER; Log is menu: false
+      // E6 (a C8a test amended by E6): Source control registers from App.tsx's E6 block; outside MENU_ORDER, it follows the
+      // ranked tools. E2: Deliverables registers from App.tsx's E2 block, after E6's (landing order; the Question sheet is
+      // menu: false)
+      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Source control', 'Deliverables']); // by MENU_ORDER; Log is menu: false
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });

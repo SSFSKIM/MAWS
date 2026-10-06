@@ -28,6 +28,9 @@ import * as voice from './schema/voice';
 // E1 start
 import * as maws from './schema/maws';
 // E1 end
+// E6 start
+import * as scm from './schema/scm';
+// E6 end
 // E2 start
 import * as deliverables from './schema/deliverables';
 // E2 end
@@ -103,6 +106,9 @@ export const commands = {
   // E1 start
   ...maws.commands,
   // E1 end
+  // E6 start
+  ...scm.commands,
+  // E6 end
   // E2 start
   ...deliverables.commands,
   // E2 end
@@ -128,6 +134,9 @@ export const events = {
   // E1 start
   ...maws.events,
   // E1 end
+  // E6 start
+  ...scm.events,
+  // E6 end
   // E2 start
   ...deliverables.events,
   // E2 end
