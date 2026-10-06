@@ -17,7 +17,7 @@ import { supervisorEnv } from './detached-transport';
 vi.mock('electron', () => ({ app: { isPackaged: false, getPath: () => '/nonexistent' }, utilityProcess: {}, MessageChannelMain: class {} }));
 
 import { createHostSupervisor, type HostSupervisor, type HostSpec } from './supervisor';
-import type { HostOwner } from '../ipc/router';
+import type { HostDispatch, HostOwner } from '../ipc/router';
 
 // Short clocks: the state table is the same, the waits are not.
 const TIMING = { connectTimeoutMs: 200, helloTimeoutMs: 150, startTimeoutMs: 1_200, pidPollMs: 20, waitRetryMs: 80, killGraceMs: 60 };
@@ -139,6 +139,44 @@ describe('the detached transport: connecting', () => {
     expect(fake.emit('session.brokerItems', { appSessionId: 'app-1', items: [] } as never)).toBe(false);
     release();
     await until(() => fake.emit('session.brokerItems', { appSessionId: 'app-1', items: [] } as never));
+  });
+
+  // E10 (Decision Log, onStreaming): the streaming listeners run once per connection, after the ready line
+  it('fires onStreaming after the ready line, again after a reconnect; a close mid-resync cancels it and carries none of its requests over', async () => {
+    // the listener's command is answered by an event, as fs.scan's discoveries are
+    const fake = await startFake({
+      register: (on, hostEmit) =>
+        on('engine.sessions', async () => {
+          hostEmit('session.brokerItems', { appSessionId: 'app-1', items: [] } as never);
+          return [];
+        }),
+    });
+    let signals: AbortSignal[] = [];
+    const releases: (() => void)[] = [];
+    let resyncDispatch: HostDispatch | null = null;
+    supervisor.setResync('engine-host', (dispatch, signal) => {
+      resyncDispatch = dispatch;
+      signals = [...signals, signal];
+      return new Promise<void>((resolve) => void releases.push(resolve));
+    });
+    const streamed = vi.fn(() => void supervisor.dispatch('engine-host', 'engine.sessions', undefined));
+    supervisor.onStreaming('engine-host', streamed);
+    const heard = () => emit.mock.calls.filter(([name]) => name === 'session.brokerItems').length;
+    await supervisor.start();
+    await until(() => signals.length === 1);
+    fake.dropClient(); // the connection closes mid-resync, the supervisor lives on
+    await until(() => signals[0]!.aborted);
+    expect(signals[0]!.reason).toBe('transition');
+    const late = resyncDispatch!('engine-host', 'engine.ping', undefined);
+    await expect(late).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    await until(() => signals.length === 2); // reconnected: a resync of its own
+    releases[0]!(); // the cancelled one settles late: nothing is said for it
+    await sleep(30);
+    expect(streamed).not.toHaveBeenCalled();
+    expect(fake.emit('session.brokerItems', { appSessionId: 'app-1', items: [] } as never)).toBe(false);
+    releases[1]!();
+    await until(() => heard() === 1); // the listener's command went after the ready line: its event reaches main
+    expect(streamed).toHaveBeenCalledOnce();
   });
 
   it('starts a supervisor when none is running: the spawn as specified', async () => {

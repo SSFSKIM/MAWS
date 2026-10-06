@@ -34,8 +34,12 @@ export interface HostSupervisorOptions {
 }
 
 // E10: what main pulls from a host between its connect and its `ready` line (X13: the host emits nothing before it).
-// The dispatch is the supervisor's own; the host is `ready` while it runs.
-export type HostResync = (dispatch: HostDispatch) => Promise<void>;
+// The host is `ready` while it runs. The signal aborts when the host leaves that connection (reason `transition`) or at
+// RESYNC_BOUND_MS (reason `bound`), and the ready line goes without waiting for the resync either way; once it has
+// aborted, the dispatch answers `host_unavailable` at once, so no request of a cancelled resync is held for the next
+// connection.
+export type ResyncCancel = 'transition' | 'bound';
+export type HostResync = (dispatch: HostDispatch, signal: AbortSignal) => Promise<void>;
 
 export interface HostSupervisor {
   start(): Promise<void>; // idempotent: forks once; resolves when each host's first launch is ready or has given up
@@ -52,6 +56,9 @@ export interface HostSupervisor {
   // E10 start
   // Registers the resync run between a host's connect and its `ready` line, on every connect (null: ready at once).
   setResync(owner: HostOwner, resync: HostResync | null): void;
+  // Once per connection, after the `ready` line was sent (after the resync, if any): the host's events reach main from
+  // here, so a command whose effect comes back only as events is dispatched here rather than at the `ready` state.
+  onStreaming(owner: HostOwner, listener: () => void): () => void;
   // Asks a detached engine host's supervisor to exit now, or when it holds nothing live; the close that follows is
   // deliberate (no crash count, a fresh start once it is gone). False when the engine host is not detached and served.
   exitSupervisor(when: 'now' | 'idle'): boolean;
@@ -97,6 +104,8 @@ interface Host {
   ptys: Set<string>;
   // E10 start
   resync: HostResync | null;
+  resyncing: AbortController | null; // the resync in flight on the current connection
+  streamingListeners: Set<() => void>;
   transport: DetachedTransport | null; // a detached host's; null for a utility host
   // E10 end
 }
@@ -117,6 +126,8 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       settleFirstLaunch: () => {},
       ptys: new Set(),
       resync: null,
+      resyncing: null,
+      streamingListeners: new Set(),
       transport: null,
     };
     // E10: a detached host's transport, reporting into the same state, ladder and requests as a utility host's
@@ -143,6 +154,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
   let nextRequestId = 0;
 
   function transition(host: Host, next: Omit<HostState, 'revision'>): void {
+    cancelResync(host, 'transition'); // E10: the connection it pulled through is gone (or replaced)
     host.state = { ...next, revision: host.state.revision + 1 };
     if (next.state === 'crashed') failHeld(host, 'is crashed'); // E10: a held request fails only on crashed or stop()
     for (const listener of host.listeners) listener(host.state);
@@ -172,6 +184,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       transition(host, { state: 'ready', pid: child.pid ?? null, restarts: host.state.restarts });
       host.settleFirstLaunch();
       if (host.resync) sayReady(host, port2); // E10: after the resync, which needs the host ready
+      else streaming(host); // E10: told ready at hello, below
     });
     child.on('error', (type, location) => {
       if (host.child === child) console.error(`[hosts] ${host.owner} fatal error ${type} at ${location}`);
@@ -189,24 +202,52 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
   }
 
   // E10: the `ready` line, after the host's resync (bounded by RESYNC_BOUND_MS), on the port it was pulled through: a
-  // host that left `ready` meanwhile is not told.
+  // host that left `ready` meanwhile is not told (its resync was cancelled). Then the streaming listeners.
   function sayReady(host: Host, port: MainPort): void {
     const resync = host.resync;
-    if (!resync) return port.postMessage({ t: 'ready' });
-    let bound: ReturnType<typeof setTimeout> | undefined;
-    const bounded = new Promise<void>((resolve) => {
-      bound = setTimeout(() => {
-        console.error(`[hosts] ${host.owner}'s resync took longer than ${RESYNC_BOUND_MS / 1000} s; saying ready without it`);
-        resolve();
-      }, RESYNC_BOUND_MS);
-    });
+    const ready = () => {
+      if (host.port !== port) return;
+      port.postMessage({ t: 'ready' });
+      streaming(host);
+    };
+    if (!resync) return ready();
+    const controller = new AbortController();
+    host.resyncing = controller;
+    // The resync's own dispatch: refused once the resync is cancelled, so nothing it asks is held for a later connection.
+    const resyncDispatch: HostDispatch = (owner, name, input) =>
+      controller.signal.aborted
+        ? Promise.resolve({ ok: false, error: ipcError('host_unavailable', `${owner}'s resync was cancelled (${String(controller.signal.reason)}); ${name} not sent`) })
+        : dispatch(owner, name, input);
+    const bound = setTimeout(() => {
+      console.error(`[hosts] ${host.owner}'s resync took longer than ${RESYNC_BOUND_MS / 1000} s; saying ready without it`);
+      cancelResync(host, 'bound');
+    }, RESYNC_BOUND_MS);
+    const ended = new Promise<void>((resolve) => controller.signal.addEventListener('abort', () => resolve(), { once: true }));
     const pulled = Promise.resolve()
-      .then(() => resync(dispatch))
+      .then(() => resync(resyncDispatch, controller.signal))
       .catch((error: unknown) => console.error(`[hosts] ${host.owner}'s resync failed`, error));
-    void Promise.race([pulled, bounded]).then(() => {
+    void Promise.race([pulled, ended]).then(() => {
       clearTimeout(bound);
-      if (host.port === port) port.postMessage({ t: 'ready' });
+      if (host.resyncing === controller) host.resyncing = null;
+      if (controller.signal.reason !== 'transition') ready();
     });
+  }
+
+  function cancelResync(host: Host, reason: ResyncCancel): void {
+    const controller = host.resyncing;
+    if (!controller) return;
+    host.resyncing = null;
+    controller.abort(reason);
+  }
+
+  function streaming(host: Host): void {
+    for (const listener of host.streamingListeners) {
+      try {
+        listener();
+      } catch (error) {
+        console.error(`[hosts] a streaming listener of ${host.owner} failed`, error);
+      }
+    }
   }
 
   // Fails the requests the host was sent; E10: the ones still held wait for the next connect.
@@ -423,6 +464,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       for (const host of Object.values(hosts)) {
         if (host.restartTimer) clearTimeout(host.restartTimer);
         host.restartTimer = null;
+        cancelResync(host, 'transition'); // E10
         const child = host.child;
         host.transport?.stop(); // E10: closes the socket without an exit; the supervisor keeps its sessions
         detach(host, 'was stopped');
@@ -450,6 +492,10 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     // E10 start
     setResync(owner, resync) {
       hosts[owner].resync = resync;
+    },
+    onStreaming(owner, listener) {
+      hosts[owner].streamingListeners.add(listener);
+      return () => hosts[owner].streamingListeners.delete(listener);
     },
     exitSupervisor(when) {
       return hosts['engine-host']?.transport?.exit(when) ?? false;

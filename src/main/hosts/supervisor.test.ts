@@ -96,6 +96,7 @@ vi.mock('electron', () => ({
   },
 }));
 
+import type { HostDispatch } from '../ipc/router';
 import { createHostSupervisor, RESYNC_BOUND_MS, type HostSupervisor } from './supervisor';
 
 const HOSTS = {
@@ -347,6 +348,99 @@ describe('host supervisor', () => {
       await flush();
       expect(next.emit('session.brokerItems', BROKER)).toBe(true);
       expect(log.mock.calls.flat().join(' ')).toContain('resync failed');
+    });
+
+    // E10 (Decision Log, onStreaming): what a listener dispatches whose effect arrives only as events runs here
+    it('fires onStreaming once per connection, after the ready line: the engine host after its resync, the pty host at its spawn', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      let release!: () => void;
+      supervisor.setResync('engine-host', () => new Promise<void>((resolve) => (release = resolve)));
+      const streaming: string[] = [];
+      supervisor.onStreaming('engine-host', () => void streaming.push('engine'));
+      const offPty = supervisor.onStreaming('pty-host', () => void streaming.push('pty'));
+      void supervisor.start();
+      serve(latest('maws-pty-host'), (on) => on('pty.ping', async () => PING(202)));
+      latest('maws-pty-host').spawn(202);
+      const engine = serveEngine(101);
+      await flush();
+      expect(streaming).toEqual(['pty']);
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(false);
+      release();
+      await flush();
+      expect(streaming).toEqual(['pty', 'engine']);
+      // a listener sees the host streaming: what it dispatches now is answered by events that reach main
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(true);
+      await flush();
+      expect(streaming).toEqual(['pty', 'engine']); // once per connection
+
+      engine.engine.exit(137);
+      await vi.advanceTimersByTimeAsync(500);
+      serveEngine(303);
+      await flush();
+      release();
+      await flush();
+      expect(streaming).toEqual(['pty', 'engine', 'engine']);
+      offPty();
+    });
+
+    it('cancels a resync the host leaves ready during: its signal aborts, its later requests are never held for the next host, and that connection is never told ready', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      let signal!: AbortSignal;
+      let resyncDispatch!: HostDispatch;
+      const releases: (() => void)[] = [];
+      supervisor.setResync('engine-host', (dispatch, s) => {
+        signal = s;
+        resyncDispatch = dispatch;
+        return new Promise<void>((resolve) => void releases.push(resolve));
+      });
+      const streaming = vi.fn();
+      supervisor.onStreaming('engine-host', streaming);
+      void supervisor.start();
+      latest('maws-pty-host').spawn(202);
+      const first = serveEngine(101);
+      await flush();
+      const firstSignal = signal;
+      expect(firstSignal.aborted).toBe(false);
+      first.engine.exit(137); // crashed, then restarting: the resync's connection is gone
+      expect(firstSignal.aborted).toBe(true);
+      expect(firstSignal.reason).toBe('transition');
+      // a request the cancelled resync makes now fails at once rather than waiting for the next host
+      await expect(resyncDispatch('engine-host', 'engine.ping', undefined)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+      await vi.advanceTimersByTimeAsync(500);
+      const pings: number[] = [];
+      const next = latest('maws-engine-host');
+      let nextEmit!: HostEmit;
+      serve(next, (on, e) => {
+        on('engine.ping', async () => (pings.push(303), PING(303)));
+        nextEmit = e;
+      });
+      next.spawn(303);
+      await flush();
+      expect(pings).toEqual([]); // nothing of the cancelled resync reached the new host
+      expect(signal).not.toBe(firstSignal); // the new connection runs a resync of its own
+      releases[0]!(); // the first resync settles late: nothing is said for a connection it no longer has
+      await flush();
+      expect(streaming).not.toHaveBeenCalled();
+      expect(nextEmit('session.brokerItems', BROKER)).toBe(false); // the new host is still pulled from, not told ready
+      releases[1]!();
+      await flush();
+      expect(nextEmit('session.brokerItems', BROKER)).toBe(true);
+      expect(streaming).toHaveBeenCalledOnce();
+    });
+
+    it('at RESYNC_BOUND_MS aborts the resync (reason bound) before the ready line, then fires onStreaming', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      let signal!: AbortSignal;
+      supervisor.setResync('engine-host', (_dispatch, s) => ((signal = s), new Promise<void>(() => {})));
+      const streaming = vi.fn();
+      supervisor.onStreaming('engine-host', streaming);
+      void supervisor.start();
+      latest('maws-pty-host').spawn(202);
+      serveEngine(101);
+      await vi.advanceTimersByTimeAsync(RESYNC_BOUND_MS);
+      expect(signal.aborted).toBe(true);
+      expect(signal.reason).toBe('bound');
+      expect(streaming).toHaveBeenCalledOnce();
     });
   });
 
