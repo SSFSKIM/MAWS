@@ -1,0 +1,32 @@
+E5 (the editor) gates, child of docs/doperpowers/plans/2026-10-05-p1-extension.md; execution document
+docs/doperpowers/plans/2026-10-05-e5-editor.md (Acceptance 1 to 3). Each command ran from the worktree
+W=/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a34c3fd994c1c0aad with pnpm_config_verify_deps_before_run=false
+and MAWS_E2E unset; each line below is the command's own summary line.
+
+== M4, 2026-10-06, head 7170b2de (E5 M4: the editor end to end) ==
+
+pnpm -C $W typecheck
+  exit 0 (tsc over tsconfig.node.json, tsconfig.web.json, tsconfig.e2e.json: no output)
+
+pnpm -C $W lint
+  exit 0 (eslint .: no output)
+
+pnpm -C $W exec vitest run src/main/files/service.test.ts src/shared/ipc/schema.test.ts test/support/tokens-guard.test.ts
+  Test Files  3 passed (3)
+       Tests  153 passed (153)
+
+pnpm -C $W exec vitest run --project renderer --project renderer-compiled src/renderer/src/tools/code
+  Test Files  14 passed (14)
+       Tests  344 passed (344)
+
+/tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm -C $W e2e:code
+  eligible: load 10.71 after 0s
+  33 passed (1.3m)
+  (e2e/code-tools.spec.ts 25 of 25, e2e/code-editor.spec.ts 8 of 8; the console free of errors in every product case)
+
+Screenshots written by e2e/code-editor.spec.ts's last case, the viewer's box at a 1280 px window:
+  docs/doperpowers/evidence/p1-e5/shots/e5-editor-light.png    e5-editor-dark.png
+  docs/doperpowers/evidence/p1-e5/shots/e5-merge-light.png     e5-merge-dark.png
+  docs/doperpowers/evidence/p1-e5/shots/e5-conflict-light.png  e5-conflict-dark.png
+
+The full unit suite (/tmp/maws-review/with-slot.sh pnpm -C $W test --maxWorkers=4) is the controller's, on the final head.
