@@ -199,4 +199,14 @@ describe('the Side pane’s question view', () => {
     expect(promotionQuestionOf(rows)).toBe('Why is this null-checked twice?');
     expect(promotionQuestionOf(rowsOf(applyEvents(createState(null, null), b.events.slice(0, 3))))).toBeNull();
   });
+
+  it('a thread promoted inside a promoted thread names its own question, the last promotion prompt, after a disk read', () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: promotionMessage([{ question: 'The outer question?', response: 'Outer.' }], null), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.end(['u1']);
+    b.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u2'), content: promotionMessage([{ question: 'The inner question?', response: 'Inner.' }], null), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    expect(promotionQuestionOf(rowsOf(applyEvents(createState(null, null), b.events)))).toBe('The inner question?');
+  });
 });

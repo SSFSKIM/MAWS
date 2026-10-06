@@ -22,9 +22,10 @@ import { hideSideChild, showSideChild } from './store';
 const COPY = SIDE_COPY.pane;
 
 // The first question of a promoted thread: the first `Q:` line of its promotion prompt (the user row whose anchor is
-// the promotion's), wherever the prompt sits (a thread read from disk begins with the parent's copied history).
+// the promotion's), wherever the prompt sits (a thread read from disk begins with the parent's copied history). The
+// last such prompt is the thread's own: one promoted inside a promoted thread copies its parent's promotion first.
 export function promotionQuestionOf(rows: readonly Row[]): string | null {
-  const prompt = rows.find((row) => row.kind === 'user' && row.anchor?.kind === 'none' && row.anchor.locator === 'btw');
+  const prompt = rows.findLast((row) => row.kind === 'user' && row.anchor?.kind === 'none' && row.anchor.locator === 'btw');
   if (prompt?.kind !== 'user') return null;
   const line = prompt.text.split('\n').find((l) => l.startsWith('Q: '));
   return line === undefined ? null : line.slice(3).trim() || null;
