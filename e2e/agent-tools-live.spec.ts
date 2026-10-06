@@ -690,6 +690,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       expect(phases.at(-1)).toBe('Echo 2/2');
       // `Echo 1/2` is recorded, not asserted: two agents finishing inside one progress frame would skip it.
       expect(widget?.taskId).toBe(taskId);
+      expect(widget?.agents, 'the run’s two agents').toHaveLength(2); // E7 (M7): an empty table passed the tokens check
       expect(widget?.agents.map((row) => row.tokens), 'the agent table’s tokens').toEqual(widget?.agents.map(() => expect.stringMatching(/^\d+(\.\d)?[kM]?$/)));
       await s.idle();
       const again = await s.send(`Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:\n\n${SLOW_WORKFLOW_SCRIPT}`);
