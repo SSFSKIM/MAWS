@@ -470,11 +470,11 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
   async function restartDetached(host: Host, transport: DetachedTransport, stopSessions: boolean): Promise<CommandResult<'host.restart'>> {
     if (host.state.state === 'ready' && host.port) {
       if (!stopSessions) return transport.exit('now') ? restarted : notRestartable(host, 'could not be asked to exit');
-      const undo = transport.expectExit(); // its close after the answer is deliberate
+      // A stop-all ends the supervisor whatever it answers (a failed ladder included; past the request deadline it may
+      // still be stopping): the close that follows is deliberate.
+      transport.expectExit();
       const result = await dispatch(host.owner, 'host.stopAll', { graceMs: STOP_ALL_GRACE_MS });
-      if (result.ok) return restarted;
-      if (result.error.code !== 'timeout') undo?.(); // past the deadline it may still be stopping, then exit as asked
-      return { ok: false, error: result.error };
+      return result.ok ? restarted : { ok: false, error: result.error };
     }
     if (host.state.state !== 'crashed') return restarted; // starting or restarting: the attempt under way reaches the newest
     // Task 2.4 asks the incompatible supervisor to exit on its refused connection; until then it is waited for

@@ -121,9 +121,9 @@ export interface DetachedTransport {
   launch(): void; // a fresh attempt (after a deliberate close, once the welcomed pid is gone)
   exit(when: ClientExit['when']): boolean; // asks the served supervisor to exit; its close is then deliberate
   // E10 start
-  // Main is about to send the served supervisor a command after which it exits (`host.stopAll`): its close is then
-  // deliberate. The undo is for a command that failed. Null when nothing is served.
-  expectExit(): (() => void) | null;
+  // Main is about to send the served supervisor a command after which it exits whatever its answer (`host.stopAll`):
+  // its close is then deliberate. False when nothing is served.
+  expectExit(): boolean;
   // The quit: from here nothing reconnects or spawns. A served connection stays open for the quit's stop-all and its
   // close ends the transport; with none served the transport stops at once (false).
   quit(): boolean;
@@ -538,14 +538,10 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     },
     // E10 start
     expectExit() {
-      const connection = served;
-      if (!connection || stopped) return null;
-      const before = connection.exitAsked;
-      connection.exitAsked = 'now';
-      log(`supervisor pid ${connection.proc.pid} is asked to stop all and exit`);
-      return () => {
-        if (connection.exitAsked === 'now') connection.exitAsked = before;
-      };
+      if (!served || stopped) return false;
+      served.exitAsked = 'now';
+      log(`supervisor pid ${served.proc.pid} is asked to stop all and exit`);
+      return true;
     },
     quit() {
       if (stopped) return false;

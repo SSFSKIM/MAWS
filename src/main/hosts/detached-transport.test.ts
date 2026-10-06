@@ -562,14 +562,19 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
     expect(supervisor.facts('engine-host').lastExit).toBeNull();
   });
 
-  it('a stop-all the supervisor refuses is answered with its error, and the close that may follow is a crash again', async () => {
-    const self: FakeSupervisor = await startFake({ register: (on) => on('host.stopAll', async () => Promise.reject(new Error('the ladder failed'))) });
+  it('a stop-all that fails is answered with its error, and the exit that follows it anyway is deliberate', async () => {
+    const self: FakeSupervisor = await startFake({
+      register: (on) =>
+        on('host.stopAll', async () => {
+          setImmediate(() => void self.die()); // every stop-all ends the supervisor (supervision.ts)
+          throw new Error('the ladder failed');
+        }),
+    });
     await supervisor.start();
     await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
-    await self.die({ keepLock: true });
     await until(() => state().state === 'ready' && state().pid !== self.pid);
-    expect(state().restarts).toBe(1);
-    expect(supervisor.facts('engine-host').lastExit).toMatchObject({ code: null, signal: null });
+    expect(state().restarts).toBe(0);
+    expect(supervisor.facts('engine-host').lastExit).toBeNull();
   });
 
   it('a stop-all that outlives the request deadline still makes the close that follows deliberate (it may still be stopping)', async () => {
