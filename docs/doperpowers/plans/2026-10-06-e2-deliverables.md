@@ -444,6 +444,7 @@ Working directory: the worktree root (`git -C <worktree> rev-parse --show-toplev
 | 22 | `setWebRTCIPHandlingPolicy('disable_non_proxied_udp')` on the app and capture windows; the TURN-over-TCP residual is a tracker row. | CSP does not govern WebRTC and STUN never passes `webRequest`, so "no network" needed a third policy; Electron exposes the IP-handling policy and no per-session WebRTC switch this child knows of. (Adversarial review.) |
 | 23 | The transcript parses a `maws` result's JSON from the first text block that is JSON (`firstJsonBlock`), not from every text block joined; `ArtifactScreenshotResultSchema` carries `title`. | The engine appends a text block of its own beside an image block (SPEC 31 `:5142`), which E1's `resultJson` (`cells.ts:62-68`) would choke on; the cell's label needs the title and the result's id is the agent's short name. (Adversarial review.) |
 | 24 | 2026-10-06 (executor, pre-flight): the parent is re-pinned to blob `7094958a1431369ef699ff9875cd7e9259a37695` (master 2224b4b0); the delta from `bd7361f6` is record-keeping plus A-26 (E3's residue) and A-27 (this document's residue, accepted as written, including the reading of Decision Log 17). No source file changed on master between fb015106 and 2224b4b0, so Grounding stands. The dispatch brief overrides two lines of Constraints "Never": the executor appends exactly one dated line "2026-10-06 (E2 executor): …" to `docs/charter.md` §19 at the end, and the controller's per-task report files under the gitignored `.doperpowers/sde/` are `.txt`. | The architect's dispatch brief of 2026-10-06. |
+| 25 | 2026-10-06 (M0): the image-block verdict is yes, so `artifact_screenshot` returns the image block as Design §6 and §7 specify; the §7 fallback is not built and G4 carries no `[parent-impact]`. The probe's prompt names the tool by its full `mcp__maws__` name and forbids delegation (Surprises); the fixture's provenance pins the parent at 7094958a. | M0's frame at seq 69 of `p1-sdk-mcp-image.jsonl`. |
 
 ## Deferred
 
@@ -460,6 +461,9 @@ Working directory: the worktree root (`git -C <worktree> rev-parse --show-toplev
 ## Surprises & Discoveries
 
 (Filled by the executor as work proceeds: an observation, then its evidence.)
+
+- 2026-10-06 (M0): an `image` block in an SDK MCP tool result reaches the model unchanged (a 132-byte PNG is not resized), and the engine inserts its own pointer text block between the image and the server's text: the `tool_result` arrives as `[image, "[Image: source: …/tool-results/mcp-maws-blob-<ms>-<rand>.png]", <server text>]`. The original is persisted under the scratch config home (`<CLAUDE_CONFIG_DIR>/projects/<slug>/<sessionId>/tool-results/`), nowhere else; the session JSONL stores the same three blocks. Haiku answered "Red.". *Evidence:* `spikes/protocol-probe/fixtures/pass3/p1-sdk-mcp-image.jsonl` seq 69; `spikes/protocol-probe/findings-pass3-e2-deliverables.txt`; `docs/doperpowers/evidence/p1-e2/probe-image-block.txt` (US$0.0534 including one discarded attempt). Consequence for M5: `firstJsonBlock` is tested over the real order `[image, engine text, server JSON]` as well as the Acceptance's `[image, json, text]`.
+- 2026-10-06 (M0): with the document's probe prompt Haiku delegated the call to a background Agent and nothing was recorded; naming the tool as `mcp__maws__red_square` and asking for the call "yourself (not through an agent)" fixed it. M2's prompt may need the same steer.
 
 ## Outcomes & Retrospective
 
