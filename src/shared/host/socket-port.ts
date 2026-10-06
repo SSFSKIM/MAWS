@@ -50,10 +50,14 @@ export class SocketPort implements HostPort {
     if (leftover.length > 0) splitter.push(leftover);
   }
 
-  postMessage(message: unknown): void {
-    if (this.dead || !this.socket.writable) return;
+  // True when the line was handed to a live socket; false when the port is closing or closed, or when this write
+  // stalled the peer past the cap (the connection is then destroyed with the line still buffered, so it never leaves).
+  postMessage(message: unknown): boolean {
+    if (this.dead || !this.socket.writable) return false;
     this.socket.write(`${JSON.stringify(message)}\n`);
-    if (this.socket.writableLength > this.writableCap) this.fail(`closed the connection: the peer stalled ${this.socket.writableLength} bytes behind`);
+    if (this.socket.writableLength <= this.writableCap) return true;
+    this.fail(`closed the connection: the peer stalled ${this.socket.writableLength} bytes behind`);
+    return false;
   }
 
   start(): void {

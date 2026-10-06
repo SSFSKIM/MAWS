@@ -266,6 +266,20 @@ describe('host runtime client hooks', () => {
     expect(log.mock.calls.some(([line]) => String(line).includes('3 events dropped'))).toBe(true);
   });
 
+  it('answers false when the port reports it wrote nothing (a socket already closing)', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fake = fakePort();
+    let writable = true;
+    const port: HostPort = { ...fake.port, postMessage: (message) => (writable ? void fake.posted.push(message) : false) };
+    const { runtime, emit } = engineHost();
+    runtime.serve(port);
+    runtime.setReady();
+    expect(emit()).toBe(true);
+    writable = false;
+    expect(emit()).toBe(false);
+    expect(fake.posted).toHaveLength(1);
+  });
+
   it('the engine host refuses to emit an event outside HOST_EVENTS', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const fake = fakePort();

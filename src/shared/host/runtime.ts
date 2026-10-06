@@ -25,7 +25,10 @@ export type HostEmit = <N extends EventName>(name: N, payload: EventPayload<N>) 
 export type HostRegister = (on: HostOn, emit: HostEmit) => void;
 
 // The part of MessagePortMain the runtime uses, so tests can drive it with a fake.
-export type HostPort = Pick<MessagePortMain, 'postMessage' | 'start'> & {
+// E10: `postMessage` may answer `false` when it wrote nothing (a socket port already closing); a MessagePort answers
+// nothing, which counts as written.
+export type HostPort = Pick<MessagePortMain, 'start'> & {
+  postMessage(message: unknown): boolean | void;
   on(event: 'message', listener: (event: { data: unknown }) => void): unknown;
 };
 
@@ -101,8 +104,7 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
       if (dropped++ === 0) console.error(`[host] dropping events until a client is ready (first: ${name})`);
       return false;
     }
-    port.postMessage({ t: 'evt', name, payload: checked.value } satisfies HostMessage);
-    return true;
+    return port.postMessage({ t: 'evt', name, payload: checked.value } satisfies HostMessage) !== false;
   };
 
   register(on, emit);

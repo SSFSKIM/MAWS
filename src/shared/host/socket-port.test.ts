@@ -140,4 +140,33 @@ describe('SocketPort', () => {
     await until(() => atClient.length === 3);
     expect(atClient[2]).toEqual({ t: 'evt', name: 'session.brokerItems', payload: items });
   });
+
+  it('postMessage reports whether it handed the bytes to a live socket, so emit never claims a write after a close', async () => {
+    const { server } = await pair();
+    let emit!: HostEmit;
+    const runtime = createHostRuntime((on, e) => {
+      on('engine.ping', async () => ({ pid: 42, uptimeMs: 1, hostVersion: 'test' }));
+      emit = e;
+    });
+    const port = new SocketPort(server, Buffer.alloc(0), { log: () => {} });
+    runtime.serve(port);
+    runtime.setReady();
+    const items = { appSessionId: 'app-1', items: [] } as never;
+    expect(port.postMessage({ t: 'evt', name: 'x', payload: null })).toBe(true);
+    expect(emit('session.brokerItems', items)).toBe(true);
+    port.close(); // the close event has not fired yet: the runtime still has its client
+    expect(runtime.hasClient()).toBe(true);
+    expect(port.postMessage({ t: 'evt', name: 'x', payload: null })).toBe(false);
+    expect(emit('session.brokerItems', items)).toBe(false);
+  });
+
+  it('a write that stalls the peer past the cap closes the connection and reports nothing written', async () => {
+    const { server, client } = await pair();
+    client.pause();
+    const port = new SocketPort(server, Buffer.alloc(0), { log: () => {}, writableCap: 64 * 1024 });
+    const results: boolean[] = [];
+    for (let i = 0; i < 8; i++) results.push(port.postMessage({ t: 'evt', name: 'x', payload: 'z'.repeat(256 * 1024) }));
+    expect(results.at(-1)).toBe(false);
+    expect(results.filter((written) => !written).length).toBeGreaterThan(0);
+  });
 });
