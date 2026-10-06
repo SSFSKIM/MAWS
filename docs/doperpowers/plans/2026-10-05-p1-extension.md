@@ -236,7 +236,7 @@ What exists, read-only, that the children build on or replace.
 - **Contracts:** owns X10, X11; extends X1 (side-thread events) through the ledger; consumes X5, the C10 fork path.
 - **Design inheritance:** §3 C [binding: one mechanism; side thread default, P-6; `/btw` through `side_question`, A-5]; the fork means [advisory until E0a, A-4]; Claude Desktop's three side-chat mechanisms (`claude-desktop-extensions.txt` §1) [advisory].
 - **Required:** required.
-- **Status:** not-dispatched, blocked-by E0a.
+- **Status:** in-flight: Fable author dispatched 2026-10-06 after E5 landed (A-21 shape; document `docs/doperpowers/plans/2026-10-06-e3-side-threads.md`), executor follows the document's review and E1's landing.
 
 ### E4: The in-app browser — decomposing at dispatch
 
@@ -355,7 +355,7 @@ What exists, read-only, that the children build on or replace.
 | E0b Electron probes | spike | landed 2026-10-05 (merged to master from e5e33b55; three commits; reviewer-medium one round, eight findings fixed and the probe re-run; Electron 44.4.5, Chromium 152, playwright-core 1.63.0; no `src/` change) | `spikes/browser-probe/findings.txt`, `spikes/browser-probe/results/` |
 | E1 Tool server | plan | in-flight (dispatched 2026-10-05 after E0a landed) | `docs/doperpowers/plans/2026-10-05-e1-tool-server.md` at dispatch |
 | E2 Deliverables and viewer | plan | not-dispatched, blocked-by E1 | execution document at dispatch |
-| E3 Anchored messages and side threads | plan | not-dispatched, blocked-by E0a | execution document at dispatch |
+| E3 Anchored messages and side threads | plan | author dispatched 2026-10-06 (Fable, isolated worktree, after E5's seam landed; adversarial review on Opus before hand-back) | `docs/doperpowers/plans/2026-10-06-e3-side-threads.md` at the author's hand-back |
 | E4 In-app browser | decomposing | not-dispatched, blocked-by E0b, E1, E3 | its composite spec at dispatch |
 | E5 Editor | plan | landed 2026-10-06 (merged to master at 1c62bfeb from a5d585eb, source head c5fbdb63; 50 commits over 1491f8b0; gates on the source head: typecheck, lint, 6,069 units, `e2e:code` 35 on the first attempt; adversarial document review 8 findings folded; M2, M4 and M5 two task-review rounds, M3 a spec amendment; whole-branch reviewer-high on Opus: two Importants (the close sheet's merge-view save; the caret after a replacement) and one Minor fixed at c5fbdb63, round two "correct"; eight additive conflicts with E8 and E9 kept both sides; master gate at 1c62bfeb: typecheck clean, 6,406 units in 479 files, `/tmp/maws-review/gates/master-e5-merge.log`; nine tracker rows) | `docs/doperpowers/plans/2026-10-05-e5-editor.md` (Outcomes & Retrospective written), `docs/doperpowers/evidence/p1-e5/` |
 | E6 Source control | plan | document authored and reviewed 2026-10-06 (Fable author, bb22ea52, one adversarial round, eight findings folded, merged to master); plan-executor on Opus dispatched 2026-10-06 | `docs/doperpowers/plans/2026-10-06-e6-source-control.md` |
