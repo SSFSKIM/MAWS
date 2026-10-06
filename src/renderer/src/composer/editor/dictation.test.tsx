@@ -301,6 +301,25 @@ describe('editor dictation replaces interim text and settles the final', () => {
     expect(editor.getJSON()).toEqual(before);
   });
 
+  // The hold's keydown reaches the controller (C5's capture-phase dispatcher) before ProseMirror reads the DOM selection
+  // the last arrow keys moved, so the state's caret can be stale; the words go where the human sees the caret (M5 gate).
+  it('opens the range at the DOM caret when ProseMirror has not yet read it', async () => {
+    const { handle, editor, content } = await mount(ALPHA_BETA, 11); // the state's caret at the end
+    const unseen = (event: Event) => event.stopImmediatePropagation(); // ProseMirror's selectionchange listener never runs
+    window.addEventListener('selectionchange', unseen, true);
+    try {
+      const words = content.querySelector('p')!.firstChild!; // the text node 'alpha beta'
+      act(() => void window.getSelection()!.collapse(words, 'alpha'.length));
+      expect(editor.state.selection.from).toBe(11);
+      const sink = handle.current!.beginDictation(() => {})!;
+      act(() => sink.partial('hello world'));
+      expect(text(editor)).toBe('alpha hello world beta');
+      expect(interim(content)).toEqual([' hello world']);
+    } finally {
+      window.removeEventListener('selectionchange', unseen, true);
+    }
+  });
+
   it('focuses an unfocused editor at the end before opening the range', async () => {
     const { handle, editor } = await mount(ALPHA_BETA, AFTER_ALPHA);
     act(() => editor.view.dom.blur());

@@ -75,8 +75,10 @@ export const inlineFragment = (schema: Schema, content: JSONContent[]): Fragment
 // Where a dictation's words start: the selection's end, normalised into a text block. A selection ending at a block or
 // document boundary (Select All's AllSelection) starts at the end of the last text block before it instead, where inline
 // words fit as they are; inserted at the boundary they would grow a wrapper paragraph the range does not cover.
-export function dictationStart(state: EditorState): number {
-  const $end = state.doc.resolve(state.selection.to);
+export const dictationStart = (state: EditorState): number => startAfter(state.selection);
+
+function startAfter(selection: Selection): number {
+  const $end = selection.$to;
   if ($end.parent.inlineContent) return $end.pos;
   return (Selection.findFrom($end, -1, true) ?? Selection.near($end, -1)).from;
 }
@@ -90,6 +92,21 @@ export function needsLeadingSpace(state: EditorState, at: number): boolean {
 }
 
 const unrecorded = (tr: Transaction) => tr.setMeta('addToHistory', false);
+
+// The selection the human sees, when ProseMirror has not read it yet: a key handled ahead of ProseMirror's own keydown
+// (C5's capture-phase dispatcher) runs before it flushes the DOM selection the last arrow keys moved, so the state's
+// can be several keystrokes stale. When the window's selection lies inside the editor and its words would start
+// elsewhere, it becomes the state's selection (unrecorded); otherwise the state's stands as it is (Select All's
+// AllSelection, a chip's NodeSelection).
+export function syncSelectionFromDOM(view: EditorView): void {
+  const dom = view.dom.ownerDocument.getSelection();
+  const anchor = dom?.anchorNode;
+  const focus = dom?.focusNode;
+  if (!dom || !anchor || !focus || !view.dom.contains(anchor) || !view.dom.contains(focus)) return;
+  const { doc, selection } = view.state;
+  const read = TextSelection.between(doc.resolve(view.posAtDOM(anchor, dom.anchorOffset)), doc.resolve(view.posAtDOM(focus, dom.focusOffset)));
+  if (startAfter(read) !== startAfter(selection)) view.dispatch(unrecorded(view.state.tr.setSelection(read)));
+}
 
 export function openInterim(view: EditorView, at: number): void {
   view.dispatch(unrecorded(view.state.tr.setMeta(dictationKey, { from: at, to: at } satisfies RangeMeta)));
