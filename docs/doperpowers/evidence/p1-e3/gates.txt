@@ -1,0 +1,37 @@
+E3 (anchored messages, side threads and /btw) gates, child of docs/doperpowers/plans/2026-10-05-p1-extension.md; execution
+document docs/doperpowers/plans/2026-10-06-e3-side-threads.md (Acceptance 6, M5). Each command ran from the worktree
+W=/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a4e09be5e5fbe8b70 with pnpm_config_verify_deps_before_run=false
+and MAWS_E2E unset, through /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh, one at a time (one-minute
+load 11 to 16). Each line below is the command's own summary line and its wall time.
+
+== M5 final gates, 2026-10-06, head ae204075 (E3 M5 e2e: the direct status answer's comment names both rows it drops) ==
+
+pnpm -C $W typecheck                                   exit 0, 35 s (tsc over tsconfig.node.json, tsconfig.web.json, tsconfig.e2e.json: no output)
+pnpm -C $W lint                                        exit 0, 22 s (eslint .: no output)
+pnpm -C $W exec tsc --noEmit -p tsconfig.node.json     exit 0, 12 s (the node project's composite check, as vitest's typecheck runs it; the repo has no script for it)
+pnpm -C $W test --maxWorkers=4                         exit 0, 143 s
+  Test Files  513 passed | 1 skipped (514)
+       Tests  6795 passed | 1 skipped (6796)
+  Type Errors  no errors
+pnpm -C $W e2e:side                                    exit 0, 53 s   8 passed (28.8s)
+pnpm -C $W e2e:code                                    exit 0, 102 s  35 passed (1.3m)  (E5's gutter case, as M3 edited it, included)
+pnpm -C $W e2e:c7                                      exit 0, 85 s   29 passed (1.0m)
+pnpm -C $W e2e:panel                                   exit 1, 67 s   22 passed, 1 failed: "unregistered tools are named" pinned the "+" menu
+                                                       without E3's Side tool (Received: ... "Session info", "Side")
+pnpm -C $W e2e:widgets                                 exit 0, 64 s   24 passed (36.7s)  (e2e/widgets.spec.ts's NAMES gained btw)
+node --test spikes/protocol-probe/fixtures.test.mjs    exit 0, <1 s   # tests 148, # pass 148, # fail 0
+
+== After the panel fix, head ee7136ef (E3 M5: the panel group's product host offers E3's Side tool from "+") ==
+(only e2e/panel.spec.ts changed since ae204075)
+
+pnpm -C $W e2e:panel                                   exit 0, 66 s   23 passed (40.1s)
+pnpm -C $W typecheck                                   exit 0, 35 s
+pnpm -C $W lint                                        exit 0, 22 s
+
+Screenshots, written by e2e/side.spec.ts case 8 at a 1440 x 900 window, element shots, otherThemeColours empty for each
+(the case asserts it before every shot):
+  docs/doperpowers/evidence/p1-e3/shots/{light,dark}/comment-sheet.png      the sheet over the file's tab
+  docs/doperpowers/evidence/p1-e3/shots/{light,dark}/side-pane-thread.png   the Side pane on a thread (anchor header, chip, reply, composer)
+  docs/doperpowers/evidence/p1-e3/shots/{light,dark}/parent-transcript.png  the parent: the side-thread row, an anchored prompt
+  docs/doperpowers/evidence/p1-e3/shots/{light,dark}/side-questions.png     the question view after /btw
+  docs/doperpowers/evidence/p1-e3/shots/{light,dark}/sidebar-nesting.png    the thread nested under its parent (level 3, the arrow)
