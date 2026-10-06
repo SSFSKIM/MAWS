@@ -53,7 +53,7 @@ describe('the confirm sheet', () => {
     const onConfirm = vi.fn();
     render(<ConfirmSheet request={requestOf('enable')} declared={null} env={ENV} onConfirm={onConfirm} onClose={() => {}} />);
     fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
-    expect(onConfirm).toHaveBeenCalledWith(requestFor('enable', { plugin: 'e8-probe@e8-scratch', scope: 'user' }, null));
+    expect(onConfirm).toHaveBeenCalledWith(requestFor('enable', { plugin: 'e8-probe@e8-scratch', scope: 'user' }, null), '/opt/claude/2.1.290'); // with the binary it named
     cleanup();
     onConfirm.mockClear();
     render(<ConfirmSheet request={requestOf('marketplace-remove')} declared={null} env={ENV} onConfirm={onConfirm} onClose={() => {}} />);
@@ -73,6 +73,6 @@ describe('the confirm sheet', () => {
     expect(within(screen.getByRole('dialog')).queryByRole('radio')).toBeNull();
     expect(argvShown()).toEqual(['plugin', 'install', 'p@m', '--scope', 'local', '--accept-command', sha, '--json']);
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Run it' }));
-    expect(onConfirm).toHaveBeenCalledWith(request);
+    expect(onConfirm).toHaveBeenCalledWith(request, '/opt/claude/2.1.290');
   });
 });

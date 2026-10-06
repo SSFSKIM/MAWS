@@ -2,7 +2,9 @@
 // `scope · enabled|disabled · marketplace`, the enable switch (its position always the last read's), Update and
 // Uninstall…; each change asks first. A plugin the change took out of the list keeps its result beneath the rows. One
 // id may be installed at several scopes (the user's, a project's, a local one), so a row is an installation: id, scope
-// and project path (M2 review); `data-plugin-row` names the id and `data-plugin-scope` the scope.
+// and project path (M2 review); `data-plugin-row` names the id and `data-plugin-scope` the scope. `plugin list` lists
+// every project's installations, so a project or local one of another project names its project and is changed there
+// (the CLI runs in its project path, E8 whole-branch review).
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { PLUGINS_SCOPES, type PluginsAction, type PluginsScope } from '@shared/plugins/cli';
 import { PLUGIN_MANAGEMENT as W } from '../copy';
@@ -25,10 +27,13 @@ const installationOf = (key: string): Installation => {
 const scopeOfRow = (scope: string): PluginsScope => ((PLUGINS_SCOPES as readonly string[]).includes(scope) ? (scope as PluginsScope) : 'user');
 
 function InstalledRow({ plugin }: { plugin: InstalledPlugin }) {
-  const { ops, ask } = useManage();
+  const { ops, ask, cwd } = useManage();
   const key = installedKey(plugin);
   const busy = ops.entries.get(key)?.state.phase === 'working';
-  const asking = (action: Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>) => ask(key, requestFor(action, { plugin: plugin.id, scope: scopeOfRow(plugin.scope) }, null));
+  const scope = scopeOfRow(plugin.scope);
+  // a project or local installation is changed in its own project, wherever this session runs
+  const project = scope !== 'user' && plugin.projectPath !== null ? plugin.projectPath : null;
+  const asking = (action: Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>) => ask(key, requestFor(action, { plugin: plugin.id, scope }, null, project === null ? {} : { cwd: project }));
   return (
     <Row
       data-plugin-row={plugin.id}
@@ -38,6 +43,7 @@ function InstalledRow({ plugin }: { plugin: InstalledPlugin }) {
       detail={
         <span className="flex flex-col gap-0.5">
           <span>{[plugin.scope, plugin.enabled ? W.enabled : W.disabled, plugin.marketplace].filter((part) => part !== '').join(' · ')}</span>
+          {project !== null && project !== cwd && <span className="font-mono break-all">{W.inProject(project)}</span>}
           {plugin.errors.map((error, i) => (
             <span key={`e${i}`} className="text-danger">
               {error}

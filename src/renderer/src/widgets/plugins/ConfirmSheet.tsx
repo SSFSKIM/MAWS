@@ -10,7 +10,7 @@ import { PLUGINS_SCOPES, type PluginsScope } from '@shared/plugins/cli';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, DANGER, PRIMARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../copy';
-import { argvOf, commandWords, DESTRUCTIVE, SCOPED, scopeOf, targetOf, thenWords, writesWords, type PluginsRequest } from './present';
+import { argvOf, commandWords, dependencyWords, DESTRUCTIVE, SCOPED, scopeOf, targetOf, thenWords, uninstallsWords, writesWords, type PluginsRequest } from './present';
 
 // A resolved `plugins.env` answer: the binary (the probe's real path; an answer without one is unresolved), the config
 // home the CLI writes and the engine's global config file (inside a `CLAUDE_CONFIG_DIR`, else `~/.claude.json` beside
@@ -25,7 +25,7 @@ export interface EngineEnv {
 export type EngineResolution = { state: 'loading' } | { state: 'error'; error: string } | { state: 'ready'; env: EngineEnv };
 
 export interface ManageEnv {
-  cwd: string; // the CLI's cwd: the session's directory
+  cwd: string; // the CLI's cwd: the session's directory, unless the request names its own (another project's installation)
   engine: EngineResolution;
   readySessions: number; // sessions with a ready process, which a change reloads
 }
@@ -37,7 +37,8 @@ export interface Declared {
 
 const withScope = (request: PluginsRequest, scope: PluginsScope): PluginsRequest => ({ ...request, input: { ...request.input, scope } }) as PluginsRequest;
 
-export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { request: PluginsRequest; declared: Declared | null; env: ManageEnv; onConfirm(request: PluginsRequest): void; onClose(): void }) {
+// `onConfirm` hears the request as confirmed and the binary the sheet named, which the host checks before it runs.
+export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { request: PluginsRequest; declared: Declared | null; env: ManageEnv; onConfirm(request: PluginsRequest, binary: string): void; onClose(): void }) {
   const [scope, setScope] = useState<PluginsScope>(scopeOf(request));
   const [acknowledged, setAcknowledged] = useState(false);
   const scoped = SCOPED.has(request.action) && declared === null; // the second sheet reruns the request as it ran
@@ -46,11 +47,14 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
   const argv = argvOf(asked);
   const target = targetOf(request);
   const engine = env.engine.state === 'ready' ? env.engine.env : null;
+  const cwd = request.cwd ?? env.cwd;
+  const dependencies = dependencyWords(request.action);
+  const uninstalls = uninstallsWords(request);
   return (
     <Sheet title={declared ? W.declaredTitle(target) : W.title(W.verb[request.action], target)} width="w-[min(520px,90vw)]" onClose={onClose} data-plugins-sheet={request.action}>
       <SheetForm
         canSubmit={engine !== null && (!destructive || acknowledged)}
-        onSubmit={() => onConfirm(asked)}
+        onSubmit={() => engine && onConfirm(asked, engine.binary)}
         submitLabel={declared ? W.runIt : W.submit[request.action]}
         submitClass={destructive ? DANGER : PRIMARY}
         focusSubmit={!destructive}
@@ -87,20 +91,22 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
                 </label>
               ))}
             </div>
-            {scope !== 'user' && <p className="m-0 font-mono text-ui-sm break-all text-fg-muted">{W.inProject(env.cwd)}</p>}
+            {scope !== 'user' && <p className="m-0 font-mono text-ui-sm break-all text-fg-muted">{W.inProject(cwd)}</p>}
           </fieldset>
         )}
         {engine && (
           <div className="flex flex-col gap-0.5 text-ui-sm text-fg-muted">
             <p className="m-0">{W.writes}</p>
             <ul aria-label={W.writes} className="m-0 list-none p-0 font-mono break-all text-fg">
-              {writesWords(asked, { configHome: engine.configHome, cwd: env.cwd }).map((path) => (
+              {writesWords(asked, { configHome: engine.configHome, cwd }).map((path) => (
                 <li key={path}>{path}</li>
               ))}
             </ul>
+            {dependencies && <p className="m-0">{dependencies}</p>}
             <p className="m-0">{W.records(engine.globalConfig)}</p>
           </div>
         )}
+        {uninstalls && <p className="m-0 text-ui-sm text-fg">{uninstalls}</p>}
         <p className="m-0 text-ui-sm text-fg-muted">{thenWords(request.action, env.readySessions)}</p>
         {destructive && (
           <label className="flex items-center gap-2 text-ui-sm text-fg">

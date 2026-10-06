@@ -2,18 +2,18 @@
 // key, `ask` (which opens the confirm sheet; nothing runs before it is confirmed), and a row's operation line. The sheet
 // is drawn beside the widget frame rather than inside a row, so it survives the row leaving the list and its Escape
 // closes only the sheet.
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { displayTitle } from '../../sessions/title';
 import { useSessions } from '../../stores/sessions';
 import { PLUGIN_MANAGEMENT as W } from '../copy';
 import { TextButton } from '../parts';
-import { ConfirmSheet, type Declared, type ManageEnv } from './ConfirmSheet';
+import { ConfirmSheet, type Declared, type EngineResolution } from './ConfirmSheet';
 import { usePluginOperations, type PluginOperations } from './operation';
 import { declaredOf, operationWords, scopeOf, type PluginsRequest } from './present';
 
 export interface Manage {
-  env: ManageEnv;
+  cwd: string; // the session's directory, where a change runs unless its request names another project
   ops: PluginOperations;
   ask(key: string, request: PluginsRequest): void; // opens the confirm sheet for the row `key`
   reloadMods: (() => void) | null; // `session.reloadPlugins` for this session; null without a ready process
@@ -29,34 +29,47 @@ export function useManage(): Manage {
 
 export const ManageProvider = ({ value, children }: { value: Manage; children: ReactNode }) => <ManageContext.Provider value={value}>{children}</ManageContext.Provider>;
 
-type Asking = { key: string; request: PluginsRequest; declared: Declared | null };
+// One open sheet: the row and request it asks about, the marketplace-declared command of a second sheet, and the
+// engine as this opening read it (`loading` until that read answered).
+type Asking = { key: string; request: PluginsRequest; declared: Declared | null; engine: EngineResolution; opening: number };
 
-// The widget's management state and the sheet to draw beside its frame.
-// `resolveEngine`: reads `plugins.env` again, passed while it is unresolved, so a sheet opened after the owner installed
-// the engine or chose one in Settings › Engine recovers without reopening the widget.
-export function useManageState(env: ManageEnv, reloadMods: (() => void) | null, resolveEngine: (() => void) | null): { manage: Manage; sheet: ReactNode } {
+// The widget's management state and the sheet to draw beside its frame. `resolveEngine` reads `plugins.env` again: every
+// opening of a sheet asks it and the sheet names no binary and confirms nothing until it answered, so a binary chosen in
+// Settings › Engine since the widget opened is the one the sheet shows and the host runs (E8 whole-branch review).
+export function useManageState(base: { cwd: string; readySessions: number }, reloadMods: (() => void) | null, resolveEngine: () => Promise<EngineResolution>): { manage: Manage; sheet: ReactNode } {
   const ops = usePluginOperations();
   const [asking, setAsking] = useState<Asking | null>(null);
-  const ask = useCallback(
-    (key: string, request: PluginsRequest) => {
-      resolveEngine?.();
-      setAsking({ key, request, declared: null });
+  const openings = useRef(0);
+  const open = useCallback(
+    (key: string, request: PluginsRequest, declared: Declared | null) => {
+      const opening = ++openings.current;
+      setAsking({ key, request, declared, engine: { state: 'loading' }, opening });
+      void resolveEngine().then((engine) => setAsking((current) => (current?.opening === opening ? { ...current, engine } : current)));
     },
     [resolveEngine],
   );
+  const ask = useCallback((key: string, request: PluginsRequest) => open(key, request, null), [open]);
   const { run } = ops;
+  const { cwd, readySessions } = base;
   const confirm = useCallback(
-    async (key: string, request: PluginsRequest) => {
+    async (key: string, request: PluginsRequest, binary: string) => {
       setAsking(null);
-      const done = await run(key, request, env.cwd);
+      const done = await run(key, request, request.cwd ?? cwd, binary);
       const declared = declaredOf(done, request.action);
-      if (declared) setAsking({ key, request: { ...request, input: { ...request.input, acceptCommand: declared.sha256 } } as PluginsRequest, declared });
+      if (declared) open(key, { ...request, input: { ...request.input, acceptCommand: declared.sha256 } } as PluginsRequest, declared);
     },
-    [run, env.cwd],
+    [run, cwd, open],
   );
-  const manage = useMemo(() => ({ env, ops, ask, reloadMods }), [env, ops, ask, reloadMods]);
+  const manage = useMemo(() => ({ cwd, ops, ask, reloadMods }), [cwd, ops, ask, reloadMods]);
   const sheet = asking && (
-    <ConfirmSheet key={`${asking.key}:${asking.declared?.sha256 ?? ''}`} request={asking.request} declared={asking.declared} env={env} onConfirm={(request) => void confirm(asking.key, request)} onClose={() => setAsking(null)} />
+    <ConfirmSheet
+      key={`${asking.key}:${asking.opening}`}
+      request={asking.request}
+      declared={asking.declared}
+      env={{ cwd, readySessions, engine: asking.engine }}
+      onConfirm={(request, binary) => void confirm(asking.key, request, binary)}
+      onClose={() => setAsking(null)}
+    />
   );
   return { manage, sheet };
 }

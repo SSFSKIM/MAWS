@@ -32,8 +32,9 @@ export interface PluginOperationEntry {
 
 export interface PluginOperations {
   entries: ReadonlyMap<string, PluginOperationEntry>; // by key (the row that started it)
-  // Runs the request in `cwd` under `key`; answers its `done` event (null when the invoke was refused or the widget closed).
-  run(key: string, request: PluginsRequest, cwd: string): Promise<PluginsOperationEvent | null>;
+  // Runs the request in `cwd` with the binary its sheet named under `key`; answers its `done` event (null when the
+  // invoke was refused or the widget closed).
+  run(key: string, request: PluginsRequest, cwd: string, binary: string): Promise<PluginsOperationEvent | null>;
   cancel(key: string): void; // asks the host to stop the CLI or drop the queued operation; `done` follows as `cancelled`
 }
 
@@ -85,10 +86,10 @@ export function usePluginOperations(): PluginOperations {
   }, [apply]);
 
   const run = useCallback(
-    async (key: string, request: PluginsRequest, cwd: string) => {
+    async (key: string, request: PluginsRequest, cwd: string, binary: string) => {
       setEntries((prior) => new Map(prior).set(key, { request, opId: null, state: { phase: 'working', opId: null, line: null, reloading: false } }));
       asking.current += 1;
-      const result = await ipc.invoke(COMMAND_OF[request.action], { cwd, ...request.input } as never);
+      const result = await ipc.invoke(COMMAND_OF[request.action], { cwd, binary, ...request.input } as never);
       asking.current -= 1;
       const held = early.current;
       if (asking.current === 0) early.current = [];

@@ -87,6 +87,8 @@ const section = (name: string) => document.querySelector<HTMLElement>(`[data-plu
 const row = (id: string) => section('installed').querySelector<HTMLElement>(`[data-plugin-row="${id}"]`)!;
 const sheet = () => screen.getByRole('dialog');
 const argvShown = () => JSON.parse(sheet().querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!) as string[];
+// Every sheet reads plugins.env again on opening and names its command once that read answered.
+const resolved = () => waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
 const event = (over: Partial<PluginsOperationEvent> & Pick<PluginsOperationEvent, 'opId' | 'phase'>): PluginsOperationEvent => ({ action: 'install', target: 'e8-probe@e8-scratch', ...over });
 const ready = async () => {
   useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
@@ -204,6 +206,7 @@ describe('plugins widget: management', () => {
     expect(invoked('plugins.install')).toEqual([]);
 
     fireEvent.click(within(other).getByRole('button', { name: 'Install…' }));
+    await resolved();
     expect(argvShown()).toEqual(commandLine('install', { plugin: 'e8-other@e8-scratch', scope: 'user' }));
     expect(within(sheet()).getByText('2.1.290 plugin install e8-other@e8-scratch --scope user --json')).toBeTruthy();
     expect(within(sheet()).getByText(`${HOME}/settings.json`)).toBeTruthy();
@@ -214,7 +217,7 @@ describe('plugins widget: management', () => {
     expect(within(sheet()).getByText(`${cwd}/.claude/settings.json`)).toBeTruthy();
     expect(within(sheet()).getByText(`In ${cwd}`)).toBeTruthy();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
-    await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd, plugin: 'e8-other@e8-scratch', scope: 'project' }]));
+    await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd, binary: BINARY, plugin: 'e8-other@e8-scratch', scope: 'project' }]));
     expect(screen.queryByRole('dialog')).toBeNull();
 
     await waitFor(() => expect(within(other).getByRole('status').textContent).toBe('Working…'));
@@ -234,10 +237,11 @@ describe('plugins widget: management', () => {
     const toggle = () => within(row('e8-probe@e8-scratch')).getByRole('switch', { name: 'Enabled: e8-probe@e8-scratch' });
     expect(toggle().getAttribute('aria-checked')).toBe('true');
     fireEvent.click(toggle());
+    await resolved();
     expect(within(sheet()).getByRole('heading', { name: 'Disable e8-probe@e8-scratch?' })).toBeTruthy();
     expect(argvShown()).toEqual(['plugin', 'disable', 'e8-probe@e8-scratch', '--scope', 'user', '--json']);
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Disable' }));
-    await waitFor(() => expect(invoked('plugins.disable')).toEqual([{ cwd, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
+    await waitFor(() => expect(invoked('plugins.disable')).toEqual([{ cwd, binary: BINARY, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
     // the CLI says it disabled the plugin, but the read that follows still lists it enabled: the switch stays on
     act(() => emit('plugins.changed', {}));
     await waitFor(() => expect(invoked('plugins.list')).toHaveLength(2));
@@ -253,24 +257,27 @@ describe('plugins widget: management', () => {
   it('a marketplace-declared command opens a second sheet whose Run it reruns with --accept-command only', async () => {
     await ready();
     fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
+    await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Update' }));
     await waitFor(() => expect(invoked('plugins.update')).toHaveLength(1));
     const shownCommand = { sha256: SHA, command: 'npx fetch-helper', kind: 'command-source' };
     act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'update', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message: 'This plugin runs a command its marketplace declares', failureCode: 'command_source_refused', shownCommand } } })));
     await waitFor(() => expect(within(sheet()).getByRole('heading', { name: 'Run the command e8-probe@e8-scratch declares?' })).toBeTruthy());
+    await resolved();
     expect(sheet().querySelector('[data-plugins-declared]')!.textContent).toBe('npx fetch-helper');
     expect(argvShown()).toEqual(['plugin', 'update', 'e8-probe@e8-scratch', '--scope', 'user', '--accept-command', SHA, '--json']);
     // beneath the modal sheet, the row says why the CLI stopped
     expect(row('e8-probe@e8-scratch').querySelector('[role="status"]')!.textContent).toBe('This plugin runs a command its marketplace declares · command_source_refused');
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Run it' }));
     await waitFor(() => expect(invoked('plugins.update')).toHaveLength(2));
-    expect(invoked('plugins.update')[1]).toEqual({ cwd, plugin: 'e8-probe@e8-scratch', scope: 'user', acceptCommand: SHA });
+    expect(invoked('plugins.update')[1]).toEqual({ cwd, binary: BINARY, plugin: 'e8-probe@e8-scratch', scope: 'user', acceptCommand: SHA });
     expect(JSON.stringify(backend.calls)).not.toContain('"-y"');
   });
 
   it('an uninstall asks for the acknowledgement, and its result outlives the row the change removed', async () => {
     await ready();
     fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Uninstall…' }));
+    await resolved();
     const confirm = within(sheet()).getByRole('button', { name: 'Uninstall' });
     expect(confirm).toHaveProperty('disabled', true);
     fireEvent.submit(confirm.closest('form')!); // Enter alone never destroys
@@ -278,7 +285,7 @@ describe('plugins widget: management', () => {
     expect(within(sheet()).getByText(`${HOME}/plugins/data/e8-probe@e8-scratch/`)).toBeTruthy();
     fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
     fireEvent.click(confirm);
-    await waitFor(() => expect(invoked('plugins.uninstall')).toEqual([{ cwd, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
+    await waitFor(() => expect(invoked('plugins.uninstall')).toEqual([{ cwd, binary: BINARY, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
     installed = [];
     act(() => emit('plugins.changed', {}));
     await waitFor(() => expect(section('installed').querySelector('[data-plugin-row]')).toBeNull());
@@ -302,11 +309,12 @@ describe('plugins widget: management', () => {
     await waitFor(() => expect(within(section('marketplaces')).getByRole('textbox', { name: 'Add marketplace' })).toHaveProperty('value', '/tmp/e8-does-not-exist'));
     expect(invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: null, multiple: false }]);
     fireEvent.click(within(section('marketplaces')).getByRole('button', { name: 'Add…' }));
+    await resolved();
     expect(argvShown()).toEqual(['plugin', 'marketplace', 'add', '/tmp/e8-does-not-exist', '--json']);
     expect(within(sheet()).getByText('Nothing to reload: an added marketplace loads no plugin')).toBeTruthy();
     expect(within(sheet()).queryByRole('radio')).toBeNull();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Add' }));
-    await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, source: '/tmp/e8-does-not-exist' }]));
+    await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, binary: BINARY, source: '/tmp/e8-does-not-exist' }]));
     act(() =>
       emit('plugins.operation', event({ opId: 'pop-1', action: 'marketplace-add', target: '/tmp/e8-does-not-exist', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message: 'Path does not exist: /tmp/e8-does-not-exist', failureCode: 'invalid_source', shownCommand: null } } })),
     );
@@ -321,6 +329,7 @@ describe('plugins widget: management', () => {
     fireEvent.click(await waitFor(() => within(section('available')).getByText('e8-scratch · 2 plugins')));
     const other = await waitFor(() => section('available').querySelector<HTMLElement>('[data-plugin-row="e8-other@e8-scratch"]')!);
     fireEvent.click(within(other).getByRole('button', { name: 'Install…' }));
+    await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(invoked('plugins.install')).toHaveLength(1));
     // the catalogue read again after the CLI ended no longer offers it (a folder marketplace is read in place)
@@ -341,23 +350,26 @@ describe('plugins widget: management', () => {
     await ready();
     const market = () => section('marketplaces').querySelector<HTMLElement>('[data-marketplace-row="e8-scratch"]')!;
     fireEvent.click(within(market()).getByRole('button', { name: 'Refresh' }));
+    await resolved();
     expect(argvShown()).toEqual(['plugin', 'marketplace', 'update', 'e8-scratch', '--json']);
     expect(within(sheet()).getByText(`${HOME}/plugins/known_marketplaces.json`)).toBeTruthy();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Refresh' }));
-    await waitFor(() => expect(invoked('marketplaces.update')).toEqual([{ cwd, name: 'e8-scratch' }]));
+    await waitFor(() => expect(invoked('marketplaces.update')).toEqual([{ cwd, binary: BINARY, name: 'e8-scratch' }]));
     act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'marketplace-update', target: 'e8-scratch', phase: 'done', outcome: { ok: true, result: { message: 'Validating local marketplace\nSuccessfully updated marketplace: e8-scratch' } }, reload: { sessions: [] } })));
     expect(within(market()).getByRole('status').textContent).toBe('Validating local marketplace\nSuccessfully updated marketplace: e8-scratch · No running session to reload');
     fireEvent.click(within(market()).getByRole('button', { name: 'Remove…' }));
+    await resolved();
     expect(argvShown()).toEqual(['plugin', 'marketplace', 'remove', 'e8-scratch', '--json']);
     expect(within(sheet()).getByRole('button', { name: 'Remove' })).toHaveProperty('disabled', true);
     fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Remove' }));
-    await waitFor(() => expect(invoked('marketplaces.remove')).toEqual([{ cwd, name: 'e8-scratch' }]));
+    await waitFor(() => expect(invoked('marketplaces.remove')).toEqual([{ cwd, binary: BINARY, name: 'e8-scratch' }]));
   });
 
   it('Stop asks the host to cancel the running CLI', async () => {
     await ready();
     fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
+    await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Update' }));
     await waitFor(() => expect(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Stop' })).toBeTruthy());
     fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Stop' }));
@@ -400,29 +412,31 @@ describe('plugins widget: review fixes', () => {
     expect(invoked('plugins.update')).toEqual([]);
   });
 
-  it('an answer with no binary is unresolved: the probe’s refusal, no command, no submit; the sheet’s opening reads again and recovers', async () => {
+  it('an answer with no binary is unresolved: the probe’s refusal, no command, no submit; the next sheet reads again and recovers', async () => {
     const REFUSAL = "Claude Code is not installed: nothing at /Users/me/.local/bin/claude and no claude on your login shell's PATH. Install it, or choose a binary in Settings › Engine.";
-    const recovered = deferred<unknown>();
-    let reads = 0;
-    backend.script('plugins.env', () => (++reads === 1 ? { binary: null, binaryError: REFUSAL, configHome: HOME, globalConfig: GLOBAL } : recovered.promise));
+    let installedEngine = false;
+    backend.script('plugins.env', () => (installedEngine ? { binary: BINARY, binaryError: null, configHome: HOME, globalConfig: GLOBAL } : { binary: null, binaryError: REFUSAL, configHome: HOME, globalConfig: GLOBAL }));
     await ready();
     await waitFor(() => expect(invoked('plugins.env')).toHaveLength(1));
     expect(document.querySelector('footer')!.textContent).not.toContain(HOME); // the foot names nothing it did not resolve
     fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
-    expect(within(sheet()).getByRole('alert').textContent).toBe(REFUSAL);
+    await waitFor(() => expect(within(sheet()).getByRole('alert').textContent).toBe(REFUSAL));
+    expect(invoked('plugins.env')).toHaveLength(2); // the opening read it again
     expect(sheet().querySelector('[data-plugins-argv]')).toBeNull();
     expect(within(sheet()).queryByRole('list', { name: "The engine's CLI writes:" })).toBeNull();
     const confirm = within(sheet()).getByRole('button', { name: 'Update' });
     expect(confirm).toHaveProperty('disabled', true);
     fireEvent.submit(confirm.closest('form')!);
     expect(invoked('plugins.update')).toEqual([]);
-    // opening the sheet read the environment again; the owner installed the engine meanwhile
-    await waitFor(() => expect(invoked('plugins.env')).toHaveLength(2));
-    act(() => recovered.resolve({ binary: BINARY, binaryError: null, configHome: HOME, globalConfig: GLOBAL }));
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    // the owner installed the engine meanwhile: the next sheet's read finds it
+    installedEngine = true;
+    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
     await waitFor(() => expect(argvShown()).toEqual(['plugin', 'update', 'e8-probe@e8-scratch', '--scope', 'user', '--json']));
     expect(within(sheet()).getByText('2.1.290 plugin update e8-probe@e8-scratch --scope user --json')).toBeTruthy();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Update' }));
-    await waitFor(() => expect(invoked('plugins.update')).toEqual([{ cwd, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
+    await waitFor(() => expect(invoked('plugins.update')).toEqual([{ cwd, binary: BINARY, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
   });
 
   it('one id installed at two scopes is two rows: an action busies only its own, and removing one leaves the other', async () => {
@@ -432,6 +446,7 @@ describe('plugins widget: review fixes', () => {
     const at = (scope: string) => section('installed').querySelector<HTMLElement>(`[data-plugin-row="e8-probe@e8-scratch"][data-plugin-scope="${scope}"]`)!;
     await waitFor(() => expect(rows()).toHaveLength(2));
     fireEvent.click(within(at('project')).getByRole('button', { name: 'Uninstall…' }));
+    await resolved();
     expect(argvShown()).toEqual(['plugin', 'uninstall', 'e8-probe@e8-scratch', '--scope', 'project', '--json']);
     fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Uninstall' }));
@@ -464,5 +479,74 @@ describe('plugins widget: review fixes', () => {
     act(() => stale.resolve({ plugins: [plugin('e8-probe@e8-scratch')] })); // read 2 answers the state before the change
     await waitFor(() => expect(invoked('plugins.list')).toHaveLength(3));
     await waitFor(() => expect(toggle().getAttribute('aria-checked')).toBe('false'));
+  });
+});
+
+describe('plugins widget: whole-branch review fixes', () => {
+  const OTHER = '/opt/claude/versions/2.1.300'; // the binary Settings › Engine chose after the widget first read plugins.env
+
+  it('every sheet reads plugins.env again and waits for the answer; the confirmed change names the binary the sheet showed', async () => {
+    let held: ((value: unknown) => void) | null = null;
+    let holding = false;
+    backend.script('plugins.env', () => (holding ? new Promise((resolve) => (held = resolve)) : { binary: BINARY, binaryError: null, configHome: HOME, globalConfig: GLOBAL }));
+    await ready();
+    await waitFor(() => expect(document.querySelector('footer')!.textContent).toContain(HOME));
+    const before = invoked('plugins.env').length;
+    holding = true; // the next read waits
+    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(invoked('plugins.env')).toHaveLength(before + 1));
+    expect(within(sheet()).getByText('Resolving the engine…')).toBeTruthy(); // not the answer read before
+    expect(sheet().querySelector('[data-plugins-argv]')).toBeNull();
+    await waitFor(() => expect(held).not.toBeNull());
+    act(() => held!({ binary: OTHER, binaryError: null, configHome: HOME, globalConfig: GLOBAL }));
+    await waitFor(() => expect(within(sheet()).getByText('2.1.300 plugin update e8-probe@e8-scratch --scope user --json')).toBeTruthy());
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(invoked('plugins.update')).toEqual([{ cwd, binary: OTHER, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
+  });
+
+  it('an installation of another project is changed in that project: its row names the project, the sheet says In it, and the CLI runs there', async () => {
+    installed = [plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work/other' }), plugin('e8-tools@e8-scratch', { scope: 'project', projectPath: cwd })];
+    await ready();
+    expect(row('e8-probe@e8-scratch').textContent).toContain('In /work/other');
+    expect(row('e8-tools@e8-scratch').textContent).not.toContain(`In ${cwd}`); // this project's own needs no naming
+    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('switch', { name: 'Enabled: e8-probe@e8-scratch' }));
+    await waitFor(() => expect(argvShown()).toEqual(['plugin', 'disable', 'e8-probe@e8-scratch', '--scope', 'project', '--json']));
+    expect(within(sheet()).getByText('In /work/other')).toBeTruthy();
+    expect(within(sheet()).getByRole('list', { name: "The engine's CLI writes:" }).textContent).toBe('/work/other/.claude/settings.json');
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Disable' }));
+    await waitFor(() => expect(invoked('plugins.disable')).toEqual([{ cwd: '/work/other', binary: BINARY, plugin: 'e8-probe@e8-scratch', scope: 'project' }]));
+    // Install from Available keeps the session's directory
+    fireEvent.click(within(section('available')).getByText('Available'));
+    await waitFor(() => expect(within(section('available')).getByText('e8-scratch · 2 plugins')).toBeTruthy());
+    fireEvent.click(within(section('available')).getByText('e8-scratch · 2 plugins'));
+    const other = await waitFor(() => section('available').querySelector<HTMLElement>('[data-plugin-row="e8-other@e8-scratch"]')!);
+    fireEvent.click(within(other).getByRole('button', { name: 'Install…' }));
+    await waitFor(() => expect(argvShown()).toEqual(['plugin', 'install', 'e8-other@e8-scratch', '--scope', 'user', '--json']));
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+    await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd, binary: BINARY, plugin: 'e8-other@e8-scratch', scope: 'user' }]));
+  });
+
+  it('removing a marketplace names the installed plugins it uninstalls and the files that writes, behind the acknowledgement', async () => {
+    installed = [plugin('e8-probe@e8-scratch'), plugin('e8-tools@e8-scratch', { scope: 'project', projectPath: '/work/other' }), plugin('review@anthropic-plugin-directory')];
+    await ready();
+    const market = section('marketplaces').querySelector<HTMLElement>('[data-marketplace-row="e8-scratch"]')!;
+    fireEvent.click(within(market).getByRole('button', { name: 'Remove…' }));
+    await waitFor(() => expect(argvShown()).toEqual(['plugin', 'marketplace', 'remove', 'e8-scratch', '--json']));
+    expect(within(sheet()).getByText('Also uninstalls 2 plugins: e8-probe@e8-scratch (user), e8-tools@e8-scratch (project, /work/other)')).toBeTruthy();
+    const writes = within(within(sheet()).getByRole('list', { name: "The engine's CLI writes:" })).getAllByRole('listitem').map((item) => item.textContent);
+    expect(writes).toEqual([
+      `${HOME}/settings.json`,
+      `${HOME}/plugins/known_marketplaces.json`,
+      `${HOME}/plugins/installed_plugins.json`,
+      `${HOME}/plugins/cache/e8-scratch/`,
+      `${HOME}/plugins/data/e8-probe@e8-scratch/`,
+      `${HOME}/plugins/data/e8-tools@e8-scratch/`,
+      '/work/other/.claude/settings.json',
+    ]);
+    const confirm = within(sheet()).getByRole('button', { name: 'Remove' });
+    expect(confirm).toHaveProperty('disabled', true);
+    fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
+    fireEvent.click(confirm);
+    await waitFor(() => expect(invoked('marketplaces.remove')).toEqual([{ cwd, binary: BINARY, name: 'e8-scratch' }]));
   });
 });

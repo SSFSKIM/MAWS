@@ -1,9 +1,11 @@
 // Marketplaces (E8 execution document, M2): one row per `claude plugin marketplace list --json` entry — its name, source
 // kind and repository, URL or path — with Refresh and Remove…, and below the rows "Add marketplace": an `owner/repo`, a
 // URL or a folder (typed, or chosen with Choose folder…). Every change asks first; a removed marketplace's result stays
-// beneath the rows after its row leaves.
+// beneath the rows after its row leaves. Removing a marketplace uninstalls the plugins installed from it (2.1.291), so
+// its sheet names them, from the installed read, and the files that uninstall writes.
 import { useState, type FormEvent } from 'react';
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
+import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { isPluginsArgument } from '@shared/plugins/cli';
 import { ipc } from '../../ipc/client';
 import { FRAME, PLUGIN_MANAGEMENT as W } from '../copy';
@@ -15,7 +17,7 @@ import { usePluginsRead } from './read';
 const marketplaceKey = (name: string) => `marketplace:${name}`;
 const ADD_KEY = 'marketplace-add';
 
-function MarketplaceRow({ marketplace }: { marketplace: Marketplace }) {
+function MarketplaceRow({ marketplace, installed }: { marketplace: Marketplace; installed: readonly InstalledPlugin[] }) {
   const { ops, ask } = useManage();
   const key = marketplaceKey(marketplace.name);
   const busy = ops.entries.get(key)?.state.phase === 'working';
@@ -35,7 +37,7 @@ function MarketplaceRow({ marketplace }: { marketplace: Marketplace }) {
           <TextButton onClick={() => ask(key, requestFor('marketplace-update', { name: marketplace.name }, marketplace.source))} disabled={busy}>
             {W.refresh}
           </TextButton>
-          <TextButton onClick={() => ask(key, requestFor('marketplace-remove', { name: marketplace.name }, marketplace.source))} disabled={busy}>
+          <TextButton onClick={() => ask(key, requestFor('marketplace-remove', { name: marketplace.name }, marketplace.source, { uninstalls: uninstallsOf(installed, marketplace.name) }))} disabled={busy}>
             {W.remove}
           </TextButton>
         </span>
@@ -43,6 +45,9 @@ function MarketplaceRow({ marketplace }: { marketplace: Marketplace }) {
     />
   );
 }
+
+// The installations a removal of `name` uninstalls.
+const uninstallsOf = (installed: readonly InstalledPlugin[], name: string) => installed.filter((p) => p.marketplace === name).map(({ id, scope, projectPath }) => ({ id, scope, projectPath }));
 
 function AddMarketplace() {
   const { ops, ask } = useManage();
@@ -79,7 +84,7 @@ function AddMarketplace() {
   );
 }
 
-export function MarketplacesSection({ cwd }: { cwd: string }) {
+export function MarketplacesSection({ cwd, installed }: { cwd: string; installed: readonly InstalledPlugin[] }) {
   const { ops } = useManage();
   const read = usePluginsRead('marketplaces.list', cwd);
   const marketplaces = read.data?.marketplaces ?? [];
@@ -96,7 +101,7 @@ export function MarketplacesSection({ cwd }: { cwd: string }) {
           ) : (
             <Rows label={W.marketplaceList}>
               {marketplaces.map((marketplace) => (
-                <MarketplaceRow key={marketplace.name} marketplace={marketplace} />
+                <MarketplaceRow key={marketplace.name} marketplace={marketplace} installed={installed} />
               ))}
             </Rows>
           ))}

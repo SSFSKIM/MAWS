@@ -5,7 +5,7 @@
 // the engine's CLI, which refreshes its own catalogue cache (D-12), so none refetches on focus, and a harness mounting
 // widgets passively (`WidgetReadPolicyContext`) issues none.
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useContext, useEffect, useRef } from 'react';
+import { useCallback, useContext, useEffect, useRef } from 'react';
 import type { CommandOutput } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { IpcCommandError } from '../../ipc/query';
@@ -63,10 +63,11 @@ export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | 
 }
 
 // The binary the CLI runs (the launcher's probe; null when it fails), the config home it writes and the engine's global
-// config file, for the sheet and the foot; an answer naming a binary does not move while the app runs, so it is read
-// once. Its state is the sheet's: nothing is confirmed while it is pending, after it failed, or while it names no binary
-// (M2 review); `refetch` reads it again for a sheet opened then (the engine installed, or chosen in Settings › Engine).
-export function usePluginsEnv(): PluginsReadResult<CommandOutput<'plugins.env'>> & { refetch(): void } {
+// config file: the foot shows the last answer; every confirm sheet asks again (`reread`) and confirms nothing until that
+// answer came, since Settings › Engine may have chosen another binary meanwhile (E8 whole-branch review), nor while it
+// failed or names no binary (M2 review). `reread` answers the fresh read alone: a failed one is an error even when an
+// earlier answer is cached.
+export function usePluginsEnv(): PluginsReadResult<CommandOutput<'plugins.env'>> & { reread(): Promise<PluginsReadResult<CommandOutput<'plugins.env'>>> } {
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
   const query = useQuery<CommandOutput<'plugins.env'>, IpcCommandError>({
     queryKey: ['maws', 'plugins.env', {}],
@@ -76,5 +77,9 @@ export function usePluginsEnv(): PluginsReadResult<CommandOutput<'plugins.env'>>
     refetchOnWindowFocus: false,
   });
   const { refetch } = query;
-  return { ...resultOf(query.data, query.error, query.isError), refetch: () => void refetch() };
+  const reread = useCallback(async () => {
+    const answer = await refetch();
+    return answer.isError ? resultOf<CommandOutput<'plugins.env'>>(undefined, answer.error, true) : resultOf(answer.data, null, false);
+  }, [refetch]);
+  return { ...resultOf(query.data, query.error, query.isError), reread };
 }

@@ -14,7 +14,8 @@ import { useSessions } from '../stores/sessions';
 import { PLUGIN_MANAGEMENT, PLUGINS, pluginsFoot, WIDGET_TITLE } from './copy';
 import { Group, Mono, Row, Rows } from './parts';
 import { AvailableSection } from './plugins/Available';
-import type { EngineResolution, ManageEnv } from './plugins/ConfirmSheet';
+import { useCallback } from 'react';
+import type { EngineResolution } from './plugins/ConfirmSheet';
 import { InstalledSection } from './plugins/Installed';
 import { ManageProvider, useManageState } from './plugins/manage';
 import { MarketplacesSection } from './plugins/Marketplaces';
@@ -71,8 +72,8 @@ const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): num
   return n;
 };
 
-// `plugins.env`'s read as the sheet takes it: resolved only by an answer that names a binary; an answer without one is
-// the probe's refusal in its own words (`binaryError`), and a failed read is the read's refusal.
+// `plugins.env`'s read as the sheet and the foot take it: resolved only by an answer that names a binary; an answer
+// without one is the probe's refusal in its own words (`binaryError`), and a failed read is the read's refusal.
 function resolutionOf(env: PluginsReadResult<CommandOutput<'plugins.env'>>): EngineResolution {
   if (env.data) {
     const { binary, binaryError, configHome, globalConfig } = env.data;
@@ -87,14 +88,15 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
   const cwd = useSessions((s) => s.engine.get(appSessionId)?.cwd ?? s.records.get(appSessionId)?.directory ?? null);
   const readySessions = useSessions((s) => readyCount(s.engine));
   const env = usePluginsEnv();
+  const { reread } = env;
   const installed = usePluginsRead('plugins.list', cwd);
   const reloads = useReloads(appSessionId);
   const ready = status?.process === 'ready';
-  // the binary and the paths are the host's answer, never a guess: until it names a binary the sheet confirms nothing,
-  // and a sheet opened meanwhile reads it again (M2 review)
+  // the binary and the paths are the host's answer, never a guess: the foot shows the last one, and every sheet reads it
+  // again and confirms nothing until it names a binary (M2 review; E8 whole-branch review)
   const engine = resolutionOf(env);
-  const manageEnv: ManageEnv = { cwd: cwd ?? '', engine, readySessions };
-  const { manage, sheet } = useManageState(manageEnv, ready ? reloads.reloadMods : null, engine.state === 'error' ? env.refetch : null);
+  const resolveEngine = useCallback(async () => resolutionOf(await reread()), [reread]);
+  const { manage, sheet } = useManageState({ cwd: cwd ?? '', readySessions }, ready ? reloads.reloadMods : null, resolveEngine);
   const plugins = installed.data?.plugins ?? [];
   return (
     <ManageProvider value={manage}>
@@ -105,7 +107,7 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
           </div>
         )}
         <InstalledSection plugins={plugins} />
-        {cwd !== null && <MarketplacesSection cwd={cwd} />}
+        {cwd !== null && <MarketplacesSection cwd={cwd} installed={plugins} />}
         {cwd !== null && <AvailableSection cwd={cwd} installed={new Set(plugins.map((p) => p.id))} />}
         <section data-plugins-section="loaded" className="mt-3">
           {status && !ready && <p className="m-0 mb-1 text-ui-sm text-fg-muted">{PLUGINS.lastReported}</p>}
