@@ -60,6 +60,11 @@ import { connectQuitWait } from './lifecycle/quit-wait';
 // W6 start
 import { registerUsage } from './usage';
 // W6 end
+// E1 start
+import { mawsTranscriptActions } from './tools/maws/actions';
+import { connectPaneShows } from './tools/maws/panes/connect';
+import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
+// E1 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -157,6 +162,11 @@ export function App() {
   // W6 start: the top bar's usage pill and its popover, the copy of ClaudeUsage's panel (E1), and the Usage action
   useEffect(() => registerUsage(), []);
   // W6 end
+  // E1 start: the maws tool server's renderer side: a pane `show_pane` asks for, opened by a window that knows the
+  // session; the capsule's and the delivery row's actions (the Question sheet, Open externally, Reveal in Finder)
+  useEffect(() => connectPaneShows(), []);
+  useEffect(() => registerMawsTranscriptActions(mawsTranscriptActions), []);
+  // E1 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
