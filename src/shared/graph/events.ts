@@ -97,6 +97,9 @@ export const EVENT_KINDS = [
   // E1 start: the maws tool server (P1 X9): an ask's life, a delivered file, a pane shown for the model
   'maws.ask.opened', 'maws.ask.answered', 'maws.ask.cancelled', 'maws.delivery.file', 'maws.pane.shown',
   // E1 end
+  // E7 start: a message from another session, parsed from the engine's envelope
+  'peer.message',
+  // E7 end
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -261,6 +264,15 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('maws.delivery.file', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, deliverables: z.array(DeliveredFileSchema), caption: nullableString(), urgency: z.enum(['normal', 'high']) }),
   event('maws.pane.shown', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, pane: PaneSchema, target: nullableString(), opened: ShowPaneOpenedSchema.nullable(), error: nullableString() }),
   // E1 end
+  // E7 start: a message from another session, parsed from the engine's envelope (SPEC 38 §38.23); emitted beside the
+  // `user.message` that carried it, by the live normaliser and the disk backfill alike. `replyable` is false when the
+  // suffix says SendMessage cannot reach the sender (a host-injected message).
+  event('peer.message', {
+    messageUuid: MessageUuidSchema.nullable(), from: z.string(), fromSession: nullableString(), fromName: nullableString(),
+    fromMode: nullableString(), fromPlugin: nullableString(), hopChain: z.array(z.string()), text: z.string(),
+    midTurn: z.boolean(), lineage: z.enum(['peer', 'descendant']), replyable: z.boolean(),
+  }),
+  // E7 end
 ]);
 
 export type SessionEvent = z.infer<typeof SessionEventSchema>;

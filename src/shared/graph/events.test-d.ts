@@ -7,6 +7,7 @@ import type { ToolUseId } from './ids';
 import type { Pane } from '../maws/panes';
 import type { AskAnswer, AskQuestion, ShowPaneOpened } from '../maws/tools';
 // E1 end
+import type { MessageUuid } from './ids'; // E7
 
 describe('session events are EventBase & EventPayload', () => {
   it('every event carries the base fields and a kind from EVENT_KINDS', () => {
@@ -45,4 +46,13 @@ describe('session events are EventBase & EventPayload', () => {
     expectTypeOf<Extract<SessionEvent, { kind: 'maws.delivery.file' }>['toolUseId']>().toEqualTypeOf<ToolUseId | null>();
   });
   // E1 end
+
+  // E7 start
+  it('peer.message carries the parsed envelope with a branded message uuid', () => {
+    type Peer = Extract<SessionEvent, { kind: 'peer.message' }>;
+    expectTypeOf<Peer['messageUuid']>().toEqualTypeOf<MessageUuid | null>();
+    expectTypeOf<Peer['lineage']>().toEqualTypeOf<'peer' | 'descendant'>();
+    expectTypeOf<Peer['hopChain']>().toEqualTypeOf<string[]>();
+  });
+  // E7 end
 });
