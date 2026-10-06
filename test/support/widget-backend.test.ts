@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { EngineSessionStatusSchema } from '../../src/shared/engine/status';
 import type { AppSessionId } from '../../src/shared/graph/ids';
-import { ReloadPluginsResponseSchema } from '../../src/shared/wire/control'; // E8
+import { ReloadPluginsResponseSchema, ReloadSkillsResponseSchema } from '../../src/shared/wire/control'; // E8
 import { loadScenario } from './scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, syntheticFixture, WidgetBackendError, WIDGET_BACKEND_COMMANDS } from './widget-backend';
 
@@ -141,6 +141,18 @@ describe('the widget backend', () => {
     expect(operations()).toHaveLength(1);
     expect(backend.settleOperations()).toBe(1);
     expect(operations()[1].outcome).toEqual({ ok: false, error: { code: 'engine_error', message: 'Server not found: x', engineCode: null } });
+  });
+
+  it('E8: answers Reload skills as an operation completing with the recorded reload_skills answer', async () => {
+    const { backend, emitted } = backendOf();
+    expect(WIDGET_BACKEND_COMMANDS).toContain('session.reloadSkills');
+    const { opId } = (await backend.answer('session.reloadSkills', { appSessionId: READY })) as { opId: string };
+    await vi.waitFor(() => expect(emitted.filter((e) => e.name === 'session.operation')).toHaveLength(1));
+    const event = emitted.find((e) => e.name === 'session.operation')!.payload as { opId: string; command: string; outcome: { ok: true; value: unknown } };
+    expect(event).toMatchObject({ opId, command: 'session.reloadSkills', outcome: { ok: true } });
+    const skills = ReloadSkillsResponseSchema.parse(event.outcome.value).skills;
+    expect(skills).toHaveLength(15); // pass3/e8-plugins-reload seq 34
+    expect(skills.map((s) => s.name)).toContain('e8-probe:e8-hello');
   });
 
   it('answers mcp_status with the toggles the engine accepted', async () => {

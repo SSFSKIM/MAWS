@@ -309,16 +309,19 @@ test('every widget opens with live engine data; controls take effect and are rea
       const w = await openWidget(live, 'plugins');
       const rev = async () => value(await invoke(page, 'session.catalog', { appSessionId: id as AppSessionId })).revision;
       const r0 = await rev();
-      await w.getByRole('button', { name: 'Reload' }).click();
-      await expect(w.getByRole('status')).toContainText('Reloaded', { timeout: 60_000 });
-      const first = await w.getByRole('status').innerText();
+      // E8: the button is Reload mods, its line beside it (the widget's rows carry status lines of their own)
+      const reload = w.getByRole('button', { name: 'Reload mods' });
+      const line = reload.locator('xpath=following-sibling::*[@role="status"]');
+      await reload.click();
+      await expect(line).toContainText('Reloaded', { timeout: 60_000 });
+      const first = await line.innerText();
       const r1 = await rev();
       const commands = join(repo, '.claude', 'commands');
       mkdirSync(commands, { recursive: true });
       writeFileSync(join(commands, 'c11-probe.md'), '---\ndescription: C11 live probe command\n---\nReply with exactly: PROBE\n');
-      await w.getByRole('button', { name: 'Reload' }).click();
+      await reload.click();
       await expect.poll(rev, { timeout: 30_000 }).toBeGreaterThan(r1);
-      const second = await w.getByRole('status').innerText();
+      const second = await line.innerText();
       observe('plugins', { first, second, revisions: [r0, r1, await rev()] });
       expect(first).toContain('0 errors');
     });
