@@ -690,6 +690,11 @@ test.describe('E7: the orchestration views', () => {
     await h.agents('setClock', new Date(Date.parse(lastFrame.at) + 2_000).toISOString());
     await bothThemes(h, 'g1-widget', h.region);
     const liveFacts = widgetFacts(await widget());
+    // the transcript's workflow ref, on the live session, opens the same widget
+    await h.panel('showSummary');
+    await h.agents('clickTranscriptSubagent', 1);
+    await expect.poll(async () => (await h.tabs()).find((tab) => tab.active)?.toolId).toBe('background');
+    await expect.poll(async () => widgetFacts(await widget()), 'the ref opens the run it names').toEqual(liveFacts);
 
     await test.step('the transcript’s workflow ref on a disk-only session opens the same widget, its agents their transcripts', async () => {
       await h.load('A', 'pass2/workflow'); // the same run recorded live: its Workflow call names the run's ids
