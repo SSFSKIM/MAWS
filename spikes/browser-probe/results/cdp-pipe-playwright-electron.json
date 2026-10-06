@@ -1,0 +1,242 @@
+{
+  "route": "remote-debugging-pipe via playwright _electron.launch",
+  "launchMs": 391,
+  "launcherSwitches": [
+    "--inspect=0",
+    "--remote-debugging-port=0",
+    "--scenario=cdp-pipe"
+  ],
+  "firstWindowMs": 0.1,
+  "windows": [
+    "http://127.0.0.1:17333/index.html"
+  ],
+  "inventory": {
+    "note": "electron context only",
+    "pages": [
+      "http://127.0.0.1:17333/index.html"
+    ]
+  },
+  "driver": {
+    "pageUrl": "http://127.0.0.1:17333/index.html",
+    "snapshot": {
+      "ms": 31.5,
+      "chars": 2072,
+      "lines": 59,
+      "head": "- generic [active] [ref=e1]:\n  - banner [ref=e2]:\n    - heading \"MAWS browser probe\" [level=1] [ref=e3]\n  - navigation \"Probe navigation\" [ref=e4]:\n    - link \"Second page\" [ref=e5] [cursor=pointer]:\n      - /url: /second.html\n    - text: ·\n    - link \"External link\" [ref=e6] [cursor=pointer]:\n      - /url: https://example.com/\n  - main [ref=e7]:\n    - region [ref=e8]:\n      - heading \"A form\" [level=2] [ref=e9]\n      - generic [ref=e10]:\n        - generic [ref=e11]: Name\n        - textbox \"Name\" [ref=e12]:\n          - /placeholder: Your name\n      - generic [ref=e13]:\n        - generic [ref=e14]: Flavour\n        - combobox \"Flavour\" [ref=e15]:\n          - option \"Vanilla\" [selected]\n          - option \"Mint\"\n          - option \"Coffee\"\n      - generic [ref=e16]:\n        - checkbox \"I agree\" [ref=e17]\n        - generic [ref=e18]: I agree\n      - generic [ref=e19]:\n        - button \"Increment\" [ref=e20]\n        - generic [ref=e21]:\n          - text: \"Count:\"\n          - strong [ref=e22]: \"0\"\n        - button \"Insert siblings\" [ref=e23]\n    - generic [ref=e24]:\n      - heading \"A list without ids\" [level=2] [ref=e25]\n      - list [ref=e26]:\n        - listitem [ref=e27]: First item\n        - listitem [ref=e28]:\n          - text: Second item\n          - button \"Act\" [ref=e29]\n        - listitem [ref=e30]: Third item\n      - paragraph [ref=e31]:"
+    },
+    "refCount": 46,
+    "refs": {
+      "increment": "e20",
+      "name": "e12",
+      "flavour": "e15",
+      "agree": "e17"
+    },
+    "click": {
+      "n": 10,
+      "min": 15.8,
+      "median": 16.7,
+      "p95": 65.9,
+      "max": 65.9,
+      "countAfter": "10"
+    },
+    "fill": {
+      "n": 10,
+      "min": 2.9,
+      "median": 3.4,
+      "p95": 4.1,
+      "max": 4.1,
+      "valueAfter": "Ada 9"
+    },
+    "selectOption": {
+      "n": 3,
+      "min": 2.3,
+      "median": 2.5,
+      "p95": 3.7,
+      "max": 3.7,
+      "last": [
+        "coffee"
+      ],
+      "valueAfter": "coffee"
+    },
+    "check": {
+      "ms": 19.3,
+      "checked": true
+    },
+    "evaluate": {
+      "n": 10,
+      "min": 0.5,
+      "median": 0.7,
+      "p95": 1.8,
+      "max": 1.8,
+      "last": {
+        "title": "MAWS browser probe",
+        "count": "10"
+      }
+    },
+    "screenshotPage": {
+      "n": 3,
+      "min": 58.3,
+      "median": 61,
+      "p95": 67,
+      "max": 67,
+      "bytes": 102117
+    },
+    "screenshotElement": {
+      "n": 3,
+      "min": 40.9,
+      "median": 41.4,
+      "p95": 56.7,
+      "max": 56.7,
+      "bytes": 2459
+    },
+    "snapshotRepeat": {
+      "n": 5,
+      "min": 2.7,
+      "median": 2.9,
+      "p95": 3.4,
+      "max": 3.4,
+      "incrementRefStable": true
+    },
+    "snapshotDefault": {
+      "ms": 2.7,
+      "hasRefs": false
+    },
+    "snapshotBoxes": {
+      "ms": 3.5,
+      "sampleLine": "- button \"Increment\" [ref=e20] [box=37,275,87,32]"
+    },
+    "mutation": {
+      "refBefore": "e20",
+      "oldRefResolvesWithoutResnapshot": "increment",
+      "refAfterResnapshot": "e20",
+      "insertedRefs": [
+        "Inserted 1=e47",
+        "Inserted 2=e48",
+        "Inserted 3=e49"
+      ],
+      "sameRef": true
+    },
+    "reload": {
+      "refBefore": "e20",
+      "oldRefResolvesWithoutResnapshot": "error: locator.evaluate: Timeout 1500ms exceeded.",
+      "refAfterResnapshot": "f1e20",
+      "sameNumber": false,
+      "note": "after a reload the DOM is new; equal numbers mean numbering is deterministic (traversal order), not that identity survived"
+    },
+    "pick": [
+      {
+        "target": "button \"Increment\"",
+        "agentRef": "f1e20",
+        "agentA11yPath": "generic > main > region > generic > button \"Increment\"",
+        "humanPick": {
+          "css": "#increment",
+          "a11y": "main > region \"A form\" > button \"Increment\"",
+          "role": "button",
+          "name": "Increment"
+        },
+        "refViaHumanCss": "f1e20",
+        "rootedSnapshotFirstLine": "- button \"Increment\" [active] [ref=f1e20]",
+        "cssViaAgentRef": "#increment",
+        "pageRefAfterRootedSnapshot": {
+          "picked": "increment",
+          "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+        },
+        "agree": {
+          "ref": true,
+          "css": true,
+          "roleName": true
+        },
+        "pickMs": 7.9,
+        "mapMs": 1.7,
+        "pickDebug": {
+          "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+          "exposed": "object",
+          "pageLogTail": [
+            "mousedown alt=false button=0",
+            "click alt=false at 80,291 on BUTTON#increment",
+            "mousedown alt=true button=0",
+            "click alt=true at 80,291 on BUTTON#increment"
+          ]
+        }
+      },
+      {
+        "target": "button \"Act\"",
+        "agentRef": "f1e29",
+        "agentA11yPath": "generic > main > generic > list > listitem > button \"Act\"",
+        "humanPick": {
+          "css": "body > main > section:nth-of-type(2) > ul > li:nth-of-type(2) > button",
+          "a11y": "main > region \"A list without ids First item Second item Act Third item A paragraph with a local link and emphasis.\" > list > listitem > button \"Act\"",
+          "role": "button",
+          "name": "Act"
+        },
+        "refViaHumanCss": "f1e29",
+        "rootedSnapshotFirstLine": "- button \"Act\" [active] [ref=f1e29]",
+        "cssViaAgentRef": "body > main > section:nth-of-type(2) > ul > li:nth-of-type(2) > button",
+        "pageRefAfterRootedSnapshot": {
+          "picked": "BUTTON",
+          "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+        },
+        "agree": {
+          "ref": true,
+          "css": true,
+          "roleName": true
+        },
+        "pickMs": 8.1,
+        "mapMs": 2.3,
+        "pickDebug": {
+          "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+          "exposed": "object",
+          "pageLogTail": [
+            "mousedown alt=false button=0",
+            "click alt=false at 185,452 on BUTTON#",
+            "mousedown alt=true button=0",
+            "click alt=true at 185,452 on BUTTON#"
+          ]
+        }
+      },
+      {
+        "target": "textbox \"Name\"",
+        "agentRef": "f1e12",
+        "agentA11yPath": "generic > main > region > generic > textbox \"Name\"",
+        "humanPick": {
+          "css": "#name",
+          "a11y": "main > region \"A form\" > textbox \"Name\"",
+          "role": "textbox",
+          "name": "Name"
+        },
+        "refViaHumanCss": "f1e12",
+        "rootedSnapshotFirstLine": "- textbox \"Name\" [active] [ref=f1e12]:",
+        "cssViaAgentRef": "#name",
+        "pageRefAfterRootedSnapshot": {
+          "picked": "name",
+          "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+        },
+        "agree": {
+          "ref": true,
+          "css": true,
+          "roleName": true
+        },
+        "pickMs": 7.9,
+        "mapMs": 1.5,
+        "pickDebug": {
+          "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+          "exposed": "object",
+          "pageLogTail": [
+            "mousedown alt=false button=0",
+            "click alt=false at 160,201 on INPUT#name",
+            "mousedown alt=true button=0",
+            "click alt=true at 160,201 on INPUT#name"
+          ]
+        }
+      }
+    ],
+    "navigate": {
+      "ms": 41,
+      "urlAfterBack": "http://127.0.0.1:17333/index.html"
+    }
+  },
+  "mainProcessEvaluate": {
+    "version": "44.4.5",
+    "name": "maws-spike-browser-probe"
+  }
+}

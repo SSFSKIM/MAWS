@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "MAWS probe extension",
+  "version": "1.0",
+  "description": "Reports which chrome.* APIs exist and work under Electron: a service worker, a content script, storage, tabs, scripting, messaging.",
+  "permissions": ["storage", "tabs", "scripting", "alarms", "cookies", "webRequest", "declarativeNetRequest", "webNavigation", "contextMenus", "notifications", "offscreen", "sidePanel"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "background": { "service_worker": "sw.js" },
+  "content_scripts": [
+    { "matches": ["http://127.0.0.1/*", "http://localhost/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ],
+  "action": { "default_title": "MAWS probe" }
+}

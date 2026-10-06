@@ -1,0 +1,36 @@
+{
+  "route": "remote-debugging-pipe (raw, fds 3/4)",
+  "messages": [
+    {
+      "method": "Target.attachedToTarget",
+      "sessionId": null,
+      "type": "page",
+      "url": "http://127.0.0.1:17333/index.html"
+    }
+  ],
+  "firstRoundTripMs": 6.8,
+  "version": {
+    "protocolVersion": "1.3",
+    "product": "Chrome/152.0.7977.130",
+    "revision": "@3ea4be7c55c3e85bfe9a21846d7ccd036dc1d582",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) maws-spike-browser-probe/44.4.5 Chrome/152.0.7977.130 Electron/44.4.5 Safari/537.36",
+    "jsVersion": "15.2.124.28"
+  },
+  "targets": [
+    {
+      "type": "page",
+      "url": "http://127.0.0.1:17333/index.html",
+      "title": "MAWS browser probe"
+    }
+  ],
+  "pageEvaluate": {
+    "ms": 6.8,
+    "value": "MAWS browser probe"
+  },
+  "screenshotBytes": 101871,
+  "sinceLaunchMs": 2612.5,
+  "stderrHasDevToolsListening": false,
+  "playwrightCanUseDirectly": "no: chromium.connectOverCDP takes a ws:// or http:// endpoint; a pipe needs a WebSocket adapter in the launcher (not written here)",
+  "childExitedEarly": null,
+  "stderrTail": []
+}

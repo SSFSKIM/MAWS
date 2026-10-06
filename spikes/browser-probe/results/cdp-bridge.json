@@ -1,0 +1,313 @@
+{
+  "scenario": "cdp-bridge",
+  "electron": "44.4.5",
+  "chrome": "152.0.7977.130",
+  "node": "24.21.0",
+  "startedAt": "2026-10-06T03:27:14.223Z",
+  "partitionPath": "/Users/new/Library/Application Support/maws-spike-browser-probe/Partitions/maws-probe",
+  "cdpBridge": {
+    "route": "webContents.debugger bridge",
+    "before": {
+      "idle": {
+        "rendererPercentCPU": 0,
+        "rendererWorkingSetKB": 114464,
+        "mainPercentCPU": 10.7
+      },
+      "jsLoopMs": 182.8,
+      "loadMs": [
+        14.2,
+        13.5,
+        14.6,
+        21.4,
+        13
+      ]
+    },
+    "bridgeStartMs": 10.3,
+    "endpoint": "ws://127.0.0.1:64290/devtools/browser/maws-bridge",
+    "attachMs": 37.2,
+    "inventory": {
+      "version": "152.0.7977.130",
+      "contexts": [
+        {
+          "pages": [
+            "http://127.0.0.1:17333/index.html"
+          ]
+        }
+      ],
+      "pageCount": 1
+    },
+    "attached": {
+      "idle": {
+        "rendererPercentCPU": 0,
+        "rendererWorkingSetKB": 137104,
+        "mainPercentCPU": 10.7
+      },
+      "jsLoopMs": 183.3,
+      "loadMs": [
+        20.8,
+        15.1,
+        15.6,
+        16.1,
+        15.2
+      ]
+    },
+    "pageLookup": [],
+    "clientUrlTracking": {
+      "atLookup": "http://127.0.0.1:17333/index.html",
+      "lastNavigatedEvent": "http://127.0.0.1:17333/index.html"
+    },
+    "driver": {
+      "pageUrl": "http://127.0.0.1:17333/index.html",
+      "snapshot": {
+        "ms": 28.4,
+        "chars": 2164,
+        "lines": 59,
+        "head": "- generic [active] [ref=f5e1]:\n  - banner [ref=f5e2]:\n    - heading \"MAWS browser probe\" [level=1] [ref=f5e3]\n  - navigation \"Probe navigation\" [ref=f5e4]:\n    - link \"Second page\" [ref=f5e5] [cursor=pointer]:\n      - /url: /second.html\n    - text: ·\n    - link \"External link\" [ref=f5e6] [cursor=pointer]:\n      - /url: https://example.com/\n  - main [ref=f5e7]:\n    - region [ref=f5e8]:\n      - heading \"A form\" [level=2] [ref=f5e9]\n      - generic [ref=f5e10]:\n        - generic [ref=f5e11]: Name\n        - textbox \"Name\" [ref=f5e12]:\n          - /placeholder: Your name\n      - generic [ref=f5e13]:\n        - generic [ref=f5e14]: Flavour\n        - combobox \"Flavour\" [ref=f5e15]:\n          - option \"Vanilla\" [selected]\n          - option \"Mint\"\n          - option \"Coffee\"\n      - generic [ref=f5e16]:\n        - checkbox \"I agree\" [ref=f5e17]\n        - generic [ref=f5e18]: I agree\n      - generic [ref=f5e19]:\n        - button \"Increment\" [ref=f5e20]\n        - generic [ref=f5e21]:\n          - text: \"Count:\"\n          - strong [ref=f5e22]: \"0\"\n        - button \"Insert siblings\" [ref=f5e23]\n    - generic [ref=f5e24]:\n      - heading \"A list without ids\" [level=2] [ref=f5e25]\n      - list [ref=f5e26]:\n        - listitem [ref=f5e27]: First item\n        - listitem [ref=f5e28]:\n          - text: Second item\n          - button \"Act\" [ref=f5e29]\n        - listitem [ref=f5e30]: Third item\n      - paragraph [ref=f5e31]:"
+      },
+      "refCount": 46,
+      "refs": {
+        "increment": "f5e20",
+        "name": "f5e12",
+        "flavour": "f5e15",
+        "agree": "f5e17"
+      },
+      "click": {
+        "n": 10,
+        "min": 16,
+        "median": 16.5,
+        "p95": 61.4,
+        "max": 61.4,
+        "countAfter": "10"
+      },
+      "fill": {
+        "n": 10,
+        "min": 2.2,
+        "median": 2.8,
+        "p95": 6,
+        "max": 6,
+        "valueAfter": "Ada 9"
+      },
+      "selectOption": {
+        "n": 3,
+        "min": 2.2,
+        "median": 2.4,
+        "p95": 2.7,
+        "max": 2.7,
+        "last": [
+          "coffee"
+        ],
+        "valueAfter": "coffee"
+      },
+      "check": {
+        "ms": 16.9,
+        "checked": true
+      },
+      "evaluate": {
+        "n": 10,
+        "min": 0.4,
+        "median": 0.4,
+        "p95": 1.5,
+        "max": 1.5,
+        "last": {
+          "title": "MAWS browser probe",
+          "count": "10"
+        }
+      },
+      "screenshotPage": {
+        "n": 3,
+        "min": 49.9,
+        "median": 57.7,
+        "p95": 61.2,
+        "max": 61.2,
+        "bytes": 102117
+      },
+      "screenshotElement": {
+        "n": 3,
+        "min": 40.9,
+        "median": 42.6,
+        "p95": 51,
+        "max": 51,
+        "bytes": 2459
+      },
+      "snapshotRepeat": {
+        "n": 5,
+        "min": 2.5,
+        "median": 2.9,
+        "p95": 3.7,
+        "max": 3.7,
+        "incrementRefStable": true
+      },
+      "snapshotDefault": {
+        "ms": 2,
+        "hasRefs": false
+      },
+      "snapshotBoxes": {
+        "ms": 3.1,
+        "sampleLine": "- button \"Increment\" [ref=f5e20] [box=37,275,87,32]"
+      },
+      "mutation": {
+        "refBefore": "f5e20",
+        "oldRefResolvesWithoutResnapshot": "increment",
+        "refAfterResnapshot": "f5e20",
+        "insertedRefs": [
+          "Inserted 1=f5e47",
+          "Inserted 2=f5e48",
+          "Inserted 3=f5e49"
+        ],
+        "sameRef": true
+      },
+      "reload": {
+        "refBefore": "f5e20",
+        "oldRefResolvesWithoutResnapshot": "error: locator.evaluate: Invalid frame in aria-ref selector \"aria-ref=f5e20\"",
+        "refAfterResnapshot": "f6e20",
+        "sameNumber": false,
+        "note": "after a reload the DOM is new; equal numbers mean numbering is deterministic (traversal order), not that identity survived"
+      },
+      "pick": [
+        {
+          "target": "button \"Increment\"",
+          "agentRef": "f6e20",
+          "agentA11yPath": "generic > main > region > generic > button \"Increment\"",
+          "humanPick": {
+            "css": "#increment",
+            "a11y": "main > region \"A form\" > button \"Increment\"",
+            "role": "button",
+            "name": "Increment"
+          },
+          "refViaHumanCss": "f6e20",
+          "rootedSnapshotFirstLine": "- button \"Increment\" [active] [ref=f6e20]",
+          "cssViaAgentRef": "#increment",
+          "pageRefAfterRootedSnapshot": {
+            "picked": "increment",
+            "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+          },
+          "agree": {
+            "ref": true,
+            "css": true,
+            "roleName": true
+          },
+          "pickMs": 7,
+          "mapMs": 1,
+          "pickDebug": {
+            "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+            "exposed": "object",
+            "pageLogTail": [
+              "mousedown alt=false button=0",
+              "click alt=false at 80,291 on BUTTON#increment",
+              "mousedown alt=true button=0",
+              "click alt=true at 80,291 on BUTTON#increment"
+            ]
+          }
+        },
+        {
+          "target": "button \"Act\"",
+          "agentRef": "f6e29",
+          "agentA11yPath": "generic > main > generic > list > listitem > button \"Act\"",
+          "humanPick": {
+            "css": "body > main > section:nth-of-type(2) > ul > li:nth-of-type(2) > button",
+            "a11y": "main > region \"A list without ids First item Second item Act Third item A paragraph with a local link and emphasis.\" > list > listitem > button \"Act\"",
+            "role": "button",
+            "name": "Act"
+          },
+          "refViaHumanCss": "f6e29",
+          "rootedSnapshotFirstLine": "- button \"Act\" [active] [ref=f6e29]",
+          "cssViaAgentRef": "body > main > section:nth-of-type(2) > ul > li:nth-of-type(2) > button",
+          "pageRefAfterRootedSnapshot": {
+            "picked": "BUTTON",
+            "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+          },
+          "agree": {
+            "ref": true,
+            "css": true,
+            "roleName": true
+          },
+          "pickMs": 6,
+          "mapMs": 1.8,
+          "pickDebug": {
+            "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+            "exposed": "object",
+            "pageLogTail": [
+              "mousedown alt=false button=0",
+              "click alt=false at 185,452 on BUTTON#",
+              "mousedown alt=true button=0",
+              "click alt=true at 185,452 on BUTTON#"
+            ]
+          }
+        },
+        {
+          "target": "textbox \"Name\"",
+          "agentRef": "f6e12",
+          "agentA11yPath": "generic > main > region > generic > textbox \"Name\"",
+          "humanPick": {
+            "css": "#name",
+            "a11y": "main > region \"A form\" > textbox \"Name\"",
+            "role": "textbox",
+            "name": "Name"
+          },
+          "refViaHumanCss": "f6e12",
+          "rootedSnapshotFirstLine": "- textbox \"Name\" [active] [ref=f6e12]:",
+          "cssViaAgentRef": "#name",
+          "pageRefAfterRootedSnapshot": {
+            "picked": "name",
+            "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+          },
+          "agree": {
+            "ref": true,
+            "css": true,
+            "roleName": true
+          },
+          "pickMs": 5.9,
+          "mapMs": 1.1,
+          "pickDebug": {
+            "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+            "exposed": "object",
+            "pageLogTail": [
+              "mousedown alt=false button=0",
+              "click alt=false at 160,201 on INPUT#name",
+              "mousedown alt=true button=0",
+              "click alt=true at 160,201 on INPUT#name"
+            ]
+          }
+        }
+      ],
+      "navigate": {
+        "ms": 35.1,
+        "urlAfterBack": "http://127.0.0.1:17333/index.html"
+      }
+    },
+    "ipcPicks": 3,
+    "newPage": "error: browserContext.newPage: Protocol error (Target.createTarget): Target.createTarget is not available through the MAWS debugger bridge (one view, owned by the app)",
+    "debuggerBeside": {
+      "secondAttach": "throws: Debugger is already attached to the target",
+      "mainSendCommandSharesSession": "MAWS browser probe",
+      "playwrightStillWorks": "MAWS browser probe"
+    },
+    "devtoolsBeside": {
+      "opened": true,
+      "playwrightEvaluate": "MAWS browser probe",
+      "debuggerStillAttached": true,
+      "afterClose": {
+        "playwrightEvaluate": 2,
+        "debuggerStillAttached": true
+      }
+    },
+    "bridgeStats": {
+      "forwarded": 656,
+      "browserLevel": 5,
+      "events": 212,
+      "errors": 2,
+      "unknownBrowserMethods": []
+    },
+    "disconnectMs": 5.2,
+    "viewAliveAfterClose": "MAWS browser probe",
+    "after": {
+      "idle": {
+        "rendererPercentCPU": 0,
+        "rendererWorkingSetKB": 189600,
+        "mainPercentCPU": 10.5
+      },
+      "jsLoopMs": 207.1
+    },
+    "totalMs": 11885.1
+  }
+}
