@@ -6,11 +6,11 @@
     "node": "24.21.0",
     "playwrightCore": "1.63.0",
     "platform": "darwin arm64 25.6.0",
-    "startedAt": "2026-10-06T17:08:56.817Z",
+    "startedAt": "2026-10-06T17:23:51.858Z",
     "loadavg": [
-      9.3,
-      9.5,
-      10.7
+      9,
+      8.4,
+      8.8
     ],
     "userData": "/tmp/maws-e4-0/userData",
     "origins": {
@@ -67,24 +67,24 @@
         "label": "agent click, top-frame button (CDP)",
         "error": null,
         "expect": "before-mouse-event fires?",
-        "inputEvents": [
+        "attributedEvents": [
           {
             "type": "mouseMove",
-            "at": 12.67,
+            "at": 14.44,
             "x": 63.119998931884766,
             "y": 86.5,
             "attributed": "agent"
           },
           {
             "type": "mouseDown",
-            "at": 12.75,
+            "at": 14.56,
             "x": 63.119998931884766,
             "y": 86.5,
             "attributed": "agent"
           },
           {
             "type": "mouseUp",
-            "at": 12.79,
+            "at": 14.61,
             "x": 63.119998931884766,
             "y": 86.5,
             "attributed": "agent"
@@ -95,9 +95,9 @@
           "mouseDown",
           "mouseUp"
         ],
-        "beforeMouseEvents": [
+        "inputEvents": [
           {
-            "at": 12.63,
+            "at": 14.48,
             "type": "mouseMove",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -105,7 +105,7 @@
             "globalY": 164.5
           },
           {
-            "at": 12.74,
+            "at": 14.57,
             "type": "mouseDown",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -113,7 +113,33 @@
             "globalY": 164.5
           },
           {
-            "at": 12.79,
+            "at": 14.61,
+            "type": "mouseUp",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          }
+        ],
+        "beforeMouseEvents": [
+          {
+            "at": 14.44,
+            "type": "mouseMove",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          },
+          {
+            "at": 14.56,
+            "type": "mouseDown",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          },
+          {
+            "at": 14.61,
             "type": "mouseUp",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -127,22 +153,22 @@
             "type": "mouseMoved",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 12.52,
-            "replyRel": 13.28
+            "sendRel": 14.31,
+            "replyRel": 15.15
           },
           {
             "type": "mousePressed",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 12.71,
-            "replyRel": 13.63
+            "sendRel": 14.52,
+            "replyRel": 15.75
           },
           {
             "type": "mouseReleased",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 12.76,
-            "replyRel": 14.06
+            "sendRel": 14.58,
+            "replyRel": 15.95
           }
         ],
         "attributed": {
@@ -156,24 +182,24 @@
         "label": "stand-in click, top-frame button (sendInputEvent)",
         "error": null,
         "expect": "before-mouse-event fires?",
-        "inputEvents": [
+        "attributedEvents": [
           {
             "type": "mouseMove",
-            "at": 0.15,
+            "at": 0.09,
             "x": 63,
             "y": 87,
             "attributed": "human"
           },
           {
             "type": "mouseDown",
-            "at": 0.19,
+            "at": 0.13,
             "x": 63,
             "y": 87,
             "attributed": "human"
           },
           {
             "type": "mouseUp",
-            "at": 0.22,
+            "at": 0.16,
             "x": 63,
             "y": 87,
             "attributed": "human"
@@ -184,9 +210,9 @@
           "mouseDown",
           "mouseUp"
         ],
-        "beforeMouseEvents": [
+        "inputEvents": [
           {
-            "at": 0.14,
+            "at": 0.1,
             "type": "mouseMove",
             "x": 63,
             "y": 87,
@@ -194,7 +220,7 @@
             "globalY": 165
           },
           {
-            "at": 0.18,
+            "at": 0.14,
             "type": "mouseDown",
             "x": 63,
             "y": 87,
@@ -202,7 +228,33 @@
             "globalY": 165
           },
           {
-            "at": 0.21,
+            "at": 0.17,
+            "type": "mouseUp",
+            "x": 63,
+            "y": 87,
+            "globalX": 868,
+            "globalY": 165
+          }
+        ],
+        "beforeMouseEvents": [
+          {
+            "at": 0.09,
+            "type": "mouseMove",
+            "x": 63,
+            "y": 87,
+            "globalX": 868,
+            "globalY": 165
+          },
+          {
+            "at": 0.13,
+            "type": "mouseDown",
+            "x": 63,
+            "y": 87,
+            "globalX": 868,
+            "globalY": 165
+          },
+          {
+            "at": 0.16,
             "type": "mouseUp",
             "x": 63,
             "y": 87,
@@ -223,11 +275,34 @@
         "label": "agent click, button inside the cross-site iframe (CDP)",
         "error": null,
         "expect": "does main see input-event / before-mouse-event for an OOPIF?",
-        "inputEvents": [],
+        "attributedEvents": [
+          {
+            "type": "mouseMove",
+            "at": 23.72,
+            "x": 57.63999938964844,
+            "y": 68.36000061035156,
+            "attributed": "agent"
+          },
+          {
+            "type": "mouseDown",
+            "at": 23.77,
+            "x": 57.63999938964844,
+            "y": 68.36000061035156,
+            "attributed": "agent"
+          },
+          {
+            "type": "mouseUp",
+            "at": 23.82,
+            "x": 57.63999938964844,
+            "y": 68.36000061035156,
+            "attributed": "agent"
+          }
+        ],
         "inputEventTypes": [],
+        "inputEvents": [],
         "beforeMouseEvents": [
           {
-            "at": 27.65,
+            "at": 23.72,
             "type": "mouseMove",
             "x": 57.63999938964844,
             "y": 68.36000061035156,
@@ -235,7 +310,7 @@
             "globalY": 259.3599853515625
           },
           {
-            "at": 27.72,
+            "at": 23.77,
             "type": "mouseDown",
             "x": 57.63999938964844,
             "y": 68.36000061035156,
@@ -243,7 +318,7 @@
             "globalY": 259.3599853515625
           },
           {
-            "at": 27.77,
+            "at": 23.82,
             "type": "mouseUp",
             "x": 57.63999938964844,
             "y": 68.36000061035156,
@@ -257,26 +332,26 @@
             "type": "mouseMoved",
             "x": 83.64,
             "y": 181.86,
-            "sendRel": 27.59,
-            "replyRel": 28.26
+            "sendRel": 23.65,
+            "replyRel": 24.24
           },
           {
             "type": "mousePressed",
             "x": 83.64,
             "y": 181.86,
-            "sendRel": 27.69,
-            "replyRel": 28.62
+            "sendRel": 23.75,
+            "replyRel": 24.59
           },
           {
             "type": "mouseReleased",
             "x": 83.64,
             "y": 181.86,
-            "sendRel": 27.74,
-            "replyRel": 28.87
+            "sendRel": 23.79,
+            "replyRel": 24.79
           }
         ],
         "attributed": {
-          "agent": 0,
+          "agent": 3,
           "human": 0,
           "humanPresses": 0
         },
@@ -286,24 +361,24 @@
         "label": "stand-in click, button inside the cross-site iframe (sendInputEvent at its page coordinates)",
         "error": null,
         "expect": "the takeover case that matters: a human click into an iframe",
-        "inputEvents": [
+        "attributedEvents": [
           {
             "type": "mouseMove",
-            "at": 0.07,
+            "at": 0.05,
             "x": 84,
             "y": 182,
             "attributed": "human"
           },
           {
             "type": "mouseDown",
-            "at": 0.12,
+            "at": 0.1,
             "x": 84,
             "y": 182,
             "attributed": "human"
           },
           {
             "type": "mouseUp",
-            "at": 0.13,
+            "at": 0.12,
             "x": 84,
             "y": 182,
             "attributed": "human"
@@ -314,9 +389,9 @@
           "mouseDown",
           "mouseUp"
         ],
-        "beforeMouseEvents": [
+        "inputEvents": [
           {
-            "at": 0.06,
+            "at": 0.07,
             "type": "mouseMove",
             "x": 84,
             "y": 182,
@@ -324,7 +399,7 @@
             "globalY": 260
           },
           {
-            "at": 0.11,
+            "at": 0.1,
             "type": "mouseDown",
             "x": 84,
             "y": 182,
@@ -332,7 +407,33 @@
             "globalY": 260
           },
           {
-            "at": 0.13,
+            "at": 0.12,
+            "type": "mouseUp",
+            "x": 84,
+            "y": 182,
+            "globalX": 889,
+            "globalY": 260
+          }
+        ],
+        "beforeMouseEvents": [
+          {
+            "at": 0.05,
+            "type": "mouseMove",
+            "x": 84,
+            "y": 182,
+            "globalX": 889,
+            "globalY": 260
+          },
+          {
+            "at": 0.1,
+            "type": "mouseDown",
+            "x": 84,
+            "y": 182,
+            "globalX": 889,
+            "globalY": 260
+          },
+          {
+            "at": 0.12,
             "type": "mouseUp",
             "x": 84,
             "y": 182,
@@ -353,7 +454,7 @@
         "label": "stand-in click into the iframe field, then stand-in key x",
         "error": null,
         "expect": "does main see before-input-event / input-event for a key into an OOPIF?",
-        "inputEvents": [
+        "attributedEvents": [
           {
             "type": "mouseMove",
             "at": 0.08,
@@ -370,26 +471,26 @@
           },
           {
             "type": "mouseUp",
-            "at": 0.13,
+            "at": 0.14,
             "x": 185,
             "y": 217,
             "attributed": "human"
           },
           {
             "type": "rawKeyDown",
-            "at": 153.47,
+            "at": 152.28,
             "_modifiers": 0,
             "attributed": "human"
           },
           {
             "type": "char",
-            "at": 153.52,
+            "at": 152.32,
             "_modifiers": 0,
             "attributed": "human"
           },
           {
             "type": "keyUp",
-            "at": 153.56,
+            "at": 152.34,
             "_modifiers": 0,
             "attributed": "human"
           }
@@ -402,9 +503,9 @@
           "char",
           "keyUp"
         ],
-        "beforeMouseEvents": [
+        "inputEvents": [
           {
-            "at": 0.07,
+            "at": 0.09,
             "type": "mouseMove",
             "x": 185,
             "y": 217,
@@ -412,7 +513,7 @@
             "globalY": 295
           },
           {
-            "at": 0.11,
+            "at": 0.12,
             "type": "mouseDown",
             "x": 185,
             "y": 217,
@@ -420,7 +521,48 @@
             "globalY": 295
           },
           {
-            "at": 0.13,
+            "at": 0.14,
+            "type": "mouseUp",
+            "x": 185,
+            "y": 217,
+            "globalX": 990,
+            "globalY": 295
+          },
+          {
+            "at": 152.28,
+            "type": "rawKeyDown",
+            "_modifiers": 0
+          },
+          {
+            "at": 152.32,
+            "type": "char",
+            "_modifiers": 0
+          },
+          {
+            "at": 152.34,
+            "type": "keyUp",
+            "_modifiers": 0
+          }
+        ],
+        "beforeMouseEvents": [
+          {
+            "at": 0.08,
+            "type": "mouseMove",
+            "x": 185,
+            "y": 217,
+            "globalX": 990,
+            "globalY": 295
+          },
+          {
+            "at": 0.12,
+            "type": "mouseDown",
+            "x": 185,
+            "y": 217,
+            "globalX": 990,
+            "globalY": 295
+          },
+          {
+            "at": 0.14,
             "type": "mouseUp",
             "x": 185,
             "y": 217,
@@ -430,12 +572,12 @@
         ],
         "beforeInputEvents": [
           {
-            "at": 153.45,
+            "at": 152.27,
             "type": "keyDown",
             "key": "x"
           },
           {
-            "at": 153.55,
+            "at": 152.34,
             "type": "keyUp",
             "key": "x"
           }
@@ -452,59 +594,59 @@
         "label": "interleaved: agent click on the top button while the stand-in presses at another pixel (the heading)",
         "error": null,
         "expect": "agent events attributed to the agent, the stand-in press to the human",
-        "inputEvents": [
+        "attributedEvents": [
           {
             "type": "mouseMove",
-            "at": 15.8,
+            "at": 16.71,
             "x": 63.119998931884766,
             "y": 86.5,
             "attributed": "agent"
           },
           {
             "type": "mouseDown",
-            "at": 15.85,
+            "at": 16.77,
             "x": 276,
             "y": 41,
+            "attributed": "agent"
+          },
+          {
+            "type": "mouseUp",
+            "at": 16.79,
+            "x": 276,
+            "y": 41,
+            "attributed": "agent"
+          },
+          {
+            "type": "mouseDown",
+            "at": 16.82,
+            "x": 63.119998931884766,
+            "y": 86.5,
             "attributed": "human"
           },
           {
             "type": "mouseUp",
-            "at": 15.87,
-            "x": 276,
-            "y": 41,
+            "at": 16.85,
+            "x": 63.119998931884766,
+            "y": 86.5,
             "attributed": "human"
           },
           {
-            "type": "mouseDown",
-            "at": 15.9,
-            "x": 63.119998931884766,
-            "y": 86.5,
-            "attributed": "agent"
-          },
-          {
-            "type": "mouseUp",
-            "at": 15.93,
-            "x": 63.119998931884766,
-            "y": 86.5,
-            "attributed": "agent"
-          },
-          {
             "type": "mouseMove",
-            "at": 32.36,
+            "at": 32.97,
             "x": 63.119998931884766,
             "y": 86.5,
             "attributed": "agent"
           },
           {
             "type": "mouseDown",
-            "at": 32.41,
+            "at": 33.02,
             "x": 63.119998931884766,
             "y": 86.5,
             "attributed": "agent"
           },
           {
             "type": "mouseUp",
-            "at": 32.45,
+            "at": 33.06,
             "x": 63.119998931884766,
             "y": 86.5,
             "attributed": "agent"
@@ -520,9 +662,75 @@
           "mouseDown",
           "mouseUp"
         ],
+        "inputEvents": [
+          {
+            "at": 16.71,
+            "type": "mouseMove",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          },
+          {
+            "at": 16.78,
+            "type": "mouseDown",
+            "x": 276,
+            "y": 41,
+            "globalX": 1081,
+            "globalY": 119
+          },
+          {
+            "at": 16.79,
+            "type": "mouseUp",
+            "x": 276,
+            "y": 41,
+            "globalX": 1081,
+            "globalY": 119
+          },
+          {
+            "at": 16.82,
+            "type": "mouseDown",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          },
+          {
+            "at": 16.85,
+            "type": "mouseUp",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          },
+          {
+            "at": 32.98,
+            "type": "mouseMove",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          },
+          {
+            "at": 33.03,
+            "type": "mouseDown",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          },
+          {
+            "at": 33.06,
+            "type": "mouseUp",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          }
+        ],
         "beforeMouseEvents": [
           {
-            "at": 15.79,
+            "at": 16.71,
             "type": "mouseMove",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -530,7 +738,7 @@
             "globalY": 164.5
           },
           {
-            "at": 15.85,
+            "at": 16.77,
             "type": "mouseDown",
             "x": 276,
             "y": 41,
@@ -538,7 +746,7 @@
             "globalY": 119
           },
           {
-            "at": 15.86,
+            "at": 16.79,
             "type": "mouseUp",
             "x": 276,
             "y": 41,
@@ -546,7 +754,7 @@
             "globalY": 119
           },
           {
-            "at": 15.89,
+            "at": 16.82,
             "type": "mouseDown",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -554,7 +762,7 @@
             "globalY": 164.5
           },
           {
-            "at": 15.93,
+            "at": 16.85,
             "type": "mouseUp",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -562,7 +770,7 @@
             "globalY": 164.5
           },
           {
-            "at": 32.35,
+            "at": 32.97,
             "type": "mouseMove",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -570,7 +778,7 @@
             "globalY": 164.5
           },
           {
-            "at": 32.4,
+            "at": 33.02,
             "type": "mouseDown",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -578,7 +786,7 @@
             "globalY": 164.5
           },
           {
-            "at": 32.45,
+            "at": 33.06,
             "type": "mouseUp",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -592,43 +800,43 @@
             "type": "mouseMoved",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 15.73,
-            "replyRel": 16.01
+            "sendRel": 16.65,
+            "replyRel": 17.03
           },
           {
             "type": "mousePressed",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 15.82,
-            "replyRel": 16.33
+            "sendRel": 16.74,
+            "replyRel": 17.31
           },
           {
             "type": "mouseReleased",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 15.91,
-            "replyRel": 16.36
+            "sendRel": 16.83,
+            "replyRel": 17.37
           },
           {
             "type": "mouseMoved",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 32.3,
-            "replyRel": 32.51
+            "sendRel": 32.91,
+            "replyRel": 33.14
           },
           {
             "type": "mousePressed",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 32.38,
-            "replyRel": 32.72
+            "sendRel": 33,
+            "replyRel": 33.32
           },
           {
             "type": "mouseReleased",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 32.42,
-            "replyRel": 32.93
+            "sendRel": 33.04,
+            "replyRel": 33.54
           }
         ],
         "attributed": {
@@ -642,38 +850,38 @@
         "label": "interleaved: agent click on the top button while the stand-in presses at the same pixel",
         "error": null,
         "expect": "one press consumes the window, the other is human: the takeover still fires",
-        "inputEvents": [
+        "attributedEvents": [
           {
             "type": "mouseMove",
-            "at": 13.72,
+            "at": 13.1,
             "x": 63.119998931884766,
             "y": 86.5,
             "attributed": "agent"
           },
           {
             "type": "mouseDown",
-            "at": 13.79,
+            "at": 13.17,
             "x": 63,
             "y": 87,
             "attributed": "agent"
           },
           {
             "type": "mouseUp",
-            "at": 13.81,
+            "at": 13.19,
             "x": 63,
             "y": 87,
             "attributed": "human"
           },
           {
             "type": "mouseDown",
-            "at": 13.85,
+            "at": 13.23,
             "x": 63.119998931884766,
             "y": 86.5,
             "attributed": "human"
           },
           {
             "type": "mouseUp",
-            "at": 13.89,
+            "at": 13.27,
             "x": 63.119998931884766,
             "y": 86.5,
             "attributed": "agent"
@@ -686,9 +894,9 @@
           "mouseDown",
           "mouseUp"
         ],
-        "beforeMouseEvents": [
+        "inputEvents": [
           {
-            "at": 13.71,
+            "at": 13.11,
             "type": "mouseMove",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -696,7 +904,7 @@
             "globalY": 164.5
           },
           {
-            "at": 13.79,
+            "at": 13.18,
             "type": "mouseDown",
             "x": 63,
             "y": 87,
@@ -704,7 +912,7 @@
             "globalY": 165
           },
           {
-            "at": 13.81,
+            "at": 13.2,
             "type": "mouseUp",
             "x": 63,
             "y": 87,
@@ -712,7 +920,7 @@
             "globalY": 165
           },
           {
-            "at": 13.84,
+            "at": 13.23,
             "type": "mouseDown",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -720,7 +928,49 @@
             "globalY": 164.5
           },
           {
-            "at": 13.89,
+            "at": 13.27,
+            "type": "mouseUp",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          }
+        ],
+        "beforeMouseEvents": [
+          {
+            "at": 13.1,
+            "type": "mouseMove",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          },
+          {
+            "at": 13.17,
+            "type": "mouseDown",
+            "x": 63,
+            "y": 87,
+            "globalX": 868,
+            "globalY": 165
+          },
+          {
+            "at": 13.19,
+            "type": "mouseUp",
+            "x": 63,
+            "y": 87,
+            "globalX": 868,
+            "globalY": 165
+          },
+          {
+            "at": 13.23,
+            "type": "mouseDown",
+            "x": 63.119998931884766,
+            "y": 86.5,
+            "globalX": 868.1199951171875,
+            "globalY": 164.5
+          },
+          {
+            "at": 13.27,
             "type": "mouseUp",
             "x": 63.119998931884766,
             "y": 86.5,
@@ -734,22 +984,22 @@
             "type": "mouseMoved",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 13.62,
-            "replyRel": 13.97
+            "sendRel": 13.02,
+            "replyRel": 13.42
           },
           {
             "type": "mousePressed",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 13.75,
-            "replyRel": 14.45
+            "sendRel": 13.14,
+            "replyRel": 13.83
           },
           {
             "type": "mouseReleased",
             "x": 63.12,
             "y": 86.5,
-            "sendRel": 13.86,
-            "replyRel": 14.59
+            "sendRel": 13.24,
+            "replyRel": 13.93
           }
         ],
         "attributed": {
@@ -763,27 +1013,27 @@
         "label": "agent click at zoom 1.25",
         "error": null,
         "expect": "do command x,y and input-event x,y still agree?",
-        "inputEvents": [
+        "attributedEvents": [
           {
             "type": "mouseMove",
-            "at": 19.33,
+            "at": 12.94,
             "x": 78.9124984741211,
             "y": 108.1875,
-            "attributed": "human"
+            "attributed": "agent"
           },
           {
             "type": "mouseDown",
-            "at": 19.42,
+            "at": 13.07,
             "x": 78.9124984741211,
             "y": 108.1875,
-            "attributed": "human"
+            "attributed": "agent"
           },
           {
             "type": "mouseUp",
-            "at": 19.56,
+            "at": 13.14,
             "x": 78.9124984741211,
             "y": 108.1875,
-            "attributed": "human"
+            "attributed": "agent"
           }
         ],
         "inputEventTypes": [
@@ -791,9 +1041,9 @@
           "mouseDown",
           "mouseUp"
         ],
-        "beforeMouseEvents": [
+        "inputEvents": [
           {
-            "at": 19.32,
+            "at": 12.96,
             "type": "mouseMove",
             "x": 78.9124984741211,
             "y": 108.1875,
@@ -801,7 +1051,7 @@
             "globalY": 186.1875
           },
           {
-            "at": 19.39,
+            "at": 13.07,
             "type": "mouseDown",
             "x": 78.9124984741211,
             "y": 108.1875,
@@ -809,7 +1059,33 @@
             "globalY": 186.1875
           },
           {
-            "at": 19.55,
+            "at": 13.14,
+            "type": "mouseUp",
+            "x": 78.9124984741211,
+            "y": 108.1875,
+            "globalX": 883.9124755859375,
+            "globalY": 186.1875
+          }
+        ],
+        "beforeMouseEvents": [
+          {
+            "at": 12.94,
+            "type": "mouseMove",
+            "x": 78.9124984741211,
+            "y": 108.1875,
+            "globalX": 883.9124755859375,
+            "globalY": 186.1875
+          },
+          {
+            "at": 13.07,
+            "type": "mouseDown",
+            "x": 78.9124984741211,
+            "y": 108.1875,
+            "globalX": 883.9124755859375,
+            "globalY": 186.1875
+          },
+          {
+            "at": 13.14,
             "type": "mouseUp",
             "x": 78.9124984741211,
             "y": 108.1875,
@@ -823,28 +1099,28 @@
             "type": "mouseMoved",
             "x": 63.13,
             "y": 86.55,
-            "sendRel": 19.24,
-            "replyRel": 19.64
+            "sendRel": 12.85,
+            "replyRel": 13.31
           },
           {
             "type": "mousePressed",
             "x": 63.13,
             "y": 86.55,
-            "sendRel": 19.36,
-            "replyRel": 19.83
+            "sendRel": 13.01,
+            "replyRel": 13.57
           },
           {
             "type": "mouseReleased",
             "x": 63.13,
             "y": 86.55,
-            "sendRel": 19.48,
-            "replyRel": 20.14
+            "sendRel": 13.1,
+            "replyRel": 13.97
           }
         ],
         "attributed": {
-          "agent": 0,
-          "human": 3,
-          "humanPresses": 1
+          "agent": 3,
+          "human": 0,
+          "humanPresses": 0
         },
         "pointAtZoom": {
           "x": 63,
@@ -882,7 +1158,7 @@
         "inputEvents": 0,
         "beforeMouse": 3,
         "beforeInput": 0,
-        "agent": 0,
+        "agent": 3,
         "human": 0,
         "humanPresses": 0,
         "counts": {
@@ -942,12 +1218,12 @@
         "inputEvents": 3,
         "beforeMouse": 3,
         "beforeInput": 0,
-        "agent": 0,
-        "human": 3,
-        "humanPresses": 1,
+        "agent": 3,
+        "human": 0,
+        "humanPresses": 0,
         "counts": {}
       }
     ],
-    "totalMs": 3493.6
+    "totalMs": 3503.6
   }
 }

@@ -341,12 +341,13 @@ async function input2Scenario() {
 
   const CDP_TO_ELECTRON = { mouseMoved: 'mouseMove', mousePressed: 'mouseDown', mouseReleased: 'mouseUp', keyDown: 'keyDown', rawKeyDown: 'rawKeyDown', keyUp: 'keyUp', char: 'char', mouseWheel: 'mouseWheel' };
   const windowsOf = (cmds) => { const byId = new Map(); for (const c of cmds) { const w = byId.get(c.id) ?? { id: c.id, method: c.method, params: c.params }; if (c.phase === 'send') w.send = c.at; else w.reply = c.at; byId.set(c.id, w); } return [...byId.values()]; };
-  // the rule as (1) states it: an input-event is the agent's iff an Input.dispatch* of the same type and rounded
-  // coordinates is in flight and not yet consumed by an earlier event
+  // the rule as (1) states it: an event is the agent's iff an Input.dispatch* of the same type is in flight (sent, not
+  // replied) and not yet consumed by an earlier event of that type; no coordinates (zoom and iframes break them).
+  // Mouse events are read from before-mouse-event (the hook that also sees input to OOPIFs), keys from input-event.
   const classify = (events, windows) => {
     const used = new Set();
     return events.map((m) => {
-      const w = windows.find((x) => !used.has(x.id) && m.at >= x.send - 0.05 && (x.reply == null || m.at <= x.reply + 0.05) && CDP_TO_ELECTRON[x.params.type] === m.type && (x.params.x == null || (Math.round(x.params.x) === Math.round(m.x) && Math.round(x.params.y) === Math.round(m.y))));
+      const w = windows.find((x) => !used.has(x.id) && m.at >= x.send - 0.05 && (x.reply == null || m.at <= x.reply + 0.05) && CDP_TO_ELECTRON[x.params.type] === m.type);
       if (w) used.add(w.id);
       return { type: m.type, at: m.at, x: m.x, y: m.y, _modifiers: m._modifiers, attributed: w ? 'agent' : 'human' };
     });
@@ -360,8 +361,11 @@ async function input2Scenario() {
     await sleep(300);
     const main = mainEvents.slice(before.main);
     const windows = windowsOf(commands.slice(before.cmd));
-    const classified = classify(main, windows).map((m) => ({ ...m, at: round(m.at - t0, 2) }));
-    const p = { label, error, expect, inputEvents: classified, inputEventTypes: main.map((m) => m.type), beforeMouseEvents: beforeMouse.slice(before.bm).map((b) => ({ ...b, at: round(b.at - t0, 2) })), beforeInputEvents: beforeInput.slice(before.bi).map((b) => ({ ...b, at: round(b.at - t0, 2) })), commands: windows.map((w) => ({ type: w.params.type, x: w.params.x, y: w.params.y, sendRel: round(w.send - t0, 2), replyRel: round((w.reply ?? NaN) - t0, 2) })), attributed: { agent: classified.filter((m) => m.attributed === 'agent').length, human: classified.filter((m) => m.attributed === 'human').length, humanPresses: classified.filter((m) => m.attributed === 'human' && (m.type === 'mouseDown' || m.type === 'rawKeyDown' || m.type === 'keyDown')).length } };
+    const isMouse = (m) => /^mouse/.test(m.type);
+    // the stated rule's inputs: mouse events from before-mouse-event, key events from input-event
+    const source = [...beforeMouse.slice(before.bm).filter(isMouse), ...main.filter((m) => !isMouse(m))].sort((a, b) => a.at - b.at);
+    const classified = classify(source, windows).map((m) => ({ ...m, at: round(m.at - t0, 2) }));
+    const p = { label, error, expect, attributedEvents: classified, inputEventTypes: main.map((m) => m.type), inputEvents: main.map((m) => ({ ...m, at: round(m.at - t0, 2) })), beforeMouseEvents: beforeMouse.slice(before.bm).map((b) => ({ ...b, at: round(b.at - t0, 2) })), beforeInputEvents: beforeInput.slice(before.bi).map((b) => ({ ...b, at: round(b.at - t0, 2) })), commands: windows.map((w) => ({ type: w.params.type, x: w.params.x, y: w.params.y, sendRel: round(w.send - t0, 2), replyRel: round((w.reply ?? NaN) - t0, 2) })), attributed: { agent: classified.filter((m) => m.attributed === 'agent').length, human: classified.filter((m) => m.attributed === 'human').length, humanPresses: classified.filter((m) => m.attributed === 'human' && (m.type === 'mouseDown' || m.type === 'rawKeyDown' || m.type === 'keyDown')).length } };
     phases.push(p);
     return p;
   }

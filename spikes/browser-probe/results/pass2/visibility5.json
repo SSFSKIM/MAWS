@@ -3,14 +3,13 @@
   "chrome": "152.0.7977.130",
   "steps": [
     {
-      "label": "A: window pinned on screen (floating, all Spaces), shell renderer",
+      "label": "A: window pinned above others (floating, all Spaces; screen locked), shell renderer",
       "visibility": "visible",
       "rafFires": true,
       "framesPresented": 11,
       "inMs": 1000,
       "window": {
         "isVisibleApi": true,
-        "onScreenByInvertedTest": false,
         "isFocused": false,
         "isAlwaysOnTop": true,
         "bounds": {
@@ -22,14 +21,13 @@
       }
     },
     {
-      "label": "A: window pinned on screen, child view, nothing attached",
+      "label": "A: window pinned above others (screen locked), child view, nothing attached",
       "visibility": "hidden",
       "rafFires": false,
       "framesPresented": 0,
       "inMs": 1000,
       "window": {
         "isVisibleApi": true,
-        "onScreenByInvertedTest": false,
         "isFocused": false,
         "isAlwaysOnTop": true,
         "bounds": {
@@ -48,7 +46,6 @@
       "inMs": 1000,
       "window": {
         "isVisibleApi": true,
-        "onScreenByInvertedTest": false,
         "isFocused": false,
         "isAlwaysOnTop": true,
         "bounds": {
@@ -67,7 +64,6 @@
       "inMs": 1000,
       "window": {
         "isVisibleApi": true,
-        "onScreenByInvertedTest": false,
         "isFocused": false,
         "isAlwaysOnTop": true,
         "bounds": {
@@ -86,7 +82,6 @@
       "inMs": 1000,
       "window": {
         "isVisibleApi": true,
-        "onScreenByInvertedTest": false,
         "isFocused": false,
         "isAlwaysOnTop": true,
         "bounds": {
@@ -105,7 +100,6 @@
       "inMs": 1000,
       "window": {
         "isVisibleApi": true,
-        "onScreenByInvertedTest": false,
         "isFocused": false,
         "isAlwaysOnTop": true,
         "bounds": {
@@ -117,14 +111,13 @@
       }
     },
     {
-      "label": "D: view.setVisible(false) while on screen, child view",
+      "label": "D: view.setVisible(false), child view",
       "visibility": "hidden",
       "rafFires": false,
       "framesPresented": 0,
       "inMs": 1000,
       "window": {
         "isVisibleApi": true,
-        "onScreenByInvertedTest": false,
         "isFocused": false,
         "isAlwaysOnTop": true,
         "bounds": {
@@ -143,7 +136,6 @@
       "inMs": 1000,
       "window": {
         "isVisibleApi": true,
-        "onScreenByInvertedTest": false,
         "isFocused": false,
         "isAlwaysOnTop": true,
         "bounds": {
@@ -155,14 +147,13 @@
       }
     },
     {
-      "label": "E: after a navigation while on screen, child view",
+      "label": "E: after a navigation, child view",
       "visibility": "hidden",
       "rafFires": false,
       "framesPresented": 0,
       "inMs": 1000,
       "window": {
         "isVisibleApi": true,
-        "onScreenByInvertedTest": false,
         "isFocused": false,
         "isAlwaysOnTop": true,
         "bounds": {
@@ -181,7 +172,6 @@
       "inMs": 1000,
       "window": {
         "isVisibleApi": true,
-        "onScreenByInvertedTest": false,
         "isFocused": false,
         "isAlwaysOnTop": true,
         "bounds": {

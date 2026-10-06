@@ -1,10 +1,11 @@
-// (2), supplement five, after review: the earlier matrices never established that the probe window was on screen
-// (NativeWindowMac::IsVisible in 44.4.5 returns `[window isVisible] && !(occlusionState == NSWindowOcclusionStateVisible)`,
-// so the `windowVisible: true` they recorded means the occlusion state was not "visible"). This run pins the window
-// above everything on the current Space without taking focus (floating level, visible on full-screen Spaces), reads
-// the child view and the shell with nothing attached, then covers the window with a second window to see what
-// occlusion does to each, then uncovers, then the setVisible cover. If the child is still hidden while on screen, the
-// last step takes focus (app.focus({steal: true})) and reads again. Launch: Electron spikes/browser-probe/pass2/visibility5.mjs
+// (2), supplement five, after review: the earlier matrices never established that the probe window was on screen,
+// and it was not (the owner's screen was locked for the whole pass; results/pass2/screen-lock-evidence.txt). This
+// run pins the window above every other window on the current Space without taking focus (floating level, visible on
+// full-screen Spaces), reads the child view and the shell with nothing attached, covers the window with a second
+// window and uncovers it, tries the setVisible cover and a navigation, and, if the child is still hidden, takes focus
+// (app.focus({steal: true}) + show()) and reads again. Under a locked screen all of this is still occluded; the run
+// documents that the window order makes no difference there and leaves the on-screen case to a run with the owner
+// present. Launch: Electron spikes/browser-probe/pass2/visibility5.mjs
 import { app, BrowserWindow, WebContentsView } from 'electron';
 import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -26,8 +27,8 @@ async function probe(wc, label, frameWindowMs = 1000) {
   } catch (e) { frames = `error: ${e.message.split('\n')[0]}`; }
   return { label, visibility, rafFires: raf, framesPresented: frames, inMs: frameWindowMs };
 }
-// win.isVisible() through 44.4.5's inverted occlusion test: false while shown means the occlusion state is "visible"
-const windowState = (win) => ({ isVisibleApi: win.isVisible(), onScreenByInvertedTest: !win.isVisible(), isFocused: win.isFocused(), isAlwaysOnTop: win.isAlwaysOnTop(), bounds: win.getBounds() });
+// win.isVisible() is recorded as the API returns it; the raw occlusion state is not readable from JS
+const windowState = (win) => ({ isVisibleApi: win.isVisible(), isFocused: win.isFocused(), isAlwaysOnTop: win.isAlwaysOnTop(), bounds: win.getBounds() });
 
 async function main() {
   const results = { electron: process.versions.electron, chrome: process.versions.chrome, steps: [] };
@@ -45,8 +46,8 @@ async function main() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.showInactive();
   await sleep(800);
-  await log('A: window pinned on screen (floating, all Spaces), shell renderer', win, win.webContents);
-  await log('A: window pinned on screen, child view, nothing attached', win, wc);
+  await log('A: window pinned above others (floating, all Spaces; screen locked), shell renderer', win, win.webContents);
+  await log('A: window pinned above others (screen locked), child view, nothing attached', win, wc);
 
   // occlusion control: a second window exactly over the first, one level higher
   const cover = new BrowserWindow({ width: 760, height: 460, x: 50, y: 50, show: false, webPreferences: { sandbox: true } });
@@ -65,7 +66,7 @@ async function main() {
   // the cover protocol while on screen
   view.setVisible(false);
   await sleep(500);
-  await log('D: view.setVisible(false) while on screen, child view', win, wc);
+  await log('D: view.setVisible(false), child view', win, wc);
   view.setVisible(true);
   await sleep(500);
   await log('D: view.setVisible(true) again, child view', win, wc);
@@ -73,7 +74,7 @@ async function main() {
   // a navigation while on screen
   await wc.loadURL(PAGE('dfd'));
   await sleep(600);
-  await log('E: after a navigation while on screen, child view', win, wc);
+  await log('E: after a navigation, child view', win, wc);
 
   const last = results.steps[results.steps.length - 1];
   if (last.visibility !== 'visible') {
@@ -82,7 +83,7 @@ async function main() {
     await sleep(800);
     await log('F: app.focus({steal: true}) + show(): child view', win, wc);
   } else {
-    results.focusStealSkipped = 'the child was visible on screen without taking focus';
+    results.focusStealSkipped = 'the child was visible without taking focus';
   }
   writeFileSync(join(here, '..', 'results', 'pass2', 'visibility5.json'), JSON.stringify(results, null, 2));
   console.log('[probe] visibility5 written');

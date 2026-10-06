@@ -82,8 +82,8 @@ session; and the human stand-in through sendInputEvent (mouse without and with g
 two: embed.html on A with a cross-site iframe from B; main also records 'before-mouse-event'; agent and stand-in
 clicks on the top page and inside the iframe, a stand-in key, the stand-in pressing while the agent's mousePressed is
 in flight (at another pixel, then at the same pixel), and an agent click at zoom 1.25. All clocks are epoch
-milliseconds from performance.timeOrigin + performance.now(); the renderer's clock trails main's by about 0.1 to
-0.2 ms, which is the size of the finest intervals below.
+milliseconds from performance.timeOrigin + performance.now(); the renderer's and main's clocks differ by about 0.1
+to 0.25 ms, in a direction that varied between runs, which is the size of the finest intervals below.
 
 What the page sees: nothing. Every event from every source had isTrusted true, sourceCapabilities
 {firesTouchEvents:false} on mouse and key events (null on pointer, input and wheel events), pointerType 'mouse',
@@ -111,9 +111,8 @@ no modifiers, so it is no signal either; what it adds is reach, below.
   both mouseWheel events of the CDP wheel; 0 on sendInputEvent's rawKeyDown, char, keyUp and mouseWheel; 0 on the
   gestureScroll* events Chromium derives from either wheel (input.json rawModifierBitsSeen: candidate bit 23, 8
   synthesised events carrying modifiers against 5 stand-in ones). Mouse button events: unobservable, the field is
-  absent. The second, and the one that reaches iframes: 'before-input-event' fired for the stand-in's keyDown and
-  keyUp (2 of 2, both runs) and for none of the eight CDP key commands (Chromium's PreHandleKeyboardEvent path is the
-  native one). A third, weaker: a CDP keyDown with text arrives as input-event type 'keyDown' (the combined synthetic
+  absent. The second: 'before-input-event' fired for the stand-in's keyDown and keyUp (2 of 2, both runs) and for
+  none of the six CDP key commands (Chromium's PreHandleKeyboardEvent path is the native one). A third, weaker: a CDP keyDown with text arrives as input-event type 'keyDown' (the combined synthetic
   type); native keys arrive as 'rawKeyDown' then 'char'.
   Reach into iframes (input2). Electron attaches its input-event observer to the primary main frame's widget only
   (electron_api_web_contents.cc:1072-1074 and 2198-2205), and CDP's InputHandler hands an event to the target widget
@@ -130,19 +129,23 @@ no modifiers, so it is no signal either; what it adds is reach, below.
   whole 20.6 ms, mouse.click 1.7, keyboard.press 4.6, fill 5.5, type 3.9, wheel 1.4. Every CDP mouse and key
   input-event fell inside its own command's window with matching type and integer coordinates (click 3/3, 3/3;
   press 2/2; type 4/4). Order per press: command sent at 0; input-event +0.02 to +0.43 ms; the DOM event's timestamp
-  within +0.1 to +0.2 (the two clocks' skew); the preload's report in main +0.3 to +0.9 ms; the command's reply +0.7
+  within 0.25 ms of it (the two clocks' skew); the preload's report in main +0.3 to +0.9 ms; the command's reply +0.7
   to +4.5 ms. So both the input-event and the DOM report precede the reply, and a mouse event is attributable at the
   moment it arrives, not after the action ends. The stand-in's events in run one fell outside every window by
-  construction (its phases issue no commands), so run two interleaved them: with the stand-in pressing at another
-  pixel while the agent's mousePressed was in flight, the rule credited the agent's 6 events to the agent and the
-  stand-in's 2 to the human (one human press; Playwright re-issued its click once when the foreign press landed, and
-  the count rose by one); with the stand-in pressing at the same pixel, whichever press came first took the window
-  and the other was unmatched (3 agent, 2 human, one human press, the count rose by two). The raw CDP triple issued
-  from main directly (bypassing the bridge hook) matched nothing, as expected: MAWS's own Input.* use must go through
-  the same hook as the tools'. Coordinates cannot be part of the match: at zoom 1.25 the command carries CSS px
-  (63.1,86.6) and the hooks carry widget px (78.9,108.2), and inside an iframe before-mouse-event carries the frame's
-  own space. Wheel: the CDP wheel's second mouseWheel arrived 0.3 ms after the command's reply, so the window does
-  not cover wheels and only the bit does; the gestureScroll* events carry 0 for both and are not input.
+  construction (its phases issue no commands), so run two interleaved them, classified by the rule the verdict
+  states (before-mouse-events, type and window only, each command consumed once; input2.json attributedEvents): with
+  the stand-in pressing at another pixel while the agent's mousePressed was in flight, 6 events went to the agent and
+  2 to the human, one human press; the stand-in's press, arriving first inside the window, took the agent's slot and
+  the agent's own press was the one left unmatched (Playwright also re-issued its click once when the foreign press
+  landed, and the count rose by one); with the stand-in pressing at the same pixel, the same shape (3 agent, 2 human,
+  one human press, the count rose by two). Only the human-first order was exercised (the stand-in fires from the
+  bridge's send hook, before the command reaches the debugger), and the windows carry a 0.05 ms tolerance. The raw
+  CDP triple issued from main directly (bypassing the bridge hook) matched nothing, as expected: MAWS's own Input.*
+  use must go through the same hook as the tools'. Coordinates cannot be part of the match: at zoom 1.25 the command
+  carries CSS px (63.1,86.6) and the hooks carry widget px (78.9,108.2), and inside an iframe before-mouse-event
+  carries the frame's own space; without them the zoom click and the iframe click attribute to the agent 3/3. Wheel: the CDP wheel's second mouseWheel arrived after the command's reply (0.1 ms after in this run), so
+  the window does not cover wheels and only the bit does; the gestureScroll* events carry 0 for both and are not
+  input.
 
 Verdict: the takeover rule can rely on a signal for keys and wheels and must rely on the window for mouse buttons,
 and the window to use is the command, not the action. Keys: a before-input-event is the human's (CDP keys never raise
@@ -151,7 +154,9 @@ ignored. Mouse: neither mouse hook exposes modifiers, so a before-mouse-event mo
 Input.dispatchMouseEvent of the matching type (mousePressed/mouseReleased) is in flight (sent, not replied) and not
 yet consumed by an earlier event of that type; otherwise it is the human's. No coordinates in the match. The race is
 nil in practice: with consumption, a human press inside an agent press's window leaves exactly one press unmatched
-whichever arrives first, and the takeover fires. The coarse "agent action in flight" window (21 ms for a click, longer
+whichever arrives first, and the takeover fires; the assumption behind it is that every in-flight command yields
+exactly one event of its type, so a command that errors or yields none can absorb one same-type human event, which
+the TabDebugger closes by releasing a window when its reply is an error. The coarse "agent action in flight" window (21 ms for a click, longer
 with actionability waits) is not a discriminator on its own because a human click during an agent action is exactly
 the case the rule exists for; with per-command matching it needs no separate state. mouseMove is not a trigger
 (humans move constantly; Playwright moves once per click). Nothing in the preload can attribute; its report serves
@@ -205,33 +210,40 @@ hiding; restore 0.27 ms. While hidden, setInterval(1 ms) ran at 388 ms per tick.
 The visibility observation, and the condition it was made under (pass2/visibility.mjs to visibility5.mjs;
 results/pass2/visibility.json to visibility5.json). Throughout this pass the owner's screen was locked: the session
 dictionary reads CGSSessionScreenIsLocked = 1 and the power log shows the display turned off and on in 30-second
-bursts all morning (pmset -g log: off at 08:03:54, 08:04:29, ... 09:58:21, 10:03:04). Every window of the session was
-therefore occluded. Electron's `win.isVisible()` confirmed it in its own way: NativeWindowMac::IsVisible in 44.4.5 is
-`[window isVisible] && !(occlusionState == NSWindowOcclusionStateVisible)` (native_window_mac.mm:537-540), so the
-`true` it returned in every run means the occlusion state was not "visible", and `app.focus({steal: true})` could not
-make a window key (isFocused stayed false, visibility5 step F). The review of the first draft raised exactly this
-(the window was never in front) and it was right. What was observed under that condition, and what it does and does
-not establish:
+bursts all morning (results/pass2/screen-lock-evidence.txt: off at 08:03:54, 08:04:29, ... 09:58:21, 10:03:04;
+UserIsActive 0). Every window of the session was therefore occluded; consistent with it, isFocused stayed false in
+every run and `app.focus({steal: true})` could not make a window key (visibility5 step F). (win.isVisible() returned
+true throughout; NativeWindowMac::IsVisible in 44.4.5 reads `[window isVisible] && !(occlusionState ==
+NSWindowOcclusionStateVisible)`, native_window_mac.mm:537-540, which taken literally would make that an "occluded"
+reading, but the raw occlusion state was never read and the lock evidence stands on its own.) The review of the
+first draft raised exactly this (the window was never in front) and it was right. What was observed under that
+condition, and what it does and does not establish:
   Observed. The child view's page reports document.visibilityState 'hidden', gets no requestAnimationFrame callback
   and presents no frames (webContents.beginFrameSubscription counted 0 in 1.5 s while a 100 ms timer rewrote the
   page's text), from load onwards, in seven construction orders (visibility.json: BrowserWindow show:false then
   showInactive(), then show(), showInactive() before addChildView, backgroundThrottling:false at construction,
   BaseWindow show:true as pass one built it, BaseWindow showInactive, BrowserWindow show:true with the view added
   after ready-to-show), after every restore, with the window pinned at the floating level on every Space (visibility5
-  A), covered by a second window (B) and uncovered (C), and after setBounds, setVisible toggles, webContents.focus(),
-  removeChildView + addChildView, win.focus(), win.blur(), a reload, a second window. In the same window and the same
-  tests the window's own renderer is 'visible', gets rAF and presents 11 to 16 frames per second, covered or not.
-  Timers in the child run at hidden-page rates (setInterval(1 ms) at 106 to 388 ms per tick).
+  A; still occluded by the lock), covered by a second window (B) and uncovered (C), and after setBounds, setVisible
+  toggles, webContents.focus(), removeChildView + addChildView, win.focus(), win.blur(), a reload, a second window. In
+  the same window and the same tests the window's own renderer is 'visible', gets rAF and presents 11 to 16 frames
+  per second, whatever the window order. Timers in the child run at hidden-page rates (setInterval(1 ms) at 106 to
+  388 ms per tick).
   What that establishes. Under occlusion, Chromium treats the child view's page as a hidden page, which is its normal
-  behaviour for an occluded window, and the BrowserWindow's own page is exempt only because Electron force-shows it:
+  behaviour for an occluded window, and the BrowserWindow's own page is exempt because Electron force-shows it:
   BrowserWindow::Show, ShowInactive and OnWindowShow call web_contents()->WasShown() unconditionally
-  (electron_api_browser_window.cc:278-305; OnWindowHide calls WasOccluded, :287), and no occlusion update reaches it
-  afterwards (a window covered by another at the modal-panel level left it 'visible' and presenting frames, visibility5
-  B). The asymmetry between the two renderers is real and Electron's; the hidden state of the child is the display's.
+  (electron_api_browser_window.cc:278-305; OnWindowHide calls WasOccluded, :287), and under the lock nothing hid it
+  again (whether an occlusion change on an unlocked display would is not shown: the lock meant no occlusion change
+  ever happened during visibility5's cover and uncover). The asymmetry between the two renderers is real and
+  Electron's; the hidden state of the child is the display's.
   What it does not establish: how a child view behaves on an unlocked, uncovered display. It was not measurable in
-  this pass (no run can unlock the owner's screen), and the one reference point outside the probe says it is fine:
-  Claude Desktop 2.16120 (Electron 44.4.3) hosts its whole UI as a WebContentsView added with contentView.addChildView
-  and uses no focus emulation (the review's reading of its source). Electron issues #54626 (a WebContentsView
+  this pass (no run can unlock the owner's screen). The reference point outside the probe is not clean evidence
+  either way: Claude Desktop 2.16120 (Electron 44.4.3) hosts its whole UI as a WebContentsView added with
+  contentView.addChildView and uses no focus emulation, but it does toggle setBackgroundThrottling on that view
+  (off during boot and while popouts, the glow, the computer-use lock or display capture are live; the review's
+  reading of its readable source, main-process/index.chunk-kXuYPTnM.js:375837-375855), and visibility3 shows that
+  toggle is itself an un-hide path that keeps rAF alive until the next navigation, which a single-page app rarely
+  makes. Electron issues #54626 (a WebContentsView
   re-attached with removeChildView/addChildView stays hidden on Linux, 44.0.0 through 44.5.1, macOS 44.3.0 reported
   unaffected) and #44590 (a WebContentsView 'hidden' with innerWidth 0 when occluded, Apple Silicon) and PR #54311
   (setBackgroundThrottling leaving a page's visibility desynchronised) are the neighbours of this behaviour, none
@@ -296,7 +308,7 @@ Verdict: the attachment and Playwright's frame session survive the process swap 
 debugger binds to the WebContents (its FrameTreeNode), whose devtools frame id persists across RenderFrameHost swaps,
 and Playwright keys its FrameSession on exactly that id. E4c keeps one bridge per tab across navigations, refreshes
 refs after any navigation (the frame ordinal moves), and reserves re-attach for a renderer crash; a re-attach costs
-about 22 ms warm.
+about 24 ms warm.
 
 ======================================================================================================================
 (4) OOPIF CHILD SESSIONS
@@ -368,17 +380,18 @@ app.isPackaged reads false; a build:app binary differs only in the executable an
 log from inside. Five variants.
 
   external: playwright-core in `dependencies`, packed into the asar. Bundle 130 KB (the app, the bridge, ws); asar
-    13.3 MB; from inside the asar: require('playwright-core') resolves to app.asar/node_modules/playwright-core/
-    index.js and loads in 124 ms; bridge start 4 ms; connectOverCDP 42 ms (Chrome/152.0.7977.130); ariaSnapshot
-    30 ms (87 chars, 3 refs); click by ref 35 ms ("clicked"); fill; screenshot 7,854 bytes; evaluate; clean exit.
+    13.3 MB; from inside the asar (the final run's numbers): require('playwright-core') resolves to
+    app.asar/node_modules/playwright-core/index.js and loads in 114 ms; bridge start 5.8 ms; connectOverCDP 44.5 ms
+    (Chrome/152.0.7977.130); ariaSnapshot 21.6 ms (87 chars, 3 refs); click by ref 9.2 ms ("clicked"); fill;
+    screenshot 7,854 bytes; evaluate; clean exit.
     Nothing was unpacked: playwright-core 1.63 has no native code, its bundles read through Electron's asar fs
     patch, and connectOverCDP spawns nothing (lib/webp_codec.wasm was not exercised: the screenshot is PNG).
   external-unpacked: the same with node_modules/playwright-core left outside the asar (electron-builder's
-    asarUnpack; asar 160 KB plus 13.1 MB unpacked). Identical results (connect 37 ms, snapshot 23 ms, click 24 ms).
-    Unpacking buys nothing.
+    asarUnpack; asar 160 KB plus 13.1 MB unpacked). The same results (connect 32.3 ms, snapshot 22 ms, click
+    21.4 ms). Unpacking buys nothing.
   bundled-plain and bundled: playwright-core bundled into main (no `dependencies`). With nothing externalised Rollup
     stops on playwright-core's optional dynamic import of `kerberos` (lib/utilsBundle.js; bundled-plain, recorded);
-    with `kerberos` in rollupOptions.external the build passes in 5.9 s (6.6 MB bundle) with warnings
+    with `kerberos` in rollupOptions.external the build passes in 4.7 s (6.6 MB bundle) with warnings
     (chromium-bidi/lib/cjs/* unresolved and treated as external; eval in coreBundle.js), and the bundle keeps 14 bare
     requires it could not resolve (chromium-bidi x2, enquirer, ./custom-prompt, ajv runtime x4, ajv-formats, kerberos,
     playwright, electron/index.js, bufferutil, utf-8-validate) plus 2 dynamic require calls and 9 uses of __dirname.
@@ -435,15 +448,20 @@ through cookies.get, which cannot see the partition.
 ======================================================================================================================
   1. §3 D takeover and E4's ledger contract "the preload's input report": attribution of an input to the human or the
      agent is main's: before-mouse-event matched by type against the TabDebugger's in-flight Input.dispatchMouseEvent
-     commands, one event per command, no coordinates (mouse, top frame and iframes alike); before-input-event, which
-     only native keys raise (keys, iframes included); Chromium's kFromDebugger bit, exposed by Electron as the
-     undocumented `_modifiers` on input-event (keys and wheels, top frame). The preload reports only for the cursor
-     and hover UI. A precision, like A-19's.
+     commands, one event per command, no coordinates (mouse); before-input-event, which only native keys raise
+     (keys); Chromium's kFromDebugger bit, exposed by Electron as the undocumented `_modifiers` on input-event (keys
+     and wheels, top frame only). Measured for top-frame input from the agent and the stand-in, and for the agent's
+     input into a cross-site iframe (before-mouse-event sees it, input-event does not). Human input into a
+     cross-site iframe was not measurable here (the stand-in cannot be routed into an OOPIF); that the two delegate
+     hooks see it is an inference from their per-WebContents path and an E4c verification item, not a stated
+     property. The preload reports only for the cursor and hover UI. A precision, like A-19's.
   2. §3 D's view, A-31's cover protocol and lazy attach, E4c's "detaching after idle": conditional. Under an occluded
      window (the screen was locked throughout this pass) a page in a child WebContentsView is a hidden page (no rAF,
      no frames) while BrowserWindow's own contents stay force-shown; on an unlocked, uncovered display it was not
-     measurable here, and Claude Desktop runs the same construction without any workaround. E4a's first act is the
-     on-screen check (pass2/visibility2.mjs and visibility5.mjs with the owner present). If the child is visible
+     measurable here, and the outside reference (Claude Desktop: the same construction, no focus emulation, but a
+     setBackgroundThrottling toggle on the view that is itself an un-hide path) settles nothing. E4a's first act is
+     the on-screen check (pass2/visibility2.mjs and visibility5.mjs with the owner present, the window confirmed in
+     front by eye). If the child is visible
      there, nothing changes. If it is hidden there too, the measured remedy is Emulation.setFocusEmulationEnabled on
      the tab's debugger session, attached at tab creation rather than lazily, never detached on idle, switched off
      for covered, background and hidden-window tabs (else they keep painting), with document.hasFocus() always true;
