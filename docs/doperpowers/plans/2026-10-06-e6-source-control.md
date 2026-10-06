@@ -16,7 +16,7 @@ To see it working: `pnpm dev`, open a session whose directory is a repository th
 - [x] (2026-10-06, reviewed clean at c9ba3e8e) M1 — Main, local: the mutating runner mode, `git.diff`'s `untracked` scope, the `scm` namespace, the local service with its trust gate.
 - [x] (2026-10-06, reviewed clean at fb8e04cd) M2 — Main, remote: the shell-environment runner, plans and tokens, push and PR runs with streamed output, PR state.
 - [x] (2026-10-06, reviewed clean at ff145568) M3 — Renderer: the Source control tool.
-- [ ] M4 — Renderer: the Push and PR sheets, the output panel, the summary's push-state row.
+- [x] (2026-10-06, reviewed clean at 163eb3c9) M4 — Renderer: the Push and PR sheets, the output panel, the summary's push-state row.
 - [x] (2026-10-06, reviewed clean at 354888f3; the PR diff surface Deferred, E3 absent) M5 — The `pr-line` anchor seam (G4; the PR diff surface only if E3 has landed).
 - [ ] M6 — End to end (`pnpm e2e:scm`), the `code` and `panel` groups re-run, the gates, the evidence, the hand-back.
 
