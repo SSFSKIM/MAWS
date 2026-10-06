@@ -58,24 +58,27 @@ async function awaitNotice(viewer: Locator): Promise<void> {
   await expect(viewer).toHaveAttribute('data-theirs', 'notice');
 }
 
-// Every `files.changed` the page receives and every `Updated` notice the viewer draws, from now on.
-async function recordActivity(page: Page): Promise<{ changes(): Promise<number>; updated(): Promise<number> }> {
+// Every `Updated` notice the viewer draws, from now on.
+async function recordUpdated(page: Page): Promise<() => Promise<number>> {
   await page.evaluate(() => {
-    const w = window as unknown as { __changes: unknown[]; __updated: number };
-    w.__changes = [];
+    const w = window as unknown as { __updated: number };
     w.__updated = 0;
-    window.maws.on('files.changed', (event) => void w.__changes.push(event));
     new MutationObserver((records) => {
       for (const record of records)
         for (const node of Array.from(record.addedNodes))
           if (node instanceof Element && (node.matches('[data-file-viewer] [data-updated]') || node.querySelector('[data-file-viewer] [data-updated]'))) w.__updated++;
     }).observe(document.body, { subtree: true, childList: true });
   });
-  return {
-    changes: () => page.evaluate(() => (window as unknown as { __changes: unknown[] }).__changes.length),
-    updated: () => page.evaluate(() => (window as unknown as { __updated: number }).__updated),
-  };
+  return () => page.evaluate(() => (window as unknown as { __updated: number }).__updated);
 }
+
+// How many loads of the viewer's entry have completed, landing anything or not (`data-loads`).
+const loads = async (viewer: Locator) => Number(await viewer.getAttribute('data-loads'));
+
+// The follow-the-file re-read of an own save's watcher event has completed, whatever it did: the count of completed
+// loads moved past `before`, read before the save.
+const ownReloadDone = (viewer: Locator, before: number) =>
+  expect.poll(() => loads(viewer), { timeout: MEASURED_WAIT_MS, message: 'the own save’s re-read completed' }).toBeGreaterThan(before);
 
 const frames = (page: Page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
@@ -86,38 +89,44 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       const viewer = await openEditor(p, APP);
       await expect(viewer).toHaveAttribute('data-dirty', 'false');
       await expectDirtyTab(p.page, 'app.ts', false);
-      const activity = await recordActivity(p.page);
+      const updated = await recordUpdated(p.page);
 
       await typeAtTop(p, viewer, TYPED);
       await expectDirtyTab(p.page, 'app.ts', true);
       await expect(barButton(viewer, 'Save')).toBeVisible();
+      const beforeMenuSave = await loads(viewer);
       await menu(p.maws, 'file.save');
       await expect.poll(() => read(p, APP)).toBe(`${TYPED}\n${original}`);
       await expect(viewer).toHaveAttribute('data-dirty', 'false');
       await expectDirtyTab(p.page, 'app.ts', false);
       await expect(controls(viewer)).toHaveCount(0);
+      // Each save's re-read is waited out before the next save, so no later count can be an earlier save's.
+      await ownReloadDone(viewer, beforeMenuSave);
+      expect(await updated(), 'no Updated notice for the menu’s save').toBe(0);
 
       await typeAtTop(p, viewer, `${TYPED}, again`);
       await expectDirtyTab(p.page, 'app.ts', true);
-      const before = await activity.changes();
+      const beforeBarSave = await loads(viewer);
       await barButton(viewer, 'Save').click();
       await expect.poll(() => read(p, APP)).toBe(`${TYPED}, again\n${TYPED}\n${original}`);
       await expect(viewer).toHaveAttribute('data-dirty', 'false');
       await expectDirtyTab(p.page, 'app.ts', false);
 
-      // The own save's watcher event reached the page, and its re-read was answered (a read issued after it, through
-      // the same handler, has come back): the hash matched the saved one, so nothing was drawn.
-      await expect.poll(activity.changes, { timeout: MEASURED_WAIT_MS, message: 'the save’s files.changed reached the page' }).toBeGreaterThan(before);
-      await p.page.evaluate(([appSessionId, path]) => window.maws.invoke('files.read', { appSessionId, path, hash: true } as never), [p.scratch.appSessionId, p.scratch.path(APP)] as const);
-      await frames(p.page);
-      expect(await activity.updated(), 'no Updated notice for the own saves').toBe(0);
+      // The own save's re-read has completed (the count of completed loads moved), so whatever it drew is drawn: its
+      // hash matched the saved one, so nothing was.
+      await ownReloadDone(viewer, beforeBarSave);
+      expect(await updated(), 'no Updated notice for the own saves').toBe(0);
       await expect(viewer.locator('[data-updated]')).toHaveCount(0);
       expect((await lineTexts(viewer)).slice(0, 2)).toEqual([`${TYPED}, again`, TYPED]);
 
-      // The recorder's control: another writer's change to the clean tab is followed, with its Updated.
+      // The recorder's control: another writer's change to the clean tab is followed, with exactly one Updated, by a
+      // load the count shows, so a zero above cannot come from a recorder or a counter that sees nothing.
+      const beforeExternal = await loads(viewer);
       write(p, APP, `// changed on disk\n${read(p, APP)}`);
-      await expect.poll(activity.updated, { timeout: MEASURED_WAIT_MS, message: 'an external change draws Updated' }).toBe(1);
+      await expect.poll(updated, { timeout: MEASURED_WAIT_MS, message: 'an external change draws Updated' }).toBe(1);
+      expect(await loads(viewer), 'the external change’s load is counted').toBeGreaterThan(beforeExternal);
       await expect.poll(async () => (await lineTexts(viewer))[0]).toBe('// changed on disk');
+      await expect(viewer.locator('[data-updated]')).toHaveCount(1);
     });
   });
 

@@ -229,6 +229,47 @@ describe('editor', () => {
       expect(doc()).toBe('// mine\nconst a = 1;\n');
     });
 
+    // `loads` is the e2e's barrier for "my own save's re-read has finished": it moves only once a load is over, whatever
+    // the load did, and the viewer root shows it.
+    it('counts each completed load on the viewer root: an open load, one that lands nothing, one that lands in theirs', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      const loads = () => viewer().getAttribute('data-loads');
+      await waitFor(() => expect(loads()).toBe('1')); // the open load
+      expect(entry().loads).toBe(1);
+
+      const epoch = entry().epoch;
+      const spurious = disk.hold('files.read'); // the disk is the baseline: this load lands nothing
+      changed(disk);
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(2));
+      await settle();
+      expect(loads()).toBe('1'); // not before it completes
+      await act(async () => spurious.release());
+      await waitFor(() => expect(loads()).toBe('2'));
+      expect(entry()).toMatchObject({ updated: 0, theirs: null, epoch });
+
+      type('// mine\n');
+      await waitFor(() => expect(entry().dirty).toBe(true));
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk); // lands in theirs
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
+      expect(loads()).toBe('3');
+      expect(entry()).toMatchObject({ loads: 3, updated: 0 });
+    });
+
+    it('counts a change load a save outran once its read is answered, though it lands nowhere', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      const read = disk.hold('files.read');
+      changed(disk);
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(2));
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(entry().hash).toBe(fakeHash('// mine\nconst a = 1;\n')));
+      expect(entry().loads).toBe(1);
+      await act(async () => read.release());
+      await waitFor(() => expect(entry().loads).toBe(2));
+      expect(entry()).toMatchObject({ text: '// mine\nconst a = 1;\n', theirs: null, dirty: false, updated: 0 });
+    });
+
     it('keeps typing done during a save dirty against the content it submitted, which an undo returns to', async () => {
       const { disk } = await open({ [APP]: 'const a = 1;\n' });
       type('A');

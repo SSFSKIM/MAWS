@@ -4,7 +4,8 @@
 // does not know) can only say so, since the allowlist is per session.
 //
 // E5: a code view of an editable entry edits; the bar carries the editor's controls (`editor/EditorControls.tsx`), and
-// the viewer says what it holds as data attributes (`data-editable`, `data-dirty`, `data-theirs`).
+// the viewer says what it holds as data attributes (`data-editable`, `data-dirty`, `data-theirs`, and `data-loads`, the
+// count of the entry's completed loads: an e2e's barrier for the follow-the-file re-read after an own save).
 import { lazy, Suspense, useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
@@ -65,6 +66,7 @@ function SessionFile({ tabId, appSessionId, path, line }: { tabId: string; appSe
       data-editable={String(entry !== null && entry.editable && showsCode(entry))}
       data-dirty={String(entry?.dirty ?? false)}
       data-theirs={entry?.theirs?.view ?? ''}
+      data-loads={entry?.loads ?? 0}
       className="flex h-full min-h-0 flex-col bg-bg"
     >
       <div className={bar}>

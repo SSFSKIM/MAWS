@@ -66,6 +66,7 @@ export interface ViewerEntry {
   saveError: string | null; // the last save's failure, word for word; cleared by the next edit or save
   theirs: Theirs | null; // the disk's content past the baseline while dirty
   baseline: number; // bumped when `text` and `hash` move while the document stands (a save, Keep mine)
+  loads: number; // loads of this entry completed, whether or not they landed anything (the e2e's own-save barrier)
   // E5 end
 }
 
@@ -279,7 +280,7 @@ export function createViewerStore(client: MawsBridge) {
     // E5: every read of a text the editor could take asks for the file's hash; a continuation answering another hash
     // than the first chunk's means the file changed mid-load, and the load ends there (an open load shows what it has,
     // read-only; a change load lands nothing): the change's own `files.changed` re-reads it.
-    const load = async (tabId: string, reason: 'open' | 'change') => {
+    const loadOnce = async (tabId: string, reason: 'open' | 'change') => {
       const entry = get().entries.get(tabId);
       if (!entry) return;
       const generation = ++lastGeneration;
@@ -339,6 +340,18 @@ export function createViewerStore(client: MawsBridge) {
         if (reason === 'open') patch(tabId, { text, loaded, complete: !more });
       }
       commit({ ...file, text, base64: null, loaded, complete: kind !== 'head', hash, utf8 });
+    };
+
+    // E5: a load is counted once it is over, however it ended (it replaced the text, landed nothing, landed in theirs,
+    // failed, or was superseded and its answer landed nowhere), on the entry incarnation it was issued for: nothing of
+    // it is in flight once `loads` has moved, which is what an e2e waiting out an own save's re-read needs (the router
+    // answers reads independently, so no later read is a barrier for this one).
+    const load = async (tabId: string, reason: 'open' | 'change') => {
+      const incarnation = incarnations.get(tabId);
+      if (!get().entries.has(tabId)) return;
+      await loadOnce(tabId, reason);
+      const entry = get().entries.get(tabId);
+      if (entry && incarnations.get(tabId) === incarnation) patch(tabId, { loads: entry.loads + 1 });
     };
 
     const refresh = (tabId: string) => {
@@ -416,7 +429,7 @@ export function createViewerStore(client: MawsBridge) {
           const fresh: ViewerEntry = {
             tabId, appSessionId, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
             text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
-            hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, baseline: 0,
+            hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, baseline: 0, loads: 0,
           };
           incarnations.set(tabId, ++lastIncarnation);
           set((s) => ({ entries: new Map(s.entries).set(tabId, fresh) }));
