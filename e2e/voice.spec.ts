@@ -8,8 +8,9 @@
 //   under a plain build those cases skip. One more scripted case opens the app's own Settings › Voice.
 // - The packaged case runs only against `MAWS_E2E_EXECUTABLE` and launches without MAWS_E2E_VOICE, so main runs the
 //   bundled helper probe-only: `voice.status` is answered by the real helper and `voice.start` is refused.
-// The hold is ⌥Space as Playwright presses it: Alt down, Space down (a second Space down carries `repeat`), Space up,
-// Alt up. Interim text is the editor's `.text-fg-muted` span; settled text is the editor's text. With MAWS_E9_SHOTS
+// `composer.dictate` is unbound by default (M6), so the hold cases bind it to ⌥Space first through the app's own
+// `settings.set`, as Settings › Keyboard would. The hold is ⌥Space as Playwright presses it: Alt down, Space down (a
+// second Space down carries `repeat`), Space up, Alt up. The toolbar microphone is a click toggle. Interim text is the editor's `.text-fg-muted` span; settled text is the editor's text. With MAWS_E9_SHOTS
 // naming a directory the scripted cases leave dictation-listening.png, dictation-denied.png and settings-voice.png there.
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
@@ -126,7 +127,16 @@ function intentAt(path: string): HarnessIntent {
   return { location: { kind: 'directory', path }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null };
 }
 
-// The `#composer` page with unstarted sessions' composers (C10's intent stubbed), focus in the first one's editor.
+// Binds the dictation hold to ⌥Space through the app's settings, and waits until the page's settings store has it (the
+// toolbar microphone's tooltip names the chord).
+async function bindDictate(page: Page): Promise<void> {
+  const result = await page.evaluate(() => window.maws.invoke('settings.set', { keymap: { 'composer.dictate': 'Alt+Space' } }));
+  expect(result.ok, JSON.stringify(result)).toBe(true);
+  await expect(pane(page, 0).getByRole('button', { name: 'Dictate' })).toHaveAttribute('title', /⌥Space/);
+}
+
+// The `#composer` page with unstarted sessions' composers (C10's intent stubbed), the dictation hold bound, focus in the
+// first one's editor.
 async function showComposers(page: Page, ids: [string] | [string, string]): Promise<void> {
   await page.evaluate(() => void (location.hash = 'composer'));
   await page.waitForFunction(() => (window as unknown as Partial<CardsWindow>).__maws_cards !== undefined);
@@ -134,6 +144,7 @@ async function showComposers(page: Page, ids: [string] | [string, string]): Prom
   const panes: [HarnessPane, HarnessPane] = [{ composer: ids[0] }, ids[1] === undefined ? null : { composer: ids[1] }];
   await cards(page, 'show', panes);
   await expect(messageIn(page, 0)).toBeVisible();
+  await bindDictate(page);
   await messageIn(page, 0).click();
 }
 
@@ -258,16 +269,13 @@ test('letting go of ⌥ first ends the hold, and the still-held Space types noth
   expect(voice.consoleErrors()).toEqual([]);
 });
 
-// Under the microphone button's pointer hold, so the other hand types without ⌥ held.
+// Started from the toolbar microphone (a click), so the keyboard types without ⌥ held.
 test('typing inside the greyed words keeps them and the letter, and ends the capture; the next partial changes nothing', async ({ voice }) => {
   const { page, app } = voice;
   await showComposers(page, ['e9-edit-inside']);
   await script(app, { partials: ['hello world', 'never drawn'], partialDelayMs: 2000 });
 
-  const mic = pane(page, 0).getByRole('button', { name: 'Dictate' });
-  const box = (await mic.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
+  await pane(page, 0).getByRole('button', { name: 'Dictate' }).click();
   await expect(statusIn(page, 0)).toHaveText('Listening…');
   await expect(interimIn(page, 0)).toHaveText('hello world');
   await expect(messageIn(page, 0)).toBeFocused(); // the button leaves focus at the caret
@@ -280,12 +288,49 @@ test('typing inside the greyed words keeps them and the letter, and ends the cap
   await expect.poll(async () => (await voiceLog(app)).cancels).toHaveLength(1);
   await page.waitForTimeout(2500); // past the second partial's time
   await expect(messageIn(page, 0)).toHaveText('hello woxrld');
-  await page.mouse.up(); // the capture it started is over: nothing more is asked of main
-  await expect(messageIn(page, 0)).toHaveText('hello woxrld');
   const log = await voiceLog(app);
   expect(log.starts).toHaveLength(1);
   expect(log.cancels).toEqual([log.starts[0]!.captureId]);
   expect(log.stops).toEqual([]);
+  expect(voice.consoleErrors()).toEqual([]);
+});
+
+test('the toolbar microphone toggles: a click starts listening, a second settles the final; a click while asking cancels', async ({ voice }) => {
+  const { page, app } = voice;
+  await showComposers(page, ['e9-click']);
+  await script(app, { partials: ['hello', 'hello world'], partialDelayMs: 300, final: 'Hello world.' });
+  const mic = pane(page, 0).getByRole('button', { name: 'Dictate' });
+  await expect(mic).toHaveAttribute('title', 'Click to dictate · on this Mac · or hold ⌥Space');
+  await expect(mic).toHaveAttribute('aria-pressed', 'false');
+
+  await mic.click();
+  await expect(statusIn(page, 0)).toHaveText('Listening…');
+  await expect(mic).toHaveAttribute('aria-pressed', 'true');
+  await expect(interimIn(page, 0)).toHaveText('hello');
+  await expect(interimIn(page, 0)).toHaveText('hello world');
+  await expect(messageIn(page, 0)).toBeFocused(); // the words go to the caret; the button does not take focus
+  await mic.click();
+  await expect(messageIn(page, 0)).toHaveText('Hello world.');
+  await expect(mic).toHaveAttribute('aria-pressed', 'false');
+  await expect(interimIn(page, 0)).toHaveCount(0);
+  await expect(statusIn(page, 0)).toHaveCount(0);
+  let log = await voiceLog(app);
+  expect(log.starts).toHaveLength(1);
+  expect(log.stops).toEqual([log.starts[0]!.captureId]);
+
+  // a second click before the recognizer started cancels: nothing is heard, nothing lands
+  await script(app, { startedDelayMs: 500 });
+  await mic.click();
+  expect(await cards(page, 'dictation'), 'still asking main at the second click').toMatchObject({ phase: 'requesting' });
+  await mic.click();
+  await expect.poll(async () => (await voiceLog(app)).cancels).toHaveLength(1);
+  log = await voiceLog(app);
+  expect(log.starts).toHaveLength(2);
+  expect(log.cancels).toEqual([log.starts[1]!.captureId]);
+  await page.waitForTimeout(800); // past the scripted `started` and its partials
+  await expect(messageIn(page, 0)).toHaveText('Hello world.');
+  await expect(statusIn(page, 0)).toHaveCount(0);
+  await expect(noticeIn(page, 0)).toHaveCount(0);
   expect(voice.consoleErrors()).toEqual([]);
 });
 
@@ -442,7 +487,7 @@ test('Settings › Voice reads the status from main and writes the language to s
   const section = settings.getByRole('region', { name: 'Voice' });
   await expect(section).toBeVisible();
   await expect(section).toContainText('scripted recognizer (test harness)');
-  await expect(section).toContainText('⌥Space');
+  await expect(section.getByRole('group', { name: 'Shortcut' })).toContainText('Unbound'); // M6: no default hold
   const language = section.getByRole('combobox', { name: 'Language' });
   await expect(language.locator('option').first()).toHaveText('System (en-US)');
   await expect(section.getByText('Allowed', { exact: true })).toHaveCount(2); // microphone and speech, as the script grants them

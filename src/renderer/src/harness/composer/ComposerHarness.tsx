@@ -10,7 +10,9 @@
 // transcript above it on request (C6's slot, with the composer's edit-and-resubmit registered as the app registers it),
 // and can fail a composer's next `session.send` before it reaches main. W2: that composer sits in C5's own composer
 // column, as a started session pane holds it, and `wide` spans the page so the column reaches its cap.
-// E9 (M5): the page mounts the app's dictation key and controller beside ComposerAppKeys, and reads its store.
+// E9 (M5): the page mounts the app's dictation key and controller beside ComposerAppKeys, and reads its store; it
+// connects the settings store as App.tsx does, so a keymap override (the dictation key's binding) and the recognition
+// language reach the dispatcher and the controller.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -29,6 +31,7 @@ import { RequestCard } from '../../request-card';
 import { ComposerColumn, SessionPane } from '../../session/SessionPane';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
+import { useSettings } from '../../stores/settings';
 import { currentSet } from '../../stores/layout-model';
 import { TranscriptSlot } from '../../transcript';
 import { RewindWidget } from '../../widgets/RewindWidget';
@@ -134,7 +137,7 @@ export function ComposerHarness() {
     if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
     connectComposer(); // C5's session pane (a `shell` pane) finds the composer in its slot, as in the app
     // W3: C11's rewind picker, which `/rewind` and Esc Esc open as the app's floating dialog
-    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget })];
+    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget }), useSettings.getState().connect()];
     window.__maws_cards = {
       // Committed before the call returns: rendered later, the previous placement's card would still be in the page for
       // a test's next step to find (a docked card answering for the inline one it moved to).
