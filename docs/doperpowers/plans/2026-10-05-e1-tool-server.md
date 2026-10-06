@@ -1,0 +1,363 @@
+# E1 — The tool server: `ask`, `send_file`, `show_pane`
+
+Child of the composite spec `docs/doperpowers/plans/2026-10-05-p1-extension.md`, child id **E1**, parent pin `a346e00b0f9662062fb76841590cbe8d10920697` (the P1 spec's git blob at master `4256c78f`, the text after E0a's landing was recorded). The design is the parent's §3 A (binding where marked), §9 E1 (gates G1 to G7), §10 X9 and X12, §7 P-13, P-16, A-1, A-14, A-15, A-17, A-18, §14 (E0a's surprises), and the interface ledger `docs/doperpowers/plans/2026-10-05-p1-interface-ledger.md` §1, §2, §5. E0a's findings `spikes/protocol-probe/findings-pass3-p1-extension.txt` Q1 and Q4 and its fixtures `spikes/protocol-probe/fixtures/pass3/p1-sdk-mcp-roundtrip.jsonl`, `p1-question-preview-{unset,html}.jsonl` are pre-landed input. This document carries E1's constraints, its residue decisions and its milestones; it never restates the design.
+
+## Purpose
+
+After E1 the agent has a surface in MAWS. In any session MAWS launches, the model sees three tools it did not have before: `mcp__maws__send_file`, `mcp__maws__ask` and `mcp__maws__show_pane`. When it delivers a file, a row appears in the transcript with the file's name and the agent's caption, and two buttons open the file in its viewer or reveal it in Finder. When it has questions, a capsule appears in the transcript and the Question sheet opens in the right panel with one section per question: a choice set (single or multi, with Other), a free-text box, a native file or folder picker, or the list of MAWS projects, each answerable with "decide for me" or skipped; Submit returns the answers to the model, and an asynchronous ask lets the model keep working until the answers arrive as its next steer. When it wants the human to look somewhere, `show_pane` opens the Review diff, a file tab or the Terminal. A session resumed in a terminal has none of this and nothing breaks: every tool's description names its fallback first, so the model that read the description knows what to do without it.
+
+To see it: launch a session in MAWS, send "Use the maws ask tool to ask me which colour I prefer (red or blue) and which folder to use", answer in the sheet, and watch the model reply with the choices; send "Write hello.txt and deliver it with send_file"; the delivery row opens the file.
+
+## Progress
+
+- [ ] M1 — X9 and the `maws` server: `send_file`, `show_pane`, the preview format (A-17), `files.reveal`
+- [ ] M2 — `ask` in the host; the four fixtures recorded live; conformance admission
+- [ ] M3 — Transcript rows (the capsule, the delivery row), the pane bridge, the question-row refusal
+- [ ] M4 — The Question sheet (X5 tool)
+- [ ] M5 — The `tools` e2e group, the live sitting, evidence, acceptance
+- [ ] Whole-branch review (`doperpowers:reviewer-high`, two rounds at most), hand-back, the one `docs/charter.md` §19 line
+
+## Terms
+
+- **Engine host**: MAWS's utility process that owns engine processes (`src/engine-host/`); `EngineSession` (`session.ts`) wires one engine process. **Main**: the Electron main process (`src/main/`). **Renderer**: the window (`src/renderer/src/`).
+- **Control request**: an engine→host frame `{type:'control_request', request_id, request:{subtype,…}}` answered by a `control_response` the host writes (`src/engine-host/rpc.ts`, `ControlClient.respond`). **`mcp_message`**: the control subtype that wraps one JSON-RPC message for an SDK-hosted MCP server (`request.server_name`, `request.message`); the host answers `{mcp_response: <JSON-RPC response>}` (E0a Q1).
+- **The `maws` server**: the one MCP server the host serves in process for every MAWS-launched session, declared as `initialize.sdkMcpServers: ["maws"]`; the engine exposes its tools to the model as `mcp__maws__<tool>` (X9).
+- **Tool result**: an MCP `tools/call` result `{content:[{type:'text', text}], isError?}`. A **tool error** is a result with `isError: true` whose text says what went wrong; the model reads it as an ordinary failed tool call. A **JSON-RPC error** (`{error:{code,message}}`) is for protocol faults only (unknown method, malformed message).
+- **Ask**: one `ask` call; its **askId** is the engine's tool-use id for the call (`params._meta["claudecode/toolUseId"]`), the id the transcript already correlates tool rows by; when the call carries none, the control request id. **Blocking ask**: the JSON-RPC request stays unanswered until the human submits (the engine imposes no timeout, E0a Q1). **Async ask**: answered at once with `{status:'asked', askId}`; the answers go later as a `priority: 'next'` steer.
+- **Capsule**: the transcript row of an `ask` call. **Question sheet**: the X5 panel tool that shows a session's asks. **Delivery row**: the transcript row of a `send_file` call. **Pane bridge**: the host→renderer request that `show_pane` needs (the host cannot open a pane itself).
+- **X1 event**: an entry of the session event graph (`src/shared/graph/events.ts`), produced only by the normaliser from journal rows (`src/engine-host/normalizer.ts`). **Meta row**: a journal row the host writes for a fact no wire frame carries (`EngineSession.record('meta', …)`); the normaliser maps some meta events to X1 events (`pushMeta`). **Journal rebuild**: re-running the normaliser over a journal (`session-stream.ts` `fromJournal`); every event must come back identical.
+- **Replay**: the test transport that plays a recorded journal (`replay-transport.ts`), holding at each recorded `out` row until the host writes a frame that matches it (a `control_response` matches by request id and `behavior` only). **Fixture**: a recorded journal under `spikes/protocol-probe/fixtures/pass3/` with a provenance row. **Conformance suite**: `src/engine-host/conformance/fixtures.test.ts`, which normalises every fixture and pins what it yields.
+- **Scratch home**: a `CLAUDE_CONFIG_DIR` under `/tmp` for a live engine run; the owner's `~/.claude` and `~/.claude.json` are read-only to this child (A-15's delta check).
+
+## Constraints
+
+Binding on every milestone, from the parent and the standing rules:
+
+- **D-1**: the engine is the installed Claude Code (2.1.290 today), never patched; every wire claim rests on a fixture (`spikes/protocol-probe/fixtures/pass3/`), E0a's or one this child records.
+- **§3 A, binding**: one SDK-hosted server named `maws`, declared at initialize for every MAWS-launched session, served from the engine host over `mcp_message`; tool descriptions carry their fallback; permissions as any MCP tool (the broker's `can_use_tool` path, unchanged). **A-18**: the fallback sentence opens each description (ToolSearch indexes descriptions; E0a seq 44; the ledger's §1 still says "ends with", written before A-18, and A-18 is the binding text: flagged in the hand-back); a tool change mid-session goes through the client-sent `notifications/tools/list_changed`; any `mcp_set_servers` carries the whole SDK server map. **A-1 / X9**: the names, inputs, results and events below are the contract the owner's skills target; they change only by a dated line in the parent's Decision Log.
+- **P-13, binding**: `ask` is the general batch-question sheet with exactly the modalities choice (single or multi, with Other), free text, file or folder pick through the native dialog, repository pick from MAWS's project list, and "decide for me" per question; the design-system modality waits for the editors composite.
+- **X12**: `send_file` writes the record in §10 X12's shape under the app's data directory; the record and the viewer are E2's; E1 draws the delivery row with Open externally and Reveal in Finder. **X5**: the Question sheet is an ordinary `PanelTool` (`src/renderer/src/panel/tool.ts`) registered through `registerPanelTool`; one instance per session. **X13**: nothing the host adds assumes the host dies with the app; pending asks are host memory, answered by command, never renderer state.
+- **A-17**: `buildEnvironment` sets `CLAUDE_CODE_QUESTION_PREVIEW_FORMAT=html` at every launch, over any inherited value; the engine's refusal of a non-HTML preview is shown where the question would have been drawn.
+- **Ledger §1, §2, §5**: tool names snake_case; every input, result and event schema lives in `src/shared/`; X1 kinds `maws.ask.opened|answered|cancelled`, `maws.delivery.file`, `maws.pane.shown` appended at the end of `EVENT_KINDS` and the union; IPC under `maws.*`; the shared files of §6 (`events.ts`, `layout.ts`, `App.tsx`, `classify.ts`, `rows.ts`, `session.ts`'s `inbound()` switch) take appended, delimited `// E1 start … // E1 end` blocks, never reorderings.
+- **Standing rules**: `~/.claude` and `~/.claude.json` read-only; every live run under a scratch `CLAUDE_CONFIG_DIR` under `/tmp`, launched as MAWS launches, through ClaudeUsage's relay (`ANTHROPIC_BASE_URL=http://127.0.0.1:8641`, `ANTHROPIC_AUTH_TOKEN=claudeusage-local-gateway`, `ENABLE_TOOL_SEARCH=true`); Haiku; spend recorded in Concrete Steps; the A-15 delta (`python3 -c "import json;d=json.load(open('$HOME/.claude.json'));print(sorted(k for k in d.get('projects',{}) if k.startswith('/tmp') or k.startswith('/private/tmp')))"`) recorded before the first live run and identical after each; every process this child starts is stopped; no GUI automation of the owner's apps; no polling waiters. Heavy commands (`pnpm test --maxWorkers=4`, a build, one e2e group at a time) only through `/tmp/maws-review/with-slot.sh` when `sysctl -n vm.loadavg`'s one-minute figure is below 20 (`/tmp/maws-review/waitload20.sh` waits); a timing-only failure is retried once; `MAWS_E2E` unset for manual runs; `pnpm_config_verify_deps_before_run=false` exported for the shared `node_modules`.
+- **Repository conventions** (C1): zod 4 (`import * as z from 'zod'`), `Schema` suffix, validators never default or transform, strict objects for app-owned shapes and loose objects for wire payloads, unit tests beside sources as `*.test.ts(x)`, `@shared/*` alias, tokens only in the renderer (both themes; `test/support/tokens-guard.test.ts`), copy in a `copy.ts`. Commits: fresh commits only, own files staged, no attribution footers of any kind.
+- **Models (P-16)**: `doperpowers:plan-executor`, `doperpowers:task-executor` and any general subagent on Opus; doperpowers reviewer agents keep their definitions.
+
+## Residue decisions
+
+What the parent leaves to E1, decided here (the owner may overturn any of them; each is listed in the hand-back).
+
+1. **Events come from the wire where the wire carries the fact, from meta rows where it does not.** `maws.ask.opened` is mapped from the inbound `tools/call` row; `maws.ask.answered` for a blocking ask, `maws.delivery.file` and `maws.pane.shown` from the host's `control_response` row (the normaliser's inbound table remembers the call, as it does for permissions); `maws.ask.answered` for an async ask and `maws.ask.cancelled` from meta rows `maws_ask_answered` and `maws_ask_cancelled`, since no frame carries those. Alternative rejected: meta rows for everything (simpler host code, but the journal would say the same thing twice and the disk path, which has no meta rows, would diverge from the live one for nothing). Everything a journal rebuild needs is in the journal.
+2. **askId is the tool-use id.** The transcript keys the capsule by the `tool.use` event's `toolUseId`; `_meta["claudecode/toolUseId"]` on the `tools/call` is that id (E0a seq 71), so one id serves the model, the host and the rows. A call without `_meta` (none observed) falls back to the control request id. Alternative rejected: a host-minted short id, which the normaliser could not derive from the row.
+3. **The pane bridge is an IPC event, not an X1 event.** `show_pane` needs the renderer to act once, now; a `maws.pane.requested` X1 event would be re-delivered on every reload and disk replay and would re-open panes. The host emits the IPC event `maws.pane.show` (relayed to every window), the renderer answers `maws.pane.answer`, the first answer wins, and the host turns silence into a tool error after `PANE_ANSWER_MS = 8_000`. The journal records the call and its result (`maws.pane.shown` from the response row).
+4. **Tool errors are MCP results with `isError: true`**, never JSON-RPC errors: an unknown pane, an absent tool, a missing file, invalid arguments. JSON-RPC errors answer only an unknown method (`-32601`) or a message that is not a JSON-RPC object (`-32600`). E0a did not exercise either path (findings, "Open points"); the recorded fixtures of M2 do.
+5. **`readOnlyHint: true` on all three tools** (`openWorldHint: false`). SPEC 31 §11.4: the hint drives `isReadOnly` (the permission system's plan-mode check) and `isConcurrencySafe` (the scheduler batches read-only tools); none of the three mutates the repository. Permission prompts are unchanged: the engine still asks `can_use_tool` for an MCP tool in `default` mode (E0a seq 63) and the broker handles it.
+6. **`html` for the preview format** (A-17). The request card already renders previews in a scriptless sandboxed frame (`request-card/preview/SandboxedPreview.tsx`), and under `html` the engine validates every preview before any permission request (E0a Q4). No evidence that models write worse HTML previews; `markdown` would need a markdown renderer in the card. The engine refuses a non-HTML preview before any `can_use_tool` reaches the host (p1-question-preview-html seq 64), so there is no request card to show the refusal on: the transcript's question row (the historical receipt the `AskUserQuestion` tool call becomes) shows the refusal text. The parent's "request card" wording is read as "where the question is drawn"; flagged in the hand-back.
+7. **The deliverable record is a JSON file** at `<userData>/deliverables/<appSessionId>/<id>.json`, written by the host with a temp file and a rename. The host writes it (the call arrives there); E2 may move the store into the index (ledger §4 version 5) and then migrates these files. Delivered files are referenced in place (A-3). One record per file: X12's `path` is singular.
+8. **`files.reveal`** is added beside `files.openExternal` (owner main, the same `precheck` against the session's allowlist roots, the same `MAWS_E2E_OPEN_LOG` seam writing `reveal <path>`), because neither `session.revealPath` (project and session directories only) nor `settings.reveal` (the config home) can reveal a delivered file. It is not in the ledger's `files.*` reservation (E5 holds `files.write`); flagged in the hand-back for the ledger.
+9. **Fixtures are recorded through MAWS's own host**, not a probe script: a vitest case in the `live` project drives `LiveHost` (`test/live/support/live-host.ts`), which runs the product's `registerEngineIpc`, launcher, `EngineSession` and journal under a scratch config home, and answers the asks through `maws.ask.answer` and the pane through `maws.pane.answer`; the journal is exported with `exportFixture` and E1's provenance. The live app sitting (M5) is a separate Playwright run of the real app for the screenshots and the text evidence.
+10. **`show_pane` parameters for siblings' tools** are `{ target }`: `deliverables` (E2) receives `{ target: <deliverable id> }`, `browser` (E4) `{ target: <url> }`, `tasks` (E7) and `source-control` (E6) `{ target }` when given. The existing tools get their own params: `review` `{ scope: 'uncommitted', path }`, `terminal` `{}`, a `file` pane opens a main tab through `openFile`. Flagged for the ledger.
+11. **A pending ask is not an attention item** (sidebar badge, hover card) in this child: the capsule and the auto-opened sheet carry the "needs you" state; `EngineSessionStatus.pendingRequests` counts pending asks so the quit guard's busy report sees them. Attention integration is residue for the owner (hand-back).
+
+## Interfaces and Dependencies
+
+### X9 — the `maws` server (`src/shared/maws/`)
+
+`src/shared/maws/tools.ts` holds the server name, the tool names, the descriptions (exact copy below), the input and result zod schemas, the JSON schemas the `tools/list` answer carries (`z.toJSONSchema` of each input schema), and the annotations. The host and the normaliser parse arguments with the same schemas, so the host refuses exactly what the normaliser declines to map.
+
+```ts
+export const MAWS_SERVER_NAME = 'maws';
+export const MAWS_TOOL_NAMES = ['send_file', 'ask', 'show_pane'] as const;
+export const MAWS_SERVER_INFO = { name: 'maws', version: <the app version> };
+export const MAWS_TOOL_ANNOTATIONS = { readOnlyHint: true, openWorldHint: false } as const; // residue 5; `title` per tool
+```
+
+Descriptions (exact; the fallback sentence first, A-18):
+
+- `send_file`: *Deliver files to the user inside MAWS; without this tool, write the file and tell the user its path. Each delivered file becomes a row in the MAWS transcript with your caption and buttons to open it or reveal it in Finder; use it when you have produced something the user should look at (a PDF, an HTML page, an image, a document). Paths may be absolute or relative to the working directory and must name existing files. Returns the deliverable ids MAWS recorded.*
+- `ask`: *Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), or "repository" (one of the user's MAWS projects). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile.*
+- `show_pane`: *Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "deliverable", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), a deliverable id for deliverable, a URL for browser. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.*
+
+Inputs (zod, strict):
+
+```ts
+SendFileInputSchema = { files: string[] (1..20, each non-empty), caption?: string (≤ 2000), urgency?: 'normal' | 'high' }
+AskQuestionSchema = {
+  id?: string (≤ 64, unique within the call; default `q<n>` by position),
+  question: string (1..2000), header?: string (≤ 60),
+  modality: 'choice' | 'text' | 'file' | 'folder' | 'repository',
+  options?: { label: string (1..200), description?: string (≤ 500) }[] (1..12; required when modality is 'choice', refused otherwise),
+  multi?: boolean (choice only; default false), allowOther?: boolean (choice only; default true),
+  multiple?: boolean (file and folder only; default false), placeholder?: string (text only; ≤ 200),
+}
+AskInputSchema = { title?: string (≤ 120), context?: string (≤ 2000), blocking?: boolean (default true), questions: AskQuestionSchema[] (1..12) }
+ShowPaneInputSchema = { pane: 'diff' | 'file' | 'terminal' | 'tasks' | 'deliverable' | 'browser' | 'source-control', target?: string (≤ 4096), line?: number (int ≥ 1; file only) }
+```
+
+Results (the `text` block is this JSON, pretty-printed; `isError` absent on success):
+
+```ts
+SendFileResultSchema = { status: 'delivered', deliverables: { id: string, path: string, name: string }[] }
+AskAnswerSchema = {
+  id: string, question: string,
+  status: 'answered' | 'skipped' | 'decide_for_me',
+  value?: string | string[],   // choice: the chosen labels (an array, one entry for single-select); text: the text; file/folder: absolute paths; repository: the project's directory
+  otherText?: string,          // choice: what was typed under Other (present only when used)
+  name?: string,               // repository: the project's name
+}
+AskResultSchema = { status: 'answered', askId: string, answers: AskAnswerSchema[] } | { status: 'asked', askId: string }
+ShowPaneResultSchema = { status: 'shown', pane, opened: { kind: 'panel-tool', toolId: string, tabId: string, title: string } | { kind: 'main-tab', tabId: string, path: string, line: number | null } }
+```
+
+Tool error texts (exact prefixes; the rest names the offender): `send_file: not a file: <path>`, `send_file: invalid arguments: <zod issues>`, `ask: invalid arguments: <issues>`, `ask: the session ended before the user answered` (the answer the host would have written; see M2 for when it can be written), `show_pane: unknown pane "<pane>"; known panes: diff, file, terminal, tasks, deliverable, browser, source-control`, `show_pane: the <pane> pane is not available in this build of MAWS`, `show_pane: a target is required for the <pane> pane`, `show_pane: file not found: <path>`, `show_pane: no MAWS window answered within 8 s`.
+
+The async steer (`src/shared/maws/ask.ts`, `askSteerText(askId, questions, answers)`), sent as a `priority: 'next'` user message, exactly (the inner fence is part of the text):
+
+````
+[MAWS ask <askId>] The user answered the questions you asked:
+1. <header, else the question> — <answer>
+2. …
+```json
+<the AskResult JSON of status 'answered'>
+```
+````
+
+where `<answer>` is the labels joined by `, ` (plus `; Other: "<otherText>"`), the text in quotes, paths one per line indented three spaces, `<name> (<directory>)` for a repository, `decide for me`, or `skipped`.
+
+`src/shared/maws/panes.ts`: `PANES: Record<Pane, { toolId: string } | { mainTab: 'file' }>` = diff→`review`, file→main tab, terminal→`terminal`, tasks→`tasks`, deliverable→`deliverables`, browser→`browser`, source-control→`source-control`; `ASK_SHEET_TOOL_ID = 'ask-sheet'`; `PANE_ANSWER_MS = 8_000`.
+
+`src/shared/maws/deliverable.ts`: `DeliverableRecordSchema` (X12, strict) = `{ id: string (uuid), appSessionId, kind: 'file' | 'artifact' | 'screenshot', path: string, title?: string, caption?: string, versions: { path: string, at: string }[], toolUseId?: string, createdAt: string }`; E1 writes `kind: 'file'`, `title` = the basename, `versions: [{ path, at: createdAt }]`.
+
+### X1 events (`src/shared/graph/events.ts`, appended)
+
+```ts
+event('maws.ask.opened',    { askId: string, toolUseId: ToolUseId | null, requestId: RequestId, blocking: boolean, title: string | null, context: string | null, questions: AskQuestion[] })
+event('maws.ask.answered',  { askId: string, toolUseId: ToolUseId | null, answers: AskAnswer[], delivery: 'result' | 'steer' })
+event('maws.ask.cancelled', { askId: string, toolUseId: ToolUseId | null, reason: 'exit' | 'withdrawn' })
+event('maws.delivery.file', { toolUseId: ToolUseId | null, requestId: RequestId, deliverables: { id: string, path: string, name: string }[], caption: string | null, urgency: 'normal' | 'high' })
+event('maws.pane.shown',    { toolUseId: ToolUseId | null, requestId: RequestId, pane: Pane, target: string | null, opened: ShowPaneOpened | null, error: string | null })
+```
+
+The normaliser's `InboundKind` gains `'mcp'` with `InboundEntry.mcp: { tool: string; askId: string | null; toolUseId: ToolUseId | null; args: unknown } | null`. Meta rows: `{ event: 'maws_ask_answered', askId, toolUseId, answers }` and `{ event: 'maws_ask_cancelled', askId, toolUseId, reason }`.
+
+### Wire types (`src/shared/wire/control.ts`, appended)
+
+```ts
+McpMessageRequestSchema = looseObject({ subtype: literal('mcp_message'), server_name: string, message: unknown })
+InitializeRequest gains sdkMcpServers?: string[]
+```
+
+`appInitialize()` (`src/shared/engine/initialize.ts`) returns `sdkMcpServers: [MAWS_SERVER_NAME]` for every launch; `appReplayHandshake` (`src/engine-host/replay-handshake.ts`) deletes `sdkMcpServers` from the recorded initialize before spreading `appInitialize`, so every older fixture replays (the engine of an older recording never sends `mcp_message`, and the host's server simply never handshakes).
+
+### IPC (`src/shared/ipc/names/maws.ts`, `schema/maws.ts`; owner engine-host; deadline shape immediate)
+
+```ts
+'maws.asks.list':   { appSessionId } → { asks: PendingAsk[] }      // PendingAsk = { askId, toolUseId, requestId, blocking, title, context, questions, openedAt }
+'maws.ask.answer':  { appSessionId, askId, answers: AskAnswer[] } → { outcome: 'delivered' | 'not_pending' | 'write_failed' }
+'maws.pane.answer': { appSessionId, requestId, result: { ok: true, opened: ShowPaneOpened } | { ok: false, error: string } } → { outcome: 'delivered' | 'not_pending' }
+event 'maws.pane.show': { appSessionId, requestId, pane, target: string | null, line: number | null }
+```
+
+`files.reveal` (`src/shared/ipc/schema/files.ts`, owner main): `{ appSessionId, path } → { revealed: boolean, message: string | null }`.
+
+### The host (`src/engine-host/tool-server/`)
+
+```ts
+// server.ts
+export interface McpToolContext { appSessionId: AppSessionId; cwd: string; toolUseId: ToolUseId | null; requestId: RequestId; signal: AbortSignal }
+export interface McpToolDefinition { name: string; title: string; description: string; inputSchema: Record<string, unknown>; annotations: Record<string, unknown>; call(args: unknown, ctx: McpToolContext): Promise<McpToolResult> }
+export interface McpToolResult { content: { type: 'text'; text: string }[]; isError?: true }
+export class MawsToolServer {
+  constructor(deps: { tools: McpToolDefinition[]; respond: (requestId: RequestId, response: unknown) => Promise<void>; cwd: () => string; appSessionId: AppSessionId; log: (m: string) => void });
+  accept(req: ControlRequestFrame): void;          // every `mcp_message`; answers through `respond`
+  cancel(requestId: RequestId): void;              // the engine withdrew the request: abort the call's signal
+  processExited(): void;                           // abort every call in flight
+  get inFlight(): number;
+}
+```
+
+JSON-RPC handling (E0a Q1, seqs 5 to 14): `initialize` → `{ protocolVersion: <the client's>, capabilities: { tools: { listChanged: true } }, serverInfo: MAWS_SERVER_INFO }`; a notification (no `id`) → `{ jsonrpc: '2.0', result: {}, id: 0 }` (the official SDK's answer, E0a seq 11); `ping` → `{ result: {} }`; `tools/list` → `{ tools: [{ name, title, description, inputSchema, annotations }] }`; `tools/call` → the tool's result, `isError` text for an unknown tool or arguments its schema refuses; any other method → error `-32601`; a `message` that is not an object with `jsonrpc: '2.0'` → error `-32600`. Every answer carries the request's `id`. Correlation with the transcript is `params._meta["claudecode/toolUseId"]`.
+
+```ts
+// asks.ts — the pending-ask table one session holds (G6: host memory, not renderer state)
+export class AskTable {
+  open(ask: PendingAsk, settle: { blocking: true; resolve: (result: McpToolResult) => void } | { blocking: false }): void;
+  list(): PendingAsk[];
+  answer(askId: string, answers: AskAnswer[]): { ask: PendingAsk; blocking: boolean } | null;   // removes and returns it
+  cancel(askId: string, reason: 'exit' | 'withdrawn'): PendingAsk | null;
+  cancelAll(reason: 'exit'): PendingAsk[];
+}
+// panes.ts — the pane bridge
+export class PaneBridge { request(req: { requestId, pane, target, line }, signal): Promise<ShowPaneResult | { error: string }>; answer(requestId, result): 'delivered' | 'not_pending'; processExited(): void }
+// deliverables/store.ts
+export interface DeliverableWriter { write(record: DeliverableRecord): Promise<void> }
+export class FileDeliverableStore implements DeliverableWriter { constructor(userData: string); write(record); list(appSessionId): Promise<DeliverableRecord[]> }
+```
+
+`EngineSessionOptions` gains `deliverables?: DeliverableWriter` (the launcher passes `new FileDeliverableStore(userData)`; tests an in-memory writer) and `appVersion` is already there for `serverInfo`. `EngineSession` gains `asks(): PendingAsk[]`, `answerAsk(askId, answers): Promise<'delivered' | 'not_pending' | 'write_failed'>`, `answerPane(requestId, result): 'delivered' | 'not_pending'`, a `Listeners` channel `paneShow: (req) => void` that `registerEngineIpc` forwards as `emit('maws.pane.show', …)`.
+
+### The renderer
+
+- `src/renderer/src/tools/maws/ask/AskSheetTool.tsx` — the X5 tool: `id: ASK_SHEET_TOOL_ID`, `title: 'Questions'`, `pinnable: false`, `multiInstance: false`, `menu: false`; params `{ askId?: string }`; `open(state, params)` selects the ask. `store.ts`: a vanilla zustand store per session (pending asks from `maws.asks.list` on mount and from live `maws.ask.*` events; drafts per question; the answered and cancelled asks of this run for read-only reopening). `connect.ts`: `connectAsks()` subscribes to `session.eventBatch` and opens the sheet (`panelHost.addTool(ASK_SHEET_TOOL_ID, { appSessionId, params: { askId }, activate: true })`) on every `maws.ask.opened` of a live batch.
+- `src/renderer/src/tools/maws/panes/connect.ts` — `connectPaneShows()`: on `maws.pane.show`, resolve through `PANES` and `panelHost.tools()`, open, answer `maws.pane.answer`.
+- Transcript (appended in C6's files): `classify.ts` `ROW_KIND_TOOLS` gains `mcp__maws__ask: 'ask'`, `mcp__maws__send_file: 'delivery'`, `Presentation` gains `'ask' | 'delivery'`, `TABLE` gains `mcp__maws__show_pane: standalone('other')` and `tableRowOf` consults `TABLE` before the MCP pattern; `rows.ts` gains
+
+```ts
+| { kind: 'ask'; toolUseId: ToolUseId; askId: string; title: string | null; context: string | null; blocking: boolean; questions: AskQuestion[]; state: 'pending' | 'asked' | 'answered' | 'cancelled' | 'error'; answers: AskAnswer[] | null; error: string | null }
+| { kind: 'delivery'; toolUseId: ToolUseId; files: { path: string; name: string; id: string | null }[]; caption: string | null; urgency: 'normal' | 'high'; error: string | null }
+```
+
+  `keys.ts` gains `rowId.ask(toolUseId)` and `rowId.delivery(toolUseId)`; `derive.ts` derives both from `tool.use` + `tool.result` (the result's text block parsed with the result schemas; an `isError` result sets `error`) and refines from `maws.ask.*` and `maws.delivery.file` when present, so the disk path (no meta rows, no `maws.*` events) draws the same rows from the calls; `isPersistentRow` includes both. `Row.tsx` maps `ask` → `rows/AskCapsule.tsx`, `delivery` → `rows/Delivery.tsx`. `TranscriptActions` gains `openAsk(appSessionId, askId)`, `openDelivered(path)`, `revealDelivered(path)`, registered from E1's `App.tsx` block.
+- The question row (`rows/Question.tsx`) gains `error: string | null` on its row (`rows.ts` `question` member gains `error`), shown as one line under the questions when the engine refused the call (A-17).
+
+### Dependencies
+
+No new packages. zod 4's `z.toJSONSchema` for the `tools/list` schemas (already a dependency). The native picker is `layout.pickFiles` (`src/main/files/pick.ts`); the project list is `useSessions().projects` (`src/renderer/src/stores/sessions.ts`, `selectProjectOrder`); the Review tool's params are `review-model.ts`'s `{ scope, path }`; main tabs open through `openFile` (`src/renderer/src/tools/code/open-file.ts`).
+
+## Plan of Work
+
+### M1 — X9 and the `maws` server: `send_file`, `show_pane`, the preview format, `files.reveal`
+
+**What exists at its end.** Every session the host launches declares `sdkMcpServers: ["maws"]`, answers the engine's MCP handshake and `tools/list` with the three tools, and serves `tools/call` for `send_file` and `show_pane` (an `ask` call answers `isError` "ask: not yet served" until M2). Replaying `pass3/p1-sdk-mcp-roundtrip` through an `EngineSession` reaches the fixture's end with no `replay_mismatch` and no `frame.unknown` for `mcp_message`; the normaliser yields `maws.delivery.file` and `maws.pane.shown` from a scripted call and the journal rebuild reproduces them. `buildEnvironment` carries `CLAUDE_CODE_QUESTION_PREVIEW_FORMAT=html` whatever the capture held. Main serves `files.reveal`.
+
+**What it touches.** `src/shared/maws/` (new: `tools.ts`, `panes.ts`, `deliverable.ts`, `ask.ts` with the types and `askSteerText`, tests), `src/shared/graph/events.ts` (the five kinds; `graph.test.ts`'s count and samples; `events.test-d.ts`), `src/shared/wire/control.ts`, `src/shared/engine/initialize.ts`, `src/engine-host/replay-handshake.ts`, `src/engine-host/tool-server/` (new: `server.ts`, `send-file.ts`, `show-pane.ts`, `panes.ts`, tests), `src/engine-host/deliverables/store.ts` (new), `src/engine-host/session.ts` (the server's construction, the `mcp_message` case, `client.onInboundCancel`, `processExited`, `answerPane`, the `paneShow` listener, `pendingRequests`), `src/engine-host/ipc.ts` (`maws.pane.answer`, the `maws.pane.show` forwarding; `maws.asks.list` and `maws.ask.answer` registered now answering an empty list and `not_pending` so the schema module is complete), `src/engine-host/launcher.ts` (the deliverable store), `src/engine-host/normalizer-controls.ts` and `normalizer.ts` (the `mcp` inbound kind, the two response mappings, the meta cases), `src/engine-host/launch.ts` (A-17), `src/engine-host/conformance/fixtures.test.ts` (drop `control_request/mcp_message` from the unknown allowlist; the kind census), `src/shared/ipc/names/maws.ts`, `schema/maws.ts`, `names.ts`, `schema.ts`, `schema.test.ts`, `src/shared/ipc/schema/files.ts`, `src/main/files/service.ts` and `register.ts` (`files.reveal`), `src/main/index.ts` (wiring `shell.showItemInFolder`).
+
+**Interfaces.** Exposes everything under *Interfaces and Dependencies* except `AskTable` and the ask lifecycle; consumes nothing of this child.
+
+**Decisions here.**
+- The server lives on `EngineSession` as `surface` does (R2): constructed in the constructor with `respond` bound to `this.client`, accepted from `inbound()` by a new `case 'mcp_message'` appended before `default`, aborted from `handleExit` between `broker.processExited()` and `client.close()`. `inbound()` routes by subtype only; the server checks `server_name === 'maws'` and answers any other name with a JSON-RPC error `-32601` naming the server (the engine never addresses a server MAWS did not declare, but E0a's fixture carries `maws2`, which must still be answered so the replay advances).
+- The handshake interleaves with the host's own initialize (E0a: the engine's `initialize` JSON-RPC arrives before the initialize answer). `accept` therefore works from the constructor on, with no `ready` gate; `respond` rejects with "no engine process" only before the spawn, which cannot happen for an inbound frame.
+- `send_file` resolves each path against `ctx.cwd` (the tracker's engine cwd, else the spec's), requires `stat().isFile()`, writes one record per file (ids `randomUUID()`), then answers; a failing stat refuses the whole call before any record is written (all or nothing: the model gets one error and retries once). The record's `toolUseId` is the ask-style correlator.
+- `show_pane`: `file` requires `target`, resolves it against the cwd and requires an existing file before the bridge is used (the renderer never receives a path that does not exist); `diff` resolves `target` the same way when given; `deliverable`, `browser`, `tasks`, `source-control` pass `target` through unresolved. The bridge request is `{ requestId: <the control request id>, pane, target: <resolved or null>, line }`. One `PaneBridge` per session; `answer` for an id not pending returns `not_pending` (a second window).
+- The normaliser remembers every `tools/call` of the `maws` server in the inbound table (kind `mcp`, the tool and its parsed args); at the response row it emits `maws.delivery.file` for a `send_file` whose result parses as `delivered`, `maws.pane.shown` for every `show_pane` (`opened` from a `shown` result, `error` from an `isError` text), and nothing for any other tool or a result that parses as neither (the `tool.result` event already carries the text). Handshake methods (`initialize`, `notifications/*`, `ping`, `tools/list`) yield no event and no table entry. An `mcp_message` for another server name yields no event either (it is not unknown; it is another server's traffic).
+- A-17: `buildEnvironment` sets the variable after the allowlist copy, so an owner's export is overwritten (the test asserts both the set and the override). The question-row text change is M3's.
+- `files.reveal` mirrors `openExternal`'s `precheck` and regular-file rule but accepts any extension (revealing is not opening); `shell.showItemInFolder` returns nothing, so `revealed: true` after the call and `{ revealed: false, message }` when the precheck refuses.
+- Pitfalls seen while designing: `appReplayHandshake` must drop `sdkMcpServers` before the spread, or E0a's fixture (which has the key) and the app's request diverge if the app ever changes the list; `replay-transport.ts`'s `matches()` ignores the `control_response` body, so a replayed handshake passes even when the host's `tools/list` answer differs from the recording (the unit test asserts the host's answer itself, not the match); the engine echoes the host's `control_response` back on stdout (E0a seq 9) and `ControlClient.observe` consumes the echo, so the normaliser's inbound `control_response` path never sees it. E0a's fixture carries probe-only writes the app never makes (`notifications/tools/list_changed` at seq 96, `mcp_set_servers` at 180 and 185, the probe's `get_context_usage` at 104 and 217, `mcp_status` at 215), at which a replay holds forever, and its seq 7 answer advertises `ui_surface_v1`, so the session writes `ui_attach`: the M1 replay test uses the app-replay pattern (`surface-replay.test.ts`: `replayEngine(appReplayHandshake(fixture, trust), { prelude, surfaceReads: true })`), drives the fixture's `user` row with `session.send` and its `can_use_tool` at seq 63 with `session.answer` allow once (the replay compares `behavior`), and ends the replay with `kill` when the held row is seq 96. The handshake test therefore proves the handshake, the list and one `tools/call`, not the whole fixture; the probe's own writes are E0a's, not the app's.
+
+**What it does not touch.** No renderer code; no `ask` lifecycle (the `ask` tool is registered so `tools/list` is final from M1, but its `call` answers the placeholder error); no fixture recording; no e2e.
+
+**What it proves.** G1's host half (the declaration and the list; the terminal half is a fixture fact: `pass3/launch-env-terminal` and every pre-E1 fixture list no `mcp__maws__*` tool), G2's host half (the record and the result), G5's host half (the error texts, the bridge timeout), G7's "the conformance suite admits `mcp_message`", A-17's environment half. Tests pin: the exact descriptions open with the fallback sentence (`/^[^.]*without this tool/`); `tools/list` JSON schemas equal `z.toJSONSchema` of the inputs; the handshake over the E0a fixture (the app-replay pattern above: the host's `initialize` matches seq 4, its `mcp_response` answers close seqs 5, 10 and 13 with no `replay_mismatch`, its `tools/list` answer lists the three tools with their annotations, the `tools/call echo_file` at seq 71 is answered `isError` "unknown tool", and the normalised `session.init` lists `mcp__maws__echo_file` and the `maws` server as recorded); a scripted `tools/call send_file` writes the record file and yields `maws.delivery.file` live and on rebuild; a scripted `show_pane` with no renderer answer yields the timeout error after `PANE_ANSWER_MS` (fake timers); `show_pane file` with a missing target answers the error without a bridge request; unknown method → `-32601`; unknown tool → `isError`; `buildEnvironment({ ...CAPTURED, CLAUDE_CODE_QUESTION_PREVIEW_FORMAT: 'markdown' })` yields `html`; the conformance suite still passes over every pre-E1 fixture (their `initialize` rows gain `sdkMcpServers` through the projection and their engines never sent `mcp_message`).
+
+### M2 — `ask` in the host; the four fixtures recorded live; conformance admission
+
+**What exists at its end.** A blocking `ask` holds its JSON-RPC request until `maws.ask.answer` writes the result; an async `ask` answers `{status:'asked', askId}` at once and `maws.ask.answer` later journals `maws_ask_answered` and sends the steer; `maws.asks.list` returns the pending asks; a session's exit cancels every pending ask (meta `maws_ask_cancelled`, reason `exit`) before the exit row, and an engine `control_cancel_request` cancels one (reason `withdrawn`); the normaliser yields `maws.ask.opened` at the call, `maws.ask.answered` at the result or the meta row, `maws.ask.cancelled` at the meta row, all reproduced on rebuild. Four new fixtures are checked in under `spikes/protocol-probe/fixtures/pass3/`: `p1-maws-send-file.jsonl`, `p1-maws-ask-blocking.jsonl`, `p1-maws-ask-async.jsonl`, `p1-maws-show-pane.jsonl`, recorded on 2.1.290 through `LiveHost`, admitted by the conformance suite and the probe integrity suite.
+
+**What it touches.** `src/engine-host/tool-server/ask.ts` and `asks.ts` (new), `session.ts` (`asks()`, `answerAsk`, the exit and cancel paths, `pendingRequests`), `ipc.ts` (`maws.asks.list`, `maws.ask.answer` now real), `normalizer-controls.ts` (the `ask` mappings), `normalizer.ts` (`pushMeta` cases), `test/live/maws-tools.live.test.ts` (new) with `test/live/support/live-host.ts` if a helper is needed, `spikes/protocol-probe/fixtures/pass3/p1-maws-*.jsonl` (new), `src/engine-host/conformance/fixtures.test.ts` (the pass-3 list, the kind census, per-fixture pins), `spikes/protocol-probe/fixtures.test.mjs` only if its provenance rules need E1's row shape.
+
+**Interfaces.** Exposes `AskTable`, `EngineSession.asks/answerAsk`, the `maws.asks.list` and `maws.ask.answer` commands, `askSteerText`; consumes M1's server and events.
+
+**Decisions here.**
+- The ask's `call` parses the arguments with `AskInputSchema`, fills default ids `q1…`, opens the table entry and, when blocking, returns a promise the table resolves at `answer`; the server's `signal` (engine withdrawal, process exit) rejects it. When the process exits with a blocking ask pending, no response can be written (the pipe is gone); the meta row is the record and the capsule shows "Cancelled: the session ended". When the engine withdraws (`control_cancel_request`), the host writes nothing either (the engine no longer waits); the meta row says `withdrawn`.
+- `answerAsk` for a blocking ask writes the `control_response` through the server (`delivered` once the write settles, `write_failed` when the write rejects and the ask stays pending, as the broker does); for an async ask it journals `maws_ask_answered` then calls `this.queue.steer(askSteerText(…), { priority: 'next' })`; a steer refused because the process is not ready answers `write_failed` and the ask stays pending (the renderer shows the failure and offers Retry). The answers array is validated against the ask's questions: every question id present once, `status` consistent with `value` (a `skipped` or `decide_for_me` entry has no value; a `text` answer has a string; `choice`, `file`, `folder` an array; `repository` a string) — a mismatch is `invalid_input` from the command, never written.
+- `pendingRequests` in `status()` adds the table's size.
+- The live suite (`test/live/maws-tools.live.test.ts`, gate as `engine-host.live.test.ts`'s `live(ctx)`: `MAWS_LIVE=1`, the relay answering, the binary answering its version; `binary: null` so the installed Claude Code runs) records four cases under one scratch config home with `ENABLE_TOOL_SEARCH=true` (the gateway launch), Haiku, a scratch git repository as the cwd, and the A-15 delta read before the first launch and asserted identical after each case. Each case allows every `can_use_tool` through `session.answer` with scope `once`, waits for the tool's `maws.*` event, and ends the session with `session.stop`. Prompts (exact, so a re-recording reproduces them):
+  1. `send_file`: *Write a file named hello.txt containing exactly HELLO_E1 in the working directory, then deliver it to me with the maws send_file tool with the caption "the greeting". Reply DELIVERED when done.* Asserts `maws.delivery.file` with one deliverable whose basename is `hello.txt` and the record file on disk.
+  2. blocking `ask`: *Use the maws ask tool (blocking) to ask me five questions, with these ids and modalities: q1 choice single with options Red, Green, Blue ("Which colour?"); q2 choice multi with options Mon, Tue, Wed ("Which days?"); q3 text ("What should the title be?"); q4 folder ("Which folder holds the assets?"); q5 repository ("Which repository is this for?"). Then reply with one line per question: id, then the answer or SKIPPED or DECIDE.* The case answers through `maws.ask.answer` with q1 `["Blue"]`, q2 `["Mon","Wed"]` + `otherText: "Fri"`, q3 skipped, q4 the scratch repository's `assets` subdirectory, q5 `decide_for_me`; asserts `maws.ask.opened` (five questions, the modalities), `maws.ask.answered { delivery: 'result' }`, and that the model's reply names Blue and SKIPPED.
+  3. async `ask`: *Use the maws ask tool with blocking false to ask me one choice question with id q1 and options Yes, No ("Proceed?"). Then, without waiting, run the Bash command `sleep 15; echo WAITED` and report its output. When my answer arrives, reply with ANSWER: followed by it.* The case waits for `maws.ask.opened { blocking: false }`, waits two seconds, answers q1 `["Yes"]`, and asserts `maws.ask.answered { delivery: 'steer' }`, the steer's user frame with `priority: 'next'` and the model's `ANSWER: Yes`.
+  4. `show_pane`: *Call the maws show_pane tool twice: first with pane "terminal", then with pane "nope". Reply with one line per call: the pane name and the result status or error text.* The case answers the first bridge request through `maws.pane.answer` with `{ ok: true, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:live', title: 'Terminal' } }` and lets the second fail as unknown; asserts two `maws.pane.shown` events, one with `opened`, one with `error`.
+  Each journal is exported with `exportFixture` and E1's provenance `{ charter: 'docs/charter.md', child: 'E1', pin: 'a346e00b0f9662062fb76841590cbe8d10920697', document: 'docs/doperpowers/plans/2026-10-05-p1-extension.md', engineVersion, model: 'haiku', scenario: <name>, costUsd }`, then copied into `spikes/protocol-probe/fixtures/pass3/`. The cost per case and the delta's digest go into Concrete Steps.
+- Conformance: the four names join the pass-3 list; `maws.ask.opened`, `maws.ask.answered`, `maws.delivery.file`, `maws.pane.shown` join the kind census (`maws.ask.cancelled` only if a fixture yields it: every recorded case answers its ask before the stop, so none does, and a unit test over a scripted session pins `cancelled`; the census lists only what the fixtures produce); per-fixture pins: the blocking fixture's `opened` precedes its `answered` and the response row's `mcp_response.result` parses as `AskResultSchema`; the async fixture's `answered` has `delivery: 'steer'` and the steer row follows it; the show-pane fixture yields one `opened` and one `error`. The probe integrity suite (`spikes/protocol-probe/fixtures.test.mjs`) requires contiguous seqs from 0, every control request closed by a response in the opposite direction, the echo of an answer byte-identical to the answer, an exit row with code 0 and nothing pending: a case must answer its ask and let the response's echo arrive before `session.stop`, and the host's response JSON must be written with the key order the engine echoes (`jsonrpc`, `id`, `result`, as E0a's probe did).
+
+**What it does not touch.** No renderer code; the e2e group and the live app sitting are M5's.
+
+**What it proves.** G3's and G4's host halves, G6 (the table survives the renderer: a unit test lists a pending ask, answers it after a simulated reload, and the exit path cancels), G7's fixtures. Tests pin: the blocking result shape and that `Skip` yields `status: 'skipped'` with no value; the async acknowledgement and the exact steer text; `answerAsk` on an unknown id → `not_pending`; a second answer → `not_pending`; the exit meta row precedes the exit row in the journal; rebuild equality of every `maws.*` event; the four fixtures normalise with no `frame.unknown`, no request failures, and the pins above.
+
+### M3 — Transcript rows (the capsule, the delivery row), the pane bridge, the question-row refusal
+
+**What exists at its end.** Replaying `pass3/p1-maws-ask-blocking` in the app draws a capsule reading "Asked 5 questions" in the pending state; `p1-maws-send-file` draws a delivery row with `hello.txt`, the caption "the greeting", Open externally and Reveal in Finder (the e2e seam logs both); `p1-maws-show-pane` opens the Terminal tab in the panel and the second call's row reads the error; `p1-question-preview-html` draws the question row with the engine's refusal text. Clicking a capsule calls `openAsk` (M4 registers the sheet; until then the action is the M3 default that opens the sheet tool when registered and does nothing otherwise).
+
+**What it touches.** `src/renderer/src/transcript/model/classify.ts`, `rows.ts`, `keys.ts`, `derive.ts`, `copy.ts` (appended blocks), `src/renderer/src/transcript/view/rows/Row.tsx`, `AskCapsule.tsx` (new), `Delivery.tsx` (new), `Question.tsx` (the refusal line), `src/renderer/src/transcript/view/context.tsx` (`TranscriptActions`), `src/renderer/src/tools/maws/panes/connect.ts` (new), `src/renderer/src/tools/maws/actions.ts` (new: `openAsk`, `openDelivered`, `revealDelivered`), `src/renderer/src/App.tsx` (the E1 block: `connectPaneShows`, `registerTranscriptActions`), `src/renderer/src/ipc/events.ts` only if a connect helper belongs there, snapshots under `test/snapshots/transcript/pass3/` for the four fixtures.
+
+**Interfaces.** Consumes M1's and M2's events and commands; exposes the `ask` and `delivery` rows and the three actions to M4.
+
+**Decisions here.**
+- Derivation: a `tool.use` of `mcp__maws__ask` opens a pending ask entry keyed by `toolUseId` (the capsule's row id); its `tool.result` parses the text block with `AskResultSchema` (`answered` → state `answered` with the answers; `asked` → state `asked`; `isError` → state `error` with the text); `maws.ask.opened` sets `pending` (or `asked` when `blocking: false`), `maws.ask.answered` sets `answered` with its answers (the async case's only source live), `maws.ask.cancelled` sets `cancelled`. A `tool.use` of `mcp__maws__send_file` opens a delivery entry; `tool.result` fills ids and names from a `delivered` result or `error` from an `isError` text; `maws.delivery.file` fills the same when present. The disk path, which has neither `maws.*` events nor meta rows, therefore draws the same rows from the calls (§12 "Terminal interop of new rows").
+- The capsule: a bordered row with a question glyph, the title (else "Questions"), "N questions", a state chip (pending: *Waiting for you*; asked: *Asked, answer when ready*; answered: *Answered*; cancelled: *Cancelled, the session ended*; error: the text), and one button (*Open* while pending or asked, *View answers* once answered); once answered it lists `header (or question) → answer` lines as `Question.tsx` does. `data-ask-id` and `data-ask-state` for tests. Persistent through folds.
+- The delivery row: a file glyph, "Delivered hello.txt" (or "Delivered N files"), the caption, then per file a line with its basename (full path as title) and two quiet buttons *Open externally* and *Reveal in Finder*; a refusal answer from `files.openExternal` or `files.reveal` shows its message inline for 4 s as `ExternalRow.tsx` does. `urgency: 'high'` adds the accent border. `data-delivery` and `data-path` for tests.
+- The pane bridge connect: on `maws.pane.show`, look up `PANES[pane]`; `mainTab` → `openFile(appSessionId, target, line)` and answer `{ kind: 'main-tab', tabId: tabId(ref), path, line }`; `toolId` not in `panelHost.tools()` → answer the "not available in this build" error (the exact text is the host's constant from `src/shared/maws/tools.ts`, so the model reads the same words from either side); otherwise `panelHost.addTool(toolId, { appSessionId, params, activate: true })` with the params of residue 10 and answer `{ kind: 'panel-tool', toolId, tabId, title }`. Ignore an event for a session this window does not know (`useSessions().records`), so a window showing another project never opens a pane for it; two windows showing the same session both open it and the host keeps the first answer.
+- A-17's row: `derive.ts` keeps the `isError` text of an `AskUserQuestion` `tool.result` on the pending question entry; `Question.tsx` renders it as a last line *The engine refused this question: <text without the `<tool_use_error>` tags>* with `data-question-refused`.
+- `show_pane` rows stay cells: `standalone('other')` makes them visible, ungrouped MCP cells whose label (copy.ts) reads "Opened Terminal" or "Could not open pane: <error>" from the result.
+
+**What it does not touch.** The Question sheet (M4); any main-process code; the e2e group (M5), though the snapshots of this milestone are its first assertions.
+
+**What it proves.** G2's row (name, caption, the two buttons), G5's renderer half (the pane opens; an unknown or absent pane is an error row, never a crash), the disk-path parity of the rows, A-17's row. Tests pin: the derived rows for the four fixtures (snapshot files beside the existing `*.rows.json`); the capsule state table above from events alone and from `tool.result` alone; the delivery row's buttons call `files.openExternal` and `files.reveal` with the session and the path and show the refusal text; `connectPaneShows` answers `main-tab` for `file`, `panel-tool` for `terminal`, the "not available" text for `deliverable` with no `deliverables` tool registered, and ignores an unknown session; the question row shows the refusal from `p1-question-preview-html`'s events.
+
+### M4 — The Question sheet
+
+**What exists at its end.** When `maws.ask.opened` arrives live, the Question sheet opens in the right panel for that session (one tab per session, re-targeted for a second ask) with the ask's title and context and one section per question: a choice set as radios or checkboxes with an *Other…* text row when allowed; a text box; *Choose file…* / *Choose folder…* buttons that call `layout.pickFiles` and list the chosen absolute paths with a remove glyph; a repository list of the MAWS projects (`selectProjectOrder`, name and directory) as radios; and under every section a *Decide for me* toggle and a *Skip* toggle, mutually exclusive with an answer. *Submit* (enabled when every question is answered, skipped or delegated) calls `maws.ask.answer`; the capsule turns answered; the sheet shows the next pending ask or the resting state ("No open questions"). A renderer reload with an ask pending re-opens the sheet from `maws.asks.list`. An answered ask reopens read-only from the capsule's *View answers*. A cancelled ask shows *This session ended before you answered* and nothing to submit.
+
+**What it touches.** `src/renderer/src/tools/maws/ask/` (new: `AskSheetTool.tsx`, `store.ts`, `connect.ts`, `QuestionSection.tsx`, `modalities/{Choice,Text,Paths,Repository}.tsx`, `copy.ts`, tests), `src/renderer/src/App.tsx` (the E1 block gains `registerPanelTool(askSheetTool)` and `connectAsks`), `src/renderer/src/tools/maws/actions.ts` (`openAsk` now opens the tool), `src/renderer/src/ipc/query.ts` (`maws.asks.list` in `QUERY_COMMANDS` if read through `useCommand`).
+
+**Interfaces.** Consumes `maws.asks.list`, `maws.ask.answer`, `layout.pickFiles`, the project store, `panelHost.addTool`, M3's `openAsk`; exposes nothing further.
+
+**Decisions here.**
+- The store is one vanilla zustand store keyed by session (as `ReviewTool.tsx`'s `forSession`): `asks: Map<askId, PendingAsk & { state }>`, `drafts: Map<askId, Map<questionId, Draft>>`, `selected: askId | null`. It loads `maws.asks.list` on the tool's first mount for the session and on every `engine.hostState` return to `ready` (a restarted host lost its table; the budget store's pattern), and applies live `maws.ask.*` events; an event wins over a snapshot in flight. Drafts live in the store, not in components, so switching tabs or sessions keeps half-filled answers.
+- A `Draft` is `{ selected: string[]; otherText: string | null; text: string; paths: string[]; repository: string | null; decide: boolean; skip: boolean }`; `toAnswer(question, draft)` (pure, tested) yields `AskAnswer` per the result schema: `decide` → `decide_for_me`, `skip` or an empty draft → `skipped` (an empty draft at Submit counts as skipped, and Submit says so in its label: *Submit · 2 skipped*), else `answered` with the modality's value; a single-select choice with `otherText` and no label yields `value: []` plus `otherText`.
+- File and folder picks call `layout.pickFiles` with `kind: 'files'` or `'directory'`, `multiple` from the question, `directory` the session's directory; the answer's `path`s are kept, nothing else (no bytes).
+- Auto-open: `connectAsks` opens the sheet for a `maws.ask.opened` from a live batch only (not from the history snapshot), with `activate: true`, so a blocking ask lands in front of the human; an async ask opens the same way (the sheet "stays", G4). The home summary gets no row (the summary is C8a's list; residue 11).
+- Submit disables the form while `maws.ask.answer` is in flight; `write_failed` shows *Couldn't deliver the answers* with Retry (the request card's copy pattern); `not_pending` shows *Already answered elsewhere* and drops the ask.
+- Layout (advisory, the vault's sheet and Claude Design's "ask me for visual references"): the title as the tool's tab suffix (`ctx.setTitle`), the context as a muted paragraph, sections separated by hairlines with the header as a small-caps label and the question as the section's lead, the two toggles right-aligned under each section, the Submit bar sticky at the bottom; tokens only.
+
+**What it does not touch.** The capsule and delivery rows (M3), the host (M1, M2), any screenshot or e2e (M5).
+
+**What it proves.** G3 and G4 end to end on the renderer side, G6's renderer half. Tests pin (happy-dom): one section per question with the control the modality names; Other, Decide for me and Skip exclusivity; `toAnswer` for every modality and the skipped and delegated forms; Submit disabled until every question is settled; Submit calls `maws.ask.answer` with the answers and the capsule-visible state follows; the reload path (`maws.asks.list` answers one ask → the sheet lists it); the cancelled state hides Submit.
+
+### M5 — The `tools` e2e group, the live sitting, evidence, acceptance
+
+**What exists at its end.** `pnpm e2e:tools` runs `e2e/maws-tools.spec.ts` under `MAWS_ENGINE_REPLAY=1` over the four fixtures and `p1-sdk-mcp-roundtrip`: the delivery row and its two seams, the capsule and the sheet with every modality filled (folder through `MAWS_E2E_PICK_PATHS`, repository from the scenario's project), Submit matching the recorded response row, the async ask's steer matching the recorded `user` row, a reload mid-ask and Submit after it, the Terminal opened by `show_pane`, the error cell for the unknown pane, and screenshots of the capsule (pending, answered), the sheet, the delivery row and the pane result in both themes under `docs/doperpowers/evidence/p1-e1/`. `e2e/maws-tools-live.spec.ts` (gated by `MAWS_E1_LIVE=1`) runs the real app with the installed engine under a scratch home through the relay: the four prompts of M2, the human's part done through the real sheet, and writes `docs/doperpowers/evidence/p1-e1/live-sitting.txt` (the owner-file delta before and after, each session's journal path and `total_cost_usd`, the tool list from `system/init`, the engine version) and its screenshots. The gates of §9 E1 are run and their results recorded in Concrete Steps.
+
+**What it touches.** `e2e/maws-tools.spec.ts` (new), `e2e/maws-tools-live.spec.ts` (new), `e2e/support/` helpers only if shared with `requests.spec.ts`'s replay helpers, `package.json` (`e2e:tools`; `verify` gains it), `docs/doperpowers/evidence/p1-e1/` (new), `docs/tech-debt-tracker.md` (rows), this document (Progress, Concrete Steps, Surprises, the record).
+
+**Decisions here.**
+- The replay group runs the product app, not a harness page, the way `e2e/transcript.spec.ts`'s `surfaceReplay` does (`MAWS_HARNESS: '0'`, `MAWS_ENGINE_REPLAY: '1'`, a scratch `CLAUDE_CONFIG_DIR` seeded with a transcript so C4 indexes the session's directory as a project, which the sheet's repository list needs; `sidebarRow(...).click()`, then `launchReady(page, id, fixture, { cwd })` from `e2e/support/c7-replay.ts` and `session.send` of the recorded prompt). The spec joins `playwright.config.ts`'s harness-only `testIgnore` list beside `transcript`, since the default `pnpm e2e` has no replay environment. Permissions the fixtures recorded as `allow` are answered through the real request card (the replay compares `behavior`). The sheet's folder pick is answered by `MAWS_E2E_PICK_PATHS` set with `app.evaluate` before the click (as `e2e/sessions.spec.ts` does). Submit answers whatever the test chose: the replay matches the response by request id alone, and the fixture's recorded continuation is the model's reaction to the recorded answers, so the assertions after Submit are on the capsule's state and the response row's presence in the journal (`<userData>/engine-host/journal/<id>/*.jsonl`), never on the model's words. `consoleErrors()` must be empty in every case.
+- The reload case: launch the blocking fixture, wait for the capsule, `page.reload()`, wait for the sheet to list the ask (from `maws.asks.list`), Submit, assert the capsule answered.
+- Screenshots: `setTheme` as `c7-shots.spec.ts` does (`settings.set { theme }`), files `e1-<surface>-<theme>.png`.
+- The live sitting spec reuses `e2e/support/c12-live.ts`'s pattern for the scratch home and the relay gate (read it before writing), sets `CLAUDE_CONFIG_DIR` to a scratch directory holding `settings.json {}` and a `.claude.json` that trusts the scratch repository, sets `MAWS_E2E_PICK_PATHS` for the folder question, allows permissions through the real request card, and records the A-15 delta in the evidence file. It is skipped unless `MAWS_E1_LIVE=1`.
+- The gates run on the final head, each through the slot script under the load rule, their outputs saved under `docs/doperpowers/evidence/p1-e1/gates/` and summarised in Concrete Steps: `pnpm typecheck`, `pnpm lint`, `pnpm test --maxWorkers=4`, the conformance suite (`pnpm exec vitest run src/engine-host/conformance`), `pnpm e2e:transcript`, `pnpm e2e:c7`, `pnpm e2e:panel`, `pnpm e2e:tools`, the live suite case (`MAWS_LIVE=1 pnpm exec vitest run --project live test/live/maws-tools.live.test.ts`, already run in M2; re-run only if the host changed after) and `MAWS_E1_LIVE=1 pnpm exec playwright test e2e/maws-tools-live.spec.ts` after a harness build.
+
+**What it does not touch.** No product code beyond fixes the gates force (each recorded in the Decision Log).
+
+**What it proves.** G1 to G7 as written in §9 E1, with evidence; the acceptance section below.
+
+## Acceptance
+
+Observable on the owner's Mac with the installed engine, each with its proof:
+
+1. **G1.** Launch any session in MAWS; `session.status`'s init tool list (Session info's tools, or the journal's `system/init.tools`) contains `mcp__maws__send_file`, `mcp__maws__ask`, `mcp__maws__show_pane`, and `mcp_servers` lists `{name: "maws", status: "connected", source: "sdk"}`. Resume the same session in a terminal (`claude --resume <id>`): the tools are absent and the session works. Each tool's description in `tools/list` begins with a sentence containing "without this tool". *Proof:* the live sitting's evidence file; `src/shared/maws/tools.test.ts`.
+2. **G2.** The agent calls `send_file` on `hello.txt` with a caption: a row "Delivered hello.txt · the greeting" appears with *Open externally* and *Reveal in Finder*; the first opens the file in its viewer, the second shows it in Finder; `<userData>/deliverables/<appSessionId>/<id>.json` holds the X12 record; the tool result lists the id. *Proof:* `e2e/maws-tools.spec.ts` over `p1-maws-send-file` (the seam log holds `open` and `reveal` lines); the live sitting.
+3. **G3.** A blocking `ask` with five modalities: the capsule reads "Waiting for you", the sheet opens with five sections; radios, checkboxes with Other, a text box, *Choose folder…* (the native dialog), the project list; Skip on one and Decide for me on another; Submit; the model's reply names the choices, SKIPPED and DECIDE; the capsule reads "Answered" and *View answers* reopens the sheet read-only. *Proof:* the live sitting; `e2e/maws-tools.spec.ts` over `p1-maws-ask-blocking`.
+4. **G4.** An async `ask`: the tool result is `{status:"asked", askId}` at once, the model runs its Bash command meanwhile, the capsule reads "Asked, answer when ready", Submit sends the answers, the transcript shows the steer bubble "[MAWS ask …]" at the next tool boundary and the model's `ANSWER: Yes`. *Proof:* the live sitting; `e2e/maws-tools.spec.ts` over `p1-maws-ask-async`.
+5. **G5.** `show_pane {pane:"terminal"}` opens the Terminal tab and the result says so; `show_pane {pane:"nope"}` returns the "unknown pane" error and the transcript shows an error cell; `show_pane {pane:"deliverable"}` before E2 returns "not available in this build". *Proof:* `e2e/maws-tools.spec.ts` over `p1-maws-show-pane`; `connect.test.ts`.
+6. **G6.** With a blocking ask pending, reload the renderer (⌘R in dev, `page.reload()` in e2e): the sheet lists the ask again and Submit still answers it. Stop the session with an ask pending: the capsule reads "Cancelled, the session ended" and the journal holds `maws_ask_cancelled` before `exit`. *Proof:* `e2e/maws-tools.spec.ts`; `asks.test.ts`.
+7. **G7.** `pnpm exec vitest run src/engine-host/conformance` passes with `control_request/mcp_message` off the unknown allowlist and the five `maws.*` kinds in the census; `pnpm e2e:tools` passes; `src/shared/maws/tools.test.ts` pins the schemas and the fallback text.
+8. **A-17.** `spawn`'s `envKeys` in any journal lists `CLAUDE_CODE_QUESTION_PREVIEW_FORMAT`; replaying `p1-question-preview-html` draws the question row with "The engine refused this question: Option "A" in question "Which layout?": preview must contain HTML…".
+
+## Concrete Steps
+
+Working directory: the worktree root (`git rev-parse --show-toplevel`); `pnpm -C <root>`; `export pnpm_config_verify_deps_before_run=false`.
+
+- Unit tests of one area: `pnpm exec vitest run src/engine-host/tool-server` (fast, no slot). The full suite: `/tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm test --maxWorkers=4`.
+- Conformance: `pnpm exec vitest run src/engine-host/conformance`.
+- The live recording (M2): `python3 -c "import json;d=json.load(open('$HOME/.claude.json'));print(sorted(k for k in d.get('projects',{}) if k.startswith('/tmp') or k.startswith('/private/tmp')))" | shasum` before, then `MAWS_LIVE=1 pnpm exec vitest run --project live test/live/maws-tools.live.test.ts`, then the same python line after; the exports land under the run's `userData/exports/` (printed by the case) and are copied into `spikes/protocol-probe/fixtures/pass3/`; `node --test spikes/protocol-probe/fixtures.test.mjs` from `spikes/protocol-probe/` admits them.
+- The e2e group: `/tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm e2e:tools`.
+- The live sitting (M5): `MAWS_HARNESS=1 electron-vite build` through the slot, then `MAWS_E1_LIVE=1 pnpm exec playwright test e2e/maws-tools-live.spec.ts`; evidence under `docs/doperpowers/evidence/p1-e1/`.
+
+Records (filled as work proceeds): the A-15 digest before the first live run and after each; each live case's `total_cost_usd`; each gate's result and the file holding its output.
+
+## Surprises & Discoveries
+
+- Observation: the engine's SDK-MCP handshake begins before the host's own `initialize` is answered (E0a seq 5 precedes seq 7).
+  Evidence: `p1-sdk-mcp-roundtrip.jsonl` seqs 4 to 7; the server therefore has no ready gate (M1).
+
+## Decision Log
+
+- Decision: verification. One `doperpowers:adversarial-reviewer` round on this document before M1 (buildability against §9 E1 and X9), `doperpowers:task-reviewer` per milestone with fix waves by separate executors (two rounds at most per task), the whole-branch review at `doperpowers:reviewer-high` against master (A-14; two rounds at most; tiny findings to `docs/tech-debt-tracker.md`).
+  Rationale: the parent's A-14 and the dispatch brief.
+  Date/Author: 2026-10-05, E1 executor.
+- Decision: the residue decisions 1 to 11 above.
+  Rationale: given beside each; none contradicts a binding mark.
+  Date/Author: 2026-10-05, E1 executor.
+
+## Outcomes & Retrospective
+
+Pending — written at finish.
