@@ -4,6 +4,7 @@
 // gone states, the console chip and Reload, the summary section and the `deliverable` main tab.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { AnchorSchema, type Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import { deliverableUrl, type DeliverableRecord } from '@shared/maws/deliverable';
@@ -14,6 +15,7 @@ import { useLayout } from '../../stores/layout';
 import { activeTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { fail, installFakeMain, ok } from '../../test-support/code';
+import { registerCommentComposer } from '../code/anchor/anchor';
 import { useFiles } from '../code/files/store';
 import { useViewer } from '../code/viewer/viewer-store';
 import { DeliverablesSummary } from './DeliverablesSummary';
@@ -445,6 +447,107 @@ describe('the console chip and Reload', () => {
     await mount({ target: PAGE.id });
     log(PAGE.id, 1);
     expect(document.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+  });
+});
+
+// E2 (M6): comment mode (Design §10). The frame's page cannot be reached from the app (an opaque origin), so the
+// viewer posts `maws:pick` into the frame and listens for what the bridge script posts back, from that frame alone.
+describe('comment mode on an artifact element', () => {
+  const opened: { anchor: Anchor; context: { appSessionId: AppSessionId } }[] = [];
+  let offComposer: () => void;
+  beforeEach(() => {
+    opened.length = 0;
+    offComposer = registerCommentComposer((anchor, context) => void opened.push({ anchor, context }));
+  });
+  afterEach(() => offComposer());
+
+  const picked = { type: 'maws:picked', selector: 'body > h1:nth-of-type(1)', label: 'h1.title', text: 'Sales overview', rect: { x: 0, y: 0, width: 10, height: 10 } };
+  const post = (data: unknown, source: unknown) => act(() => void window.dispatchEvent(new MessageEvent('message', { data, source: source as MessageEventSource })));
+  const hint = () => screen.queryByText('Click an element to comment on it · Esc cancels');
+  // what the viewer posts into the frame's window
+  const spyFrame = () => {
+    const target = frame()!.contentWindow!;
+    const sent: unknown[] = [];
+    target.postMessage = ((data: unknown) => void sent.push(data)) as typeof target.postMessage;
+    return { target, sent };
+  };
+
+  it('is offered on an artifact alone: not on a delivered HTML page, a PDF or a file', async () => {
+    await mount({ target: ART.id });
+    expect(button('Comment')).not.toBeNull();
+    for (const n of [2, 3, 6]) {
+      cleanup();
+      await mount({ target: id(n) });
+      expect(viewer()!.dataset.deliverableId).toBe(id(n));
+      expect(button('Comment')).toBeNull();
+    }
+  });
+
+  it('Comment starts picking in the frame; a pick from that frame opens the composer with the artifact-element anchor', async () => {
+    await mount({ target: ART.id });
+    const { target, sent } = spyFrame();
+    fireEvent.click(button('Comment')!);
+    expect(sent).toEqual([{ type: 'maws:pick', on: true }]);
+    expect(hint()).not.toBeNull();
+    expect(button('Comment')!.getAttribute('aria-pressed')).toBe('true');
+    post(picked, target);
+    expect(opened).toEqual([
+      { anchor: { kind: 'artifact-element', locator: 'body > h1:nth-of-type(1)', label: 'Dashboard v2 › h1.title “Sales overview”', pageUrl: deliverableUrl(A, ART.id, 2) }, context: { appSessionId: A } },
+    ]);
+    expect(AnchorSchema.safeParse(opened[0]!.anchor).success).toBe(true);
+    expect(hint()).toBeNull(); // one pick per Comment
+    expect(sent.at(-1)).toEqual({ type: 'maws:pick', on: false });
+  });
+
+  it('ignores a pick from anywhere but the frame, a malformed one, and one that arrives while not picking', async () => {
+    await mount({ target: ART.id });
+    const { target } = spyFrame();
+    post(picked, target); // not picking: the page cannot open the composer on its own
+    expect(opened).toEqual([]);
+    fireEvent.click(button('Comment')!);
+    post(picked, window);
+    post(picked, null);
+    post({ ...picked, selector: 7 }, target);
+    expect(opened).toEqual([]);
+    expect(hint()).not.toBeNull(); // still picking
+  });
+
+  it('Escape in the app or a cancel from the frame ends picking; Comment again toggles it off', async () => {
+    await mount({ target: ART.id });
+    const { target, sent } = spyFrame();
+    fireEvent.click(button('Comment')!);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(hint()).toBeNull();
+    expect(sent).toEqual([{ type: 'maws:pick', on: true }, { type: 'maws:pick', on: false }]);
+    fireEvent.click(button('Comment')!);
+    post({ type: 'maws:pick-cancelled' }, target);
+    expect(hint()).toBeNull();
+    fireEvent.click(button('Comment')!);
+    fireEvent.click(button('Comment')!);
+    expect(hint()).toBeNull();
+    post(picked, target);
+    expect(opened).toEqual([]);
+  });
+
+  it('a version switch ends picking, and Comment then picks on the version shown', async () => {
+    await mount({ target: ART.id });
+    fireEvent.click(button('Comment')!);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), { target: { value: '1' } });
+    await settle();
+    expect(hint()).toBeNull();
+    const { target } = spyFrame();
+    fireEvent.click(button('Comment')!);
+    post(picked, target);
+    expect(opened[0]!.anchor).toMatchObject({ label: 'Dashboard v1 › h1.title “Sales overview”', pageUrl: deliverableUrl(A, ART.id, 1) });
+  });
+
+  it('is offered in the deliverable main tab too', async () => {
+    render(<DeliverableTab tab={{ id: `deliverable:${A}:${ART.id}`, kind: 'deliverable', appSessionId: A, deliverableId: ART.id, pinned: false }} />);
+    await settle();
+    const { target } = spyFrame();
+    fireEvent.click(button('Comment')!);
+    post(picked, target);
+    expect(opened).toHaveLength(1);
   });
 });
 

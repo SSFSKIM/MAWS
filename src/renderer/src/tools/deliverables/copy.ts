@@ -18,6 +18,7 @@ export const DELIVERABLES_COPY = {
   openAsFile: 'Open as file',
   reload: 'Reload',
   comment: 'Comment',
+  picking: 'Click an element to comment on it · Esc cancels',
   versionLabel: 'Version',
   version: (n: number, latest: boolean) => (latest ? `v${n} · latest` : `v${n}`),
   artifactLine: (n: number, when: string) => `v${n} · ${when}`,

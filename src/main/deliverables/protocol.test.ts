@@ -175,6 +175,29 @@ describe('insertBridgeScript (E2 Design §3, §10)', () => {
     expect(insert('<HEAD><p>x')).toBe(`<HEAD>${tag}<p>x`);
   });
 
+  // M3's review: a `<head` inside a comment before the real head took the script into the comment, where it never runs;
+  // a leading comment hid the doctype from a start-anchored match, which put the script ahead of it (quirks mode)
+  it('passes over comments: a <head> inside one is not the head, and a leading comment never puts it before the doctype', () => {
+    expect(insert('<!-- <head> --><!doctype html><html><head><title>t</title>')).toBe(`<!-- <head> --><!doctype html><html><head>${tag}<title>t</title>`);
+    expect(insert('<!-- note -->\n<!DOCTYPE html>\n<body>x</body>')).toBe(`<!-- note -->\n<!DOCTYPE html>${tag}\n<body>x</body>`);
+    expect(insert('<!doctype html><!-- <head> --><html lang="en"><body>x')).toBe(`<!doctype html><!-- <head> --><html lang="en">${tag}<body>x`);
+    expect(insert('<!--><!doctype html><p>x')).toBe(`<!--><!doctype html>${tag}<p>x`); // the abrupt comment closes at once
+    expect(insert('<?xml version="1.0"?><!doctype html><p>x')).toBe(`<?xml version="1.0"?><!doctype html>${tag}<p>x`); // a bogus comment
+  });
+
+  it('looks for the head only before the page’s content: a <head> in the body’s script text is not one', () => {
+    expect(insert('<!doctype html><body><script>document.write("<head>")</script>')).toBe(`<!doctype html>${tag}<body><script>document.write("<head>")</script>`);
+  });
+
+  it('reads a head whose attribute value holds a >', () => {
+    expect(insert('<head data-x="a>b"><title>t')).toBe(`<head data-x="a>b">${tag}<title>t`);
+  });
+
+  it('never goes before a byte-order mark, and goes before a comment that never closes', () => {
+    expect(insert('\uFEFF<p>x')).toBe(`\uFEFF${tag}<p>x`);
+    expect(insert('<!doctype html><!-- open')).toBe(`<!doctype html>${tag}<!-- open`);
+  });
+
   it('leaves every other byte as it was, including bytes that are not UTF-8', () => {
     const html = Buffer.concat([Buffer.from('<head>'), Buffer.from([0xff, 0xfe, 0xe9]), Buffer.from('</head>')]);
     const out = insertBridgeScript(html);

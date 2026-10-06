@@ -110,16 +110,49 @@ export function createDeliverableHandler(reader: Pick<DeliverableReader, 'get'>)
   };
 }
 
-// The bridge script as the first element of `<head>`; with no `<head>`, right after the doctype (a script ahead of it
-// would put the page in quirks mode); with neither, first. Searched over the bytes as latin1, so a byte offset is a
-// string offset and bytes that are not UTF-8 pass through untouched.
+// The bridge script as the first element of `<head>`; with no `<head>`, after the doctype and the `<html>` tag (a script
+// ahead of the doctype would put the page in quirks mode); with none of them, first (after a byte-order mark, which
+// must stay the first bytes). The place is found by walking the page's prologue as the HTML parser reads it, token by
+// token: whitespace, comments (a `<head>` inside one is no head), bogus comments (`<?xml …?>`), the doctype and the
+// `<html>` tag; the walk stops at the first `<head>` or at anything else, so nothing past the prologue (a `<head>` in
+// the body's script text) is ever taken for the head. Searched over the bytes as latin1, so a byte offset is a string
+// offset and bytes that are not UTF-8 pass through untouched.
 export function insertBridgeScript(html: Buffer): Buffer {
-  const text = html.toString('latin1');
-  const head = /<head(?=[\s>])[^>]*>/i.exec(text);
-  const doctype = /^(?:\xef\xbb\xbf)?\s*<!doctype[^>]*>/i.exec(text);
-  const at = head ? head.index + head[0].length : doctype ? doctype[0].length : 0;
+  const at = bridgeScriptOffset(html.toString('latin1'));
   const tag = Buffer.from(`<script data-maws-bridge>${BRIDGE_SCRIPT}</script>`, 'utf8');
   return Buffer.concat([html.subarray(0, at), tag, html.subarray(at)]);
+}
+
+const UTF8_BOM = '\xef\xbb\xbf';
+const ATTRIBUTES = String.raw`(?=[\s/>])(?:"[^"]*"|'[^']*'|[^'">])*>`; // a start tag's rest, a quoted value may hold a `>`
+const HEAD = new RegExp(`<head${ATTRIBUTES}`, 'iy');
+const WHITESPACE = /\s+/y;
+const PROLOGUE = [
+  /<!--(?:-?>|[\s\S]*?--!?>)/y, // a comment, the abrupt `<!-->` and `<!--->` included; one that never closes stops the walk
+  /<!doctype[^>]*>/iy,
+  /<(?:\?|!(?!--))[^>]*>/y, // a bogus comment
+  new RegExp(`<html${ATTRIBUTES}`, 'iy'),
+];
+
+function bridgeScriptOffset(text: string): number {
+  let pos = text.startsWith(UTF8_BOM) ? UTF8_BOM.length : 0;
+  let at = pos; // the end of the last token read: the script goes right after it, before any whitespace that follows
+  const read = (pattern: RegExp): number | null => {
+    pattern.lastIndex = pos;
+    return pattern.exec(text) ? pattern.lastIndex : null;
+  };
+  for (;;) {
+    const head = read(HEAD);
+    if (head !== null) return head;
+    const blank = read(WHITESPACE);
+    if (blank !== null) {
+      pos = blank;
+      continue;
+    }
+    const token = PROLOGUE.map(read).find((end): end is number => end !== null);
+    if (token === undefined) return at;
+    pos = at = token;
+  }
 }
 
 // The shared name table, except that a name it does not know is binary here, never text.

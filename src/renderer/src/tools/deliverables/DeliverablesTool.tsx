@@ -23,7 +23,7 @@ export interface DeliverablesParams {
   scope?: DeliverablesScope;
 }
 
-export type DeliverablesView = { kind: 'list' } | { kind: 'record'; appSessionId: AppSessionId; id: string; version: number | null; picking: boolean };
+export type DeliverablesView = { kind: 'list' } | { kind: 'record'; appSessionId: AppSessionId; id: string; version: number | null };
 
 export interface DeliverablesState {
   appSessionId: AppSessionId | null; // the session the view state belongs to
@@ -60,7 +60,7 @@ export class DeliverablesHandle {
     if (params?.scope !== undefined && params.scope !== this.state.scope) this.update({ scope: params.scope });
     const appSessionId = params?.appSessionId ?? this.state.appSessionId;
     if (params?.target === undefined || appSessionId === null) return this.back();
-    this.update({ view: { kind: 'record', appSessionId, id: params.target, version: params.version ?? null, picking: false }, notice: null });
+    this.update({ view: { kind: 'record', appSessionId, id: params.target, version: params.version ?? null }, notice: null });
   };
 
   openRecord = (record: DeliverableRecord) => this.open({ target: record.id, appSessionId: record.appSessionId });

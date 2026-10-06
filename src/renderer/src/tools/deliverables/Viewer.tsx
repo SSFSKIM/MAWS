@@ -3,8 +3,13 @@
 // gone hands control back (`onGone`: the list with the notice), a version whose file is gone draws the missing state.
 // The header: Back (panel), the title, the version switcher (an artifact of several versions), the console chip (an HTML
 // body), and the actions: Open in tab (panel), Open externally (a kind main hands to the OS), Reveal in Finder, Open as
-// file (a drawn file under the record's session directories, Decision Log 18) and Reload. The body by the shown
-// version's type: the HTML frame, the PDF frame, native media, else the file viewer read-only.
+// file (a drawn file under the record's session directories, Decision Log 18), Reload and, on an artifact, Comment. The
+// body by the shown version's type: the HTML frame, the PDF frame, native media, else the file viewer read-only.
+//
+// Comment (M6, Design §10) picks an element in the artifact's frame: the frame is told to pick, the hint shows, and a
+// pick opens the comment composer (E3's, through E5's seam) with the `artifact-element` anchor. Picking belongs to one
+// frame: a version switch or a Reload (a new frame) ends it, as do Escape in the app (where the keyboard stays while the
+// pointer is over the frame) and Escape in the frame, and a pick ends it (one pick per Comment).
 //
 // A frame is never re-pointed: its URL is fixed at creation and the frame is keyed by it and by Reload's count, so a
 // version switch and a Reload mount a new frame on a scheme URL and an unmount removes it, never routing a deliverable
@@ -15,10 +20,12 @@ import { opensExternally } from '@shared/ipc/schema/files';
 import { deliverableUrl, type DeliverableRecord } from '@shared/maws/deliverable';
 import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
+import { openCommentComposer } from '../code/anchor/anchor';
 import { openFile } from '../code/open-file';
 import { FileBody } from '../code/viewer/FileViewer';
 import { useViewer } from '../code/viewer/viewer-store';
 import { mawsTranscriptActions } from '../maws/actions';
+import { artifactElementAnchor, type PickMessage } from './comment/pick';
 import { ConsoleChip } from './ConsoleChip';
 import { DELIVERABLES_COPY } from './copy';
 import { HtmlFrame } from './frames/HtmlFrame';
@@ -141,6 +148,24 @@ function Shown({ record, shown, present, checked, reloads, mode, onBack, onVersi
   const path = versionPath(record, shown);
   const body = bodyOf(path);
   const title = titleOf(record);
+  // the frame picking is asked of, by what keys it: another version or a Reload is another frame, which is not picking
+  const frame = `${record.appSessionId}/${record.id}/${shown}#${reloads}`;
+  const [pickingIn, setPickingIn] = useState<string | null>(null);
+  const picking = pickingIn === frame;
+  const commentable = record.kind === 'artifact' && body === 'html' && checked && present;
+  useEffect(() => {
+    if (!picking) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPickingIn(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [picking]);
+  const onPick = (message: PickMessage) => {
+    setPickingIn(null);
+    if (message.type === 'maws:picked') openCommentComposer(artifactElementAnchor(record, shown, message), { appSessionId: record.appSessionId });
+  };
+  const comment = commentable ? { picking, toggle: () => setPickingIn(picking ? null : frame) } : null;
   return (
     <div data-deliverable-viewer="" data-deliverable-id={record.id} data-version={shown} data-body={body} className="flex h-full min-h-0 flex-col bg-bg">
       <header className="flex shrink-0 flex-col gap-1.5 border-b border-border px-2 py-2">
@@ -152,7 +177,12 @@ function Shown({ record, shown, present, checked, reloads, mode, onBack, onVersi
           {record.kind === 'artifact' && <Versions record={record} shown={shown} onChange={onVersion} />}
           {body === 'html' && <ConsoleChip appSessionId={record.appSessionId} deliverableId={record.id} version={shown} />}
         </div>
-        <Actions record={record} shown={shown} path={path} body={body} present={present} mode={mode} onReload={onReload} />
+        <Actions record={record} shown={shown} path={path} body={body} present={present} mode={mode} comment={comment} onReload={onReload} />
+        {picking && (
+          <p role="status" data-picking="" className="px-1 text-ui-sm text-accent">
+            {DELIVERABLES_COPY.picking}
+          </p>
+        )}
       </header>
       <div className="relative min-h-0 flex-1">
         {!checked ? (
@@ -162,18 +192,30 @@ function Shown({ record, shown, present, checked, reloads, mode, onBack, onVersi
             {DELIVERABLES_COPY.missing(path)}
           </p>
         ) : (
-          <Body key={reloads} record={record} shown={shown} path={path} body={body} title={title} />
+          <Body key={reloads} record={record} shown={shown} path={path} body={body} title={title} picking={picking} onPick={onPick} />
         )}
       </div>
     </div>
   );
 }
 
-function Body({ record, shown, path, body, title }: { record: DeliverableRecord; shown: number; path: string; body: BodyKind; title: string }) {
+interface BodyProps {
+  record: DeliverableRecord;
+  shown: number;
+  path: string;
+  body: BodyKind;
+  title: string;
+  picking: boolean;
+  onPick(message: PickMessage): void;
+}
+
+function Body({ record, shown, path, body, title, picking, onPick }: BodyProps) {
   const url = deliverableUrl(record.appSessionId, record.id, shown);
   switch (body) {
     case 'html':
-      return <HtmlFrame key={url} url={url} title={DELIVERABLES_COPY.frameTitle(title)} appSessionId={record.appSessionId} deliverableId={record.id} version={shown} />;
+      return (
+        <HtmlFrame key={url} url={url} title={DELIVERABLES_COPY.frameTitle(title)} appSessionId={record.appSessionId} deliverableId={record.id} version={shown} picking={picking} onPick={onPick} />
+      );
     case 'pdf':
       return <PdfFrame key={url} url={url} title={DELIVERABLES_COPY.frameTitle(title)} />;
     case 'video':
@@ -184,7 +226,18 @@ function Body({ record, shown, path, body, title }: { record: DeliverableRecord;
   }
 }
 
-function Actions({ record, shown, path, body, present, mode, onReload }: { record: DeliverableRecord; shown: number; path: string; body: BodyKind; present: boolean; mode: 'panel' | 'tab'; onReload(): void }) {
+interface ActionsProps {
+  record: DeliverableRecord;
+  shown: number;
+  path: string;
+  body: BodyKind;
+  present: boolean;
+  mode: 'panel' | 'tab';
+  comment: { picking: boolean; toggle(): void } | null; // an artifact's frame on screen
+  onReload(): void;
+}
+
+function Actions({ record, shown, path, body, present, mode, comment, onReload }: ActionsProps) {
   const session = useSessions((s) => s.records.get(record.appSessionId));
   const drawnKind = useViewer((s) => (body === 'file' ? (s.entries.get(viewerTabId(record.id, shown))?.kind ?? null) : null));
   const [problem, setProblem] = useState<{ text: string } | null>(null); // a new object per refusal, so each one is shown its full time
@@ -230,6 +283,13 @@ function Actions({ record, shown, path, body, present, mode, onReload }: { recor
       {DELIVERABLES_COPY.reload}
     </button>,
   );
+  if (comment) {
+    buttons.push(
+      <button key="comment" type="button" className={`${action} aria-pressed:bg-bg-active`} aria-pressed={comment.picking} onClick={comment.toggle}>
+        {DELIVERABLES_COPY.comment}
+      </button>,
+    );
+  }
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5 px-1">
       {buttons}

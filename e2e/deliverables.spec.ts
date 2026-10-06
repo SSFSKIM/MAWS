@@ -200,3 +200,52 @@ test('the capture renders a scheme-served artifact offscreen at the asked size; 
     await maws.cleanup();
   }
 });
+
+// M6: the bridge script on the real Chromium (Design §10): served into an artifact whose doctype follows a comment that
+// mentions `<head>` (the placement M3's review found wrong: the page must stay in standards mode and the script must
+// run), it picks in a scripts-only sandboxed frame when the app asks, swallows the click it picks with, posts the pick to
+// the app, and gives the page its clicks back. The viewer's Comment action and the composer are M7's comment case.
+test('the bridge script picks an element of an artifact in a sandboxed frame and posts the pick to the app', async () => {
+  const maws = await launchMaws({ env: { MAWS_HARNESS: '0' } });
+  try {
+    const id = randomUUID();
+    const copy = join(maws.userData, 'deliverables', APP, id, 'v1.html');
+    mkdirSync(join(copy, '..'), { recursive: true });
+    writeFileSync(
+      copy,
+      '<!-- made by the agent; a <head> in a comment --><!doctype html><html><head><title>E2</title></head><body style="margin:0">' +
+        '<h1 id="hero" style="margin:0;height:200px">Sales overview</h1><p class="lead">more</p>' +
+        "<script>document.addEventListener('click', () => parent.postMessage('e2-page-click', '*'));</script></body></html>",
+    );
+    const at = new Date().toISOString();
+    seed(maws.userData, { id, appSessionId: APP, kind: 'artifact', artifactId: 'dash', title: 'Dashboard', path: copy, versions: [{ path: copy, at }], createdAt: at, updatedAt: at });
+
+    await mountFrame(maws, deliverableUrl(APP, id, 1), 'allow-scripts');
+    const frame = maws.page.frames().find((f) => f.url().startsWith('maws-deliverable://'))!;
+    expect(await frame.evaluate(() => [document.compatMode, document.head.firstElementChild?.hasAttribute('data-maws-bridge') ?? false])).toEqual(['CSS1Compat', true]);
+
+    // what the frame posts to the app, as the viewer hears it (source checked)
+    await maws.page.evaluate(() => {
+      const w = window as unknown as { __e2Posted: unknown[] };
+      const element = document.getElementById('e2-frame') as HTMLIFrameElement;
+      w.__e2Posted = [];
+      window.addEventListener('message', (event) => {
+        if (event.source === element.contentWindow) w.__e2Posted.push(event.data);
+      });
+      element.contentWindow!.postMessage({ type: 'maws:pick', on: true }, '*');
+    });
+    const posted = () => maws.page.evaluate(() => (window as unknown as { __e2Posted: unknown[] }).__e2Posted);
+    await maws.page.mouse.move(100, 100);
+    await expect.poll(() => frame.locator('[data-maws-pick-overlay]').count()).toBe(1);
+    await maws.page.mouse.click(100, 100);
+    await expect.poll(posted).toEqual([
+      { type: 'maws:picked', selector: '#hero', label: 'h1#hero', text: 'Sales overview', rect: { x: 0, y: 0, width: FRAME.width, height: 200 } },
+    ]); // the page never heard the click it was picked with
+    expect(await frame.locator('[data-maws-pick-overlay]').count()).toBe(0);
+    await maws.page.mouse.click(100, 300);
+    await expect.poll(posted).toHaveLength(2);
+    expect((await posted())[1]).toBe('e2-page-click'); // picking ended with the pick: the page has its clicks back
+  } finally {
+    await maws.cleanup();
+  }
+});
