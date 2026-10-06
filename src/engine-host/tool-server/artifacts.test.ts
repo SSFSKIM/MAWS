@@ -110,9 +110,14 @@ describe('artifact_create (G4, host half)', () => {
   it('two creates of one id that overlap register it once', async () => {
     const tool = artifactCreateTool(deps());
     const results = await Promise.all([tool.call({ id: 'dash', html_path: 'dashboard.html', title: 'One' }, ctx()), tool.call({ id: 'dash', html_path: 'dashboard.html', title: 'Two' }, ctx())]);
-    expect(results.map((r) => r.isError ?? false)).toEqual([false, true]);
-    expect(textOf(results[1]!)).toBe(TOOL_ERRORS.artifactExists('dash'));
-    expect((await store.list(A)).map((r) => r.title)).toEqual(['One']);
+    // which call enters the per-session chain first is not deterministic (the stat, extension and size checks before it are async)
+    const winners = results.filter((r) => !r.isError);
+    const losers = results.filter((r) => r.isError);
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(1);
+    expect(textOf(losers[0]!)).toBe(TOOL_ERRORS.artifactExists('dash'));
+    const winnerTitle = results[0] === winners[0] ? 'One' : 'Two';
+    expect((await store.list(A)).map((r) => r.title)).toEqual([winnerTitle]);
   });
 });
 
