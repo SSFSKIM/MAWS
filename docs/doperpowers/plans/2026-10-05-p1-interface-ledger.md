@@ -82,6 +82,7 @@ Files more than one child touches: `src/shared/graph/events.ts`, `src/shared/ipc
 ## 7. Record
 
 - 2026-10-05: opened at wave one's dispatch with the reservations above; E9 holds settings version 9 provisionally.
+- 2026-10-06 (E5 interim 3): E5 adds `layout.unsavedFiles` (renderer → main dirty set), `layout.saveAll` (event) and `layout.saveAllDone` (answer) as `layout.*` extensions, `QuitAnswer 'save_all'`, `BusyReport.unsavedFiles`, and the e2e variable `MAWS_E2E_QUIT_ANSWER=save_all`.
 - 2026-10-06: E8 landed; E6's execution document merged with its names (§5); no settings version for E6.
 - 2026-10-06 (E1 interim): X9's three tools, events and IPC as built (§1, §2, §5); `files.reveal` joins `files.*`; the fallback sentence opens each description (A-18 corrected §1's earlier "ends with"); the installed engine moved to 2.1.291 during E1.
 - 2026-10-06 (E5 interim): E5 names `files.write`, the `files.read` extension, `file.save` and the X10 seam (§5); adds devDependencies `@codemirror/commands` 6.11.1 and `@codemirror/merge` 6.12.2 (exact); tokens `--code-conflict-*`. E3's author reads the seam before designing the comment composer.
