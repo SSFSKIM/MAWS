@@ -46,7 +46,7 @@ export default async()=>{
  delete cliEnv.CLAUDECODE;delete cliEnv.CLAUDE_CODE_ENTRYPOINT;delete cliEnv.CLAUDE_CODE_SSE_PORT;
  const sessionId=randomUUID();
  const p=await harnessRun('e8-plugins-reload',async p=>{
-  p.note({event:'provenance',spec:'docs/doperpowers/plans/2026-10-05-p1-extension.md',child:'E8',pin:'f11ae359af82c86831f052140683ed620dd25500',document:'docs/doperpowers/plans/2026-10-05-e8-plugins.md',question:'G0: reload_plugins and reload_skills answers; does a live session reflect CLI disable, enable and install',engine:BIN,configHome,globalConfig,pinnedSessionId:sessionId,envKeys:Object.keys(env).sort(),settings:settings()});
+  p.note({event:'provenance',charter:'docs/charter.md',spec:'docs/doperpowers/plans/2026-10-05-p1-extension.md',child:'E8',pin:'f11ae359af82c86831f052140683ed620dd25500',document:'docs/doperpowers/plans/2026-10-05-e8-plugins.md',question:'G0: reload_plugins and reload_skills answers; does a live session reflect CLI disable, enable and install',engine:BIN,configHome,globalConfig,pinnedSessionId:sessionId,envKeys:Object.keys(env).sort(),settings:settings()});
   p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
   p.on('elicitation',()=>({action:'decline'}));
   const init=success(await p.init(appInitialize({accepted:true,directory:cwd})),'initialize');

@@ -52,7 +52,7 @@ export default async()=>{
  if(!preRow)throw new Error('e8-probe is not installed: '+JSON.stringify(pre));
  if(!preRow.enabled){const en=cli(cliEnv,'enable',PLUGIN);if(en.json?.outcome!=='ok')throw new Error('could not enable: '+JSON.stringify(en));}
  const p=await harnessRun('e8-plugins-reload-settle',async p=>{
-  p.note({event:'provenance',spec:'docs/doperpowers/plans/2026-10-05-p1-extension.md',child:'E8',pin:'f11ae359af82c86831f052140683ed620dd25500',document:'docs/doperpowers/plans/2026-10-05-e8-plugins.md',question:'G0 Q1: reload after a settling delay reflects the CLI write; Q2: the engine applies a settings change at the next turn without a reload',settleMs:SETTLE,engine:BIN,configHome,globalConfig,pinnedSessionId:sessionId,envKeys:Object.keys(env).sort(),settings:settings()});
+  p.note({event:'provenance',charter:'docs/charter.md',spec:'docs/doperpowers/plans/2026-10-05-p1-extension.md',child:'E8',pin:'f11ae359af82c86831f052140683ed620dd25500',document:'docs/doperpowers/plans/2026-10-05-e8-plugins.md',question:'G0 Q1: reload after a settling delay reflects the CLI write; Q2: the engine applies a settings change at the next turn without a reload',settleMs:SETTLE,engine:BIN,configHome,globalConfig,pinnedSessionId:sessionId,envKeys:Object.keys(env).sort(),settings:settings()});
   p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
   p.on('elicitation',()=>({action:'decline'}));
   success(await p.init(appInitialize({accepted:true,directory:cwd})),'initialize');
