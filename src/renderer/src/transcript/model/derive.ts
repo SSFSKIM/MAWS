@@ -990,7 +990,7 @@ interface KnownAgents {
   names: Map<string, ToolUseId>; // an Agent call's real `name` → its tool use
   peers: Map<string, string>; // a sender's address → the name its envelope gave
 }
-const knownByTurn = new WeakMap<TurnState, KnownAgents>();
+const knownByTurn = new WeakMap<TurnState, { version: number; known: KnownAgents }>();
 
 function namesOf(events: SessionEvent[]): Pick<KnownAgents, 'names' | 'peers'> {
   const names = new Map<string, ToolUseId>();
@@ -1005,13 +1005,12 @@ function namesOf(events: SessionEvent[]): Pick<KnownAgents, 'names' | 'peers'> {
 }
 
 function knownOfTurn(state: TranscriptState, turn: TurnState): KnownAgents {
-  let known = knownByTurn.get(turn);
-  if (!known) {
-    const memo = state.memo.get(turn.id);
-    const work = memo && memo.version === turn.version ? memo.work : deriveTurn(turn, null).work;
-    known = { refs: work.subagents.map(refOf), ...namesOf(turn.events) };
-    knownByTurn.set(turn, known);
-  }
+  const kept = knownByTurn.get(turn);
+  if (kept && kept.version === turn.version) return kept.known;
+  const memo = state.memo.get(turn.id);
+  const work = memo && memo.version === turn.version ? memo.work : deriveTurn(turn, null).work;
+  const known = { refs: work.subagents.map(refOf), ...namesOf(turn.events) };
+  knownByTurn.set(turn, { version: turn.version, known });
   return known;
 }
 
