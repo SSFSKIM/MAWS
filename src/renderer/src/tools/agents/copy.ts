@@ -92,8 +92,6 @@ export const BACKGROUND_COPY = {
   // an ended task's state word (a card's badge, a row's `· <status> <ago>`)
   status: { completed: 'completed', failed: 'failed', stopped: 'stopped', exited: 'ended with the session', unknown: 'status unavailable' },
   runsUnavailable: (message: string) => `Workflow runs unavailable: ${message}`,
-  phase: (title: string, done: number, total: number) => `${title} ${done}/${total}`,
-  phaseQueued: (title: string) => `${title} · Queued`,
   phaseUntitled: (index: number) => `Phase ${index}`, // agents naming a phaseIndex with no workflow_phase row
   columns: { agent: 'Agent', model: 'Model', tokens: 'Tokens', time: 'Time', /* E7 */ state: 'State' }, // the widget's agent table
   phasesPending: 'Phases arrive with the first progress frame',
@@ -125,7 +123,9 @@ export const BACKGROUND_COPY = {
   phaseCount: (done: number, total: number) => `${done}/${total}`,
   phaseCountQueued: 'Queued',
   agentsLabel: (phase: string) => `Agents · ${phase}`, // the agent table's accessible name
-  notStarted: 'Not started', // an agent row with no id: nothing to open yet
+  notStarted: 'Not started', // a queued agent row: nothing to open yet
+  noTranscript: 'No transcript known for this agent', // a started row whose id neither the row nor the run's journal gives
+  phaseDone: 'done', // the phase mark of a finished phase, by its accessible name
   noAgentsInPhase: 'No agents in this phase yet',
   runNotFound: 'Run not found yet', // a hand-off named a run no read has brought yet; the widget opens when one does
   runSummary: {

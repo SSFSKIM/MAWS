@@ -87,6 +87,13 @@ describe('runView', () => {
     const once = progressNode([{ type: 'workflow_agent', index: 1, label: 'solo', phaseIndex: 1, phaseTitle: 'P', state: 'running', startedAt: 1 }]);
     const retried: WorkflowRun = { runId: 'r', snapshot: null, journal: [{ type: 'started', agentId: 'y1', label: 'solo', phase: 'P' }, { type: 'started', agentId: 'y2', label: 'solo', phase: 'P' }] };
     expect(runView(once, retried, NOW).phases[0].agents[0].agentId).toBe('y2');
+    // a journal row with no phase is not used: its label may name agents of several phases
+    const twoPhases = progressNode([
+      { type: 'workflow_agent', index: 1, label: 'check', phaseIndex: 1, phaseTitle: 'P', state: 'done', startedAt: 1 },
+      { type: 'workflow_agent', index: 2, label: 'check', phaseIndex: 2, phaseTitle: 'Q', state: 'done', startedAt: 1 },
+    ]);
+    const phaseless: WorkflowRun = { runId: 'r', snapshot: null, journal: [{ type: 'started', agentId: 'z1', label: 'check' }, { type: 'started', agentId: 'z2', label: 'check' }] };
+    expect(runView(twoPhases, phaseless, NOW).phases.flatMap((p) => p.agents.map((a) => a.agentId))).toEqual([null, null]);
   });
 
   it('no progress yet: no phases', () => {

@@ -37,19 +37,18 @@ export interface RunView {
 
 export type PhaseSelection = number | 'all';
 
-const keyOf = (phase: string | undefined, label: string) => `${phase ?? ''}\u0000${label}`;
+const keyOf = (phase: string, label: string) => `${phase}\u0000${label}`;
 
-// The journal's `started`/`result` rows that carry both an agent id and a label, by phase title and label: the last id
-// wins (a retried agent's latest attempt). A row without a phase matches on its label alone.
-function journalIds(run: WorkflowRun | null): { byPhase: Map<string, AgentId>; byLabel: Map<string, AgentId> } {
-  const byPhase = new Map<string, AgentId>();
-  const byLabel = new Map<string, AgentId>();
+// The journal's `started`/`result` rows that carry an agent id, a label and a phase, by phase title and label: the last
+// id wins (a retried agent's latest attempt). A row without a phase is not used: a label alone may name agents of
+// several phases, and no recorded journal has one.
+function journalIds(run: WorkflowRun | null): Map<string, AgentId> {
+  const ids = new Map<string, AgentId>();
   for (const row of run?.journal ?? []) {
-    if ((row.type !== 'started' && row.type !== 'result') || !row.agentId || row.label === undefined) continue;
-    if (row.phase === undefined) byLabel.set(row.label, row.agentId as AgentId);
-    else byPhase.set(keyOf(row.phase, row.label), row.agentId as AgentId);
+    if ((row.type !== 'started' && row.type !== 'result') || !row.agentId || row.label === undefined || row.phase === undefined) continue;
+    ids.set(keyOf(row.phase, row.label), row.agentId as AgentId);
   }
-  return { byPhase, byLabel };
+  return ids;
 }
 
 export function runView(node: TaskNode, run: WorkflowRun | null, now: number): RunView {
@@ -64,7 +63,7 @@ export function runView(node: TaskNode, run: WorkflowRun | null, now: number): R
   const fromJournal = (phase: WorkflowPhase, label: string): AgentId | null => {
     const key = keyOf(phase.title, label);
     if ((shared.get(key) ?? 0) > 1) return null;
-    return journal.byPhase.get(key) ?? journal.byLabel.get(label) ?? null;
+    return journal.get(key) ?? null;
   };
   return {
     phases: phases.map((phase) => ({

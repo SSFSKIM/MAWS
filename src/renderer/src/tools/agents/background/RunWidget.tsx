@@ -52,7 +52,9 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
   }
   const run = runs?.find((r) => r.runId === node.workflow?.runId) ?? null;
   const view = runView(node, run, now);
-  const selection = phase ?? defaultPhase(view.phases);
+  // the owner's pick while the snapshot still has it, else the default (a phase a later snapshot dropped)
+  const kept = phase === 'all' || view.phases.some((p) => p.index === phase) ? phase : null;
+  const selection = kept ?? defaultPhase(view.phases);
   const live = ctx.status !== null;
   // the selection names its session, so a pinned Subagents tab still on another session follows this one first
   const openAgent = (agentId: AgentId) => ctx.openTool(AGENT_TOOL_IDS.subagents, { appSessionId, params: { agentId, appSessionId } });
@@ -160,7 +162,7 @@ function PhaseMark({ state, running }: { state: RunPhase['state']; running: bool
 }
 
 const Check = ({ hidden = false }: { hidden?: boolean }) => (
-  <span role={hidden ? undefined : 'img'} aria-label={hidden ? undefined : 'done'} aria-hidden={hidden || undefined} className="text-success">
+  <span role={hidden ? undefined : 'img'} aria-label={hidden ? undefined : BACKGROUND_COPY.phaseDone} aria-hidden={hidden || undefined} className="text-success">
     <Icon className="size-3">
       <path d="M3.5 8.5l3 3 6-7" />
     </Icon>
@@ -218,7 +220,7 @@ function AgentRow({ agent, onOpenAgent }: { agent: RunAgent; onOpenAgent: (agent
             {label}
           </button>
         ) : (
-          <span title={BACKGROUND_COPY.notStarted} className="block">
+          <span title={agent.state === 'queued' ? BACKGROUND_COPY.notStarted : BACKGROUND_COPY.noTranscript} className="block">
             {label}
           </span>
         )}

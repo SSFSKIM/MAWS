@@ -244,6 +244,11 @@ describe('background work', () => {
     fireEvent.keyDown(list, { key: 'ArrowUp' }); // stays at the first
     expect(options()[0]).toBe('*All phases|');
     expect(handle.snapshot().view).toEqual({ kind: 'run', taskId: 'wf1', phase: 'all' });
+    // a picked phase a later snapshot no longer has falls back to the default, the active option one that exists
+    fireEvent.click(within(widget()!).getByRole('option', { name: /Solve/ }));
+    push([event('workflow.progress', { taskId: 'wf1', workflowName: 'demo', progress: progress.filter((row) => ('phaseIndex' in row ? row.phaseIndex : row.index) === 2) }, { seq: 3 })]);
+    expect(options()).toEqual(['All phases|', '*Judge|0/1']);
+    expect(list.getAttribute('aria-activedescendant')).toBe(within(widget()!).getByRole('option', { name: /Judge/ }).id);
   });
 
   it('a run that ended leaves an unfinished agent’s time blank, with no spinner', async () => {
@@ -377,6 +382,17 @@ describe('background work', () => {
     openWidget('wf1');
     expect(within(widget()!).queryByRole('button', { name: /queued-one/ })).toBeNull();
     expect(within(widget()!).getByTitle('Not started').textContent).toBe('queued-one');
+    // a started row whose id neither the row nor the journal gives is not "not started"
+    unmountAll();
+    await mount({
+      events: [
+        event('task.started', { taskId: 'wf1', taskType: 'local_workflow', description: 'Judge panel', workflowName: 'demo' }, { seq: 1, at: T }),
+        event('workflow.progress', { taskId: 'wf1', progress: [{ type: 'workflow_agent', index: 1, label: 'done-one', phaseIndex: 1, state: 'done', startedAt: 1 }] }, { seq: 2 }),
+      ],
+    });
+    openWidget('wf1');
+    expect(within(widget()!).queryByTitle('Not started')).toBeNull();
+    expect(within(widget()!).getByTitle('No transcript known for this agent').textContent).toBe('done-one');
   });
 
   it('a per-agent row opens its drill-in on a pinned Subagents tab still holding another session, keeping the selection', async () => {
