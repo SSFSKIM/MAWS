@@ -110,6 +110,9 @@ export interface EngineSessionOptions {
   // E1: where the `maws` tools record deliverables (the launcher's FileDeliverableStore; in memory by default). E2: built
   // with the session's announcement, so every write the store settles reaches the windows as `deliverables.changed`.
   deliverables?: (onWritten: OnDeliverableWritten) => DeliverableWriter;
+  // E10: whether an app is connected to the engine host (the runtime's); `show_pane` and `artifact_screenshot` fail at
+  // once with `appNotOpen` while it is false. Absent, always connected.
+  hasClient?: () => boolean;
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -215,8 +218,8 @@ export class EngineSession {
     this.tracker = new SessionStatusTracker(opts.spec, () => this.touch());
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
-    this.panes = new PaneBridge({ show: (request) => this.emit('paneShow', { appSessionId: opts.spec.appSessionId, ...request }) });
-    this.captures = new HostBridge({ send: (request) => this.emit('artifactCapture', { appSessionId: opts.spec.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS }); // E2
+    this.panes = new PaneBridge({ show: (request) => this.emit('paneShow', { appSessionId: opts.spec.appSessionId, ...request }), hasClient: opts.hasClient /* E10 */ });
+    this.captures = new HostBridge({ send: (request) => this.emit('artifactCapture', { appSessionId: opts.spec.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS, hasClient: opts.hasClient /* E10 */ }); // E2
     const announce: OnDeliverableWritten = (record, change) => this.emit('deliverableChanged', { appSessionId: record.appSessionId, id: record.id, change }); // E2
     this.askTable = new AskTable({
       onChange: () => {

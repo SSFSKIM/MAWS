@@ -43,6 +43,7 @@ export interface LauncherDeps {
   appVersion: string;
   log: (message: string) => void;
   wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec) => void; // attaches the session's listeners before it starts
+  hasClient?: () => boolean; // E10: the runtime's, handed to each session's bridges
 }
 
 function readJournal(path: string): JournalRow[] {
@@ -100,6 +101,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
         reconnectTrigger: deps.table.takeReleased(spec.appSessionId) ? 'process_exit' : 'user',
         // C12 end
         deliverables: (onWritten) => new FileDeliverableStore(deps.userData, { onWritten }), // E1: the maws tools' records under <userData>/deliverables; E2: announced
+        hasClient: deps.hasClient, // E10: the bridges fail fast with no app connected
       });
       deps.wire(session, plan, spec);
       return session;

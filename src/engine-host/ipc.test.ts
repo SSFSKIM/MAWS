@@ -35,6 +35,7 @@ import { FileSessionStateStore } from './store/file-session-state-store';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 // E1 start
 import * as mawsSchema from '@shared/ipc/schema/maws';
+import { TOOL_ERRORS } from '@shared/maws/tools'; // E10
 import { MAWS_DEADLINE_SHAPES } from './ipc';
 // E1 end
 // E3 start
@@ -906,6 +907,23 @@ describe('maws.* commands (E1 M1)', () => {
     expect(await host.call('maws.pane.answer', { appSessionId: id, requestId: 'mcp-1', result: { ok: true, opened } })).toEqual({ outcome: 'delivered' });
     expect(await host.call('maws.pane.answer', { appSessionId: id, requestId: 'mcp-1', result: { ok: true, opened } })).toEqual({ outcome: 'not_pending' });
     await until(() => transport.writes.some((w) => w.type === 'control_response' && (w as { response: { request_id: string } }).response.request_id === 'mcp-1'), 'the answer');
+    transport.exit(0);
+    await host.ipc.table.get(id)!.exited;
+  });
+
+  // E10 (X13, §Design 4): the runtime's hasClient reaches each session's bridges through the launcher, so with no app
+  // connected a show_pane fails at once with appNotOpen and no maws.pane.show is emitted
+  it('answers show_pane with appNotOpen at once and emits nothing when no client is connected', async () => {
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }), hasClient: () => false });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    transport.push({ type: 'control_request', request_id: 'mcp-1', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'show_pane', arguments: { pane: 'terminal' } } } } });
+    const answered = () => transport.writes.find((w) => w.type === 'control_response' && (w as { response: { request_id: string } }).response.request_id === 'mcp-1') as { response: { response: { mcp_response: { result: unknown } } } } | undefined;
+    await until(() => answered() !== undefined, 'the answer');
+    expect(answered()!.response.response.mcp_response.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.appNotOpen('show_pane') }], isError: true });
+    expect(host.emitted.some((e) => e.name === 'maws.pane.show')).toBe(false);
     transport.exit(0);
     await host.ipc.table.get(id)!.exited;
   });

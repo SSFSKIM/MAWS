@@ -154,6 +154,8 @@ export function artifactScreenshotTool(deps: { deliverables: DeliverableWriter; 
         return toolError(WITHDRAWN);
       case 'ended':
         return toolError(ENDED);
+      case 'noClient':
+        return toolError(TOOL_ERRORS.appNotOpen('artifact_screenshot')); // E10
       case 'answered':
         break;
     }
