@@ -17,7 +17,7 @@ Every stopping point is recorded here with a timestamp; the executor splits a ta
   - Baseline at 163e83eb: `pnpm typecheck` green; `pnpm test --maxWorkers=4` 580 files, 7790 passed, 1 skipped (`/tmp/maws-review/gates/e10-preflight-*.log`).
 - [x] (2026-10-06 12:05) M0 — Probes: `spikes/supervisor-probe/findings.txt` with the five verdicts.
 - [x] (2026-10-06 14:40) M1 — The transport and the two modes: the socket protocol, the detached entry, main's connect-or-start, `MAWS_HOST_MODE`.
-- [ ] M2 — Catch-up and host state: the delivered cursor and the connect burst, main's resync fold, `host.*`, idle exit, Stop all, the build handshake and exit-when-idle, the orphan sweep, the fail-fast bridges.
+- [x] (2026-10-06 22:50) M2 — Catch-up and host state: the delivered cursor and the connect burst, main's resync fold, `host.*`, idle exit, Stop all, the build handshake and exit-when-idle, the orphan sweep, the fail-fast bridges.
 - [ ] M3 — The app's surfaces: the quit answer and settings version 10, Settings and Diagnostics rows, the update banner, the crash notice, the lost-terminal state.
 - [ ] M4 — Proof: `pnpm e2e:supervisor`, the live reconnect probe, the packaged check, evidence in both themes, gates, the whole-branch review, Outcomes.
 
@@ -609,6 +609,10 @@ The executor replaces these lines with what actually ran and what it printed.
 
 - Decision: G1's "quitting the app (nothing busy) leaves it running; relaunching connects to it (the same pid)" is amended to a keep-quit check, and §Design 5's first paragraph no longer says an unbusy detached quit goes through `engine.shutdown` and idles out. Both contradicted §Design 5's second paragraph and residue 23 (every non-keep detached quit runs `host.stopAll` and the supervisor exits, because a host that ran `engine.shutdown` can never launch again), which Task 3.1 built. G1's survival and same-pid reconnect are proved by the keep-quit (e2e case (b)) and the unbusy quit's stop by the gates.
   Rationale: Task 3.1's review; the precise text and A-29's ruling (an unbusy quit stops idle sessions as today) agree, the G1 sentence was stale.
+  Date/Author: 2026-10-06, the E10 controller.
+
+- Decision: Task 2.6's recovery after its two review rounds (c583fe17, fa1d0e98). A deferred recovery records what it owes (`unreconciled`: every intent present at the deferring boot, plus each intent's message and progress and the bootstrap notes). A re-run reconciles every owed intent whatever touched it since (reconciliation reads the live table and the record, which no command misleads), so a kept session patched, renamed or released during the wait is handed off, never set up and rolled back; an id locked or starting is passed over, stays owed, is settled under its own lock once the re-run ends, and a start reconciles it first meanwhile. Only marking interrupted starts and retiring bootstraps pass over an intent that a start or take-over began on since the deferring boot, or whose message or progress changed; a draft edit alone does not. A streaming that arrives during the table read makes a failed read retry at once; each step logs its failure and the rest go on; a kill wakes the replay pacing wait.
+  Rationale: Task 2.6's review rounds 1 and 2 (a trust-card start misread as a quit; a touched kept session stopped by a later start's rollback); §Design 5's rule that a kept session is never failed, removed or set up over.
   Date/Author: 2026-10-06, the E10 controller.
 
 Residue decisions (the design above carries each with its reason; the architect folded them as A-29, which accepts every one and rules the three that were marked ★ (10, 11, 21) and the `[parent-impact]` items, overturnable by the owner):
