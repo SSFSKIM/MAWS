@@ -12,7 +12,7 @@ To see it: in a MAWS session, send *Write a self-contained HTML page dashboard.h
 
 - [x] M0 — The image-block probe — 2026-10-06, verdict yes, reviewed clean (the one engine fact this child depends on and no fixture records)
 - [x] M1 (2026-10-06, reviewed clean) — X9: the four artifact tools in the shared module and the host; the store's artifact half; the capture bridge; `maws.delivery.artifact`
-- [ ] M2 — The live recording through `LiveHost`: `p1-maws-artifacts`, its transcript, conformance admission
+- [x] M2 (2026-10-06, reviewed clean; US$0.1332 over two Haiku runs, A-15 identical at 25 keys) — The live recording through `LiveHost`: `p1-maws-artifacts`, its transcript, conformance admission
 - [ ] M3 — Main: the reader, `deliverables.*`, the `maws-deliverable` scheme and the frame policies, the files-service admission, the capture, console attribution
 - [ ] M4 — Renderer: the Deliverables tool (list, viewer, versions, actions), the summary section, the `deliverable` tab
 - [ ] M5 — Transcript: the artifact row, the cells, the delivery row's Open, `SendUserFile` retired, replay parity
@@ -471,7 +471,7 @@ Working directory: the worktree root (`git -C <worktree> rev-parse --show-toplev
 - 2026-10-06 (M0): with the document's probe prompt Haiku delegated the call to a background Agent and nothing was recorded; naming the tool as `mcp__maws__red_square` and asking for the call "yourself (not through an agent)" fixed it. M2's prompt may need the same steer.
 - 2026-10-06 (M0 review): in the product, every `artifact_screenshot` leaves the PNG's original under the engine's config home, which for the owner's sessions is `~/.claude/projects/<slug>/<sessionId>/tool-results/` (the engine writes it, not MAWS; Design §12's "the scratch home in every run" holds for this child's runs only). Disk growth there is the engine's, bounded by the 4 MiB cap per capture. *Evidence:* findings D2.
 - 2026-10-06 (M0 review): although `maws` tools are listed at initialize, with `ENABLE_TOOL_SEARCH=true` the model loaded `red_square` through a ToolSearch `select` (fixture seq 42) before calling it, so Decision Log 3's "in the model's context from its first turn" is qualified: MCP tools are deferred behind ToolSearch under that setting either way; listing at init still avoids the `isLoaded: false` path of a mid-session addition. *Evidence:* findings D3.
-- 2026-10-06 (M0 review): the screenshot's base64 appears twice in the engine's `tool_result` frame (`message.content` and `tool_use_result`) and a third time in the echoed `mcp_response`, so one capture at the 4 MiB cap adds about 17 MB to the journal, inside `MAX_LINE_CHARS` (64 Mi). *Evidence:* `p1-sdk-mcp-image.jsonl` seqs 68 and 69.
+- 2026-10-06 (M0 review): the screenshot's base64 appears twice in the engine's `tool_result` frame (`message.content` and `tool_use_result`) a third time in the echoed `mcp_response`, and a fourth in the host's own outbound answer, so one capture at the 4 MiB cap adds about 22 MB to the journal (about 11 MB in the one `tool_result` frame), inside `MAX_LINE_CHARS` (64 Mi). *Evidence:* `p1-sdk-mcp-image.jsonl` seqs 68 and 69; `p1-maws-artifacts.jsonl` seqs 208 to 210 (corrected after M2's review).
 
 ## Outcomes & Retrospective
 
