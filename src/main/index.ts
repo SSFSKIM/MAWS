@@ -362,14 +362,18 @@ void startWithProfileLock(app, () => {
     publish: (waiting) => void emit('layout.quitWait', { waiting }),
     log: process.env.MAWS_E2E === '1' ? (line) => console.error(line) : undefined,
     // C12 end
-    ask: (report) =>
-      askToQuit(report, {
-        env: process.env,
-        show: (options) => {
-          const win = BrowserWindow.getFocusedWindow();
-          return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options);
+    ask: (report, asked /* E5 */) =>
+      askToQuit(
+        report,
+        {
+          env: process.env,
+          show: (options) => {
+            const win = BrowserWindow.getFocusedWindow();
+            return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options);
+          },
         },
-      }),
+        asked,
+      ),
     // C3's engine host stops its sessions within the grace; a host that cannot answer (not started, or a build without
     // C3's command) has nothing to stop.
     shutdownEngine: async () => {

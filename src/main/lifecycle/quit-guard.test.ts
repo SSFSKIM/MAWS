@@ -38,6 +38,7 @@ const { SAVE_ALL_BOUND_MS, trackUnsavedFiles } = await import('./quit-guard'); /
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const NONE = { midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] };
+const FIRST = { round: 0, reasons: new Map() }; // E5: a flight's first question, no Save all before it
 const TASK = { taskId: 'b1' as never, taskType: 'local_bash', description: 'sleep 900', ambient: false };
 
 // A read model holding the given engine statuses (C4's index source in the product; `apply` changes one later).
@@ -204,7 +205,7 @@ describe('the quit guard', () => {
       publish: vi.fn(),
       engines: noEngines,
       unsavedFiles: () => [], // E5
-      saveAll: vi.fn(async () => {}), // E5
+      saveAll: vi.fn(async (): Promise<ReadonlyMap<string, string>> => new Map()), // E5
       ...over,
     };
     return { deps, control: installQuitGuard(model, deps) };
@@ -223,7 +224,7 @@ describe('the quit guard', () => {
     const { deps } = guard(modelWith(midTurn(2)));
     expect(electron.app.attempt()).toBe(false);
     await settle();
-    expect(deps.ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 2, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] });
+    expect(deps.ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 2, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] }, FIRST);
     expect(deps.shutdownEngine).not.toHaveBeenCalled();
     expect(electron.app.quits).toBe(0);
     expect(electron.app.attempt()).toBe(false);
@@ -402,7 +403,7 @@ describe('quit when idle', () => {
 });
 
 function guardDeps(model: ReturnType<typeof modelWith>, over: Partial<Parameters<typeof installQuitGuard>[1]>) {
-  return installQuitGuard(model, { pty: noTerminals, ask: async () => 'cancel', shutdownEngine: vi.fn(async () => {}), publish: () => {}, engines: noEngines, unsavedFiles: () => [] /* E5 */, saveAll: async () => {} /* E5 */, ...over });
+  return installQuitGuard(model, { pty: noTerminals, ask: async () => 'cancel', shutdownEngine: vi.fn(async () => {}), publish: () => {}, engines: noEngines, unsavedFiles: () => [] /* E5 */, saveAll: async () => new Map() /* E5 */, ...over });
 }
 
 // A pty host whose every `pty.list` answers when the test says; one terminal, busy while `busy` is true.
@@ -631,7 +632,7 @@ describe('the report is fresh when it decides', () => {
     model.apply(status('a', { turn: humanTurn })); // a turn starts during the read
     await d.answer(0);
     expect(electron.app.quits).toBe(0);
-    expect(ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] });
+    expect(ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] }, FIRST);
   });
 
   it('while waiting, a read that a status change overtook does not quit on its zero', async () => {
@@ -712,7 +713,7 @@ describe('unsaved files in the quit question', () => {
       publish: vi.fn(),
       engines: noEngines,
       unsavedFiles: (): readonly string[] => [],
-      saveAll: vi.fn(async () => {}),
+      saveAll: vi.fn(async (): Promise<ReadonlyMap<string, string>> => new Map()),
       ...over,
     };
     return { deps, control: installQuitGuard(model, deps) };
@@ -724,7 +725,7 @@ describe('unsaved files in the quit question', () => {
     const { deps } = guard(modelWith([status('idle')]), { unsavedFiles: () => ['/r/a.ts'] });
     expect(electron.app.attempt()).toBe(false);
     await settle();
-    expect(deps.ask).toHaveBeenCalledExactlyOnceWith(unsaved('/r/a.ts')); // nothing busy, but a file unsaved: asked
+    expect(deps.ask).toHaveBeenCalledExactlyOnceWith(unsaved('/r/a.ts'), FIRST); // nothing busy, but a file unsaved: asked
     expect(electron.app.quits).toBe(0);
   });
 
@@ -772,7 +773,7 @@ describe('unsaved files in the quit question', () => {
 
   it('Save all saves, re-reads the report and quits once nothing is unsaved or busy', async () => {
     let files = ['/r/a.ts'];
-    const saveAll = vi.fn(async () => void (files = []));
+    const saveAll = vi.fn(async () => ((files = []), new Map<string, string>()));
     const { deps } = guard(modelWith([]), { unsavedFiles: () => files, saveAll, ask: vi.fn(async () => 'save_all' as const) });
     electron.app.attempt();
     await settle();
@@ -785,7 +786,7 @@ describe('unsaved files in the quit question', () => {
 
   it('Save all that leaves a file unsaved asks again naming it; one that leaves only busy sessions asks the ordinary question', async () => {
     const ask = vi.fn<(r: unknown) => Promise<'save_all' | 'cancel'>>().mockResolvedValueOnce('save_all').mockResolvedValueOnce('cancel');
-    guard(modelWith([]), { unsavedFiles: () => ['/r/a.ts', '/r/b.ts'], saveAll: async () => {}, ask }); // neither saved (a conflict, say)
+    guard(modelWith([]), { unsavedFiles: () => ['/r/a.ts', '/r/b.ts'], saveAll: async () => new Map(), ask }); // neither saved (a conflict, say)
     electron.app.attempt();
     await settle();
     await settle();
@@ -795,7 +796,7 @@ describe('unsaved files in the quit question', () => {
     electron.app.reset();
     let files = ['/r/a.ts'];
     const ask2 = vi.fn<(r: unknown) => Promise<'save_all' | 'cancel'>>().mockResolvedValueOnce('save_all').mockResolvedValueOnce('cancel');
-    guard(modelWith(midTurn(1)), { unsavedFiles: () => files, saveAll: async () => void (files = []), ask: ask2 });
+    guard(modelWith(midTurn(1)), { unsavedFiles: () => files, saveAll: async () => ((files = []), new Map<string, string>()), ask: ask2 });
     electron.app.attempt();
     await settle();
     await settle();
@@ -805,7 +806,7 @@ describe('unsaved files in the quit question', () => {
 
   it('a quit while Save all runs is held without a second question; Quit anyway quits without saving', async () => {
     let finish!: () => void;
-    const saveAll = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    const saveAll = vi.fn(() => new Promise<ReadonlyMap<string, string>>((resolve) => (finish = () => resolve(new Map()))));
     let files = ['/r/a.ts'];
     const { deps } = guard(modelWith([]), { unsavedFiles: () => files, saveAll, ask: vi.fn(async () => 'save_all' as const) });
     electron.app.attempt();
@@ -846,6 +847,97 @@ describe('unsaved files in the quit question', () => {
     await settle();
     expect(electron.app.quits).toBe(1);
   });
+
+  // Fix wave 1 start: the reasons Save all's answers gave, the e2e seam's later questions, and a failing Save all
+  it('the re-asked question names each file Save all left unsaved with its reason; the others keep the plain listing', () => {
+    const reasons = new Map([['/r/app.ts', 'Changed on disk since you opened it']]);
+    expect(quitQuestion(unsaved('/r/app.ts', '/r/b.ts'), 'Quit', reasons).detail).toBe('app.ts: Changed on disk since you opened it\nUnsaved: b.ts');
+    expect(quitQuestion({ ...unsaved('/r/app.ts'), midTurn: 1 }, 'Quit', reasons)).toMatchObject({
+      message: '1 unsaved file · 1 session mid-turn',
+      detail: 'app.ts: Changed on disk since you opened it\nQuitting stops them. Transcripts stay on disk and can be resumed.',
+    });
+    expect(quitQuestion(unsaved('/r/b.ts'), 'Quit', reasons).detail).toBe('Unsaved: b.ts'); // a saved file's reason names nothing
+    // at most five files named, reasons included, then how many more
+    const seven = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((n) => `/r/${n}.ts`);
+    const two = new Map([['/r/a.ts', 'Could not save: disk full'], ['/r/g.ts', 'Saving…']]);
+    expect(quitQuestion(unsaved(...seven), 'Quit', two).detail).toBe('a.ts: Could not save: disk full\nUnsaved: b.ts, c.ts, d.ts, e.ts and 2 more');
+    const all = new Map(seven.map((path) => [path, 'Unsaved changes']));
+    expect(quitQuestion(unsaved(...seven.slice(0, 6)), 'Quit', all).detail).toBe(
+      ['a', 'b', 'c', 'd', 'e'].map((n) => `${n}.ts: Unsaved changes`).join('\n') + '\nand 1 more',
+    );
+  });
+
+  it('the guard asks each question with its round and the reasons of the Save all before it', async () => {
+    const files = trackUnsavedFiles();
+    const window = Object.assign(new EventEmitter(), { id: 1 });
+    files.update(window, ['/r/app.ts', '/r/b.ts']);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const show = vi.fn().mockResolvedValueOnce({ response: 0 }).mockResolvedValueOnce({ response: 2 }); // Save all, then Cancel
+    const ask = vi.fn((report: Parameters<typeof askToQuit>[0], asked: Parameters<typeof askToQuit>[2]) => askToQuit(report, { env: {}, show }, asked));
+    guard(modelWith([]), {
+      unsavedFiles: () => files.paths(),
+      // the window answers app.ts with the conflict its tab now shows, and b.ts not at all (typed into during the save, say)
+      saveAll: () => files.saveAll((requestId) => setTimeout(() => files.done(window, requestId, [{ path: '/r/app.ts', message: 'Changed on disk since you opened it' }]))),
+      ask,
+    });
+    electron.app.attempt();
+    await settle();
+    await settle();
+    await settle();
+    warn.mockRestore();
+    expect(ask.mock.calls.map(([, asked]) => asked)).toEqual([
+      FIRST,
+      { round: 1, reasons: new Map([['/r/app.ts', 'Changed on disk since you opened it']]) },
+    ]);
+    expect(show.mock.calls.map(([options]) => options.detail)).toEqual(['Unsaved: app.ts, b.ts', 'app.ts: Changed on disk since you opened it\nUnsaved: b.ts']);
+    expect(electron.app.quits).toBe(0);
+  });
+
+  it('under MAWS_E2E a save that keeps failing ends the flight as Cancel after one Save all; the next quit asks afresh', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const show = vi.fn();
+    const env = { MAWS_E2E: '1', MAWS_E2E_QUIT_ANSWER: 'save_all' };
+    const saveAll = vi.fn(async () => new Map([['/r/a.ts', 'Changed on disk since you opened it']]));
+    guard(modelWith([]), { unsavedFiles: () => ['/r/a.ts'], saveAll, ask: (report, asked) => askToQuit(report, { env, show }, asked) });
+    electron.app.attempt();
+    await settle();
+    await settle();
+    expect(saveAll).toHaveBeenCalledOnce();
+    expect(electron.app.quits).toBe(0);
+    electron.app.attempt();
+    await settle();
+    await settle();
+    expect(saveAll).toHaveBeenCalledTimes(2);
+    expect(log.mock.calls.map(([line]) => line)).toEqual([
+      'quit-guard: 1 unsaved file, auto-answered save_all',
+      'quit-guard: 1 unsaved file, auto-answered cancel',
+      'quit-guard: 1 unsaved file, auto-answered save_all',
+      'quit-guard: 1 unsaved file, auto-answered cancel',
+    ]);
+    log.mockRestore();
+    expect(show).not.toHaveBeenCalled();
+    expect(electron.app.quits).toBe(0);
+  });
+
+  it('a Save all that fails is logged and ends the flight as Cancel; the next quit asks again', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const saveAll = vi.fn(async (): Promise<ReadonlyMap<string, string>> => {
+      throw new Error('no window answered');
+    });
+    const { deps } = guard(modelWith([]), { unsavedFiles: () => ['/r/a.ts'], saveAll, ask: vi.fn(async () => 'save_all' as const) });
+    electron.app.attempt();
+    await settle();
+    await settle();
+    expect(saveAll).toHaveBeenCalledOnce();
+    expect(deps.ask).toHaveBeenCalledOnce();
+    expect(electron.app.quits).toBe(0);
+    expect(String(error.mock.calls[0]![0])).toContain('[quit-guard]');
+    error.mockRestore();
+    electron.app.attempt();
+    await settle();
+    expect(deps.ask).toHaveBeenCalledTimes(2);
+  });
+  // Fix wave 1 end
 });
 
 describe('the unsaved files each window pushes', () => {
@@ -872,7 +964,7 @@ describe('the unsaved files each window pushes', () => {
     expect(two.listenerCount('destroyed')).toBe(1);
   });
 
-  it('Save all asks every window and settles once each window holding files has answered that request', async () => {
+  it('Save all asks every window and settles once each window holding files has answered that request, with their failures', async () => {
     const files = trackUnsavedFiles();
     const one = windowOf(1);
     const two = windowOf(2);
@@ -882,18 +974,18 @@ describe('the unsaved files each window pushes', () => {
     files.update(idle, []);
     const sent: string[] = [];
     let settled = false;
-    const done = files.saveAll((requestId) => sent.push(requestId)).then(() => (settled = true));
+    const done = files.saveAll((requestId) => sent.push(requestId)).then((reasons) => ((settled = true), reasons));
     expect(sent).toHaveLength(1);
     const requestId = sent[0]!;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     files.update(one, []);
     files.done(one, requestId, []);
     files.done(idle, requestId, []); // a window without files answers too; it was not waited on
-    files.done(two, 'an-earlier-request', []);
+    files.done(two, 'an-earlier-request', [{ path: '/r/z.ts', message: 'Saving…' }]); // not this request's
     await settle();
     expect(settled).toBe(false);
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     files.done(two, requestId, [{ path: '/r/b.ts', message: 'Changed on disk since you opened it' }]);
-    await done;
+    expect(await done).toEqual(new Map([['/r/b.ts', 'Changed on disk since you opened it']])); // main keeps them by path
     expect(warn).toHaveBeenCalledWith('[quit-guard] could not save /r/b.ts: Changed on disk since you opened it');
     warn.mockRestore();
     expect(files.paths()).toEqual(['/r/b.ts']); // the sets are the windows' pushes; an answer changes none

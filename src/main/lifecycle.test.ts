@@ -65,7 +65,7 @@ vi.mock('./sessions', () => ({
 vi.mock('./menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
 vi.mock('./window-state', () => ({ restoreWindowState: vi.fn(() => null), trackWindowState: vi.fn() }));
 vi.mock('./attention', () => ({ startAttention: vi.fn() }));
-vi.mock('./lifecycle/quit-guard', () => ({ installQuitGuard: vi.fn(), askToQuit: vi.fn(), listProcesses: vi.fn() }));
+vi.mock('./lifecycle/quit-guard', () => ({ installQuitGuard: vi.fn(), askToQuit: vi.fn(), listProcesses: vi.fn(), trackUnsavedFiles: vi.fn(() => ({})) /* E5 */ }));
 // C5 end
 // C10 start: the session service (and the login-shell capture it reads the engine's environment from) is replaced; the
 // lifecycle only has to construct, register and start it without a real shell or index
