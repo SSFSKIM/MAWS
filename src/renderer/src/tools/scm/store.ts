@@ -123,14 +123,24 @@ export function createScmStore(client: MawsBridge, options: { git?: typeof useGi
       }, SCM_REFRESH_MS);
     };
 
-    // A mutation's answer is for the session it was asked for: a pinned tool that moved on meanwhile keeps its own.
-    // `ok` clears the last notice; a refusal or a failed call becomes it.
-    const mutate = async (ui: StoreApi<ScmUi>, appSessionId: AppSessionId, call: Promise<CommandResult<'scm.stage'>>, onOk?: (answer: Extract<ScmMutation, { ok: true }>) => Partial<ScmUi>) => {
+    // A mutation's answer is for the session it was asked for: a pinned tool that moved on meanwhile keeps its own, and
+    // only `elsewhere` (the commit's parked draft) touches the state then. `ok` clears the last notice; a refusal or a
+    // failed call becomes it.
+    type Landed = Extract<ScmMutation, { ok: true }>;
+    const mutate = async (
+      ui: StoreApi<ScmUi>,
+      appSessionId: AppSessionId,
+      call: Promise<CommandResult<'scm.stage'>>,
+      landed?: { here(answer: Landed): Partial<ScmUi>; elsewhere(): Partial<ScmUi> },
+    ) => {
       const result = await settled(call);
-      if (ui.getState().session !== appSessionId) return result;
+      if (ui.getState().session !== appSessionId) {
+        if (landed && result.ok && !('refused' in result.value)) ui.setState(landed.elsewhere());
+        return result;
+      }
       if (!result.ok) ui.setState({ notice: { kind: 'error', text: result.error.message, output: '' } });
       else if ('refused' in result.value) ui.setState({ notice: { kind: result.value.refused, text: result.value.detail, output: result.value.output } });
-      else ui.setState({ notice: null, ...onOk?.(result.value) });
+      else ui.setState({ notice: null, ...landed?.here(result.value) });
       return result;
     };
 
@@ -191,16 +201,25 @@ export function createScmStore(client: MawsBridge, options: { git?: typeof useGi
       // Skip hooks goes back off (it is a decision per commit, as `--no-verify` is in a terminal).
       commit(ui, appSessionId) {
         const { message, noVerify } = ui.getState();
-        return mutate(ui, appSessionId, client.invoke('scm.commit', { appSessionId, message, noVerify }), (answer) => ({
-          lastCommit: answer.commit ?? null,
-          noVerify: false,
-          ...(ui.getState().message === message ? { message: '' } : {}),
-        }));
+        return mutate(ui, appSessionId, client.invoke('scm.commit', { appSessionId, message, noVerify }), {
+          here: (answer) => ({ lastCommit: answer.commit ?? null, noVerify: false, ...(ui.getState().message === message ? { message: '' } : {}) }),
+          // Landed while a pinned tool shows another session: the committed draft parked for this one goes, unless it
+          // was edited before the switch.
+          elsewhere: () => {
+            const { drafts } = ui.getState();
+            if (drafts.get(appSessionId)?.message !== message) return {};
+            const next = new Map(drafts);
+            next.delete(appSessionId);
+            return { drafts: next };
+          },
+        });
       },
 
-      // Events that arrive before the snapshot answers are either folded into it (its run, at or below its `seq`) or
-      // from a run before it (main's latest run is the newest one when it answers): only its own run's later events
-      // are kept. With no run in main, whatever arrived is a run that started since.
+      // A session's run is the checkout's latest, which another session on the same checkout may have started: an
+      // event is the session's when it names the session or the run it holds. Events that arrive before the snapshot
+      // answers are either folded into it (its run, at or below its `seq`) or from a run before it (main's latest run
+      // is the newest one when it answers): only its own run's later events are kept. With no run in main, whatever
+      // the session's own runs sent is a run that started since.
       resume(appSessionId) {
         let r = resumed.get(appSessionId);
         if (r) r.count += 1;
@@ -209,9 +228,9 @@ export function createScmStore(client: MawsBridge, options: { git?: typeof useGi
           r = entry;
           resumed.set(appSessionId, entry);
           entry.off = client.on('scm.remote.output', (event) => {
-            if (event.appSessionId !== appSessionId) return;
-            if (entry.pending) entry.pending.push(event);
-            else setRun(appSessionId, advanceRun(get().runs.get(appSessionId) ?? null, event));
+            if (entry.pending) return void entry.pending.push(event);
+            const run = get().runs.get(appSessionId) ?? null;
+            if (event.appSessionId === appSessionId || event.token === run?.token) setRun(appSessionId, advanceRun(run, event));
           });
           void settled(client.invoke('scm.remote.last', { appSessionId })).then((result) => {
             if (resumed.get(appSessionId) !== entry) return; // released meanwhile
@@ -219,7 +238,7 @@ export function createScmStore(client: MawsBridge, options: { git?: typeof useGi
             entry.pending = null;
             const seeded = result.ok ? runFromSnapshot(result.value) : null;
             let run = seeded;
-            for (const event of pending) if (seeded === null || event.token === seeded.token) run = advanceRun(run, event);
+            for (const event of pending) if (seeded === null ? event.appSessionId === appSessionId : event.token === seeded.token) run = advanceRun(run, event);
             set((s) => ({ runs: mapWith(s.runs, appSessionId, run) }));
           });
         }
@@ -251,8 +270,9 @@ export function createScmStore(client: MawsBridge, options: { git?: typeof useGi
     };
   });
 
-  // A new status C8a's store took for a directory (its git.changed, or a watch's first answer) re-reads the diffs held
-  // over that directory. Its status objects are replaced, never mutated, so a reference change is a new status.
+  // A new status C8a's store took for a directory (its git.changed) re-reads the diffs held over that directory; a
+  // watch's first answer does not, since the holds read on their own when they start (as Review's). Its status objects
+  // are replaced, never mutated, so a reference change is a new status.
   if (options.git) {
     const git = options.git;
     git.subscribe((state, prev) => {

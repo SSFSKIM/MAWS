@@ -16,7 +16,7 @@ import { fail, installFakeMain, ok, type Handler } from '../../test-support/code
 import { A, B, DIR, OTHER_TOKEN, planOf, refusal, statusOf, TOKEN } from '../../test-support/scm';
 import { REVIEW_SCOPE_BYTES_CAP, splitPatch } from '../code/review/review-model';
 import { createScmStore, diffOf, fileDiffOf, SCM_REFRESH_MS, type ScmDiffTarget } from './store';
-import { createScmUi } from './view-state';
+import { createScmUi, forSession } from './view-state';
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 // The renderer's validating client over the fake, so every answer and event the cases script is held to its schema.
@@ -192,6 +192,46 @@ describe('source control store: diffs', () => {
     off();
   });
 
+  it('ignores a read released in flight once the scope is held again, and a file read of the released hold', async () => {
+    const reads: ((patch: string) => void)[] = [];
+    const main = installFakeMain(async (name, input) => {
+      if (name !== 'git.diff') return ok();
+      const patch = await new Promise<string>((resolve) => reads.push(resolve));
+      return ok({ patch: input.path ? patch : patch + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP), files: APP_FILES });
+    });
+    const store = createScmStore(validated(main.bridge));
+    const patch = (value: string) => `diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-before\n+${value}\n`;
+
+    const first = store.getState().hold(WORKTREE);
+    await tick();
+    first(); // released with its read in flight
+    const second = store.getState().hold(WORKTREE);
+    await tick();
+    reads[0](patch('first'));
+    await tick();
+    expect(diffOf(store.getState(), WORKTREE)).toEqual({ status: 'loading' }); // the released hold's answer is not this one's
+    reads[1](patch('second'));
+    await tick();
+    expect(diffOf(store.getState(), WORKTREE)).toMatchObject({ status: 'ok', patch: null });
+
+    store.getState().loadFile(WORKTREE, 'src/app.ts');
+    await tick();
+    second(); // released with the file read in flight
+    const third = store.getState().hold(WORKTREE);
+    await tick();
+    reads[3](patch('third'));
+    await tick();
+    store.getState().loadFile(WORKTREE, 'src/app.ts');
+    await tick();
+    reads[2](patch('stale'));
+    await tick();
+    expect(fileDiffOf(store.getState(), WORKTREE, 'src/app.ts')).toEqual({ status: 'loading' });
+    reads[4](patch('fresh'));
+    await tick();
+    expect(fileDiffOf(store.getState(), WORKTREE, 'src/app.ts')).toMatchObject({ status: 'ok', file: { hunks: ['@@ -1 +1 @@\n-before\n+fresh'] } });
+    third();
+  });
+
   it('says why a read failed', async () => {
     const main = installFakeMain((name) => (name === 'git.diff' ? fail('not an untracked file: udir/') : ok()));
     const store = createScmStore(validated(main.bridge));
@@ -267,6 +307,38 @@ describe('source control store applies no status of its own and resumes a run fr
     expect(ui.getState()).toMatchObject({ lastCommit: { sha: 'abc1234def' }, message: 'Fix, and the next one' });
   });
 
+  it('drops the committed draft a pinned tool parked for its session when the commit lands elsewhere', async () => {
+    const releases: (() => void)[] = [];
+    const main = scmMain(async (name) => {
+      if (name !== 'scm.commit') return ok();
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return ok(committed);
+    });
+    const store = createScmStore(validated(main.bridge));
+    const ui = createScmUi({ session: A });
+    ui.setState({ message: 'Fix', noVerify: true });
+    const done = store.getState().commit(ui, A);
+    await tick();
+    ui.setState(forSession(ui.getState(), B));
+    ui.setState({ message: 'B’s draft' });
+    releases[0]();
+    await done;
+    expect(ui.getState()).toMatchObject({ session: B, message: 'B’s draft', lastCommit: null, notice: null });
+    expect(ui.getState().drafts.has(A)).toBe(false);
+    ui.setState(forSession(ui.getState(), A));
+    expect(ui.getState()).toMatchObject({ session: A, message: '', noVerify: false });
+
+    // A draft edited before the switch is not the one committed: it stays parked.
+    ui.setState({ message: 'Next' });
+    const again = store.getState().commit(ui, A);
+    await tick();
+    ui.setState({ message: 'Next, edited' });
+    ui.setState(forSession(ui.getState(), B));
+    releases[1]();
+    await again;
+    expect(ui.getState().drafts.get(A)).toEqual({ message: 'Next, edited', noVerify: false });
+  });
+
   it('applies an answer only to the session it was asked for', async () => {
     let release!: () => void;
     const main = scmMain(async (name) => {
@@ -309,7 +381,7 @@ describe('source control store applies no status of its own and resumes a run fr
     expect(store.getState().runs.get(A)).toMatchObject({ token: TOKEN, kind: 'push', plan: planOf(), running: true, seq: 3, lines: ['one', 'two', 'three', ''] });
     for (const seq of [1, 2, 3]) main.emit('scm.remote.output', out(seq, `again ${seq}\n`));
     main.emit('scm.remote.output', out(4, 'four\n'));
-    main.emit('scm.remote.output', { ...out(5, ''), appSessionId: B }); // another session's run
+    main.emit('scm.remote.output', { ...out(5, 'B’s run\n', OTHER_TOKEN), appSessionId: B }); // another session's run
     main.emit('scm.remote.output', exit(5, 0));
     expect(store.getState().runs.get(A)).toMatchObject({ seq: 5, lines: ['one', 'two', 'three', 'four', ''], running: false, exitCode: 0 });
     release();
@@ -351,6 +423,34 @@ describe('source control store applies no status of its own and resumes a run fr
     expect(store.getState().runs.get(A)).toMatchObject({ token: OTHER_TOKEN, kind: 'pr', plan: pr, lines: [], seq: 0, running: true });
     main.emit('scm.remote.output', out(1, 'https://github.com/o/r/pull/7\n', OTHER_TOKEN));
     expect(store.getState().runs.get(A)).toMatchObject({ token: OTHER_TOKEN, lines: ['https://github.com/o/r/pull/7', ''] });
+    release();
+  });
+
+  it('follows the run it holds from another session on the same checkout, and nothing else of that session', async () => {
+    const main = scmMain((name) => (name === 'scm.remote.last' ? ok(snapshot()) : ok()));
+    const store = createScmStore(validated(main.bridge));
+    const release = store.getState().resume(B); // B's checkout's latest run is A's push
+    await tick();
+    expect(store.getState().runs.get(B)).toMatchObject({ token: TOKEN, seq: 3 });
+    main.emit('scm.remote.output', out(4, 'four\n'));
+    main.emit('scm.remote.output', exit(5, 0));
+    expect(store.getState().runs.get(B)).toMatchObject({ seq: 5, lines: ['one', 'two', 'three', 'four', ''], running: false, exitCode: 0 });
+    main.emit('scm.remote.output', out(1, 'A’s next run\n', OTHER_TOKEN)); // A's own, not the run B holds
+    expect(store.getState().runs.get(B)).toMatchObject({ token: TOKEN, seq: 5 });
+    release();
+  });
+
+  it('keeps another session’s events of the snapshot’s run that came before it, past its seq', async () => {
+    let answer!: (value: unknown) => void;
+    const main = scmMain(async (name) => (name === 'scm.remote.last' ? ok(await new Promise((resolve) => (answer = resolve))) : ok()));
+    const store = createScmStore(validated(main.bridge));
+    const release = store.getState().resume(B);
+    await tick();
+    main.emit('scm.remote.output', out(4, 'four\n'));
+    main.emit('scm.remote.output', out(1, 'unrelated\n', OTHER_TOKEN));
+    answer(snapshot());
+    await tick();
+    expect(store.getState().runs.get(B)).toMatchObject({ token: TOKEN, seq: 4, lines: ['one', 'two', 'three', 'four', ''] });
     release();
   });
 });

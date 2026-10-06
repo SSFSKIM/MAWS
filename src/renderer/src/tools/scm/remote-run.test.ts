@@ -2,7 +2,7 @@
 // progress rewritten in place, the renderer's cap, the exit.
 import { describe, expect, it } from 'vitest';
 import { A, planOf, TOKEN } from '../../test-support/scm';
-import { advanceRun, appendOutput, REMOTE_OUTPUT_CAP, runFromSnapshot, runStarted } from './remote-run';
+import { advanceRun, appendOutput, runFromSnapshot, runStarted } from './remote-run';
 
 describe('remote run output', () => {
   const none = { lines: [], carriage: false };
@@ -39,20 +39,24 @@ describe('remote run output', () => {
     expect(runFromSnapshot(null)).toBeNull();
   });
 
-  it('marks the truncated chunk and stops taking text past the cap', () => {
+  // Main caps a run at 1 MiB and marks it with one `truncated` chunk; its own notes come outside that budget and must
+  // still show (src/main/scm/remote-runner.ts).
+  it('keeps main’s timeout note after a capped run, with the truncated mark and the exit', () => {
+    const MIB = 1024 * 1024;
     let run = runStarted(null, planOf());
-    run = advanceRun(run, { appSessionId: A, token: TOKEN, seq: 1, kind: 'stderr', text: 'x'.repeat(REMOTE_OUTPUT_CAP - 2) });
-    run = advanceRun(run, { appSessionId: A, token: TOKEN, seq: 2, kind: 'stdout', text: 'abcd' });
-    expect(run.bytes).toBe(REMOTE_OUTPUT_CAP);
-    expect(run.truncated).toBe(true);
-    expect(run.lines.at(-1)!.endsWith('xab')).toBe(true);
-    run = advanceRun(run, { appSessionId: A, token: TOKEN, seq: 3, kind: 'stdout', truncated: true });
-    run = advanceRun(run, { appSessionId: A, token: TOKEN, seq: 4, kind: 'exit', exitCode: null, signal: 'SIGTERM' });
-    expect(run).toMatchObject({ seq: 4, truncated: true, running: false, exitCode: null, signal: 'SIGTERM' });
+    for (let seq = 1; seq <= 64; seq++) run = advanceRun(run, { appSessionId: A, token: TOKEN, seq, kind: 'stderr', text: 'x'.repeat(MIB / 64 - 1) + '\n' });
+    run = advanceRun(run, { appSessionId: A, token: TOKEN, seq: 65, kind: 'stdout', truncated: true });
+    run = advanceRun(run, { appSessionId: A, token: TOKEN, seq: 66, kind: 'stderr', text: 'MAWS: timed out after 120 s; stopping it\n' });
+    run = advanceRun(run, { appSessionId: A, token: TOKEN, seq: 67, kind: 'exit', exitCode: null, signal: 'SIGTERM' });
+    expect(run).toMatchObject({ seq: 67, truncated: true, running: false, exitCode: null, signal: 'SIGTERM' });
+    expect(run.lines.slice(-2)).toEqual(['MAWS: timed out after 120 s; stopping it', '']);
+    expect(run.lines).toHaveLength(66);
   });
 
-  it('counts bytes, not UTF-16 units', () => {
-    const run = advanceRun(runStarted(null, planOf()), { appSessionId: A, token: TOKEN, seq: 1, kind: 'stdout', text: 'é\n' });
-    expect(run.bytes).toBe(3);
+  it('keeps a note that follows a snapshot main already capped', () => {
+    const snapshot = { token: TOKEN, kind: 'push' as const, plan: planOf(), running: true, exitCode: null, signal: null, output: 'x'.repeat(1024 * 1024), truncated: true, seq: 65, startedAt: '2026-10-06T10:00:00.000Z' };
+    const run = advanceRun(runFromSnapshot(snapshot), { appSessionId: A, token: TOKEN, seq: 66, kind: 'stderr', text: '\ncould not start /usr/bin/git: EACCES\n' });
+    expect(run.truncated).toBe(true);
+    expect(run.lines.slice(-2)).toEqual(['could not start /usr/bin/git: EACCES', '']);
   });
 });

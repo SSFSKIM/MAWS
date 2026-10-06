@@ -63,6 +63,12 @@ describe('source control view state', () => {
     expect(store.getState()).toMatchObject({ session: B, message: 'B’s draft', noVerify: false });
   });
 
+  it('answers no change for the session it already shows', () => {
+    const store = createScmUi({ session: A });
+    store.setState({ message: 'Fix', selected: { group: 'staged', path: 'a.ts' }, notice: { kind: 'changed', text: '', output: '' } });
+    expect(forSession(store.getState(), A)).toEqual({});
+  });
+
   it('forgets an empty draft rather than keeping it per session', () => {
     const store = createScmUi({ session: A });
     store.setState(forSession(store.getState(), B));
