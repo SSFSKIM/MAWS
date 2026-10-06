@@ -69,8 +69,9 @@ export function DeliveryRowView({ row }: { row: DeliveryRow }) {
       </div>
       {row.error !== null && <p className="transcript-delivery-error">{row.error}</p>}
       <ul className="transcript-delivery-files">
-        {row.files.map((file) => (
-          <FileLine key={file.id ?? file.path} file={file} appSessionId={appSessionId} actionable={row.error === null} />
+        {row.files.map((file, index) => (
+          // a recorded file by its deliverable id; a pending one (no id yet) by its position, since a call may name a path twice
+          <FileLine key={file.id ?? `pending:${index}`} file={file} appSessionId={appSessionId} actionable={row.error === null} />
         ))}
       </ul>
     </section>

@@ -134,6 +134,24 @@ describe('the delivery row', () => {
   });
 });
 
+describe('the delivery row before its result', () => {
+  it('a call that names one path twice renders both lines without a console warning', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const row: RowOf<'delivery'> = {
+        id: 'delivery:t1' as never, turnId: null, at: '2026-10-06T00:00:00.000Z', kind: 'delivery', toolUseId: 't1' as never,
+        files: [{ path: 'a.txt', name: 'a.txt', id: null }, { path: 'a.txt', name: 'a.txt', id: null }], caption: null, urgency: 'normal', error: null,
+      };
+      const { container } = renderRow(row, { storeKey: APP });
+      expect(container.querySelector('[data-delivery-heading]')!.textContent).toBe('Delivering 2 files');
+      expect(container.querySelectorAll('[data-path="a.txt"]')).toHaveLength(2);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
+  });
+});
+
 describe('the question row’s refusal (A-17)', () => {
   it('p1-question-preview-html: one last line saying the engine refused the question, tags stripped', async () => {
     const store = await fixtureRows('p1-question-preview-html');
