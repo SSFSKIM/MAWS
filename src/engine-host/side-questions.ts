@@ -8,7 +8,7 @@ import type { OperationEvent } from '@shared/engine/operations';
 import type { SideExchange } from '@shared/side/question';
 import type { SideQuestionResponse } from '@shared/wire/control';
 
-export const SESSION_ENDED = 'The session ended';
+const SESSION_ENDED = 'The session ended';
 
 export class SideQuestionLog {
   private readonly entries: SideExchange[] = [];
