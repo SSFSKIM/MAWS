@@ -19,7 +19,8 @@ import type { PluginsAction, PluginsScope } from '@shared/plugins/cli';
 import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws } from './support/launch';
-import { deltaOf, kindOf, manifestOf, pluginsLiveSkipReason, pluginsScratch, type PluginsScratch } from './support/plugins-live';
+import { auditOf, manifestOf, type Manifest, type Tree } from '../test/support/plugins-audit';
+import { pluginsLiveSkipReason, pluginsScratch, type PluginsScratch } from './support/plugins-live';
 import { newChatIn } from './support/sidebar';
 
 const skip = pluginsLiveSkipReason();
@@ -31,6 +32,9 @@ const REPO_SOURCE = 'anthropics/claude-plugins-official'; // the architect's rul
 const PLUGIN = 'e8-probe@e8-scratch';
 const DONE_TIMEOUT = 120_000; // the CLI, the 3 s settle, the reload and its one retry
 const CLONE_TIMEOUT = 240_000; // a 23 MB clone (G0: 17 s)
+// A clone the network refused, as git and the engine word it (DNS, connection, TLS, timeout, HTTP access).
+const NETWORK_REFUSAL = /could not resolve host|unable to access|failed to connect|connection (refused|reset|timed out)|network is unreachable|operation timed out|timed out|getaddrinfo|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|SSL|TLS|offline/i;
+const NOT_FOUND = 'Plugin "nope" not found in marketplace "e8-scratch". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`. · not_found';
 
 let scratch: PluginsScratch;
 test.beforeAll(() => {
@@ -68,11 +72,43 @@ async function openWidget(page: Page, name: string): Promise<Locator> {
   await expect(w).toBeVisible();
   return w;
 }
+// ---- the G4 audit (test/support/plugins-audit.ts) ----------------------------------------------------------------
+
+// The trees around one CLI action set side by side: every changed path with its verdict in live-run.txt; a configuration
+// write outside the manifest (any, for a listing) or a path nobody recognises fails the step.
+async function audited(page: Page, before: Tree, manifest: Manifest | null, what: string): Promise<void> {
+  await page.waitForTimeout(1_000); // the CLI has exited; let a straggling writer land before the after-tree is read
+  const audit = auditOf(before, scratch.tree(), manifest);
+  scratch.log(manifest ? `manifest: ${manifest.paths.join(' · ')}` : `${what}: a listing (D-12: the catalogue caches and .claude.json bookkeeping only)`);
+  scratch.log(audit.lines.length > 0 ? `delta:\n${audit.lines.join('\n')}` : 'delta: none');
+  const verdict =
+    audit.unannounced.length === 0 && audit.unclassified.length === 0
+      ? manifest
+        ? 'verdict: every configuration write inside the manifest'
+        : 'verdict: no configuration write'
+      : `verdict: FAILED${audit.unannounced.length > 0 ? ` · unannounced: ${audit.unannounced.join(', ')}` : ''}${audit.unclassified.length > 0 ? ` · unclassified: ${audit.unclassified.join(', ')}` : ''}`;
+  scratch.log(verdict);
+  expect(audit.unannounced, `${what}: configuration writes the sheet did not announce`).toEqual([]);
+  expect(audit.unclassified, `${what}: paths the audit could not classify`).toEqual([]);
+}
+// A listing the widget runs (its opening reads, the Available section's expansion), audited as one.
+async function listing<T>(page: Page, what: string, run: () => Promise<T>): Promise<T> {
+  scratch.log(`--- listing: ${what}`);
+  const before = scratch.tree();
+  const result = await run();
+  await audited(page, before, null, what);
+  return result;
+}
+
+// `/plugins` opened, its two CLI reads (`plugin list`, `marketplace list`) answered and audited.
 async function openPlugins(page: Page): Promise<Locator> {
-  const w = await openWidget(page, 'plugins');
-  await expect(w.locator('[data-plugins-section="installed"]')).toBeVisible({ timeout: 30_000 });
-  await expect(w.locator('[data-plugins-section="marketplaces"]')).not.toContainText('Reading', { timeout: 30_000 });
-  return w;
+  return listing(page, 'opening /plugins (plugin list --json, plugin marketplace list --json)', async () => {
+    const w = await openWidget(page, 'plugins');
+    await expect(w.locator('[data-plugins-section="installed"]')).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator('[data-plugins-section="installed"]')).not.toContainText('Reading', { timeout: 30_000 });
+    await expect(w.locator('[data-plugins-section="marketplaces"]')).not.toContainText('Reading', { timeout: 30_000 });
+    return w;
+  });
 }
 const installedRow = (w: Locator, id = PLUGIN) => w.locator(`[data-plugins-section="installed"] [data-plugin-row="${id}"]`);
 const marketplaceRow = (w: Locator, name: string) => w.locator(`[data-marketplace-row="${name}"]`);
@@ -96,11 +132,17 @@ async function ended(scope: Locator, timeout = DONE_TIMEOUT): Promise<{ text: st
     .toBe(true);
   return { text: (await line.innerText()).trim(), failed: ((await line.getAttribute('class')) ?? '').includes('text-danger') };
 }
+// The Available section opened (its `plugin list --json --available` read audited as a listing) and one group expanded.
 async function openAvailableGroup(w: Locator, marketplace: string): Promise<Locator> {
   const section = w.locator('[data-plugins-section="available"]');
-  if ((await section.locator('details').first().getAttribute('open')) === null) await section.locator('summary').first().click();
   const group = section.locator('details details').filter({ has: w.page().locator('summary', { hasText: new RegExp(`^${marketplace} · \\d+ plugins?$`) }) });
-  await expect(group).toHaveCount(1, { timeout: 120_000 }); // the catalogue read lists the built-in directory too
+  if ((await section.locator('details').first().getAttribute('open')) === null) {
+    await listing(w.page(), 'expanding Available (plugin list --json --available)', async () => {
+      await section.locator('summary').first().click();
+      await expect(group).toHaveCount(1, { timeout: 120_000 }); // the catalogue read lists the built-in directory too
+    });
+  }
+  await expect(group).toHaveCount(1, { timeout: 120_000 });
   if ((await group.getAttribute('open')) === null) await group.locator('summary').click();
   return group;
 }
@@ -134,7 +176,8 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
   // One management action: the sheet read (its argv shown and screenshotted), confirmed, the row's words when it ended,
   // and the config home's delta beside the action's manifest.
   const action = async (spec: { name: string; action: PluginsAction; scope: PluginsScope; source: string | null; fill: Record<string, string>; sheet: string; submit: string; acknowledge?: boolean; line: () => Locator; timeout?: number }, open: () => Promise<void>) => {
-    const before = scratch.snapshot();
+    scratch.log(`--- ${spec.action}: ${spec.name}`);
+    const before = scratch.tree();
     await open();
     const sheet = sheetOf(page, spec.sheet);
     await expect(sheet.locator('[data-plugins-argv]')).toBeVisible({ timeout: 30_000 });
@@ -150,28 +193,15 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     await expect(sheet).toBeHidden();
     const result = await ended(spec.line(), spec.timeout);
     scratch.log(`row: ${result.text.replaceAll('\n', ' ⏎ ')}${result.failed ? '   [drawn as a failure]' : ''}`);
-    await page.waitForTimeout(1_000); // the CLI has exited; let a straggling writer land before the after-tree is read
-    const delta = deltaOf(before, scratch.snapshot());
-    const manifest = manifestOf(spec.action, spec.scope, spec.source, spec.fill);
-    scratch.log(`manifest (writesOf ${spec.action}, ${spec.scope}, ${spec.source ?? 'null'}): ${manifest.paths.join(' · ')}`);
-    const unannounced: string[] = [];
-    const lines = ([['added', delta.added], ['removed', delta.removed], ['changed', delta.changed]] as const).flatMap(([kind, paths]) =>
-      paths.map((path) => {
-        const where = manifest.covers(path) ? 'manifest' : kindOf(path);
-        if (where === 'unannounced') unannounced.push(`${kind} ${path}`);
-        return `  ${kind.padEnd(7)} ${path}   [${where}]`;
-      }),
-    );
-    scratch.log(lines.length > 0 ? `delta:\n${lines.join('\n')}` : 'delta: none');
-    scratch.log(unannounced.length === 0 ? 'verdict: every configuration write inside the manifest' : `verdict: OUTSIDE the manifest: ${unannounced.join(', ')}`);
-    scratch.observe(spec.name, { argv, writes, then, row: result, delta, unannounced });
-    expect(unannounced, 'configuration writes the sheet did not announce').toEqual([]);
+    scratch.observe(spec.name, { argv, writes, then, row: result });
+    scratch.log(`(writesOf ${spec.action}, ${spec.scope}, ${spec.source ?? 'null'})`);
+    await audited(page, before, manifestOf(spec.action, spec.scope, spec.source, spec.fill), spec.name);
     return result;
   };
 
   try {
     scratch.log(`E8 live run · ${new Date().toISOString()} · engine ${ENGINE_BIN} (${ENGINE_VERSION}) · CLAUDE_CONFIG_DIR=${scratch.config} · marketplace ${scratch.market} · repository ${scratch.repo}`);
-    scratch.log('Each action: the sheet\'s command and writes, the row\'s words once it ended, the config home\'s file delta (config/…) and the project\'s .claude/ (project/…), each path marked [manifest] when writesOf covers it, else [records (D-12)], [catalogue cache (D-12)], [session files] or [unannounced].');
+    scratch.log('Every CLI run is audited (test/support/plugins-audit.ts): each mutation (the sheet\'s command and writes, the row\'s words once it ended) and each listing (the widget\'s opening reads, the Available expansion). The delta covers the config home (config/…) and the project\'s .claude/ (project/…); a file\'s fingerprint is its size, mtime and content hash, so a same-content rewrite shows. Each path is marked [manifest] when writesOf covers it, else [records (D-12)] (a .claude.json bookkeeping key or a .claude.json backup), [catalogue cache (D-12)], [session files] (by name), [unannounced] (a configuration write outside the manifest, any for a listing: fails) or [unclassified] (fails); .claude.json is judged per changed top-level key.');
     await expect(page.locator('[data-region="main"]')).toBeVisible();
     let id = '';
     let builtin = 0; // the plugins the engine loads with an empty home (its own `@builtin` ones)
@@ -223,7 +253,10 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
         await w.getByRole('button', { name: 'Add…' }).click();
       });
       if (result.failed) {
-        scratch.log('the network refused the repository source: recorded; the folder case stays the gate');
+        // only a refusal by the network is tolerated (the architect's ruling); any other failure is the run's
+        expect(result.text, 'a repository-source failure other than a network refusal').toMatch(NETWORK_REFUSAL);
+        scratch.log(`the network refused the repository source (${result.text.split(' · ').at(-1)}): recorded; the folder case stays the gate`);
+        scratch.observe('add-repo.networkRefusal', result.text);
         return;
       }
       const row = marketplaceRow(w, 'claude-plugins-official');
@@ -322,24 +355,28 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       await expect(loaded(w)).not.toContainText('e8-probe');
     });
 
-    await step('error', 'install nope@e8-scratch after its marketplace withdrew it: the engine’s words and code', async () => {
+    await step('offer-nope', 'the marketplace offers `nope`: Refresh reads it in, and Available lists it', async () => {
       const w = page.locator('[data-widget="plugins"]');
-      // the marketplace offers `nope`; a Refresh reads it in, and the open Available section reads the catalogue again
       scratch.offerNope(true);
       const market = marketplaceRow(w, 'e8-scratch');
-      await market.getByRole('button', { name: 'Refresh' }).click();
-      await sheetOf(page, 'marketplace-update').getByRole('button', { name: 'Refresh', exact: true }).click();
-      await ended(market);
+      const result = await action({ name: 'offer-nope-refresh', action: 'marketplace-update', scope: 'user', source: 'directory', fill: { name: 'e8-scratch' }, sheet: 'marketplace-update', submit: 'Refresh', line: () => market }, () =>
+        market.getByRole('button', { name: 'Refresh' }).click(),
+      );
+      expect(result.text).toContain('Successfully updated marketplace: e8-scratch');
       const group = await openAvailableGroup(w, 'e8-scratch');
-      const row = group.locator('[data-plugin-row="nope@e8-scratch"]');
-      await expect(row).toBeVisible({ timeout: 60_000 });
-      // then withdraws it, and the owner installs from the list they read
+      await expect(group.locator('[data-plugin-row="nope@e8-scratch"]')).toBeVisible({ timeout: 60_000 });
+    });
+
+    await step('error', 'install nope@e8-scratch after its marketplace withdrew it: the engine’s words and code', async () => {
+      const w = page.locator('[data-widget="plugins"]');
+      const row = w.locator('[data-plugins-section="available"] [data-plugin-row="nope@e8-scratch"]');
+      // the marketplace withdraws it, and the owner installs from the list they read
       scratch.offerNope(false);
       const result = await action({ name: 'error', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'nope', id: 'nope@e8-scratch' }, sheet: 'install', submit: 'Install', line: () => availableLine(w, 'nope@e8-scratch') }, () =>
         row.getByRole('button', { name: 'Install…' }).click(),
       );
       expect(result.failed).toBe(true);
-      expect(result.text).toMatch(/ · [a-z_]+$/);
+      expect(result.text).toBe(NOT_FOUND);
       scratch.observe('error.code', result.text.split(' · ').at(-1));
     });
 
