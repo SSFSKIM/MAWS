@@ -152,7 +152,7 @@ describe('takeLock', () => {
     expect(leftovers()).toEqual([]);
   });
 
-  it('two candidates linking at once on one directory: one taken, one held', async () => {
+  it('a second candidate after the first took the lock (one directory, live holders): one taken, one held', async () => {
     const alive = new Map([
       [100, 'T100'],
       [101, 'T101'],
