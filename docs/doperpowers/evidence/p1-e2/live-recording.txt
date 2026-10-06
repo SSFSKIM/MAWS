@@ -48,7 +48,7 @@ shows; do not investigate", and the calls made "yourself, one after another, not
   these calls yourself, one after another, not through an agent. Reply with one line: the colour word, the number of
   versions artifact_list reported, and the first six words of the error.
 
-What happened (seqs are the fixture's, spikes/protocol-probe/fixtures/pass3/p1-maws-artifacts.jsonl, 373 rows)
+What happened (seqs are the first recording's seqs (not kept), 373 rows)
   - Permissions allowed once, in order: Write (150), mcp__maws__artifact_create (170), mcp__maws__artifact_screenshot (194),
     Edit (256), mcp__maws__artifact_update (275), mcp__maws__artifact_list (297), mcp__maws__artifact_update (323). No
     background Agent: the steer held.
