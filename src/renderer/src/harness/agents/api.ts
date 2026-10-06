@@ -32,10 +32,10 @@ export interface AgentRowView {
 }
 
 export interface SubagentsView {
-  active: AgentRowView[];
-  done: AgentRowView[];
+  agents: AgentRowView[]; // E7: the tree's Agents section (its agent rows; `tree()` reads its folds and team rows too)
+  done: AgentRowView[]; // the rows shown: none while Done is collapsed, its default (E7)
   disk: AgentRowView[];
-  headings: string[]; // the sections' headings as shown (`Active · 2`)
+  headings: string[]; // the sections' headings as shown (`Agents · 2 running`, `Done · 1`)
   notes: string[]; // the lines above the sections (the disk-only header line, an unavailable read)
   drillIn: {
     agentId: string;
@@ -58,7 +58,21 @@ export interface BackgroundView {
   headings: string[];
 }
 
-// E7 start: the workflow widget as shown (E7 execution document, Interfaces *Harness and e2e*): the run's header, its
+// E7 start: the Subagents tree as shown (E7 execution document, Interfaces *Harness and e2e*): the Agents and Done
+// sections' rows in order. An agent row by its id; a running parent's `Done · N` fold by that parent's id, with its
+// count and whether it is open; the team header, and a roster teammate (no agent of its own) by its name in `title`.
+export interface TreeRowView {
+  section: 'agents' | 'done';
+  kind: 'agent' | 'done-fold' | 'team' | 'roster';
+  agentId: string | null;
+  title: string;
+  depth: number;
+  count: number | null;
+  expanded: boolean | null;
+  orphan: boolean;
+}
+
+// the workflow widget as shown (E7 execution document, Interfaces *Harness and e2e*): the run's header, its
 // phase options (`All phases` first, its count and state empty) and the selected phase's agent rows.
 export interface RunWidgetView {
   taskId: string;
@@ -101,6 +115,7 @@ export interface AgentsHarnessApi {
   answerStop(taskId: string, outcome: 'ok' | 'error'): void; // 'error' rejects with FAKE_STOP_REFUSAL's message
 
   subagents(): SubagentsView | null; // the selected tab's Subagents body, else null
+  tree(): TreeRowView[] | null; // E7: the selected Subagents tab's tree rows, else null
   background(): BackgroundView | null;
   widget(): RunWidgetView | null; // E7: the selected Background work tab's run widget, else null
   log(): LogView | null;

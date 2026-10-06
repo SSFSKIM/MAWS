@@ -135,7 +135,7 @@ function installProbes(): void {
     return {
       headings: all(lists, 'section[data-section] > h3').map(text),
       notes: all(lists, ':scope > p').map(text),
-      active: rows('active'),
+      agents: rows('agents'), // E7: the tree's Agents section (Done is collapsed by default)
       done: rows('done'),
       disk: rows('disk'),
       drillIn: agent
@@ -197,7 +197,7 @@ type Probe = {
   rec: { rows: Record<string, { firstSeen: number; sections: { t: number; v: string }[]; elapsed: { t: number; v: string }[]; lines: { t: number; v: string }[] }>; cards: Record<string, { t: number; v: string }[]>; stopping: Record<string, number>; relay: { t: number; v: string }[] };
   subagents(): {
     headings: string[]; notes: string[];
-    active: { agentId: string; depth: number; title: string; elapsed: string; line: string; waiting: boolean; nested: boolean }[];
+    agents: { agentId: string; depth: number; title: string; elapsed: string; line: string; waiting: boolean; nested: boolean }[];
     done: { agentId: string; depth: number; title: string; elapsed: string; line: string; waiting: boolean; nested: boolean }[];
     disk: { agentId: string; depth: number; title: string; elapsed: string; line: string; waiting: boolean; nested: boolean }[];
     drillIn: { header: string; meta: string; dispatchedBy: string; requestCards: number; label: string; disabled: string | null; tooltip: string | null; line: string | null } | null;
@@ -480,7 +480,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     const agents = <T,>(read: string) => page.evaluate(`(() => { const a = window.__maws_agents; return (${read})(a); })()`) as Promise<T>;
     const ids = { first: [] as string[], perm: '', relayBusy: '', relayIdle: '', foreground: '' };
 
-    await step('i', 'two background agents under Active, then Done', async () => {
+    await step('i', 'two background agents under Agents, then Done', async () => {
       await showTool(page, 'Subagents');
       const from = await s.send('Dispatch two general-purpose agents in the background, model haiku: one lists the files under docs/, the other under mockups/; report both.');
       const started = await s.until('two subagent.started', (ev) => {
@@ -488,11 +488,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         return found.length >= 2 ? found.slice(0, 2) : undefined;
       });
       ids.first = started.map((e) => e.taskId as string);
-      await expect.poll(() => probe(page, (p) => p.subagents().headings), { timeout: 15_000 }).toContain('Active · 2');
-      const shownActive = await probe(page, (p) => p.subagents().active);
-      const t1 = await probe(page, (p) => p.subagents().active.map((r) => r.elapsed));
+      await expect.poll(() => probe(page, (p) => p.subagents().headings), { timeout: 15_000 }).toContain('Agents · 2 running');
+      const shownActive = await probe(page, (p) => p.subagents().agents);
+      const t1 = await probe(page, (p) => p.subagents().agents.map((r) => r.elapsed));
       await sleep(2_200);
-      const t2 = await probe(page, (p) => p.subagents().active.map((r) => r.elapsed));
+      const t2 = await probe(page, (p) => p.subagents().agents.map((r) => r.elapsed));
       const rec = await probe(page, (p) => p.rec.rows);
       const latency = started.map((e) => ({ agentId: e.taskId, description: e.description, isBackground: e.isBackground, startedAt: e.at, rowShownAfterMs: rec[e.taskId as string] ? rec[e.taskId as string].firstSeen - Date.parse(e.at) : null }));
       note('i.active', { rows: shownActive, elapsedThen: t1, elapsedLater: t2, latency });
@@ -500,6 +500,8 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       for (const l of latency) expect(l.rowShownAfterMs, `row of ${l.agentId} shown within a second of its start`).toBeLessThan(1_000);
       await s.until('both agents finished', (ev) => ids.first.every((id) => ev.some((e) => e.kind === 'subagent.finished' && e.taskId === id)), 240_000);
       await expect.poll(() => probe(page, (p) => p.subagents().headings), { timeout: 15_000 }).toContain('Done · 2');
+      const doneToggle = panel.locator('section[data-section="done"] > h3 button'); // E7: Done is collapsed by default
+      if ((await doneToggle.getAttribute('aria-expanded')) !== 'true') await doneToggle.click();
       const done = await probe(page, (p) => p.subagents().done);
       note('i.done', { rows: done, finished: s.after(from).filter((e) => e.kind === 'subagent.finished').map((e) => ({ taskId: e.taskId, status: e.status, summary: e.summary })) });
       for (const row of done.filter((r) => ids.first.includes(r.agentId))) expect(row.line).toMatch(/^finished · /);
@@ -579,8 +581,8 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const from = await s.send(`Dispatch one general-purpose agent in the background, model haiku: run "touch ${TMP.perm}" with Bash and reply OK.`);
       const asked = await s.until('the child’s permission request', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'permission.requested' && e.agentId !== null), 180_000);
       ids.perm = asked.agentId!;
-      await expect.poll(() => probe(page, (p) => p.subagents().active.find((r) => r.waiting) ?? null), { timeout: 15_000 }).not.toBeNull();
-      const row = (await probe(page, (p) => p.subagents().active)).find((r) => r.agentId === ids.perm);
+      await expect.poll(() => probe(page, (p) => p.subagents().agents.find((r) => r.waiting) ?? null), { timeout: 15_000 }).not.toBeNull();
+      const row = (await probe(page, (p) => p.subagents().agents)).find((r) => r.agentId === ids.perm);
       expect(row?.waiting, 'the waiting agent’s row carries the badge').toBe(true);
       expect(row?.line).toMatch(/^Approval needed · /);
       await panel.locator(`[data-agent-row="${ids.perm}"]`).click();

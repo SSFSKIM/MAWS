@@ -120,8 +120,9 @@ async function mount(opts: MountOptions = {}) {
 }
 
 const push = (events: SessionEvent[]) => act(() => fake.batch('A', events));
-const section = (name: 'active' | 'done' | 'disk') => document.querySelector<HTMLElement>(`[data-section="${name}"]`);
-const rowsOf = (name: 'active' | 'done' | 'disk') =>
+type Section = 'agents' | 'done' | 'disk'; // E7: the tree's Agents and Done, and On disk
+const section = (name: Section) => document.querySelector<HTMLElement>(`[data-section="${name}"]`);
+const rowsOf = (name: Section) =>
   Array.from(section(name)?.querySelectorAll<HTMLElement>('[data-agent-row]') ?? []).map((row) => ({
     id: row.dataset.agentRow,
     depth: Number(row.dataset.depth),
@@ -131,7 +132,18 @@ const rowsOf = (name: 'active' | 'done' | 'disk') =>
     nested: row.querySelector<HTMLElement>('[data-part="nested"]')?.title ?? null,
     waiting: row.querySelector('[data-part="waiting"]') !== null,
   }));
-const heading = (name: 'active' | 'done' | 'disk') => section(name)?.querySelector('h3')?.textContent;
+const heading = (name: Section) => section(name)?.querySelector('h3')?.textContent;
+// E7: every row of a section as shown, by kind: agents by id and depth, a fold by its count and whether it is open, the
+// team header and a roster teammate by their text.
+const treeOf = (name: Section) =>
+  Array.from(section(name)?.querySelectorAll<HTMLElement>('[data-agent-row], [data-fold], [data-team], [data-roster]') ?? []).map((el) =>
+    el.dataset.agentRow !== undefined
+      ? `${'  '.repeat(Number(el.dataset.depth))}${el.dataset.agentRow}`
+      : el.dataset.fold !== undefined
+        ? `${'  '.repeat(Number(el.dataset.depth))}[${el.textContent}${el.getAttribute('aria-expanded') === 'true' ? ' open' : ''}]`
+        : `${'  '.repeat(Number(el.dataset.depth))}${el.textContent}`,
+  );
+const expandDone = () => fireEvent.click(within(section('done')!).getByRole('button', { name: /^Done · \d+$/ })); // Done is collapsed by default
 const row = (id: string) => document.querySelector<HTMLElement>(`[data-agent-row="${id}"]`)!;
 
 beforeEach(() => {
@@ -146,33 +158,63 @@ afterEach(() => {
   cleanup();
   handles.splice(0).forEach((handle) => subagentsTool.dispose(handle));
   for (const key of [...useRelays.getState().relays.keys()]) useRelays.getState().dismiss(key);
+  for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key); // E7: a teammates case attaches A's transcript
   setAgentWorkClient(null);
   vi.useRealTimers();
 });
 
 describe('subagents lists', () => {
-  it('splits Active and Done, four and ten shown with Show N more', async () => {
-    const running = Array.from({ length: 6 }, (_, i) => started(`r${i}`, i + 1));
-    const ended = Array.from({ length: 12 }, (_, i) => [started(`d${i}`, 10 + 2 * i), finished(`d${i}`, 11 + 2 * i, {}, at(100 + i))]).flat();
+  // E7 (Design §3; Decision Log 13): the tree's Agents section and the folded Done section replace Active and Done.
+  it('heads the tree Agents · N running, eight rows shown; Done collapsed by default, ten shown once opened; Show N more', async () => {
+    const running = Array.from({ length: 10 }, (_, i) => started(`r${i}`, i + 1));
+    const ended = Array.from({ length: 12 }, (_, i) => [started(`d${i}`, 20 + 2 * i), finished(`d${i}`, 21 + 2 * i, {}, at(100 + i))]).flat();
     await mount({ events: [...running, ...ended] });
-    expect(heading('active')).toBe('Active · 6');
-    expect(rowsOf('active').map((r) => r.id)).toEqual(['r0', 'r1', 'r2', 'r3']);
+    expect(heading('agents')).toBe('Agents · 10 running');
+    expect(rowsOf('agents').map((r) => r.id)).toEqual(['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']);
     expect(heading('done')).toBe('Done · 12');
+    expect(within(section('done')!).getByRole('button', { name: 'Done · 12' }).getAttribute('aria-expanded')).toBe('false');
+    expect(rowsOf('done')).toEqual([]);
+    expandDone();
     expect(rowsOf('done')).toHaveLength(10);
     expect(rowsOf('done')[0].id).toBe('d11'); // newest end first
-    fireEvent.click(within(section('active')!).getByRole('button', { name: 'Show 2 more' }));
-    expect(rowsOf('active')).toHaveLength(6);
+    fireEvent.click(within(section('agents')!).getByRole('button', { name: 'Show 2 more' }));
+    expect(rowsOf('agents')).toHaveLength(10);
     fireEvent.click(within(section('done')!).getByRole('button', { name: 'Show 2 more' }));
     expect(rowsOf('done')).toHaveLength(12);
     expect(screen.getByText('Live activity · includes nested agents')).toBeTruthy();
   });
 
-  it('nests a child under its parent at depth 1 in Active and again in Done', async () => {
-    await mount({ events: [started('p', 1), dispatch('p', 'tu-c', 2), started('c', 3)] });
-    expect(rowsOf('active').map((r) => [r.id, r.depth, r.nested])).toEqual([['p', 0, null], ['c', 1, null]]);
-    push([finished('c', 4, {}, at(20)), finished('p', 5, {}, at(30))]);
-    expect(section('active')).toBeNull();
+  it('nests a child at depth 1 under its running parent, folds it under the parent’s Done · 1 once it finishes, and lists both under Done when both have', async () => {
+    const { handle } = await mount({ events: [started('p', 1), dispatch('p', 'tu-c', 2), started('c', 3)] });
+    expect(rowsOf('agents').map((r) => [r.id, r.depth, r.nested])).toEqual([['p', 0, null], ['c', 1, null]]);
+    push([finished('c', 4, {}, at(20))]);
+    expect(heading('agents')).toBe('Agents · 1 running');
+    expect(treeOf('agents')).toEqual(['p', '  [Done · 1]']);
+    expect(section('done')).toBeNull();
+    fireEvent.click(within(section('agents')!).getByRole('button', { name: 'Done · 1 under Agent p' }));
+    expect(treeOf('agents')).toEqual(['p', '  [Done · 1 open]', '  c']);
+    expect(rowsOf('agents')[1]).toMatchObject({ id: 'c', depth: 1, nested: null, line: expect.stringMatching(/^finished · /), elapsed: '' });
+    expect(handle.snapshot().expandedFolds).toEqual(new Set(['p']));
+    push([finished('p', 5, {}, at(30))]);
+    expect(section('agents')).toBeNull();
+    expect(heading('done')).toBe('Done · 2');
+    expandDone();
     expect(rowsOf('done').map((r) => [r.id, r.depth])).toEqual([['p', 0], ['c', 1]]);
+  });
+
+  it('keeps a finished parent of a running agent under Agents, its children unfolded and each row read by its own status', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse(at(60)));
+    await mount({
+      events: [started('p', 1), dispatch('p', 'tu-c', 2), started('c', 3), dispatch('p', 'tu-d', 4), started('d', 5), finished('d', 6, {}, at(20)), finished('p', 7, {}, at(30))],
+    });
+    expect(treeOf('agents')).toEqual(['p', '  c', '  d']);
+    expect(rowsOf('agents').map((r) => [r.id, r.elapsed, r.line])).toEqual([
+      ['p', '', 'finished · just now'],
+      ['c', '1m 00s', 'Working'],
+      ['d', '', 'finished · just now'],
+    ]);
+    expect(section('done')).toBeNull();
   });
 
   it('nests On disk over the nested-agents sidecars of a disk-only session, with status unavailable and the header line', async () => {
@@ -183,20 +225,43 @@ describe('subagents lists', () => {
       ['Inner reads one.txt', 1, 'status unavailable'],
     ]);
     expect(screen.getByText('Status is known only while the session runs here')).toBeTruthy();
-    expect(section('active')).toBeNull();
+    expect(section('agents')).toBeNull();
     expect(screen.queryByText('Live activity · includes nested agents')).toBeNull();
   });
 
-  it('marks a child whose parent sits in the other list as an orphan at depth 0, its tooltip naming the parent', async () => {
-    await mount({ events: [started('p', 1, { description: 'Planner' }), dispatch('p', 'tu-c', 2), started('c', 3), finished('c', 4)] });
-    expect(rowsOf('done')).toEqual([expect.objectContaining({ id: 'c', depth: 0, nested: 'Child of Planner' })]);
+  it('marks a child whose parent is known only on disk as an orphan root, its tooltip naming the parent (Decision Log 19)', async () => {
+    const [outer] = sidecarsOf('pass3/nested-agents-sidecars');
+    await mount({ events: [dispatch(outer.agentId, 'tu-c', 1), started('c', 2)], sidecars: [outer] });
+    expect(rowsOf('agents')).toEqual([expect.objectContaining({ id: 'c', depth: 0, nested: 'Child of Outer agent dispatching inner' })]);
     expect(row('c').querySelector('[data-part="nested"]')?.textContent).toBe('· nested');
-    expect(rowsOf('active')).toEqual([expect.objectContaining({ id: 'p', depth: 0, nested: null })]);
+    expect(rowsOf('disk')).toEqual([expect.objectContaining({ id: outer.agentId, depth: 0, nested: null })]);
   });
 
   it('marks a child of an agent the session does not list', async () => {
     await mount({ events: [dispatch('ghost', 'tu-c', 1), started('c', 2)] });
-    expect(rowsOf('active')).toEqual([expect.objectContaining({ id: 'c', depth: 0, nested: 'Child of an agent this session does not list' })]);
+    expect(rowsOf('agents')).toEqual([expect.objectContaining({ id: 'c', depth: 0, nested: 'Child of an agent this session does not list' })]);
+  });
+
+  // E7 (Design §5; Decision Log 7, 24): no recorded listing names a teammate, so the roster is a hand-built one.
+  it('groups the teammates the newest listing names under Team · led by this session, a teammate no agent matches as a roster row', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('l1', 'ListAgents', {});
+    b.result('l1', [
+      'This session is lead [aa11bb] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).', '',
+      'Teammates (2):', '  researcher [9c1f00]  ·  Explore  ·  in-process  ·  joined 1m ago', '  tester  ·  general-purpose  ·  idle  ·  joined 2m ago',
+    ].join('\n'));
+    const listedAt = b.events.find((e) => e.kind === 'tool.use')!.at;
+    vi.setSystemTime(Date.parse(listedAt) + 120_000);
+    await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(b.events) }));
+    const [one] = sidecarsOf('subagent-sidecars');
+    await mount({ events: [started('solo', 1), started(one.agentId, 2)], sidecars: [{ ...one, meta: { ...one.meta!, name: 'researcher' } }] });
+    expect(treeOf('agents')).toEqual(['Team · led by this session', `  ${one.agentId}`, '  testergeneral-purpose · listed 2m ago', 'solo']);
+    expect(heading('agents')).toBe('Agents · 2 running');
+    const roster = document.querySelector<HTMLElement>('[data-roster="tester"]')!;
+    expect(roster.tagName).not.toBe('BUTTON'); // no transcript to open
+    expect(roster.querySelector('[data-part="title"]')?.textContent).toBe('tester');
   });
 
   it('titles a row by the sidecar’s name, else the dispatch description, and the second line by summary, activity, else Working', async () => {
@@ -206,18 +271,18 @@ describe('subagents lists', () => {
       events: [started(one.agentId, 1, { description: 'Read one' }), started(two.agentId, 2, { description: 'Read two' })],
       sidecars: [named, two],
     });
-    expect(rowsOf('active').map((r) => [r.title, r.line])).toEqual([
+    expect(rowsOf('agents').map((r) => [r.title, r.line])).toEqual([
       ['scout', 'Read one'],
       ['Read two', 'Working'],
     ]);
     push([event('subagent.progress', { taskId: two.agentId, description: 'Reading two.txt', usage: { totalTokens: 10, toolUses: 1, durationMs: 900 } }, { seq: 3 })]);
-    expect(rowsOf('active')[1]).toMatchObject({ title: 'Read two', line: 'Reading two.txt' });
+    expect(rowsOf('agents')[1]).toMatchObject({ title: 'Read two', line: 'Reading two.txt' });
   });
 
   it('lists a workflow’s agents in no section, though the graph holds them from the run’s sidecars', async () => {
     const runs = workflowRunsOf();
     await mount({ status: null, sidecars: sidecarsOf('pass2/workflow-disk', runs[0].runId), runs });
-    expect(section('active') ?? section('done') ?? section('disk')).toBeNull();
+    expect(section('agents') ?? section('done') ?? section('disk')).toBeNull();
     expect(screen.getByText('No subagents yet')).toBeTruthy();
     const nodes = [...useTaskGraph.getState().entries.get(A)!.graph.tasks.values()].filter((n) => n.kind === 'agent');
     expect(nodes.map((n) => n.agent?.runId)).toEqual([runs[0].runId, runs[0].runId]);
@@ -228,9 +293,9 @@ describe('subagents lists', () => {
     act(() =>
       useAttention.getState().applySnapshot([item('A', 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })]),
     );
-    expect(rowsOf('active').map((r) => [r.id, r.waiting])).toEqual([['a1', true], ['a2', false]]);
+    expect(rowsOf('agents').map((r) => [r.id, r.waiting])).toEqual([['a1', true], ['a2', false]]);
     expect(row('a1').querySelector('[data-part="waiting"]')?.textContent).toBe('waiting');
-    expect(rowsOf('active')[0].line).toContain('Approval needed');
+    expect(rowsOf('agents')[0].line).toContain('Approval needed');
   });
 
   it('ticks elapsed once a second, and reads elapsed unavailable for an agent known only from the snapshot', async () => {
@@ -238,15 +303,16 @@ describe('subagents lists', () => {
     vi.setSystemTime(Date.parse(at(5)));
     const snapshotBorn = { taskId: 'snap' as TaskId, taskType: 'local_agent', description: 'From the snapshot', ambient: false };
     await mount({ status: live({ backgroundTasks: [snapshotBorn] }), events: [started('a1', 1)] });
-    expect(rowsOf('active').map((r) => [r.id, r.elapsed])).toEqual([['snap', 'elapsed unavailable'], ['a1', '5s']]);
+    expect(rowsOf('agents').map((r) => [r.id, r.elapsed])).toEqual([['snap', 'elapsed unavailable'], ['a1', '5s']]);
     act(() => vi.advanceTimersByTime(3000));
-    expect(rowsOf('active')[1].elapsed).toBe('8s');
+    expect(rowsOf('agents')[1].elapsed).toBe('8s');
   });
 
   it('a disk-only session: On disk with status unavailable, a stoppedByUser sidecar under Done as stopped, never Active', async () => {
     const [one, two] = sidecarsOf('subagent-sidecars');
     await mount({ status: null, sidecars: [one, { ...two, meta: { ...two.meta!, stoppedByUser: true } }] });
-    expect(section('active')).toBeNull();
+    expect(section('agents')).toBeNull();
+    expandDone();
     expect(rowsOf('done')).toEqual([expect.objectContaining({ id: two.agentId, line: 'stopped' })]);
     expect(rowsOf('disk')).toEqual([expect.objectContaining({ id: one.agentId, line: 'status unavailable' })]);
   });
@@ -273,6 +339,7 @@ describe('subagents lists', () => {
         started('gone', 7), event('process.exited', {}, { seq: 8, at: at(10) }),
       ],
     });
+    expandDone();
     const lines = Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]));
     expect(lines).toEqual({ ok: 'finished · 3m ago · Read both files', bad: 'finished with errors · 3m ago', halt: 'stopped · 3m ago', gone: 'ended with the session' });
   });
@@ -288,6 +355,7 @@ describe('subagents lists', () => {
         started('wait', 4), finished('wait', 5, { summary: pointer.replace('"hb"', '"wait"') }),
       ],
     });
+    expandDone();
     const lines = Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]));
     expect(lines).toEqual({ hb: 'finished · 3m ago · Found 3 files.', wait: 'finished · 3m ago' });
   });
@@ -670,7 +738,7 @@ describe('subagents tool', () => {
     expect(fake.listeners()).toBe(0);
   });
 
-  it('the one-second ticker runs only while a shown Active agent is live, Active expanded and the tool visible', async () => {
+  it('the one-second ticker runs only while a shown agent is live, its section expanded and the tool visible', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     vi.setSystemTime(Date.parse(at(1)));
     const { handle, rerender } = await mount({ events: [started('a1', 1)] });
@@ -679,11 +747,13 @@ describe('subagents tool', () => {
     expect(vi.getTimerCount()).toBe(0);
     rerender(<Mounted state={handle} visible />);
     expect(vi.getTimerCount()).toBe(1);
-    fireEvent.click(within(section('active')!).getByRole('button', { name: 'Active · 1' })); // collapsed
+    fireEvent.click(within(section('agents')!).getByRole('button', { name: 'Agents · 1 running' })); // collapsed
     expect(vi.getTimerCount()).toBe(0);
-    fireEvent.click(within(section('active')!).getByRole('button', { name: 'Active · 1' }));
+    fireEvent.click(within(section('agents')!).getByRole('button', { name: 'Agents · 1 running' }));
     expect(vi.getTimerCount()).toBe(1);
     push([finished('a1', 2, {}, at(2))]);
+    expect(vi.getTimerCount()).toBe(0); // E7: the finished agent sits in the collapsed Done section: nothing shown ticks
+    expandDone();
     expect(vi.getTimerCount()).toBe(1); // only Done's slow tick now
     act(() => vi.advanceTimersByTime(1000));
     expect(vi.getTimerCount()).toBe(1);
@@ -696,6 +766,7 @@ describe('subagents tool', () => {
     vi.setSystemTime(Date.parse(at(0)));
     await mount({ events: [started('a1', 1)] });
     push([finished('a1', 2, {}, at(1))]);
+    expandDone();
     expect(rowsOf('done')[0].line).toBe('finished · just now');
     act(() => vi.advanceTimersByTime(90_000));
     expect(rowsOf('done')[0].line).toBe('finished · 1m ago');
@@ -711,12 +782,14 @@ describe('subagents tool', () => {
     expect(document.querySelector('[data-view="agent"]')).not.toBeNull();
   });
 
-  it('a pinned tool follows the shown session: that session’s lists, its view, scroll and draft reset', async () => {
+  it('a pinned tool follows the shown session: that session’s lists, its view, scroll, draft and open folds reset', async () => {
     const { handle, rerender } = await mount({ events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
     act(() => handle.setDraft('for A'));
+    act(() => handle.toggleFold('a1' as TaskId));
+    expect(handle.snapshot().expandedFolds).toEqual(new Set(['a1']));
     rerender(<Mounted state={handle} appSessionId={B} />);
     expect(document.querySelector('[data-view="agent"]')).toBeNull();
-    expect(handle.snapshot()).toMatchObject({ appSessionId: B, view: { kind: 'lists' }, scrollTop: 0, draft: '' });
+    expect(handle.snapshot()).toMatchObject({ appSessionId: B, view: { kind: 'lists' }, scrollTop: 0, draft: '', expandedFolds: new Set() });
     expect(fake.calls).toContain('subagents B');
     expect(fake.calls.filter((c) => c === 'off eventBatch')).toHaveLength(1); // A's watch released
   });

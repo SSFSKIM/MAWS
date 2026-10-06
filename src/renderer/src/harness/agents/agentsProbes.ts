@@ -13,7 +13,7 @@ import { STOP_SETTLE_MS, useTaskGraph } from '../../tools/agents/store';
 import { useTranscriptStore } from '../../transcript';
 import { fakeId } from '../panel/fakeSessions';
 import { attachesOf, childSourceFor, columnHandle, columnView, fake, feed, patchStatus, releaseThrough, reset, setAgentTab } from './AgentsHarnessBlock';
-import type { AgentRowView, AgentsHarnessApi, BackgroundView, LogView, RunWidgetView, SubagentsView } from './api';
+import type { AgentRowView, AgentsHarnessApi, BackgroundView, LogView, RunWidgetView, SubagentsView, TreeRowView } from './api';
 
 // The fixture directories, raw, as C4's `fs.subagents` and `fs.workflows` would answer them (sizes and times are nominal;
 // the lists read neither).
@@ -94,13 +94,32 @@ function subagents(): SubagentsView | null {
     };
   }
   return {
-    active: rows('active'),
+    agents: rows('agents'),
     done: rows('done'),
     disk: rows('disk'),
     headings: [...(lists?.querySelectorAll('section[data-section] > h3') ?? [])].map(text),
     notes: [...(lists?.querySelectorAll(':scope > p') ?? [])].map(text),
     drillIn,
   };
+}
+
+// E7: the tree's rows as shown, in order (the lists view only).
+function tree(): TreeRowView[] | null {
+  const lists = bodyOf('subagents')?.querySelector('[data-view="lists"]');
+  if (!lists) return null;
+  return [...lists.querySelectorAll<HTMLElement>('section[data-section="agents"], section[data-section="done"]')].flatMap((section) =>
+    [...section.querySelectorAll<HTMLElement>('[data-agent-row], [data-fold], [data-team], [data-roster]')].map((row): TreeRowView => {
+      const base = { section: section.dataset.section as TreeRowView['section'], depth: Number(row.dataset.depth), count: null, expanded: null, orphan: false };
+      if (row.dataset.agentRow !== undefined) {
+        return { ...base, kind: 'agent', agentId: row.dataset.agentRow, title: text(row.querySelector('[data-part="title"]')), orphan: row.querySelector('[data-part="nested"]') !== null };
+      }
+      if (row.dataset.fold !== undefined) {
+        return { ...base, kind: 'done-fold', agentId: row.dataset.fold, title: text(row), count: Number(/\d+$/.exec(text(row))?.[0]), expanded: row.getAttribute('aria-expanded') === 'true' };
+      }
+      if (row.dataset.roster !== undefined) return { ...base, kind: 'roster', agentId: null, title: row.dataset.roster };
+      return { ...base, kind: 'team', agentId: null, title: text(row) };
+    }),
+  );
 }
 
 // ---- Background work -------------------------------------------------------------------------------------------------------
@@ -329,6 +348,7 @@ export const agentsProbes: AgentsHarnessApi = {
   calls: () => fake.calls(),
   answerStop: (taskId, outcome) => fake.answerStop(taskId, outcome),
   subagents,
+  tree, // E7
   background,
   widget, // E7
   log,

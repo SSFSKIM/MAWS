@@ -7,8 +7,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 export const SUBAGENTS_COPY = {
   title: 'Subagents',
   // lists
-  active: (n: number) => `Active · ${n}`,
-  done: (n: number) => `Done · ${n}`,
+  done: (n: number) => `Done · ${n}`, // the Done section's heading, and (E7) a running parent's fold over its finished children
   onDisk: (n: number) => `On disk · ${n}`,
   showMore: (n: number) => `Show ${n} more`,
   working: 'Working', // a row's second line when it has neither a summary nor (under a real name) a description
@@ -45,6 +44,13 @@ export const SUBAGENTS_COPY = {
   stopping: 'stopping…',
   stopFailed: (message: string) => `Couldn't stop it: ${message}`,
   waitingToStart: 'Waiting for the agent to start',
+  // E7 start: the topology tree (Design §3, §5)
+  agents: (running: number) => `Agents · ${running} running`,
+  foldLabel: (n: number, parentTitle: string) => `Done · ${n} under ${parentTitle}`, // the fold's accessible name
+  team: 'Team · led by this session',
+  teammateListed: (agentType: string | null, ago: string) => (agentType ? `${agentType} · listed ${ago}` : `listed ${ago}`),
+  teammateNoTranscript: 'Named by the team listing; no transcript of it is known here',
+  // E7 end
 } as const;
 
 // The relay composer (Interfaces *The relay*): its label, its disabled reasons (shown as the placeholder) and the pending

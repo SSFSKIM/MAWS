@@ -74,6 +74,11 @@ class Harness {
   background = () => this.agents('background');
   log = () => this.agents('log');
   drillIn = async () => (await this.subagents())?.drillIn ?? null;
+  // E7: the tree's Done section is collapsed by default; this opens it (once it is listed) unless it is open already.
+  async expandDone(): Promise<void> {
+    const toggle = this.region.locator('section[data-section="done"] > h3 button');
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  }
   // A tool on A, selected (a single-instance tool already open is re-targeted and selected; Subagents opened with no
   // params shows its lists).
   open = (toolId: 'subagents' | 'background') => this.panel('addTool', toolId);
@@ -95,25 +100,26 @@ test.describe('the #panel harness: the agent tools', () => {
   test.use({ mawsEnv: HARNESS_ENV });
   test.beforeAll(() => mkdirSync(DIR_A, { recursive: true }));
 
-  test('two agents show under Active and move to Done', async ({ maws }) => {
+  test('two agents show under Agents and move to Done', async ({ maws }) => {
     test.setTimeout(120_000); // one wait of up to a minute: replayed starts are hours old, so the count moves by the minute
     const h = await Harness.open(maws);
     await h.load('A', 'pass1/subagent', { releaseTo: PASS1.firstStart });
     await h.open('subagents');
     // The engine's snapshot naming the first agent comes a frame before its start: a running node whose start is unknown.
-    await expect.poll(async () => (await h.subagents())?.active).toEqual([expect.objectContaining({ agentId: FIRST.agentId, elapsed: 'elapsed unavailable' })]);
+    await expect.poll(async () => (await h.subagents())?.agents).toEqual([expect.objectContaining({ agentId: FIRST.agentId, elapsed: 'elapsed unavailable' })]);
 
     await h.agents('releaseThrough', 'A', PASS1.secondStart);
-    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Active · 2']);
-    const active = (await h.subagents())!.active;
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Agents · 2 running']);
+    const active = (await h.subagents())!.agents;
     expect(titles(active)).toEqual([FIRST.title, SECOND.title]);
     for (const row of active) expect(row.elapsed, `${row.title}: a live count`).toMatch(/^(\d+h \d{2}m|\d+m \d{2}s|\d+s)$/);
     // The elapsed ticks: the shown count moves on its own (by the minute here, the replayed start being hours old).
     const before = active[0].elapsed;
-    await expect.poll(async () => (await h.subagents())?.active[0]?.elapsed, { timeout: 65_000, intervals: [1_000] }).not.toBe(before);
+    await expect.poll(async () => (await h.subagents())?.agents[0]?.elapsed, { timeout: 65_000, intervals: [1_000] }).not.toBe(before);
 
     await h.agents('releaseThrough', 'A', PASS1.firstFinish);
-    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Active · 1', 'Done · 1']);
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Agents · 1 running', 'Done · 1']);
+    await h.expandDone();
     expect((await h.subagents())!.done).toEqual([expect.objectContaining({ title: FIRST.title, status: 'completed', line: expect.stringMatching(/^finished · .+ · ONE$/) })]);
     await h.agents('releaseThrough', 'A', PASS1.secondFinish);
     await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done · 2']);
@@ -128,6 +134,7 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.agents('feed', 'A', 'pass1/subagent');
     await h.open('subagents');
     await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done · 2']);
+    await h.expandDone();
     expect(titles((await h.subagents())!.done)).toEqual([SECOND.title, FIRST.title]);
     h.expectQuietConsole();
   });
@@ -172,8 +179,8 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.load('A', 'events/panel-child', { releaseTo: PANEL_CHILD_TAIL.first });
     for (const count of PANEL_CHILD_TAIL.batches) await h.release(count);
     await h.open('subagents');
-    await expect.poll(async () => (await h.subagents())?.active.find((row) => row.agentId === FIRST.agentId)?.waiting, 'the row waits on its approval').toBe(true);
-    expect((await h.subagents())!.active.find((row) => row.agentId === FIRST.agentId)!.line).toMatch(/^Approval needed · /);
+    await expect.poll(async () => (await h.subagents())?.agents.find((row) => row.agentId === FIRST.agentId)?.waiting, 'the row waits on its approval').toBe(true);
+    expect((await h.subagents())!.agents.find((row) => row.agentId === FIRST.agentId)!.line).toMatch(/^Approval needed · /);
     await h.agents('clickRow', FIRST.agentId);
     await expect.poll(async () => (await h.drillIn())?.requestCards).toBe(1);
     const card = h.region.locator('[data-view="agent"] [data-request-card]');
@@ -225,7 +232,7 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.release(AGENTS_RELAY_TAIL.batches[0]);
     await h.release(AGENTS_RELAY_TAIL.batches[1]); // R1's recorded foreground start, re-keyed
     await h.open('subagents');
-    await expect.poll(async () => (await h.subagents())?.active.map((row) => row.agentId)).toContain(AGENTS_RELAY_TAIL.foregroundAgentId);
+    await expect.poll(async () => (await h.subagents())?.agents.map((row) => row.agentId)).toContain(AGENTS_RELAY_TAIL.foregroundAgentId);
     await h.agents('clickRow', AGENTS_RELAY_TAIL.foregroundAgentId);
     await expect.poll(async () => (await h.drillIn())?.relay).toMatchObject({
       disabled: `${SESSION} is waiting on this agent and reads messages only after it returns`,
@@ -238,7 +245,7 @@ test.describe('the #panel harness: the agent tools', () => {
     const h = await Harness.open(maws);
     const rows = async () => {
       const view = await h.subagents();
-      return [...(view?.active ?? []), ...(view?.done ?? []), ...(view?.disk ?? [])].map((row) => ({ agentId: row.agentId, depth: row.depth, orphan: row.orphan }));
+      return [...(view?.agents ?? []), ...(view?.done ?? []), ...(view?.disk ?? [])].map((row) => ({ agentId: row.agentId, depth: row.depth, orphan: row.orphan }));
     };
     // The recorded run: the outer agent dispatches the inner one (spawn depths 1 and 2); both finished.
     const nested = [
@@ -247,6 +254,7 @@ test.describe('the #panel harness: the agent tools', () => {
     ];
     await h.load('A', 'pass3/nested-agents');
     await h.open('subagents');
+    await h.expandDone(); // both finished: the tree lists them under Done (E7)
     // R5 promoted live nesting: from the wire alone (the inner start's issuing Agent call), before any sidecar is read.
     await expect.poll(rows, 'nested from the wire').toEqual(nested);
     await h.agents('fixtureFs', 'nested-agents-sidecars');
@@ -514,7 +522,7 @@ test.describe('the #panel harness: the agent tools', () => {
           await h.load('A', 'events/panel-child', { releaseTo: PANEL_CHILD_TAIL.first });
           for (const count of PANEL_CHILD_TAIL.batches) await h.release(count);
           await h.open('subagents'); // `open` with no params shows the lists
-          await expect.poll(async () => (await h.subagents())?.active.some((row) => row.waiting)).toBe(true);
+          await expect.poll(async () => (await h.subagents())?.agents.some((row) => row.waiting)).toBe(true);
         },
       ],
       [
@@ -523,9 +531,10 @@ test.describe('the #panel harness: the agent tools', () => {
           await h.load('A', 'pass3/nested-agents');
           await h.agents('fixtureFs', 'nested-agents-sidecars');
           await h.open('subagents');
+          await h.expandDone(); // E7: both finished, under Done
           await expect.poll(async () => {
             const view = await h.subagents();
-            return [...(view?.active ?? []), ...(view?.done ?? [])].some((row) => row.depth === 1);
+            return [...(view?.agents ?? []), ...(view?.done ?? [])].some((row) => row.depth === 1);
           }).toBe(true);
         },
       ],

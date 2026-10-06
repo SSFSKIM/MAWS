@@ -1,10 +1,10 @@
 // The Subagents tool (C8b execution document, Interfaces *Tools*; M2): one single-instance, pinnable tool whose view is
-// the three lists or one agent's drill-in (Back is a state change; the host sees one tab). Its state is a small handle
-// holding an immutable snapshot the body reads through useSyncExternalStore (under the React Compiler a body renders
-// from what it selects), plus the task-graph store watch for the session it shows, released by `dispose` and moved by
-// `follow` when a pinned tab's session changes under it.
+// the lists (E7: the topology tree's Agents and Done sections, and On disk) or one agent's drill-in (Back is a state
+// change; the host sees one tab). Its state is a small handle holding an immutable snapshot the body reads through
+// useSyncExternalStore (under the React Compiler a body renders from what it selects), plus the task-graph store watch
+// for the session it shows, released by `dispose` and moved by `follow` when a pinned tab's session changes under it.
 import { useEffect, useSyncExternalStore } from 'react';
-import type { AgentId, AppSessionId, ToolUseId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import type { PanelTool, PanelToolContext } from '../../../panel/tool';
 import { AGENT_TOOL_IDS } from '../tool-ids';
@@ -25,20 +25,23 @@ export interface SubagentsParams {
 }
 
 export type SubagentsView = { kind: 'lists' } | { kind: 'agent'; agentId: AgentId } | { kind: 'pending'; toolUseId: ToolUseId };
-export type ListSection = 'active' | 'done' | 'disk';
+export type ListSection = 'agents' | 'done' | 'disk'; // E7: the tree's two sections and On disk
 
 // The snapshot. `appSessionId` is the session the view state belongs to, so a pinned tab never shows one session's
 // drill-in over another's while the follow lands.
 export interface SubagentsState {
   appSessionId: AppSessionId | null;
   view: SubagentsView;
-  expanded: { active: boolean; done: boolean; disk: boolean };
-  shown: { active: number; done: number };
+  expanded: { agents: boolean; done: boolean; disk: boolean };
+  shown: { agents: number; done: number };
   scrollTop: number;
   draft: string;
+  expandedFolds: ReadonlySet<TaskId>; // E7: the running parents whose `Done · N` fold is open
 }
 
-export const INITIAL_SHOWN = { active: 4, done: 10 } as const; // Codex's bounds
+// E7 (Decision Log 13): the tree's rows counted flat; a tree's first rows are its roots, so Agents shows eight.
+export const INITIAL_SHOWN = { agents: 8, done: 10 } as const;
+const NO_FOLDS: ReadonlySet<TaskId> = new Set();
 const LISTS: SubagentsView = { kind: 'lists' };
 
 export class SubagentsHandle {
@@ -48,7 +51,8 @@ export class SubagentsHandle {
   private draftFor: AgentId | null = null; // the agent the draft was typed to: it survives Back and a return to that agent
 
   constructor(appSessionId: AppSessionId | null, params: SubagentsParams | undefined) {
-    this.state = { appSessionId, view: LISTS, expanded: { active: true, done: true, disk: true }, shown: { ...INITIAL_SHOWN }, scrollTop: 0, draft: '' };
+    // E7: Done is collapsed by default (Design §3)
+    this.state = { appSessionId, view: LISTS, expanded: { agents: true, done: false, disk: true }, shown: { ...INITIAL_SHOWN }, scrollTop: 0, draft: '', expandedFolds: NO_FOLDS };
     this.watch(appSessionId);
     this.open(params);
   }
@@ -116,15 +120,22 @@ export class SubagentsHandle {
 
   toggle = (section: ListSection) => this.update({ expanded: { ...this.state.expanded, [section]: !this.state.expanded[section] } });
 
-  showMore = (section: 'active' | 'done', count: number) => this.update({ shown: { ...this.state.shown, [section]: count } });
+  showMore = (section: 'agents' | 'done', count: number) => this.update({ shown: { ...this.state.shown, [section]: count } });
 
-  // A pinned tab's session changed under it: that session's lists, with this tab's view, scroll and draft reset. No
-  // session shown (the Overview) changes nothing: returning to the same session finds the tab as it was.
+  // E7: a running parent's fold over its finished children opens or closes.
+  toggleFold = (parentTaskId: TaskId) => {
+    const expandedFolds = new Set(this.state.expandedFolds);
+    if (!expandedFolds.delete(parentTaskId)) expandedFolds.add(parentTaskId);
+    this.update({ expandedFolds });
+  };
+
+  // A pinned tab's session changed under it: that session's lists, with this tab's view, scroll, draft and open folds
+  // reset. No session shown (the Overview) changes nothing: returning to the same session finds the tab as it was.
   follow = (appSessionId: AppSessionId | null) => {
     if (appSessionId === null || appSessionId === this.state.appSessionId) return;
     this.watch(appSessionId);
     this.draftFor = null;
-    this.update({ appSessionId, view: LISTS, shown: { ...INITIAL_SHOWN }, scrollTop: 0, draft: '' });
+    this.update({ appSessionId, view: LISTS, shown: { ...INITIAL_SHOWN }, scrollTop: 0, draft: '', expandedFolds: NO_FOLDS });
   };
 
   dispose = () => {
@@ -151,6 +162,7 @@ function SubagentsBody({ state, ctx }: { state: SubagentsHandle; ctx: PanelToolC
       handle={state}
       expanded={snapshot.expanded}
       shown={own ? snapshot.shown : INITIAL_SHOWN}
+      expandedFolds={own ? snapshot.expandedFolds : NO_FOLDS}
       scrollTop={own ? snapshot.scrollTop : 0}
       ctx={ctx}
     />
