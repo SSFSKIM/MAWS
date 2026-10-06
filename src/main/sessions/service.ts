@@ -34,6 +34,7 @@ import type { Lineage } from '@shared/graph/session';
 import { sendContentRefusal } from '@shared/engine/session-state-store';
 import type { SideThreadFrom } from '@shared/ipc/schema/side';
 import { commentContent, screenshotRoots, withoutScreenshot } from '../side/content';
+import { InvalidSideInput } from '../side/invalid';
 import { sendToMain, type SendToMainInput, type SendToMainOutput } from '../side/send-to-main';
 // E3 end
 import { trustKeyOf, trustStateOf } from './trust';
@@ -555,8 +556,8 @@ export class SessionService {
   // E3 start: `side.thread.open` (E3 execution document, Design §3): C10's fork of the parent, in place and at its current
   // point, under the side thread's own guard (a running turn does not refuse it), its intent carrying the lineage the
   // record takes and the anchored first message (or the promotion of answered side questions). The outcome's id is the
-  // thread's. A screenshot outside the allowed roots throws `ScreenshotRefused`; a first message larger than a send may
-  // be is refused `invalid` on `from`, before anything is created.
+  // thread's. A screenshot outside the allowed roots throws `ScreenshotRefused`, and a first message larger than a send
+  // may be `InvalidSideInput`, both before anything is created.
   async openSideThread(appSessionId: AppSessionId, from: SideThreadFrom): Promise<StartOutcome> {
     const allocated = await this.serial(appSessionId, async (): Promise<StartOutcome | AppSessionId> => {
       const s = await this.ready();
@@ -568,7 +569,7 @@ export class SessionService {
           ? await commentContent({ ...from, destination: 'thread' }, () => screenshotRoots(this.deps.userData, source))
           : [{ type: 'text', text: promotionMessage(from.exchanges, from.text) }];
       const tooLarge = sendContentRefusal(content);
-      if (tooLarge !== null) throw new IntentRefused('invalid', `the side thread's first message is too large: ${tooLarge.message}`, 'from');
+      if (tooLarge !== null) throw new InvalidSideInput([], `the side thread's first message is too large: ${tooLarge.message}`);
       const display = String(content.at(-1)!.text); // the anchored text: the record's title until the thread is named
       const lineage: Lineage = {
         kind: 'side-thread',

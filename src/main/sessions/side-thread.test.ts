@@ -12,8 +12,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { sessionIdFor, summary } from '../../../test/support/index-fixture';
 import { SessionHarness } from '../../../test/support/session-harness';
+import { InvalidSideInput } from '../side/invalid';
 import { ScreenshotRefused } from '../side/screenshot';
-import { IntentRefused } from './service';
 
 vi.mock('electron', () => {
   throw new Error('SessionService must not load Electron');
@@ -87,8 +87,9 @@ describe('side threads', () => {
   it('refuses a promotion larger than a send may be before anything is created', async () => {
     const parent = parentRecord();
     const exchanges = Array.from({ length: 11 }, (_, i) => ({ question: `q${i}`, response: 'r'.repeat(100_000) }));
-    await expect(h.service.openSideThread(parent.appId, { kind: 'btw', exchanges, text: null })).rejects.toMatchObject({ reason: 'invalid', field: 'from' });
-    await expect(h.service.openSideThread(parent.appId, { kind: 'btw', exchanges, text: null })).rejects.toBeInstanceOf(IntentRefused);
+    const refused = h.service.openSideThread(parent.appId, { kind: 'btw', exchanges, text: null });
+    await expect(refused).rejects.toBeInstanceOf(InvalidSideInput);
+    await expect(refused).rejects.toMatchObject({ path: [] }); // the `from` input as a whole
     expect(await h.service.listIntents()).toEqual([]);
     expect(h.host.launches).toEqual([]);
   });
@@ -112,6 +113,7 @@ describe('side threads', () => {
     const launches = h.host.launches.length;
     const refused = h.service.openSideThread(parent.appId, { kind: 'comment', anchor, text: 'Look', screenshot: { path: away, width: 1, height: 1 } });
     await expect(refused).rejects.toBeInstanceOf(ScreenshotRefused);
+    await expect(refused).rejects.toMatchObject({ path: ['screenshot'] });
     await expect(refused).rejects.toThrow('screenshot: not under an allowed root');
     expect(h.host.launches).toHaveLength(launches);
     expect(await h.service.listIntents()).toEqual([]);

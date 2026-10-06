@@ -10,7 +10,7 @@ import type { HostState } from '@shared/ipc/schema';
 import type { HostSupervisor } from '../hosts/supervisor';
 import { CommandFailure, registerMainHandler } from '../ipc/router';
 import { IntentRefused, type SessionService } from './service';
-import { ScreenshotRefused } from '../side/screenshot'; // E3
+import { InvalidSideInput } from '../side/invalid'; // E3
 
 // The runtime hands a handler the schema's parsed value; the ids in it passed the branded id schemas, which is what the
 // brands stand for (as C4's handlers read them).
@@ -57,16 +57,14 @@ export function engineHostSettled(hosts: Pick<HostSupervisor, 'snapshot' | 'onSt
   });
 }
 
-// E3: a refused screenshot (its field under `screenshotAt`, where the command's input holds it) and an oversized first
-// message (`IntentRefused` naming its field) are `invalid_input`; the host's own refusal stays `internal`, verbatim.
-async function relaySide<T>(screenshotAt: string[], call: () => Promise<T>): Promise<T> {
+// E3: a side input main refuses (a screenshot, an oversized first message) is `invalid_input` at its path under `at`,
+// where the command's input holds the comment; every other refusal, the host's included, stays `internal`, verbatim.
+async function relaySide<T>(at: string[], call: () => Promise<T>): Promise<T> {
   try {
     return await call();
   } catch (error) {
-    const path = error instanceof ScreenshotRefused ? [...screenshotAt, 'screenshot'] : error instanceof IntentRefused && error.reason === 'invalid' ? [error.field ?? 'from'] : null;
-    if (path === null) throw error;
-    const message = (error as Error).message;
-    throw new CommandFailure(ipcError('invalid_input', message, [{ path, message }]));
+    if (!(error instanceof InvalidSideInput)) throw error;
+    throw new CommandFailure(ipcError('invalid_input', error.message, [{ path: [...at, ...error.path], message: error.message }]));
   }
 }
 

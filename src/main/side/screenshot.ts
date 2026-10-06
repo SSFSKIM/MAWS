@@ -8,10 +8,11 @@ import { lstat, open, realpath } from 'node:fs/promises';
 import type { ContentBlock } from '@shared/graph/events';
 import { MAX_SEND_IMAGE_BYTES } from '@shared/engine/session-state-store';
 import { under } from '../files/allowlist';
+import { InvalidSideInput } from './invalid';
 
-export class ScreenshotRefused extends Error {
+export class ScreenshotRefused extends InvalidSideInput {
   constructor(readonly reason: string) {
-    super(`screenshot: ${reason}`);
+    super(['screenshot'], `screenshot: ${reason}`);
     this.name = 'ScreenshotRefused';
   }
 }
