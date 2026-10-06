@@ -172,7 +172,7 @@ export function createRelayStore() {
 
     // E7 start: a relay to another session (E7 execution document, Design §4; Decision Log 6): asked → forwarded on the
     // parent's SendMessage to the address carrying the owner's text → sent or failed on that call's result; failed when
-    // the engine drops the steer before starting it; gone with the parent's process, as an agent relay is. No child to
+    // the engine drops the steer before starting it or the steer's own turn ends without that send; gone with the parent's process, as an agent relay is. No child to
     // follow and no receipt: the other session's inbox is not this one's to watch.
     const putPeer = (key: string, relay: PeerRelay | null) => {
       const peers = new Map(get().peers);
@@ -189,6 +189,9 @@ export function createRelayStore() {
         if (e.kind === 'command.lifecycle' && e.commandUuid === state.messageUuid) {
           if (e.state === 'started') started.add(e.commandUuid);
           else if (DROPPED.has(e.state) && !started.has(e.commandUuid)) putPeer(key, { ...relay, state: { kind: 'failed', message: RELAY_COPY.dropped(e.state as 'cancelled' | 'discarded' | 'refused') } });
+          // The steer's own turn ended and no SendMessage carried the text (the engine names that turn by the steer's
+          // uuid, pass3/steer-next seq 238-239; e7-peer-a seq 216 follows the reply's send): nothing will send it now.
+          else if (e.state === 'completed') putPeer(key, { ...relay, state: { kind: 'failed', message: RELAY_COPY.notSent } });
           return;
         }
         if (e.kind === 'tool.use' && e.seq !== null && matchesSendMessage(e, relay.target, relay.text)) {

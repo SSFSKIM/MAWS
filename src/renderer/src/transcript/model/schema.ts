@@ -83,7 +83,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('subagent'), agents: z.array(SubagentRefSchema), sentence: z.string(), status: z.enum(['started', 'working', 'finished', 'finished_with_errors', 'stopped']), overflow: z.number() }),
   z.strictObject({
     ...base, kind: z.literal('agent_message'), direction: z.enum(['to_child', 'from_child', 'between']), from: nullable(SubagentRefSchema), to: nullable(SubagentRefSchema), text: z.string(),
-    peer: PeerMessageSchema.optional(), report: z.string().optional(), // E7
+    peer: PeerMessageSchema.optional(), report: z.string().optional(), body: z.string().optional(), // E7
   }),
   z.strictObject({ ...base, kind: z.literal('thinking'), messageUuid: nullable(z.string()), text: z.string(), live: z.boolean(), durationMs: nullable(z.number()) }),
   z.strictObject({ ...base, kind: z.literal('plan'), toolUseId: z.string(), plan: z.string(), outcome: nullable(z.enum(PLAN_OUTCOMES)), feedback: nullable(z.string()) }),

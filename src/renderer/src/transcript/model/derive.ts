@@ -20,6 +20,7 @@ import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
 import { isEngineOrigin, originOf, RECEIPT_APPLIED, runningTurn, type ReceiptUndo } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
+import { previewHidesBody } from './rows'; // E7
 import { needsSeparator, separatorLabel } from './time';
 import { isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome } from '@shared/engine/peer-envelope'; // E7
@@ -1076,7 +1077,7 @@ function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | u
   const preview = previewOf(message);
   const name = peerNamed(known, to);
   return {
-    ...base, direction: 'between', to: null, text: peerMessageCopy.outbound(name ?? to, preview),
+    ...base, direction: 'between', to: null, text: peerMessageCopy.outbound(peerLabel(to, name), preview), // the label the view shows
     peer: {
       sender: null, recipient: { name, address: to }, body: message, preview, replyTo: null, toolUseId: use.toolUseId, messageUuid: null,
       result: outcome === null ? 'pending' : outcome.ok ? 'sent' : 'failed', resultText: outcome !== null && !outcome.ok ? outcome.message : null,
@@ -1085,14 +1086,17 @@ function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | u
   };
 }
 
-// An in-process agent's message to the main conversation (`<agent-message>`), the agent by its title; its hand-back
-// reads as its report (Decision Log 28's interim row replaced).
+// An in-process agent's message to the main conversation (`<agent-message>`), the agent by its title and the message
+// by its first line, the whole of it kept as `body` when that line leaves some out; its hand-back reads as its report
+// (Decision Log 28's interim row replaced).
 function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, known: KnownAgents[]): RowOf<'agent_message'> {
   const agent = event.fromAgentId === null ? null : agentNamed(known, event.fromAgentId);
   const title = agent?.name ?? event.fromAgentId;
   const report = handbackReport(event.text);
   const base = { id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message' as const, direction: 'from_child' as const, from: agent, to: null };
-  return report === null ? { ...base, text: agentMessageCopy('from_child', title, event.text) } : { ...base, text: peerMessageCopy.report(title), report };
+  if (report !== null) return { ...base, text: peerMessageCopy.report(title), report };
+  const preview = previewOf(event.text);
+  return { ...base, text: agentMessageCopy('from_child', title, preview), ...(previewHidesBody(event.text, preview) && { body: event.text }) };
 }
 
 function agentListRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId): RowOf<'agent_list'> {

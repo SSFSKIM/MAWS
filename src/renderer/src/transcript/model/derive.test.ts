@@ -617,6 +617,7 @@ describe('cross-session rows (E7)', () => {
     b.toolUse('s3', 'SendMessage', { to: 'peer-c', message: 'x' });
     b.result('s3', '<tool_use_error>InputValidationError: bad</tool_use_error>', { isError: true });
     b.toolUse('s4', 'SendMessage', { to: 'peer-d', message: 'waiting' });
+    b.toolUse('s5', 'SendMessage', { to: 'uds:/tmp/cc-socks/2.sock', message: 'unnamed' }); // labelled as the view labels it
     b.end(['u2']);
     const outbound = messages(rows(b.events)).slice(1);
     expect(outbound.map((row) => [row.direction, row.text, row.peer?.recipient, row.peer?.result, row.peer?.resultText, row.peer?.summary, row.peer?.toolUseId])).toEqual([
@@ -624,6 +625,7 @@ describe('cross-session rows (E7)', () => {
       ['between', 'Sent to nobody: hi', { name: null, address: 'nobody' }, 'failed', "No agent named 'nobody' is reachable.", null, 's2'],
       ['between', 'Sent to peer-c: x', { name: null, address: 'peer-c' }, 'failed', 'InputValidationError: bad', null, 's3'],
       ['between', 'Sent to peer-d: waiting', { name: null, address: 'peer-d' }, 'pending', null, null, 's4'],
+      ['between', 'Sent to 2: unnamed', { name: null, address: 'uds:/tmp/cc-socks/2.sock' }, 'pending', null, null, 's5'],
     ]);
     expect(outbound[0]!.peer).toMatchObject({ sender: null, body: 'reply\nmore', preview: 'reply', replyTo: null });
     const folded = messages(rowsOf(reduce(b.events)));
@@ -657,12 +659,14 @@ describe('cross-session rows (E7)', () => {
     b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: report });
     b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'a plain note' });
     b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a9' as never, toAgentId: null, text: 'from a stranger' });
+    b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'first line\nsecond line' });
     b.end([], { origin: 'peer' });
     const list = messages(rows(b.events));
-    expect(list.map((row) => [row.direction, row.text, row.from?.taskId ?? null, row.report])).toEqual([
-      ['from_child', 'Report from Survey src', 'a1', 'line one\n\nline two'],
-      ['from_child', 'Message from Survey src: a plain note', 'a1', undefined],
-      ['from_child', 'Message from a9: from a stranger', null, undefined],
+    expect(list.map((row) => [row.direction, row.text, row.from?.taskId ?? null, row.report, row.body])).toEqual([
+      ['from_child', 'Report from Survey src', 'a1', 'line one\n\nline two', undefined],
+      ['from_child', 'Message from Survey src: a plain note', 'a1', undefined, undefined],
+      ['from_child', 'Message from a9: from a stranger', null, undefined, undefined],
+      ['from_child', 'Message from Survey src: first line', 'a1', undefined, 'first line\nsecond line'], // the preview, the body behind it
     ]);
     expect(messages(rowsOf(reduce(b.events))).map((row) => row.text)).toEqual(['Report from Survey src']);
   });

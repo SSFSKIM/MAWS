@@ -15,14 +15,20 @@ import { duration } from '../../model/time';
 import { useActions, type PeerAddress, type PeerReply } from '../context';
 import { useTicker } from './parts';
 
+// After this long asked with the turn clause shown, the clause becomes the long-wait one: the session reaches no tool
+// boundary while one call runs (the drill-in relay's RELAY_LONG_WAIT_MS).
+const LONG_WAIT_MS = 30_000;
+
 // The line over the box, or null when nothing was asked of this address yet.
 export function peerReplyLine(reply: PeerReply | undefined, mode: PeerAddress['mode'], session: string, now: number): string | null {
   const state = reply?.state;
   if (!state) return null;
   switch (state.kind) {
     case 'asked': {
-      const elapsed = duration(now - Date.parse(state.sentAt));
-      return state.parentTurnOpenAtSend ? peerMessageCopy.askedTurnOpen(mode, session, elapsed) : peerMessageCopy.asked(mode, session, elapsed);
+      const waited = now - Date.parse(state.sentAt);
+      const elapsed = duration(waited);
+      if (!state.parentTurnOpenAtSend) return peerMessageCopy.asked(mode, session, elapsed);
+      return waited >= LONG_WAIT_MS ? peerMessageCopy.askedLongWait(mode, session, elapsed) : peerMessageCopy.askedTurnOpen(mode, session, elapsed);
     }
     case 'forwarded':
       return peerMessageCopy.forwarded(mode, session);

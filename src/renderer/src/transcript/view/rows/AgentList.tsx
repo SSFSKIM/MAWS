@@ -11,9 +11,13 @@ import { PeerComposer } from './PeerComposer';
 
 type AgentListData = Extract<Row, { kind: 'agent_list' }>;
 
-function ListingLine({ rowId, entry }: { rowId: string; entry: ListingRow }) {
+// An entry's identity within its listing: its section and its ref when it has one, else its place (two agents may
+// share a name; a ref is the engine's own short id).
+const entryKey = (section: string, entry: ListingRow, index: number) => `${section}:${entry.ref ?? `#${index}`}`;
+
+function ListingLine({ rowId, entryId, entry }: { rowId: string; entryId: string; entry: ListingRow }) {
   const appSessionId = useRowSession();
-  const [messaging, toggle] = useDisclosure(`listing-message:${rowId}:${entry.name}`);
+  const [messaging, toggle] = useDisclosure(`listing-message:${rowId}:${entryId}`);
   return (
     <li className="transcript-listing-entry" data-name={entry.name}>
       <div className="transcript-listing-line">
@@ -40,9 +44,10 @@ export function AgentListRow({ row }: { row: AgentListData }) {
         <div key={section.title} className="transcript-listing-section" data-section={section.title}>
           <div className="transcript-listing-heading">{agentListCopy.section(section.title, section.count)}</div>
           <ul className="transcript-listing-rows">
-            {section.rows.map((entry) => (
-              <ListingLine key={entry.name} rowId={row.id} entry={entry} />
-            ))}
+            {section.rows.map((entry, index) => {
+              const entryId = entryKey(section.title, entry, index);
+              return <ListingLine key={entryId} rowId={row.id} entryId={entryId} entry={entry} />;
+            })}
           </ul>
         </div>
       ))}

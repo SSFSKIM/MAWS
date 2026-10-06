@@ -53,6 +53,7 @@ export type Row = RowBase &
     | {
         kind: 'agent_message'; direction: 'to_child' | 'from_child' | 'between'; from: SubagentRef | null; to: SubagentRef | null; text: string;
         peer?: PeerMessage; report?: string; // E7: a message between sessions (`between`); an in-process agent's hand-back report
+        body?: string; // E7: an in-process agent's whole message, when the text shows only its preview
       }
     | { kind: 'thinking'; messageUuid: MessageUuid | null; text: string; live: boolean; durationMs: number | null }
     | { kind: 'plan'; toolUseId: ToolUseId; plan: string; outcome: (typeof PLAN_OUTCOMES)[number] | null; feedback: string | null }
@@ -80,6 +81,10 @@ export type Row = RowBase &
     // E7 end
   );
 
+// E1: an ask as its capsule holds it, without the row base: what the Question sheet shows when the capsule reopens it
+// (residue 14), so an answered ask reopens from its own data after a reload or in a disk-only session.
+export type AskRowData = Omit<Extract<Row, { kind: 'ask' }>, keyof RowBase | 'kind'>;
+
 // E7 start: a message between sessions (E7 execution document, Design §4). Inbound (`sender` set) from a `peer.message`;
 // outbound (`recipient` set) from a SendMessage whose `to` names no agent of this transcript. `sender.name` is the
 // envelope's `from-name` (null when it had none; the view labels the address as the TUI does); `recipient.address` the
@@ -98,11 +103,11 @@ export interface PeerMessage {
   resultText: string | null;
   summary: string | null;
 }
-// E7 end
 
-// E1: an ask as its capsule holds it, without the row base: what the Question sheet shows when the capsule reopens it
-// (residue 14), so an answered ask reopens from its own data after a reload or in a disk-only session.
-export type AskRowData = Omit<Extract<Row, { kind: 'ask' }>, keyof RowBase | 'kind'>;
+// Whether a message's preview leaves some of its body out (more lines, or a cut first line): then the row offers the
+// whole of it and the markdown copy quotes it. Surrounding whitespace hides nothing.
+export const previewHidesBody = (body: string, preview: string): boolean => body.trim() !== preview;
+// E7 end
 
 export type RowKind = Row['kind'];
 

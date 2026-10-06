@@ -323,6 +323,18 @@ describe('relay store, peer targets (E7)', () => {
     batch(peerBetween(192, 200));
     expect(peerOf(B)?.state).toEqual({ kind: 'sent', sentAt: peerA.find((e) => e.seq === 195 && e.kind === 'tool.result')!.at });
     expect(fake.listeners()).toBe(0);
+    batch(peerBetween(200, 220)); // the steer's own turn ends after the reply (command_lifecycle completed, seq 216): still sent
+    expect(peerOf(B)?.state.kind).toBe('sent');
+  });
+
+  it('reads failed when the steer’s own turn ends with no SendMessage carrying the owner’s text', async () => {
+    await sendPeer(NOBODY, 'a text the session never sends', 'c762441a-e67e-4d7d-bf40-f40a32c465ec');
+    batch(peerBetween(281, 338)); // the turn's own SendMessage to nobody-e7 carries other text: no match
+    expect(peerOf(NOBODY)?.state.kind).toBe('asked');
+    batch(peerBetween(338, 340)); // command_lifecycle completed for the steer's uuid, seq 339
+    expect(peerOf(NOBODY)?.state).toEqual({ kind: 'failed', message: 'the session ended that turn without sending it' });
+    expect(restoreDraft('', peerOf(NOBODY))).toBe('a text the session never sends');
+    expect(fake.listeners()).toBe(0);
   });
 
   it('reads failed with the engine’s message when the send answers `success: false`', async () => {

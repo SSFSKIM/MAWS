@@ -87,6 +87,8 @@ describe('a message from another session', () => {
     expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Waiting for the last reply');
     put(B, { text: 'on it', state: { kind: 'asked', sentAt: new Date().toISOString(), parentTurnOpenAtSend: true } });
     expect(screen.getByRole('status').textContent).toBe('Asked Session A to reply · 0s · Session A sends it at its next tool boundary or when this turn ends');
+    put(B, { text: 'on it', state: { kind: 'asked', sentAt: new Date(Date.now() - 40_000).toISOString(), parentTurnOpenAtSend: true } });
+    expect(screen.getByRole('status').textContent).toMatch(/^Asked Session A to reply · \d+s · Session A is inside a long tool call; it sends it when that call returns or this turn ends$/);
     put(B, { text: 'on it', state: { kind: 'forwarded' } });
     expect(screen.getByRole('status').textContent).toBe('Session A is replying with SendMessage');
     put(B, { text: 'on it', state: { kind: 'sent' } });
@@ -106,6 +108,12 @@ describe('a message from another session', () => {
     expect(screen.queryByText(/second line/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Show the whole message' }));
     expect(screen.getByText(/second line/).textContent).toBe('first line\nsecond line');
+  });
+
+  it('offers no disclosure when the preview is the whole body but for surrounding whitespace', () => {
+    renderRow(inbound('  just this  \n'), { storeKey: A });
+    expect(screen.getByText('just this')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show the whole message' })).toBeNull();
   });
 });
 
@@ -138,6 +146,18 @@ describe('a message sent to another session, and a subagent’s report', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show the report' }));
     expect(screen.getByText('all done')).toBeTruthy();
   });
+
+  it('reads a plain agent message as its first line, the whole of it behind the disclosure', () => {
+    const [row] = derived((b) => {
+      b.emit('turn.started', { userMessageUuid: null, origin: 'peer' });
+      b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'first line\nsecond line' });
+    }).filter((row): row is Message => row.kind === 'agent_message');
+    renderRow(row!, { storeKey: A });
+    expect(screen.getByText('Message from a1: first line')).toBeTruthy();
+    expect(screen.queryByText(/second line/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show the whole message' }));
+    expect(screen.getByText(/second line/).textContent).toBe('first line\nsecond line');
+  });
 });
 
 describe('a ListAgents listing', () => {
@@ -162,6 +182,20 @@ describe('a ListAgents listing', () => {
     fireEvent.change(box, { target: { value: 'ping' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
     expect(actions.replyToPeer).toHaveBeenCalledExactlyOnceWith(A, { address: 'repo-b', name: 'repo-b', mode: 'message' }, 'ping');
+  });
+
+  it('keeps two rows of one name apart: each its own Message disclosure', () => {
+    const row = derived((b) => {
+      b.turn('u1');
+      b.toolUse('l1', 'ListAgents', {});
+      b.result('l1', 'This session is repo-a [1] — x.\n\nSubagents (2):\n  worker  ·  running\n  worker  ·  completed\n\nPeer sessions (1):\n  worker [61303a]  ·  idle');
+    }).find((r): r is Extract<Row, { kind: 'agent_list' }> => r.kind === 'agent_list')!;
+    const { container } = renderRow(row, { storeKey: A });
+    const buttons = screen.getAllByRole('button', { name: 'Message worker' });
+    expect(buttons).toHaveLength(3);
+    fireEvent.click(buttons[1]!);
+    expect(buttons.map((button) => button.getAttribute('aria-expanded'))).toEqual(['false', 'true', 'false']);
+    expect(container.querySelectorAll('[data-part="peer-composer"]')).toHaveLength(1);
   });
 
   it('says it is listing until the result arrives', () => {

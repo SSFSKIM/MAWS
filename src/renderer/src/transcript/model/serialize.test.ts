@@ -61,6 +61,8 @@ describe('serializeRows', () => {
     b.toolUse('l3', 'ListAgents', {});
     b.toolUse('s1', 'SendMessage', { to: 'peer-b', message: 'first\nsecond' });
     b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: '[Subagent hand-back] Framed. The report follows:\n  done\n  all of it' });
+    b.toolUse('s2', 'SendMessage', { to: 'peer-c', message: '  padded  \n' }); // whitespace hides nothing: no quote
+    b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'note\nmore' });
     b.end(['u1']);
     const markdown = serializeRows(rows(b.events).filter((row) => row.kind === 'agent_list' || row.kind === 'agent_message'));
     expect(markdown).toBe([
@@ -69,6 +71,8 @@ describe('serializeRows', () => {
       '- Listing the agents and sessions…',
       '- Sent to peer-b: first\n  > first\n  > second',
       '- Report from a1\n  > done\n  > all of it',
+      '- Sent to peer-c: padded',
+      '- Message from a1: note\n  > note\n  > more',
     ].join('\n\n'));
   });
 });

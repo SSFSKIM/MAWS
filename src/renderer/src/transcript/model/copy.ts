@@ -456,6 +456,8 @@ export const peerMessageCopy = {
   asked: (mode: PeerMode, session: string, elapsed: string) => `Asked ${session} to ${mode === 'reply' ? 'reply' : 'send it'} · ${elapsed}`,
   askedTurnOpen: (mode: PeerMode, session: string, elapsed: string) =>
     `Asked ${session} to ${mode === 'reply' ? 'reply' : 'send it'} · ${elapsed} · ${session} sends it at its next tool boundary or when this turn ends`,
+  askedLongWait: (mode: PeerMode, session: string, elapsed: string) =>
+    `Asked ${session} to ${mode === 'reply' ? 'reply' : 'send it'} · ${elapsed} · ${session} is inside a long tool call; it sends it when that call returns or this turn ends`,
   forwarded: (mode: PeerMode, session: string) => (mode === 'reply' ? `${session} is replying with SendMessage` : `${session} is sending it with SendMessage`),
   sent: (mode: PeerMode, session: string) => (mode === 'reply' ? `${session} replied with SendMessage` : `${session} sent it with SendMessage`),
   failed: (mode: PeerMode, message: string) => `${mode === 'reply' ? 'Reply' : 'Message'} failed: ${message}`,

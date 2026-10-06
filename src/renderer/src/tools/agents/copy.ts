@@ -73,6 +73,7 @@ export const RELAY_COPY = {
     `${session} sent it with SendMessage after ${plural(rounds, 'parent round')} · ${title} gets it at its next tool round`,
   failed: (message: string) => `Relay failed: ${message}`,
   dropped: (state: 'cancelled' | 'discarded' | 'refused') => `the engine ${state} it before starting it`, // the failed state's message (O1)
+  notSent: 'the session ended that turn without sending it', // E7: a peer relay whose steer's own turn ended with no matching SendMessage
 } as const;
 
 export const BACKGROUND_COPY = {

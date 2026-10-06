@@ -4,6 +4,7 @@
 import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, NOT_SENT, planBadge, plural, QUESTION, requestSlotPlaceholder } from './copy';
 import { ASK, askAnswerCopy, DELIVERY } from './copy'; // E1
 import { agentListCopy } from './copy'; // E7
+import { previewHidesBody } from './rows'; // E7
 import type { Cell, Row } from './rows';
 import { untaggedUserText } from './user-text';
 
@@ -47,10 +48,10 @@ function partOf(row: Row): string | null {
   }
 }
 
-// E7 start: a message's line, then its whole body (a message between sessions whose line shows only its first line) or
-// a hand-back's report, quoted; a listing as its counts, a pending one as such, one the parser did not read as its notes
+// E7 start: a message's line, then its whole body (a message whose line shows only its first line) or a hand-back's
+// report, quoted; a listing as its counts, a pending one as such, one the parser did not read as its notes
 function messagePart(row: Extract<Row, { kind: 'agent_message' }>): string {
-  const more = row.report ?? (row.peer && row.peer.body !== row.peer.preview ? row.peer.body : null);
+  const more = row.report ?? row.body ?? (row.peer && previewHidesBody(row.peer.body, row.peer.preview) ? row.peer.body : null);
   return more === null ? `- ${row.text}` : `- ${row.text}\n${indent(more, '  > ')}`;
 }
 

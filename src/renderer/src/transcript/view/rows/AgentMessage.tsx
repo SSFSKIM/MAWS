@@ -5,7 +5,7 @@
 // `Report from <title>` with the report behind a disclosure (E7 execution document, Design §4).
 import { peerLabel } from '@shared/engine/peer-envelope'; // E7
 import { peerMessageCopy } from '../../model/copy'; // E7
-import type { PeerMessage, Row } from '../../model/rows';
+import { previewHidesBody, type PeerMessage, type Row } from '../../model/rows';
 import { useDisclosure, useRowSession } from '../context'; // E7
 import { MessageIcon } from './icons';
 import { PeerComposer } from './PeerComposer'; // E7
@@ -15,6 +15,7 @@ type AgentMessageData = Extract<Row, { kind: 'agent_message' }>;
 export function AgentMessageRow({ row }: { row: AgentMessageData }) {
   if (row.peer) return <PeerMessageRow row={row} peer={row.peer} />; // E7
   if (row.report !== undefined) return <ReportRow row={row} report={row.report} />; // E7
+  if (row.body !== undefined) return <AgentBodyRow row={row} body={row.body} />; // E7
   return (
     <div className="transcript-lifecycle" data-direction={row.direction}>
       <MessageIcon />
@@ -32,7 +33,7 @@ function PeerMessageRow({ row, peer }: { row: AgentMessageData; peer: PeerMessag
   const party = peer.sender ?? peer.recipient; // one of the two is set
   const who = party ? peerLabel(party.address, party.name) : '';
   const address = party?.address ?? null;
-  const hidden = peer.body !== peer.preview; // the preview cut the body: the whole of it behind the disclosure
+  const hidden = previewHidesBody(peer.body, peer.preview); // the whole of it behind the disclosure
   return (
     <div className="transcript-peer" data-direction={row.direction} data-peer={inbound ? 'inbound' : 'outbound'}>
       <div className="transcript-lifecycle">
@@ -66,19 +67,24 @@ function PeerMessageRow({ row, peer }: { row: AgentMessageData; peer: PeerMessag
   );
 }
 
-function ReportRow({ row, report }: { row: AgentMessageData; report: string }) {
-  const [open, toggle] = useDisclosure(`report:${row.id}`);
+// A hand-back's report, or an agent's message whose line shows only its first line: the line, then the rest behind the
+// disclosure the message between sessions uses.
+function FoldedBody({ row, folded, show, part }: { row: AgentMessageData; folded: string; show: string; part: 'report' | 'body' }) {
+  const [open, toggle] = useDisclosure(`${part}:${row.id}`);
   return (
-    <div className="transcript-peer" data-direction={row.direction} data-report="">
+    <div className="transcript-peer" data-direction={row.direction} data-part={part}>
       <div className="transcript-lifecycle">
         <MessageIcon />
         <span className="transcript-peer-text">{row.text}</span>
         <button type="button" className="transcript-quiet-button transcript-peer-toggle" aria-expanded={open} onClick={toggle}>
-          {open ? peerMessageCopy.hide : peerMessageCopy.showReport}
+          {open ? peerMessageCopy.hide : show}
         </button>
       </div>
-      {open && <p className="transcript-peer-body">{report}</p>}
+      {open && <p className="transcript-peer-body">{folded}</p>}
     </div>
   );
 }
+
+const ReportRow = ({ row, report }: { row: AgentMessageData; report: string }) => <FoldedBody row={row} folded={report} show={peerMessageCopy.showReport} part="report" />;
+const AgentBodyRow = ({ row, body }: { row: AgentMessageData; body: string }) => <FoldedBody row={row} folded={body} show={peerMessageCopy.showMessage} part="body" />;
 // E7 end
