@@ -102,7 +102,7 @@ export const REVIEW_COPY = {
 } as const;
 
 // E5: the editor's sentences (E5 execution document, Interfaces *Copy*; exact strings are decisions). M2 shows the save,
-// the dirty mark, the close sheet and Changed on disk; the merge view's, the conflict blocks' and the gutter's are M3's.
+// the dirty mark, the close sheet and Changed on disk; M3 the merge view's, the conflict blocks' and the gutter's.
 export const EDITOR_COPY = {
   save: 'Save', saving: 'Saving…', unsaved: 'Unsaved changes',
   saveFailed: (message: string) => `Could not save: ${message}`,

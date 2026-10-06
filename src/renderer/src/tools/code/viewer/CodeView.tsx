@@ -10,13 +10,25 @@
 // and after every text it applies. Two counters say what a new store text means: a new `epoch` replaces the document,
 // a new `baseline` (a save, Keep mine) leaves the document standing and only moves `clean`. `docOf` reads the document
 // as the file's text, live while mounted and from the state left behind once hidden, so a hidden tab saves too.
+//
+// E5 M3: three more modes, each a compartment. `merging` holds the unified merge view over the disk's version while
+// the entry's `theirs.view` is 'merge' (`editor/merge.ts`), reconfigured only for another version, so the chunks kept
+// survive a hidden tab; `conflicts` holds the conflict-marker blocks (`editor/conflicts.ts`) and is empty while the
+// merge view is open, so the two never stack; `comments` holds the comment gutter (`editor/comment-gutter.ts`),
+// always. The view reports the chunks and blocks it holds to its bar and steps through them for it
+// (`editor/navigation.ts`).
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import { syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState, StateEffect, StateField, Text, Transaction, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { useEffect, useRef } from 'react';
+import { fileLineAnchor, openCommentComposer } from '../anchor/anchor';
 import { EDITOR_COPY } from '../copy';
+import { commentGutter, comments } from '../editor/comment-gutter';
+import { conflictBlocks, conflicts, conflictsOf, stepConflict } from '../editor/conflicts';
 import { documentText, editing, editingExtensions, fromStore } from '../editor/editing';
+import { changeCount, mergedWith, mergeView, merging, stepChange } from '../editor/merge';
+import { attachNavigation, reportCounts } from '../editor/navigation';
 import { codeHighlightStyle, codeThemeDark, codeThemeLight } from './code-theme';
 import { jumpTarget } from './kinds';
 import { languageFor, languageNameFor } from './languages';
@@ -54,9 +66,19 @@ const onEdit = (tabId: string) => (doc: Text) => {
   viewer.setSaveError(tabId, null);
 };
 
+// E5 M3: a gutter mark's line as X10's anchor, for the tab's file and session as they are at the click.
+const onComment = (tabId: string) => (line: number) => {
+  const entry = useViewer.getState().entries.get(tabId);
+  if (entry) openCommentComposer(fileLineAnchor(entry.path, line), { appSessionId: entry.appSessionId });
+};
+
+// E5 M3: what the bar counts, from the state as it now is.
+const report = (tabId: string, state: EditorState) => reportCounts(tabId, { changes: changeCount(state), conflicts: conflictsOf(state).length });
+
 const extensions = (tabId: string, wrap: boolean): Extension[] => [
   editing.of(editingExtensions(false, null, onEdit(tabId))), // E5: ahead of the search keymap
   lineNumbers(),
+  comments.of(commentGutter(onComment(tabId))), // E5 M3: after the line numbers
   highlightActiveLine(),
   highlightActiveLineGutter(),
   search({ top: true }),
@@ -67,6 +89,9 @@ const extensions = (tabId: string, wrap: boolean): Extension[] => [
   flashField,
   wrapping.of(wrap ? EditorView.lineWrapping : []),
   language.of([]),
+  merging.of([]), // E5 M3
+  conflicts.of(conflictBlocks),
+  EditorView.updateListener.of((update) => report(tabId, update.state)),
 ];
 
 const ratioOf = (el: HTMLElement) => el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
@@ -119,7 +144,13 @@ export default function CodeView({ entry, wrap }: { entry: ViewerEntry; wrap: bo
     view.dispatch({ effects: theming.reconfigure(pageTheme()) });
     const themes = new MutationObserver(() => view.dispatch({ effects: theming.reconfigure(pageTheme()) }));
     themes.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    // E5 M3: the bar's counts and its arrows, which leave the editor focused at the chunk or block they reach.
+    report(tabId, view.state);
+    const detach = attachNavigation(tabId, (kind, direction) => {
+      if (kind === 'change' ? stepChange(view, direction) : stepConflict(view, direction)) view.focus();
+    });
     return () => {
+      detach();
       themes.disconnect();
       if (flashTimer.current !== null) clearTimeout(flashTimer.current);
       flashTimer.current = null;
@@ -138,6 +169,18 @@ export default function CodeView({ entry, wrap }: { entry: ViewerEntry; wrap: bo
   useEffect(() => {
     editor.current?.dispatch({ effects: editing.reconfigure(editingExtensions(editable, readOnlyTitle, onEdit(tabId))) });
   }, [editable, readOnlyTitle, tabId]);
+
+  // E5 M3: the merge view while the entry shows the disk's version as one, the conflict blocks otherwise; rebuilt only
+  // for another version than the one it holds (the hash names it), so the chunks already kept stand.
+  const merge = entry.theirs?.view === 'merge' ? entry.theirs : null;
+  const mergeHash = merge?.hash ?? null;
+  const mergeText = merge?.text ?? null;
+  useEffect(() => {
+    const view = editor.current;
+    if (!view || mergedWith(view.state) === mergeHash) return;
+    const theirs = mergeHash !== null && mergeText !== null ? { text: mergeText, hash: mergeHash } : null;
+    view.dispatch({ effects: [merging.reconfigure(theirs ? mergeView(theirs) : []), conflicts.reconfigure(theirs ? [] : conflictBlocks)] });
+  }, [mergeHash, mergeText, tabId]);
 
   // The language arrives after the first paint, in its own chunk.
   useEffect(() => {
