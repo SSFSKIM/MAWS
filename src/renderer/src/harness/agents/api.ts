@@ -157,6 +157,7 @@ export interface AgentsHarnessApi {
   scheduled(): ScheduledView | null; // the selected Background work tab's Scheduled section, else null
   peerRows(): Promise<PeerRowView[]>; // the column's rows, read from its top down (the list scrolled to mount each)
   columnTexts(): Promise<string[]>; // every row of the column as text, read from its top down
+  scrollColumnTo(text: string): Promise<void>; // the column's first row whose text holds `text`, at the list's top
   pushTasks(listId: string, tasks: PersistedTask[]): void; // the list's new contents, announced as `fs.tasksChanged`
   setClock(iso: string | null): void; // the agent tools' clock fixed at `iso` (null: the wall clock again)
   clearStatus(id: AgentsFakeId): void; // a disk-only session: no status, its task graph started over on disk
@@ -164,6 +165,7 @@ export interface AgentsHarnessApi {
   toggleFold(parentId: string): void; // the Subagents tree's `Done · N` fold under that parent
   reply(n: number, text: string): Promise<void>; // the n-th (1-based) Reply of the column: opened, typed, sent; resolves once the steer is answered
   openCreatingTurn(id: string): void; // the Scheduled row's `Open creating turn`
+  setColumnWidth(px: number): number; // the debug strip (C5's sidebar column, clamped as C5 clamps it) holding the column; answers the width it had
   // E7 end
 
   clickRow(agentId: string): void;

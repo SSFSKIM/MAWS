@@ -643,11 +643,11 @@ async function bothThemes(h: Harness, name: string, target: Locator): Promise<vo
 const widgetFacts = (view: Awaited<ReturnType<AgentsHarnessApi['widget']>>) =>
   view && { header: view.header, phases: view.phases.map(({ title, count }) => ({ title, count })), agents: view.agents.map(({ label, model, state, tokens, openable }) => ({ label, model, state, tokens, openable })) };
 
+// A derived fixture's events, as far as the cases read them (their kind, tool use and time).
+const fixtureEvents = (name: string) =>
+  readFileSync(join(REPO_ROOT, `test/fixtures/transcript/events/${name}.events.jsonl`), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { kind: string; toolUseId?: string; at: string });
 // A tool use's time in the derived cron fixture (a job's `createdAt` is its call's).
-function callAt(toolUseId: string): number {
-  const events = readFileSync(join(REPO_ROOT, 'test/fixtures/transcript/events/agents-cron.events.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { kind: string; toolUseId?: string; at: string });
-  return Date.parse(events.find((event) => event.kind === 'tool.use' && event.toolUseId === toolUseId)!.at);
-}
+const callAt = (toolUseId: string): number => Date.parse(fixtureEvents('agents-cron').find((event) => event.kind === 'tool.use' && event.toolUseId === toolUseId)!.at);
 // A job's next run as the row reads it relative to `now`: a recurring job's next match from now, a one-shot's single
 // fire after its call (null once that is past: the row is gone).
 function nextIn(job: { cron: string; toolUseId: string }, recurring: boolean, now: number): string | null {
@@ -685,6 +685,9 @@ test.describe('E7: the orchestration views', () => {
     await expect.poll(async () => (await widget())?.phases.map((phase) => phase.selected)).toEqual([true, false]);
     expect((await widget())!.agents.map((row) => row.label)).toEqual(['alpha', 'beta']);
     await h.agents('selectPhase', 1);
+    // read as the run was then: the clock a moment after its last progress frame (the replay's own times are days old)
+    const lastFrame = fixtureEvents('agents-stop-workflow').findLast((event) => event.kind === 'workflow.progress')!;
+    await h.agents('setClock', new Date(Date.parse(lastFrame.at) + 2_000).toISOString());
     await bothThemes(h, 'g1-widget', h.region);
     const liveFacts = widgetFacts(await widget());
 
@@ -720,6 +723,7 @@ test.describe('E7: the orchestration views', () => {
       { kind: 'agent', agentId: outer, depth: 0, count: null, expanded: null, section: 'agents' },
       { kind: 'done-fold', agentId: outer, depth: 1, count: 1, expanded: false, section: 'agents' },
     ]);
+    await h.agents('setClock', new Date(Date.parse(E7_NESTED_AGENTS.innerFinishAt) + 3_000).toISOString()); // the run's own time
     await h.agents('toggleFold', outer);
     await expect.poll(tree).toEqual([
       { kind: 'agent', agentId: outer, depth: 0, count: null, expanded: null, section: 'agents' },
@@ -774,6 +778,12 @@ test.describe('E7: the orchestration views', () => {
       await expect.poll(line).toBe(`${SESSION} is replying with SendMessage`);
       await h.agents('releaseThrough', 'A', E7_PEER_A.replyResult);
       await expect.poll(line).toBe(`${SESSION} replied with SendMessage`);
+      // the evidence: the listing, the message with its Reply walked to replied, and the sends after it
+      await expandAll();
+      const width = await h.agents('setColumnWidth', 480); // the strip's widest, nearer a session column's width
+      await h.agents('scrollColumnTo', 'This session is');
+      await bothThemes(h, 'g3-rows', h.page.locator('[data-agents-harness-transcript]'));
+      await h.agents('setColumnWidth', width);
     });
 
     await test.step('a mid-turn message draws as the idle one did; a send to nobody reads Not sent with the engine’s reason', async () => {
@@ -788,8 +798,6 @@ test.describe('E7: the orchestration views', () => {
         ['outbound', 'To @ nobody-e7', 'E7 probe: nobody', 'failed'],
       ]);
       expect(rows.at(-1)).toMatchObject({ resultText: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." });
-      await h.page.locator('[data-agents-harness-transcript] .transcript-peer[data-peer="inbound"]').first().scrollIntoViewIfNeeded();
-      await bothThemes(h, 'g3-rows', h.page.locator('[data-agents-harness-transcript]'));
     });
 
     await test.step('from its JSONL, on a session not running here: the same rows, Reply closed with the reason', async () => {

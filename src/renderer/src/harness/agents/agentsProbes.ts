@@ -316,6 +316,18 @@ async function columnTexts(): Promise<string[]> {
   return texts;
 }
 
+async function scrollColumnTo(wanted: string): Promise<void> {
+  let found: number | null = null;
+  await scanColumn((row) => {
+    if (!text(row).includes(wanted)) return false;
+    found = Number(row.dataset.index);
+    return true;
+  });
+  if (found === null) throw new Error(`agents: no row of the column holds ${wanted}`);
+  columnHandle.current!.scrollToIndex(found, 'start');
+  await frames();
+}
+
 // The n-th Reply of the column, opened, typed and sent; resolves once the steer is answered (or the send refused).
 async function reply(n: number, value: string): Promise<void> {
   let rowId: string | null = null;
@@ -511,12 +523,18 @@ export const agentsProbes: AgentsHarnessApi = {
   scheduled,
   peerRows,
   columnTexts,
+  scrollColumnTo,
   pushTasks: (listId: string, list: PersistedTask[]) => fake.fakeFs({ tasks: { [listId]: list } }),
   setClock: (iso) => setAgentsClock(iso === null ? null : Date.parse(iso)),
   clearStatus,
   selectPhase: (n) => click(bodyOf('background')?.querySelectorAll('[data-view="run"] [role="option"]')[n], `phase option ${n}`),
   toggleFold: (parentId) => click(bodyOf('subagents')?.querySelector(`[data-fold="${CSS.escape(parentId)}"]`), `the fold under ${parentId}`),
   reply,
+  setColumnWidth(px) {
+    const before = useLayout.getState().regions.sidebar.width;
+    useLayout.getState().setSidebar({ width: px });
+    return before;
+  },
   openCreatingTurn: (id) => click(buttonNamed(bodyOf('background')?.querySelector(`[data-scheduled="${CSS.escape(id)}"]`), SCHEDULED_COPY.openTurn), `Open creating turn of ${id}`),
   // E7 end
   clickRow: (agentId) => click(bodyOf('subagents')?.querySelector(`[data-agent-row="${CSS.escape(agentId)}"]`), `the row of ${agentId}`),

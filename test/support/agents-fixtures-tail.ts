@@ -54,12 +54,14 @@ export const E7_PEER_A = {
   text: 'E7 probe: reply from A',
 } as const;
 
-// pass3/nested-agents: the outer agent dispatches the inner one, which finishes first.
+// pass3/nested-agents: the outer agent dispatches the inner one, which finishes first (`innerFinishAt` its time, the
+// clock a case reads the tree at).
 export const E7_NESTED_AGENTS = {
   outer: 'a38d4aebfaea9f6b1',
   inner: 'a425e926e506edeb1',
   innerStart: 112,
   innerFinish: 121,
+  innerFinishAt: '2026-09-29T15:35:30.157Z',
   outerFinish: 126,
 } as const;
 

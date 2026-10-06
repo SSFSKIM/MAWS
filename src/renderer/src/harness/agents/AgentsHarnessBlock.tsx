@@ -220,8 +220,9 @@ export function AgentsHarnessBlock() {
   const { session, agentTab } = useSyncExternalStore(subscribeView, currentView);
   if (!session) return null;
   const A = fakeId('A');
+  // E7 (M7): `font-ui`, the app's face as a session's column has it (the strip around it is mono)
   return (
-    <div data-agents-harness className="mt-3 flex flex-col gap-2 border-t border-border pt-3 font-sans">
+    <div data-agents-harness className="mt-3 flex flex-col gap-2 border-t border-border pt-3 font-ui">
       <p>agents: the fed transcript of A</p>
       <div data-agents-harness-transcript className="flex h-[26rem] min-h-0 flex-col rounded-sm border border-border bg-bg">
         <Transcript key={session.key} source={columnSource(session)} variant="session" actions={agentTranscriptActions} handle={columnHandle} className="min-h-0 flex-1" />

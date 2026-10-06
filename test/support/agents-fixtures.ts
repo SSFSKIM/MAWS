@@ -265,8 +265,11 @@ export function measureAgentsCron(events: SessionEvent[]) {
 
 export function measureE7NestedAgents(events: SessionEvent[]) {
   const starts = events.filter((event): event is Extract<SessionEvent, { kind: 'subagent.started' }> => event.kind === 'subagent.started');
-  const finish = (taskId: string) => events.find((event) => event.kind === 'subagent.finished' && event.taskId === taskId)!.seq!;
+  const finished = (taskId: string) => events.find((event) => event.kind === 'subagent.finished' && event.taskId === taskId)!;
   const [outer, inner] = starts;
-  return { outer: outer.taskId as string, inner: inner.taskId as string, innerStart: inner.seq!, innerFinish: finish(inner.taskId), outerFinish: finish(outer.taskId) };
+  return {
+    outer: outer.taskId as string, inner: inner.taskId as string, innerStart: inner.seq!,
+    innerFinish: finished(inner.taskId).seq!, innerFinishAt: finished(inner.taskId).at, outerFinish: finished(outer.taskId).seq!,
+  };
 }
 // E7 end
