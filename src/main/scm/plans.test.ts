@@ -110,10 +110,10 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
     });
 
     it('pr: --repo, --head, --base, then --title= and --body= so a leading dash is a value; --draft only when asked', () => {
-      expect(prArgv({ repository: 'o/r', branch: 'main', base: 'main', title: 'Panel PR', body: '', draft: false })).toEqual([
+      expect(prArgv({ repository: 'o/r', head: 'main', base: 'main', title: 'Panel PR', body: '', draft: false })).toEqual([
         'pr', 'create', '--repo', 'o/r', '--head', 'main', '--base', 'main', '--title=Panel PR', '--body=',
       ]);
-      expect(prArgv({ repository: 'ghe.example.com/o/r', branch: 'feat', base: 'dev', title: '--help', body: '-x\nline two', draft: true })).toEqual([
+      expect(prArgv({ repository: 'ghe.example.com/o/r', head: 'feat', base: 'dev', title: '--help', body: '-x\nline two', draft: true })).toEqual([
         'pr', 'create', '--repo', 'ghe.example.com/o/r', '--head', 'feat', '--base', 'dev', '--title=--help', '--body=-x\nline two', '--draft',
       ]);
     });
@@ -264,6 +264,7 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
 
     it('adds --draft when asked and a GHE host to the repository', async () => {
       world.repoView = { ...REPO_VIEW, stdout: '{"nameWithOwner":"team/app","url":"https://ghe.example.com/team/app"}' };
+      world.pushUrls = { origin: ['https://ghe.example.com/team/app.git'] };
       expect(await planPr(makeSources(world).sources, { ...input, draft: true })).toMatchObject({
         plan: { repository: 'ghe.example.com/team/app', argv: ['pr', 'create', '--repo', 'ghe.example.com/team/app', '--head', 'main', '--base', 'main', '--title=Panel PR', '--body=', '--draft'] },
       });
@@ -287,6 +288,48 @@ describe('scm plans build the exact argv, bind the destination and expire tokens
     ])('refuses %s', async (_name, arrange, refused, detail) => {
       arrange(world);
       expect(await planPr(makeSources(world).sources, input)).toMatchObject({ refused, detail: expect.stringMatching(detail) });
+    });
+
+    // `gh repo fork --clone`: origin is the fork, upstream the parent, and gh resolves the parent. The branch went to the
+    // fork, so the head names the fork's owner (`gh pr create --help`: "`--head` supports `<user>:<branch>` syntax to
+    // select a head repo owned by `<user>`"); unqualified, gh would ask for `parent:<branch>`.
+    describe('a branch pushed to a fork', () => {
+      const headOf = (draft: unknown) => {
+        const argv = (draft as PlanDraft).plan.argv;
+        return argv[argv.indexOf('--head') + 1];
+      };
+      const plannedHead = async (pushUrls: string[], repoView: { nameWithOwner: string; url: string } = { nameWithOwner: 'parent/r', url: 'https://github.com/parent/r' }) => {
+        world.pushUrls = { origin: pushUrls };
+        world.repoView = { ...REPO_VIEW, stdout: JSON.stringify(repoView) };
+        return headOf(await planPr(makeSources(world).sources, input));
+      };
+
+      it('names the fork’s owner when the branch’s remote is another repository than the one gh targets (https and scp forms)', async () => {
+        expect(await plannedHead(['https://github.com/me/r.git'])).toBe('me:main');
+        expect(await plannedHead(['git@github.com:me/r.git'])).toBe('me:main');
+        expect(await plannedHead(['ssh://git@github.com/me/r'])).toBe('me:main');
+        expect(await plannedHead(['https://github.com/me/r.git/'])).toBe('me:main');
+        const draft = await planPr(makeSources(world).sources, input);
+        expect((draft as PlanDraft).plan.argv).toEqual(['pr', 'create', '--repo', 'parent/r', '--head', 'me:main', '--base', 'main', '--title=Panel PR', '--body=']);
+      });
+
+      it('reads a GHE remote’s host as the repository’s host', async () => {
+        const ghe = { nameWithOwner: 'team/app', url: 'https://ghe.example.com/team/app' };
+        expect(await plannedHead(['git@ghe.example.com:me/app.git'], ghe)).toBe('me:main');
+        expect(await plannedHead(['https://ghe.example.com/team/app.git'], ghe)).toBe('main');
+        expect(await plannedHead(['https://github.com/team/app.git'], ghe)).toBe('team:main'); // the same names on another host
+      });
+
+      it('keeps the bare branch when the remote is the repository gh targets, or names none git can read', async () => {
+        expect(await plannedHead(['https://github.com/parent/r.git'])).toBe('main');
+        expect(await plannedHead(['git@github.com:Parent/R.git'])).toBe('main'); // GitHub's names ignore case
+        expect(await plannedHead(['/srv/mirror.git'])).toBe('main');
+        expect(await plannedHead(['file:///srv/r.git'])).toBe('main');
+        expect(await plannedHead(['https://github.com/parent'])).toBe('main');
+        // several destinations: one of them is the target, so the branch is there
+        expect(await plannedHead(['https://github.com/me/r.git', 'https://github.com/parent/r.git'])).toBe('main');
+        expect(await plannedHead(['/srv/mirror.git', 'git@github.com:me/r.git'])).toBe('me:main');
+      });
     });
 
     it('refuses in the order of the rules: gh before not pushed, not pushed before the repository', async () => {

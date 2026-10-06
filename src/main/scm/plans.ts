@@ -15,7 +15,8 @@
 // about the destination, so only an own upstream holds a push back for being behind. Pushing to another remote than the
 // upstream's likewise publishes there and sets the upstream to it, as `git push -u` would: the plan's `upstream` is what
 // the argv makes it. A pull request needs an own upstream even with the branch, so `--head <branch>` names exactly the
-// commits the sheet showed.
+// commits the sheet showed; when that upstream's remote is a fork of the repository gh targets, the head names the
+// fork's owner (`<owner>:<branch>`, prHead).
 import { randomUUID } from 'node:crypto';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
@@ -60,10 +61,16 @@ export function pushArgv({ remote, branch, setUpstream }: { remote: string; bran
   return ['push', '--progress', ...(setUpstream ? ['--set-upstream'] : []), remote, `refs/heads/${branch}:refs/heads/${branch}`];
 }
 
-export function prArgv(input: { repository: string; branch: string; base: string; title: string; body: string; draft: boolean }): string[] {
-  const { repository, branch, base, title, body, draft } = input;
-  return ['pr', 'create', '--repo', repository, '--head', branch, '--base', base, `--title=${title}`, `--body=${body}`, ...(draft ? ['--draft'] : [])];
+// `head` is the branch, or `<owner>:<branch>` when the branch lives in a fork of the repository (prHead).
+export function prArgv(input: { repository: string; head: string; base: string; title: string; body: string; draft: boolean }): string[] {
+  const { repository, head, base, title, body, draft } = input;
+  return ['pr', 'create', '--repo', repository, '--head', head, '--base', base, `--title=${title}`, `--body=${body}`, ...(draft ? ['--draft'] : [])];
 }
+
+const NAME_WITH_OWNER = /^[\w.][\w.-]*\/[\w.][\w.-]*$/;
+
+// `OWNER/REPO` on github.com, `HOST/OWNER/REPO` elsewhere: what `--repo` takes.
+const qualified = (host: string, nameWithOwner: string) => (host === 'github.com' ? nameWithOwner : `${host}/${nameWithOwner}`);
 
 // `gh repo view --json nameWithOwner,url`: `OWNER/REPO`, or `HOST/OWNER/REPO` off github.com (what `--repo` takes).
 export function repositoryOf(stdout: string): string | null {
@@ -75,14 +82,53 @@ export function repositoryOf(stdout: string): string | null {
   }
   if (typeof answer !== 'object' || answer === null) return null;
   const { nameWithOwner, url } = answer as { nameWithOwner?: unknown; url?: unknown };
-  if (typeof nameWithOwner !== 'string' || !/^[\w.][\w.-]*\/[\w.][\w.-]*$/.test(nameWithOwner) || typeof url !== 'string') return null;
+  if (typeof nameWithOwner !== 'string' || !NAME_WITH_OWNER.test(nameWithOwner) || typeof url !== 'string') return null;
   let host: string;
   try {
     host = new URL(url).host.toLowerCase();
   } catch {
     return null;
   }
-  return host === 'github.com' ? nameWithOwner : `${host}/${nameWithOwner}`;
+  return qualified(host, nameWithOwner);
+}
+
+// The repository a remote URL names, spelled as `repositoryOf` spells gh's, with its owner: a URL with a host
+// (`https://host/owner/repo.git`, `ssh://git@host/owner/repo`) or git's scp form (`git@host:owner/repo.git`). Null for a
+// local path, a `file:` URL or a path that is not `owner/repo`.
+export function remoteRepositoryOf(url: string): { repository: string; owner: string } | null {
+  let host: string;
+  let path: string;
+  if (url.includes('://')) {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return null;
+    }
+    if (parsed.protocol === 'file:' || parsed.hostname === '') return null;
+    host = parsed.hostname;
+    path = parsed.pathname;
+  } else {
+    // git reads `[user@]host:path` as scp-like only when the colon comes before any slash
+    const scp = /^(?:[^@/]*@)?([^/:]+):(.*)$/.exec(url);
+    if (scp === null) return null;
+    [, host, path] = scp;
+  }
+  const nameWithOwner = path.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/, '');
+  if (!NAME_WITH_OWNER.test(nameWithOwner)) return null;
+  return { repository: qualified(host.toLowerCase(), nameWithOwner), owner: nameWithOwner.split('/')[0] };
+}
+
+// The head `gh pr create` takes: the branch, or `<owner>:<branch>` when the branch's remote is a fork of the repository
+// the PR targets (`gh repo fork --clone` leaves origin the fork while gh resolves the parent; the branch went to the
+// fork, and an unqualified head would name the parent's branch of that name). Read from the remote's push URLs (its
+// fetch URL when it has no push URL of its own): when one of them is the target, or none names a repository, the branch
+// stands. GitHub's names ignore case.
+export function prHead(branch: string, repository: string, pushUrls: readonly string[]): string {
+  const named = pushUrls.map(remoteRepositoryOf).filter((remote) => remote !== null);
+  const target = repository.toLowerCase();
+  if (named.length === 0 || named.some((remote) => remote.repository.toLowerCase() === target)) return branch;
+  return `${named[0].owner}:${branch}`;
 }
 
 // The pull request `gh pr create` printed.
@@ -140,9 +186,10 @@ export async function planPr(sources: PlanSources, input: Omit<ScmPrPlanInput, '
   if (named !== null) return named;
   const destination = await destinationOf(sources, remote);
   if (isRefusal(destination)) return destination;
+  const head = prHead(branch, repository, destination.pushUrls);
   return {
     plan: {
-      kind: 'pr', cwd: sources.cwd, program: gh.path, argv: prArgv({ repository, branch, base, title, body, draft }), remote, ...destination,
+      kind: 'pr', cwd: sources.cwd, program: gh.path, argv: prArgv({ repository, head, base, title, body, draft }), remote, ...destination,
       repository, branch, head: status.head, upstream: status.upstream,
     },
     basis: { upstream: status.upstream, ownUpstream: true },
