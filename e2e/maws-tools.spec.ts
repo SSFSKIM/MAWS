@@ -552,7 +552,8 @@ test('show_pane: the Terminal opens in the panel, a deliverable no record answer
     // the cells: what opened, and why nothing did twice
     await unfoldWork(s.pane);
     await expect(s.pane.getByText('Opened Terminal')).toBeVisible();
-    await expect(s.pane.getByText('Could not open pane: no deliverable "none" in this session')).toBeVisible();
+    // the cell reads the engine's tool_result, which the replay plays as recorded (E1's build answered "not available")
+    await expect(s.pane.getByText('Could not open pane: the deliverable pane is not available in this build of MAWS')).toBeVisible();
     await expect(s.pane.getByText(/Could not open pane: unknown pane "nope"/)).toBeVisible();
     await shoot(s, 'pane');
   });
