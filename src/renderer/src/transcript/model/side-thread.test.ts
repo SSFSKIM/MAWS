@@ -198,6 +198,43 @@ describe('the side-thread row', () => {
     expect(again).toEqual(once);
   });
 
+  // M3's review (M4): the row re-derives on an increment, keeps its text through a summary without one, and is never
+  // rolled back by an older summary arriving late
+  it('incremental: rows derived after the opened, then a summary applied to that state, re-derive the row in place', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'sleep 20' });
+    opened(b);
+    const first = stateOf(b.events);
+    expect(ofKind(rowsOf(first), 'side_thread')).toEqual([expect.objectContaining({ state: 'opened', turns: 0, text: null })]);
+    const before = b.events.length;
+    summarised(b, 1, 'Done here.');
+    const second = applyEvents(first, b.events.slice(before));
+    const side = ofKind(rowsOf(second), 'side_thread');
+    expect(side).toHaveLength(1);
+    expect(side[0]).toMatchObject({ turnId: second.order[0], state: 'finished', turns: 1, text: 'Done here.' });
+  });
+
+  it('a second summary with no text keeps the first one’s text and counts the turn', () => {
+    const b = builder();
+    b.turn('u1');
+    b.end(['u1']);
+    opened(b);
+    summarised(b, 1, 'First answer.');
+    summarised(b, 2, null);
+    expect(ofKind(folded(stateOf(b.events)), 'side_thread')).toEqual([expect.objectContaining({ state: 'finished', turns: 2, text: 'First answer.' })]);
+  });
+
+  it('an older summary arriving after a newer one (lower turns) changes nothing', () => {
+    const b = builder();
+    b.turn('u1');
+    b.end(['u1']);
+    opened(b);
+    summarised(b, 2, 'Second answer.');
+    summarised(b, 1, 'First answer.', true);
+    expect(ofKind(folded(stateOf(b.events)), 'side_thread')).toEqual([expect.objectContaining({ state: 'finished', turns: 2, text: 'Second answer.' })]);
+  });
+
   it('parity: a snapshot holding the opened and only the latest summary draws the row the live stream drew', () => {
     const live = builder();
     live.turn('u1');
