@@ -1,0 +1,134 @@
+{
+ "question": "Q3",
+ "app": "/tmp/maws-e10-MAWS.app",
+ "asarMtimeBefore": "2026-10-05T01:41:33.030Z",
+ "find": {
+  "status": 0,
+  "version": "v24.21.0",
+  "execPath": "/Users/new/Developer/GitHub/MAWS/dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS",
+  "files": [
+   "index-BCu401m2.js",
+   "index-BochXOs7.js",
+   "index.js"
+  ],
+  "hits": [
+   "index-BochXOs7.js"
+  ]
+ },
+ "chunkRun": {
+  "chunk": "/tmp/maws-e10-MAWS.app/Contents/Resources/app.asar/out/main/index-BochXOs7.js",
+  "status": 1,
+  "signal": null,
+  "stderrHead": [
+   "/Users/new/Developer/GitHub/MAWS/dist/mac-arm64/MAWS.app/Contents/Resources/app.asar/out/main/index-BochXOs7.js:13052",
+   "if (!userData) throw new Error('the engine host needs MAWS_USER_DATA (main forwards app.getPath(\"userData\"))');",
+   "               ^",
+   "Error: the engine host needs MAWS_USER_DATA (main forwards app.getPath(\"userData\"))",
+   "    at Object.<anonymous> (/Users/new/Developer/GitHub/MAWS/dist/mac-arm64/MAWS.app/Contents/Resources/app.asar/out/main/index-BochXOs7.js:13052:22)",
+   "    at Module._compile (node:internal/modules/cjs/loader:1937:14)"
+  ],
+  "stdout": ""
+ },
+ "chunkTraced": {
+  "status": 0,
+  "loaded": false,
+  "error": "the engine host needs MAWS_USER_DATA (main forwards app.getPath(\"userData\"))",
+  "requiresTotal": 246,
+  "chunkRequires": [
+   {
+    "request": "zod",
+    "resolved": "/Users/new/Developer/GitHub/MAWS/dist/mac-arm64/MAWS.app/Contents/Resources/app.asar/node_modules/zod/index.cjs"
+   },
+   {
+    "request": "node:path",
+    "resolved": "builtin"
+   },
+   {
+    "request": "node:child_process",
+    "resolved": "builtin"
+   },
+   {
+    "request": "node:fs",
+    "resolved": "builtin"
+   },
+   {
+    "request": "node:fs/promises",
+    "resolved": "builtin"
+   },
+   {
+    "request": "node:os",
+    "resolved": "builtin"
+   },
+   {
+    "request": "node:crypto",
+    "resolved": "builtin"
+   },
+   {
+    "request": "node:readline",
+    "resolved": "builtin"
+   },
+   {
+    "request": "node:util",
+    "resolved": "builtin"
+   },
+   {
+    "request": "node:string_decoder",
+    "resolved": "builtin"
+   },
+   {
+    "request": "node:http",
+    "resolved": "builtin"
+   },
+   {
+    "request": "node:perf_hooks",
+    "resolved": "builtin"
+   }
+  ]
+ },
+ "zodOneLine": {
+  "status": 0,
+  "resolved": "/Users/new/Developer/GitHub/MAWS/dist/mac-arm64/MAWS.app/Contents/Resources/app.asar/node_modules/zod/index.cjs",
+  "object": "function",
+  "toJSONSchema": "function"
+ },
+ "lsappinfo": {
+  "childPid": 2475,
+  "psCommand": "2475  2201  2475 Ss   maws-supervisor -e setTimeout(()=>{},8000)",
+  "psComm": "maws-supervisor",
+  "entryForChildPid": false,
+  "mawsEntries": [
+   {
+    "name": "MAWS",
+    "pid": 44903
+   },
+   {
+    "name": "ThemeWidgetControlViewService(MAWS)",
+    "pid": 45456
+   },
+   {
+    "name": "자동 완성(MAWS)",
+    "pid": 51965
+   },
+   {
+    "name": "Open and Save Panel Service(MAWS)",
+    "pid": 96403
+   }
+  ],
+  "totalEntries": 121,
+  "childKilled": true
+ },
+ "fuses": [
+  "Analyzing app: maws-e10-MAWS.app",
+  "Fuse Version: v1",
+  "RunAsNode is Enabled",
+  "EnableCookieEncryption is Disabled",
+  "EnableNodeOptionsEnvironmentVariable is Enabled",
+  "EnableNodeCliInspectArguments is Enabled",
+  "EnableEmbeddedAsarIntegrityValidation is Disabled",
+  "OnlyLoadAppFromAsar is Disabled",
+  "LoadBrowserProcessSpecificV8Snapshot is Disabled",
+  "GrantFileProtocolExtraPrivileges is Enabled",
+  "WasmTrapHandlers is Enabled"
+ ],
+ "asarMtimeAfter": "2026-10-05T01:41:33.030Z"
+}

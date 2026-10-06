@@ -1,0 +1,558 @@
+{
+ "question": "Q1",
+ "variant": "parent-killed",
+ "engine": {
+  "bin": "/Users/new/.local/share/claude/versions/2.1.291",
+  "version": "2.1.291"
+ },
+ "model": "haiku",
+ "watchMs": 90000,
+ "events": [
+  {
+   "ms": 36,
+   "ev": "spawned",
+   "engine": 74108,
+   "wrapper": 74097
+  },
+  {
+   "ms": 349,
+   "ev": "initialized",
+   "subtype": "success"
+  },
+  {
+   "ms": 349,
+   "ev": "prompt_sent"
+  },
+  {
+   "ms": 354,
+   "ev": "frame",
+   "type": "system",
+   "subtype": "session_state_changed"
+  },
+  {
+   "ms": 354,
+   "ev": "frame",
+   "type": "command_lifecycle",
+   "subtype": null
+  },
+  {
+   "ms": 356,
+   "ev": "frame",
+   "type": "command_lifecycle",
+   "subtype": null
+  },
+  {
+   "ms": 376,
+   "ev": "frame",
+   "type": "system",
+   "subtype": "init"
+  },
+  {
+   "ms": 379,
+   "ev": "frame",
+   "type": "system",
+   "subtype": "status"
+  },
+  {
+   "ms": 1039,
+   "ev": "frame",
+   "type": "user",
+   "subtype": null
+  },
+  {
+   "ms": 1622,
+   "ev": "frame",
+   "type": "assistant",
+   "subtype": null
+  },
+  {
+   "ms": 1858,
+   "ev": "frame",
+   "type": "assistant",
+   "subtype": null
+  }
+ ],
+ "samples": [
+  {
+   "ms": 102,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 252,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 404,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 568,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 718,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 874,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 1027,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 1179,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 1333,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 1485,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 1639,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 1788,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 1943,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 2096,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 2248,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 2395,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 2548,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 2699,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 2852,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 3011,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 4074,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 6052,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 8008,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 9065,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 11064,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 13054,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 15018,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 16099,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 17014,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 18083,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": true
+  },
+  {
+   "ms": 20073,
+   "engineAlive": true,
+   "ppid": 1,
+   "registry": true,
+   "sleeper": false
+  },
+  {
+   "ms": 21894,
+   "engineAlive": false,
+   "ppid": null,
+   "registry": false,
+   "sleeper": false
+  }
+ ],
+ "beforeKill": {
+  "engine": {
+   "pid": 74108,
+   "ppid": 74097,
+   "pgid": 74108,
+   "stat": "Ss"
+  },
+  "wrapperPid": 74097,
+  "descendants": [
+   {
+    "pid": 74988,
+    "ppid": 74108,
+    "pgid": 74988,
+    "stat": "Ss",
+    "command": "/bin/zsh -c source /private/tmp/maws-e0a-e10-q1-B9nU3E/config/shell-snapshots/sn"
+   },
+   {
+    "pid": 74996,
+    "ppid": 74988,
+    "pgid": 74988,
+    "stat": "S",
+    "command": "sleep 20"
+   }
+  ],
+  "registry": {
+   "pid": 74108,
+   "sessionId": "eb3f9765-71a7-4c5a-9d12-3d0c127945e7",
+   "entrypoint": "sdk-ts",
+   "kind": "interactive",
+   "cwdIsScratch": false,
+   "keys": [
+    "cwd",
+    "entrypoint",
+    "kind",
+    "messagingSocketPath",
+    "name",
+    "nameSince",
+    "nameSource",
+    "peerFeatures",
+    "peerProtocol",
+    "pid",
+    "pidDomain",
+    "procStart",
+    "sessionId",
+    "startedAt",
+    "status",
+    "statusUpdatedAt",
+    "updatedAt",
+    "version"
+   ]
+  }
+ },
+ "killAtMs": 3830,
+ "afterKill": {
+  "engineGoneMs": 21894,
+  "registryGoneMs": 21736,
+  "sleeperGoneMs": 18835,
+  "firstOrphanSample": {
+   "ms": 102,
+   "ppid": 1,
+   "pgid": 74108,
+   "stat": "Ss",
+   "registry": {
+    "pid": 74108,
+    "sessionId": "eb3f9765-71a7-4c5a-9d12-3d0c127945e7",
+    "entrypoint": "sdk-ts",
+    "kind": "interactive",
+    "cwdIsScratch": false,
+    "keys": [
+     "cwd",
+     "entrypoint",
+     "kind",
+     "messagingSocketPath",
+     "name",
+     "nameSince",
+     "nameSource",
+     "peerFeatures",
+     "peerProtocol",
+     "pid",
+     "pidDomain",
+     "procStart",
+     "sessionId",
+     "startedAt",
+     "status",
+     "statusUpdatedAt",
+     "updatedAt",
+     "version"
+    ]
+   }
+  },
+  "wrapperExit": {
+   "code": null,
+   "signal": "SIGKILL",
+   "ms": 3831
+  },
+  "engineExitSeenByWrapper": null
+ },
+ "lingeringAfterWindow": [],
+ "transcript": {
+  "lines": 32,
+  "parsed": 32,
+  "endsWithNewline": true,
+  "badLine": null,
+  "tail": [
+   {
+    "type": "assistant",
+    "subtype": null,
+    "content": "[{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"EroDCtABCBIYAipAaMNmXMmz41bkLmlV3y+Gbfe68xOLtDeAc4e+WG+o2WwO/rOhfp3zEuXdBJqCyU557THZXyjZ2okG4D9Z0eSeizIZY2xhdWRlL"
+   },
+   {
+    "type": "assistant",
+    "subtype": null,
+    "content": "[{\"type\":\"text\",\"text\":\"finished\"}]"
+   },
+   {
+    "type": "last-prompt",
+    "subtype": null,
+    "content": "null"
+   },
+   {
+    "type": "cost-state",
+    "subtype": null,
+    "content": "null"
+   }
+  ],
+  "toolUses": [
+   "toolu_01KvoWQELH96UyXwWfEr2wiD"
+  ],
+  "toolResults": [
+   {
+    "id": "toolu_01KvoWQELH96UyXwWfEr2wiD",
+    "is_error": false,
+    "text": "\"q1-done\""
+   }
+  ],
+  "toolUseAnswered": true,
+  "cost": {
+   "usage": {
+    "input": 18,
+    "output": 160,
+    "cacheWrite": 9643,
+    "cacheRead": 34686,
+    "messages": 2
+   },
+   "estimatedUsd": 0.01634
+  }
+ },
+ "framesSeen": {
+  "count": 25,
+  "lastAtMsFromKill": -1962,
+  "results": []
+ },
+ "debugTail": [
+  "2026-10-06T17:55:18.332Z [DEBUG] Hooks: checkForNewResponses returning 0 responses",
+  "2026-10-06T17:55:18.335Z [DEBUG] Dynamic tool loading: 0/17 deferred tools included",
+  "2026-10-06T17:55:18.336Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.291.e53; cc_entrypoint=sdk-ts;",
+  "2026-10-06T17:55:18.336Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK",
+  "2026-10-06T17:55:18.336Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK",
+  "2026-10-06T17:55:18.337Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK",
+  "2026-10-06T17:55:18.337Z [DEBUG] [API:timing] dispatching to firstParty model=claude-haiku-4-5-20251001",
+  "2026-10-06T17:55:18.338Z [DEBUG] [API REQUEST] /v1/messages source=sdk",
+  "2026-10-06T17:55:18.845Z [DEBUG] Stream started - received first chunk",
+  "2026-10-06T17:55:18.845Z [DEBUG] [API:timing] first byte after 508ms",
+  "2026-10-06T17:55:19.225Z [DEBUG] hooks module cc-plugin-telemetry@builtin telemetry.log settled in 0.9ms (native link, next() included)",
+  "2026-10-06T17:55:19.225Z [DEBUG] [engine] turn 1 end (turns=2 usage in=943 out=171 cost=$0.0173 api=2959ms stop=end_turn resultLen=8)",
+  "2026-10-06T17:55:19.225Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK",
+  "2026-10-06T17:55:19.226Z [DEBUG] hooks module cc-plugin-telemetry@builtin telemetry.log settled in 0.7ms (native link, next() included)",
+  "2026-10-06T17:55:19.227Z [DEBUG] hooks module cc-plugin-agents-md@builtin turn.complete settled in 0.1ms (native link, next() included)",
+  "2026-10-06T17:55:19.229Z [DEBUG] [uds-messaging] Shutting down",
+  "2026-10-06T17:55:19.231Z [DEBUG] LSP server manager shut down successfully",
+  "2026-10-06T17:55:19.233Z [ERROR] [Anthropic telemetry] Failed to check metrics opt-out status: Auth error: no credential usable for the metrics opt-out check",
+  "2026-10-06T17:55:19.233Z [DEBUG] [Anthropic telemetry] BigQuery metrics export failed (metrics opt-out check failed; skipping export). This is Anthropic's own telemetry pipeline, not your OTel collector; further failures",
+  "2026-10-06T17:55:19.233Z [DEBUG] [Anthropic telemetry] BigQuery metrics export: 1 failure(s) this session (last: metrics opt-out check failed; skipping export)",
+  "2026-10-06T17:55:19.233Z [DEBUG] [Anthropic telemetry] BigQuery metrics exporter flush complete",
+  "2026-10-06T17:55:19.233Z [DEBUG] [Anthropic telemetry] BigQuery metrics exporter flush complete",
+  "2026-10-06T17:55:19.233Z [DEBUG] [Anthropic telemetry] BigQuery metrics exporter shutdown complete",
+  "2026-10-06T17:55:19.233Z [DEBUG] Cleaned up session snapshot: <scratch>/config/shell-snapshots/snapshot-zsh-1791309297623-3fg272.sh",
+  "2026-10-06T17:55:19.234Z [DEBUG] hooks module cc-plugin-telemetry@builtin session.end settled in 0.3ms (native link, next() included)"
+ ],
+ "debugShutdownLines": [
+  "2026-10-06T17:54:56.018Z [INFO] [uds-messaging] Connect when the data is ready (e.g. out=$(cmd); printf '%s\\n' \"$out\" | nc -U \"$CLAUDE_CODE_MESSAGING_SOCKET\" — or the socat form above): a connection that sends no complet",
+  "2026-10-06T17:54:56.118Z [DEBUG] $.process.run (cc-plugin-telemetry): sh exited 0 in 16ms, 50 + 0 chars",
+  "2026-10-06T17:55:19.233Z [DEBUG] [Anthropic telemetry] BigQuery metrics export failed (metrics opt-out check failed; skipping export). This is Anthropic's own telemetry pipeline, not your OTel collector; further failures",
+  "2026-10-06T17:55:19.233Z [DEBUG] [Anthropic telemetry] BigQuery metrics exporter shutdown complete"
+ ],
+ "stderr": "",
+ "ownerFileDelta": {
+  "before": [
+   "/private/tmp",
+   "/private/tmp/b2-ws",
+   "/private/tmp/bench-browser",
+   "/private/tmp/bgt2",
+   "/private/tmp/bgtest",
+   "/private/tmp/cc-capture",
+   "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad",
+   "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe",
+   "/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest",
+   "/private/tmp/claude-plugin-smoke-15",
+   "/private/tmp/cua-accept",
+   "/private/tmp/fold-live",
+   "/private/tmp/fold-smoke",
+   "/private/tmp/hooktest",
+   "/private/tmp/maws-accept",
+   "/private/tmp/maws-harness/a",
+   "/private/tmp/md-test",
+   "/private/tmp/oc-ws-b",
+   "/private/tmp/sminos-probe",
+   "/private/tmp/th-pad.Nnz1",
+   "/private/tmp/th-pad.WI9D",
+   "/private/tmp/th-test",
+   "/private/tmp/th-tools.Ozkz",
+   "/private/tmp/th-tools.VY2Y",
+   "/private/tmp/wr-test"
+  ],
+  "after": [
+   "/private/tmp",
+   "/private/tmp/b2-ws",
+   "/private/tmp/bench-browser",
+   "/private/tmp/bgt2",
+   "/private/tmp/bgtest",
+   "/private/tmp/cc-capture",
+   "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad",
+   "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe",
+   "/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest",
+   "/private/tmp/claude-plugin-smoke-15",
+   "/private/tmp/cua-accept",
+   "/private/tmp/fold-live",
+   "/private/tmp/fold-smoke",
+   "/private/tmp/hooktest",
+   "/private/tmp/maws-accept",
+   "/private/tmp/maws-harness/a",
+   "/private/tmp/md-test",
+   "/private/tmp/oc-ws-b",
+   "/private/tmp/sminos-probe",
+   "/private/tmp/th-pad.Nnz1",
+   "/private/tmp/th-pad.WI9D",
+   "/private/tmp/th-test",
+   "/private/tmp/th-tools.Ozkz",
+   "/private/tmp/th-tools.VY2Y",
+   "/private/tmp/wr-test"
+  ],
+  "same": true,
+  "pythonBefore": "[\"/private/tmp\", \"/private/tmp/b2-ws\", \"/private/tmp/bench-browser\", \"/private/tmp/bgt2\", \"/private/tmp/bgtest\", \"/private/tmp/cc-capture\", \"/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad\", \"/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe\", \"/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest\", \"/private/tmp/claude-plugin-smoke-15\", \"/private/tmp/cua-accept\", \"/private/tmp/fold-live\", \"/private/tmp/fold-smoke\", \"/private/tmp/hooktest\", \"/private/tmp/maws-accept\", \"/private/tmp/maws-harness/a\", \"/private/tmp/md-test\", \"/private/tmp/oc-ws-b\", \"/private/tmp/sminos-probe\", \"/private/tmp/th-pad.Nnz1\", \"/private/tmp/th-pad.WI9D\", \"/private/tmp/th-test\", \"/private/tmp/th-tools.Ozkz\", \"/private/tmp/th-tools.VY2Y\", \"/private/tmp/wr-test\"]",
+  "pythonAfter": "[\"/private/tmp\", \"/private/tmp/b2-ws\", \"/private/tmp/bench-browser\", \"/private/tmp/bgt2\", \"/private/tmp/bgtest\", \"/private/tmp/cc-capture\", \"/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad\", \"/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe\", \"/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest\", \"/private/tmp/claude-plugin-smoke-15\", \"/private/tmp/cua-accept\", \"/private/tmp/fold-live\", \"/private/tmp/fold-smoke\", \"/private/tmp/hooktest\", \"/private/tmp/maws-accept\", \"/private/tmp/maws-harness/a\", \"/private/tmp/md-test\", \"/private/tmp/oc-ws-b\", \"/private/tmp/sminos-probe\", \"/private/tmp/th-pad.Nnz1\", \"/private/tmp/th-pad.WI9D\", \"/private/tmp/th-test\", \"/private/tmp/th-tools.Ozkz\", \"/private/tmp/th-tools.VY2Y\", \"/private/tmp/wr-test\"]"
+ },
+ "cleanup": {
+  "started": [
+   74097,
+   74108,
+   74988,
+   74996,
+   75700
+  ],
+  "stillAlive": [],
+  "psMatchesScratch": [],
+  "scratchRemoved": true
+ }
+}
