@@ -3,11 +3,16 @@
 // `pty.hostState` snapshot commands, and the events of the same names on every transition.
 // E10: the engine host runs in the mode MAWS_HOST_MODE picks (mode.ts): detached (the supervisor, by default) or a
 // utility process (under the harnesses); the pty host is always a utility process.
+import { join } from 'node:path';
+import { app, shell } from 'electron';
 import engineHostPath from '../../engine-host/index?modulePath';
 import ptyHostPath from '../../pty-host/index?modulePath';
+import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
+import { buildIdOf, SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
 import { hostModeFromEnv } from './mode';
+import { startHostStatus } from './status';
 import { createHostSupervisor, type HostSupervisor } from './supervisor';
 
 export function createHosts(): HostSupervisor {
@@ -26,5 +31,15 @@ export function createHosts(): HostSupervisor {
   registerMainHandler('pty.hostState', () => supervisor.snapshot('pty-host'));
   supervisor.onState('engine-host', (state) => emit('engine.hostState', state));
   supervisor.onState('pty-host', (state) => emit('pty.hostState', state));
+  // E10: host.status (the supervisor's status with main's facts), host.restart and host.openLog
+  startHostStatus({
+    hosts: supervisor,
+    appBuildId: () => buildIdOf(engineHostPath),
+    appWire: wireFingerprint,
+    logPath: () => (mode === 'detached' ? join(app.getPath('userData'), 'supervisor', SUPERVISOR_FILES.log) : null),
+    emit: (status) => void emit('host.status', status),
+    register: registerMainHandler,
+    openPath: (path) => shell.openPath(path),
+  });
   return supervisor;
 }
