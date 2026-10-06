@@ -557,6 +557,10 @@ Every e2e run is under `MAWS_E2E=1` with its own `userData` and an empty `CLAUDE
   Rationale: M2's task review, round 1, with round 2's approval.
   Date/Author: 2026-10-06, the E3 executor.
 
+- Decision (M3, as built): the user row's `anchor` is optional and absent on an ordinary prompt (not `Anchor | null`), so existing snapshots and E7's concurrent row changes merge without churn; the `side_thread` row carries `anchorKind` because `kind` is the row union's discriminator. The reducer keeps a per-thread owner map, so a `summarised` routes to the turn or loose block of the thread's first event. `adoptFork` is extracted from C10's `forkSession` with unchanged behaviour and reused by the composer. A producer's screenshot shows in the sheet as a removable "Screenshot · W×H" chip, not a thumbnail: the renderer cannot read a `userData` file yet (a tracker row, or E2's reader later). M3 builds only the pane's thread view; the `/btw` view is M4's. When the chosen thread is deleted, the pane falls back to the newest. For the unread rule, the pane's child counts as visible only while the panel is open and the parent is visible. The pane header opens an anchor's file in the parent's session. The `p1-side-thread-live{,-fork}` transcript snapshots are regenerated on purpose: the anchored user row gains `anchor`, its text becomes the comment alone, and `lines` drops to 1.
+  Rationale: task 4's report; each fits Design §6 and the panel rule.
+  Date/Author: 2026-10-06, the E3 executor.
+
 ## Deferred
 
 - A fork detected by a mid-file uuid (a parent compacted before the fork), a root pushed past the head window by a large `file-history-snapshot`, and a first message record over 64 KiB (a pasted image in the first prompt; the `uuid` key follows `message`): not detected by the disk rule; listed as roots. A whole-file scan on demand is a later child.
