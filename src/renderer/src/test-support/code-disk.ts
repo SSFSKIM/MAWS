@@ -40,7 +40,8 @@ export function installDisk(files: Record<string, DiskFile>) {
       if (file === undefined) return fail(`not found: ${path}`);
       const offset = (input.offset as number | undefined) ?? 0;
       const length = (input.length as number | undefined) ?? FILES_READ_DEFAULT_LENGTH;
-      const end = Math.min(file.text.length, offset + length); // the suites' multi-chunk files are ASCII
+      // the suites' multi-chunk files are ASCII; past the end, zero bytes (main's `Math.max(0, …)`)
+      const end = Math.max(offset, Math.min(file.text.length, offset + length));
       return ok({
         encoding: 'utf8', content: file.text.slice(offset, end), bytes: file.bytes, offset, length: end - offset, truncated: end < file.bytes, mime: mimeOf(path),
         hash: input.hash === true ? fakeHash(file.text) : null,

@@ -85,6 +85,22 @@ describe('editor', () => {
       expect(entry().hash).toBe(fakeHash(text));
     });
 
+    it('ends a load read-only when a continuation answers another hash, even with zero bytes (the file shrank)', async () => {
+      const text = `${'const line = 1; '.repeat(63)}\n`.repeat(1040); // past one chunk
+      const disk = installDisk({ [APP]: text });
+      const first = disk.hold('files.read'); // answered with the whole file as it is when the call arrives
+      render(<FileViewer tab={fileTab(APP)} />);
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(1));
+      disk.files[APP] = 'x\n'; // shrunk before the continuation: it answers zero bytes with the new file's hash
+      await act(async () => first.release());
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(2));
+      await settle();
+      expect(disk.callsOf('files.read')[1]).toMatchObject({ offset: MiB, hash: true });
+      expect(entry()).toMatchObject({ status: 'ready', hash: null, editable: false, complete: false, text: text.slice(0, MiB) });
+      await waitFor(() => expect(document.querySelector('.cm-content')?.getAttribute('title')).toBe('Read-only until the file has loaded'));
+      expect(view().state.facet(EditorView.editable)).toBe(false);
+    });
+
     it('keeps a head and a lossy decode read-only, each with its reason as the content’s title', async () => {
       installDisk({ '/r/big.log': { text: 'log line\n', bytes: 5 * MiB }, '/r/latin1.txt': { text: 'caf�\n', bytes: 5, utf8: false } });
       const head = render(<FileViewer tab={fileTab('/r/big.log')} />);

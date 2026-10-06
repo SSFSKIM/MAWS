@@ -328,8 +328,11 @@ export function createViewerStore(client: MawsBridge) {
         if (!live()) return;
         // Mid-file: nothing of either version stays, except that a file gone during a re-read keeps its last content.
         if (!next.ok) return fail(tabId, next.error.message, reason);
-        if (next.value.length === 0) break; // the file shrank under the read
-        if (hash !== null && next.value.hash !== hash) return; // changed mid-load: its files.changed re-reads it
+        // Changed mid-load, whatever the chunk's length (a shrunk file answers zero bytes with its new hash): the load ends
+        // here, an open one read-only with `hash: null`; its files.changed re-reads it. Checked before the shrink exit,
+        // which would otherwise commit the old file's partial text with its whole-file hash, as editable.
+        if (hash !== null && next.value.hash !== hash) return;
+        if (next.value.length === 0) break; // the file shrank under an unhashed read (a head)
         text += next.value.content;
         loaded = next.value.offset + next.value.length;
         more = next.value.truncated && wanted();
