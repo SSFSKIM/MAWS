@@ -19,7 +19,7 @@ import { slashWidget } from '../mentions/widgets';
 import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
 import { atomId, attachmentsOf, docOf, emptyDoc, hardBreak, isMultiline, mentionNode, paragraph, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
-import { closeInterim, inlineFragment, interimOf, needsLeadingSpace, openInterim, replaceInterim, settleFinal } from './dictation-plugin'; // E9
+import { closeInterim, dictationStart, inlineFragment, interimOf, needsLeadingSpace, openInterim, replaceInterim, settleFinal } from './dictation-plugin'; // E9
 import { createDraftWriter, docOfDraft, isEmptyDoc, registerLiveDraft, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
@@ -497,15 +497,15 @@ export class EditorController {
   // ---- E9: dictation (E9 execution document, Design §7) -----------------------------------------------------------
 
   // Opens the interim range at the caret (the editor takes focus first: at its selection when focused, else at the
-  // end), deleting nothing: a selection stays and the words go after it, so a refused or cancelled capture leaves the
-  // document exactly as it was. Whether the words get a leading space is decided once, here.
+  // end), deleting nothing: a selection stays and the words go after it, inside its last text block, so a refused or
+  // cancelled capture leaves the document exactly as it was. Whether the words get a leading space is decided once, here.
   private beginDictation(onEnded: () => void): DictationSink | null {
     const editor = this.editor;
     if (!editor || editor.isDestroyed || this.busy || submissions.has(this.inputs.appSessionId) || this.inputs.disabled !== null) return null;
     this.endDictation('remove'); // one sink at a time
     if (!editor.isFocused) editor.commands.focus('end');
     editor.view.focus();
-    const at = editor.state.selection.to;
+    const at = dictationStart(editor.state);
     const space = needsLeadingSpace(editor.state, at);
     openInterim(editor.view, at);
     const session: Dictation = { ended: false, onEnded };

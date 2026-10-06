@@ -11,7 +11,7 @@
 import { Extension } from '@tiptap/core';
 import { closeHistory } from '@tiptap/pm/history';
 import { Fragment, type Schema } from '@tiptap/pm/model';
-import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
+import { Plugin, PluginKey, Selection, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import type { JSONContent } from '@tiptap/core';
 
@@ -71,6 +71,15 @@ export const DictationInterim = Extension.create({
 export const interimOf = (state: EditorState): InterimRange | null => dictationKey.getState(state) ?? null;
 
 export const inlineFragment = (schema: Schema, content: JSONContent[]): Fragment => Fragment.fromArray(content.map((node) => schema.nodeFromJSON(node)));
+
+// Where a dictation's words start: the selection's end, normalised into a text block. A selection ending at a block or
+// document boundary (Select All's AllSelection) starts at the end of the last text block before it instead, where inline
+// words fit as they are; inserted at the boundary they would grow a wrapper paragraph the range does not cover.
+export function dictationStart(state: EditorState): number {
+  const $end = state.doc.resolve(state.selection.to);
+  if ($end.parent.inlineContent) return $end.pos;
+  return (Selection.findFrom($end, -1, true) ?? Selection.near($end, -1)).from;
+}
 
 // Dictated text after a word or a chip gets one leading space; none at the start of a line or after whitespace.
 export function needsLeadingSpace(state: EditorState, at: number): boolean {

@@ -248,6 +248,59 @@ describe('editor dictation replaces interim text and settles the final', () => {
     expect(JSON.stringify(saved)).not.toContain('hello');
   });
 
+  // Select All ends at the document's boundary, outside any paragraph: the range starts at the end of the last text
+  // block instead, so its words never grow a wrapper paragraph the range would not cover (Task 3 review round 1).
+  describe('after Select All', () => {
+    const TWO = docOf([paragraph(textNode('one')), paragraph(textNode('two'))]);
+    const selectAll = async (doc: ComposerDoc) => {
+      const mounted = await mount(doc, 1);
+      act(() => void mounted.editor.commands.selectAll());
+      return { ...mounted, before: mounted.editor.getJSON() };
+    };
+
+    it('partials replace only their own words at the end of the last paragraph, and leave the selection until words arrive', async () => {
+      const { handle, editor, content, before } = await selectAll(TWO);
+      const sink = handle.current!.beginDictation(() => {})!;
+      expect(editor.getJSON()).toEqual(before);
+      expect([editor.state.selection.from, editor.state.selection.to]).toEqual([0, editor.state.doc.content.size]);
+      act(() => sink.partial('hello'));
+      act(() => sink.partial('hello world'));
+      expect(editor.getJSON()).toEqual(docOf([paragraph(textNode('one')), paragraph(textNode('two hello world'))]));
+      expect(interim(content)).toEqual([' hello world']);
+    });
+
+    it('cancel restores the document exactly', async () => {
+      const { handle, editor, before } = await selectAll(ALPHA_BETA);
+      const sink = handle.current!.beginDictation(() => {})!;
+      act(() => sink.partial('hello'));
+      act(() => sink.partial('hello there'));
+      act(() => sink.cancel());
+      expect(editor.getJSON()).toEqual(before);
+    });
+
+    it('the final settles in the paragraph and one undo restores the document', async () => {
+      const { handle, editor, before } = await selectAll(TWO);
+      const sink = handle.current!.beginDictation(() => {})!;
+      act(() => sink.partial('hello'));
+      act(() => sink.final('Hello world.'));
+      expect(editor.getJSON()).toEqual(docOf([paragraph(textNode('one')), paragraph(textNode('two Hello world.'))]));
+      act(() => void editor.commands.undo());
+      expect(editor.getJSON()).toEqual(before);
+    });
+  });
+
+  it('a selected chip ending its paragraph: the words go after it, and cancel restores the document', async () => {
+    const chip = docOf([paragraph(textNode('see '), mentionNode({ id: 'src/a.ts', label: 'a.ts', kind: 'file' }))]);
+    const { handle, editor } = await mount(chip, 5);
+    act(() => void editor.commands.setNodeSelection(5)); // the chip itself, its end at the paragraph's boundary
+    const before = editor.getJSON();
+    const sink = handle.current!.beginDictation(() => {})!;
+    act(() => sink.partial('hi'));
+    expect(handle.current!.serialize().display).toBe('see @src/a.ts hi');
+    act(() => sink.cancel());
+    expect(editor.getJSON()).toEqual(before);
+  });
+
   it('focuses an unfocused editor at the end before opening the range', async () => {
     const { handle, editor } = await mount(ALPHA_BETA, AFTER_ALPHA);
     act(() => editor.view.dom.blur());
