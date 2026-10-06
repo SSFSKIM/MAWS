@@ -161,8 +161,10 @@ describe('the maws artifact tools, live (E2 M2)', () => {
             if (capture.appSessionId !== id || captured.has(capture.requestId)) continue;
             captured.add(capture.requestId);
             console.log(`   capture: ${JSON.stringify(capture)}`);
-            const answered = await host.call('maws.artifact.captured', { appSessionId: id, requestId: capture.requestId, result: { ok: true, png: GREEN_SQUARE_PNG, width: 64, height: 64, consoleErrors: [] } });
-            console.log(`   captured: ${JSON.stringify(answered)}`);
+            await host
+              .call('maws.artifact.captured', { appSessionId: id, requestId: capture.requestId, result: { ok: true, png: GREEN_SQUARE_PNG, width: 64, height: 64, consoleErrors: [] } })
+              .then((answered) => console.log(`   captured: ${JSON.stringify(answered)}`))
+              .catch((error: unknown) => console.log(`   capture answer failed: ${String(error)}`));
           }
           await delay(100);
         }
@@ -204,13 +206,6 @@ describe('the maws artifact tools, live (E2 M2)', () => {
       expect(refused.isError).toBe(true);
       expect(textOf(refused.content)).toContain(TOOL_ERRORS.noArtifact('artifact_update', 'nope'));
 
-      // the reply: the colour the picture shows (green, which the prompt never names), the two versions, the error
-      expect(ended.resultText).toMatch(/green/i);
-      expect(ended.resultText).toMatch(/\b2\b/);
-      // counting "the first six words", the model may drop the quotes (both recordings did: `green 2 artifact_update no
-      // artifact nope in`)
-      expect(ended.resultText).toMatch(/no artifact "?nope"?/);
-
       // the store on disk: one artifact record with two versions copied under it, `path` on v2
       const record = DeliverableRecordSchema.parse(JSON.parse(readFileSync(join(g.userData, 'deliverables', id, `${deliverableId}.json`), 'utf8')));
       const v1 = versionPath(g.userData, id, deliverableId, 1);
@@ -220,6 +215,13 @@ describe('the maws artifact tools, live (E2 M2)', () => {
       expect(readFileSync(v1, 'utf8')).not.toBe(readFileSync(v2, 'utf8'));
       expect(readFileSync(v2, 'utf8')).toBe(readFileSync(join(repo, 'dashboard.html'), 'utf8'));
       report.push(`record ${deliverableId}.json: ${JSON.stringify(record)}`);
+
+      // the reply: the colour the picture shows (green, which the prompt never names), the two versions, the error
+      expect(ended.resultText).toMatch(/green/i);
+      expect(ended.resultText).toMatch(/\b2\b/);
+      // counting "the first six words", the model may drop the quotes (both recordings did: `green 2 artifact_update no
+      // artifact nope in`)
+      expect(ended.resultText).toMatch(/no artifact "?nope"?/);
     } finally {
       running = false;
       await host.shutdown().catch((error: unknown) => console.log(`   shutdown failed: ${String(error)}`));

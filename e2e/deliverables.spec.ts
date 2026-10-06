@@ -72,14 +72,17 @@ async function mountFrame(maws: MawsLaunch, src: string, sandbox: string | null)
   );
 }
 
-// What main sees of the frame's rect: how many near-black pixels it paints, and every frame URL in the window.
-async function frameView(maws: MawsLaunch): Promise<{ dark: number; frames: string[] }> {
+// What main sees of the frame's rect: how many near-black pixels it paints, every frame URL in the window, and the parent
+// URL of each frame of Chromium's PDF viewer (the ancestry the frame policies judge it by).
+async function frameView(maws: MawsLaunch): Promise<{ dark: number; frames: string[]; viewerParents: (string | null)[] }> {
   return maws.app.evaluate(async ({ BrowserWindow }, size) => {
     const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
     const bitmap = (await win.webContents.capturePage({ x: 0, y: 0, ...size })).toBitmap(); // BGRA
     let dark = 0;
     for (let i = 0; i < bitmap.length; i += 4) if (bitmap[i] < 40 && bitmap[i + 1] < 40 && bitmap[i + 2] < 40) dark++;
-    return { dark, frames: win.webContents.mainFrame.framesInSubtree.map((frame) => frame.url) };
+    const frames = win.webContents.mainFrame.framesInSubtree;
+    const viewerParents = frames.filter((frame) => frame.url.startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/')).map((frame) => frame.parent?.url ?? null);
+    return { dark, frames: frames.map((frame) => frame.url), viewerParents };
   }, FRAME);
 }
 
@@ -100,7 +103,7 @@ test('the PDF trial: which frame sandbox draws a scheme-served PDF in Chromiumâ€
     writeFileSync(path, minimalPdf());
     const id = randomUUID();
     seed(maws.userData, { id, appSessionId: APP, kind: 'file', path, title: 'trial.pdf', versions: [{ path, at: new Date().toISOString() }], createdAt: new Date().toISOString() });
-    const results: { mode: string; sandbox: string | null; draws: boolean; dark: number; frames: string[] }[] = [];
+    const results: { mode: string; sandbox: string | null; draws: boolean; dark: number; frames: string[]; viewerParents: (string | null)[] }[] = [];
     for (const { mode, sandbox } of PDF_TRIAL) {
       await mountFrame(maws, deliverableUrl(APP, id, 1), sandbox);
       let view = await frameView(maws);
@@ -112,10 +115,17 @@ test('the PDF trial: which frame sandbox draws a scheme-served PDF in Chromiumâ€
       results.push({ mode, sandbox, draws: view.dark >= 2_000, ...view });
       await testInfo.attach(`pdf-trial-${mode}.png`, { body: await maws.page.screenshot({ clip: { x: 0, y: 0, ...FRAME } }), contentType: 'image/png' });
     }
-    const report = results.map((r) => `${r.mode} sandbox=${JSON.stringify(r.sandbox)} draws=${r.draws} darkPixels=${r.dark} frames=${JSON.stringify(r.frames)}`).join('\n');
+    const report = results
+      .map((r) => `${r.mode} sandbox=${JSON.stringify(r.sandbox)} draws=${r.draws} darkPixels=${r.dark} frames=${JSON.stringify(r.frames)} viewerParents=${JSON.stringify(r.viewerParents)}`)
+      .join('\n');
     console.log(`[pdf-trial]\n${report}`);
     await testInfo.attach('pdf-trial.txt', { body: report, contentType: 'text/plain' });
     expect(results.find((r) => r.mode === PDF_CHOSEN)?.draws, report).toBe(true);
+    // the policies' premise (policies.ts): the viewer's frame lies beneath the PDF's own scheme frame, so its links and
+    // requests are judged as a deliverable's
+    const viewerParents = results.find((r) => r.mode === PDF_CHOSEN)!.viewerParents;
+    expect(viewerParents.length, report).toBeGreaterThan(0);
+    for (const parent of viewerParents) expect(parent, report).toMatch(/^maws-deliverable:\/\//);
     for (const earlier of PDF_TRIAL.slice(0, PDF_TRIAL.findIndex((t) => t.mode === PDF_CHOSEN))) {
       expect(results.find((r) => r.mode === earlier.mode)?.draws, `${earlier.mode} would have been chosen first\n${report}`).toBe(false);
     }

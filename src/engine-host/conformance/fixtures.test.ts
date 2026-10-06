@@ -897,7 +897,7 @@ describe('normaliser: the artifact tools recorded live (E2 M2, pass3/p1-maws-art
     expect(refusedAnswer.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.noArtifact('artifact_update', 'nope') }], isError: true });
     const errors = ofKind(events, 'tool.result').filter((e) => e.isError && ofKind(events, 'tool.use').find((u) => u.toolUseId === e.toolUseId)?.toolName.startsWith('mcp__maws__artifact_'));
     expect(errors).toHaveLength(1);
-    expect(text(errors[0]!.content)).toContain(TOOL_ERRORS.noArtifact('artifact_update', 'nope'));
+    expect(text(errors[0]!.content)).toBe(TOOL_ERRORS.noArtifact('artifact_update', 'nope')); // seq 418 carries exactly it
     expect(events.filter((e) => e.kind.startsWith('maws.') && (e as { requestId?: string }).requestId === updates[1]!.requestId)).toEqual([]);
   });
 });

@@ -54,7 +54,10 @@ export function beneathDeliverable(frame: FrameLike | null | undefined): boolean
 
 // A request whose frame is (or lies beneath) a deliverable frame, or whose initiator is the scheme (an unsandboxed frame
 // reports it; a sandboxed one reports the opaque "null"), for anything outside the scheme, the PDF viewer's files and
-// `chrome://resources/`: http, https, ws, wss and file alike. `data:` and `blob:` never reach `webRequest`.
+// `chrome://resources/`: http, https, ws, wss and file alike. `data:` and `blob:` never reach `webRequest`. Unlike the
+// navigation guard, a frame that can no longer be read counts as not beneath one here (only an initiator in the scheme
+// still cancels): safe because every scheme answer that can run script carries a CSP without network sources
+// (`protocol.ts`), so the frame's own policy refuses what this filter lets by.
 export function shouldCancelRequest(details: { url: string; beneath: boolean | null; initiatorOrigin?: string }): boolean {
   if (allowedBeneath(details.url)) return false;
   return details.beneath === true || isDeliverable(details.initiatorOrigin);
@@ -89,8 +92,8 @@ export function isDeliverablePermission(origins: readonly (string | null | undef
   return origins.some(isDeliverable);
 }
 
-// A console message of a deliverable frame, as `deliverables.console` carries it (the message cut to its schema's
-// bound); null for anything else.
+// A console message of a deliverable frame, as `deliverables.console` carries it (the message and the source cut to
+// their schema's bound); null for anything else.
 export function consoleMessageOf(details: {
   frame: { url: string } | null;
   level: string;
@@ -114,7 +117,7 @@ export function consoleMessageOf(details: {
     level: details.level,
     message: details.message.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX),
     line: Number.isInteger(details.lineNumber) ? details.lineNumber : null,
-    source: details.sourceId || null,
+    source: details.sourceId ? details.sourceId.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX) : null,
   };
 }
 
@@ -175,7 +178,10 @@ export function installFramePolicies(session: Session, env: SeamEnv): void {
 
 // Permissions (the session's only handlers: nothing else in main installs one). `all`: the capture partition, which
 // holds nothing but captures, denies every request and check. `deliverables`: the app's session denies a deliverable
-// frame's and keeps Electron's default (granted) for everything else, the app page and the PDF viewer included.
+// frame's and keeps Electron's default (granted) for everything else, the app page and the PDF viewer included, but for
+// the checks Electron itself denies to every origin: an installed check handler replaces that built-in denial.
+const DENIED_EVERYWHERE = new Set(['deprecated-sync-clipboard-read']); // Electron 32+ denies it when no handler is set
+
 export function guardPermissions(session: Session, scope: 'all' | 'deliverables'): void {
   if (scope === 'all') {
     session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -186,7 +192,10 @@ export function guardPermissions(session: Session, scope: 'all' | 'deliverables'
     const { requestingUrl, securityOrigin } = details as { requestingUrl?: string; securityOrigin?: string };
     callback(!isDeliverablePermission([requestingUrl, securityOrigin]));
   });
-  session.setPermissionCheckHandler((_contents, _permission, requestingOrigin, details) => !isDeliverablePermission([requestingOrigin, details.requestingUrl, details.securityOrigin]));
+  session.setPermissionCheckHandler(
+    (_contents, permission, requestingOrigin, details) =>
+      !DENIED_EVERYWHERE.has(permission) && !isDeliverablePermission([requestingOrigin, details.requestingUrl, details.securityOrigin]),
+  );
 }
 
 // A window's guard on its frames' navigations, and its WebRTC policy.

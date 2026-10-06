@@ -170,6 +170,15 @@ describe('console attribution', () => {
     expect(DeliverableConsoleSchema.safeParse({ ...message, message: 'x'.repeat(2001) }).success).toBe(false);
   });
 
+  it('cuts a source at 2,000 characters, which the event’s schema bounds too', () => {
+    const longSource = `${FRAME}?${'q'.repeat(5000)}`;
+    const message = consoleMessageOf({ frame: { url: FRAME }, level: 'error', message: 'boom', lineNumber: 1, sourceId: longSource })!;
+    expect(message.source).toHaveLength(2000);
+    expect(longSource.startsWith(message.source!)).toBe(true);
+    expect(DeliverableConsoleSchema.safeParse(message).success).toBe(true);
+    expect(DeliverableConsoleSchema.safeParse({ ...message, source: 'x'.repeat(2001) }).success).toBe(false);
+  });
+
   it('admits at most CONSOLE_BURST messages per deliverable version in a window, each version counted apart', () => {
     let now = 0;
     const admit = consoleLimiter(() => now);
@@ -284,6 +293,7 @@ describe('the policies installed on a session and a window', () => {
     expect(session.asked('media', { requestingUrl: FRAME })).toBe(false);
     expect(session.asked('notifications', { requestingUrl: APP })).toBe(false);
     expect(session.check!(null, 'clipboard-read', 'file:///', { isMainFrame: true })).toBe(false);
+    expect(session.check!(null, 'deprecated-sync-clipboard-read', 'file:///', { isMainFrame: true })).toBe(false);
   });
 
   it('denies a deliverable frame’s permissions on the app’s session and keeps the default for the app and the PDF viewer', () => {
@@ -296,5 +306,16 @@ describe('the policies installed on a session and a window', () => {
     expect(session.asked('clipboard-sanitized-write', { requestingUrl: APP })).toBe(true);
     expect(session.asked('clipboard-sanitized-write', { requestingUrl: VIEWER })).toBe(true);
     expect(session.check!(null, 'clipboard-sanitized-write', 'file:///', { isMainFrame: true, requestingUrl: APP })).toBe(true);
+  });
+
+  // An installed check handler replaces Electron's built-in answer, which (Electron 32+) denies this one to every origin.
+  it('denies deprecated-sync-clipboard-read to every origin on both sessions, as Electron does without a handler', () => {
+    for (const scope of ['all', 'deliverables'] as const) {
+      const session = new PermissionSession();
+      guardPermissions(session as unknown as Session, scope);
+      for (const [origin, requestingUrl] of [['file:///', APP], ['chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai', VIEWER], [`maws-deliverable://${ID}`, FRAME]]) {
+        expect(session.check!(null, 'deprecated-sync-clipboard-read', origin!, { isMainFrame: false, requestingUrl })).toBe(false);
+      }
+    }
   });
 });
