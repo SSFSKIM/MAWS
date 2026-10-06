@@ -295,7 +295,7 @@ export const reconnectCopy = (phase: 'attempting' | 'reconnected' | 'failed', at
   phase === 'attempting' ? `Reconnecting (${attempt}/${max ?? '?'})…` : phase === 'reconnected' ? 'Reconnected' : `Could not reconnect${reason ? ` · ${reason}` : ''}`;
 // C12 start: the memory budget's release and the resume after it (C12 execution document, "Surfaces of the budget")
 export const RELEASED_COPY = 'Released to stay under the memory budget · sending resumes it';
-export const IDLE_RELEASED_COPY = 'Stopped while MAWS was closed · sending resumes it'; // E10: the supervisor's idle release
+export const IDLE_RELEASED_COPY = 'Stopped while idle · sending resumes it'; // E10: the supervisor's idle release (neutral: it also runs with MAWS open after an update)
 export const RESUMING_COPY = 'Resuming…';
 export const RESUMED_COPY = 'Resumed';
 // C12 end

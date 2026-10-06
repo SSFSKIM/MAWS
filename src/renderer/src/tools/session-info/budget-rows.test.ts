@@ -35,8 +35,8 @@ describe("Session info's memory budget lines", () => {
   });
 
   // E10: the supervisor's idle release, while no app was connected, has no limit and its own words
-  it('says when a session was stopped while MAWS was closed', () => {
+  it('says when a session was stopped while idle', () => {
     const at = new Date(2026, 9, 6, 14, 2).toISOString();
-    expect(budgetRows(state(), digest(A, { released: { at, reason: 'idle', limitKiB: null } }))[1]).toEqual({ label: 'Process', value: 'Stopped at 14:02 while MAWS was closed' });
+    expect(budgetRows(state(), digest(A, { released: { at, reason: 'idle', limitKiB: null } }))[1]).toEqual({ label: 'Process', value: 'Stopped at 14:02 while idle' });
   });
 });

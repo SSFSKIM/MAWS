@@ -968,10 +968,10 @@ describe('a release and the resume after it', () => {
     expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Released to stay under the memory budget · sending resumes it']]);
   });
 
-  it('an idle exit (the supervisor, while MAWS was closed) reads as a release too, in its own words (E10)', () => {
+  it('an idle exit (the supervisor idle clock) reads as a release too, in its own words (E10)', () => {
     const b = builder();
     b.emit('process.exited', { code: 0, signal: null, reason: 'idle', lostAttentionCount: 0, budget: null });
-    expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Stopped while MAWS was closed · sending resumes it']]);
+    expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Stopped while idle · sending resumes it']]);
   });
 
   it('a process_exit reconnect reads Resuming… and then stays as Resumed; a user reconnect still leaves no row', () => {

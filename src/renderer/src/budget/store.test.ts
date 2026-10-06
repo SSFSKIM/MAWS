@@ -33,10 +33,10 @@ describe('the budget’s words', () => {
     expect(BUDGET.releasedLine({ at, reason: 'budget', limitKiB: 8 * GiB })).toBe('Released at 14:02 to stay under 8 GB');
   });
 
-  it('names an idle release (E10: the supervisor, while MAWS was closed) by its time, with no budget', () => {
+  it('names an idle release (E10: the supervisor idle clock) by its time, with no budget', () => {
     const at = new Date(2026, 9, 6, 14, 2).toISOString();
-    expect(BUDGET.markTitle({ at, reason: 'idle', limitKiB: null })).toBe('Stopped at 14:02 while MAWS was closed · Send resumes it');
-    expect(BUDGET.releasedLine({ at, reason: 'idle', limitKiB: null })).toBe('Stopped at 14:02 while MAWS was closed');
+    expect(BUDGET.markTitle({ at, reason: 'idle', limitKiB: null })).toBe('Stopped at 14:02 while idle · Send resumes it');
+    expect(BUDGET.releasedLine({ at, reason: 'idle', limitKiB: null })).toBe('Stopped at 14:02 while idle');
   });
 
   it('says why each session holds work, counting where a count helps', () => {
