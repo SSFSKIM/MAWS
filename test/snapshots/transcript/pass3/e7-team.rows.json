@@ -39,7 +39,7 @@
         "exploration": 0,
         "files": 0,
         "mcp": 0,
-        "other": 1,
+        "other": 0,
         "skills": 1,
         "web": 0
       },
@@ -50,11 +50,11 @@
       "model": "claude-haiku-4-5-20251001",
       "safeguard": {
         "flagged": 0,
-        "notEvaluated": 2,
+        "notEvaluated": 1,
         "reviewed": 0
       },
       "terminalReason": "completed",
-      "toolCalls": 2,
+      "toolCalls": 1,
       "usage": {
         "cacheCreationInputTokens": 23666,
         "cacheReadInputTokens": 45511,
@@ -63,7 +63,7 @@
         "thinkingTokens": 484
       }
     },
-    "toolCalls": 2,
+    "toolCalls": 1,
     "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
   },
   {
@@ -87,96 +87,80 @@
     "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
   },
   {
-    "activeLabel": null,
+    "agent": null,
     "at": "2026-10-06T10:59:51.601Z",
-    "cells": [
-      {
-        "agent": null,
-        "category": "skills",
-        "classification": {
-          "category": "skills",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": true,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "input": {
-            "max_results": 1,
-            "query": "select:ListAgents"
-          },
-          "isError": false,
-          "kind": "generic",
-          "result": [
-            {
-              "tool_name": "ListAgents",
-              "type": "tool_reference"
-            }
-          ],
-          "spill": null,
-          "structured": {
-            "matches": [
-              "ListAgents"
-            ],
-            "query": "select:ListAgents",
-            "total_deferred_tools": 17
-          },
-          "truncated": null
-        },
-        "endedAt": "2026-10-06T10:59:51.604Z",
-        "expanded": true,
-        "id": "cell:toolu_019KFUCtczzkzzV5QQtsSnM5",
-        "label": "Loaded 1 tool",
-        "paths": [],
-        "startedAt": "2026-10-06T10:59:51.601Z",
-        "status": "done",
-        "toolName": "ToolSearch",
-        "toolUseId": "toolu_019KFUCtczzkzzV5QQtsSnM5"
+    "category": "skills",
+    "classification": {
+      "category": "skills",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "input": {
+        "max_results": 1,
+        "query": "select:ListAgents"
       },
+      "isError": false,
+      "kind": "generic",
+      "result": [
+        {
+          "tool_name": "ListAgents",
+          "type": "tool_reference"
+        }
+      ],
+      "spill": null,
+      "structured": {
+        "matches": [
+          "ListAgents"
+        ],
+        "query": "select:ListAgents",
+        "total_deferred_tools": 17
+      },
+      "truncated": null
+    },
+    "endedAt": "2026-10-06T10:59:51.604Z",
+    "expanded": true,
+    "id": "cell:toolu_019KFUCtczzkzzV5QQtsSnM5",
+    "kind": "cell",
+    "label": "Loaded 1 tool",
+    "paths": [],
+    "startedAt": "2026-10-06T10:59:51.601Z",
+    "status": "done",
+    "toolName": "ToolSearch",
+    "toolUseId": "toolu_019KFUCtczzkzzV5QQtsSnM5",
+    "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
+  },
+  {
+    "at": "2026-10-06T10:59:52.793Z",
+    "id": "agents:toolu_014MV1xUpn4aobtBRqoVJdXz",
+    "kind": "agent_list",
+    "notes": [],
+    "pending": false,
+    "raw": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  running  ·  started 1s ago",
+    "sections": [
       {
-        "agent": null,
-        "category": "other",
-        "classification": {
-          "category": "other",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": false,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "input": {},
-          "isError": false,
-          "kind": "generic",
-          "result": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  running  ·  started 1s ago",
-          "spill": null,
-          "structured": {
-            "listing": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  running  ·  started 1s ago"
-          },
-          "truncated": null
-        },
-        "endedAt": "2026-10-06T10:59:52.797Z",
-        "expanded": true,
-        "id": "cell:toolu_014MV1xUpn4aobtBRqoVJdXz",
-        "label": "Used ListAgents",
-        "paths": [],
-        "startedAt": "2026-10-06T10:59:52.793Z",
-        "status": "done",
-        "toolName": "ListAgents",
-        "toolUseId": "toolu_014MV1xUpn4aobtBRqoVJdXz"
+        "count": 1,
+        "rows": [
+          {
+            "extras": [
+              "general-purpose",
+              "running",
+              "started 1s ago"
+            ],
+            "name": "scout",
+            "ref": "15083b"
+          }
+        ],
+        "title": "Subagents"
       }
     ],
-    "expanded": true,
-    "icon": "skills",
-    "id": "group:cell:toolu_019KFUCtczzkzzV5QQtsSnM5",
-    "kind": "group",
-    "state": "completed",
-    "summary": "Loaded 1 tool",
+    "self": "repo-y2xidi-73 [48fa39]",
+    "toolUseId": "toolu_014MV1xUpn4aobtBRqoVJdXz",
     "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
   },
   {
@@ -282,7 +266,7 @@
         "exploration": 0,
         "files": 0,
         "mcp": 0,
-        "other": 1,
+        "other": 0,
         "skills": 0,
         "web": 0
       },
@@ -293,11 +277,11 @@
       "model": "claude-haiku-4-5-20251001",
       "safeguard": {
         "flagged": 0,
-        "notEvaluated": 1,
+        "notEvaluated": 0,
         "reviewed": 0
       },
       "terminalReason": "completed",
-      "toolCalls": 1,
+      "toolCalls": 0,
       "usage": {
         "cacheCreationInputTokens": 419,
         "cacheReadInputTokens": 48904,
@@ -306,43 +290,34 @@
         "thinkingTokens": 68
       }
     },
-    "toolCalls": 1,
+    "toolCalls": 0,
     "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
   },
   {
-    "agent": null,
     "at": "2026-10-06T11:00:00.390Z",
-    "category": "other",
-    "classification": {
-      "category": "other",
-      "denial": null,
-      "groupable": true,
-      "hidden": false,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {},
-      "isError": false,
-      "kind": "generic",
-      "result": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  completed  ·  started 9s ago",
-      "spill": null,
-      "structured": {
-        "listing": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  completed  ·  started 9s ago"
-      },
-      "truncated": null
-    },
-    "endedAt": "2026-10-06T11:00:00.396Z",
-    "expanded": true,
-    "id": "cell:toolu_01VXfwtV7Aw7rweu8K86J74p",
-    "kind": "cell",
-    "label": "Used ListAgents",
-    "paths": [],
-    "startedAt": "2026-10-06T11:00:00.390Z",
-    "status": "done",
-    "toolName": "ListAgents",
+    "id": "agents:toolu_01VXfwtV7Aw7rweu8K86J74p",
+    "kind": "agent_list",
+    "notes": [],
+    "pending": false,
+    "raw": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  completed  ·  started 9s ago",
+    "sections": [
+      {
+        "count": 1,
+        "rows": [
+          {
+            "extras": [
+              "general-purpose",
+              "completed",
+              "started 9s ago"
+            ],
+            "name": "scout",
+            "ref": "15083b"
+          }
+        ],
+        "title": "Subagents"
+      }
+    ],
+    "self": "repo-y2xidi-73 [48fa39]",
     "toolUseId": "toolu_01VXfwtV7Aw7rweu8K86J74p",
     "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
   },

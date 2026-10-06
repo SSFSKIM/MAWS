@@ -39,7 +39,7 @@
         "exploration": 0,
         "files": 0,
         "mcp": 0,
-        "other": 1,
+        "other": 0,
         "skills": 0,
         "web": 0
       },
@@ -50,11 +50,11 @@
       "model": "claude-haiku-4-5-20251001",
       "safeguard": {
         "flagged": 0,
-        "notEvaluated": 1,
+        "notEvaluated": 0,
         "reviewed": 0
       },
       "terminalReason": "completed",
-      "toolCalls": 1,
+      "toolCalls": 0,
       "usage": {
         "cacheCreationInputTokens": 9726,
         "cacheReadInputTokens": 34398,
@@ -63,43 +63,34 @@
         "thinkingTokens": 120
       }
     },
-    "toolCalls": 1,
+    "toolCalls": 0,
     "turnId": "turn:0b4385a8-900b-4da0-8e62-59fe1aff7066"
   },
   {
-    "agent": null,
     "at": "2026-10-06T10:54:19.716Z",
-    "category": "other",
-    "classification": {
-      "category": "other",
-      "denial": null,
-      "groupable": true,
-      "hidden": false,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {},
-      "isError": false,
-      "kind": "generic",
-      "result": "This session is repo-h6xooi-51 [804260] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nPeer sessions (1):\n  repo-b-gen1il-79 [61303a]  ·  interactive  ·  idle  ·  started 2s ago",
-      "spill": null,
-      "structured": {
-        "listing": "This session is repo-h6xooi-51 [804260] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nPeer sessions (1):\n  repo-b-gen1il-79 [61303a]  ·  interactive  ·  idle  ·  started 2s ago"
-      },
-      "truncated": null
-    },
-    "endedAt": "2026-10-06T10:54:19.728Z",
-    "expanded": true,
-    "id": "cell:toolu_016WoxdH7XtbkxRsgqaJo2Gb",
-    "kind": "cell",
-    "label": "Used ListAgents",
-    "paths": [],
-    "startedAt": "2026-10-06T10:54:19.716Z",
-    "status": "done",
-    "toolName": "ListAgents",
+    "id": "agents:toolu_016WoxdH7XtbkxRsgqaJo2Gb",
+    "kind": "agent_list",
+    "notes": [],
+    "pending": false,
+    "raw": "This session is repo-h6xooi-51 [804260] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nPeer sessions (1):\n  repo-b-gen1il-79 [61303a]  ·  interactive  ·  idle  ·  started 2s ago",
+    "sections": [
+      {
+        "count": 1,
+        "rows": [
+          {
+            "extras": [
+              "interactive",
+              "idle",
+              "started 2s ago"
+            ],
+            "name": "repo-b-gen1il-79",
+            "ref": "61303a"
+          }
+        ],
+        "title": "Peer sessions"
+      }
+    ],
+    "self": "repo-h6xooi-51 [804260]",
     "toolUseId": "toolu_016WoxdH7XtbkxRsgqaJo2Gb",
     "turnId": "turn:0b4385a8-900b-4da0-8e62-59fe1aff7066"
   },
@@ -162,6 +153,32 @@
     "turnId": "turn:ereplay:journal:71:1"
   },
   {
+    "at": "2026-10-06T10:54:24.940Z",
+    "direction": "between",
+    "from": null,
+    "id": "agentmsg:replay:journal:73:1",
+    "kind": "agent_message",
+    "peer": {
+      "body": "E7 probe: hello from B",
+      "messageUuid": "c2291cea-3cc9-4f6d-bdec-321a085cc0f7",
+      "preview": "E7 probe: hello from B",
+      "recipient": null,
+      "replyTo": "uds:/tmp/cc-socks/10562.sock",
+      "result": null,
+      "resultText": null,
+      "sender": {
+        "address": "uds:/tmp/cc-socks/10562.sock",
+        "name": "repo-b-gen1il-79",
+        "session": null
+      },
+      "summary": null,
+      "toolUseId": null
+    },
+    "text": "Message from repo-b-gen1il-79: E7 probe: hello from B",
+    "to": null,
+    "turnId": "turn:ereplay:journal:71:1"
+  },
+  {
     "agent": null,
     "at": "2026-10-06T10:54:27.507Z",
     "category": "skills",
@@ -211,11 +228,23 @@
   },
   {
     "at": "2026-10-06T10:54:30.247Z",
-    "direction": "to_child",
+    "direction": "between",
     "from": null,
     "id": "agentmsg:replay:journal:130:1",
     "kind": "agent_message",
-    "text": "Sent message to repo-b-gen1il-79: Hello from A — received your probe message.",
+    "peer": {
+      "body": "Hello from A — received your probe message.",
+      "messageUuid": null,
+      "preview": "Hello from A — received your probe message.",
+      "recipient": "repo-b-gen1il-79",
+      "replyTo": null,
+      "result": "sent",
+      "resultText": null,
+      "sender": null,
+      "summary": "Respond to peer session probe",
+      "toolUseId": "toolu_01Hjvw4bRrU1xo6YfEsM31Lj"
+    },
+    "text": "Sent to repo-b-gen1il-79: Hello from A — received your probe message.",
     "to": null,
     "turnId": "turn:ereplay:journal:71:1"
   },
@@ -293,11 +322,23 @@
   },
   {
     "at": "2026-10-06T10:54:49.703Z",
-    "direction": "to_child",
+    "direction": "between",
     "from": null,
     "id": "agentmsg:replay:journal:191:1",
     "kind": "agent_message",
-    "text": "Sent message to uds:/tmp/cc-socks/10562.sock: E7 probe: reply from A",
+    "peer": {
+      "body": "E7 probe: reply from A",
+      "messageUuid": null,
+      "preview": "E7 probe: reply from A",
+      "recipient": "uds:/tmp/cc-socks/10562.sock",
+      "replyTo": null,
+      "result": "sent",
+      "resultText": null,
+      "sender": null,
+      "summary": null,
+      "toolUseId": "toolu_014MYinuDDFrreJtW6nkbeVh"
+    },
+    "text": "Sent to repo-b-gen1il-79: E7 probe: reply from A",
     "to": null,
     "turnId": "turn:fab15aee-8755-4d22-be95-fe6a693bb43e"
   },
@@ -413,6 +454,32 @@
     "turnId": "turn:d6dcf359-401e-4c0c-b982-082a8b388515"
   },
   {
+    "at": "2026-10-06T10:55:10.604Z",
+    "direction": "between",
+    "from": null,
+    "id": "agentmsg:replay:journal:258:1",
+    "kind": "agent_message",
+    "peer": {
+      "body": "E7 probe: second message while you work",
+      "messageUuid": "61f87e30-e48a-4f4c-ac91-db3c792c1a78",
+      "preview": "E7 probe: second message while you work",
+      "recipient": null,
+      "replyTo": "uds:/tmp/cc-socks/10562.sock",
+      "result": null,
+      "resultText": null,
+      "sender": {
+        "address": "uds:/tmp/cc-socks/10562.sock",
+        "name": "repo-b-gen1il-79",
+        "session": null
+      },
+      "summary": null,
+      "toolUseId": null
+    },
+    "text": "Message from repo-b-gen1il-79: E7 probe: second message while you work",
+    "to": null,
+    "turnId": "turn:d6dcf359-401e-4c0c-b982-082a8b388515"
+  },
+  {
     "at": "2026-10-06T10:55:41.422Z",
     "blockIndex": 1,
     "id": "text:msg_011CfkrvdVgKXcWhiabWLqMP:1",
@@ -486,11 +553,23 @@
   },
   {
     "at": "2026-10-06T10:55:58.839Z",
-    "direction": "to_child",
+    "direction": "between",
     "from": null,
     "id": "agentmsg:replay:journal:307:1",
     "kind": "agent_message",
-    "text": "Sent message to nobody-e7: E7 probe: nobody",
+    "peer": {
+      "body": "E7 probe: nobody",
+      "messageUuid": null,
+      "preview": "E7 probe: nobody",
+      "recipient": "nobody-e7",
+      "replyTo": null,
+      "result": "failed",
+      "resultText": "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message.",
+      "sender": null,
+      "summary": null,
+      "toolUseId": "toolu_01KC8uNWxWQ5zXJ7EU6Fh8nT"
+    },
+    "text": "Sent to nobody-e7: E7 probe: nobody",
     "to": null,
     "turnId": "turn:c762441a-e67e-4d7d-bf40-f40a32c465ec"
   },

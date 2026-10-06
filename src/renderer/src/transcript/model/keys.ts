@@ -45,6 +45,9 @@ export const rowId = {
   ask: (toolUse: ToolUseId) => row(`ask:${toolUse}`),
   delivery: (toolUse: ToolUseId) => row(`delivery:${toolUse}`),
   // E1 end
+  // E7 start: a `ListAgents` call's listing row, keyed by the tool use
+  agentList: (toolUse: ToolUseId) => row(`agents:${toolUse}`),
+  // E7 end
 };
 
 export const cellId = {

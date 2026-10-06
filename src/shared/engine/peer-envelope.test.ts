@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadEngineJournal, loadJournal, loadTranscript } from '../../../test/support/fixtures';
 import { handbackReport, messageText, parsePeerMessage, peerEventsOf, peerLabel } from './peer-envelope';
+import { sendMessageOutcome } from './peer-envelope'; // E7 M2
 
 const frameOf = (rows: ReturnType<typeof loadJournal>, seq: number) => rows.find((row) => row.seq === seq)!.frame as { uuid: string; message: { content: string }; origin: Record<string, unknown> };
 const PEER_A = loadJournal('pass3', 'e7-peer-a');
@@ -148,5 +149,27 @@ describe('messageText', () => {
   it('is the string, or the text blocks joined', () => {
     expect(messageText('plain')).toBe('plain');
     expect(messageText([{ type: 'text', text: 'one' }, { type: 'image', source: {} }, { type: 'text', text: 'two' }])).toBe('one\ntwo');
+  });
+});
+
+// E7 M2: what a SendMessage result says about the send (SPEC 38 §38.24.6: a failed send is `success: false` data, not an
+// error result), over e7-peer-a seq 195 (sent) and 311 (no such recipient).
+describe('sendMessageOutcome', () => {
+  const resultOf = (seq: number) => {
+    const frame = PEER_A.find((row) => row.seq === seq)!.frame as { message: { content: { content: unknown; is_error?: boolean }[] }; tool_use_result: unknown };
+    const block = frame.message.content[0]!;
+    return { isError: block.is_error === true, content: block.content as never, structured: frame.tool_use_result };
+  };
+  const NOBODY = "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message.";
+
+  it("reads a send as sent, and `success: false` as failed with the engine's message", () => {
+    expect(sendMessageOutcome(resultOf(195))).toEqual({ ok: true });
+    expect(sendMessageOutcome(resultOf(311))).toEqual({ ok: false, message: NOBODY });
+  });
+
+  it('reads the JSON text when no structured result came, and an error result as failed with its text untagged', () => {
+    expect(sendMessageOutcome({ ...resultOf(311), structured: null })).toEqual({ ok: false, message: NOBODY });
+    expect(sendMessageOutcome({ isError: true, content: '<tool_use_error>InputValidationError: to is required</tool_use_error>', structured: null })).toEqual({ ok: false, message: 'InputValidationError: to is required' });
+    expect(sendMessageOutcome({ isError: false, content: 'Message sent.', structured: null })).toEqual({ ok: true });
   });
 });

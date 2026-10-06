@@ -48,4 +48,27 @@ describe('serializeRows', () => {
     const markdown = serializeRows(rows(b.events).filter((row) => row.kind !== 'time'));
     expect(markdown).toBe(['```\n! ls\na\nb\nexit 0\n```', '---\n*Context compacted · 100k → 20k tokens · auto*', '*Heads up*'].join('\n\n'));
   });
+
+  // E7: a listing as its counts (a pending one says so, an unparsed one its notes); a message's whole body under its
+  // line when the line shows only its first; a hand-back's report under its line
+  it('renders the listing, the messages between sessions and a hand-back (E7)', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('l1', 'ListAgents', {});
+    b.result('l1', 'This session is a [1] — x.\n\nSubagents (2):\n  s1  ·  running\n  s2  ·  running\n\nPeer sessions (1):\n  b [2]  ·  idle');
+    b.toolUse('l2', 'ListAgents', {});
+    b.result('l2', 'Messaging is off.');
+    b.toolUse('l3', 'ListAgents', {});
+    b.toolUse('s1', 'SendMessage', { to: 'peer-b', message: 'first\nsecond' });
+    b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: '[Subagent hand-back] Framed. The report follows:\n  done\n  all of it' });
+    b.end(['u1']);
+    const markdown = serializeRows(rows(b.events).filter((row) => row.kind === 'agent_list' || row.kind === 'agent_message'));
+    expect(markdown).toBe([
+      '- Agents: 2 subagents, 0 teammates, 1 peer session',
+      '- Agents: Messaging is off.',
+      '- Listing the agents and sessions…',
+      '- Sent to peer-b: first\n  > first\n  > second',
+      '- Report from a1\n  > done\n  > all of it',
+    ].join('\n\n'));
+  });
 });

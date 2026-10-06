@@ -543,3 +543,155 @@ describe('plugins: log lines, load issues and pinned status lines', () => {
     expect(state.pluginStatus.size).toBe(0);
   });
 });
+
+// E7 start (E7 execution document, Design §4; Decision Log 17, 28 and 29): the messages between sessions and agents, and
+// the listing. The fixture-level proof, live and from disk, is fixtures.test.ts's `cross-session rows (E7)`.
+describe('cross-session rows (E7)', () => {
+  const B = 'uds:/tmp/cc-socks/1.sock';
+  const ENVELOPE = `Another Claude session sent a message:\n<cross-session-message from="${B}" from-name="repo-b" from-mode="prompting">\nhello from B\n</cross-session-message>\n\nThis came from another Claude session.`;
+  const peerTurn = (b: ReturnType<typeof builder>, text: string, payload: Partial<Extract<SessionEvent, { kind: 'peer.message' }>> = {}, synthetic = true) => {
+    b.emit('turn.started', { userMessageUuid: null, origin: 'peer' });
+    b.emit('user.message', { messageUuid: uuid('p1'), content: ENVELOPE, isReplay: true, isSynthetic: synthetic, origin: 'peer', bash: null });
+    b.emit('peer.message', { messageUuid: uuid('p1'), from: B, fromSession: null, fromName: 'repo-b', fromMode: 'prompting', fromPlugin: null, hopChain: [], text, midTurn: false, lineage: 'peer', replyable: true, ...payload });
+  };
+  const messages = (list: Row[]) => list.filter((row): row is Extract<Row, { kind: 'agent_message' }> => row.kind === 'agent_message');
+  const agentTurn = (b: ReturnType<typeof builder>) => {
+    b.turn('u1');
+    b.toolUse('ag1', 'Agent', { description: 'Survey src', name: 'scout', subagent_type: 'general-purpose', prompt: 'go' });
+    b.result('ag1', 'Async agent launched', { structured: { status: 'async_launched', agentId: 'a1' } });
+    b.emit('subagent.started', { taskId: task('a1'), toolUseId: tool('ag1'), description: 'Survey src', subagentType: 'general-purpose', isBackground: true, spawnDepth: 1, prompt: 'go' });
+    b.end(['u1']);
+  };
+
+  it('draws a message from another session as a between row with its sender, preview and reply address, and no bubble', () => {
+    const b = builder();
+    peerTurn(b, 'hello from B');
+    b.text('m1', 0, 'Got it');
+    b.end([], { origin: 'peer' });
+    const list = rows(b.events);
+    expect(list.filter((row) => row.kind === 'user')).toEqual([]);
+    const [row] = messages(list);
+    expect(row).toMatchObject({
+      direction: 'between', from: null, to: null, text: 'Message from repo-b: hello from B',
+      peer: { sender: { name: 'repo-b', address: B, session: null }, recipient: null, body: 'hello from B', preview: 'hello from B', replyTo: B, toolUseId: null, messageUuid: 'p1', result: null, resultText: null, summary: null },
+    });
+    expect(find(list, 'assistant_text')).toMatchObject({ phase: 'answer', markdown: 'Got it' });
+  });
+
+  it('keeps the inbound row in view once its turn folds, cuts the preview to the first line, and names an unnamed sender from its address', () => {
+    const long = `${'x'.repeat(130)}\nsecond line`;
+    const b = builder();
+    peerTurn(b, long, { fromName: null, replyable: false });
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    b.end([], { origin: 'peer' });
+    const folded = rowsOf(reduce(b.events));
+    expect(folded.map((row) => row.kind)).toEqual(['time', 'divider', 'agent_message']);
+    const [row] = messages(folded);
+    expect(row!.peer).toMatchObject({ sender: { name: null, address: B }, body: long, preview: `${'x'.repeat(119)}…`, replyTo: null });
+    expect(row!.text).toBe(`Message from 1: ${'x'.repeat(119)}…`);
+  });
+
+  it('draws a non-synthetic envelope as its row and no bubble; a peer text the parser refuses keeps its bubble', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.emit('user.message', { messageUuid: uuid('p1'), content: ENVELOPE, isReplay: true, isSynthetic: false, origin: 'peer', bash: null });
+    b.emit('peer.message', { messageUuid: uuid('p1'), from: B, fromSession: null, fromName: 'repo-b', fromMode: null, fromPlugin: null, hopChain: [], text: 'hello from B', midTurn: true, lineage: 'peer', replyable: true });
+    b.emit('user.message', { messageUuid: uuid('p2'), content: 'a peer text in no envelope', isReplay: true, isSynthetic: false, origin: 'peer', bash: null });
+    b.end(['u1']);
+    const list = rows(b.events);
+    expect(list.filter((row) => row.kind === 'user').map((row) => row.kind === 'user' && row.text)).toEqual(['prompt u1', 'a peer text in no envelope']);
+    expect(messages(list).map((row) => row.text)).toEqual(['Message from repo-b: hello from B']);
+  });
+
+  it('draws a SendMessage to another session between, naming a sender this transcript heard from, pending until its result, failed on `success: false` or an error', () => {
+    const b = builder();
+    peerTurn(b, 'hello from B');
+    b.end([], { origin: 'peer' });
+    b.turn('u2');
+    b.toolUse('s1', 'SendMessage', { to: B, message: 'reply\nmore', summary: 'Answer B' });
+    b.result('s1', '{"success":true}', { structured: { success: true, message: 'delivered' } });
+    b.toolUse('s2', 'SendMessage', { to: 'nobody', message: 'hi' });
+    b.result('s2', '{"success":false}', { structured: { success: false, message: "No agent named 'nobody' is reachable." } });
+    b.toolUse('s3', 'SendMessage', { to: 'peer-c', message: 'x' });
+    b.result('s3', '<tool_use_error>InputValidationError: bad</tool_use_error>', { isError: true });
+    b.toolUse('s4', 'SendMessage', { to: 'peer-d', message: 'waiting' });
+    b.end(['u2']);
+    const outbound = messages(rows(b.events)).slice(1);
+    expect(outbound.map((row) => [row.direction, row.text, row.peer?.recipient, row.peer?.result, row.peer?.resultText, row.peer?.summary, row.peer?.toolUseId])).toEqual([
+      ['between', 'Sent to repo-b: reply', B, 'sent', null, 'Answer B', 's1'],
+      ['between', 'Sent to nobody: hi', 'nobody', 'failed', "No agent named 'nobody' is reachable.", null, 's2'],
+      ['between', 'Sent to peer-c: x', 'peer-c', 'failed', 'InputValidationError: bad', null, 's3'],
+      ['between', 'Sent to peer-d: waiting', 'peer-d', 'pending', null, null, 's4'],
+    ]);
+    expect(outbound[0]!.peer).toMatchObject({ sender: null, body: 'reply\nmore', preview: 'reply', replyTo: null });
+    const folded = messages(rowsOf(reduce(b.events)));
+    expect(folded.map((row) => row.text)).toEqual(['Message from repo-b: hello from B']); // outbound rows are work
+  });
+
+  it('keeps a SendMessage to a subagent this transcript knows to_child with the agent as `to` (task id, agent id or real name); main and parent are from_child', () => {
+    const b = builder();
+    agentTurn(b);
+    b.turn('u2');
+    b.toolUse('s1', 'SendMessage', { to: 'a1', message: 'by id' });
+    b.toolUse('s2', 'SendMessage', { to: 'scout', message: 'by name' });
+    b.toolUse('s3', 'SendMessage', { to: 'main', message: 'up' });
+    b.toolUse('s4', 'SendMessage', { to: 'parent', message: 'up too' });
+    b.end(['u2']);
+    const list = messages(rows(b.events));
+    expect(list.map((row) => [row.direction, row.text, row.to?.taskId ?? null, row.peer])).toEqual([
+      ['to_child', 'Sent message to a1: by id', 'a1', undefined],
+      ['to_child', 'Sent message to scout: by name', 'a1', undefined],
+      ['from_child', 'Message from main: up', null, undefined],
+      ['from_child', 'Message from parent: up too', null, undefined],
+    ]);
+    expect(list[0]!.to).toEqual({ taskId: 'a1', agentId: 'a1', toolUseId: 'ag1', name: 'Survey src', glyph: list[0]!.to!.glyph, kind: 'agent', subagentType: 'general-purpose' });
+  });
+
+  it('reads a hand-back as Report from the agent with its report, kept in view; a plain message from an agent names it and stays work', () => {
+    const report = '[Subagent hand-back] The text below is the final report of a subagent. The report follows:\n  line one\n  \n  line two';
+    const b = builder();
+    agentTurn(b);
+    b.emit('turn.started', { userMessageUuid: null, origin: 'peer' });
+    b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: report });
+    b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'a plain note' });
+    b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a9' as never, toAgentId: null, text: 'from a stranger' });
+    b.end([], { origin: 'peer' });
+    const list = messages(rows(b.events));
+    expect(list.map((row) => [row.direction, row.text, row.from?.taskId ?? null, row.report])).toEqual([
+      ['from_child', 'Report from Survey src', 'a1', 'line one\n\nline two'],
+      ['from_child', 'Message from Survey src: a plain note', 'a1', undefined],
+      ['from_child', 'Message from a9: from a stranger', null, undefined],
+    ]);
+    expect(messages(rowsOf(reduce(b.events))).map((row) => row.text)).toEqual(['Report from Survey src']);
+  });
+
+  it('draws ListAgents as a listing row: pending, then the self line, sections and notes; an unknown text is notes', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('l1', 'ListAgents', {});
+    expect(find(rows(b.events), 'agent_list')).toMatchObject({ id: 'agents:l1', toolUseId: 'l1', self: null, sections: [], notes: [], raw: '', pending: true });
+    const text = 'This session is repo-a [804260] — the name other sessions use to message it.\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  running\n\nPeer sessions (2):\n  repo-b [61303a]  ·  interactive  ·  idle\n  (… 1 more not shown)';
+    b.result('l1', text);
+    b.toolUse('l2', 'ListAgents', {});
+    b.result('l2', 'Messaging is off in this session.');
+    b.text('m9', 0, 'Done');
+    b.end(['u1']);
+    const list = rows(b.events);
+    expect(list.filter((row) => row.kind === 'agent_list').map((row) => row.kind === 'agent_list' && { self: row.self, sections: row.sections, notes: row.notes, raw: row.raw, pending: row.pending })).toEqual([
+      {
+        self: 'repo-a [804260]', raw: text, pending: false, notes: ['(… 1 more not shown)'],
+        sections: [
+          { title: 'Subagents', count: 1, rows: [{ name: 'scout', ref: '15083b', extras: ['general-purpose', 'running'] }] },
+          { title: 'Peer sessions', count: 2, rows: [{ name: 'repo-b', ref: '61303a', extras: ['interactive', 'idle'] }] },
+        ],
+      },
+      { self: null, sections: [], notes: ['Messaging is off in this session.'], raw: 'Messaging is off in this session.', pending: false },
+    ]);
+    expect(list.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : [])).map((cell) => cell.toolName)).not.toContain('ListAgents');
+    expect(find(list, 'assistant_text')).toMatchObject({ phase: 'answer' }); // the listing is work, before the answer
+    expect(rowsOf(reduce(b.events)).some((row) => row.kind === 'agent_list')).toBe(false); // folded with the work
+  });
+});
+// E7 end

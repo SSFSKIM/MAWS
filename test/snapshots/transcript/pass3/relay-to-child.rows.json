@@ -214,7 +214,15 @@
     "id": "agentmsg:replay:journal:196:1",
     "kind": "agent_message",
     "text": "Sent message to a7aea42f9bed9b3ea: Say PING in your next inbox line",
-    "to": null,
+    "to": {
+      "agentId": "a7aea42f9bed9b3ea",
+      "glyph": 3,
+      "kind": "agent",
+      "name": "Loop rounds until stop.txt",
+      "subagentType": "general-purpose",
+      "taskId": "a7aea42f9bed9b3ea",
+      "toolUseId": "toolu_019WWfE6Ry9diHmJymKAtX7Q"
+    },
     "turnId": "turn:2fb7478b-2a11-4ae1-8e85-588fd92bd1d3"
   },
   {
@@ -349,7 +357,15 @@
     "id": "agentmsg:replay:journal:315:1",
     "kind": "agent_message",
     "text": "Sent message to a7aea42f9bed9b3ea: Say PONG in your next inbox line",
-    "to": null,
+    "to": {
+      "agentId": "a7aea42f9bed9b3ea",
+      "glyph": 3,
+      "kind": "agent",
+      "name": "Loop rounds until stop.txt",
+      "subagentType": "general-purpose",
+      "taskId": "a7aea42f9bed9b3ea",
+      "toolUseId": "toolu_019WWfE6Ry9diHmJymKAtX7Q"
+    },
     "turnId": "turn:973fefba-82be-4059-9266-a70593597680"
   },
   {
@@ -465,7 +481,15 @@
     "id": "agentmsg:replay:journal:543:1",
     "kind": "agent_message",
     "text": "Sent message to accea5ba03e220b64: Say PANG in your next inbox line",
-    "to": null,
+    "to": {
+      "agentId": "accea5ba03e220b64",
+      "glyph": 5,
+      "kind": "agent",
+      "name": "Read file after sleep",
+      "subagentType": "general-purpose",
+      "taskId": "accea5ba03e220b64",
+      "toolUseId": "toolu_01Rcv6NNoLrUG3EZtboMbtQz"
+    },
     "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
   },
   {

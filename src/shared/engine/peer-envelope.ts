@@ -114,3 +114,24 @@ export function peerEventsOf(text: string, messageUuid: MessageUuid | null, orig
     replyable: parsed.replyable && from !== '',
   };
 }
+
+// E7 M2: what a SendMessage result says about the send, for the transcript's outbound row and the Reply's relay alike.
+// The engine reports a send it could not make as data, `{ success: false, message }`, not as an error result (SPEC 38
+// §38.24.6; e7-peer-a seq 311); the structured result carries it on both paths, and the JSON text when it is absent. An
+// error result (an input the engine refused) is failed with its text, the `<tool_use_error>` tags dropped.
+export function sendMessageOutcome(result: { isError: boolean; content: string | ContentBlock[]; structured: unknown }): { ok: true } | { ok: false; message: string } {
+  const text = messageText(result.content);
+  if (result.isError) return { ok: false, message: text.replace(/<\/?tool_use_error>/g, '').trim() };
+  const data = typeof result.structured === 'object' && result.structured !== null ? (result.structured as Record<string, unknown>) : jsonObject(text);
+  if (data?.success !== false) return { ok: true };
+  return { ok: false, message: typeof data.message === 'string' ? data.message : text };
+}
+
+function jsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}

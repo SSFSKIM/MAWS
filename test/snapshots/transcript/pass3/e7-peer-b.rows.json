@@ -142,11 +142,23 @@
   },
   {
     "at": "2026-10-06T10:54:24.926Z",
-    "direction": "to_child",
+    "direction": "between",
     "from": null,
     "id": "agentmsg:replay:journal:77:1",
     "kind": "agent_message",
-    "text": "Sent message to repo-h6xooi-51: E7 probe: hello from B",
+    "peer": {
+      "body": "E7 probe: hello from B",
+      "messageUuid": null,
+      "preview": "E7 probe: hello from B",
+      "recipient": "repo-h6xooi-51",
+      "replyTo": null,
+      "result": "sent",
+      "resultText": null,
+      "sender": null,
+      "summary": null,
+      "toolUseId": "toolu_01G9uwubWgCupz4H7294VaDp"
+    },
+    "text": "Sent to repo-h6xooi-51: E7 probe: hello from B",
     "to": null,
     "turnId": "turn:3c95b09d-2759-4093-96c8-2b28c1a981eb"
   },
@@ -209,6 +221,32 @@
     "turnId": "turn:ereplay:journal:104:1"
   },
   {
+    "at": "2026-10-06T10:54:30.258Z",
+    "direction": "between",
+    "from": null,
+    "id": "agentmsg:replay:journal:106:1",
+    "kind": "agent_message",
+    "peer": {
+      "body": "Hello from A — received your probe message.",
+      "messageUuid": "666f12e2-4d97-4ce5-8dee-5aca571c64ed",
+      "preview": "Hello from A — received your probe message.",
+      "recipient": null,
+      "replyTo": "uds:/tmp/cc-socks/10560.sock",
+      "result": null,
+      "resultText": null,
+      "sender": {
+        "address": "uds:/tmp/cc-socks/10560.sock",
+        "name": "repo-h6xooi-51",
+        "session": null
+      },
+      "summary": null,
+      "toolUseId": null
+    },
+    "text": "Message from repo-h6xooi-51: Hello from A — received your probe message.",
+    "to": null,
+    "turnId": "turn:ereplay:journal:104:1"
+  },
+  {
     "at": "2026-10-06T10:54:32.001Z",
     "blockIndex": 1,
     "id": "text:msg_011CfkrqViisxKwrui5zvT1L:1",
@@ -264,6 +302,32 @@
       }
     },
     "toolCalls": 0,
+    "turnId": "turn:ereplay:journal:140:1"
+  },
+  {
+    "at": "2026-10-06T10:54:49.710Z",
+    "direction": "between",
+    "from": null,
+    "id": "agentmsg:replay:journal:142:1",
+    "kind": "agent_message",
+    "peer": {
+      "body": "E7 probe: reply from A",
+      "messageUuid": "6a3e4c30-499c-4037-b6cc-7f2a115cff67",
+      "preview": "E7 probe: reply from A",
+      "recipient": null,
+      "replyTo": "uds:/tmp/cc-socks/10560.sock",
+      "result": null,
+      "resultText": null,
+      "sender": {
+        "address": "uds:/tmp/cc-socks/10560.sock",
+        "name": "repo-h6xooi-51",
+        "session": null
+      },
+      "summary": null,
+      "toolUseId": null
+    },
+    "text": "Message from repo-h6xooi-51: E7 probe: reply from A",
+    "to": null,
     "turnId": "turn:ereplay:journal:140:1"
   },
   {
@@ -340,11 +404,23 @@
   },
   {
     "at": "2026-10-06T10:55:10.597Z",
-    "direction": "to_child",
+    "direction": "between",
     "from": null,
     "id": "agentmsg:replay:journal:207:1",
     "kind": "agent_message",
-    "text": "Sent message to repo-h6xooi-51: E7 probe: second message while you work",
+    "peer": {
+      "body": "E7 probe: second message while you work",
+      "messageUuid": null,
+      "preview": "E7 probe: second message while you work",
+      "recipient": "repo-h6xooi-51",
+      "replyTo": null,
+      "result": "sent",
+      "resultText": null,
+      "sender": null,
+      "summary": null,
+      "toolUseId": "toolu_017StumvJQFvUYHP9Fr1aPuv"
+    },
+    "text": "Sent to repo-h6xooi-51: E7 probe: second message while you work",
     "to": null,
     "turnId": "turn:2e2cd9bd-01ae-4320-aff1-460bd117a833"
   },

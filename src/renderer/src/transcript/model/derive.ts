@@ -22,6 +22,9 @@ import { isEngineOrigin, originOf, RECEIPT_APPLIED, runningTurn, type ReceiptUnd
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
 import { isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf } from './user-text';
+import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome } from '@shared/engine/peer-envelope'; // E7
+import { parseListing } from './agent-listing'; // E7
+import { peerMessageCopy } from './copy'; // E7
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -111,7 +114,8 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')));
+  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
+  || isPersistentMessage(row); // E7
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
@@ -195,7 +199,8 @@ type Item =
   | { kind: 'request'; toolUseId: ToolUseId }
   | { kind: 'subagents'; group: SubagentGroup }
   | { kind: 'steer'; row: RowOf<'user'> } // a prompt folded into this turn: a persistent row at its delivery position (W1)
-  | { kind: 'ask' | 'delivery'; toolUseId: ToolUseId }; // E1: a `maws` call's row, filled once its result and events are seen
+  | { kind: 'ask' | 'delivery'; toolUseId: ToolUseId } // E1: a `maws` call's row, filled once its result and events are seen
+  | { kind: 'later'; row: () => Row }; // E7: a message or listing row, filled once the turn's results and agents are known
 
 interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null; error: string | null /* E1: the engine's refusal */ }
@@ -250,6 +255,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const pendingRows = new Map<ToolUseId, Pending>();
   const asks = new Map<ToolUseId, AskRecord>(); // E1
   const deliveries = new Map<ToolUseId, DeliveryRecord>(); // E1
+  const results = new Map<ToolUseId, Event<'tool.result'>>(); // E7: a SendMessage's or ListAgents' result, for its row
   const retracted = new Set<string>();
   const superseded = new Set<string>();
   const byMarker = new Map<string, LiveBlock>();
@@ -263,6 +269,13 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   let retry: RowOf<'error'> | null = null;
   let retryAt: string | null = null; // the first api.retry's time: the in-place row keeps its position
   const agentIds = new Map<ToolUseId, AgentId>();
+  // E7: what this transcript knows of agents and peers, for a message row (this turn's own, then the turns before it),
+  // read once the turn's events are all seen
+  let knownAgents: KnownAgents[] | null = null;
+  const known = (): KnownAgents[] => (knownAgents ??= [
+    { refs: subagents.flatMap((group) => group.refs.map((ref) => ({ ...ref, agentId: ref.agentId ?? (ref.toolUseId ? (agentIds.get(ref.toolUseId) ?? null) : null) }))), ...namesOf(turn.events) },
+    ...(state === null ? [] : earlierTurns(state, turn).map((earlier) => knownOfTurn(state, earlier))),
+  ]);
 
   // *Turn boundaries on this engine*: the reducer retains a `command.lifecycle` on a turn only when it dropped that
   // turn's pending prompt, so its presence is the dropped mark. A prompt the engine folded into this turn
@@ -336,6 +349,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (originOf(event.origin) === 'engine') {
           // The engine's own trigger (C4's disk `<task-notification>` record, origin 'task-notification'): an engine turn
           // has no user row; its divider reads Continued and the subagent row says what finished.
+        } else if (originOf(event.origin) === 'peer' && parsePeerMessage(messageText(event.content)) !== null) {
+          // E7: a message from another session or an in-process agent: its companion event (peer.message,
+          // subagent.message) draws it; a peer text the parser refuses keeps its bubble below, so nothing is lost
         } else if (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn.id && user === null && !dropped(event.messageUuid)) {
           user = userRow(event, rowId.user(event.messageUuid), true);
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {
@@ -377,10 +393,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
             kind: event.toolName === 'Workflow' ? 'workflow' : 'agent', subagentType: typeof input.subagent_type === 'string' ? input.subagent_type : null,
           });
         } else if (presentation === 'agent_message') {
-          const input = record(event.input);
-          const to = str(input.to);
-          const direction = to === 'parent' ? 'from_child' : 'to_child';
-          items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction, from: null, to: null, text: agentMessageCopy(direction, to || null, str(input.message, str(input.content))) } });
+          items.push({ kind: 'later', row: () => sendMessageRow(event, results.get(event.toolUseId), turn.id, known()) }); // E7: `to` classified against what the transcript knows; the result refines it
         } else if (presentation === 'ask') { // E1
           const input = AskInputSchema.safeParse(event.input);
           asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: null, resulted: false, error: null });
@@ -389,6 +402,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           const input = SendFileInputSchema.safeParse(event.input);
           deliveries.set(event.toolUseId, { use: event, input: input.success ? input.data : null, delivered: null, caption: undefined, urgency: null, error: null });
           items.push({ kind: 'delivery', toolUseId: event.toolUseId });
+        } else if (presentation === 'agent_list') { // E7
+          items.push({ kind: 'later', row: () => agentListRow(event, results.get(event.toolUseId), turn.id) });
         } else {
           pendingRows.set(event.toolUseId, { kind: presentation, use: event, answers: null, outcome: null, feedback: null, requestId: null, error: null });
           items.push({ kind: 'request', toolUseId: event.toolUseId });
@@ -417,6 +432,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         const delivery = deliveries.get(event.toolUseId); // E1
         if (delivery) resultOfDelivery(delivery, event);
         if (group && ref?.kind === 'workflow') nameWorkflowRun(group, ref, event.structured, byTask); // E7
+        results.set(event.toolUseId, event); // E7
         break;
       }
       case 'tool.safeguard': {
@@ -482,6 +498,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'task.updated':
         break;
       case 'subagent.message': {
+        if (event.direction === 'from_child') { // E7: the agent by its title, a hand-back as its report
+          items.push({ kind: 'later', row: () => agentMessageRow(event, turn.id, known()) });
+          break;
+        }
         const name = event.direction === 'to_child' ? event.toAgentId : event.fromAgentId;
         items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction: event.direction, from: null, to: null, text: agentMessageCopy(event.direction, name, event.text) } });
         break;
@@ -569,6 +589,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       }
       // E1 end
+      // E7 start: a message from another session, at its arrival position (its user.message draws no bubble)
+      case 'peer.message':
+        items.push({ kind: 'row', row: inboundRow(event, turn.id) });
+        break;
+      // E7 end
       default:
         break;
     }
@@ -607,6 +632,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push({ kind: 'row', row: deliveryRow(deliveries.get(item.toolUseId)!, turn.id) });
         break;
       // E1 end
+      case 'later': // E7
+        resolved.push({ kind: 'row', row: item.row() });
+        break;
       case 'subagents': {
         if (item.group.refs.length === 0) break;
         for (const ref of item.group.refs) if (ref.toolUseId && agentIds.has(ref.toolUseId)) ref.agentId = agentIds.get(ref.toolUseId)!;
@@ -623,7 +651,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary. A hook,
   // a notice and what a plugin said (R1) are not the model's work: under MessageDisplay and Stop hooks every final text
   // is followed by hook events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
-  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */]);
+  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */, 'agent_list' /* E7 */]);
   const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin')));
   const lastWork = resolved.map(isWork).lastIndexOf(true);
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
@@ -950,6 +978,122 @@ function nameWorkflowRun(group: SubagentGroup, ref: SubagentRef, structured: unk
     group.statuses.delete(ref.taskId);
     group.statuses.set(taskId, status);
   }
+}
+
+// The messages between sessions and agents, and the listing (E7 execution document, Design §4; Decision Log 17, 29).
+// A message row names an agent the transcript has seen in any turn up to its own: what one turn knows is its subagent
+// refs as its own rows name them, the real names its Agent calls gave (`name`, what SendMessage may address), and the
+// names its inbound messages gave their senders' addresses. Kept per turn object (a turn is cloned when it changes),
+// read from the per-turn memo when it is current, else derived without the reader's state (which looks no further).
+interface KnownAgents {
+  refs: SubagentRef[];
+  names: Map<string, ToolUseId>; // an Agent call's real `name` → its tool use
+  peers: Map<string, string>; // a sender's address → the name its envelope gave
+}
+const knownByTurn = new WeakMap<TurnState, KnownAgents>();
+
+function namesOf(events: SessionEvent[]): Pick<KnownAgents, 'names' | 'peers'> {
+  const names = new Map<string, ToolUseId>();
+  const peers = new Map<string, string>();
+  for (const event of events) {
+    if (event.kind === 'tool.use' && presentationOf(event.toolName) === 'subagent') {
+      const name = record(event.input).name;
+      if (typeof name === 'string' && name.length > 0) names.set(name, event.toolUseId);
+    } else if (event.kind === 'peer.message' && event.fromName) peers.set(event.from, event.fromName);
+  }
+  return { names, peers };
+}
+
+function knownOfTurn(state: TranscriptState, turn: TurnState): KnownAgents {
+  let known = knownByTurn.get(turn);
+  if (!known) {
+    const memo = state.memo.get(turn.id);
+    const work = memo && memo.version === turn.version ? memo.work : deriveTurn(turn, null).work;
+    known = { refs: work.subagents.map(({ status: _status, ...ref }) => ref), ...namesOf(turn.events) };
+    knownByTurn.set(turn, known);
+  }
+  return known;
+}
+
+// The turns before this one, latest first (a turn of a rewound branch, outside the order, looks at none).
+function earlierTurns(state: TranscriptState, turn: TurnState): TurnState[] {
+  const at = state.order.indexOf(turn.id);
+  return at <= 0 ? [] : state.order.slice(0, at).reverse().map((id) => state.turns.get(id)!);
+}
+
+// An agent (never a workflow) by the task id, agent id or real name a message names it with.
+function agentNamed(known: KnownAgents[], key: string): SubagentRef | null {
+  for (const { refs, names } of known) {
+    const byName = names.get(key);
+    const ref = refs.find((r) => r.kind === 'agent' && (r.taskId === key || r.agentId === key || (byName !== undefined && r.toolUseId === byName)));
+    if (ref) return ref;
+  }
+  return null;
+}
+
+const peerNamed = (known: KnownAgents[], address: string): string | null => known.find(({ peers }) => peers.has(address))?.peers.get(address) ?? null;
+
+// The body's first line cut to 120 columns, as the TUI previews a message.
+const PREVIEW_COLUMNS = 120;
+function previewOf(body: string): string {
+  const line = body.trimStart().split('\n')[0]!.trimEnd();
+  return line.length > PREVIEW_COLUMNS ? `${line.slice(0, PREVIEW_COLUMNS - 1)}…` : line;
+}
+
+// An inbound row and a hand-back row stand where a persistent bubble stood, and the sender, the preview and Reply must
+// outlive the turn's fold; outbound and in-process rows stay work.
+function isPersistentMessage(row: Row): boolean {
+  return row.kind === 'agent_message' && ((row.peer?.sender ?? null) !== null || row.report !== undefined);
+}
+
+function inboundRow(event: Event<'peer.message'>, turnId: TurnId): RowOf<'agent_message'> {
+  const preview = previewOf(event.text);
+  return {
+    id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message', direction: 'between', from: null, to: null, text: peerMessageCopy.inbound(peerLabel(event.from, event.fromName), preview),
+    peer: {
+      sender: { name: event.fromName, address: event.from, session: event.fromSession }, recipient: null, body: event.text, preview, replyTo: event.replyable ? event.from : null,
+      toolUseId: null, messageUuid: event.messageUuid, result: null, resultText: null, summary: null,
+    },
+  };
+}
+
+// A SendMessage call: to `main` or `parent` a child's report up (`from_child`), to an agent this transcript knows the
+// parent's message down (`to_child`, its text as before), to anything else a message to another session (`between`:
+// a peer's name or address, a teammate), refined by its result.
+function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, known: KnownAgents[]): RowOf<'agent_message'> {
+  const input = record(use.input);
+  const to = str(input.to);
+  const message = str(input.message, str(input.content));
+  const base = { id: rowId.agentMessage(use.id), turnId, at: use.at, kind: 'agent_message' as const, from: null };
+  if (to === 'parent' || to === 'main') return { ...base, direction: 'from_child', to: null, text: agentMessageCopy('from_child', to, message) };
+  const agent = to === '' ? null : agentNamed(known, to);
+  if (agent !== null || to === '') return { ...base, direction: 'to_child', to: agent, text: agentMessageCopy('to_child', to || null, message) };
+  const outcome = result === undefined ? null : sendMessageOutcome(result);
+  const preview = previewOf(message);
+  return {
+    ...base, direction: 'between', to: null, text: peerMessageCopy.outbound(peerNamed(known, to) ?? to, preview),
+    peer: {
+      sender: null, recipient: to, body: message, preview, replyTo: null, toolUseId: use.toolUseId, messageUuid: null,
+      result: outcome === null ? 'pending' : outcome.ok ? 'sent' : 'failed', resultText: outcome !== null && !outcome.ok ? outcome.message : null,
+      summary: typeof input.summary === 'string' && input.summary.length > 0 ? input.summary : null,
+    },
+  };
+}
+
+// An in-process agent's message to the main conversation (`<agent-message>`), the agent by its title; its hand-back
+// reads as its report (Decision Log 28's interim row replaced).
+function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, known: KnownAgents[]): RowOf<'agent_message'> {
+  const agent = agentNamed(known, event.fromAgentId);
+  const title = agent?.name ?? event.fromAgentId;
+  const report = handbackReport(event.text);
+  const base = { id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message' as const, direction: 'from_child' as const, from: agent, to: null };
+  return report === null ? { ...base, text: agentMessageCopy('from_child', title, event.text) } : { ...base, text: peerMessageCopy.report(title), report };
+}
+
+function agentListRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId): RowOf<'agent_list'> {
+  const text = result === undefined ? '' : result.isError ? toolErrorText(resultText(result.content)) : resultText(result.content);
+  const listing = result === undefined ? { self: null, sections: [], notes: [] } : parseListing(text);
+  return { id: rowId.agentList(use.toolUseId), turnId, at: use.at, kind: 'agent_list', toolUseId: use.toolUseId, self: listing.self, sections: listing.sections, notes: listing.notes, raw: text, pending: result === undefined };
 }
 // E7 end
 

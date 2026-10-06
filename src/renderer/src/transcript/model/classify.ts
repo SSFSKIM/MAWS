@@ -5,7 +5,7 @@ import type { DenialKind, SafeguardVerdict } from '@shared/graph/enums';
 import { MAWS_SERVER_NAME, type MawsToolName } from '@shared/maws/tools'; // E1
 import type { ToolCategory, ToolClassification } from './rows';
 
-export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery';
+export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery' | /* E7 */ 'agent_list';
 
 // E1 start: the names the engine gives the `maws` server's tools (X9), as tool uses carry them
 export const MAWS_TOOL_USE: Record<MawsToolName, string> = { send_file: `mcp__${MAWS_SERVER_NAME}__send_file`, ask: `mcp__${MAWS_SERVER_NAME}__ask`, show_pane: `mcp__${MAWS_SERVER_NAME}__show_pane` };
@@ -20,6 +20,10 @@ const ROW_KIND_TOOLS: Record<string, Presentation> = {
   [MAWS_TOOL_USE.ask]: 'ask',
   [MAWS_TOOL_USE.send_file]: 'delivery',
   // E1 end
+  // E7 start: a listing of the agents and sessions this one can message is a row of its own (E7 execution document,
+  // Design §4)
+  ListAgents: 'agent_list',
+  // E7 end
 };
 
 export function presentationOf(toolName: string): Presentation {
@@ -44,6 +48,10 @@ const TABLE: Record<string, TableRow> = {
   // E1 start: a pane shown for the model is a cell of its own, never folded into a group of MCP calls
   [MAWS_TOOL_USE.show_pane]: standalone('other'),
   // E1 end
+  // E7 start: the scheduling tools by name (as the fallback would class them), so a job's creating call is a known cell
+  // that Background work's `Open creating turn` jumps to (E7 execution document, Design §7)
+  CronCreate: grouped('other'), CronList: grouped('other'), CronDelete: grouped('other'),
+  // E7 end
 };
 
 export const MCP_TOOL = /^mcp__([^_].*?)__(.+)$/;

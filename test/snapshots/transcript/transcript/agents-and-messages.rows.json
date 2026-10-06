@@ -112,7 +112,15 @@
     "id": "agentmsg:replay:journal:57:1",
     "kind": "agent_message",
     "text": "Sent message to ad1synthagent0001: Skip node_modules entirely.",
-    "to": null,
+    "to": {
+      "agentId": "ad1synthagent0001",
+      "glyph": 0,
+      "kind": "agent",
+      "name": "Survey src for TODOs",
+      "subagentType": "general-purpose",
+      "taskId": "ad1synthagent0001",
+      "toolUseId": "toolu_synth_agent_1"
+    },
     "turnId": "turn:u-agents-and-messages-002"
   },
   {
