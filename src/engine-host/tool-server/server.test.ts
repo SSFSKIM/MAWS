@@ -116,6 +116,55 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
     expect(sent).toEqual([]); // no one waits for those answers
   });
 
+  // E1 review: the engine's MCP client abandons a call (a turn interrupted while an ask waits) by the MCP notification
+  // `notifications/cancelled` naming the call's JSON-RPC id, not by a control_cancel_request
+  it('a notifications/cancelled naming a call in flight aborts it as withdrawn and answers only the notification', async () => {
+    const signals: AbortSignal[] = [];
+    const held = defineMawsTool('show_pane', (_args, ctx) => {
+      signals.push(ctx.signal);
+      return new Promise((resolve) => ctx.signal.addEventListener('abort', () => resolve(toolText({ late: true }))));
+    });
+    const { server, send, sent, rpcOf } = harness([held]);
+    const a = send({ method: 'tools/call', params: { name: 'show_pane', arguments: {} }, jsonrpc: '2.0', id: 1 });
+    const b = send({ method: 'tools/call', params: { name: 'show_pane', arguments: {} }, jsonrpc: '2.0', id: 'two' });
+    await flush();
+    const note = send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 'two', reason: 'AbortError: This operation was aborted' } });
+    await flush();
+    expect(signals.map((s) => s.aborted)).toEqual([false, true]);
+    expect(signals[1]!.reason).toBe('withdrawn');
+    expect(server.inFlight).toBe(1);
+    expect(JSON.stringify(rpcOf(note))).toBe('{"jsonrpc":"2.0","result":{},"id":0}'); // the notification itself, as any
+    expect(rpcOf(b)).toBeUndefined();
+    expect(rpcOf(a)).toBeUndefined();
+    expect(sent.map((s) => s.requestId)).toEqual([note]);
+  });
+
+  it('a notifications/cancelled naming no call in flight, or a call already answered, changes nothing', async () => {
+    let settle!: (result: ReturnType<typeof toolText>) => void;
+    const signals: AbortSignal[] = [];
+    const held = defineMawsTool('ask', (_args, ctx) => {
+      signals.push(ctx.signal);
+      return new Promise((resolve) => (settle = resolve));
+    });
+    const { server, send, rpcOf } = harness([held]);
+    const call = send({ method: 'tools/call', params: { name: 'ask', arguments: {} }, jsonrpc: '2.0', id: 5 });
+    await flush();
+    for (const params of [{ requestId: 6 }, { requestId: '5' }, { reason: 'no id' }, undefined]) send({ jsonrpc: '2.0', method: 'notifications/cancelled', ...(params && { params }) });
+    send({ jsonrpc: '2.0', method: 'notifications/progress', params: { requestId: 5, progressToken: 1, progress: 1 } }); // another notification
+    await flush();
+    expect(signals[0]!.aborted).toBe(false);
+    expect(server.inFlight).toBe(1);
+    const result = toolText({ status: 'answered' });
+    await server.reply(call, result);
+    send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 5 } }); // too late: the answer is written
+    await flush();
+    expect(signals[0]!.aborted).toBe(false);
+    settle(result);
+    await flush();
+    expect(rpcOf(call)).toEqual({ jsonrpc: '2.0', id: 5, result });
+    expect(server.inFlight).toBe(0);
+  });
+
   // E1 M2: a blocking ask answers its own call with the write's outcome in hand (residue 12)
   it('reply answers a call in flight with the given write options, and the tool settling after writes nothing more', async () => {
     let settle!: (result: ReturnType<typeof toolText>) => void;

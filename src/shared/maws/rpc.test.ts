@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readMcpMessage, toolCallOf } from './rpc';
+import { cancelledCallOf, readMcpMessage, toolCallOf } from './rpc';
 
 const req = (message: unknown, server_name = 'maws') => ({ subtype: 'mcp_message', server_name, message });
 
@@ -22,8 +22,20 @@ describe('readMcpMessage (the one reading the server and the normaliser share)',
   });
 
   it('takes an id that is neither a string nor a number as a notification', () => {
-    expect(readMcpMessage(req({ jsonrpc: '2.0', method: 'notifications/initialized' }))).toEqual({ kind: 'notification', method: 'notifications/initialized' });
-    for (const id of [null, true, { n: 1 }]) expect(readMcpMessage(req({ jsonrpc: '2.0', id, method: 'tools/call' }))).toEqual({ kind: 'notification', method: 'tools/call' });
+    expect(readMcpMessage(req({ jsonrpc: '2.0', method: 'notifications/initialized' }))).toEqual({ kind: 'notification', method: 'notifications/initialized', params: {} });
+    for (const id of [null, true, { n: 1 }]) expect(readMcpMessage(req({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'ask' } }))).toEqual({ kind: 'notification', method: 'tools/call', params: { name: 'ask' } });
+  });
+});
+
+// E1 review: how the engine's MCP client abandons a call it sent (the official SDK's request abort handler)
+describe('cancelledCallOf', () => {
+  it("reads the JSON-RPC id a notifications/cancelled names, and nothing from any other message", () => {
+    expect(cancelledCallOf(readMcpMessage(req({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 3, reason: 'AbortError: This operation was aborted' } })))).toBe(3);
+    expect(cancelledCallOf(readMcpMessage(req({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 'x' } })))).toBe('x');
+    for (const params of [{}, { requestId: null }, { requestId: { n: 1 } }]) expect(cancelledCallOf(readMcpMessage(req({ jsonrpc: '2.0', method: 'notifications/cancelled', params })))).toBeNull();
+    expect(cancelledCallOf(readMcpMessage(req({ jsonrpc: '2.0', method: 'notifications/progress', params: { requestId: 3 } })))).toBeNull();
+    expect(cancelledCallOf(readMcpMessage(req({ jsonrpc: '2.0', id: 1, method: 'notifications/cancelled', params: { requestId: 3 } })))).toBeNull(); // a request, not a notification
+    expect(cancelledCallOf(readMcpMessage(req({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 3 } }, 'maws2')))).toBeNull();
   });
 });
 

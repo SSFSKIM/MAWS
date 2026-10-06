@@ -185,6 +185,25 @@ describe('the maws server on an EngineSession (scripted)', () => {
     expect(run.maws()).toEqual([]);
     expect(run.session.status().pendingRequests).toBe(0);
   });
+
+  // E1 review: an interrupted turn abandons the call through MCP's `notifications/cancelled` (the engine's MCP client,
+  // the official SDK's request abort handler), naming the call's JSON-RPC id; no fixture records it, so the frame is
+  // built in the envelope pass3/p1-sdk-mcp-roundtrip records for every notification (seq 10)
+  it('a show_pane the engine abandoned with notifications/cancelled settles at once, answered with nothing', async () => {
+    const run = await mawsSession();
+    const id = run.mcp({ id: 42, method: 'tools/call', params: { name: 'show_pane', arguments: { pane: 'terminal' }, _meta: { 'claudecode/toolUseId': 'toolu_pane', progressToken: 42 } } });
+    await until(() => run.shows.length === 1, 'the pane request');
+    expect(run.session.status().pendingRequests).toBe(1);
+    const note = run.mcp({ method: 'notifications/cancelled', params: { requestId: 42, reason: 'AbortError: This operation was aborted' } });
+    await until(() => run.session.status().pendingRequests === 0, 'the abandoned call settled', PANE_ANSWER_MS / 8); // not the 8 s timeout
+    expect(run.session.answerPane(id, { ok: true, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 't', title: 'Terminal' } })).toBe('not_pending');
+    expect(JSON.stringify(await run.answered(note))).toBe('{"jsonrpc":"2.0","result":{},"id":0}');
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.answerOf(id)).toBeUndefined();
+    expect(run.maws()).toEqual([]);
+    expect(run.rebuilt()).toEqual(run.events);
+  });
 });
 
 // E1 M2: the ask lifecycle (residue 12's claim, write, commit; G6's table in host memory)
@@ -437,6 +456,36 @@ describe('a blocking ask as a question attention item (scripted)', () => {
     await run.session.exited;
     expect(run.last()).toEqual([]);
     expect(run.session.brokerItems()).toEqual([]);
+  });
+
+  // E1 review: the user interrupts the turn while a blocking ask waits. The engine's MCP client drops the call and says
+  // so with `notifications/cancelled` naming its JSON-RPC id (no control_cancel_request); the ask is withdrawn exactly as
+  // a withdrawn control request withdraws it, so nobody can answer it and no one sees an answer the model never got.
+  it('a blocking ask abandoned by notifications/cancelled is cancelled (withdrawn): item gone, nothing written, rebuild equal', async () => {
+    const run = await attended();
+    const id = run.mcp({ id: 7, method: 'tools/call', params: { name: 'ask', arguments: { title: 'Setup', questions: QUESTIONS }, _meta: { 'claudecode/toolUseId': 'toolu_int', progressToken: 7 } } });
+    await until(() => run.session.asks().length === 1, 'the pending ask');
+    expect(run.last().map((i) => [i.kind, i.request.toolUseId])).toEqual([['question', 'toolu_int']]);
+    expect(run.session.status().pendingRequests).toBe(1);
+    run.mcp({ method: 'notifications/cancelled', params: { requestId: 999, reason: 'not a call' } }); // names no call: nothing
+    const note = run.mcp({ method: 'notifications/cancelled', params: { requestId: 7, reason: 'AbortError: This operation was aborted' } });
+    await until(() => run.session.asks().length === 0, 'the withdrawal');
+    expect(run.last()).toEqual([]);
+    expect(run.session.brokerItems()).toEqual([]);
+    expect(run.stream.pendingRequest(id)).toBeNull();
+    await until(() => run.session.status().pendingRequests === 0, 'the call settled');
+    const writes = run.transport.writes.length;
+    expect(await run.session.answerAsk('toolu_int', ANSWERS)).toBe('not_pending');
+    expect(run.transport.writes.length).toBe(writes); // a later Submit writes nothing
+    const cancelled = run.journal.rows.filter((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'maws_ask_cancelled');
+    expect(cancelled.map((r) => r.frame)).toEqual([{ event: 'maws_ask_cancelled', askId: 'toolu_int', toolUseId: 'toolu_int', reason: 'withdrawn' }]);
+    expect(JSON.stringify(await run.answered(note))).toBe('{"jsonrpc":"2.0","result":{},"id":0}'); // the notification's own request
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.answerOf(id)).toBeUndefined();
+    expect(run.maws().map((e) => e.kind)).toEqual(['maws.ask.opened', 'maws.ask.cancelled']);
+    expect(run.maws()[1]).toMatchObject({ kind: 'maws.ask.cancelled', askId: 'toolu_int', toolUseId: 'toolu_int', reason: 'withdrawn' });
+    expect(run.rebuilt()).toEqual(run.events);
   });
 
   // M5 fix: exit parity with an AskUserQuestion. The broker confirmed the ask's permission at its tools/call, so it is

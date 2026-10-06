@@ -5,12 +5,13 @@
 // pass3/p1-sdk-mcp-roundtrip seqs 5 to 14). The handshake interleaves with the host's own initialize, so the server
 // answers from construction on. A tool's failure is an MCP result with `isError: true`, which the model reads as an
 // ordinary failed call; JSON-RPC errors answer only an unknown method or a malformed message (residue 4). A call the
-// engine withdrew, or one still running when the process ended, is aborted (its signal's reason `withdrawn` or `exit`)
-// and answered with nothing: no one waits. A call may instead be answered from outside its tool through `reply` (a
-// blocking ask, whose answer must be committed only once its write settled: residue 12); the tool settling after that
-// writes nothing more. Nothing here builds an event: the normaliser maps the `tools/call` rows and their answers.
+// engine withdrew (its control request cancelled, or the call abandoned by its MCP client's `notifications/cancelled`,
+// as when the user interrupts the turn), or one still running when the process ended, is aborted (its signal's reason
+// `withdrawn` or `exit`) and answered with nothing: no one waits. A call may instead be answered from outside its tool
+// through `reply` (a blocking ask, whose answer must be committed only once its write settled: residue 12); the tool
+// settling after that writes nothing more. Nothing here builds an event: the normaliser maps the `tools/call` rows and their answers.
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
-import { readMcpMessage, toolCallOf, type RpcId } from '@shared/maws/rpc';
+import { cancelledCallOf, readMcpMessage, toolCallOf, type RpcId } from '@shared/maws/rpc';
 import { mawsServerInfo, mawsToolList, TOOL_ERRORS, type MawsToolName } from '@shared/maws/tools';
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { WriteOptions } from '../outbound-writer';
@@ -93,6 +94,8 @@ export class MawsToolServer {
     }
     if (message.kind === 'notification') {
       this.write(requestId, { jsonrpc: '2.0', result: {}, id: 0 }); // a notification: the official SDK's answer (E0a seq 11)
+      const abandoned = cancelledCallOf(message);
+      if (abandoned !== null) this.abandoned(abandoned);
       return;
     }
     const { id, params } = message;
@@ -119,6 +122,15 @@ export class MawsToolServer {
   // The engine withdrew the request (`control_cancel_request`): the call's signal aborts and nothing is answered.
   cancel(requestId: RequestId): void {
     this.calls.get(requestId)?.controller.abort('withdrawn' satisfies CallAbortReason);
+  }
+
+  // The engine's MCP client gave up on the call it sent with this JSON-RPC id (`notifications/cancelled`): it has dropped
+  // the call's response handler, so the call aborts as a withdrawn one does. A call already answered (its answer is on
+  // its way or written) is left to settle; an id naming no call in flight is nothing.
+  private abandoned(id: RpcId): void {
+    for (const call of this.calls.values()) {
+      if (call.id === id && !call.answered) call.controller.abort('withdrawn' satisfies CallAbortReason);
+    }
   }
 
   // The process is gone: every call in flight aborts; the pipe that would take their answers is closed.
