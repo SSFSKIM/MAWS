@@ -30,7 +30,7 @@ if (!userData) throw new Error('the engine host needs MAWS_USER_DATA (main forwa
 
 let ipc: EngineIpc | null = null; // E10: the detached entry reaches the table through it
 
-const register: HostRegister = (on, emit) => {
+const register: HostRegister = (on, emit, client) => {
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing)
   void pruneJournals(join(userData, 'engine-host', 'journal'), { keepPerSession: JOURNAL_KEEP_PER_SESSION, maxAgeDays: JOURNAL_MAX_AGE_DAYS }).catch((error: unknown) =>
     console.warn(`[engine-host] journal pruning failed: ${error instanceof Error ? error.message : String(error)}`),
@@ -46,6 +46,7 @@ const register: HostRegister = (on, emit) => {
   ipc = registerEngineIpc(on, emit, {
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
     diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
+    onConnect: client.onConnect, // E10: the connect burst
   });
   ({ table } = ipc);
   table.startSampling();

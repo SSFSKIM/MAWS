@@ -130,6 +130,7 @@ export interface EngineIpcDeps {
   // registry); absent, never
   heldElsewhere?: (appSessionId: AppSessionId, since: string | null) => boolean;
   pluginsTimers?: Timers; // E8: the plugin runner's timers (its settle, its CLI ceiling); default the real ones
+  onConnect?: (hook: () => void) => void; // E10: the runtime's connect hooks, where the connect burst registers
 }
 
 export interface EngineIpc {
@@ -222,7 +223,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
       const stream = new SessionStream({
         appSessionId: spec.appSessionId, launchId: plan.launchId, sessionId: plan.sessionId, journalPath: session.status().journalPath,
-        emit, ringSize: deps.ringSize, batchMs: deps.batchMs,
+        emit, ringSize: deps.ringSize, batchMs: deps.batchMs, log, // E10: log, for the burst's tail_gap
       });
       streams.set(spec.appSessionId, stream);
       session.on('events', (events) => stream.events(events));
@@ -732,6 +733,24 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     return {};
   });
   // E3 end
+
+  // E10 start: the connect burst (E10 execution document, §Design 3 "Connect"), run synchronously at the client's ready
+  // before any later event: every row in the table's order (its stream republishes the row's state, read from the
+  // session since the stream keeps none, then the events no client received), then the budget, the plugin lists'
+  // change and the latest event of every running plugin operation. A row with no stream here has none to send.
+  deps.onConnect?.(() => {
+    for (const session of table.list()) {
+      const status = session.status();
+      const catalog = session.catalog();
+      streams.get(status.appSessionId)?.republish({
+        status, queue: session.queue.recovered ? session.queue.state : null, brokerItems: session.brokerItems(), catalog: catalog.revision > 0 ? catalog : null,
+      });
+    }
+    emit('engine.budget', table.budgetState());
+    emit('plugins.changed', {});
+    for (const event of plugins.running()) emit('plugins.operation', event);
+  });
+  // E10 end
 
   return { table, plugins, shutdown };
 }
