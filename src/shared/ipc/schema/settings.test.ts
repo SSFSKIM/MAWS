@@ -23,7 +23,9 @@ describe('settings keymap is a partial record', () => {
     expect(issueCodes({ ...base, keymap: { 'tab.close': 'Cmd J!' } })).toEqual(['invalid_format']);
   });
 
-  it('is version 9 (W13: no engine pin; E9: the voice section) and carries the notification policy', () => {
+  it('is version 10 (W13: no engine pin; E9: the voice section; E10: the supervisor section) and carries the notification policy', () => {
+    expect(SettingsSchema.safeParse({ ...base, version: 9 }).success).toBe(false); // E10
+    expect(SettingsSchema.safeParse({ ...base, supervisor: undefined }).success).toBe(false); // E10
     expect(SettingsSchema.safeParse({ ...base, version: 8 }).success).toBe(false);
     expect(SettingsSchema.safeParse({ ...base, voice: undefined }).success).toBe(false); // E9
     expect(SettingsSchema.safeParse({ ...base, version: 7 }).success).toBe(false);
