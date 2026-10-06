@@ -2,6 +2,7 @@
 // fields, the registered opener (later registrations win, a disposer restores the one before), and the placeholder
 // sheet's dialog when none is registered.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { sha256Hex } from '@shared/composer/sha256';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useEditorDialog } from '../editor/EditorDialogs';
 import { fileLineAnchor, openCommentComposer, prLineAnchor, registerCommentComposer } from './anchor';
@@ -36,6 +37,33 @@ describe('pr-line anchor', () => {
   it('carries exactly X10’s fields for a pr-line, every one present', () => {
     const anchor = prLineAnchor({ prUrl: PR, prNumber: 7, path: 'a.ts', line: 1, side: 'old' });
     expect(Object.keys(anchor).sort()).toEqual(['kind', 'label', 'line', 'locator', 'pageUrl', 'path', 'prNumber', 'side']);
+  });
+
+  // E3's planned AnchorSchema: a label of at most 200 characters with no control characters.
+  it('shows a control character in the path as U+FFFD in the label only', () => {
+    const path = 'odd\nname\t.ts';
+    const anchor = prLineAnchor({ prUrl: PR, prNumber: 7, path, line: 2, side: 'new' });
+    expect(anchor.label).toBe('odd�name�.ts:2 · PR #7');
+    expect(anchor.path).toBe(path);
+  });
+
+  it('elides a long path from its start so the label fits 200 characters and keeps the basename, line and PR number', () => {
+    const path = `${'deep/'.repeat(60)}file.ts`;
+    const anchor = prLineAnchor({ prUrl: PR, prNumber: 1234, path, line: 9876, side: 'new' });
+    expect(anchor.label).toHaveLength(200);
+    expect(anchor.label.startsWith('…')).toBe(true);
+    expect(anchor.label.endsWith('/deep/file.ts:9876 · PR #1234')).toBe(true);
+    expect(anchor.path).toBe(path);
+    expect(anchor.locator).toBe(`${PR}/files#diff-${sha256Hex(path)}R9876`);
+  });
+
+  it('never leaves half a surrogate pair at the elision', () => {
+    const tail = ':1 · PR #7';
+    const path = `${'😀'.repeat(150)}`; // 300 UTF-16 code units
+    const { label } = prLineAnchor({ prUrl: PR, prNumber: 7, path, line: 1, side: 'new' });
+    expect(label.length).toBeLessThanOrEqual(200);
+    expect(label.endsWith(tail)).toBe(true);
+    expect(label.slice(1, -tail.length)).toBe('😀'.repeat((label.length - 1 - tail.length) / 2));
   });
 });
 

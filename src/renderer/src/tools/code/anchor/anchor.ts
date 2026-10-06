@@ -25,13 +25,28 @@ export const fileLineAnchor = (path: string, line: number): FileLineAnchor => ({
 export interface PrLineAnchor {
   kind: 'pr-line';
   locator: string; // the line's own address on the PR's files page: `<pageUrl>#diff-<sha256 hex of path><L|R><line>`
-  label: string; // `<path>:<line> · PR #<prNumber>`
+  label: string; // `<path>:<line> · PR #<prNumber>`, fitted to X10's label rule (prLineLabel)
   pageUrl: string; // the PR's files page, `<prUrl>/files`
   path: string; // repository-relative, as the PR's diff names the file
   line: number; // 1-based, on `side`
   side: 'old' | 'new';
   prNumber: number;
 }
+
+// X10's label rule (E3's AnchorSchema): at most 200 characters, no control characters. Git allows both in a path, so
+// the label shows a control character as U+FFFD and elides a long path from its start, keeping the basename, the line
+// and the PR number; `path` and `locator` stay exact.
+const LABEL_MAX = 200;
+// eslint-disable-next-line no-control-regex -- the control characters are what is matched
+const CONTROL = /[\x00-\x1f\x7f]/g;
+const prLineLabel = (path: string, line: number, prNumber: number): string => {
+  const shown = path.replace(CONTROL, '�');
+  const suffix = `:${line} · PR #${prNumber}`;
+  if (shown.length + suffix.length <= LABEL_MAX) return `${shown}${suffix}`;
+  let tail = shown.slice(shown.length - (LABEL_MAX - 1 - suffix.length));
+  if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1); // never half a surrogate pair
+  return `…${tail}${suffix}`;
+};
 
 // GitHub addresses a diff line by the SHA-256 of the file's repository-relative path and the side's letter (L the old
 // file, R the new one), the `id` its files page gives the line's cell; GitHub documents none of it.
@@ -41,7 +56,7 @@ export const prLineAnchor = (input: { prUrl: string; prNumber: number; path: str
   return {
     kind: 'pr-line',
     locator: `${pageUrl}#diff-${sha256Hex(path)}${side === 'old' ? 'L' : 'R'}${line}`,
-    label: `${path}:${line} · PR #${prNumber}`,
+    label: prLineLabel(path, line, prNumber),
     pageUrl,
     path,
     line,
