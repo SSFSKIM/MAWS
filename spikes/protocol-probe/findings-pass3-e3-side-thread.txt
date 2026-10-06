@@ -50,9 +50,9 @@ context, and leaves the parent's turn unaffected.
   was still sleeping (P's tool_result at parent seq 73, 11:04:14.564Z): parent seq 149 `fork_timing`, check 150.
 - P was unaffected: its tool_result is SLEPT_OK (parent seq 73), its one result is success, terminal_reason completed
   (parent seq 143); P's JSONL holds only P's session id (check 159).
-- What C's file holds (fork seq 40, 41 records): six session-level records without uuids (ai-title copied from P,
+- What C's file holds (fork seq 40, 41 records): seven session-level records without uuids (ai-title copied from P,
   "Remember the word ZEBRA"; mode; atis-latch; two file-history-snapshots; two queue-operations of C's own prompt at
-  11:03:55.699Z), then P's history under C's session id with P's uuids and timestamps, root `f3ae79a6-…` with
+  11:03:55.699Z and .700Z), then P's history under C's session id with P's uuids and timestamps, root `f3ae79a6-…` with
   `parentUuid: null` (P's first prompt, parent seq 6), through P's Bash tool_use `294e8971-…`; then two records the
   engine synthesised at the fork (new uuids, stamped 11:03:55.674Z): a user tool_result for the open call, is_error true,
   "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check
