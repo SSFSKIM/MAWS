@@ -23,12 +23,10 @@ import type { MutateRun } from '../git/mutate';
 import { GitCommandError, NotARepositoryError, type GitRun } from '../git/runner';
 import { withoutUserInfo } from '../git/service';
 import { trustStateOf } from '../sessions/trust';
-import { commitRefusal, discardTargets, isRefusal, refusal, stageTargets, unstageTargets } from './validate';
+import { commitRefusal, discardTargets, isRefusal, refusal, stageTargets, UNTRUSTED_DETAIL, unstageTargets } from './validate';
 
 const LOCAL_TIMEOUT_MS = 10_000; // add, restore, rm, clean
 const COMMIT_TIMEOUT_MS = 60_000; // hooks run linters
-
-export const UNTRUSTED_DETAIL = 'MAWS runs git here only after you trust the folder in a session';
 
 export interface ScmServiceDeps {
   records(appSessionId: AppSessionId): Pick<SessionRecord, 'directory' | 'worktree'> | null; // sessions.model.record

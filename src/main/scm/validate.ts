@@ -5,6 +5,9 @@
 import type { GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
 import type { ScmDiscardInput, ScmRefusal, ScmRefusalCode } from '@shared/ipc/schema/scm';
 
+// Every command but `scm.status` runs only in a checkout the engine trusts (service.ts, plans.ts).
+export const UNTRUSTED_DETAIL = 'MAWS runs git here only after you trust the folder in a session';
+
 export const refusal = (refused: ScmRefusalCode, detail: string, output = ''): ScmRefusal => ({ refused, detail, output });
 
 // Why a path cannot name an entry of the checkout, or null.
