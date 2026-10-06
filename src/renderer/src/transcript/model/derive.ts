@@ -403,7 +403,6 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (group && ref && event.isError) group.statuses.set(ref.taskId, 'finished_with_errors');
         const agentId = record(event.structured).agentId;
         if (typeof agentId === 'string') agentIds.set(event.toolUseId, agentId as AgentId);
-        if (group && ref?.kind === 'workflow') nameWorkflowRun(group, ref, event.structured, byTask); // E7
         const pending = pendingRows.get(event.toolUseId);
         if (pending?.kind === 'question' && pending.answers === null) {
           const answers = record(event.structured).answers;
@@ -417,6 +416,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (ask) resultOfAsk(ask, event);
         const delivery = deliveries.get(event.toolUseId); // E1
         if (delivery) resultOfDelivery(delivery, event);
+        if (group && ref?.kind === 'workflow') nameWorkflowRun(group, ref, event.structured, byTask); // E7
         break;
       }
       case 'tool.safeguard': {

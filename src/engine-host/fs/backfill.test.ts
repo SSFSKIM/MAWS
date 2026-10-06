@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AgentId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
-import { FIXTURE_DIR, loadJournal, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
+import { FIXTURE_DIR, loadEngineJournal, loadJournal, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
 import { Normalizer } from '../normalizer'; // E7
 import { recordedReceiptRecord } from '../../../test/support/agents-events';
 import { createBackfillContext, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
@@ -594,6 +594,41 @@ describe('peer messages from disk (E7)', () => {
     const events = mapAll([rec({ type: 'user', uuid: 'p1', timestamp: at(1), isMeta: true, origin: { kind: 'peer', from: 'uds:/x.sock' }, message: { role: 'user', content: 'plain words' } })]);
     expect(kinds(events)).toEqual(['turn.started', 'user.message']);
     expect(only(events, 'user.message')[0]).toMatchObject({ origin: 'peer', content: 'plain words' });
+  });
+
+  // Hand-built: no disk hand-back has been recorded. The record carries what C8b's live frame carries
+  // (test/fixtures/engine/handback-pointer.jsonl seq 207: its content and its `origin`) in the idle peer record's disk
+  // shape M0 recorded (`isMeta: true`, the origin on the record).
+  it("gives an in-process agent's hand-back the subagent.message the live frame gives, in a turn of its own", () => {
+    const frame = loadEngineJournal('handback-pointer').find((row) => row.seq === 207)!;
+    const live = new Normalizer({ appSessionId: 'app' as never, launchId: 'L', sessionId: null }).push(frame);
+    const { uuid, message, origin } = frame.frame as { uuid: string; message: { content: string }; origin: Record<string, unknown> };
+    const events = mapAll([rec({ type: 'user', uuid, timestamp: at(1), isMeta: true, origin, promptSource: 'system', turnOrigin: 'peer', message: { role: 'user', content: message.content } })]);
+    expect(kinds(events)).toEqual(['turn.started', 'user.message', 'subagent.message']);
+    expect(events[0]).toMatchObject({ userMessageUuid: null, origin: 'peer' });
+    expect(payloads(events)).toEqual(payloads(live));
+    expect(payloads(events)).toEqual([expect.objectContaining({ kind: 'subagent.message', direction: 'from_child', fromAgentId: 'a6a89722837fede78' })]);
+  });
+
+  it('opens no turn for a peer record inside a tool loop: the message joins the running turn', () => {
+    const envelope = '<cross-session-message from="uds:/tmp/cc-socks/1.sock">\nhi\n</cross-session-message>';
+    const events = mapAll([
+      rec({ type: 'user', uuid: 'u1', timestamp: at(0), message: { role: 'user', content: 'go' } }),
+      rec({ type: 'assistant', uuid: 'a1', timestamp: at(1), message: { id: 'm1', model: 'x', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } }),
+      rec({ type: 'user', uuid: 'r1', timestamp: at(2), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } }),
+      rec({ type: 'user', uuid: 'p1', timestamp: at(3), isMeta: true, origin: { kind: 'peer', from: 'uds:/tmp/cc-socks/1.sock' }, message: { role: 'user', content: envelope } }),
+    ]);
+    expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual(['u1']);
+    expect(kinds(events).slice(-2)).toEqual(['user.message', 'peer.message']);
+    expect(only(events, 'peer.message')[0]).toMatchObject({ messageUuid: 'p1', text: 'hi' });
+  });
+
+  it('reads a peer record whose content is text blocks, as the live normaliser does', () => {
+    const blocks = [{ type: 'text', text: 'Another Claude session sent a message:\n<cross-session-message from="uds:/tmp/cc-socks/1.sock">\nhi\n</cross-session-message>' }];
+    const events = mapAll([rec({ type: 'user', uuid: 'p1', timestamp: at(1), isMeta: true, origin: { kind: 'peer' }, message: { role: 'user', content: blocks } })]);
+    expect(kinds(events)).toEqual(['turn.started', 'user.message', 'peer.message']);
+    expect(only(events, 'user.message')[0]).toMatchObject({ origin: 'peer', content: blocks });
+    expect(only(events, 'peer.message')[0]).toMatchObject({ text: 'hi', midTurn: false });
   });
 });
 // E7 end

@@ -15,6 +15,7 @@ import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, eventBase, recordToEvents, isTaskNotification, isHumanPrompt, isNoResponseMarker, localCommandKind, singleText, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { opensTurn } from './backfill'; // E7
 
 export interface Skeleton {
   uuid: MessageUuid;
@@ -35,6 +36,7 @@ export interface Skeleton {
   noResponse: boolean;
   isProgress: boolean;
   startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
+  opensTurn: boolean; // E7: `startsTurn` or a peer message's record (backfill's `opensTurn`): what the unended-turn rule reads
   endsTurn: boolean; // a `system/turn_duration` record (backfill's `turn.ended`); not a blocked prompt's record, also written for a steer dropped mid-turn
   own: boolean; // holder-backed writer attribution at ingestion, not entrypoint alone
   timestamp: string | null;
@@ -205,6 +207,7 @@ class FollowerCore {
         || (record.type === 'user' && singleText(record) === '/compact'),
       isProgress: record.type === 'progress',
       startsTurn: startsTurn(record),
+      opensTurn: opensTurn(record), // E7
       endsTurn: record.type === 'system' && record.subtype === 'turn_duration',
       own: this.isOwnRecord(record),
       timestamp: typeof record.timestamp === 'string' ? record.timestamp : null,
@@ -539,7 +542,7 @@ class FollowerCore {
     for (let i = this.chain.length - 1; i >= 0; i--) {
       const skeleton = this.skeletons.get(this.chain[i]);
       if (skeleton?.endsTurn) return null;
-      if (!skeleton?.startsTurn) continue;
+      if (!skeleton?.opensTurn) continue; // E7: a peer message's turn too
       const at = (this.leaf === null ? null : this.skeletons.get(this.leaf)?.timestamp) ?? this.ctx.lastAt;
       return {
         ...eventBase(this.ctx, `session:${this.ctx.sessionId}:exited`),

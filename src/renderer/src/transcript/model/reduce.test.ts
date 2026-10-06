@@ -1066,6 +1066,22 @@ describe('orchestration facts (E7)', () => {
     expect(activity!.crons).toEqual([]);
   });
 
+  it('leaves out a call whose message was retracted or superseded, as the rest of the activity does', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('c1', 'CronCreate', { cron: '0 3 * * *', prompt: 'refused attempt' });
+    b.emit('boundary.retraction', { retractedMessageUuids: [uuid('msg-c1-u0')], reason: 'model refusal', fallbackModel: null });
+    b.toolUse('l1', 'ListAgents', {});
+    b.toolUse('c2', 'CronCreate', { cron: '0 4 * * *', prompt: 'kept' });
+    b.emit('assistant.block.complete', {
+      messageUuid: uuid('m3-u0'), apiMessageId: api('m3'), blockIndex: 0, block: { type: 'text', text: 'again' }, model: 'claude-test',
+      supersedes: [uuid('msg-l1-u0')], aborted: false, userMessageUuids: [],
+    });
+    const [activity] = turnActivity(reduce(b.events));
+    expect(activity!.crons.map((c) => c.toolUseId)).toEqual(['c2']);
+    expect(activity!.listings).toEqual([]);
+  });
+
   const WORKFLOW_RESULT = { status: 'async_launched', taskId: 'wayue3on6', taskType: 'local_workflow', workflowName: 'maws-probe', runId: 'wf_7cacbb2d-902', summary: 'Two echo agents in one phase' }; // pass2/workflow seq 80
 
   it("names a disk-only Workflow ref's task and run from its launch result, keeping the row's id", () => {

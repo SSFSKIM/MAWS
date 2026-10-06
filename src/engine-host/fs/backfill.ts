@@ -8,7 +8,7 @@ import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, Sess
 import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
 import { slashCommandLine } from '@shared/wire/local-command';
 import { INTERRUPT_MARKER } from '../normalizer-support';
-import { peerEventsOf } from '@shared/engine/peer-envelope'; // E7
+import { messageText, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
 export const SPILL_MARKER = /(?:Full output saved to|were saved to|was saved to):? (\/[^\r\n]+\.(?:txt|json))(?=[.;\s]|$)/;
@@ -169,14 +169,34 @@ function steeredPrompt(record: TranscriptRecord, base: Base, events: SessionEven
 // bare envelope the live frame carries, under that frame's uuid (`source_uuid`), and whose `rendered` text adds the
 // header and reply suffix the model read. Each becomes the live stream's synthetic peer `user.message` and the parsed
 // event beside it, from the parser the live normaliser uses.
-function peerMessage(record: TranscriptRecord, uuid: MessageUuid, content: string, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
-  ctx.lastTurnUserUuid = null;
-  ctx.inToolLoop = false;
-  ctx.lastAssistantWasApiError = false;
-  events.push({ ...base(), kind: 'turn.started', userMessageUuid: null, origin: 'peer' });
+function peerMessage(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+  const raw = messageContent(record) as string | unknown[];
+  const content = typeof raw === 'string' ? raw : raw.filter(isContentBlock);
+  // Inside a tool loop the engine takes it into the running turn, as it does a task notification there
+  // (taskNotificationAttachment): no turn of its own.
+  if (!ctx.inToolLoop) {
+    ctx.lastTurnUserUuid = null;
+    ctx.lastAssistantWasApiError = false;
+    events.push({ ...base(), kind: 'turn.started', userMessageUuid: null, origin: 'peer' });
+  }
   events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: record.isMeta === true, origin: 'peer', bash: null });
-  const companion = peerEventsOf(content, uuid, record.origin);
+  const companion = peerEventsOf(messageText(content), uuid, record.origin);
   if (companion) events.push({ ...base(), ...companion });
+}
+
+// A `user` record of the peer origin whose content is text: a string, or text blocks with no tool result.
+function isPeerPrompt(record: TranscriptRecord): boolean {
+  if (record.type !== 'user' || (record.origin as { kind?: unknown } | undefined)?.kind !== 'peer') return false;
+  const content = messageContent(record);
+  if (typeof content === 'string') return true;
+  return Array.isArray(content) && content.length > 0 && content.every((block) => isContentBlock(block) && block.type === 'text');
+}
+
+// Shared with the follower's unended-turn rule: a record that opens a turn on this mapping, `startsTurn`'s human prompts
+// (the boundary the rewind rules read) and a peer message, which opens its own (E7). A peer record inside a tool loop
+// opens none, but the turn it joins was already open, so the rule's answer is the same.
+export function opensTurn(record: TranscriptRecord): boolean {
+  return startsTurn(record) || (isPeerPrompt(record) && !isInterruptMarker(record));
 }
 
 function peerQueuedMessage(record: TranscriptRecord, uuid: MessageUuid, base: Base, events: SessionEvent[]): boolean {
@@ -219,8 +239,8 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
   };
   if (marker) ctx.inToolLoop = false; // an interrupt ends the loop: no model call follows
   // E7 start
-  if (typeof content === 'string' && !marker && (record.origin as { kind?: unknown } | undefined)?.kind === 'peer') {
-    peerMessage(record, uuid, content, ctx, base, events);
+  if (!marker && isPeerPrompt(record)) {
+    peerMessage(record, uuid, ctx, base, events);
     return;
   }
   // E7 end

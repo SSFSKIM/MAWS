@@ -5,8 +5,8 @@
 // from the turn's top-level events, so a child agent's calls (kept under `children`) are never the session's. Pure.
 import type { SessionEvent } from '@shared/graph/events';
 import type { ToolUseId } from '@shared/graph/ids';
-import { messageText } from '@shared/engine/peer-envelope';
 import { parseListing, type Listing } from './agent-listing';
+import { resultText } from './cells';
 import { parseCronResult } from './cron-result';
 import type { TurnState } from './reduce';
 
@@ -47,7 +47,7 @@ function cronCall(toolName: string, input: unknown): CronCall | null {
 // A create's id and schedule from its result text; the structured result answers when the wording is one this parser
 // does not know (both paths carry it), so a reworded engine still lists its jobs.
 function cronOutcome(call: CronCall, result: ToolResult): CronOutcome {
-  const text = messageText(result.content);
+  const text = resultText(result.content);
   if (result.isError) return { ok: false, text };
   if (call.kind === 'delete') return { ok: true };
   const parsed = parseCronResult(text);
@@ -61,12 +61,18 @@ export function turnOrchestration(turn: TurnState): TurnOrchestration {
   const crons: TurnCron[] = [];
   const listings: TurnListing[] = [];
   const results = new Map<ToolUseId, ToolResult>();
-  for (const event of turn.events) if (event.kind === 'tool.result') results.set(event.toolUseId, event);
+  // A call whose message the engine retracted or superseded (a refused attempt) is none of the turn's, as derive.ts drops it.
+  const dropped = new Set<string>();
   for (const event of turn.events) {
-    if (event.kind !== 'tool.use') continue;
+    if (event.kind === 'tool.result') results.set(event.toolUseId, event);
+    else if (event.kind === 'boundary.retraction') for (const uuid of event.retractedMessageUuids) dropped.add(uuid);
+    else if (event.kind === 'assistant.block.complete') for (const uuid of event.supersedes) dropped.add(uuid);
+  }
+  for (const event of turn.events) {
+    if (event.kind !== 'tool.use' || (event.messageUuid !== null && dropped.has(event.messageUuid))) continue;
     const result = results.get(event.toolUseId);
     if (event.toolName === 'ListAgents') {
-      listings.push({ toolUseId: event.toolUseId, at: event.at, parsed: result ? parseListing(messageText(result.content)) : null });
+      listings.push({ toolUseId: event.toolUseId, at: event.at, parsed: result ? parseListing(resultText(result.content)) : null });
     } else if (event.toolName === 'CronCreate' || event.toolName === 'CronDelete') {
       const call = cronCall(event.toolName, event.input);
       if (call) crons.push({ toolUseId: event.toolUseId, at: event.at, call, result: result ? cronOutcome(call, result) : null });
