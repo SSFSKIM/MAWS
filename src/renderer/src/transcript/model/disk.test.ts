@@ -4,7 +4,7 @@
 // are applied through the reducer the renderer uses.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema } from '@shared/wire/transcript';
@@ -18,6 +18,7 @@ import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState, type TranscriptState } from './reduce';
 import type { Row } from './rows';
 import { builder, uuid } from './test-events';
+import { configureTime } from './time'; // E1
 
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 const ofKind = <K extends Row['kind']>(rows: Row[], kind: K) => rows.filter((row): row is RowOf<K> => row.kind === kind);
@@ -187,5 +188,29 @@ describe('a /compact turn from disk', () => {
     expect(ofKind(rows, 'user').some((row) => row.text.startsWith('This session is being continued'))).toBe(false);
     expect(ofKind(rows, 'local_command').some((row) => row.text.startsWith('Caveat'))).toBe(false); // the engine's caveat for the model
     expect(ofKind(rows, 'divider')).toEqual([]);
+  });
+});
+
+// E1 (M3, residue 13; §12 "Terminal interop of new rows"): the async ask's session read from its transcript on disk,
+// where there are no `maws.*` events and no meta rows, only the call, its `asked` result and the steer the answers
+// travelled in. The capsule reads answered all the same, in the first of the two turns, and the steer stays a bubble.
+describe('a maws ask read from disk', () => {
+  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' })); // the snapshot suite's pin
+  afterAll(() => configureTime(null));
+  const sortKeys = (value: unknown): unknown =>
+    Array.isArray(value) ? value.map(sortKeys) : typeof value === 'object' && value !== null ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys((value as Record<string, unknown>)[key])])) : value;
+
+  it('p1-maws-ask-async: the capsule answered from the call and the steer alone', async () => {
+    const disk = await backfillFixture('p1-maws-ask-async', 'ccd2c390-f412-47ce-a480-87c2524d643e');
+    expect(disk.filter((event) => event.kind.startsWith('maws.'))).toEqual([]);
+    const state = stateOf(disk);
+    const rows = rowsOf(withAllExpanded(state));
+    const [ask] = ofKind(rows, 'ask');
+    expect(ask).toMatchObject({ state: 'answered', blocking: false, askId: 'toolu_016zBCDTWVXbAqbGdLyd1Zzj', turnId: state.order[0], answers: [{ id: 'q1', question: 'Proceed?', status: 'answered', value: ['Yes'] }] });
+    expect(ask.questions).toEqual([{ id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] }]);
+    const users = ofKind(rows, 'user');
+    expect(users.map((row) => row.turnId)).toEqual(state.order.slice(0, 2));
+    expect(users[1].text.startsWith('[MAWS ask toolu_016zBCDTWVXbAqbGdLyd1Zzj] ')).toBe(true);
+    await expect(`${JSON.stringify(rows.map(sortKeys), null, 2)}\n`).toMatchFileSnapshot(join(SNAPSHOT_DIR, 'disk/p1-maws-ask-async.rows.json'));
   });
 });

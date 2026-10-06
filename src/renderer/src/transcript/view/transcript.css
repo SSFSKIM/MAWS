@@ -462,3 +462,26 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-working-dots span:nth-child(2) { animation-delay: 0.15s; }
 .transcript-working-dots span:nth-child(3) { animation-delay: 0.3s; }
 @keyframes transcript-dot { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
+
+/* E1 start: the maws server's rows. The capsule (an ask) and the delivery row (a delivered file) are bordered widgets
+   like the question receipt; a delivery the agent marked urgent takes the accent border. */
+.transcript-ask, .transcript-delivery { width: fit-content; min-width: 240px; max-width: min(560px, 100%); margin: 4px 0 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); }
+.transcript-ask-top, .transcript-delivery-top { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+.transcript-ask-title, .transcript-delivery-top strong { font-weight: 500; color: var(--fg); }
+.transcript-ask-count, .transcript-delivery-caption { color: var(--fg-muted); }
+.transcript-ask-chip { padding: 1px 8px; border-radius: 999px; background: var(--bg-hover); color: var(--fg-muted); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
+.transcript-ask[data-ask-state="pending"] .transcript-ask-chip, .transcript-ask[data-ask-state="asked"] .transcript-ask-chip { background: var(--accent-soft); color: var(--accent); }
+.transcript-ask[data-ask-state="error"] .transcript-ask-chip { color: var(--danger); }
+.transcript-ask-open { margin-left: auto; padding: 2px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg); font-size: var(--text-ui-sm); }
+.transcript-ask-open:hover:not(:disabled) { background: var(--bg-hover); }
+.transcript-ask .transcript-question-lines { border-top: 1px solid var(--border); }
+.transcript-delivery[data-urgency="high"] { border-color: var(--accent); }
+.transcript-delivery-error { margin: 0; padding: 0 12px 8px; color: var(--danger); overflow-wrap: anywhere; }
+.transcript-delivery-files { margin: 0; padding: 0 0 6px; list-style: none; }
+.transcript-delivery-file { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; padding: 2px 12px; font-size: var(--text-ui-sm); }
+.transcript-delivery-name { min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
+.transcript-delivery-actions { display: inline-flex; gap: 10px; margin-left: auto; }
+.transcript-delivery-actions .transcript-quiet-button { margin-top: 0; }
+.transcript-delivery-problem { flex-basis: 100%; color: var(--danger); }
+.transcript-question-refused { margin: 0; padding: 0 12px 8px; color: var(--danger); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
+/* E1 end */

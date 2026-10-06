@@ -67,6 +67,6 @@ export async function launch(name,{cwd,env,sessionId=randomUUID(),flags=[],model
  return {p,configHome,globalConfig,sessionId};
 }
 
-import {appInitialize} from '../../../../src/shared/engine/initialize.ts';
-export const initPayload=(extra={})=>({...appInitialize(),...extra});
+import {probeInitialize} from '../../probe-initialize.mjs';
+export const initPayload=(extra={})=>({...probeInitialize(),...extra});
 export {mkdirSync,writeFileSync,existsSync,join,randomUUID};

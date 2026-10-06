@@ -690,3 +690,43 @@ it('preserves API-error envelope identity and code on completed blocks', () => {
     expect.objectContaining({ isApiErrorMessage: true, error: 'authentication_failed', block: { type: 'text', text: 'Authentication unavailable.' } }),
   ]);
 });
+
+// E1 (residue 1's admission rule, M2 fix wave): a `maws` tools/call is mapped only when the server would serve it, on
+// the same reading of the envelope (src/shared/maws/rpc.ts): a message that is not JSON-RPC 2.0 is answered -32600 and
+// one whose id is neither a string nor a number is taken as a notification, so neither opens an ask nor records a
+// delivery or a pane, whatever the arguments.
+describe('maws tools/call admission follows the server envelope (E1)', () => {
+  const ASK = { questions: [{ question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }] }] };
+  const call = (requestId: string, message: Record<string, unknown>) => inRow({ type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message } });
+  const answer = (requestId: string, id: unknown, result: unknown) => outRow({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: { mcp_response: { jsonrpc: '2.0', id, result } } } });
+  const meta = { 'claudecode/toolUseId': 'toolu_a' };
+
+  it('opens a well-formed ask', () => {
+    const events = feed(make(), [call('r1', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ask', arguments: ASK, _meta: meta } })]);
+    expect(kinds(events)).toEqual(['maws.ask.opened']);
+  });
+
+  it('opens no ask for a message that is not JSON-RPC 2.0, nor for an id that is neither a string nor a number', () => {
+    const events = feed(make(), [
+      call('r1', { jsonrpc: '1.0', id: 1, method: 'tools/call', params: { name: 'ask', arguments: ASK, _meta: meta } }),
+      call('r2', { jsonrpc: '2.0', id: { n: 2 }, method: 'tools/call', params: { name: 'ask', arguments: ASK, _meta: meta } }),
+      call('r3', { jsonrpc: '2.0', id: null, method: 'tools/call', params: { name: 'ask', arguments: { ...ASK, blocking: false }, _meta: meta } }),
+      metaRow({ event: 'maws_ask_cancelled', askId: 'toolu_a', toolUseId: 'toolu_a', reason: 'exit' }),
+    ]);
+    expect(events.filter((e) => e.kind.startsWith('maws.'))).toEqual([]);
+  });
+
+  it('records no delivery and no pane for a send_file or show_pane outside the envelope, even when an answer follows', () => {
+    const delivered = { content: [{ type: 'text', text: JSON.stringify({ status: 'delivered', deliverables: [{ id: 'd1', path: '/w/a.txt', name: 'a.txt' }] }) }] };
+    const shown = { content: [{ type: 'text', text: JSON.stringify({ status: 'shown', pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 't', title: 'Terminal' } }) }] };
+    const events = feed(make(), [
+      call('r1', { jsonrpc: '1.0', id: 1, method: 'tools/call', params: { name: 'send_file', arguments: { files: ['a.txt'] } } }),
+      answer('r1', 1, delivered),
+      call('r2', { jsonrpc: '2.0', id: true, method: 'tools/call', params: { name: 'show_pane', arguments: { pane: 'terminal' } } }),
+      answer('r2', 0, shown),
+      call('r3', { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'show_pane', arguments: { pane: 'terminal' } } }),
+      answer('r3', 3, shown),
+    ]);
+    expect(kinds(events.filter((e) => e.kind.startsWith('maws.')))).toEqual(['maws.pane.shown']); // the well-formed one alone
+  });
+});

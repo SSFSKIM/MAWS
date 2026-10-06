@@ -33,6 +33,10 @@ import { ProcessTable } from './process-table';
 // C12 end
 import { FileSessionStateStore } from './store/file-session-state-store';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
+// E1 start
+import * as mawsSchema from '@shared/ipc/schema/maws';
+import { MAWS_DEADLINE_SHAPES } from './ipc';
+// E1 end
 
 const REPO_ROOT = resolve(__dirname, '../..');
 const ROUTER_TIMEOUT_MS = 10_000; // C1's supervisor (src/main/hosts/supervisor.ts REQUEST_TIMEOUT_MS), which imports electron
@@ -872,3 +876,56 @@ describe('F2 persisted queue and cwd regressions', () => {
     await host.ipc.table.get(id)!.exited;
   });
 });
+
+// E1 start: the maws tool server's commands and its pane request (E1 execution document, Interfaces "IPC")
+describe('maws.* commands (E1 M1)', () => {
+  it('registers each maws command, immediate; a session this host does not hold has no ask and nothing pending', async () => {
+    const host = engineHost();
+    expect(Object.keys(MAWS_DEADLINE_SHAPES).sort()).toEqual(Object.keys(mawsSchema.commands).sort());
+    for (const name of Object.keys(mawsSchema.commands)) expect(host.handlers.has(name), name).toBe(true);
+    expect(await host.call('maws.asks.list', { appSessionId: 'app-none' })).toEqual({ asks: [] });
+    expect(await host.call('maws.ask.answer', { appSessionId: 'app-none', askId: 'toolu_1', answers: [] })).toEqual({ outcome: 'not_pending' });
+    expect(await host.call('maws.pane.answer', { appSessionId: 'app-none', requestId: 'r1', result: { ok: false, error: 'x' } })).toEqual({ outcome: 'not_pending' });
+  });
+
+  it("relays a show_pane's request to the windows as maws.pane.show and takes their answer", async () => {
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    transport.push({ type: 'control_request', request_id: 'mcp-1', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'show_pane', arguments: { pane: 'terminal' } } } } });
+    await until(() => host.emitted.some((e) => e.name === 'maws.pane.show'), 'the pane request');
+    expect(host.emitted.find((e) => e.name === 'maws.pane.show')!.payload).toEqual({ appSessionId: id, requestId: 'mcp-1', pane: 'terminal', target: null, line: null });
+    const opened = { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:1', title: 'Terminal' } as const;
+    expect(await host.call('maws.pane.answer', { appSessionId: id, requestId: 'mcp-1', result: { ok: true, opened } })).toEqual({ outcome: 'delivered' });
+    expect(await host.call('maws.pane.answer', { appSessionId: id, requestId: 'mcp-1', result: { ok: true, opened } })).toEqual({ outcome: 'not_pending' });
+    await until(() => transport.writes.some((w) => w.type === 'control_response' && (w as { response: { request_id: string } }).response.request_id === 'mcp-1'), 'the answer');
+    transport.exit(0);
+    await host.ipc.table.get(id)!.exited;
+  });
+
+  // G6: the pending ask is host memory, so a window that reloads (and so lost everything it held) lists it again and
+  // answers it; answers that do not fit are invalid input and change nothing
+  it('lists a pending ask to any caller and answers it by command; a mismatched answer is invalid_input', async () => {
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    const question = { id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] };
+    transport.push({ type: 'control_request', request_id: 'mcp-ask', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'ask', arguments: { questions: [question] }, _meta: { 'claudecode/toolUseId': 'toolu_ask' } } } } });
+    const listed = { askId: 'toolu_ask', toolUseId: 'toolu_ask', requestId: 'mcp-ask', blocking: true, title: null, context: null, questions: [question], openedAt: expect.any(String) };
+    await until(() => host.ipc.table.get(id)!.asks().length === 1, 'the pending ask');
+    expect(await host.call('maws.asks.list', { appSessionId: id })).toEqual({ asks: [listed] });
+    expect(await host.call('maws.asks.list', { appSessionId: id })).toEqual({ asks: [listed] }); // after a reload: the same ask
+    await expect(host.call('maws.ask.answer', { appSessionId: id, askId: 'toolu_ask', answers: [] })).rejects.toMatchObject({ ipcError: { code: 'invalid_input', message: 'ask toolu_ask: no answer for question q1' } });
+    const answers = [{ id: 'q1', question: 'Proceed?', status: 'answered' as const, value: ['Yes'] }];
+    expect(await host.call('maws.ask.answer', { appSessionId: id, askId: 'toolu_ask', answers })).toEqual({ outcome: 'delivered' });
+    expect(await host.call('maws.ask.answer', { appSessionId: id, askId: 'toolu_ask', answers })).toEqual({ outcome: 'not_pending' });
+    expect(await host.call('maws.asks.list', { appSessionId: id })).toEqual({ asks: [] });
+    transport.exit(0);
+    await host.ipc.table.get(id)!.exited;
+  });
+});
+// E1 end

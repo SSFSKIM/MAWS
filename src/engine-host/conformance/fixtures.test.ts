@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
+import { parseAskSteer } from '@shared/maws/ask';
+import { AskResultSchema, TOOL_ERRORS } from '@shared/maws/tools';
 import { ClaimSessionResponseSchema, GetStatusResponseSchema, GetWorkspaceDiffResponseSchema, InitializeResponseSchema, UiRenderResponseSchema, RewindConversationResponseSchema, RewindFilesResponseSchema } from '@shared/wire/control';
 import { FIXTURE_PASSES, listJournals, loadJournal, type FixturePass } from '../../../test/support/fixtures';
 import { ownerMarkedText, sittingSeed } from '../../../test/support/r3-surface';
@@ -10,10 +12,9 @@ import { replayFixture, type ConformanceRun } from './harness';
 // A `system` subtype or frame type the fixtures may carry without an X1 mapping. Empty: every fixture frame maps to
 // an event or to a "none" row of the table, and a new subtype in a future recording fails here, never silently.
 // (R0 admitted the remote-surface pushes here on 2026-10-01; R1 maps them to `plugin.*`.)
-// E0a (P1 spec §9, spikes/protocol-probe/findings-pass3-p1-extension.txt) admits two frames the way R0 did, until E1
-// maps the SDK MCP round trip and E3 the side question's progress frame:
+// E0a (P1 spec §9, spikes/protocol-probe/findings-pass3-p1-extension.txt) admitted two frames the way R0 did; E1 maps
+// the SDK MCP round trip (`control_request/mcp_message`), and E3 will map the side question's progress frame:
 const UNKNOWN_ALLOWLIST: ReadonlySet<string> = new Set([
-  'control_request/mcp_message', // pass3/p1-sdk-mcp-roundtrip: the engine's JSON-RPC frames for the host's `maws` server (E1 maps them)
   'system/control_request_progress', // pass3/p1-side-question-session: `{request_id, status: 'started'}` ahead of a side_question answer (E3 maps it)
 ]);
 
@@ -85,7 +86,9 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // --fork-session launch, side_question idle and mid-turn, the AskUserQuestion preview format unset and html)
     const e0a = ['p1-fork-session-flag', 'p1-fork-start', 'p1-question-preview-html', 'p1-question-preview-unset', 'p1-sdk-mcp-roundtrip', 'p1-side-question-session'];
     const e8 = ['e8-plugins-reload', 'e8-plugins-reload-settle']; // E8 (P1): reload_plugins and reload_skills on 2.1.290 around CLI writes under a scratch home, immediately and after a settle
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8].sort());
+    // E1 M2: the maws tool server recorded live through MAWS's own host (send_file, a blocking and an async ask, show_pane)
+    const e1 = ['p1-maws-ask-async', 'p1-maws-ask-blocking', 'p1-maws-send-file', 'p1-maws-show-pane'];
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -621,7 +624,10 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'boundary.compaction', // W1: pass3/compact seq 43
       'plugin.log', 'plugin.status', 'plugin.toast', 'plugin.invalidate', // R1: pass3/mods-* (no fixture carries a plugin load error or warning)
       'plugin.panes', 'plugin.scroll', 'plugin.focus', 'plugin.ask', // R2: pass3/mods-surface-*
-      'frame.unknown', // E0a: the two allowlisted frames above (pass3/p1-sdk-mcp-roundtrip, pass3/p1-side-question-session) until E1 and E3 map them
+      'frame.unknown', // E0a: the allowlisted frame above (pass3/p1-side-question-session) until E3 maps it (E1 mapped pass3/p1-sdk-mcp-roundtrip's)
+      // E1 M2: pass3/p1-maws-* (every recorded ask is answered before the stop, so no fixture yields maws.ask.cancelled;
+      // session-maws.test.ts pins it over a scripted session)
+      'maws.ask.opened', 'maws.ask.answered', 'maws.delivery.file', 'maws.pane.shown',
     ].sort());
     void kinds;
   });
@@ -784,5 +790,79 @@ describe('normaliser: transcript surface recordings (R3)', () => {
     }
     expect(ofKind(events, 'turn.started')).toEqual([]);
     expect(ofKind(events, 'user.message')).toEqual([]);
+  });
+});
+
+// E1 (E1 execution document, M1): the SDK MCP round trip maps. The handshake and the tool list are protocol (no event),
+// another server's traffic is not unknown, and the probe's `echo_file` is no X9 tool, so it yields no `maws.*` event.
+describe('normaliser: the maws server traffic (E1, pass3/p1-sdk-mcp-roundtrip)', () => {
+  it('maps every mcp_message without an unknown frame or an event of its own', async () => {
+    const { events, rows } = await run('pass3', 'p1-sdk-mcp-roundtrip');
+    const mcp = rows.filter((r) => r.direction === 'in' && (r.frame as { request?: { subtype?: string } }).request?.subtype === 'mcp_message');
+    expect(mcp.length).toBeGreaterThan(10); // the handshakes of maws and maws2, the re-lists and three calls
+    expect(ofKind(events, 'frame.unknown')).toEqual([]);
+    expect(events.filter((e) => e.kind.startsWith('maws.'))).toEqual([]);
+    expect(events.filter((e) => mcp.some((r) => r.seq === e.seq))).toEqual([]);
+  });
+});
+
+// E1 M2 (E1 execution document, M2 "Conformance"): the four tools recorded live through MAWS's own host on the installed
+// engine. Each fixture normalises with no unknown frame and no request failure (the generic case above); these pin what
+// the tool server's traffic yields.
+describe('normaliser: the maws tools recorded live (E1 M2, pass3/p1-maws-*)', () => {
+  const mcpResponseOf = (rows: { direction: string; frame: unknown }[], requestId: string) =>
+    (rows.find((r) => r.direction === 'out' && (r.frame as { type?: string; response?: { request_id?: string } }).type === 'control_response' && (r.frame as { response: { request_id: string } }).response.request_id === requestId)?.frame as
+      | { response: { response: { mcp_response: { result: { content: { text: string }[]; isError?: boolean } } } } }
+      | undefined)?.response.response.mcp_response;
+
+  it('p1-maws-send-file: one maws.delivery.file for hello.txt with its caption, at the host answer', async () => {
+    const { events, rows } = await run('pass3', 'p1-maws-send-file');
+    const [delivery, ...more] = ofKind(events, 'maws.delivery.file');
+    expect(more).toEqual([]);
+    expect(delivery).toMatchObject({ caption: 'the greeting', urgency: 'normal' });
+    expect(delivery!.deliverables.map((d) => d.name)).toEqual(['hello.txt']);
+    expect(JSON.parse(mcpResponseOf(rows, delivery!.requestId)!.result.content[0]!.text)).toEqual({ status: 'delivered', deliverables: delivery!.deliverables });
+    expect(ofKind(events, 'tool.use').find((e) => e.toolUseId === delivery!.toolUseId)?.toolName).toBe('mcp__maws__send_file');
+  });
+
+  it('p1-maws-ask-blocking: opened precedes answered, and the response row reads as the AskResult', async () => {
+    const { events, rows } = await run('pass3', 'p1-maws-ask-blocking');
+    const [opened, ...moreOpened] = ofKind(events, 'maws.ask.opened');
+    const [answered, ...moreAnswered] = ofKind(events, 'maws.ask.answered');
+    expect([moreOpened, moreAnswered]).toEqual([[], []]);
+    expect(opened).toMatchObject({ blocking: true, askId: opened!.toolUseId });
+    expect(opened!.questions.map((q) => [q.id, q.modality])).toEqual([['q1', 'choice'], ['q2', 'choice'], ['q3', 'text'], ['q4', 'folder'], ['q5', 'repository']]);
+    expect(answered).toMatchObject({ askId: opened!.askId, delivery: 'result' });
+    expect(answered!.answers.map((a) => [a.id, a.status])).toEqual([['q1', 'answered'], ['q2', 'answered'], ['q3', 'skipped'], ['q4', 'answered'], ['q5', 'decide_for_me']]);
+    expect(seq(opened)).toBeLessThan(seq(answered));
+    const result = AskResultSchema.parse(JSON.parse(mcpResponseOf(rows, opened!.requestId)!.result.content[0]!.text));
+    expect(result).toEqual({ status: 'answered', askId: opened!.askId, answers: answered!.answers });
+  });
+
+  it('p1-maws-ask-async: acknowledged as asked, answered by delivery steer beside the steer row', async () => {
+    const { events, rows } = await run('pass3', 'p1-maws-ask-async');
+    const [opened] = ofKind(events, 'maws.ask.opened');
+    const [answered, ...more] = ofKind(events, 'maws.ask.answered');
+    expect(more).toEqual([]);
+    expect(opened).toMatchObject({ blocking: false });
+    expect(AskResultSchema.parse(JSON.parse(mcpResponseOf(rows, opened!.requestId)!.result.content[0]!.text))).toEqual({ status: 'asked', askId: opened!.askId });
+    expect(answered).toMatchObject({ askId: opened!.askId, delivery: 'steer', answers: [{ id: 'q1', status: 'answered', value: ['Yes'] }] });
+    const steer = rows.find((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user' && text((r.frame as { message: { content: unknown } }).message.content).startsWith(`[MAWS ask ${opened!.askId}]`))!;
+    expect((steer.frame as { priority?: string }).priority).toBe('next');
+    expect(parseAskSteer(text((steer.frame as { message: { content: unknown } }).message.content))?.result.answers).toEqual(answered!.answers);
+    // the meta row is journaled once the steer's write settled: after the steer row, possibly after frames held meanwhile
+    expect(seq(answered)).toBeGreaterThan(steer.seq);
+  });
+
+  it('p1-maws-show-pane: one pane shown opened, one with an error, and the unknown pane only as an error tool.result', async () => {
+    const { events } = await run('pass3', 'p1-maws-show-pane');
+    expect(ofKind(events, 'maws.pane.shown')).toMatchObject([
+      { pane: 'terminal', target: null, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:live', title: 'Terminal' }, error: null },
+      { pane: 'deliverable', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('deliverable') },
+    ]);
+    const nope = ofKind(events, 'tool.use').find((e) => e.toolName === 'mcp__maws__show_pane' && (e.input as { pane?: string }).pane === 'nope')!;
+    const refused = ofKind(events, 'tool.result').find((e) => e.toolUseId === nope.toolUseId)!;
+    expect(refused.isError).toBe(true);
+    expect(text(refused.content)).toContain(TOOL_ERRORS.unknownPane('nope'));
   });
 });

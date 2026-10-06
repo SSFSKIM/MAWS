@@ -4,8 +4,9 @@
 import type { SafeguardVerdict } from '@shared/graph/enums';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { TaskId, ToolUseId } from '@shared/graph/ids';
-import { classifyTool, MCP_TOOL, tableRowOf, type ClassifyContext } from './classify';
-import { baseName, cellLabel, hostOf, thinkingLabel } from './copy';
+import { ShowPaneResultSchema } from '@shared/maws/tools'; // E1
+import { classifyTool, MAWS_TOOL_USE, MCP_TOOL, tableRowOf, type ClassifyContext } from './classify';
+import { baseName, cellLabel, hostOf, PANE_CELL, thinkingLabel } from './copy';
 import { cellId } from './keys';
 import type { Cell, CellDetail, ChangedFile, Hunk, Spill, ToolCategory, Truncation } from './rows';
 
@@ -55,6 +56,21 @@ export function resultText(content: string | ContentBlock[]): string {
   if (typeof content === 'string') return content;
   return content.filter((block) => block.type === 'text').map((block) => str(block.text)).join('\n');
 }
+
+// E1 start: a result's text as JSON (a `maws` tool answers with its result pretty-printed), null when it is not JSON;
+// the engine's own refusal of a call before it ran (`<tool_use_error>…</tool_use_error>`, its validation errors), the
+// inner text, null for any other text; and an error result's text as a row shows it, the refusal's tags stripped.
+export function resultJson(content: string | ContentBlock[]): unknown {
+  try {
+    return JSON.parse(resultText(content));
+  } catch {
+    return null;
+  }
+}
+const TOOL_USE_ERROR = /^\s*<tool_use_error>([\s\S]*)<\/tool_use_error>\s*$/;
+export const engineRefusalOf = (text: string): string | null => TOOL_USE_ERROR.exec(text)?.[1]!.trim() ?? null;
+export const toolErrorText = (text: string): string => engineRefusalOf(text) ?? text.trim();
+// E1 end
 
 const imageBlocks = (content: string | ContentBlock[]) => (typeof content === 'string' ? [] : content.filter((block) => block.type === 'image'));
 
@@ -179,6 +195,7 @@ function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], ca
     const subject = detail.kind === 'shell' ? detail.command : detail.kind === 'edit' ? detail.filePath : rec.use.toolName;
     return cellLabel({ kind: 'denied', subject, disposition: classification.denial.disposition, denialKind: classification.denial.kind, reason: classification.denial.reason });
   }
+  if (rec.use.toolName === MAWS_TOOL_USE.show_pane) return paneLabel(rec); // E1
   switch (detail.kind) {
     case 'shell':
       return cellLabel({ kind: 'shell', command: detail.command, status: status === 'denied' ? 'stopped' : status, durationMs: elapsedMs(rec, turn), background: detail.backgroundTaskId !== null && status === 'running' });
@@ -201,6 +218,19 @@ function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], ca
       return cellLabel({ kind: 'generic', toolName: rec.use.toolName, category, detail: detailText });
     }
   }
+}
+
+// E1: a `show_pane` call reads what it opened (a panel tool's title, a main tab's file name) from its result, or the
+// host's refusal without the tool's own prefix.
+function paneLabel(rec: ToolRecord): string {
+  const { result } = rec;
+  const pane = str(record(rec.use.input).pane, 'requested');
+  if (!result) return PANE_CELL.opening(pane);
+  if (result.isError) return PANE_CELL.failed(toolErrorText(resultText(result.content)).replace(/^show_pane: /, ''));
+  const parsed = ShowPaneResultSchema.safeParse(resultJson(result.content));
+  if (!parsed.success) return PANE_CELL.opened(pane);
+  const { opened } = parsed.data;
+  return PANE_CELL.opened(opened.kind === 'panel-tool' ? opened.title : baseName(opened.path));
 }
 
 // Draw-time rewrites may override status, before deriving both detail and label. Model callers omit it.

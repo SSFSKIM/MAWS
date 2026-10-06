@@ -108,6 +108,10 @@ export function buildEnvironment(spec: LaunchSpec, captured: Record<string, stri
   env.CLAUDE_CODE_FORK_SUBAGENT = 'true'; // C12: kept (D9, ruled at M5): the terminal's interactive default; probe fixtures pass3/launch-env-{terminal,fork,unset}
   env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING = '1';
   env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1'; // C12: session_state_changed on the wire (a host-facing option, C12 M5 probe)
+  // E1 (P1 A-17; E0a Q4): AskUserQuestion previews as HTML fragments, which the request card draws in its scriptless
+  // sandboxed frame and the engine validates before any permission request; set over an owner's export, since nothing
+  // on the wire tells the host which format is in effect
+  env.CLAUDE_CODE_QUESTION_PREVIEW_FORMAT = 'html';
   env.TERM = 'dumb';
   env.DISABLE_AUTOUPDATER = '1'; // W13: MAWS's processes never race the user's own updater; Settings › Engine offers the update
   if (spec.subagentModel !== null) env.CLAUDE_CODE_SUBAGENT_MODEL = spec.subagentModel;

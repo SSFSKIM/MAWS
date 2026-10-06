@@ -3,7 +3,8 @@
 // request-card renderer, and view-only disclosure state (bubbles, pasted blocks, thinking) that must survive a row
 // scrolling out of the virtualised list and back.
 import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
-import type { Cell, Row, Spill, SubagentRef, TurnId } from '../model/rows';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { AskRowData, Cell, Row, Spill, SubagentRef, TurnId } from '../model/rows';
 import { ipcLoadSpill, ipcOpenExternal } from '../source/ipc';
 import { WorkMotion } from './motion';
 
@@ -16,6 +17,11 @@ export interface TranscriptActions {
   editAndResubmit(row: Extract<Row, { kind: 'user' }>): void; // C7: prefill the composer; forks history (§4.2)
   editPrompt(row: Extract<Row, { kind: 'user' }>): void; // C7 (W1): a prompt that never reached the model (a hook blocked it) back into the composer, as a new message
   loadSpill(spill: Spill): Promise<string>; // C4: fs.readSpill; default adapter provided (DEFAULT_ACTIONS)
+  // E1 start: the `maws` server's rows (tools/maws/actions.ts, registered from App.tsx's E1 block)
+  openAsk(appSessionId: AppSessionId, ask: AskRowData): void; // the Question sheet with this ask, from the capsule's own data (residue 14)
+  openDelivered(appSessionId: AppSessionId, path: string): Promise<string | null>; // files.openExternal; what to show inline when it was refused, null when opened
+  revealDelivered(appSessionId: AppSessionId, path: string): Promise<string | null>; // files.reveal; the same
+  // E1 end
 }
 
 export interface RewindInterface {
@@ -28,6 +34,7 @@ const noop = () => {};
 export const NO_ACTIONS: TranscriptActions = {
   openSubagent: noop, openFullLog: noop, reviewChanges: noop, openFile: noop, openExternal: noop, editAndResubmit: noop, editPrompt: noop,
   loadSpill: () => Promise.reject(new Error('loadSpill: no adapter supplied')),
+  openAsk: noop, openDelivered: () => Promise.resolve(null), revealDelivered: () => Promise.resolve(null), // E1
 };
 // What a Transcript does for an action its caller did not supply: the two X2 commands C6 can call itself (a spilled
 // result through fs.readSpill, a link through layout.openExternal); the rest belong to C5, C7 and C8 and do nothing.
@@ -69,6 +76,12 @@ export const TranscriptProvider = TranscriptContext.Provider;
 export const useTranscriptContext = () => useContext(TranscriptContext);
 export const useActions = () => useContext(TranscriptContext).actions;
 export const rowElementId = (idPrefix: string, rowId: string) => `${idPrefix}-${rowId}`;
+// E1: the app session a row belongs to: the store key is the session's id, or `<appSessionId>:<agentId>` for a child's
+// transcript (ipcSource), whose rows act on the parent session; null outside a mounted transcript.
+export const useRowSession = (): AppSessionId | null => {
+  const { storeKey } = useContext(TranscriptContext);
+  return storeKey === '' ? null : ((storeKey.includes(':') ? storeKey.slice(0, storeKey.indexOf(':')) : storeKey) as AppSessionId);
+};
 // The list's scroll container: the one mounted element a divider's aria-controls can name (its rows are virtual).
 export const listElementId = (idPrefix: string) => `${idPrefix}-list`;
 

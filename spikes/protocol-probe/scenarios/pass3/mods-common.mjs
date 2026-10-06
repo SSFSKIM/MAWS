@@ -31,8 +31,8 @@ export const GATE='CLAUDE_CODE_ENABLE_FUNCTION_HOOKS';
 // MAWS's flags beyond the harness's own (launch.ts ENGINE_FLAGS less what harness.mjs already passes), and its --settings.
 const PRODUCT_FLAGS=['--forward-subagent-text','--replay-user-messages','--include-hook-events','--settings',JSON.stringify({dialogExpiry:'never'})];
 const SPEND_CAP='0.30';
-import {appInitialize} from '../../../../src/shared/engine/initialize.ts';
-export const initPayload=cwd=>appInitialize({accepted:true,directory:cwd});
+import {probeInitialize} from '../../probe-initialize.mjs';
+export const initPayload=cwd=>probeInitialize({accepted:true,directory:cwd});
 
 // The probe mod: three pushes when the session starts and again when a turn completes, and a one-line band.
 export const MOD_NAME='mods-probe';

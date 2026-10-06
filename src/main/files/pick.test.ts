@@ -49,6 +49,15 @@ describe('layout.pickFiles', () => {
     expect(files).toEqual([{ path: folder, name: 'extra', bytes: 0, mediaType: 'inode/directory', data: null }]);
   });
 
+  it('lets a multiple directory pick choose several folders in one dialog (E1: a `multiple` folder question)', async () => {
+    const one = join(dir, 'one');
+    const two = join(dir, 'two');
+    const dialog = dialogAnswering([one, two]);
+    const { files } = await pickFiles({ kind: 'directory', directory: dir, multiple: true }, { showOpenDialog: dialog });
+    expect(dialog.mock.calls[0]![0].properties).toEqual(['openDirectory', 'createDirectory', 'multiSelections']);
+    expect(files.map((file) => file.path)).toEqual([one, two]);
+  });
+
   it('answers HEIC, BMP and TIFF by path: the Messages API and the canvas downscale take only PNG, JPEG, GIF and WebP', async () => {
     const picked = ['a.heic', 'b.bmp', 'c.tiff', 'd.webp'].map((name) => {
       writeFileSync(join(dir, name), 'x');

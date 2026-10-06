@@ -81,6 +81,7 @@
       "Which color do you prefer?": "Red"
     },
     "at": "2026-10-01T18:05:04.403Z",
+    "error": null,
     "id": "question:toolu_01ExNwmPYBW5464JGK1FYw1m",
     "kind": "question",
     "questions": [

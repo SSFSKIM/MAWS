@@ -3,6 +3,10 @@ import { describe, expectTypeOf, it } from 'vitest';
 import type { SafeguardVerdict } from './enums';
 import type { EventBase, EventKind, EventPayload, SessionEvent } from './events';
 import type { ToolUseId } from './ids';
+// E1 start
+import type { Pane } from '../maws/panes';
+import type { AskAnswer, AskQuestion, ShowPaneOpened } from '../maws/tools';
+// E1 end
 
 describe('session events are EventBase & EventPayload', () => {
   it('every event carries the base fields and a kind from EVENT_KINDS', () => {
@@ -28,4 +32,17 @@ describe('session events are EventBase & EventPayload', () => {
     expectTypeOf<Exited['budget']>().toEqualTypeOf<{ limitKiB: number; totalKiB: number } | null>();
   });
   // C12 end
+
+  // E1 start
+  it('the maws.* events carry the X9 shapes: the pane enum, the shared ask and result types, branded correlators', () => {
+    type PaneShown = Extract<SessionEvent, { kind: 'maws.pane.shown' }>;
+    expectTypeOf<PaneShown['pane']>().toEqualTypeOf<Pane>();
+    expectTypeOf<PaneShown['opened']>().toEqualTypeOf<ShowPaneOpened | null>();
+    type Answered = Extract<SessionEvent, { kind: 'maws.ask.answered' }>;
+    expectTypeOf<Answered['answers']>().toEqualTypeOf<AskAnswer[]>();
+    expectTypeOf<Answered['delivery']>().toEqualTypeOf<'result' | 'steer'>();
+    expectTypeOf<Extract<SessionEvent, { kind: 'maws.ask.opened' }>['questions']>().toEqualTypeOf<AskQuestion[]>();
+    expectTypeOf<Extract<SessionEvent, { kind: 'maws.delivery.file' }>['toolUseId']>().toEqualTypeOf<ToolUseId | null>();
+  });
+  // E1 end
 });

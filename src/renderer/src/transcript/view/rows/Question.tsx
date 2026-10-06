@@ -4,7 +4,7 @@
 // request declined whole reads Skipped. No options, no previews, no controls: a pending question is C7's card in the
 // slot. The row stays in view when its turn folds (isPersistentRow).
 import type { Question } from '@shared/graph/events';
-import { QUESTION } from '../../model/copy';
+import { QUESTION, questionRefused /* E1 */ } from '../../model/copy';
 import type { Row } from '../../model/rows';
 
 // A question the human declined whole: the card's Esc answers the request with a plain permission deny, which C3
@@ -37,6 +37,12 @@ export function QuestionRow({ row }: { row: Extract<Row, { kind: 'question' }> }
           <QuestionLine key={question.question} question={question} answers={row.answers} />
         ))}
       </ul>
+      {/* E1 (A-17): the engine refused the call before any card could ask, so the refusal shows where the question is drawn */}
+      {row.error !== null && (
+        <p className="transcript-question-refused" data-question-refused="">
+          {questionRefused(row.error)}
+        </p>
+      )}
     </section>
   );
 }

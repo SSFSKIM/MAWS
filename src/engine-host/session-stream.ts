@@ -28,6 +28,8 @@ export const BATCH_MS = 16;
 export const BATCH_MAX = 500;
 
 const REQUESTED_KINDS = new Set(['permission.requested', 'question.requested', 'plan.requested', 'dialog.requested', 'elicitation.requested']);
+// E1 M4b: a blocking ask's attention item originates in its `maws.ask.opened` (an async ask is no item)
+const isRequested = (event: SessionEvent): boolean => REQUESTED_KINDS.has(event.kind) || (event.kind === 'maws.ask.opened' && event.blocking);
 
 export interface SessionStreamOptions {
   appSessionId: AppSessionId;
@@ -58,6 +60,7 @@ export class SessionStream {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly requests = new Map<string, SessionEvent>();
   private liveItems = new Set<string>(); // request ids of pending or delivered broker items
+  private listed = new Set<string>(); // E1 M5: the request ids of the last published list
   private readonly ringSize: number;
   private readonly batchMs: number;
   private readonly exitedRingSize: number; // C12
@@ -69,7 +72,7 @@ export class SessionStream {
   }
 
   events(batch: SessionEvent[]): void {
-    for (const event of batch) if (REQUESTED_KINDS.has(event.kind)) this.requests.set((event as { requestId: string }).requestId, event);
+    for (const event of batch) if (isRequested(event)) this.requests.set((event as { requestId: string }).requestId, event);
     this.ring.push(...batch);
     if (this.ring.length > this.ringSize + Math.floor(this.ringSize / 5)) this.trim(this.ringSize); // trims in chunks, never one shift per event
     this.pending.push(...batch);
@@ -114,11 +117,16 @@ export class SessionStream {
   brokerItems(items: AttentionItem[]): void {
     this.flush();
     this.liveItems = new Set(items.filter((i) => i.state === 'pending' || i.state === 'delivered').map((i) => i.request.requestId!));
-    for (const requestId of this.requests.keys()) if (!items.some((i) => i.request.requestId === requestId)) this.requests.delete(requestId);
+    // E1 M5: a request's event is forgotten once its item has left the list, never before its item was first listed: a
+    // blocking ask's item is listed after a list the same frame caused (the broker confirming the call's permission)
+    const listed = new Set<string>(items.map((i) => i.request.requestId!));
+    for (const requestId of this.listed) if (!listed.has(requestId)) this.requests.delete(requestId);
+    this.listed = listed;
     this.opts.emit('session.brokerItems', { appSessionId: this.opts.appSessionId, items });
   }
 
-  // `session.pendingRequest`: the originating *.requested event of a pending or delivered broker item, else null.
+  // `session.pendingRequest`: the originating *.requested event (a blocking ask's `maws.ask.opened`, E1 M4b) of a pending
+  // or delivered broker item, else null.
   pendingRequest(requestId: RequestId): SessionEvent | null {
     return this.liveItems.has(requestId) ? (this.requests.get(requestId) ?? null) : null;
   }
