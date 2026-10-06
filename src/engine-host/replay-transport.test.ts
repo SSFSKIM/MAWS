@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { RewindFilesResponseSchema } from '@shared/wire/control';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadEngineJournal, loadJournal } from '../../test/support/fixtures';
@@ -178,8 +179,10 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
   });
 
   // E1 M5: the transcript's file-change receipt asks a dry run as soon as it draws (canUndo), which a fixture recorded
-  // without a window (LiveHost) never holds; a dry run mutates nothing, so it is answered as an unrecorded read
-  it('answers an unrecorded rewind_files dry run as a read, while a real rewind stays a mismatch', async () => {
+  // without a window (LiveHost) never holds; a dry run mutates nothing, so it is answered as an unrecorded read, with a
+  // well-formed refusal (`canRewind: false`, RewindFilesResponseSchema) so the receipt's Undo reads "not rewindable"
+  // rather than an unexpected shape (M5 fix)
+  it('answers an unrecorded rewind_files dry run as a read refusing the rewind, while a real rewind stays a mismatch', async () => {
     const journal = [
       row(1, 'out', { type: 'user', uuid: 'rec-u', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null }),
       row(2, 'meta', { event: 'exit', code: 0, signal: null }),
@@ -188,7 +191,9 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     const it = transport.frames[Symbol.asyncIterator]();
     await expect(transport.write({ type: 'control_request', request_id: 'M-dry', request: { subtype: 'rewind_files', user_message_id: 'u1', dry_run: true } })).resolves.toBeUndefined();
     expect(((await it.next()).value as TransportItem).error).toMatchObject({ kind: 'replay_unrecorded_read', read: { subtype: 'rewind_files', requestId: 'M-dry' } });
-    expect(frameOf((await it.next()).value as TransportItem)).toEqual({ type: 'control_response', response: { subtype: 'success', request_id: 'M-dry', response: {} } });
+    const answer = frameOf((await it.next()).value as TransportItem) as { response: { response: unknown } };
+    expect(answer).toEqual({ type: 'control_response', response: { subtype: 'success', request_id: 'M-dry', response: { canRewind: false, error: 'not recorded in this replay' } } });
+    expect(RewindFilesResponseSchema.safeParse(answer.response.response).success).toBe(true);
     const write = transport.write({ type: 'control_request', request_id: 'M-real', request: { subtype: 'rewind_files', user_message_id: 'u1' } });
     expect(((await it.next()).value as TransportItem).error?.kind).toBe('replay_mismatch');
     await expect(write).rejects.toThrow(/replay mismatch/);

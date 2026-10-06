@@ -337,9 +337,13 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
         if (!upcoming || !sameControl(upcoming.frame as Frame, f) || ((f as ControlRequest).request.subtype.startsWith('ui_') && !matches(upcoming.frame as Frame, f, idMap))) {
           const { subtype } = (f as ControlRequest).request;
           const requestId = (f as ControlRequest).request_id;
-          const message = `replay: ${subtype} was not recorded; answered with an empty success`;
+          // E1 M5 fix: a dry run is refused in the shape `RewindFilesResponseSchema` reads (`canRewind` required), so the
+          // receipt's Undo reads "not rewindable"; every other read is answered empty
+          const rewind = subtype === 'rewind_files';
+          const message = `replay: ${subtype} was not recorded; answered with ${rewind ? 'a refusal (canRewind: false)' : 'an empty success'}`;
+          const response = rewind ? { canRewind: false, error: 'not recorded in this replay' } : {};
           injected.push({ frame: null, raw: '', error: { kind: 'replay_unrecorded_read', message, length: 0, typeGuess: null, read: { subtype, requestId } } });
-          injected.push({ frame: { type: 'control_response', response: { subtype: 'success', request_id: requestId, response: {} } }, raw: '', error: null });
+          injected.push({ frame: { type: 'control_response', response: { subtype: 'success', request_id: requestId, response } }, raw: '', error: null });
           wake?.();
           return Promise.resolve();
         }
