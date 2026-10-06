@@ -85,3 +85,21 @@ Unrun on this head: e2e:c7, build:app, the packaged checks, the packaged e2e.
    start: eligible: load 18.97 after 0s · slot slot.1 acquired at 23:51:07 load { 18.97 16.08 52.78 }
    tail: 14 passed (25.2s), 1 skipped; every case listed in e2e-voice.txt; screenshots refreshed
 
+== e2e:c7 run 1   2026-10-05 23:52 KST   (exit 1: 28 passed, 1 failed)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:c7
+   start: eligible: load 12.55 after 0s · slot slot.1 acquired at 23:52:24 load { 12.55 14.79 49.20 }
+   failure: e2e/composer.spec.ts:771 "W2: the shared column…" pins the toolbar's buttons exactly as C2 left them
+     ("no @, no mic"); E9's microphone now sits after the permission mode (Design §8, M3):
+       - StringMatching /^Model /
+       + "Dictate"
+       + "Model sonnet"
+     Not a product defect: a stale pin of C7's. The spec line gains 'Dictate' between the mode and the model (and its
+     comment says why); that edit is uncommitted, held for the next head.
+
+== e2e:c7 run 2   2026-10-05 23:54 KST   (exit 0: 29 passed, 1.1m; with the pin updated)
+   command: as run 1
+   start: eligible: load 9.39 after 0s · slot slot.1 acquired at 23:54:08 load { 9.39 13.23 44.60 }
+
+Paused here at the controller's request (a second stale-caret fix lands first; the whole sequence reruns on its head).
+Unrun on 7d0442ac: build:app, the packaged checks, the packaged e2e.
+
