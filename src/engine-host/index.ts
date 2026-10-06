@@ -16,7 +16,6 @@ import { registerFs } from './fs/register';
 // C4 end
 // E10 start
 import { runDetached } from './detached';
-import { SHUTDOWN_KILL_GRACE_MS } from './plugins/runner';
 import { openSupervisorLog } from './supervisor-log';
 // E10 end
 
@@ -72,8 +71,7 @@ if ((process as { parentPort?: unknown }).parentPort) {
       return { liveSessions: rows.filter((row) => row.lifecycle !== 'exited').length, rows: rows.length };
     },
     shutdown: async (graceMs) => {
-      if (!ipc) return;
-      await Promise.all([ipc.table.shutdown({ graceMs }), ipc.plugins.stop(SHUTDOWN_KILL_GRACE_MS)]); // engine.shutdown's body
+      await ipc?.shutdown(graceMs); // engine.shutdown's body
     },
   });
 } else {

@@ -135,6 +135,9 @@ export interface EngineIpcDeps {
 export interface EngineIpc {
   table: ProcessTable;
   plugins: PluginsRunner; // E8
+  // E10: engine.shutdown's body (every live row's ladder, and the plugin runner stopped), shared with the detached
+  // entry's exit order and host.stopAll; closes the table's and the runner's admission for good
+  shutdown(graceMs: number): Promise<{ stopped: number; forced: number }>;
 }
 
 const unknownSession = (id: string) => new HostCommandError({ code: 'internal', message: `unknown session ${id}` });
@@ -253,12 +256,13 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('engine.binaryInfo', async () => binaryProbe()); // W13: resolved and probed per call, the version cached by file
   handle('engine.relayHealth', async ({ force }) => relayCheck(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
-  handle('engine.shutdown', async ({ graceMs }) => {
-    // E8: a plugin CLI outlives nothing it should not (X13): answered only once every CLI's process group is gone, its
-    // SIGKILL sooner than a cancel's so the stop fits main's quit bound
+  // E8: a plugin CLI outlives nothing it should not (X13): answered only once every CLI's process group is gone, its
+  // SIGKILL sooner than a cancel's so the stop fits main's quit bound
+  const shutdown = async (graceMs: number) => {
     const [result] = await Promise.all([table.shutdown({ graceMs }), plugins.stop(SHUTDOWN_KILL_GRACE_MS)]);
     return result;
-  });
+  };
+  handle('engine.shutdown', async ({ graceMs }) => shutdown(graceMs));
   // C12 start: the memory budget (C12 execution document, Interfaces "X2 additions"). Both immediate: the policy is
   // evaluated at once against the previous sample (a release it makes is a stop the table starts, not awaited here),
   // and the state is the table's own; the event goes out whenever the state changes and at every release.
@@ -729,7 +733,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   });
   // E3 end
 
-  return { table, plugins };
+  return { table, plugins, shutdown };
 }
 
 function throwing(error: Error): never {
