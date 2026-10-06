@@ -311,4 +311,17 @@ describe('host.supervisorStatus', () => {
     expect(h.emitted).toHaveLength(before + 1);
     expect(h.emitted.at(-1)).toEqual(await h.call('host.supervisorStatus', undefined));
   });
+
+  // Task 2.5: the sweep runs after the supervisor serves, so its count reaches the status (and the app) when it ends
+  it('carries the orphans the start-up sweep stopped, emitted when the sweep ends', async () => {
+    const h = harness();
+    h.start();
+    expect((await h.call('host.supervisorStatus', undefined)).orphansKilled).toBe(0);
+    h.supervision.orphansSwept(2);
+    expect(h.emitted.at(-1)).toMatchObject({ orphansKilled: 2 });
+    expect((await h.call('host.supervisorStatus', undefined)).orphansKilled).toBe(2);
+    const count = h.emitted.length;
+    h.supervision.orphansSwept(2);
+    expect(h.emitted).toHaveLength(count);
+  });
 });

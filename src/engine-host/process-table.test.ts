@@ -4,6 +4,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
 import { parsePsTree, ProcessTable } from './process-table';
 import { EngineSession } from './session';
+import type { LiveRow } from './live-ledger'; // E10
 // C12 start
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -814,6 +815,69 @@ describe('process table (E10): the idle-row release', () => {
     expect(table.list().map((x) => x.status().appSessionId)).toEqual(['a', 'c']); // b went at the cap; the released a stayed
     expect(table.release('a' as AppSessionId)).toBe(true); // the archive's release takes the released id with the row
     expect(table.takeReleased('a' as AppSessionId)).toBe(false);
+  });
+});
+// E10 end
+
+// E10 start: the orphan ledger's rows (E10 execution document, §Design 1 "The orphan ledger and sweep")
+describe('process table (E10): the orphan ledger', () => {
+  type Scripted = ReturnType<typeof scriptedSession>;
+  function ledgerTable() {
+    const procStartOf = vi.fn((pid: number): string | null => `T${pid}`);
+    const logs: string[] = [];
+    const table = new ProcessTable({ ps: async () => '', procStartOf, log: (line) => void logs.push(line) });
+    const writes: LiveRow[][] = [];
+    const launch = async (name: string, pid: number): Promise<Scripted> => {
+      const s = scriptedSession({ spec: { appSessionId: name as AppSessionId }, transport: { pid } });
+      table.reserve(name as AppSessionId, () => s.session);
+      await s.session.start();
+      return s;
+    };
+    const row = (s: Scripted, pid: number): LiveRow => ({ appSessionId: s.session.status().appSessionId, pid, procStart: `T${pid}`, launchId: s.session.status().launchId });
+    return { table, procStartOf, logs, writes, launch, row, record: () => table.recordLive((rows) => void writes.push([...rows])) };
+  }
+
+  it('writes nothing until it records, then the live rows at once', async () => {
+    const { table, writes, launch, row, record } = ledgerTable();
+    const a = await launch('a', 701);
+    expect(writes).toEqual([]);
+    record();
+    expect(writes).toEqual([[row(a, 701)]]);
+    expect(table.list()).toHaveLength(1);
+  });
+
+  it('rewrites at every launch and exit, and only then: statuses that leave the live set as it was write nothing', async () => {
+    const { writes, launch, row, record, procStartOf } = ledgerTable();
+    record();
+    expect(writes).toEqual([[]]);
+    const a = await launch('a', 701);
+    const b = await launch('b', 702);
+    expect(writes.at(-1)).toEqual([row(a, 701), row(b, 702)]);
+    const count = writes.length;
+    a.transport.push({ type: 'system', subtype: 'session_state_changed', state: 'running', uuid: 'u-1', session_id: 's' });
+    await flush();
+    expect(writes).toHaveLength(count);
+    a.transport.exit(0);
+    await a.session.exited;
+    expect(writes.at(-1)).toEqual([row(b, 702)]);
+    expect(writes).toHaveLength(count + 1);
+    expect(procStartOf.mock.calls.map(([pid]) => pid)).toEqual([701, 702]); // once per process
+  });
+
+  it('records a start time it cannot read as empty, and a failed write is logged and retried at the next change', async () => {
+    const { table, logs, procStartOf, launch } = ledgerTable();
+    procStartOf.mockReturnValueOnce(null);
+    let fail = true;
+    const writes: LiveRow[][] = [];
+    table.recordLive((rows) => {
+      if (fail) throw new Error('disk full');
+      writes.push([...rows]);
+    });
+    const a = await launch('a', 701);
+    expect(logs.some((line) => line.includes('disk full'))).toBe(true);
+    fail = false;
+    const b = await launch('b', 702);
+    expect(writes.at(-1)!.map((r) => [r.appSessionId, r.procStart])).toEqual([[a.session.status().appSessionId, ''], [b.session.status().appSessionId, 'T702']]);
   });
 });
 // E10 end

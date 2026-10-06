@@ -11,6 +11,10 @@
 //
 // When to exit is not decided here: the engine host's Supervision (supervision.ts) holds the idle exit, exit-when-idle
 // and host.stopAll, and this entry tells it (`life`) when it serves, who connects and what a client asks.
+//
+// Task 2.5: after listen the orphan sweep reads the predecessor's ledger (live.json) and, when that supervisor is dead,
+// stops the engines it left; once the sweep has ended the engine host's table records this supervisor's own ledger
+// (`life.orphansSwept`). A welcomed client drops the cached login-shell capture, so the next launch captures again.
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -18,10 +22,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { format } from 'node:util';
 import { createHostRuntime, type HostRegister } from '@shared/host/runtime';
+import { invalidateShellEnvironment } from '@shared/host/shell-env';
 import { serveSocketClients } from '@shared/host/socket-server';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
-import { clearLive, type Owner } from './live-ledger';
+import { clearLive, signalOrphan, sweepOrphans, writeLive, type LiveRow, type Owner } from './live-ledger';
 import { buildIdOf, isAlive, procStartOf, readLock, socketPathFor, START_EXIT_HELD, SUPERVISOR_FILES, takeLock } from './supervisor-files';
 import type { SupervisorExit, SupervisorIdentity } from './supervision';
 
@@ -42,6 +47,9 @@ export interface SupervisorLife {
   started(identity: SupervisorIdentity, exit: (reason: SupervisorExit) => void): void; // serving; `exit` runs the exit order
   clientChanged(connected: boolean): void; // a client was welcomed, or the client left
   exitWhenIdle(): void; // a client's `exit {when: 'idle'}`
+  // the start-up sweep ended: how many orphans it stopped, and the writer of this supervisor's own ledger, which the
+  // engine host's table takes from here on (writing it before the sweep read the predecessor's would lose its rows)
+  orphansSwept(killed: number, recordLive: (rows: readonly LiveRow[]) => void): void;
 }
 
 export type ExitReason = SupervisorExit | 'exit' | 'fatal' | 'signal';
@@ -142,7 +150,10 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
       if (when === 'now') void stop('exit');
       else opts.life.exitWhenIdle();
     },
-    onClient: (connected) => opts.life.clientChanged(connected),
+    onClient: (connected) => {
+      if (connected) invalidateShellEnvironment(); // the owner is back: the next launch captures the shell again
+      opts.life.clientChanged(connected);
+    },
     log,
   });
 
@@ -182,7 +193,13 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
   }
   fs.chmodSync(socketPath, 0o600);
   log(`listening on ${socketPath}`);
+  // the predecessor's ledger is read here, synchronously, before anything can launch; its orphans are stopped in the
+  // background (up to the sweep's grace) while this supervisor already serves
+  const sweep = sweepOrphans(dir, { isAlive, procStartOf, signal: signalOrphan, sleep: lockDeps.sleep, log });
   opts.life.started({ pid, startedAt, buildId, protocol: SOCKET_PROTOCOL, wire: wireFingerprint(), socketPath, logPath: join(dir, SUPERVISOR_FILES.log) }, (reason) => void stop(reason));
+  void sweep.then((killed) => {
+    if (stopping === null) opts.life.orphansSwept(killed, (rows) => writeLive(dir, owner, rows)); // an exit under way records nothing
+  });
   return { socketPath, stop };
 }
 

@@ -9,12 +9,19 @@ import { connectLines, type LineClient } from '../../test/support/socket-lines';
 import { START_EXIT_ABORTED, START_EXIT_HELD, startSupervisor, type DetachedOptions, type RunningSupervisor, type SupervisorLife } from './detached';
 import { Supervision, type SupervisorExit } from './supervision';
 import { readLive, writeLive } from './live-ledger';
-import { buildIdOf, procStartOf, readLock } from './supervisor-files';
+import { buildIdOf, isAlive, procStartOf, readLock } from './supervisor-files';
+import { invalidateShellEnvironment } from '@shared/host/shell-env';
+import { spawn, type ChildProcess } from 'node:child_process';
 
 // procStartOf stays the real one unless a case makes one `ps` fail
 vi.mock('./supervisor-files', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./supervisor-files')>();
   return { ...actual, procStartOf: vi.fn(actual.procStartOf) };
+});
+// Task 2.5: the shell capture's cache is dropped at a client's welcome; the capture itself is never run here
+vi.mock('@shared/host/shell-env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@shared/host/shell-env')>();
+  return { ...actual, invalidateShellEnvironment: vi.fn() };
 });
 
 const until = (check: () => boolean, timeout = 3_000) => vi.waitFor(() => expect(check()).toBe(true), { timeout, interval: 5 });
@@ -49,6 +56,7 @@ function harness(over: Partial<DetachedOptions> = {}) {
     started: vi.fn<SupervisorLife['started']>((_identity, exit) => void (leave = exit)),
     clientChanged: vi.fn<SupervisorLife['clientChanged']>(),
     exitWhenIdle: vi.fn<SupervisorLife['exitWhenIdle']>(),
+    orphansSwept: vi.fn<SupervisorLife['orphansSwept']>(),
   };
   let emit!: HostEmit;
   const options: DetachedOptions = {
@@ -261,7 +269,7 @@ describe('the detached entry', () => {
       const rows: { lifecycle: 'ready' | 'exited' }[] = [{ lifecycle: 'ready' }];
       let supervision!: Supervision;
       const host = harness({
-        life: { started: (identity, exit) => supervision.started(identity, exit), clientChanged: (connected) => supervision.clientChanged(connected), exitWhenIdle: () => supervision.armExitWhenIdle(true) },
+        life: { started: (identity, exit) => supervision.started(identity, exit), clientChanged: (connected) => supervision.clientChanged(connected), exitWhenIdle: () => supervision.armExitWhenIdle(true), orphansSwept: (killed) => supervision.orphansSwept(killed) },
       });
       await host.start(undefined, (on, emit, client) => {
         supervision = new Supervision({
@@ -293,5 +301,89 @@ describe('the detached entry', () => {
     const host = harness();
     await host.start();
     expect(readdirSync(dir).sort()).toEqual(['host.lock', 'host.sock', 'host.token']);
+    await until(() => host.life.orphansSwept.mock.calls.length === 1);
+    host.life.orphansSwept.mock.calls[0]![1]([]); // the table records its (empty) live rows once the sweep ended
+    expect(readdirSync(dir).sort()).toEqual(['host.lock', 'host.sock', 'host.token', 'live.json']);
+  });
+
+  // Task 2.5: the shell capture is cached per process; a supervisor outlives the app, so a welcomed client (the owner
+  // back) drops it and the next launch captures the shell again
+  it('drops the cached shell capture when a client is welcomed, not before', async () => {
+    const host = harness();
+    await host.start();
+    vi.mocked(invalidateShellEnvironment).mockClear();
+    const client = await connect();
+    await client.next();
+    await until(() => host.life.clientChanged.mock.calls.length === 1);
+    expect(invalidateShellEnvironment).toHaveBeenCalledOnce();
+    client.socket.destroy();
+    await until(() => host.life.clientChanged.mock.calls.length === 2);
+    expect(invalidateShellEnvironment).toHaveBeenCalledOnce(); // a client leaving changes nothing
+  });
+
+  // Task 2.5 (§Design 1 "The orphan ledger and sweep"): after listen, the engines a dead predecessor left are stopped,
+  // the count goes to the supervisor's status, and only then does the table record this supervisor's own ledger
+  describe('the orphan sweep', () => {
+    const children: ChildProcess[] = [];
+    afterEach(() => {
+      for (const child of children.splice(0)) {
+        try {
+          process.kill(-child.pid!, 'SIGKILL');
+        } catch {
+          // already gone
+        }
+      }
+    });
+
+    it('stops the engines a dead predecessor’s ledger names, then hands the count and its own ledger’s writer to its life', async () => {
+      const child = spawn('/bin/sh', ['-c', 'echo up; exec sleep 30'], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      children.push(child);
+      await new Promise((resolve) => child.stdout!.once('data', resolve));
+      const orphan = { appSessionId: 'app-orphan', pid: child.pid!, procStart: procStartOf(child.pid!)!, launchId: 'L-old' };
+      mkdirSync(dir, { recursive: true });
+      writeLive(dir, { pid: 999_999, procStart: 'gone' }, [orphan]);
+      const host = harness();
+      await host.start();
+      await until(() => host.life.orphansSwept.mock.calls.length === 1);
+      const [killed, recordLive] = host.life.orphansSwept.mock.calls[0]!;
+      expect(killed).toBe(1);
+      await until(() => !isAlive(child.pid!));
+      expect(host.lines.some((line) => line.includes('orphan app-orphan') && line.includes('SIGTERM'))).toBe(true);
+      expect(readLive(dir)?.owner.pid).toBe(999_999); // nothing written over the predecessor's until the table records
+      const row = { appSessionId: 'app-1', pid: 4242, procStart: 'T', launchId: 'L1' };
+      recordLive([row]);
+      expect(readLive(dir)).toEqual({ owner: { pid: process.pid, procStart: readLock(dir)!.procStart }, rows: [row] });
+    });
+
+    it('a ledger whose owner is alive is left alone and swept of nothing', async () => {
+      mkdirSync(dir, { recursive: true });
+      const living = { pid: process.pid, procStart: 'this test process, as a predecessor' };
+      vi.mocked(procStartOf).mockReturnValue(null); // an unreadable start time never makes a live owner dead
+      try {
+        writeLive(dir, living, [{ appSessionId: 'app-x', pid: process.pid, procStart: 'x', launchId: 'L' }]);
+        const host = harness();
+        await host.start();
+        await until(() => host.life.orphansSwept.mock.calls.length === 1);
+        expect(host.life.orphansSwept.mock.calls[0]![0]).toBe(0);
+        expect(host.lines.some((line) => line.includes('sweep skipped'))).toBe(true);
+      } finally {
+        vi.mocked(procStartOf).mockReset();
+      }
+    });
+
+    it('records nothing when the exit order began during the sweep', async () => {
+      const child = spawn('/bin/sh', ['-c', 'echo up; exec sleep 30'], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      children.push(child);
+      await new Promise((resolve) => child.stdout!.once('data', resolve));
+      mkdirSync(dir, { recursive: true });
+      writeLive(dir, { pid: 999_999, procStart: 'gone' }, [{ appSessionId: 'app-orphan', pid: child.pid!, procStart: procStartOf(child.pid!)!, launchId: 'L-old' }]);
+      const host = harness();
+      const supervisor = (await host.start())!; // the sweep has sent its SIGTERM and waits for the orphan's end
+      await supervisor.stop('exit');
+      await until(() => !isAlive(child.pid!));
+      await until(() => host.lines.some((line) => line.includes('orphan sweep: 1 engine(s)')));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(host.life.orphansSwept).not.toHaveBeenCalled();
+    });
   });
 });

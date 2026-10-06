@@ -27,13 +27,20 @@
 // since its reason is that no app is there to use the process, not memory. A row's clock starts at the later of the
 // moment its last hard reason cleared and the moment the release became active; one timer serves every row, and each
 // row is read again when it fires.
+//
+// E10: the orphan ledger (§Design 1 "The orphan ledger and sweep"). Once the supervisor records (`recordLive`, after
+// its predecessor's orphans are swept), every change of the live rows that have a process (a launch's pid known, an
+// exit) is handed to the writer as `{appSessionId, pid, procStart, launchId}`, so a successor of a supervisor that died
+// can stop the engines it left. Each process's start time is read once (`ps`), at its first entry.
 import { execFile } from 'node:child_process';
 import { totalmem } from 'node:os';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { BudgetState } from '@shared/ipc/schema/engine';
 import { defaultBudgetKiB, evaluate, EXITED_ROWS_MAX, isIdleRow, type BudgetPolicy, type BudgetVerdict } from './budget';
+import type { LiveRow } from './live-ledger'; // E10
 import type { EngineSession } from './session';
+import { procStartOf as psProcStart } from './supervisor-files'; // E10
 
 export const MEMORY_SAMPLE_MS = 10_000;
 
@@ -103,10 +110,16 @@ export class ProcessTable {
   private readonly idleSince = new Map<EngineSession, number>(); // ready rows with no hard reason, since when
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly rowsListeners = new Set<() => void>();
+  private readonly procStartOf: (pid: number) => string | null;
+  private liveLedger: ((rows: LiveRow[]) => void) | null = null; // the orphan ledger's writer, once recording
+  private readonly ledgerKeys = new WeakMap<EngineSession, string>(); // each row's part of the ledger: exited, pid
+  private readonly procStarts = new WeakMap<EngineSession, string>();
+  private ledgerWritten: string | null = null; // the rows last written, so an unchanged set is not rewritten
   // E10 end
 
-  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number; exitedRowsMax?: number /* C12 */ } = {}) {
+  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number; exitedRowsMax?: number /* C12 */; procStartOf?: (pid: number) => string | null /* E10 */ } = {}) {
     this.ps = opts.ps ?? runPs;
+    this.procStartOf = opts.procStartOf ?? psProcStart; // E10
     this.sampleMs = opts.sampleMs ?? MEMORY_SAMPLE_MS;
     this.log = opts.log ?? ((message) => console.warn(`[engine-host process table] ${message}`));
     // C12 start
@@ -132,6 +145,7 @@ export class ProcessTable {
     session.on('status', (status) => {
       if (status.process === 'exited') this.exitedRow(session, status); // C12
       this.trackIdle(session, status); // E10
+      this.trackLive(session, status); // E10
       for (const listener of this.listeners) listener(status);
     });
     this.rowsChanged(); // E10
@@ -166,6 +180,44 @@ export class ProcessTable {
       } catch (error) {
         this.log(`rows listener failed: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+  }
+
+  // The orphan ledger: from now on every change of the live rows goes to `write` (the supervisor's live.json), starting
+  // with the rows live now. A write that fails is logged and the next change writes the whole set again.
+  recordLive(write: (rows: LiveRow[]) => void): void {
+    this.liveLedger = write;
+    this.ledgerWritten = null;
+    this.writeLiveLedger();
+  }
+
+  private trackLive(session: EngineSession, status: EngineSessionStatus): void {
+    const key = `${status.process === 'exited'}:${status.pid}`;
+    if (this.ledgerKeys.get(session) === key) return;
+    this.ledgerKeys.set(session, key);
+    this.writeLiveLedger();
+  }
+
+  private writeLiveLedger(): void {
+    if (this.liveLedger === null) return;
+    const rows: LiveRow[] = [];
+    for (const session of this.rows.values()) {
+      const status = session.status();
+      if (status.process === 'exited' || status.pid === null) continue;
+      let procStart = this.procStarts.get(session);
+      if (procStart === undefined) {
+        procStart = this.procStartOf(status.pid) ?? ''; // '' is never swept: a start time that cannot be compared
+        this.procStarts.set(session, procStart);
+      }
+      rows.push({ appSessionId: status.appSessionId, pid: status.pid, procStart, launchId: status.launchId });
+    }
+    const signature = JSON.stringify(rows);
+    if (signature === this.ledgerWritten) return;
+    try {
+      this.liveLedger(rows);
+      this.ledgerWritten = signature;
+    } catch (error) {
+      this.log(`the orphan ledger could not be written: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

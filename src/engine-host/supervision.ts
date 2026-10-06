@@ -47,6 +47,7 @@ export class Supervision {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private release: { idleMs: number | null; active: boolean } | null = null; // the idle-row release's policy as last set
   private published = '';
+  private orphansKilled = 0; // the engines of a dead predecessor the start-up sweep stopped (Task 2.5)
 
   constructor(private readonly deps: SupervisionDeps) {
     this.identity = deps.identity;
@@ -99,6 +100,12 @@ export class Supervision {
     this.refresh();
   }
 
+  // The start-up sweep ended (a detached host's, after it serves; detached.ts): how many orphans it stopped.
+  orphansSwept(killed: number): void {
+    this.orphansKilled = killed;
+    this.refresh();
+  }
+
   armExitWhenIdle(armed: boolean): void {
     if (armed !== this.exitWhenIdle) this.deps.log(`exit when idle ${armed ? 'armed' : 'disarmed'}`);
     this.exitWhenIdle = armed;
@@ -111,7 +118,7 @@ export class Supervision {
       mode: this.deps.mode, ...this.identity,
       liveSessions: rows.filter((row) => row.lifecycle !== 'exited').length, rows: rows.length,
       idleExitMs: this.idleExitMs, idleExitAt: this.idleDue === null ? null : new Date(this.idleDue).toISOString(),
-      exitWhenIdle: this.exitWhenIdle, orphansKilled: 0,
+      exitWhenIdle: this.exitWhenIdle, orphansKilled: this.orphansKilled,
     };
   }
 

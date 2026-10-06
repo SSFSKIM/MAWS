@@ -9,7 +9,7 @@ import { hostPing, runHost, type HostRegister } from '@shared/host/runtime';
 import { join } from 'node:path';
 import { registerEngineIpc, type EngineIpc } from './ipc';
 import type { ProcessTable } from './process-table'; // W7
-import { JOURNAL_KEEP_PER_SESSION, JOURNAL_MAX_AGE_DAYS, pruneJournals } from './journal';
+import { scheduleJournalPruning } from './journal';
 // C3 end
 // C4 start
 import { registerFs } from './fs/register';
@@ -46,10 +46,6 @@ let supervision: Supervision | null = null; // the host.* commands and the super
 // E10 end
 
 const register: HostRegister = (on, emit, client) => {
-  // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing)
-  void pruneJournals(join(userData, 'engine-host', 'journal'), { keepPerSession: JOURNAL_KEEP_PER_SESSION, maxAgeDays: JOURNAL_MAX_AGE_DAYS }).catch((error: unknown) =>
-    console.warn(`[engine-host] journal pruning failed: ${error instanceof Error ? error.message : String(error)}`),
-  );
   on('engine.ping', async () => hostPing(HOST_VERSION));
   // C4 start: the filesystem state service (fs.*) over the engine's store, read-only; C3's `session.events` answers an
   // app session with no process here from it (`diskEvents` below).
@@ -66,6 +62,13 @@ const register: HostRegister = (on, emit, client) => {
   ({ table } = ipc);
   table.startSampling();
   // C3 end
+  // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing; and
+  // every 24 h after, keeping every launch the table holds a row for, since a supervisor outlives the app by days)
+  const rows = table;
+  scheduleJournalPruning(join(userData, 'engine-host', 'journal'), {
+    keep: () => new Set(rows.list().map((session) => session.status().launchId)),
+    log: (line) => console.warn(`[engine-host] ${line}`),
+  });
   // E10: registered after the engine ipc, so the status ends the connect burst
   supervision = new Supervision({
     mode,
@@ -103,6 +106,12 @@ if (mode === 'utility') {
       started: (identity, exit) => served().supervision.started(identity, exit),
       clientChanged: (connected) => served().supervision.clientChanged(connected),
       exitWhenIdle: () => served().supervision.armExitWhenIdle(true),
+      // Task 2.5: the sweep ended; the table records this supervisor's own ledger from now on, and the status the count
+      orphansSwept: (killed, recordLive) => {
+        const { ipc, supervision } = served();
+        ipc.table.recordLive(recordLive);
+        supervision.orphansSwept(killed);
+      },
     },
   });
 }
