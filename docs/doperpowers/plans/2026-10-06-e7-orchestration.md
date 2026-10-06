@@ -18,7 +18,7 @@ To see it working: `pnpm dev`, open a live session that ran a Workflow, click th
 - [x] (2026-10-06, 9ad52efb..effbc961 + fix 81587fed, reviewed clean on Opus) M2 — Transcript rows: the listing row, the `between` and inbound rows, the Reply composer through the relay store.
 - [x] (2026-10-06, eadc846a..d92f204e + fix a1417f75, reviewed clean on Opus) M3 — The workflow widget.
 - [x] (2026-10-06, f2f9e7fa..0e048d91 + fix 17aac2ed, reviewed clean on Opus) M4 — The topology tree and teammates (and the live suite `e2e/agent-tools-live.spec.ts` adapted to the compact card, the widget and the collapsed Done; unrun, it needs a live engine).
-- [ ] M5 — The Tasks panel, read-only (P-20; Decision Log 21): the checklist as X5 tool `tasks` with `open` and a task-id target.
+- [x] (2026-10-06, 38b52ca9, reviewed clean on Opus; three minor polish items carried into M6) M5 — The Tasks panel, read-only (P-20; Decision Log 21): the checklist as X5 tool `tasks` with `open` and a task-id target.
 - [ ] M6 — Scheduled loops.
 - [ ] M7 — Harness, e2e, gates, evidence, whole-branch review, hand-back.
 
