@@ -160,6 +160,7 @@ test.describe('the #panel harness: the agent tools', () => {
     const h = await Harness.open(maws);
     await h.load('A', 'pass1/subagent');
     await h.open('subagents');
+    await h.expandDone(); // E7: the finished agent's row is under the collapsed Done section
     await h.agents('clickRow', FIRST.agentId);
     await expect.poll(async () => (await h.drillIn())?.rows ?? 0).toBeGreaterThan(0);
     await h.agents('agentTab', FIRST.agentId); // C5's agent tab, standing in: a second child transcript over the same source
