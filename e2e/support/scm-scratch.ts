@@ -27,7 +27,7 @@ const VIEW_JSON = {
   number: 7, url: PR_URL, title: 'Panel PR', state: 'OPEN', isDraft: false, reviewDecision: '', baseRefName: 'main', headRefName: 'main', mergeStateStatus: 'BLOCKED',
 };
 const check = (name: string, bucket: 'pass' | 'pending', state: string) => ({ name, bucket, state, link: `https://github.com/o/r/actions/runs/1/job/${name}`, workflow: 'CI' });
-export const CHECKS_MIXED = [check('typecheck', 'pass', 'SUCCESS'), check('lint', 'pass', 'SUCCESS'), check('test', 'pending', 'IN_PROGRESS')];
+const CHECKS_MIXED = [check('typecheck', 'pass', 'SUCCESS'), check('lint', 'pass', 'SUCCESS'), check('test', 'pending', 'IN_PROGRESS')];
 export const CHECKS_PASSED = [check('typecheck', 'pass', 'SUCCESS'), check('lint', 'pass', 'SUCCESS'), check('test', 'pass', 'SUCCESS')];
 
 export interface ScmScratch {
@@ -37,7 +37,6 @@ export interface ScmScratch {
   pushRepo: string; // a second bare repository, added as a push destination by a case
   appSessionId: string; // the *Charter + research* record's id
   ghPath: string; // `<root>/bin/gh`, the fake
-  ghDir: string; // `<root>/gh`: the fake's answers and its logs
   marker: string; // what the pre-commit hook writes
   env: Record<string, string>; // the product launch's environment
   path(relative: string): string; // a path in the repository
@@ -99,6 +98,15 @@ exit 1
 
 export function buildScmScratch(): ScmScratch {
   const root = realpathSync(mkdtempSync('/tmp/maws-scm-'));
+  try {
+    return buildIn(root);
+  } catch (error) {
+    rmSync(root, { recursive: true, force: true }); // a step failed mid-build: no case will clean this root
+    throw error;
+  }
+}
+
+function buildIn(root: string): ScmScratch {
   const dir = join(root, 'repo');
   const origin = join(root, 'origin.git');
   const pushRepo = join(root, 'push.git');
@@ -170,7 +178,6 @@ export function buildScmScratch(): ScmScratch {
     pushRepo,
     appSessionId: record.appId,
     ghPath,
-    ghDir,
     marker,
     // MAWS_GIT and MAWS_GH emptied, so nothing inherited overrides the programs the captured PATH resolves.
     env: { MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_HARNESS: '0', MAWS_SCENARIO_CLOCK: 'manual', MAWS_GIT: '', MAWS_GH: '' },
@@ -192,7 +199,8 @@ export function buildScmScratch(): ScmScratch {
       chmodSync(wrapper, 0o755);
     },
     cleanup: () => {
-      // A process still running from the scratch (a slow push the app did not stop) is stopped before its files go.
+      // The app's will-quit dispose stops its remote runs; this stops only a leftover process whose argv names the
+      // scratch (the slow-git wrapper, a receive-pack into a bare remote) before the files go.
       try {
         execFileSync('pkill', ['-f', root]);
       } catch {

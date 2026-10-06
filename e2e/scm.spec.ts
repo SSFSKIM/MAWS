@@ -11,7 +11,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { menu, otherThemeColours } from './support/code-product';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { CHARTER } from './support/panel-support';
-import { APP_LINES, buildScmScratch, CHECKS_PASSED, PR_URL, prepareScm, UNTRACKED_TEXT, type ScmScratch } from './support/scm-scratch';
+import { APP_EDIT, APP_LINES,buildScmScratch, CHECKS_PASSED, PR_URL, prepareScm, UNTRACKED_TEXT, type ScmScratch } from './support/scm-scratch';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 
 test.skip(process.env.MAWS_SCM_E2E !== '1', 'the source control e2e runs under pnpm e2e:scm (MAWS_SCM_E2E=1)');
@@ -146,7 +146,7 @@ test.describe('source control over a scratch repository', () => {
       await row(p, 'unstaged', 'src/app.ts').locator('[data-scm-select]').click();
       await expect(tool(p).locator('[data-scm-file-header]')).toHaveText('src/app.ts · Modified');
       await expect(tool(p).locator('[data-scm-diff] [data-review-block]').first()).toBeVisible();
-      await expect(tool(p).locator('[data-scm-diff] [data-review-block]').first()).toContainText('// edited in the working tree');
+      await expect(tool(p).locator('[data-scm-diff] [data-review-block]').first()).toContainText(APP_EDIT);
 
       // untracked.txt as an all-added diff
       await row(p, 'untracked', 'untracked.txt').locator('[data-scm-select]').click();
@@ -247,7 +247,7 @@ test.describe('source control over a scratch repository', () => {
       let push = await openPushSheet(p);
       await expect(push.locator('[data-scm-plan-row="remote"]')).toContainText('origin');
       await expect(push.locator('[data-scm-destination]')).toHaveText([scratch.origin]);
-      await expect(push.locator('[data-scm-plan-command]')).toContainText(' push --progress origin refs/heads/main:refs/heads/main');
+      await expect(push.locator('[data-scm-plan-command]')).toHaveText(/\/git push --progress origin refs\/heads\/main:refs\/heads\/main$/); // the program's path is this machine's
       await button(push, 'Cancel').click();
       await expect(push).toHaveCount(0);
       await expect(output(p), 'nothing ran').toHaveCount(0);
