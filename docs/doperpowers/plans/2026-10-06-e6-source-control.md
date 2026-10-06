@@ -617,6 +617,8 @@ Questions for the owner beyond these: whether amend (`--amend`) and stash belong
   Date/Author: 2026-10-06, E6 executor.
 - Decision (task 6, T3.2 to T3.4 as built): the body adds `ScmDiff.tsx` (the diff area) and `Notice.tsx` (the notice line) beside the files the Plan names; the notice is drawn once at the top, a commit failure included (T3.3's form shows no second copy); only the selected file's scope is held and nothing is selected by default; row actions are not locked while a mutation runs (main orders them; a click on an entry that already moved answers `changed`); trust reads three ways (loading disables actions silently, a failed `scm.status` reads "Source control unavailable: <message>", untrusted shows the notice); Open ↗ stays enabled when untrusted (a read); the untracked sheet reads "Delete untracked files", "Delete N files; this cannot be undone", button "Delete"; rows show `M A D R C T`, `U` for untracked and `!` for conflicts in token colours; the body resolves the selection in the same render that receives a new status, so a staged file's untracked hold is released before its re-read (task 5 review's carry-over, pinned by a test).
   Date/Author: 2026-10-06, E6 executor (task 6).
+- Decision (task 9, M5 as built; Design §9 corrected): GitHub addresses a PR line as `<prUrl>/files#diff-<sha256 hex of the repository-relative path><L|R><line>` (L the old side, R the new), not `#diff-<path>-L<line>` as §9 said: verified against the cell ids of a public PR's files page (eleven paths hash to the page's digests) and GitHub community discussion 43908's example; `pageUrl` is `<prUrl>/files`. `prLineAnchor({ prUrl, prNumber, path, line, side })` is synchronous over `@shared/composer/sha256`'s `sha256Hex`. Its `label` (`<path>:<line> · PR #n`) always satisfies E3's planned `AnchorSchema` (≤ 200 characters, no control characters): control characters in the path are replaced and an overlong path is elided from its start; `path` and `locator` stay exact. `openCommentComposer` is not widened (its fallback and E5's `EditorDialogs` state are typed `FileLineAnchor`, E5's file), so the call site is E3's when it widens the seam to the X10 union; the PR diff surface is Deferred (E3 not landed at M5).
+  Date/Author: 2026-10-06, E6 executor (task 9).
 - Decision (executor pre-flight): the brief confirms the owner's two open questions stand as the author left them: amend and stash are a later child (not built), and the PR body defaults to empty.
   Date/Author: 2026-10-06, E6 executor.
 
@@ -624,7 +626,7 @@ Questions for the owner beyond these: whether amend (`--amend`) and stash belong
 
 - Amend, stash, branch creation and checkout from the panel; `--force-with-lease`; pull and fetch (the terminal, or the agent, for now).
 - A PR inbox and PR review actions (the parent's §6 deferred list); Claude Desktop's auto-fix monitor; binding a PR to a session (the next composite's `ccd_pr`-like tools).
-- The PR diff surface with line comments when E3 has not landed at M5 (recorded there if so).
+- The PR diff surface with line comments (`scm.pr.diff`, a "PR" mode in the tool's diff area, the per-line Comment gutter action calling `openCommentComposer(prLineAnchor(…), { appSessionId })`): deferred 2026-10-06, E3 had not landed when M5 ran; `prLineAnchor` is in place for it, and the seam widening is E3's.
 - Marking every untracked directory's inner files in the tool (the row shows `udir/` as git lists it).
 - Commit signing status in the last-commit line (git's `%G?`), once a user asks.
 
