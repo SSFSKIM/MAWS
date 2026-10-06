@@ -1,30 +1,31 @@
-E8 live run · 2026-10-06T08:22:17.656Z · engine /Users/new/.local/share/claude/versions/2.1.291 (2.1.291) · CLAUDE_CONFIG_DIR=/private/tmp/maws-e8-live-NJcPzs/claude-config · marketplace /private/tmp/maws-e8-live-NJcPzs/market · repository /private/tmp/maws-e8-live-NJcPzs/e8-repo
+E8 live run · 2026-10-06T08:36:47.618Z · engine /Users/new/.local/share/claude/versions/2.1.291 (2.1.291) · CLAUDE_CONFIG_DIR=/private/tmp/maws-e8-live-4qDqMp/claude-config · marketplace /private/tmp/maws-e8-live-4qDqMp/market · repository /private/tmp/maws-e8-live-4qDqMp/e8-repo
 Every CLI run is audited (test/support/plugins-audit.ts): each mutation (the sheet's command and writes, the row's words once it ended) and each listing (the widget's opening reads, the Available expansion). The delta covers the config home (config/…) and the project's .claude/ (project/…); a file's fingerprint is its size, mtime and content hash, so a same-content rewrite shows. Each path is marked [manifest] when writesOf covers it, else [records (D-12)] (a .claude.json bookkeeping key or a .claude.json backup), [catalogue cache (D-12)], [session files] (by name), [unannounced] (a configuration write outside the manifest, any for a listing: fails) or [unclassified] (fails); .claude.json is judged per changed top-level key.
 
 === 01-start · a session through + on haiku, one turn so system/init lists its plugins
-session 2d181bf2-bbb8-41f8-9ed7-0e5176921f00: ready · model claude-haiku-4-5-20251001 · gateway routed · plugins loaded 3
+session 9a566512-5383-46b8-9fd9-37c1144b27aa: ready · model claude-haiku-4-5-20251001 · gateway routed · plugins loaded 3
 loaded before any install: cc-plugin-agents-md@builtin, cc-plugin-telemetry@builtin, cc-plugin-plugin-authoring@builtin
 
 === 02-plugins · /plugins lists the engine’s (empty) registry; the foot names the scratch home
 --- listing: opening /plugins (plugin list --json, plugin marketplace list --json)
-CLI reads settled in this window: plugins.env 9 ms · plugins.list 738 ms · marketplaces.list 730 ms
+CLI reads settled in this window: plugins.env 3 ms · plugins.list 754 ms · marketplaces.list 724 ms
 opening /plugins (plugin list --json, plugin marketplace list --json): a listing (D-12: the catalogue caches and .claude.json bookkeeping only)
 delta: none
 verdict: no configuration write
 installed: INSTALLED0 ·  · No plugins installed
 marketplaces: MARKETPLACES0 ·  · No marketplaces configured ·  · Add… · Choose folder…
-foot: Read with claude plugin list --json · marketplace list --json · system/init · Every change runs the engine's CLI after you confirm it; the engine writes /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json and /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins and keeps its own records in /private/tmp/maws-e8-live-NJcPzs/claude-config/.claude.json · listing refreshes the engine's own catalogue cache under /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins
+foot: Read with claude plugin list --json · marketplace list --json · system/init · Every change runs the engine's CLI after you confirm it; the engine writes /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json and /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins and keeps its own records in /private/tmp/maws-e8-live-4qDqMp/claude-config/.claude.json · listing refreshes the engine's own catalogue cache under /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins
 
 === 03-add-folder · Add marketplace: the scratch folder
 --- marketplace-add: add-folder
-sheet: 2.1.291 plugin marketplace add /private/tmp/maws-e8-live-NJcPzs/market --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/known_marketplaces.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/marketplaces/
+sheet: 2.1.291 plugin marketplace add /private/tmp/maws-e8-live-4qDqMp/market --json
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/known_marketplaces.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/marketplaces/
 sheet then: Nothing to reload: an added marketplace loads no plugin
 row: Successfully added marketplace: e8-scratch (declared in user settings)
 (writesOf marketplace-add, user, directory)
-CLI reads settled in this window: plugins.env 1 ms · marketplaces.add 1 ms · plugins.list 749 ms · marketplaces.list 752 ms
+CLI reads settled in this window: plugins.env 2 ms · marketplaces.add 2 ms · marketplaces.list 753 ms · plugins.list 784 ms
 manifest: config/settings.json · config/plugins/known_marketplaces.json · config/plugins/marketplaces/
 delta:
+  added   config/.last-cleanup   [session files]
   added   config/plugins/known_marketplaces.json   [manifest]
   added   config/plugins/marketplaces/   [manifest]
   changed config/settings.json   [manifest]
@@ -33,11 +34,11 @@ verdict: every configuration write inside the manifest
 === 04-add-repo · Add marketplace: anthropics/claude-plugins-official from GitHub (network-dependent), then Remove…
 --- marketplace-add: add-repo
 sheet: 2.1.291 plugin marketplace add anthropics/claude-plugins-official --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/known_marketplaces.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/marketplaces/<name>/
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/known_marketplaces.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/marketplaces/<name>/
 sheet then: Nothing to reload: an added marketplace loads no plugin
 row: SSH not configured, cloning via HTTPS: https://github.com/anthropics/claude-plugins-official.git ⏎ Refreshing marketplace cache (timeout: 120s)… ⏎ Cloning repository (timeout: 120s): https://github.com/anthropics/claude-plugins-official.git ⏎ Clone complete, validating marketplace… ⏎ Cleaning up old marketplace cache… ⏎ Successfully added marketplace: claude-plugins-official (declared in user settings)
 (writesOf marketplace-add, user, null)
-CLI reads settled in this window: plugins.env 1 ms · marketplaces.add 1 ms · marketplaces.list 746 ms · plugins.list 762 ms
+CLI reads settled in this window: plugins.env 1 ms · marketplaces.add 1 ms · marketplaces.list 732 ms · plugins.list 738 ms
 manifest: config/settings.json · config/plugins/known_marketplaces.json · config/plugins/marketplaces/claude-plugins-official/
 delta:
   added   config/plugins/marketplaces/claude-plugins-official/   [manifest]
@@ -47,11 +48,11 @@ verdict: every configuration write inside the manifest
 row: claude-plugins-official · github · Refresh · Remove… · anthropics/claude-plugins-official
 --- marketplace-remove: remove-repo
 sheet: 2.1.291 plugin marketplace remove claude-plugins-official --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/known_marketplaces.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/marketplaces/claude-plugins-official/
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/known_marketplaces.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/marketplaces/claude-plugins-official/
 sheet then: Reloads plugins in 1 running session
 row: Successfully removed marketplace: claude-plugins-official · Reloaded in 1 session
 (writesOf marketplace-remove, user, github)
-CLI reads settled in this window: plugins.env 3 ms · marketplaces.remove 1 ms · marketplaces.list 806 ms · plugins.list 808 ms
+CLI reads settled in this window: plugins.env 0 ms · marketplaces.remove 2 ms · plugins.list 771 ms · marketplaces.list 772 ms
 manifest: config/settings.json · config/plugins/known_marketplaces.json · config/plugins/marketplaces/claude-plugins-official/
 delta:
   removed config/plugins/marketplaces/claude-plugins-official/   [manifest]
@@ -61,7 +62,7 @@ verdict: every configuration write inside the manifest
 
 === 05-install · Install e8-probe@e8-scratch from Available at user scope: reflected, the Loaded list and the panel before any new turn
 --- listing: expanding Available (plugin list --json --available)
-CLI reads settled in this window: plugins.available 3295 ms
+CLI reads settled in this window: plugins.available 3242 ms
 expanding Available (plugin list --json --available): a listing (D-12: the catalogue caches and .claude.json bookkeeping only)
 delta:
   added   config/plugins/plugin-catalog-cache.json   [catalogue cache (D-12)]
@@ -69,12 +70,12 @@ delta:
 verdict: no configuration write
 --- install: install
 sheet: 2.1.291 plugin install e8-probe@e8-scratch --scope user --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/cache/e8-scratch/e8-probe/<version>/ · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/cache/e8-scratch/<dependency>/
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/cache/e8-scratch/e8-probe/<version>/ · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/cache/<any-marketplace>/<dependency>/
 sheet then: Reloads plugins in 1 running session
 row: Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected
 (writesOf install, user, null)
-CLI reads settled in this window: plugins.env 1 ms · plugins.install 1 ms · marketplaces.list 842 ms · plugins.list 860 ms · plugins.available 1111 ms
-manifest: config/settings.json · config/plugins/installed_plugins.json · config/plugins/cache/e8-scratch/e8-probe/<version>/ · config/plugins/cache/e8-scratch/<dependency>/
+CLI reads settled in this window: plugins.env 1 ms · plugins.install 1 ms · marketplaces.list 736 ms · plugins.list 749 ms · plugins.available 965 ms
+manifest: config/settings.json · config/plugins/installed_plugins.json · config/plugins/cache/e8-scratch/e8-probe/<version>/ · config/plugins/cache/<any-marketplace>/<dependency>/
 delta:
   added   config/plugins/cache/e8-scratch/e8-probe/0.1.0/   [manifest]
   added   config/plugins/installed_plugins.json   [manifest]
@@ -94,11 +95,11 @@ delta: none
 verdict: no configuration write
 --- marketplace-update: refresh
 sheet: 2.1.291 plugin marketplace update e8-scratch --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/known_marketplaces.json
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/known_marketplaces.json
 sheet then: Reloads plugins in 1 running session
 row: Validating local marketplace ⏎ Successfully updated marketplace: e8-scratch · Reloaded in 1 session
 (writesOf marketplace-update, user, directory)
-CLI reads settled in this window: plugins.env 1 ms · marketplaces.update 1 ms · marketplaces.list 735 ms · plugins.list 749 ms
+CLI reads settled in this window: plugins.env 1 ms · marketplaces.update 1 ms · marketplaces.list 974 ms · plugins.list 983 ms
 manifest: config/settings.json · config/plugins/known_marketplaces.json
 delta:
   changed config/plugins/known_marketplaces.json   [manifest]
@@ -107,12 +108,12 @@ verdict: every configuration write inside the manifest
 === 08-update · plugin.json rewritten to 0.2.0, then Update: 0.1.0 → 0.2.0
 --- update: update
 sheet: 2.1.291 plugin update e8-probe@e8-scratch --scope user --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/cache/e8-scratch/e8-probe/<version>/ · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/cache/e8-scratch/<dependency>/
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/cache/e8-scratch/e8-probe/<version>/ · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/cache/<any-marketplace>/<dependency>/
 sheet then: Reloads plugins in 1 running session
 row: Plugin "e8-probe" updated from 0.1.0 to 0.2.0 for scope user. Restart to apply changes. · 0.1.0 → 0.2.0 · Reloaded in 1 session
 (writesOf update, user, null)
-CLI reads settled in this window: plugins.env 0 ms · plugins.update 1 ms · marketplaces.list 764 ms · plugins.list 779 ms
-manifest: config/settings.json · config/plugins/installed_plugins.json · config/plugins/cache/e8-scratch/e8-probe/<version>/ · config/plugins/cache/e8-scratch/<dependency>/
+CLI reads settled in this window: plugins.env 2 ms · plugins.update 1 ms · marketplaces.list 829 ms · plugins.list 887 ms
+manifest: config/settings.json · config/plugins/installed_plugins.json · config/plugins/cache/e8-scratch/e8-probe/<version>/ · config/plugins/cache/<any-marketplace>/<dependency>/
 delta:
   added   config/plugins/cache/e8-scratch/e8-probe/0.2.0/   [manifest]
   changed config/plugins/cache/e8-scratch/e8-probe/0.1.0/   [manifest]
@@ -131,11 +132,11 @@ delta: none
 verdict: no configuration write
 --- disable: disable
 sheet: 2.1.291 plugin disable e8-probe@e8-scratch --scope user --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json
 sheet then: Reloads plugins in 1 running session
 row: Successfully disabled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected
 (writesOf disable, user, null)
-CLI reads settled in this window: plugins.env 0 ms · plugins.disable 1 ms · marketplaces.list 719 ms · plugins.list 729 ms
+CLI reads settled in this window: plugins.env 1 ms · plugins.disable 1 ms · marketplaces.list 728 ms · plugins.list 738 ms
 manifest: config/settings.json
 delta:
   changed config/settings.json   [manifest]
@@ -144,11 +145,11 @@ verdict: every configuration write inside the manifest
 === 11-enable · the switch: enable; the Loaded list regains e8-probe
 --- enable: enable
 sheet: 2.1.291 plugin enable e8-probe@e8-scratch --scope user --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json
 sheet then: Reloads plugins in 1 running session
 row: Successfully enabled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected
 (writesOf enable, user, null)
-CLI reads settled in this window: plugins.env 1 ms · plugins.enable 1 ms · marketplaces.list 713 ms · plugins.list 721 ms
+CLI reads settled in this window: plugins.env 1 ms · plugins.enable 0 ms · marketplaces.list 711 ms · plugins.list 720 ms
 manifest: config/settings.json
 delta:
   changed config/.claude.json · pluginUsage   [records (D-12)]
@@ -158,11 +159,11 @@ verdict: every configuration write inside the manifest
 === 12-uninstall · Uninstall…: the row leaves, its result stays; the Loaded list loses e8-probe
 --- uninstall: uninstall
 sheet: 2.1.291 plugin uninstall e8-probe@e8-scratch --scope user --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/cache/e8-scratch/e8-probe/<version>/ · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/data/e8-probe@e8-scratch/
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/cache/e8-scratch/e8-probe/<version>/ · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/data/e8-probe@e8-scratch/
 sheet then: Reloads plugins in 1 running session
 row: Successfully uninstalled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected
 (writesOf uninstall, user, null)
-CLI reads settled in this window: plugins.env 1 ms · plugins.uninstall 1 ms · plugins.list 794 ms · marketplaces.list 794 ms
+CLI reads settled in this window: plugins.env 1 ms · plugins.uninstall 1 ms · marketplaces.list 718 ms · plugins.list 717 ms
 manifest: config/settings.json · config/plugins/installed_plugins.json · config/plugins/cache/e8-scratch/e8-probe/<version>/ · config/plugins/data/e8-probe@e8-scratch/
 delta:
   changed config/.claude.json · pluginUsage   [records (D-12)]
@@ -174,17 +175,17 @@ verdict: every configuration write inside the manifest
 === 13-offer-nope · the marketplace offers `nope`: Refresh reads it in, and Available lists it
 --- marketplace-update: offer-nope-refresh
 sheet: 2.1.291 plugin marketplace update e8-scratch --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/known_marketplaces.json
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/known_marketplaces.json
 sheet then: Reloads plugins in 1 running session
 row: Validating local marketplace ⏎ Successfully updated marketplace: e8-scratch · Reloaded in 1 session
 (writesOf marketplace-update, user, directory)
-CLI reads settled in this window: plugins.env 1 ms · marketplaces.update 0 ms · marketplaces.list 743 ms · plugins.list 745 ms
+CLI reads settled in this window: plugins.env 0 ms · marketplaces.update 1 ms · marketplaces.list 720 ms · plugins.list 721 ms
 manifest: config/settings.json · config/plugins/known_marketplaces.json
 delta:
   changed config/plugins/known_marketplaces.json   [manifest]
 verdict: every configuration write inside the manifest
 --- listing: expanding Available (plugin list --json --available)
-CLI reads settled in this window: plugins.available 966 ms
+CLI reads settled in this window: plugins.available 917 ms
 expanding Available (plugin list --json --available): a listing (D-12: the catalogue caches and .claude.json bookkeeping only)
 delta: none
 verdict: no configuration write
@@ -192,24 +193,24 @@ verdict: no configuration write
 === 14-error · install nope@e8-scratch after its marketplace withdrew it: the engine’s words and code
 --- install: error
 sheet: 2.1.291 plugin install nope@e8-scratch --scope user --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/cache/e8-scratch/nope/<version>/ · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/cache/e8-scratch/<dependency>/
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/cache/e8-scratch/nope/<version>/ · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/cache/<any-marketplace>/<dependency>/
 sheet then: Reloads plugins in 1 running session
 row: Plugin "nope" not found in marketplace "e8-scratch". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`. · not_found   [drawn as a failure]
 (writesOf install, user, null)
-CLI reads settled in this window: plugins.env 1 ms · plugins.install 0 ms · marketplaces.list 817 ms · plugins.list 817 ms · plugins.available 1095 ms
-manifest: config/settings.json · config/plugins/installed_plugins.json · config/plugins/cache/e8-scratch/nope/<version>/ · config/plugins/cache/e8-scratch/<dependency>/
+CLI reads settled in this window: plugins.env 0 ms · plugins.install 0 ms · marketplaces.list 709 ms · plugins.list 711 ms · plugins.available 916 ms
+manifest: config/settings.json · config/plugins/installed_plugins.json · config/plugins/cache/e8-scratch/nope/<version>/ · config/plugins/cache/<any-marketplace>/<dependency>/
 delta: none
 verdict: every configuration write inside the manifest
 
 === 15-reinstall · Install e8-probe@e8-scratch again, so the marketplace is removed with a plugin still installed
 --- install: reinstall
 sheet: 2.1.291 plugin install e8-probe@e8-scratch --scope user --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/cache/e8-scratch/e8-probe/<version>/ · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/cache/e8-scratch/<dependency>/
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/cache/e8-scratch/e8-probe/<version>/ · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/cache/<any-marketplace>/<dependency>/
 sheet then: Reloads plugins in 1 running session
 row: Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected
 (writesOf install, user, null)
-CLI reads settled in this window: plugins.env 0 ms · plugins.install 0 ms · marketplaces.list 754 ms · plugins.list 791 ms · plugins.available 1008 ms
-manifest: config/settings.json · config/plugins/installed_plugins.json · config/plugins/cache/e8-scratch/e8-probe/<version>/ · config/plugins/cache/e8-scratch/<dependency>/
+CLI reads settled in this window: plugins.env 1 ms · plugins.install 0 ms · marketplaces.list 722 ms · plugins.list 731 ms · plugins.available 929 ms
+manifest: config/settings.json · config/plugins/installed_plugins.json · config/plugins/cache/e8-scratch/e8-probe/<version>/ · config/plugins/cache/<any-marketplace>/<dependency>/
 delta:
   changed config/plugins/cache/e8-scratch/e8-probe/0.2.0/   [manifest]
   changed config/plugins/installed_plugins.json   [manifest]
@@ -219,13 +220,13 @@ verdict: every configuration write inside the manifest
 === 16-remove-folder · Remove… e8-scratch with e8-probe installed: the sheet names the uninstall; the marketplace and the plugin leave; its result stays
 --- marketplace-remove: remove-folder
 sheet: 2.1.291 plugin marketplace remove e8-scratch --json
-sheet writes: /private/tmp/maws-e8-live-NJcPzs/claude-config/settings.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/known_marketplaces.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/cache/e8-scratch/ · /private/tmp/maws-e8-live-NJcPzs/claude-config/plugins/data/e8-probe@e8-scratch/
+sheet writes: /private/tmp/maws-e8-live-4qDqMp/claude-config/settings.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/known_marketplaces.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/installed_plugins.json · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/cache/e8-scratch/ · /private/tmp/maws-e8-live-4qDqMp/claude-config/plugins/data/e8-probe@e8-scratch/ · /private/tmp/maws-e8-live-4qDqMp/e8-repo/.claude/settings.json · /private/tmp/maws-e8-live-4qDqMp/e8-repo/.claude/settings.local.json
 sheet: Also uninstalls 1 plugin: e8-probe@e8-scratch (user)
 sheet then: Reloads plugins in 1 running session
 row: Successfully removed marketplace: e8-scratch ⏎ Also uninstalled 1 plugin from this marketplace: ⏎ e8-probe@e8-scratch ⏎ The removal also deletes their saved options, secrets and data where it can. ⏎ To use a plugin again, add the marketplace back and reinstall the plugin. · Reloaded in 1 session
 (writesOf marketplace-remove, user, directory, uninstalling e8-probe@e8-scratch)
-CLI reads settled in this window: plugins.env 1 ms · marketplaces.remove 1 ms · marketplaces.list 834 ms · plugins.list 840 ms · plugins.available 1097 ms
-manifest: config/settings.json · config/plugins/known_marketplaces.json · config/plugins/installed_plugins.json · config/plugins/cache/e8-scratch/ · config/plugins/data/e8-probe@e8-scratch/
+CLI reads settled in this window: plugins.env 1 ms · marketplaces.remove 0 ms · marketplaces.list 734 ms · plugins.list 735 ms · plugins.available 946 ms
+manifest: config/settings.json · config/plugins/known_marketplaces.json · config/plugins/installed_plugins.json · config/plugins/cache/e8-scratch/ · config/plugins/data/e8-probe@e8-scratch/ · project/.claude/settings.json · project/.claude/settings.local.json
 delta:
   changed config/plugins/cache/e8-scratch/e8-probe/0.2.0/   [manifest]
   changed config/plugins/installed_plugins.json   [manifest]
@@ -239,16 +240,16 @@ result: every step passed
 
 === owner-file check (A-15), run around the whole live run, outside the spec (Concrete Steps "Live run")
 command: python3 -c "import json;d=json.load(open('$HOME/.claude.json'));print(sorted(k for k in d.get('projects',{}) if k.startswith('/tmp') or k.startswith('/private/tmp')))"
-24 keys before; diff /tmp/e8-fix1-ownerfile-before.txt /tmp/e8-fix1-ownerfile-after.txt -> identical
+24 keys before; diff /tmp/e8-fix2-ownerfile-before.txt /tmp/e8-fix2-ownerfile-after.txt -> identical
 The run's config home was the scratch (CLAUDE_CONFIG_DIR above); nothing in the spec reads or writes ~/.claude or ~/.claude.json.
-before (/tmp/e8-fix1-ownerfile-before.txt):
+before (/tmp/e8-fix2-ownerfile-before.txt):
 ['/private/tmp', '/private/tmp/b2-ws', '/private/tmp/bench-browser', '/private/tmp/bgt2', '/private/tmp/bgtest', '/private/tmp/cc-capture', '/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad', '/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe', '/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest', '/private/tmp/claude-plugin-smoke-15', '/private/tmp/fold-live', '/private/tmp/fold-smoke', '/private/tmp/hooktest', '/private/tmp/maws-accept', '/private/tmp/maws-harness/a', '/private/tmp/md-test', '/private/tmp/oc-ws-b', '/private/tmp/sminos-probe', '/private/tmp/th-pad.Nnz1', '/private/tmp/th-pad.WI9D', '/private/tmp/th-test', '/private/tmp/th-tools.Ozkz', '/private/tmp/th-tools.VY2Y', '/private/tmp/wr-test']
-after (/tmp/e8-fix1-ownerfile-after.txt):
+after (/tmp/e8-fix2-ownerfile-after.txt):
 ['/private/tmp', '/private/tmp/b2-ws', '/private/tmp/bench-browser', '/private/tmp/bgt2', '/private/tmp/bgtest', '/private/tmp/cc-capture', '/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad', '/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe', '/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest', '/private/tmp/claude-plugin-smoke-15', '/private/tmp/fold-live', '/private/tmp/fold-smoke', '/private/tmp/hooktest', '/private/tmp/maws-accept', '/private/tmp/maws-harness/a', '/private/tmp/md-test', '/private/tmp/oc-ws-b', '/private/tmp/sminos-probe', '/private/tmp/th-pad.Nnz1', '/private/tmp/th-pad.WI9D', '/private/tmp/th-test', '/private/tmp/th-tools.Ozkz', '/private/tmp/th-tools.VY2Y', '/private/tmp/wr-test']
 
 === the evidence beside this file
 live-<NN>-<step>.png after each step; live-<NN>-<name>-sheet.png each confirm sheet before its confirm; live-06-panel-reload-mods.png; live-final.png; live-observations.json is the spec's observations.json.
 Each audit window closes only once no plugins.* / marketplaces.* invoke is in flight in main and none settled for 1.5 s, and fails on any read the bridge answered timeout (trackPluginReads, untilQuiet); "CLI reads settled in this window" lists them.
-This run follows the E8 whole-branch review's fixes: step 15 installs e8-probe again so step 16 removes e8-scratch with it installed (the engine uninstalls it; the sheet and the manifest name the uninstall).
+This run follows the E8 whole-branch review fixes (rounds one and two): step 15 installs e8-probe again so step 16 removes e8-scratch with it installed (the engine uninstalls it; the sheet and the manifest name the uninstall).
 Commands: the harness build of this head's product code (MAWS_HARNESS=1 electron-vite build, through pnpm e2e:widgets), then
   unset MAWS_E2E && MAWS_E8_LIVE=1 /tmp/maws-review/with-slot.sh pnpm exec playwright test e2e/plugins-live.spec.ts --reporter=line  ->  1 passed (1.3m)
