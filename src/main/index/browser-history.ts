@@ -2,7 +2,7 @@
 // (partition, url), written on a tab's committed http(s) navigation and read by the address field as it is typed.
 // History is a convenience, so an unavailable index (a newer app's file, opened read-only) drops visits and suggests
 // nothing rather than failing the navigation that fed it. The agent never reads this table in P1.
-import { BROWSER_SUGGESTIONS_MAX } from '@shared/ipc/schema/browser';
+import { BROWSER_SUGGESTIONS_MAX } from '@shared/browser/tab';
 import type { Db } from './db';
 
 export interface BrowserSuggestion {

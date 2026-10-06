@@ -28,13 +28,21 @@ export function validateBrowserUrl(input: string): BrowserUrlCheck {
 
 // A search engine URL: http or https, with `%s` where the search text goes.
 export function isSearchUrlTemplate(template: string): boolean {
-  return template.includes('%s') && validateBrowserUrl(template.replaceAll('%s', 'x')).ok;
+  return template.includes('%s') && !/\s/.test(template) && validateBrowserUrl(template.replaceAll('%s', 'x')).ok;
 }
 
 const IPV4 = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 const IPV6 = /^\[[0-9a-f:.]+\]$/i;
-const DOTTED_NAME = /^(?:[\p{L}\p{N}-]+\.)+[\p{L}\p{N}-]*\p{L}[\p{L}\p{N}-]*$/u; // the last label holds a letter, so `1.5` is no host
+const DOTTED_NAME = /^(?:[\p{L}\p{M}\p{N}-]+\.)+[\p{L}\p{M}\p{N}-]*\p{L}[\p{L}\p{M}\p{N}-]*$/u; // the last label holds a letter, so `1.5` is no host
 const PORT_AND_REST = /^(?::\d{1,5})?(?:[/?#]|$)/;
+const LABEL = /^[a-z0-9-]+$/;
+const PORT_THEN_REST = /^:\d{1,5}(?:[/?#]|$)/;
+// Schemes a browser knows, which stay schemes even before a number (`javascript:1`, `mailto:12345`); any other single
+// label followed by a port is a host (`devbox:8080`), as Chromium's URL fixer reads it.
+const KNOWN_SCHEMES: ReadonlySet<string> = new Set([
+  'about', 'blob', 'chrome', 'chrome-extension', 'data', 'devtools', 'file', 'filesystem', 'ftp', 'http', 'https', 'javascript',
+  'mailto', 'maws-deliverable', 'sms', 'tel', 'view-source', 'ws', 'wss',
+]);
 
 const isLoopback = (host: string) => host === 'localhost' || host.endsWith('.localhost') || host === '[::1]' || (IPV4.test(host) && host.startsWith('127.'));
 const isAddressHost = (host: string) => isLoopback(host) || IPV4.test(host) || IPV6.test(host) || DOTTED_NAME.test(host);
@@ -49,16 +57,21 @@ function leadingHost(text: string): string {
 }
 
 // Typed text, read as Chrome's omnibox would in the cases MAWS needs: text with a space is a search; a bare host
-// (`wikipedia.org`, `localhost:3000`, an IPv4 address, `[::1]`) gets `https://`, or `http://` for localhost and
-// loopback; an http or https URL stays one; any other scheme is refused; everything else is a search through
+// (`wikipedia.org`, `localhost:3000`, an IPv4 address, `[::1]`, a single label with a port such as `devbox:8080`) gets
+// `https://`, or `http://` for localhost and loopback; a bare host followed by anything but a port is a search; an
+// http or https URL stays one; any other scheme is refused; everything else is a search through
 // `searchUrl`, whose `%s` takes the encoded text.
 export function resolveAddress(text: string, searchUrl: string): ResolvedAddress {
   const typed = text.trim();
   const search = (): ResolvedAddress => ({ kind: 'search', url: searchUrl.replaceAll('%s', encodeURIComponent(typed)), query: typed });
   if (/\s/.test(typed)) return search();
 
-  const host = leadingHost(typed).toLowerCase();
-  if (host !== '' && isAddressHost(host) && PORT_AND_REST.test(typed.slice(host.length))) {
+  const typedHost = leadingHost(typed);
+  const host = typedHost.toLowerCase(); // can be longer than typed (`İ`), so the rest is cut by the typed length
+  const rest = typed.slice(typedHost.length);
+  const labelWithPort = LABEL.test(host) && !KNOWN_SCHEMES.has(host) && PORT_THEN_REST.test(rest);
+  if (host !== '' && (isAddressHost(host) || labelWithPort)) {
+    if (!PORT_AND_REST.test(rest)) return search(); // `wikipedia.org:abc`: no port, and no scheme either
     const checked = validateBrowserUrl(`${isLoopback(host) ? 'http' : 'https'}://${typed}`);
     return checked.ok ? { kind: 'url', url: checked.url } : search();
   }

@@ -32,6 +32,7 @@ describe('BrowserHistoryStore', () => {
     index = new Index(path);
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     index.close();
     dir.dispose();
   });
@@ -125,7 +126,7 @@ describe('BrowserHistoryStore', () => {
     expect(index.readOnly).toBe(true);
     expect(() => index.browserHistory.visit(P, 'https://a.example/', { typed: true, at: 1 })).not.toThrow();
     expect(() => index.browserHistory.setTitle(P, 'https://a.example/', 'A')).not.toThrow();
+    expect(() => index.browserHistory.removePartition(P)).not.toThrow();
     expect(index.browserHistory.suggest(P, 'a')).toEqual([]);
-    vi.restoreAllMocks();
   });
 });

@@ -5,6 +5,8 @@ import {
   BROWSER_SETTINGS_DEFAULTS,
   BROWSER_TAB_ID,
   BROWSER_TABS_MEMORY_MAX_MIB,
+  BROWSER_PLACEHOLDER_MAX_BYTES,
+  BROWSER_SUGGESTIONS_MAX,
   BrowserPartitionSchema,
   BrowserTabSchema,
   DEFAULT_PARTITION,
@@ -68,6 +70,8 @@ describe('BrowserTab (E4a, the cross-child model)', () => {
     expect(BROWSER_HANDBACK_IDLE_MS).toBe(3000);
     expect(BROWSER_LOADED_TABS_MAX).toBe(12);
     expect(BROWSER_TABS_MEMORY_MAX_MIB).toBe(2048);
+    expect(BROWSER_PLACEHOLDER_MAX_BYTES).toBe(400 * 1024);
+    expect(BROWSER_SUGGESTIONS_MAX).toBe(8);
     // X15's browser defaults, read from here until settings 11 lands (E4a Task 1.3, deferred to Task 3.5)
     expect(BROWSER_SETTINGS_DEFAULTS).toEqual({ profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app' });
   });

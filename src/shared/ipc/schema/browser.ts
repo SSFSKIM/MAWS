@@ -5,7 +5,14 @@
 // page in a view can never invoke any of these (the router's `isAppSender`).
 import * as z from 'zod';
 import { AppSessionIdSchema } from '../../graph/ids';
-import { BrowserControlSchema, BrowserPartitionSchema, BrowserTabIdSchema, BrowserTabSchema } from '../../browser/tab';
+import {
+  BROWSER_PLACEHOLDER_MAX_BYTES,
+  BROWSER_SUGGESTIONS_MAX,
+  BrowserControlSchema,
+  BrowserPartitionSchema,
+  BrowserTabIdSchema,
+  BrowserTabSchema,
+} from '../../browser/tab';
 import { validateBrowserUrl } from '../../browser/url';
 import type { CommandSpec } from './common';
 
@@ -14,11 +21,8 @@ import type { CommandSpec } from './common';
 // zod's `z.url()`, which trims its input (a transform) and would make the schema and main's check two rules.
 export const BrowserUrlSchema = z.string().refine((url) => !/\s/.test(url) && validateBrowserUrl(url).ok, { message: 'not an http or https URL' });
 
-export const BROWSER_PLACEHOLDER_MAX_BYTES = 400 * 1024; // the cover's JPEG; larger, and main sends null
 const PLACEHOLDER_PREFIX = 'data:image/jpeg;base64,';
 const PLACEHOLDER_MAX_LENGTH = PLACEHOLDER_PREFIX.length + Math.ceil(BROWSER_PLACEHOLDER_MAX_BYTES / 3) * 4;
-
-export const BROWSER_SUGGESTIONS_MAX = 8; // the address field's history rows
 
 // A pane's rect in CSS px of the window's content area, rounded by the renderer; a pane under 1 px sends null instead.
 const PaneRectSchema = z.strictObject({ x: z.number().int(), y: z.number().int(), width: z.number().int().min(1), height: z.number().int().min(1) });

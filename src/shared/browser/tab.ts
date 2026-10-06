@@ -28,6 +28,8 @@ export const BROWSER_HANDBACK_IDLE_MS = 3000; // E4c: the human's control lapses
 export const BROWSER_LOADED_TABS_MAX = 12; // loaded tabs across the app (Design §2; Decision Log 6)
 export const BROWSER_TABS_MEMORY_MAX_MIB = 2048; // the soft cap on loaded tabs' sampled working sets
 export const BROWSER_DENIED_MAX = 8; // a document's denied permission requests kept for the banner
+export const BROWSER_PLACEHOLDER_MAX_BYTES = 400 * 1024; // the cover's JPEG; larger, and main sends null
+export const BROWSER_SUGGESTIONS_MAX = 8; // the address field's history rows
 
 // X15's `browser` settings while settings 11 waits for E10 (Decision Log 29 and 33): the values `SETTINGS_DEFAULTS_V11`
 // will carry, read from here until Task 3.5 swaps every reader for `settings.browser`.

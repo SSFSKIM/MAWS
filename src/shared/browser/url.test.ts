@@ -63,6 +63,25 @@ describe('resolveAddress (what the address field does with typed text)', () => {
     expect(resolveAddress('about:blank', SEARCH)).toEqual({ kind: 'refused', scheme: 'about:' });
     expect(resolveAddress('data:text/html,x', SEARCH)).toEqual({ kind: 'refused', scheme: 'data:' });
     expect(resolveAddress('mailto:e4a@example.test', SEARCH)).toEqual({ kind: 'refused', scheme: 'mailto:' });
+    expect(resolveAddress('mailto:12345', SEARCH)).toEqual({ kind: 'refused', scheme: 'mailto:' }); // a known scheme is never a host
+    expect(resolveAddress('javascript:12/x', SEARCH)).toEqual({ kind: 'refused', scheme: 'javascript:' });
+  });
+
+  it('reads a single label with a numeric port as a host, as Chromium’s fixer does for an unknown scheme', () => {
+    expect(resolveAddress('devbox:8080', SEARCH)).toEqual({ kind: 'url', url: 'https://devbox:8080/' });
+    expect(resolveAddress('devbox:8080/x?y#z', SEARCH)).toEqual({ kind: 'url', url: 'https://devbox:8080/x?y#z' });
+    expect(resolveAddress('DevBox:8080', SEARCH)).toEqual({ kind: 'url', url: 'https://devbox:8080/' });
+    expect(resolveAddress('devbox:abc', SEARCH)).toEqual({ kind: 'refused', scheme: 'devbox:' }); // no port: a scheme
+  });
+
+  it('searches a dotted host followed by something that is no port, never refusing it', () => {
+    expect(resolveAddress('wikipedia.org:abc', SEARCH)).toMatchObject({ kind: 'search', query: 'wikipedia.org:abc' });
+    expect(resolveAddress('127.0.0.1:x', SEARCH)).toMatchObject({ kind: 'search', query: '127.0.0.1:x' });
+  });
+
+  it('keeps the typed path when lowercasing the host changes its length', () => {
+    expect(resolveAddress('İstanbul.com/x', SEARCH)).toEqual({ kind: 'url', url: `${new URL('https://İstanbul.com/x').href}` });
+    expect(resolveAddress('İstanbul.com/x', SEARCH)).toMatchObject({ url: expect.stringMatching(/\/x$/) });
   });
 });
 
@@ -92,4 +111,7 @@ it('isSearchUrlTemplate: an http or https URL carrying %s', () => {
   expect(isSearchUrlTemplate('https://www.google.com/search?q=')).toBe(false);
   expect(isSearchUrlTemplate('ftp://x/%s')).toBe(false);
   expect(isSearchUrlTemplate('%s')).toBe(false);
+  // whitespace would yield search URLs the browser.* schema refuses
+  expect(isSearchUrlTemplate('https://a.example/search?q=%s&x=a b')).toBe(false);
+  expect(isSearchUrlTemplate(' https://a.example/?q=%s')).toBe(false);
 });
