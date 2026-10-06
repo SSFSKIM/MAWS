@@ -1074,6 +1074,11 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('host.configure', { idleExitMs: null }).ok).toBe(true);
       expect(validateCommandInput('host.configure', { idleExitMs: 0 }).ok).toBe(false);
       expect(validateCommandInput('host.configure', { idleExitMs: 1.5 }).ok).toBe(false);
+      // settings' 1440 minutes at most: past 2^31 - 1 ms Node clamps a timer to 1 ms and both idle clocks would spin
+      expect(validateCommandInput('host.configure', { idleExitMs: 1440 * 60_000 }).ok).toBe(true);
+      expect(validateCommandInput('host.configure', { idleExitMs: 1440 * 60_000 + 1 }).ok).toBe(false);
+      expect(validateCommandInput('host.configure', { idleExitMs: 2 ** 31 }).ok).toBe(false);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, idleExitMs: 1440 * 60_000 + 1 }).ok).toBe(false);
       expect(validateCommandInput('host.stopAll', { graceMs: 5000 }).ok).toBe(true);
       expect(validateCommandInput('host.stopAll', { graceMs: -1 }).ok).toBe(false);
       expect(validateCommandOutput('host.stopAll', { stopped: 2, forced: 0 }).ok).toBe(true);

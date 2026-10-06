@@ -259,17 +259,24 @@ describe('host.stopAll', () => {
     h.launch();
     h.launch();
     h.supervision.armExitWhenIdle(true); // the rows' exits during the stop would otherwise exit first
-    const answered = h.call('host.stopAll', { graceMs: 5000 });
-    let answer: unknown = null;
-    void answered.then((value) => (answer = value));
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(answer).toEqual({ stopped: 2, forced: 0 });
+    expect(await h.call('host.stopAll', { graceMs: 5000 })).toEqual({ stopped: 2, forced: 0 });
     expect(h.exits).toEqual([]); // the runtime posts the answer before the exit runs
     expect(h.shutdown).toHaveBeenCalledExactlyOnceWith(5000);
     await vi.advanceTimersByTimeAsync(0);
     expect(h.exits).toEqual(['stopAll']);
+  });
+
+  it('detached: a stop-all whose shutdown fails still exits, after its error answer, with the failure logged', async () => {
+    const h = harness();
+    h.start();
+    h.supervision.clientChanged(true);
+    h.launch();
+    h.shutdown.mockRejectedValueOnce(new Error('ladder broke'));
+    await expect(h.call('host.stopAll', { graceMs: 0 })).rejects.toThrow('ladder broke');
+    expect(h.exits).toEqual([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.exits).toEqual(['stopAll']);
+    expect(h.lines).toContainEqual(expect.stringContaining('stop all failed: ladder broke'));
   });
 
   it('utility: answers engine.shutdown’s body and exits nothing (main forks a fresh host)', async () => {

@@ -178,7 +178,9 @@ describe('the engine host’s connect burst (E10)', () => {
 // entry composes them: with no client, a replay row that holds nothing is released as `idle` after the idle time, and
 // the supervisor then idles out; its status follows each step.
 describe('the supervisor’s clocks over the engine host (E10)', () => {
-  it('releases an idle kept row as idle with no client, then exits after the idle time', async () => {
+  // Real timers under a loaded suite: each clock is asserted by a lower bound (it never fires early) and waited for in a
+  // window far above its time, so a slow machine delays the test rather than failing it.
+  it('releases an idle kept row as idle with no client, then exits after the idle time', { timeout: 30_000 }, async () => {
     const IDLE_MS = 200;
     const host = engineHost();
     const identity = { pid: process.pid, startedAt: '2026-10-06T10:00:00.000Z', buildId: 'b', protocol: 1, wire: 'w', socketPath: '/s', logPath: '/l' };
@@ -194,20 +196,20 @@ describe('the supervisor’s clocks over the engine host (E10)', () => {
     supervision.clientChanged(true);
     await commands.get('host.configure')!({ idleExitMs: IDLE_MS }); // main's push
     await host.call('session.launch', { spec: spec('app-idle') });
-    await until(() => host.statuses('app-idle').some((s) => s.process === 'ready'), 'ready');
-    await new Promise((r) => setTimeout(r, 3 * IDLE_MS));
+    await until(() => host.statuses('app-idle').some((s) => s.process === 'ready'), 'ready', 10_000);
+    await new Promise((r) => setTimeout(r, 3 * IDLE_MS)); // past the idle time, however late the timer runs
     expect(host.ipc.table.get('app-idle' as AppSessionId)!.lifecycle).toBe('ready'); // a client is connected: kept
     expect(statuses.at(-1)).toMatchObject({ liveSessions: 1, rows: 1, idleExitMs: IDLE_MS, idleExitAt: null });
 
     const left = Date.now();
     supervision.clientChanged(false); // the app quits, keeping its session
-    await until(() => host.ipc.table.get('app-idle' as AppSessionId)!.lifecycle === 'exited', 'the idle release', 5 * IDLE_MS);
+    await until(() => host.ipc.table.get('app-idle' as AppSessionId)!.lifecycle === 'exited', 'the idle release', 10_000);
     const exited = host.ipc.table.get('app-idle' as AppSessionId)!.status();
     expect(exited.exit).toMatchObject({ reason: 'idle', release: null });
     expect(Date.parse(exited.exit!.at) - left).toBeGreaterThanOrEqual(IDLE_MS - 5);
-    expect(exits).toEqual([]);
-    expect(statuses.at(-1)).toMatchObject({ liveSessions: 0, rows: 1, idleExitAt: expect.any(String) });
-    await until(() => exits.length === 1, 'the idle exit', 5 * IDLE_MS);
+    // the clock armed at the release (the exit itself is checked by its lower bound below, not by its absence here)
+    expect(statuses).toContainEqual(expect.objectContaining({ liveSessions: 0, rows: 1, idleExitAt: expect.any(String) }));
+    await until(() => exits.length === 1, 'the idle exit', 10_000);
     expect(exits[0]!.reason).toBe('idle');
     expect(exits[0]!.at - Date.parse(exited.exit!.at)).toBeGreaterThanOrEqual(IDLE_MS - 5);
   });

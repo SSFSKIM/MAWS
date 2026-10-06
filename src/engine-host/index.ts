@@ -82,22 +82,27 @@ if (mode === 'utility') {
   runHost(HOST_VERSION, register);
 } else {
   const dir = supervisorDir!;
+  // The entry runs the register (createHostRuntime) before it listens, so every call below finds both; one that does
+  // not is a broken ordering and fails loudly rather than doing nothing.
+  const served = (): { ipc: EngineIpc; supervision: Supervision } => {
+    if (!ipc || !supervision) throw new Error('the detached entry called into the engine host before its register ran');
+    return { ipc, supervision };
+  };
   runDetached(HOST_VERSION, register, {
     dir,
     modulePath: entryFile,
     log: openSupervisorLog(dir),
     counts: () => {
-      const rows = ipc?.table.list() ?? [];
-      return { liveSessions: rows.filter((row) => row.lifecycle !== 'exited').length, rows: rows.length };
+      const { liveSessions, rows } = served().supervision.status(); // the status's live-row rule, in one place
+      return { liveSessions, rows };
     },
     shutdown: async (graceMs) => {
-      await ipc?.shutdown(graceMs); // engine.shutdown's body
+      await served().ipc.shutdown(graceMs); // engine.shutdown's body
     },
-    // the register has run by the time the entry serves, so the Supervision exists for every call
     life: {
-      started: (identity, exit) => supervision?.started(identity, exit),
-      clientChanged: (connected) => supervision?.clientChanged(connected),
-      exitWhenIdle: () => supervision?.armExitWhenIdle(true),
+      started: (identity, exit) => served().supervision.started(identity, exit),
+      clientChanged: (connected) => served().supervision.clientChanged(connected),
+      exitWhenIdle: () => served().supervision.armExitWhenIdle(true),
     },
   });
 }

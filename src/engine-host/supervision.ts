@@ -73,10 +73,16 @@ export class Supervision {
       const exits = this.exit !== null && this.leaving === null;
       if (exits) this.leaving = 'stopAll'; // no other exit may close the client before the answer is written
       this.deps.log(`stop all asked (grace ${graceMs} ms)${exits ? '; the supervisor exits after answering' : ''}`);
-      const result = await this.deps.shutdown(graceMs);
-      // after the runtime has posted the answer: it does so in the microtasks that follow this return
-      if (exits) setImmediate(() => this.exit?.('stopAll'));
-      return result;
+      try {
+        return await this.deps.shutdown(graceMs);
+      } catch (error) {
+        this.deps.log(`stop all failed: ${error instanceof Error ? error.message : String(error)}${exits ? '; the supervisor exits anyway' : ''}`);
+        throw error;
+      } finally {
+        // every stop-all ends a detached supervisor, whose admission it closed for good; after the runtime has posted the
+        // answer (or the error), which it does in the microtasks that follow this return
+        if (exits) setImmediate(() => this.exit?.('stopAll'));
+      }
     });
     client.onConnect(() => this.publish(true));
   }
