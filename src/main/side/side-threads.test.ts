@@ -30,7 +30,6 @@ describe('side-thread rows in the parent’s stream', () => {
     child = launch({ kind: 'side-thread', parentAppSessionId: parent.appId, parentEngineSessionId: parent.engineSessionId, anchor: ANCHOR, openedBy: 'comment' });
     emitted = [];
     listener = null;
-    let at = 0;
     stop = startSideThreads({
       onEvent: <N extends EventName>(name: N, fn: (payload: EventPayload<N>) => void) => {
         expect(name).toBe('session.eventBatch');
@@ -45,7 +44,6 @@ describe('side-thread rows in the parent’s stream', () => {
       },
       sessions: index.sessions,
       sideThreads: index.sideThreads,
-      now: () => `2026-10-06T12:00:0${at++}.000Z`,
     });
   });
   afterEach(() => {
@@ -152,5 +150,10 @@ describe('side-thread rows in the parent’s stream', () => {
     const early = `${'a'.repeat(100)}. ${'b'.repeat(500)}`; // the only sentence end is before 200
     expect(summaryText(early)).toBe(`${early.slice(0, 399)}…`);
     expect(summaryText(early)).toHaveLength(400);
+    // a dot inside a token is no sentence end: a path, a number, an abbreviation
+    const tokens = `${'a'.repeat(210)} see src/main/index.ts, 3.14 and e.g. this${'b'.repeat(300)}`;
+    expect(summaryText(tokens)).toBe(`${tokens.slice(0, 399)}…`);
+    const after = `${'a'.repeat(210)} in src/main/index.ts. Then ${'b'.repeat(300)}`;
+    expect(summaryText(after)).toBe(`${'a'.repeat(210)} in src/main/index.ts.`);
   });
 });

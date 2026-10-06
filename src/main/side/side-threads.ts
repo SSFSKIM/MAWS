@@ -19,12 +19,16 @@ const SUMMARY_MAX = 400;
 const SUMMARY_CUT_FROM = 200;
 
 // A turn's result text as the row shows it: whole up to 400 characters; longer, cut at the first sentence end (kept)
-// or line end (dropped) past 200, else at 400 with an ellipsis.
+// or line end (dropped) past 200, else at 400 with an ellipsis. A sentence end is `.`, `!` or `?` before whitespace or
+// the end, and not an abbreviation's dot (`e.g.`), so a path, a number or an abbreviation is never cut mid-token.
+const SENTENCE_OR_LINE_END = /(?<!\.\w)[.!?](?=\s|$)|\n/g;
+
 export function summaryText(text: string): string {
   const trimmed = text.trim();
   if (trimmed.length <= SUMMARY_MAX) return trimmed;
-  const end = /[.!?\n]/.exec(trimmed.slice(SUMMARY_CUT_FROM, SUMMARY_MAX));
-  if (end !== null) return trimmed.slice(0, SUMMARY_CUT_FROM + end.index + (end[0] === '\n' ? 0 : 1)).trimEnd();
+  SENTENCE_OR_LINE_END.lastIndex = SUMMARY_CUT_FROM;
+  const end = SENTENCE_OR_LINE_END.exec(trimmed);
+  if (end !== null && end.index < SUMMARY_MAX) return trimmed.slice(0, end.index + (end[0] === '\n' ? 0 : 1)).trimEnd();
   return `${trimmed.slice(0, SUMMARY_MAX - 1)}…`;
 }
 
@@ -88,7 +92,6 @@ const counts = (event: SessionEvent): event is TurnEnded =>
 export interface SideThreadsDeps extends Stores {
   onEvent: HostEvents;
   emit: Emit;
-  now?: () => string;
   log?: (message: string) => void;
 }
 

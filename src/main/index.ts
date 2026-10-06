@@ -151,9 +151,11 @@ void startWithProfileLock(app, () => {
     env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource,
     // E3: a parent's side-thread rows, re-synthesised from the index (none while the index is unavailable)
     appEventsExtra: (appSessionId) => {
+      if (index.unavailable !== null) return [];
       try {
         return sideThreadEvents(index, appSessionId);
-      } catch {
+      } catch (error) {
+        console.warn(`[side] ${appSessionId}: the side-thread rows could not be read: ${error instanceof Error ? error.message : String(error)}`);
         return [];
       }
     },
