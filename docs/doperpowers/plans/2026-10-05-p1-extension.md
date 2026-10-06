@@ -147,7 +147,7 @@ The spine (A) first, with S3. Deliverables (B) after A; anchored messages (C) af
 | P-12 | Source control: stage, unstage, discard and commit run through MAWS's git runner; push and open-PR run `git` and `gh` under the user's login-shell environment with its credential helpers, after a confirm that names the remote and branch. | Owner, 2026-10-05. MAWS's runner disables transport and credential helpers by design (`src/main/git/runner.ts:52-62`); the alternatives were local-only or everything through the agent. |
 | P-13 | The `ask` sheet is a general batch-question surface, not the fixed list of the vault's example; the design-system input waits for the editors composite, where the design system is "what's extracted from existing projects or artifacts or what user and agent build together". | Owner, 2026-10-05: "question sheet was example for 'batch question through sheet' … real design system object arrives with the editors." |
 | P-14 | The panel and reference taste sitting carried from P0 (C8-S) happens once, at the end, in the finish child, over P0's panels and P1's new surfaces together. | Owner, 2026-10-05. |
-| A-9 | The cut: two spike children (E0a engine probes, E0b Electron probes), nine plan children (E1 tool server, E2 deliverables, E3 anchored messages, E5 editor, E6 source control, E7 orchestration, E8 plugins, E9 voice, E10 supervisor), one decomposing child (E4 browser) and a finish child (E11). | Each child has one state owner and one verification strategy; §10 names the seams. Alternatives rejected: one child for the editor and source control (different state owners: files versus git with credentials), one plan for the browser (three state owners: the view and import, comment mode, the tools). |
+| A-9 | The cut: two spike children (E0a engine probes, E0b Electron probes), nine plan children (E1 tool server, E2 deliverables, E3 anchored messages, E5 editor, E6 source control, E7 orchestration, E8 plugins, E9 voice, E10 supervisor), one decomposing child (E4 browser) and a finish child (E11). | Each child has one state owner and one verification strategy; §9 names the seams. Alternatives rejected: one child for the editor and source control (different state owners: files versus git with credentials), one plan for the browser (three state owners: the view and import, comment mode, the tools). |
 | A-10 | The in-app browser (E4) is a decomposing run at its dispatch, not cut today. | Its boundaries depend on E0b's findings (what imports, how CDP attaches); cutting it now would go stale. |
 | A-11 | An interface ledger opens when the second wave is dispatched, since E2, E3, E4 and E7 all extend X9, X1, the TabRef kinds and the settings and index versions before any of them lands. | The decomposing skill's rule for siblings extending one contract; P0's wave-2 ledger is the precedent. |
 | A-12 | Spike findings are written as `.txt` under `spikes/` and folded into this document by the architect. | Workers never create `.md` files (standing rule); the architect is this document's one writer. |
@@ -158,7 +158,7 @@ The spine (A) first, with S3. Deliverables (B) after A; anchored messages (C) af
 
 The sections below extend the approved design into the composite spec for P1: the grounding against the code, the cut into children, the contracts that cross them, the ordering, and the record that tracks the unit to its retrospective. Decisions P-1 to P-14 and the design's binding marks are binding everywhere; the grades on the rest are given per child. One writer: the architect's session; children record residue in their own documents and the architect folds it in.
 
-## 9. Grounding baseline (2026-10-05, master 06fa09ac)
+## 8. Grounding baseline (2026-10-05, master 06fa09ac)
 
 What exists, read-only, that the children build on or replace.
 
@@ -173,7 +173,7 @@ What exists, read-only, that the children build on or replace.
 - **Absent.** Browser (no `WebContentsView`, no debugger use; Playwright only in e2e), voice (the toolbar comment "no mic until dictation exists"), a preview-format declaration for AskUserQuestion (the card renders `preview` through a scriptless sandboxed iframe, `request-card/variants/Question.tsx:76-99`).
 - **Settings.** Version 8 (`settings/defaults.ts:10`), migrations a `switch` chain `fromV4 … fromV7`; new settings need version 9 and `fromV8`. The index has its own ordered migrations (`src/main/index/migrations.ts`).
 
-## 10. Children
+## 9. Children
 
 ### E0a: Engine probes — spike (findings, never a merge)
 
@@ -305,7 +305,7 @@ What exists, read-only, that the children build on or replace.
 - **Required:** required.
 - **Status:** not-dispatched, deliberately late.
 
-## 11. Cross-child contracts
+## 10. Cross-child contracts
 
 - **X9 — the `maws` tool server** [owner E1; extended by E2 (artifact tools) and E4 (browser tools) through the interface ledger; binds every child that adds a tool]. The server name `maws`; tool names `send_file`, `ask`, `show_pane`, `artifact_create`, `artifact_update`, `artifact_list`, `artifact_screenshot`, `browser_tabs`, `browser_navigate`, `browser_snapshot`, `browser_act`, `browser_eval`, `browser_screenshot`; each tool's JSON schema, result shape and fallback description; the X1 event each call emits and the row it draws; the rule that a result returns when the surface answers or at once for fire-and-forget tools; permissions as any MCP tool. Written to outlive this unit: the owner's skills target `mcp__maws__*`; a change is a dated Decision Log entry here and, at closing, a charter contract.
 - **X10 — the anchor** [owner E3; produced by E2, E4, E5, E6]. `{ kind: 'browser-element' | 'artifact-element' | 'file-line' | 'pr-line' | 'none', locator: string, label: string, pageUrl?: string, path?: string, line?: number, screenshot?: { path, width, height } }` plus the serialisation the agent receives (text and an image block). The shared comment composer and its destination control are E3's component; producers call it, never re-implement it.
@@ -316,7 +316,7 @@ What exists, read-only, that the children build on or replace.
 - **X15 — version allocation** [owner: the architect through the ledger]. Settings version 9 and up and index migrations are allocated in the ledger in landing order; a child never picks its own number.
 - **X5** (the charter's panel-tool contract) is consumed unchanged by E1, E2, E3, E4, E6, E7.
 
-## 12. Ordering and dependency map
+## 11. Ordering and dependency map
 
 - **Wave 1, dispatchable now:** E0a, E0b (spikes, small); E1 (after E0a's fixtures, which the E1 executor may itself record first as its M1 if E0a has not finished); E8; E9. E5 and E6 can also start now; they touch different files. At most four workers at once (A-13), so the order within the wave is E0a, E0b, E8, E9, then E1 as a spike finishes, then E5, E6.
 - **Wave 2, after E1 lands:** E2, E3 (after E0a), E7. The interface ledger `docs/doperpowers/plans/2026-10-05-p1-interface-ledger.md` opens at this dispatch (A-11): every X9 tool, X1 event, TabRef kind, settings and index version added by a child in flight, with its owner, consumers and landing order.
@@ -324,7 +324,7 @@ What exists, read-only, that the children build on or replace.
 - **Wave 4:** E11.
 - Forced sequences: E0a → E1 → E2; E0a → E3 → E4; E0b → E4; E1 → E10; everything → E11. Everything else is parallel.
 
-## 13. Risks and mitigations
+## 12. Risks and mitigations
 
 - **Protocol churn.** The engine ships weekly and the installed version already exceeds the spec library; `fork_conversation` and `side_question` have no published schema. Mitigation: E0a records fixtures on the installed version; a child re-probes before it binds; the conformance suite admits new frames explicitly.
 - **Egress from sandboxed content.** HTML artifacts and PDFs run in frames. Mitigation: no network by default, no top-level navigation, downloads blocked, a content-security policy per frame (E2 G3); declared connectors are a later slice.
@@ -334,7 +334,7 @@ What exists, read-only, that the children build on or replace.
 - **Load on the owner's machine.** Mitigation: A-13; the e2e load rule; heavy runs through the slot script.
 - **Terminal interop of new rows.** Deliveries, asks and side threads are MAWS rows a terminal never shows. Mitigation: each is also a plain tool call in the JSONL, so the terminal shows the call and its result text; the disk path draws the same rows from those calls (E2 G5, E3 G5).
 
-## 14. Tracking map
+## 13. Tracking map
 
 | Child | Grain | Status | Ledger / artifact |
 |---|---|---|---|
@@ -352,7 +352,7 @@ What exists, read-only, that the children build on or replace.
 | E10 Detachable supervisor | plan | not-dispatched, blocked-by E1 | execution document at dispatch |
 | E11 Finish | plan | not-dispatched, deliberately late | execution document at dispatch |
 
-## 15. Surprises and discoveries
+## 14. Surprises and discoveries
 
 - 2026-10-05, grounding: the engine's SendUserFile and Artifact tools are both gated away from MAWS's launch (Desktop entrypoints; a first-party provider), which turned "integrate the engine's tools" into "build MAWS's own" before the owner ruled the same for product reasons (P-4).
 - 2026-10-05, grounding: Electron ships no password manager or autofill, so Codex's "import saved passwords" implies a consumer MAWS does not have; E0b measures what one would take.
@@ -360,11 +360,11 @@ What exists, read-only, that the children build on or replace.
 - 2026-10-05, grounding: MAWS's git runner forbids transport and credential helpers by design; remote mutations need a second runner under the shell environment (P-12).
 - 2026-10-05, grounding: fork lineage is not persisted on the session record today; side threads need an index migration (X11).
 
-## 16. Outcomes and retrospective
+## 15. Outcomes and retrospective
 
 Pending — written when the unit closes. Closing is a recomposition check against §2 as written, then the retrospective.
 
-## 17. References
+## 16. References
 
 - Charter: §1, §3 P1 and P2, D-5, D-9, D-12, D-16, D-20, §16, §19 entries of 2026-10-05, §20.
 - Reference inventories (2026-10-05, static source): `docs/doperpowers/evidence/extension-2026-10-05/codex-extensions.txt` (browser and annotations §1, MCP apps §3, plugins §4, PRs §5, automations §6, artifacts and Spaces §7), `claude-desktop-extensions.txt` (side chats §1, delivered files §2, artifacts §3, Launch §4, PRs §5, routines §6, plugins §8, voice §11a).
