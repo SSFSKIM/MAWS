@@ -83,7 +83,7 @@ function useSessionOf(directory: string): AppSessionId | null {
 function PrRow({ appSessionId, directory, root, branch }: { appSessionId: AppSessionId; directory: string; root: string; branch: string }) {
   // The queries the tool's header shares (tools/scm/queries.ts): the bounded poll, the rule for asking, and the re-read
   // when the head or refs move.
-  const scm = useScmStatus(appSessionId);
+  const scm = useScmStatus(appSessionId, root);
   const pr = usePrState(appSessionId, { root, branch, scm: scm.data });
   const [refreshing, setRefreshing] = useState(false);
 

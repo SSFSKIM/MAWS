@@ -4,7 +4,7 @@
 //
 // `scm.status`: the checkout's trust, remotes and gh state. `scm.pr.state`: the branch's PR and its checks, polled every
 // 2 minutes only while a surface shows it and the window is shown, asked only for a branch of a trusted checkout with a
-// remote, and asked again when the repository's head or refs move (a push from anywhere, a new upstream).
+// remote. Both are asked again when the repository's head or refs move (a push from anywhere, a new remote or upstream).
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
@@ -19,8 +19,23 @@ export const prStateKey = (appSessionId: AppSessionId) => [...PR_STATE_QUERIES, 
 
 export const PR_STATE_POLL = { staleTime: 60_000, refetchInterval: 120_000, refetchIntervalInBackground: false } as const; // main keeps an answer 60 s
 
-export function useScmStatus(appSessionId: AppSessionId) {
+// The checkout's `scm.status`, read again when its repository's head or refs move (`root`, null until the status names
+// it): `git remote add`, a remote's URL or an upstream set by a push change the remotes and defaults it answers (the
+// watcher reads `config` as refs).
+export function useScmStatus(appSessionId: AppSessionId, root: string | null) {
+  useReReadOnHeadOrRefs(root, appSessionId, scmStatusKey);
   return useCommand('scm.status', { appSessionId });
+}
+
+// The session's query under `keyOf` is read again when C4's watcher says the repository at `root` moved its head or
+// refs.
+function useReReadOnHeadOrRefs(root: string | null, appSessionId: AppSessionId, keyOf: (appSessionId: AppSessionId) => readonly unknown[]): void {
+  useEffect(() => {
+    if (root === null) return;
+    return ipc.on('git.changed', (event) => {
+      if (event.repoRoot === root && (event.reason === 'head' || event.reason === 'refs')) void queryClient.invalidateQueries({ queryKey: keyOf(appSessionId) });
+    });
+  }, [root, appSessionId, keyOf]);
 }
 
 // Something to ask gh about: a branch of a trusted checkout with a remote.
@@ -35,13 +50,7 @@ function prStateEnabled(branch: string | null, scm: ScmStatus | undefined): bool
 // answer, and nothing on a detached head or once trust or the last remote is gone. An answer naming no branch (main
 // found the checkout untrusted, not a repository or detached) carries no PR and stands: the row reads trust from it.
 export function usePrState(appSessionId: AppSessionId, { root, branch, scm }: { root: string; branch: string | null; scm: ScmStatus | undefined }) {
-  useEffect(
-    () =>
-      ipc.on('git.changed', (event) => {
-        if (event.repoRoot === root && (event.reason === 'head' || event.reason === 'refs')) void queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId) });
-      }),
-    [root, appSessionId],
-  );
+  useReReadOnHeadOrRefs(root, appSessionId, prStateKey);
   const enabled = prStateEnabled(branch, scm);
   const query = useCommand('scm.pr.state', { appSessionId, refresh: false }, { ...PR_STATE_POLL, enabled });
   const answer = query.data;

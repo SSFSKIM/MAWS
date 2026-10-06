@@ -49,7 +49,7 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
   const entry = useGit((s) => s.entries.get(directory));
   const status = entry?.status ?? null;
   const gitError = status === null ? (entry?.error ?? null) : null;
-  const scm = useScmStatus(appSessionId);
+  const scm = useScmStatus(appSessionId, status?.repoRoot ?? null);
   // Known from `scm.status`, or null while it is read; a failed read is said and gates the actions as untrusted would.
   const trusted = scm.data ? scm.data.trusted : scm.isError ? false : null;
   // Trust is recorded in main by a session's setup (C10's Trust and start, the `trusting` phase), which the renderer

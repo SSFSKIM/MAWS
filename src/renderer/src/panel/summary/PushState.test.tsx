@@ -156,6 +156,21 @@ describe('push state row shows PR state, install and sign-in states and opens th
     expect(fake.invoked('scm.pr.state')).toHaveLength(2);
   });
 
+  it('reads scm.status again when the branch head or refs move in the repository (a new remote, a new upstream), not for a worktree edit or another root', async () => {
+    await mount();
+    expect(fake.invoked('scm.status')).toHaveLength(1);
+    act(() => fake.event('git.changed', { repoRoot: DIR, status: GIT, reason: 'worktree' }));
+    act(() => fake.event('git.changed', { repoRoot: '/elsewhere', status: { ...GIT, repoRoot: '/elsewhere' }, reason: 'head' }));
+    await settle();
+    expect(fake.invoked('scm.status')).toHaveLength(1);
+    act(() => fake.event('git.changed', { repoRoot: DIR, status: GIT, reason: 'refs' }));
+    await settle();
+    expect(fake.invoked('scm.status')).toHaveLength(2);
+    act(() => fake.event('git.changed', { repoRoot: DIR, status: GIT, reason: 'head' }));
+    await settle();
+    expect(fake.invoked('scm.status')).toHaveLength(3);
+  });
+
   // Main answers per branch; the query is the session's (E6 final review, finding 3).
   describe('an answer for another branch is no answer', () => {
     const setStatus = (status: GitStatus) =>

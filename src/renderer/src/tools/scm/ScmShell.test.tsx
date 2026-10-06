@@ -351,6 +351,32 @@ describe('the header’s Push and Open PR open their sheets, and the Output foll
     expect(remoteAction('pr')?.disabled).toBe(true);
   });
 
+  // `git remote add` and a push that sets the upstream move the refs (and config); the remotes and defaults are
+  // scm.status's (E6 final review, finding 4).
+  it('reads scm.status again when the refs move: a repository gaining a remote, then an upstream, enables Publish, then Open PR', async () => {
+    main.state.scm = scmStatusOf({ remotes: [], defaultRemote: null, defaultBase: null });
+    main.state.status = statusOf({ files: SCRATCH_FILES, upstream: null, ahead: 0 });
+    renderShell();
+    await waitFor(() => expect(remoteAction('push')).toMatchObject({ disabled: true, title: 'No remote to push to' }));
+    expect(remoteAction('pr')).toMatchObject({ disabled: true, title: 'No remote to push to' });
+
+    main.state.scm = scmStatusOf(); // git remote add origin …
+    main.change(statusOf({ files: SCRATCH_FILES.slice(1), upstream: null, ahead: 0 })); // reason: index
+    await wait(20);
+    expect(main.callsOf('scm.status')).toHaveLength(1);
+    act(() => main.emit('git.changed', { repoRoot: '/elsewhere', status: statusOf({ repoRoot: '/elsewhere' }), reason: 'refs' }));
+    await wait(20);
+    expect(main.callsOf('scm.status')).toHaveLength(1);
+    act(() => main.emit('git.changed', { repoRoot: DIR, status: main.state.status, reason: 'refs' }));
+    await waitFor(() => expect(remoteAction('push')).toMatchObject({ disabled: false, textContent: 'Publish' }));
+    expect(remoteAction('pr')).toMatchObject({ disabled: true, title: 'Push first' });
+
+    main.change(statusOf({ files: SCRATCH_FILES.slice(1), ahead: 0 })); // the push set origin/main as the upstream
+    act(() => main.emit('git.changed', { repoRoot: DIR, status: main.state.status, reason: 'head' }));
+    await waitFor(() => expect(remoteAction('pr')).toMatchObject({ disabled: false, title: 'Open a pull request for main' }));
+    expect(main.callsOf('scm.status')).toHaveLength(3);
+  });
+
   it('reads the PR state again when the head or refs move, not on an index change', async () => {
     renderShell();
     await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(1));
