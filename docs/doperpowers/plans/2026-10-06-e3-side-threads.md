@@ -19,7 +19,8 @@ To see it working: `pnpm dev`, open a session, open a file from Files, hover a l
 - [x] (2026-10-06 16:20Z) M3 — Renderer: the comment composer in E5's seam, the Side pane hosting a thread, the anchored prompt row and the side-thread row. Landed 18f9cc07..fc66313b; full suite 6,757 passed, typecheck and lint clean (closing M2's deferred typecheck); task review (Opus) approved, no Critical or Important findings.
 - [x] (2026-10-06 18:00Z) M4 — Renderer: `/btw` (the `btw` slash widget, the pane's question view, promotion) and the sidebar's nesting. Landed 8262c918..e7b97062. Full suite 6,795 passed; typecheck clean at e7b97062. Task review (Opus) approved, no Critical or Important findings; its minors go to the final fix wave or the tracker.
 - [x] (2026-10-06 20:10Z) M5 — End to end (`pnpm e2e:side`), the `code` and `c7` groups re-run, the gates, the evidence. Landed bcdcf03a..387aafb9. Gates on ae204075 and ee7136ef: typecheck, lint and the composite node `tsc` all exit 0. Units: 6,795 passed, 1 skipped. e2e: side 8, code 35, c7 29, widgets 24 and panel 23 passed; panel's first run failed on the "+" menu list until ee7136ef added Side to it. Probe integrity: 148/148. The evidence is `docs/doperpowers/evidence/p1-e3/gates.txt` and `shots/{light,dark}/`.
-- [ ] Whole-branch review (`doperpowers:reviewer-high` on Opus), its fix wave, the re-run gates, Outcomes, the charter §19 line, the hand-back.
+- [x] (2026-10-06 22:30Z) Whole-branch review (`doperpowers:reviewer-high` on Opus). Round 1 found three issues (P2 migration `known`; P3 declined-card message; P3 Open's activation); the final fix wave 1f8fe7e6..027a4a94 fixed them plus the held-back items, and round 2 was clean. Outcomes and the charter §19 line written.
+- [ ] The final fix wave's re-run gates on 027a4a94 (in flight at the hand-back; executor a864f9b8e09bef109; its section lands in `gates.txt`).
 
 ## Terms
 
@@ -637,4 +638,27 @@ Every e2e run is under `MAWS_E2E=1` with its own `userData` and an empty `CLAUDE
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**Outcome (2026-10-06).** E3 is built on branch `worktree-agent-a4e09be5e5fbe8b70`, code head 027a4a94, over master 3339e13e.
+- A comment pinned to a file line opens a side thread by default. The thread is a `--fork-session` child shown in the Side pane, carrying intent lineage persisted by index migration 4, with a single summary row in the parent's transcript that is re-synthesised from the index after a relaunch. Send to main steers at the next tool boundary, or sends when the parent is idle, carrying the anchor chip and the image in both the live and the disk form.
+- `/btw` asks the engine's `side_question` with host-held history, never touches the main conversation, draws in the pane, and can be continued as a thread.
+- Forks found on disk nest under their family's earliest-born member.
+
+Every milestone had an Opus task review. M2 needed one fix wave; the others were clean. The whole-branch `reviewer-high` review on Opus found three issues in round 1, all fixed, and round 2 was clean.
+
+**Gates.**
+- On M5's head: typecheck, lint and the composite node `tsc` passed; 6,795 unit tests passed; the e2e groups side 8, code 35, c7 29, widgets 24 and panel 23 passed; probe integrity 148/148 (`docs/doperpowers/evidence/p1-e3/gates.txt`; shots in both themes).
+- The final fix wave re-runs them on its head; its section in `gates.txt` is the record.
+- G1 to G5 are met, with the qualifications in the Decision Log: the screenshot shows as a chip rather than a thumbnail (accepted), and the disk rule's head-window limits are in Deferred.
+
+**Retrospective.**
+- What worked:
+  - One live probe (M0, US$0.034) settled all three engine facts before main was built. Its strings pinned `anchoredMessage` byte for byte.
+  - Reusing main's app-synthesised events gave replay parity with no second disk reader.
+  - Dispatching the next milestone's executor while the previous one's review ran (the files did not overlap) saved hours with no conflict.
+- What did not:
+  - The `pnpm typecheck` gate (`--composite false`) missed a composite failure that vitest caught (tracker).
+  - The snapshot suite silently wrote missing baselines (tracker).
+  - Migration 4's first draft would have dropped migrated rows from removal detection. Only the whole-branch review caught it, because each milestone review saw only its own half.
+- Owner-facing:
+  - The first launch after the upgrade costs about 10 s once (accepted).
+  - The owner's index lacks `removed_at`, which predates E3 (the architect's repair on master).
