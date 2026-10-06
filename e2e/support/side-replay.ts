@@ -46,6 +46,15 @@ const RECORDED = {
 
 const AT = '2026-10-06T12:00:00.000Z';
 
+// The prelude's `get_status` answer (replay-handshake.jsonl seq 5) without its `Anthropic base URL` row.
+const PRELUDE_STATUS_ANSWER = 5;
+function directStatus(frame: Frame): Frame {
+  type Status = { response: { response: { sections: { title: string; rows: { label: string; value: string }[] }[] } } };
+  const status = structuredClone(frame) as unknown as Status;
+  for (const section of status.response.response.sections) section.rows = section.rows.filter((row) => row.label !== 'Anthropic base URL' && row.label !== 'Auth token');
+  return status as unknown as Frame;
+}
+
 export class SideJournal {
   private readonly rows: Row[] = [];
   private minted = 0;
@@ -56,8 +65,18 @@ export class SideJournal {
     readonly sessionId: string,
     private readonly cwd: string,
   ) {
-    for (const row of rowsOf('test/fixtures/engine/replay-handshake.jsonl')) this.push(row.direction, row.frame);
+    // the prelude, its `get_status` answered as a direct session's (no custom base URL), so the session verifies
+    // `direct`: no mismatch notice, and a fork of it is direct too, never meeting the relay pre-check
+    for (const row of rowsOf('test/fixtures/engine/replay-handshake.jsonl')) this.push(row.direction, row.seq === PRELUDE_STATUS_ANSWER ? directStatus(row.frame) : row.frame);
     this.push('meta', { event: 'spawn', args: ['--session-id', sessionId], note: 'E3 M5: the pin the replay seam reads' });
+  }
+
+  // The host reads `get_status` again after each human turn's result (its gateway check), answered the same way.
+  private status(): void {
+    const requestId = this.uuid();
+    const answer = directStatus(rowsOf('test/fixtures/engine/replay-handshake.jsonl').find((r) => r.seq === PRELUDE_STATUS_ANSWER)!.frame) as { response: Frame };
+    this.push('out', { type: 'control_request', request_id: requestId, request: { subtype: 'get_status' } });
+    this.push('in', { ...answer, response: { ...answer.response, request_id: requestId } });
   }
 
   private push(direction: Row['direction'], frame: Frame): void {
@@ -100,6 +119,7 @@ export class SideJournal {
     this.push('in', { ...assistant, uuid: this.uuid(), message: { ...assistant.message, content: [{ type: 'text', text }] } });
     const result = swapped(frameOf(ECHOED, 30), swap);
     this.push('in', { ...result, result: text, uuid: this.uuid(), user_message_uuid: prompt, user_message_uuids: [prompt] });
+    this.status();
   }
 
   // One whole turn: the prompt, the reply, the result and `completed`.

@@ -133,7 +133,8 @@ async function begin(build: (cwd: string, dir: string) => string[]): Promise<Cas
 }
 
 // "+" on the repository's project, the route direct (the replay ignores it; the relay pre-check must not depend on this
-// Mac's relay), and the first prompt through C10's start; answers once the first turn's reply is drawn.
+// Mac's relay, and the journals' `get_status` verifies it direct, so the side threads forked from it are direct too),
+// and the first prompt through C10's start; answers once the first turn's reply is drawn.
 async function startParent(page: Page, repo: ScratchRepo): Promise<string> {
   const project = value(await invoke(page, 'session.projects.add', { directory: repo.root }));
   await openProject(page, project.name);
@@ -190,16 +191,6 @@ async function commentOn(page: Page, viewer: Locator, line: number): Promise<Loc
   return sheet;
 }
 
-// A fork of a replayed launch is routed (the record carries the route the prelude verified), so it meets the relay
-// pre-check: when this Mac's relay is down, the thread's pane docks the relay card, and "Run direct" goes on.
-async function passRelay(page: Page): Promise<void> {
-  const health = value(await invoke(page, 'engine.relayHealth', { force: true }));
-  if (health.ok) return;
-  const card = page.getByRole('group', { name: 'Relay not answering' });
-  await expect(card).toBeVisible();
-  await card.getByRole('button', { name: 'Run direct' }).click();
-}
-
 // The side thread of `parent` whose record exists (its setup creates it before the engine runs).
 async function sideThreadOf(page: Page, parent: string, openedBy: 'comment' | 'btw'): Promise<string> {
   let child = '';
@@ -221,7 +212,6 @@ async function openThreadFromGutter(c: Case & { parent: string }): Promise<{ chi
   await sheet.getByRole('textbox', { name: 'Comment' }).fill(COMMENT);
   await sheet.getByRole('button', { name: 'Send' }).click();
   await expect(sheet, 'the sheet closes once the thread starts').toHaveCount(0);
-  await passRelay(page);
   const child = await sideThreadOf(page, c.parent, 'comment');
   const pane = panelRegion(page).locator(`[data-side-thread-view="${child}"]`);
   await expect(pane, 'the Side pane opens on the new thread').toBeVisible();
@@ -277,6 +267,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(chip).toHaveAttribute('data-anchor-kind', 'file-line');
     await expect(pane.getByText(COMMENT, { exact: true })).toBeVisible();
     await expect(pane.getByText('You are in a side thread', { exact: false }), 'the framing is MAWS’s, not drawn').toHaveCount(0);
+    // the parent verified direct, so its thread is direct too: no relay pre-check, no route notice
+    await expect(page.getByRole('group', { name: 'Relay not answering' })).toHaveCount(0);
+    await expect(page.getByText('custom base URL', { exact: false })).toHaveCount(0);
 
     // the record and the launch: a fork of the parent at its current point, in its directory, under the pinned id
     const record = value(await invoke(page, 'session.get', { appSessionId: child as never }));
@@ -488,8 +481,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // Continue as a side thread: a fork whose first prompt lists the exchanges, shown in the pane
     await view.getByRole('button', { name: 'Continue as a side thread' }).click();
-    await passRelay(page);
-    const promoted = await sideThreadOf(page, parent, 'btw');
+      const promoted = await sideThreadOf(page, parent, 'btw');
     const thread = panelRegion(page).locator(`[data-side-thread-view="${promoted}"]`);
     await expect(thread).toBeVisible();
     await expect(thread.getByText(PROMOTED_REPLY)).toBeVisible({ timeout: 20_000 });
