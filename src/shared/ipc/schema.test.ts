@@ -662,4 +662,38 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // C12 end
+  // E5 start: the quit guard names unsaved files (E5 execution document, Interfaces "The quit guard and unsaved files (M5)")
+  describe('E5 layout entries', () => {
+    it('layout.unsavedFiles and layout.saveAllDone are main’s bridged commands and layout.saveAll an event; the busy report always names the unsaved files', () => {
+      for (const name of ['layout.unsavedFiles', 'layout.saveAllDone'] as const) {
+        expect(commands[name].owner, name).toBe('main');
+        expect(NAMES.layout.commands, name).toContain(name);
+      }
+      expect(NAMES.layout.events).toContain('layout.saveAll');
+
+      const report = { midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: ['/r/a.ts'] };
+      expect(validateEventPayload('layout.quitWait', { waiting: report }).ok).toBe(true);
+      expect(validateEventPayload('layout.quitWait', { waiting: { ...report, unsavedFiles: [] } }).ok).toBe(true);
+      const withoutFiles = { midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false };
+      expect(validateEventPayload('layout.quitWait', { waiting: withoutFiles }).ok).toBe(false); // always said, never defaulted
+      expect(validateEventPayload('layout.quitWait', { waiting: { ...report, unsavedFiles: [1] } }).ok).toBe(false);
+
+      expect(validateCommandInput('layout.unsavedFiles', { paths: ['/r/a.ts', '/r/b.ts'] }).ok).toBe(true);
+      expect(validateCommandInput('layout.unsavedFiles', { paths: [] }).ok).toBe(true);
+      expect(validateCommandInput('layout.unsavedFiles', { paths: [1] }).ok).toBe(false);
+      expect(validateCommandInput('layout.unsavedFiles', {}).ok).toBe(false);
+      expect(validateCommandOutput('layout.unsavedFiles', undefined).ok).toBe(true);
+
+      expect(validateCommandInput('layout.saveAllDone', { requestId: 'r1', failed: [{ path: '/r/a.ts', message: 'Changed on disk since you opened it' }] }).ok).toBe(true);
+      expect(validateCommandInput('layout.saveAllDone', { requestId: 'r1', failed: [] }).ok).toBe(true);
+      expect(validateCommandInput('layout.saveAllDone', { requestId: 'r1', failed: [{ path: '/r/a.ts' }] }).ok).toBe(false);
+      expect(validateCommandInput('layout.saveAllDone', { failed: [] }).ok).toBe(false);
+      expect(validateCommandOutput('layout.saveAllDone', undefined).ok).toBe(true);
+
+      expect(validateEventPayload('layout.saveAll', { requestId: 'r1' }).ok).toBe(true);
+      expect(validateEventPayload('layout.saveAll', {}).ok).toBe(false);
+      expect(validateEventPayload('layout.saveAll', { requestId: 'r1', paths: [] }).ok).toBe(false);
+    });
+  });
+  // E5 end
 });

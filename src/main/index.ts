@@ -74,6 +74,9 @@ import { installWidgetBackend } from './widgets/fixture-backend';
 // W13 start
 import { rm } from 'node:fs/promises';
 // W13 end
+// E5 start
+import { trackUnsavedFiles } from './lifecycle/quit-guard';
+// E5 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -330,6 +333,14 @@ void startWithProfileLock(app, () => {
   };
   openWindow();
 
+  // E5 start: each window's unsaved editor files for the quit guard (E5 execution document, M5): the page pushes its
+  // whole dirty set, forgotten when the window navigates or closes; the question's Save all asks every window to save
+  // and waits for the answers of the windows that hold files.
+  const unsavedFiles = trackUnsavedFiles();
+  registerMainHandler('layout.unsavedFiles', ({ paths }, { sender }) => unsavedFiles.update(sender, paths));
+  registerMainHandler('layout.saveAllDone', ({ requestId, failed }, { sender }) => unsavedFiles.done(sender, requestId, failed));
+  // E5 end
+
   // ---- C5: notifications, dock badge and the quit guard ----
   startAttention(sessions.model, { restoredIds: attention.restoredIds, settings: () => settings.state().settings, openWindow });
   // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
@@ -369,6 +380,10 @@ void startWithProfileLock(app, () => {
     },
     // debt wave 6: past the bound, the ladder's SIGKILL rung for the engines still the engine host's children
     engines: { hostPid: () => hosts.snapshot('engine-host').pid, ps: listProcesses, kill: (pid) => process.kill(pid, 'SIGKILL') },
+    // E5 start: the unsaved files the windows pushed, and Save all's round trip
+    unsavedFiles: () => unsavedFiles.paths(),
+    saveAll: () => unsavedFiles.saveAll((requestId) => void emit('layout.saveAll', { requestId })),
+    // E5 end
   });
   // C12 start: the banner's reads and answers
   registerMainHandler('layout.quitWait', () => ({ waiting: quitGuard.waiting() }));
