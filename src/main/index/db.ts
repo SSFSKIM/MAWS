@@ -4,7 +4,7 @@
 // per key after the outermost commit and is dropped on rollback, which is how the stores notify only what committed.
 import { existsSync, renameSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
-import type { Migration } from './migrations';
+import type { Migration, Repair } from './migrations';
 
 export type Row = Record<string, SQLInputValue>;
 // What a column may be given: SQLite's own values, plus booleans stored as 0/1.
@@ -126,8 +126,9 @@ function isBrokenFile(error: unknown): boolean {
 // as corrupt or not a database is moved aside as `<path>.broken-<epoch>` (with its -wal and -shm) and a fresh one
 // created, never deleted; any other failure at open propagates. A file whose `user_version` is newer than the app knows
 // is opened read-only, with one logged error, and marked unavailable: its schema may not be the one this app reads, so
-// every statement fails with `index unavailable: <reason>` rather than reading or writing it.
-export function openDb(path: string, migrations: readonly Migration[]): Db {
+// every statement fails with `index unavailable: <reason>` rather than reading or writing it. Before the pending
+// migrations, in their transaction, each repair the file lacks is applied and logged (`Repair`).
+export function openDb(path: string, migrations: readonly Migration[], repairs: readonly Repair[]): Db {
   const known = migrations.length;
   let db: DatabaseSync;
   let version: number;
@@ -158,9 +159,17 @@ export function openDb(path: string, migrations: readonly Migration[]): Db {
   }
 
   const pending = migrations.slice(version);
-  if (pending.length > 0) {
+  let missing: Repair[];
+  try {
+    missing = repairs.filter((repair) => repair.version <= version && !hasColumn(db, repair.table, repair.column));
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+  if (pending.length > 0 || missing.length > 0) {
     db.exec('BEGIN IMMEDIATE');
     try {
+      for (const repair of missing) db.exec(`ALTER TABLE ${repair.table} ADD COLUMN ${repair.column} ${repair.definition}`);
       for (const migration of pending) db.exec(migration.sql);
       db.exec(`PRAGMA user_version = ${known}`);
       db.exec('COMMIT');
@@ -169,11 +178,18 @@ export function openDb(path: string, migrations: readonly Migration[]): Db {
       db.close();
       throw error;
     }
+    for (const repair of missing) {
+      console.warn(`[index] ${path}: added ${repair.table}.${repair.column}, which migration ${repair.version} was amended to create after this database had applied it`);
+    }
   }
   return new Db(
     db,
     pending.map((migration) => migration.version),
   );
+}
+
+function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((info) => info.name === column);
 }
 
 // Opens the file and reads its schema version, changing nothing: `busy_timeout` is a property of this connection, and
