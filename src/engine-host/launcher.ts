@@ -33,6 +33,7 @@ export const REPLAY_PRELUDE = 'test/fixtures/engine/replay-handshake.jsonl'; // 
 export interface LauncherDeps {
   userData: string;
   replayEnabled: boolean;
+  replayRowMs?: number; // E10: the replay transport's pause before each `in` row (the e2e pacing seam)
   cwd: string; // resolves a relative replay path and the prelude
   table: ProcessTable;
   store: SessionStateStore;
@@ -91,7 +92,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
     }
 
     const replay = journal;
-    const spawn = replay !== null ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */ }) : deps.spawn;
+    const spawn = replay !== null ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */, rowDelayMs: deps.replayRowMs /* E10 */ }) : deps.spawn;
     const outcome = deps.table.reserve(spec.appSessionId, () => {
       const session = new EngineSession({
         spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),

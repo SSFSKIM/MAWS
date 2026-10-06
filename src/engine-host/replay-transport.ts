@@ -16,6 +16,8 @@
 // recorded answer for the same ask (a render's by its component and instance) as of the cursor (the latest at or before
 // it, else the next after it), or an empty success when the fixture has none, and their recorded rows are passed over.
 // What the person does to a plugin's drawing (presses, inputs, picks, a pane closed) is still held and matched in order.
+// E10 (Design 12): with `rowDelayMs` the replay waits that long before each `in` row it plays, so a replay streams at a
+// pace (a kept session goes on streaming while the app is away); without it, `in` rows play at once.
 import { isDeepStrictEqual } from 'node:util';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
@@ -24,6 +26,12 @@ import { TransportClosed, type EngineTransport, type TransportItem } from './tra
 
 export const PRELUDE_SUBTYPES: ReadonlySet<string> = new Set(['initialize', 'get_status']);
 export const SURFACE_READ_SUBTYPES: ReadonlySet<string> = new Set(['ui_attach', 'ui_detach', 'ui_render', 'ui_panes', 'ui_focus', 'ui_scroll', 'ui_pane_show', 'ui_pane_focus', 'ui_prompt_edit']); // R2
+
+// E10: the e2e pacing seam, MAWS_E2E_REPLAY_ROW_MS, read only under MAWS_E2E=1; 0 (no pacing) unless a whole number.
+export function replayRowDelayMs(env: Record<string, string | undefined>): number {
+  const value = env.MAWS_E2E_REPLAY_ROW_MS;
+  return env.MAWS_E2E === '1' && value !== undefined && /^\d+$/.test(value) ? Number(value) : 0;
+}
 
 export interface ReplayTransport extends EngineTransport {
   readonly holding: JournalRow | null; // the `out` row the replay waits on, or null while `in` rows remain or the stream ended
@@ -99,7 +107,7 @@ function isReplayRead(request: { subtype: string; dry_run?: unknown }): boolean 
   return requestClassOf(request.subtype) === 'read' || (request.subtype === 'rewind_files' && request.dry_run === true);
 }
 
-export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[]; onHold?: (row: JournalRow) => void; surfaceReads?: boolean }): ReplayTransport {
+export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[]; onHold?: (row: JournalRow) => void; surfaceReads?: boolean; rowDelayMs?: number }): ReplayTransport {
   const rows = journal;
   // R2: the recorded surface reads (their out row's index, key and the engine's answer), and the rows the cursor passes over
   const surfaceReads: { index: number; key: string; response: Frame }[] = [];
@@ -126,6 +134,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
   let stderrEnded = false;
   let wake: (() => void) | null = null; // the frames iterator waiting for a write or a kill
   let held: JournalRow | null = null; // the `out` row `onHold` was last told about
+  let paced = -1; // E10: the index of the `in` row whose delay has run
   let resolveExited!: (v: { code: number | null; signal: NodeJS.Signals | null }) => void;
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
 
@@ -243,6 +252,11 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
               return { value: undefined, done: true };
             }
             if (row.direction === 'in') {
+              if (opts.rowDelayMs && paced !== cursor) {
+                paced = cursor;
+                await new Promise((r) => setTimeout(r, opts.rowDelayMs));
+                continue; // the replay may have ended meanwhile, or an injected answer may go first
+              }
               cursor += 1;
               const frame = rewrite(row.frame);
               return { value: { frame, raw: JSON.stringify(frame), error: null }, done: false };

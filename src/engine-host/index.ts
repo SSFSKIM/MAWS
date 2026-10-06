@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { registerEngineIpc, type EngineIpc } from './ipc';
 import type { ProcessTable } from './process-table'; // W7
 import { scheduleJournalPruning } from './journal';
+import { replayRowDelayMs } from './replay-transport'; // E10
 // C3 end
 // C4 start
 import { registerFs } from './fs/register';
@@ -56,6 +57,7 @@ const register: HostRegister = (on, emit, client) => {
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
+    replayRowMs: replayRowDelayMs(process.env), // E10: the e2e pacing seam
     diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
     onConnect: client.onConnect, hasClient: client.hasClient, // E10: the connect burst; a refused batch told from a client gone
   });

@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RewindFilesResponseSchema } from '@shared/wire/control';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadEngineJournal, loadJournal } from '../../test/support/fixtures';
-import { replayEngine } from './replay-transport';
+import { replayEngine, replayRowDelayMs } from './replay-transport';
 import type { TransportItem } from './transport';
 
 const at = '2026-09-28T00:00:00.000Z';
@@ -406,4 +406,64 @@ it.each([
       expect(items[0].error?.kind).toBe('replay_mismatch');
     }
   }
+});
+
+// E10 (Design 12): the e2e seam that paces a replay, so a kept session goes on streaming while the app is away.
+describe('replay pacing (MAWS_E2E_REPLAY_ROW_MS)', () => {
+  afterEach(() => vi.useRealTimers());
+  const journal = [
+    row(1, 'in', { type: 'system', subtype: 'status', status: null }),
+    row(2, 'out', { type: 'control_request', request_id: 'rec-1', request: { subtype: 'get_usage' } }),
+    row(3, 'in', { type: 'control_response', response: { subtype: 'success', request_id: 'rec-1', response: { ok: true } } }),
+    row(4, 'meta', { event: 'exit', code: 0, signal: null }),
+  ];
+
+  it('is read only under MAWS_E2E=1, as a whole number of milliseconds', () => {
+    expect(replayRowDelayMs({ MAWS_E2E: '1', MAWS_E2E_REPLAY_ROW_MS: '250' })).toBe(250);
+    expect(replayRowDelayMs({ MAWS_E2E_REPLAY_ROW_MS: '250' })).toBe(0);
+    expect(replayRowDelayMs({ MAWS_E2E: '0', MAWS_E2E_REPLAY_ROW_MS: '250' })).toBe(0);
+    expect(replayRowDelayMs({ MAWS_E2E: '1' })).toBe(0);
+    for (const junk of ['', 'soon', '-5', '1.5', '1e3']) expect(replayRowDelayMs({ MAWS_E2E: '1', MAWS_E2E_REPLAY_ROW_MS: junk })).toBe(0);
+  });
+
+  it('waits the delay before each in row it plays, the one after a matched write included', async () => {
+    vi.useFakeTimers();
+    const transport = replayEngine(journal, { prelude, rowDelayMs: 1_000 });
+    const it = transport.frames[Symbol.asyncIterator]();
+    let first: IteratorResult<TransportItem> | null = null;
+    void it.next().then((r) => (first = r));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(first).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(frameOf(first!.value as TransportItem)).toMatchObject({ subtype: 'status' });
+
+    let second: IteratorResult<TransportItem> | null = null;
+    void it.next().then((r) => (second = r));
+    await transport.write({ type: 'control_request', request_id: 'minted', request: { subtype: 'get_usage' } } as unknown as StdinFrame);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(second).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(frameOf(second!.value as TransportItem)).toMatchObject({ type: 'control_response' });
+    expect(await it.next()).toMatchObject({ done: true });
+  });
+
+  it('a kill during the wait ends the stream without playing the row', async () => {
+    vi.useFakeTimers();
+    const transport = replayEngine(journal, { prelude, rowDelayMs: 1_000 });
+    const it = transport.frames[Symbol.asyncIterator]();
+    const next = it.next();
+    transport.kill('SIGTERM');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await next).toMatchObject({ done: true });
+    expect(await transport.exited).toEqual({ code: null, signal: 'SIGTERM' });
+  });
+
+  it('plays at once without a delay', async () => {
+    vi.useFakeTimers();
+    const transport = replayEngine(journal, { prelude });
+    const items = take(transport.frames, 1);
+    expect((await items).map(frameOf)).toMatchObject([{ subtype: 'status' }]);
+    expect(vi.getTimerCount()).toBe(0);
+    transport.kill('SIGTERM');
+  });
 });
