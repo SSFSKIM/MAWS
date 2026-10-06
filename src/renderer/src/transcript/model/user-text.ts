@@ -99,7 +99,7 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
     });
   }
   const joined = texts.join('\n\n');
-  const anchored = parseAnchoredText(joined); // E3: the framing is MAWS's, not the human's words
+  const anchored = joined.includes('<maws_anchor') ? parseAnchoredText(joined) : null; // E3: the framing is MAWS's, not the human's words
   const body = anchored?.text ?? joined;
   const split = splitPastedSegments(slashCommandLine(body) ?? body);
   const text = split.text;
