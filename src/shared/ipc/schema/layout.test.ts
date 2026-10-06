@@ -69,6 +69,17 @@ describe('layout value shapes', () => {
     expect(TabRefSchema.safeParse({ ...tab, version: 2 }).success).toBe(false);
   });
 
+  // E4a (X14): a browser tab as a main tab, appended after E2's; one per browser tab, keyed by its session and tab id
+  it('admits a browser tab with its session and a well-formed browser tab id, and derives its id', () => {
+    const tab = { id: 'browser:a1:b_0123456789ab', kind: 'browser', appSessionId: 'a1', browserTabId: 'b_0123456789ab', pinned: false };
+    expect(TabRefSchema.parse(tab)).toEqual(tab);
+    expect(TabRefSchema.safeParse({ ...tab, browserTabId: 'tab-1' }).success).toBe(false);
+    expect(TabRefSchema.safeParse({ ...tab, appSessionId: null }).success).toBe(false);
+    expect(TabRefSchema.safeParse({ ...tab, url: 'https://example.com/' }).success).toBe(false);
+    expect(TabRefSchema.options.map((option) => option.shape.kind.value).at(-1)).toBe('browser');
+    expect(tabId({ kind: 'browser', appSessionId: 'App-1' as never, browserTabId: 'b_0123456789ab' })).toBe('browser:App-1:b_0123456789ab');
+  });
+
   // W5: only `StoredMainSchema` still knows the Overview's tab, to drop it from a layout saved before the panel.
   it('rejects an overview tab', () => {
     expect(TabRefSchema.safeParse({ id: 'overview', kind: 'overview', pinned: true }).success).toBe(false);

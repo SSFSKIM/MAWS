@@ -44,6 +44,8 @@ export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSession
       return { title: 'Settings', branch: null };
     case 'deliverable': // E2
       return { title: deliverableTitle ?? DELIVERABLES_COPY.fallbackTitle, branch: null };
+    case 'browser': // E4a: the tool's name until Task 3.1 reads the tab's title from the browser store
+      return { title: 'Browser', branch: null };
   }
 }
 

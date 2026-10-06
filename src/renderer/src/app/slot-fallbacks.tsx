@@ -38,6 +38,7 @@ const SettingsTab: Slots['settingsTab'] = () => <Placeholder className="h-full">
 // The top bar's right end holds nothing until W6 registers the usage pill there.
 const TopBarEnd: Slots['topBarEnd'] = () => null;
 const DeliverableTab: Slots['deliverableTab'] = ({ tab }) => <Placeholder className="h-full font-mono">{tab.deliverableId}</Placeholder>; // E2
+const BrowserTab: Slots['browserTab'] = () => <Placeholder className="h-full">Browser unavailable</Placeholder>; // E4a
 
 export const FALLBACKS: Slots = {
   transcript: Transcript,
@@ -50,4 +51,5 @@ export const FALLBACKS: Slots = {
   settingsTab: SettingsTab,
   topBarEnd: TopBarEnd,
   deliverableTab: DeliverableTab, // E2
+  browserTab: BrowserTab, // E4a
 };

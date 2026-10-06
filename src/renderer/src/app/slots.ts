@@ -21,6 +21,7 @@ export interface Slots {
   settingsTab: ComponentType<{ section: Extract<TabRef, { kind: 'settings' }>['section'] }>; // C11: the Settings tab's content, at a section
   topBarEnd: ComponentType<Record<never, never>>; // the title-bar toolbar's right-side mount point, for W6's usage pill
   deliverableTab: ComponentType<{ tab: Extract<TabRef, { kind: 'deliverable' }> }>; // E2: a deliverable's viewer as a main tab
+  browserTab: ComponentType<{ tab: Extract<TabRef, { kind: 'browser' }> }>; // E4a: a session's browser tab as a main tab
 }
 
 // A store rather than a plain map, so a registration after the first render still reaches the page.

@@ -294,6 +294,8 @@ describe('file tabs and the panel’s session (C8’s tenth ask)', () => {
     expect(sessionOfTab(activeTab(openTab(abc(), file(1, null))))).toBeNull();
     expect(sessionOfTab(activeTab(base))).toBeNull(); // an empty pane
     expect(sessionOfTab(activeTab(openTab(abc(), { kind: 'diagnostics' })))).toBeNull();
+    // E4a (X14): a browser main tab belongs to its tab's session (P-21), so the panel shows that session
+    expect(sessionOfTab(activeTab(openTab(abc(), { kind: 'browser', appSessionId: B, browserTabId: 'b_0123456789ab' })))).toBe('b');
   });
 });
 

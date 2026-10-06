@@ -79,6 +79,8 @@ function useTabLabel(tab: TabRef): TabLabel {
       return { title: 'Settings', secondary: null, glyph: null, fileType: null };
     case 'deliverable': // E2
       return { title: deliverableTitle ?? DELIVERABLES_COPY.fallbackTitle, secondary: null, glyph: null, fileType: null };
+    case 'browser': // E4a: the tool's name until the renderer milestone reads the tab's title from the browser store
+      return { title: 'Browser', secondary: null, glyph: null, fileType: null };
   }
 }
 
