@@ -29,7 +29,8 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../transcript';
 import { toAnswer } from './answers';
-import { ASK_CARD, AskBody } from './variants/Ask'; // E1 M4b
+import { ASK_CARD } from './copy'; // E1 M4b
+import { AskBody } from './variants/Ask'; // E1 M4b
 import { CardButton, Controls, Muted } from './controls';
 import { HoverPreview } from './preview/HoverPreview';
 import { hoverApproval } from './quick-approval';

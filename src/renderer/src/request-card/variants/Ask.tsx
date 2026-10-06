@@ -6,14 +6,9 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import { registeredActions, type AskRowData } from '../../transcript';
 import { CardButton } from '../controls';
+import { ASK_CARD } from '../copy';
 
 export type AskOpenedEvent = Extract<SessionEvent, { kind: 'maws.ask.opened' }>;
-
-export const ASK_CARD = {
-  untitled: 'Questions from the agent',
-  count: (n: number) => `${n} ${n === 1 ? 'question' : 'questions'}`,
-  open: 'Open the Question sheet',
-} as const;
 
 // The ask as its capsule would hand it over while pending (the askId is the tool-use id whenever the call carried one).
 const rowDataOf = (request: AskOpenedEvent): AskRowData => ({
