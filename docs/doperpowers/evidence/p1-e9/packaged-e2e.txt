@@ -1,0 +1,147 @@
+E9 M5 packaged e2e on the build:app output of e196298e, 2026-10-06 00:11 KST:
+/tmp/maws-review/waitload20.sh && MAWS_E2E_EXECUTABLE=dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e -- e2e/voice.spec.ts
+The literal `--` reached Playwright, which then ran its whole default suite against the packaged app instead of the one
+file (as `pnpm e2e:packaged` would): every case that does not skip itself on a packaged build passed, the E9 packaged
+case (#122) among them. The voice spec scripted cases skip on a packaged build by design (they need the harness).
+
+slot slot.1 acquired at 00:10:59 load { 17.81 17.00 25.51 }
+  ✓    1 e2e/accounts.spec.ts:101:5 › usage: the pill, and ClaudeUsage’s accounts in its geometry, the routing one and why, a reauth account, the disabled actions and the hand-off (5.0s)
+  ✓    2 e2e/accounts.spec.ts:216:5 › usage: without ClaudeUsage data the pill is a muted dash and the popover says so (3.0s)
+  ✓    3 e2e/accounts.spec.ts:251:5 › usage: with ClaudeUsage’s control route (a stub), the actions enable, Route asks and posts, and a refusal shows its message (18.1s)
+  -    4 e2e/agent-tools-live.spec.ts:381:5 › live: the agent tools over a real session (acceptance item 4, steps i to x)
+  -    5 e2e/c11-live.spec.ts:221:5 › every widget opens with live engine data; controls take effect and are read back
+  -    6 e2e/c11-live.spec.ts:451:5 › a relay alias takes the local lane; the session switches to Direct and back
+  -    7 e2e/c11-live.spec.ts:560:5 › relay down through the forwarder: the card, the direct policy and the banner
+  -    8 e2e/c11-shots.spec.ts:71:5 › the widgets and Session info on the #widgets harness page
+  -    9 e2e/c11-shots.spec.ts:124:5 › the usage popover (W6: the Accounts tab retired into it) and the Settings tab in the product shell
+  -   10 e2e/c11-shots.spec.ts:152:5 › the mockups the screenshots answer to
+  -   11 e2e/c12-budget.spec.ts:54:5 › a release reads idle and marked, offers resume on Send; over budget with no candidate raises one banner, the sheets and the disclosure
+  -   12 e2e/c12-live.spec.ts:227:5 › nine sessions under a memory budget: releases, the released surfaces, Send-to-resume with the grant, and the banner with the per-session stop
+  -   13 e2e/c12-prerun.spec.ts:175:5 › §10.1 terminal-started sessions show under their projects, the live one foreign-live
+  -   14 e2e/c12-prerun.spec.ts:227:5 › §10.1 real store, read only
+  -   15 e2e/c12-prerun.spec.ts:503:5 › §10.2 a new worktree from "+", trust attested, project settings load as in the terminal
+  -   16 e2e/c12-prerun.spec.ts:578:5 › §10.3 from Overview cards: approve P, answer Q; R asks while the window is blurred (fallback notification); attention.next lands on R
+  -   17 e2e/c12-prerun.spec.ts:693:5 › §10.4 one deep session: a relay to a running background child, Review with This branch (G3), a Terminal in the worktree, a viewer tab, a workflow; Session info in the panel
+  -   18 e2e/c12-prerun.spec.ts:894:5 › §10.5 the archived deep session resumes from a terminal with claude --resume; a terminal-started session resumes in MAWS
+  -   19 e2e/c12-prerun.spec.ts:962:5 › §10.6 in brief on the owner build: one release and its Send-to-resume; the quit question with a turn in flight, background work and a busy terminal
+  -   20 e2e/c12-prerun.spec.ts:1097:5 › §10.7 a 500-turn transcript stays anchored while old work expands; streaming never drags a reader; the owner’s three longest transcripts listed
+  -   21 e2e/c12-prerun.spec.ts:1237:5 › §10.8 every palette widget opens backed by its read; ! and # work; a live session’s phase moves running → idle
+  -   22 e2e/c12-prerun.spec.ts:1326:5 › §10.9 queue, steer, stop and resume as labelled; a paused queue survives a quit; a denial shows in a collapsed turn; an interrupt with a pending approval
+  -   23 e2e/c12-prerun.spec.ts:1490:5 › §10.10 light is the default on a fresh profile; dark switches cleanly and back
+  -   24 e2e/c12-prerun.spec.ts:1523:5 › C8 item 9: Attach adds the Terminal tab and activates its session (a claude --bg job under the scratch home)
+  -   25 e2e/c12-quit.spec.ts:71:5 › quit names a replayed session’s background work and a busy terminal; cancel keeps the app; quit when idle waits for both
+  -   26 e2e/c12-quit.spec.ts:157:5 › a quit with nothing busy asks nothing and exits within the probe bound
+  -   27 e2e/c12-sweep.spec.ts:42:5 › Worktrees…: every checkout with its state and bound session; New chat here claims one; Remove… on the orphan runs the cleanup ladder and the list is read again
+  -   28 e2e/c3-stall.spec.ts:178:5 › the deep session resumed from its row in a fresh app launch, repeatedly
+  -   29 e2e/c7-shots.spec.ts:115:5 › the shell: the frame docked under a live transcript, the docked approvals, the usage and context popovers
+  -   30 e2e/c7-shots.spec.ts:183:5 › the harness: the frame centred on an unstarted session, and the slash palette beside a registered stub widget
+  -   31 e2e/code-tools-live.spec.ts:85:5 › live: Files, the viewer and Review over this checkout
+  -   32 e2e/code-tools-live.spec.ts:225:5 › live: a turn that edits a file opens Review on Last turn and the viewer at the hunk
+  -   33 e2e/composer-live.spec.ts:132:5 › auto mode: send, queue and steer behave as labelled
+  -   34 e2e/composer-live.spec.ts:186:5 › auto mode: interrupt and send, stop and resume behave as labelled
+  -   35 e2e/composer-live.spec.ts:236:5 › auto mode with an ask rule: the card replaces the composer, offers Allow once, and Enter answers in the focused pane only
+  -   36 e2e/composer-live.spec.ts:277:5 › default mode: Allow for this session grants the exact command and a second identical command prompts nothing
+  -   37 e2e/composer-live.spec.ts:312:5 › auto mode: a two-question AskUserQuestion form submits both answers and the tool result names them
+  -   38 e2e/composer-live.spec.ts:350:5 › plan mode from the mode chip: Keep planning returns a second plan, Implement restores the pre-plan mode
+  -   39 e2e/composer-live.spec.ts:382:5 › plan mode: Clear context and implement yields a reset boundary and a turn beginning "Implement this plan:"
+  -   40 e2e/composer-live.spec.ts:409:5 › bash, memory, paste, history recall, the palette, the status line and Add directory… against the live engine
+  -   41 e2e/composer-live.spec.ts:621:5 › the mode chip after switching the model to Haiku and requesting auto
+  -   42 e2e/composer-live.spec.ts:653:5 › a session resumed Direct reads its windows from session.getUsage, or shows —
+  -   43 e2e/composer.spec.ts:140:1 › the editor sends as typed: Enter in one line, lines by Shift+Enter then Enter, ⌘Enter always; a composing Enter never sends; ArrowUp recalls
+  -   44 e2e/composer.spec.ts:182:1 › paste and drop attach with the terminal's tag framing
+  -   45 e2e/composer.spec.ts:225:1 › @ and / menus with the widget union
+  -   46 e2e/composer.spec.ts:301:1 › history recalls with bodies: two pastes of one display come back as two entries
+  -   47 e2e/composer.spec.ts:316:1 › bash mode runs through the engine
+  -   48 e2e/composer.spec.ts:337:1 › drafts survive a tab switch and a reload
+  -   49 e2e/composer.spec.ts:406:1 › the composer sends, steers, stops and resumes as labelled
+  -   50 e2e/composer.spec.ts:448:1 › composer.stop reaches the one app-level handler from either pane's editor
+  -   51 e2e/composer.spec.ts:475:1 › the composer keeps its draft across a tab switch and a reload
+  -   52 e2e/composer.spec.ts:500:1 › an unstarted session binds the frame to the intent, holds a starting state and starts on Send
+  -   53 e2e/composer.spec.ts:643:1 › edit in place: Send rewinds to the message and resends, the bubble replaced by the edited one
+  -   54 e2e/composer.spec.ts:655:1 › edit in place never repeats a rewind: a send that fails after the replayed rewind retries the send alone from the dock
+  -   55 e2e/composer.spec.ts:669:1 › edit in place reconciles an unconfirmed rewind: held past the bridge timeout, its late answer lets Send go
+  -   56 e2e/composer.spec.ts:689:1 › edit in place reconciles an unconfirmed rewind: withheld for the whole window, Send without rewinding sends alone
+  -   57 e2e/composer.spec.ts:708:1 › edit in place: Cancel and Esc put the bubble back, and nothing is written
+  -   58 e2e/composer.spec.ts:726:1 › Esc Esc opens the rewind picker over the session’s messages; a conversation rewind leaves the engine’s text in the composer
+  -   59 e2e/composer.spec.ts:771:1 › W2: the shared column, the 14px prose, Codex’s bubble and Codex’s composer box
+  -   60 e2e/composer.spec.ts:868:1 › R5: composer shadow switches below 640px and keeps the dark edge
+  ✓   61 e2e/engine-replay.spec.ts:78:5 › a replayed permission round trip crosses the X2 surface and survives reload (29.8s)
+  ✓   62 e2e/engine-replay.spec.ts:133:5 › reads answer through the bridge and generateTitle completes as an operation (1.5s)
+  ✓   63 e2e/engine-replay.spec.ts:162:5 › an unanswered read fails with the host's deadline before the router's (8.9s)
+  ✓   64 e2e/fixture-safety.spec.ts:10:7 › panel scratch ignores inherited Git routing and leaves the foreign repository unchanged (398ms)
+  ✓   65 e2e/fixture-safety.spec.ts:10:7 › code scratch ignores inherited Git routing and leaves the foreign repository unchanged (551ms)
+  ✓   66 e2e/palette.spec.ts:57:5 › palette reveal project: the row keeps focus as the browser orders the frame and the dialog restore (2.8s)
+  ✓   67 e2e/palette.spec.ts:67:5 › palette reveal project: the row keeps focus when a frame runs before the dialog restores focus (1.8s)
+  -   68 e2e/requests.spec.ts:107:1 › a replayed permission renders in the docked frame on the card page, Enter answers it in the focused pane only
+  -   69 e2e/requests.spec.ts:135:1 › a question card steps one question at a time, keeps its picks across placements, and submits every answer as the fixture recorded
+  -   70 e2e/requests.spec.ts:172:1 › the Overview card steps a question with digits and Enter, and Skip leaves the last question out of the reply
+  -   71 e2e/requests.spec.ts:197:1 › an elicitation form accepts the fixture's content
+  -   72 e2e/requests.spec.ts:211:1 › a session-scoped allow carries the fixture's updatedPermissions
+  -   73 e2e/requests.spec.ts:229:1 › the Overview card answers with focus on its article and the hover card answers by its own controls
+  -   74 e2e/requests.spec.ts:256:1 › a Read request flagged requires_user_interaction offers no quick approval anywhere
+  -   75 e2e/requests.spec.ts:283:1 › the two declared dialogs answer with the pinned result strings
+  -   76 e2e/requests.spec.ts:323:1 › an undeclared dialog kind stays pending and unanswered
+  ✓   77 e2e/requests.spec.ts:344:1 › the Overview card answers with Enter on its article (1.0s)
+  ✓   78 e2e/requests.spec.ts:380:1 › the real composer gives way to the card and returns with focus in the editor (2.1s)
+  ✓   79 e2e/resume-picker.spec.ts:10:5 › resume picker: from an expanded project, search, open a session (1.0s)
+  ✓   80 e2e/sessions.spec.ts:234:7 › sessions › new worktree: the Worktree checkbox creates a worktree and the first send runs in it, unattested and with no card in a trusted repository (2.7s)
+  ✓   81 e2e/sessions.spec.ts:269:7 › sessions › unstarted tab, trust bootstrap and first send: the prompt typed into the composer docks the trust card; Trust and start runs the bootstrap under an id of its own, then the session, and the turn plays to its end (2.0s)
+  ✓   82 e2e/sessions.spec.ts:299:7 › sessions › fork in place with distinct ids: a second tab, a pinned id, two records (1.6s)
+  ✓   83 e2e/sessions.spec.ts:323:7 › sessions › rollback keeps the tab: a launch past the fixture list is refused, the worktree and record go, the failure card stays, and Back to editing returns the message to the editor (3.0s)
+  ✓   84 e2e/sessions.spec.ts:353:7 › sessions › archive and unarchive: the sheet archives, the row goes, Archived sessions brings it back (1.6s)
+  ✓   85 e2e/sessions.spec.ts:379:7 › sessions › delete and rename on discovered sessions: rename sets the override, delete moves the transcript away and the row goes (1.3s)
+  ✓   86 e2e/sessions.spec.ts:459:7 › sessions › a resume whose engine writes nothing on its first spawn is launched once more and reaches ready, the retry visible in its rows and notice (35.0s)
+  ✓   87 e2e/sessions.spec.ts:475:7 › sessions › a resume whose engine writes nothing twice fails for good with the reason shown, and the row can be resumed again (1.0m)
+  ✓   88 e2e/sessions.spec.ts:501:7 › sessions › foreign-live: a background job holds the session read-only, the fresh read answers held, Attach runs the pinned attach in the job’s directory in one tab, again at its prompt and after a reload; a terminal holder gets no Attach (2.4s)
+  ✓   89 e2e/sessions.spec.ts:570:7 › sessions › New chat from the project list: "Choose a project" with Send disabled; a project enables Send with its branch and the Worktree checkbox; New project adds a folder; no project runs at home (2.2s)
+  ✓   90 e2e/sessions.spec.ts:640:7 › sessions › Overview New chat on an empty board closes the panel and hands typing to the new composer (1.2s)
+  ✓   91 e2e/sessions.spec.ts:653:7 › sessions › ⌘N (File › New chat) from an open session starts a New chat in that session’s project (1.2s)
+  ✓   92 e2e/sessions.spec.ts:681:7 › sessions › Add project picks through main's e2e seam: cancelled when MAWS_E2E_PICK_PATHS is unset, the listed directory when set; no native panel (1.2s)
+  ✓   93 e2e/sessions.spec.ts:696:7 › sessions › an unstarted tab with a draft survives a relaunch (3.0s)
+  ✓   94 e2e/sessions.spec.ts:717:7 › sessions › C5's acceptance item 10, replay clause: a replayed read-only request reaches the session's row through a recorded session and its hover card's Approve answers the broker (1.8s)
+  ✓   95 e2e/settings.spec.ts:35:5 › settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, refused, unbound and reset; the route and policy persist (2.5s)
+  ✓   96 e2e/settings.spec.ts:130:5 › settings: the monospace font applies to the root --font-mono and to the Appearance preview (1.1s)
+  ✓   97 e2e/settings.spec.ts:160:5 › settings: the transcript width applies to the root --measure, and Narrow restores the token (1.2s)
+  ✓   98 e2e/settings.spec.ts:185:5 › settings: Engine shows the resolved binary, its version and the tested one, and offers the update (1.0s)
+  ✓   99 e2e/settings.spec.ts:214:5 › settings: in a 50/50 split the view stacks inside its pane, and in one pane it keeps its columns (1.3s)
+  -  100 e2e/settings.spec.ts:349:5 › settings: a Nerd Font in appearance.monoFont draws private-use prompt glyphs in the terminal, and follows a change
+  ✓  101 e2e/shell.spec.ts:41:5 › shell: sidebar, overview, hover approve, tabs and split, persistence, themes, notification, quit guard (8.0s)
+  ✓  102 e2e/shell.spec.ts:68:5 › tab sets per project: the strip switches with the project, ⌘1 counts in the set, the label names it (2.5s)
+  ✓  103 e2e/shell.spec.ts:138:5 › sidebar at scale: the flat tree, 36px project rows, 30px session rows, five then eight (1.7s)
+  ✓  104 e2e/smoke.spec.ts:14:5 › preload bundle has no external runtime imports (1ms)
+  ✓  105 e2e/smoke.spec.ts:23:5 › MAWS opens light, hosts answer, pty echoes, survives reload and window close, theme switches, exits clean (1.5s)
+  ✓  106 e2e/statusline.spec.ts:60:5 › usage: Session info keeps reset times while near-limit windows never post a banner (2.4s)
+  ✓  107 e2e/statusline.spec.ts:96:5 › usage: without ClaudeUsage data the windows read —, and no banner posts (1.0s)
+  -  108 e2e/voice.spec.ts:167:1 › a hold shows Listening…, draws the partials greyed in place, settles the final on release, and ⌘Z removes it whole
+  -  109 e2e/voice.spec.ts:199:1 › dictation lands at a mid-paragraph caret with a leading space, and after a selection without replacing it
+  -  110 e2e/voice.spec.ts:229:1 › a release before the recognizer started cancels at once: no text, the control idle, nothing heard later
+  -  111 e2e/voice.spec.ts:251:1 › letting go of ⌥ first ends the hold, and the still-held Space types nothing
+  -  112 e2e/voice.spec.ts:274:1 › typing inside the greyed words keeps them and the letter, and ends the capture; the next partial changes nothing
+  -  113 e2e/voice.spec.ts:299:1 › the toolbar microphone toggles: a click starts listening, a second settles the final; a click while asking cancels
+  -  114 e2e/voice.spec.ts:337:1 › Enter while finishing sends the greyed words as they stand, and the late final changes nothing
+  -  115 e2e/voice.spec.ts:366:1 › with two composers the words land in the focused pane's only
+  -  116 e2e/voice.spec.ts:382:1 › a card docked over the composer refuses the hold with a notice and no start
+  -  117 e2e/voice.spec.ts:399:1 › the window losing focus mid-hold cancels and removes the interim words
+  -  118 e2e/voice.spec.ts:421:1 › a denied microphone shows the notice whose button records the pane and opens nothing
+  -  119 e2e/voice.spec.ts:440:1 › a missing helper refuses the hold with the path it looked at
+  -  120 e2e/voice.spec.ts:454:1 › a partial arriving after the final leaves the settled text unchanged
+  -  121 e2e/voice.spec.ts:482:1 › Settings › Voice reads the status from main and writes the language to settings version 9
+  ✓  122 e2e/voice.spec.ts:504:1 › packaged: the bundled helper answers voice.status from Contents/Resources and voice.start is refused under the harness (825ms)
+  -  123 e2e/widgets.spec.ts:90:3 › interactive › every name opens a widget from the palette, none listed as unavailable
+  -  124 e2e/widgets.spec.ts:138:3 › interactive › reads render their fixtures and issue their intended payloads
+  -  125 e2e/widgets.spec.ts:207:3 › interactive › export offers the engine’s filename and Save as… writes its text
+  -  126 e2e/widgets.spec.ts:229:3 › interactive › agents and skills list the catalogue and insert at the caret
+  -  127 e2e/widgets.spec.ts:254:3 › interactive › the model chip says sonnet high and opens the selector: effort first, the list with Default, a pick applies at once, fast after its warning
+  -  128 e2e/widgets.spec.ts:308:3 › interactive › arguments: a resolved /model, /fast off, /effort and /permissions apply at Enter; the rest open their widget with the argument
+  -  129 e2e/widgets.spec.ts:369:3 › interactive › permissions mode refusal: haiku, then auto, reads the refusal with the mode still default and the composer’s notice
+  -  130 e2e/widgets.spec.ts:407:3 › interactive › mcp reconnect and plugins reload run as operations
+  -  131 e2e/widgets.spec.ts:429:3 › interactive › mcp toggle discloses ~/.claude.json and reads its state back after either outcome
+  -  132 e2e/widgets.spec.ts:488:3 › interactive › resume lists the project’s sessions
+  -  133 e2e/widgets.spec.ts:505:3 › interactive › the toolbar’s context ring opens the context window with the engine’s full reading
+  -  134 e2e/widgets.spec.ts:524:3 › interactive › Session info renders the six sections and derives the lane from the status and the model
+  -  135 e2e/widgets.spec.ts:565:3 › interactive › the switch names background work, requires a Claude model, then re-reads, stops and starts direct in order
+  -  136 e2e/widgets.spec.ts:598:3 › interactive › work that started after the confirm returns the switch to its sheet naming it, and nothing is stopped
+  -  137 e2e/widgets.spec.ts:629:3 › replay conformance › auto-routed-controls: the driver issues the recorded frames and the widgets render the answers
+  -  138 e2e/widgets.spec.ts:693:3 › replay conformance › reads: the driver issues the recorded frames and the widgets render the answers
+  97 skipped
+  41 passed (3.8m)

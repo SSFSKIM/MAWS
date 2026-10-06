@@ -134,3 +134,31 @@ Unrun on 7d0442ac: build:app, the packaged checks, the packaged e2e.
    start: eligible: load 17.16 after 0s · slot slot.1 acquired at 00:08:09 load { 17.16 17.11 27.41 }
    tail: 29 passed (1.0m); every case in e2e-c7.txt
 
+== build:app   2026-10-06 00:10 KST   (exit 0; unsigned)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> build:app
+   start: eligible: load 15.44 after 0s · slot slot.1 acquired at 00:10:00 load { 15.44 17.16 26.22 }
+   tail:
+     $ scripts/build-voice-helper.sh
+     ✓ built in 19.85s
+     • packaging       platform=darwin arch=arm64 electron=44.4.5 appOutDir=dist/mac-arm64
+     • default Electron icon is used  reason=application icon is not set
+     • skipped macOS code signing  reason=identity explicitly is set to null
+
+== packaged e2e   2026-10-06 00:11 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && MAWS_E2E_EXECUTABLE=dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e -- e2e/voice.spec.ts
+   start: eligible: load 17.81 after 0s · slot slot.1 acquired at 00:10:59 load { 17.81 17.00 25.51 }
+   tail:
+     ✓  122 e2e/voice.spec.ts:504:1 › packaged: the bundled helper answers voice.status from Contents/Resources and voice.start is refused under the harness (825ms)
+     97 skipped
+     41 passed (3.8m)
+   note: the literal `--` reached Playwright, which ran its whole default suite on the packaged app, not the one file;
+     all 41 cases that run on a packaged build passed (packaged-e2e.txt lists them).
+
+== packaged checks   2026-10-06 00:12 KST   (light, outside the slot; full transcript in packaged-helper.txt)
+   ls -l: -rwxr-xr-x 144272 bytes, Contents/Resources/voice-helper/maws-voice-helper
+   codesign -dv: CodeDirectory v=20400 size=1226 flags=0x20002(adhoc,linker-signed) · Signature=adhoc
+   plutil: NSMicrophoneUsageDescription and NSSpeechRecognitionUsageDescription carry MAWS's two reasons
+   probe: {"type":"ready","protocol":1} then {"type":"probe","locales":[63 entries],"systemLocale":"ko-KR",
+          "locale":"ko-KR","supportsOnDevice":true,"permission":{"microphone":"authorized","speech":"notDetermined"}}
+
+All gates of Acceptance items 1 to 5 have run green on e196298e.
