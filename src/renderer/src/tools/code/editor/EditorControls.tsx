@@ -8,8 +8,10 @@ import { EDITOR_COPY } from '../copy';
 import { useViewer, type ViewerEntry } from '../viewer/viewer-store';
 import { step, useEditorNavigation } from './navigation';
 
-const control = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:text-fg-faint';
-const primary = 'rounded-sm border border-border-strong bg-bg-raised px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover disabled:text-fg-faint';
+// The buttons and counts keep their size in a narrow bar; the notice and a save's failure are what truncate (M4: the
+// merge view's bar at a 600 px viewer wrapped Keep mine and drew Save over Wrap).
+const control = 'shrink-0 whitespace-nowrap rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:text-fg-faint';
+const primary = 'shrink-0 whitespace-nowrap rounded-sm border border-border-strong bg-bg-raised px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover disabled:text-fg-faint';
 const arrow = 'rounded-sm px-1 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:text-fg-faint';
 
 // A count with ↑ ↓ through what it counts in the shown code view.
@@ -17,7 +19,7 @@ function Counter({ tabId, kind, label, previous, next, count }: { tabId: string;
   const data = kind === 'change' ? { 'data-merge-changes': String(count) } : { 'data-conflicts': String(count) };
   return (
     <span className="flex shrink-0 items-center gap-0.5">
-      <span role="status" {...data} className="mr-0.5 text-fg-muted">
+      <span role="status" {...data} className="mr-0.5 whitespace-nowrap text-fg-muted">
         {label}
       </span>
       <button type="button" className={arrow} aria-label={previous} title={previous} disabled={count === 0} onClick={() => step(tabId, kind, -1)}>
@@ -47,7 +49,7 @@ export function EditorControls({ entry }: { entry: ViewerEntry }) {
       ) : null}
       {theirs !== null ? (
         <>
-          <span role="status" data-theirs-notice={theirs.view} className="shrink-0 text-warning">
+          <span role="status" data-theirs-notice={theirs.view} title={theirs.view === 'notice' ? EDITOR_COPY.changedOnDisk : EDITOR_COPY.conflictOnSave} className="min-w-0 truncate text-warning">
             {theirs.view === 'notice' ? EDITOR_COPY.changedOnDisk : EDITOR_COPY.conflictOnSave}
           </span>
           {changes !== null ? (
@@ -72,7 +74,7 @@ export function EditorControls({ entry }: { entry: ViewerEntry }) {
       {dirty || theirs !== null ? (
         <button
           type="button"
-          className={`shrink-0 ${primary}`}
+          className={primary}
           disabled={saving}
           title={saveChord ? `${EDITOR_COPY.save} · ${saveChord}` : EDITOR_COPY.save}
           onClick={() => void viewer().save(tabId)}
