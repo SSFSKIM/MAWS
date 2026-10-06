@@ -213,7 +213,9 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
       model: { requested: intent.model, resolved: null },
       effort: intent.effort,
       permissionMode: { requested: mode, effective: mode, refusal: null },
-      firstPrompt: intent.message?.display ?? null, // W11 (I1): the row's title until the transcript's first summary
+      // W11 (I1): the row's title until the transcript's first summary. E3 (M5): a side thread's is its name, never its
+      // anchored first message (whose lead, preamble and tag would title it until the engine's title is read back)
+      firstPrompt: intent.lineage?.kind === 'side-thread' ? sideThreadTitle(intent.lineage) : (intent.message?.display ?? null),
       lineage: intent.lineage ?? null, // E3 (X11): the record carries it before the engine runs
     });
     if (!created.ok) s.log(`a record already exists under ${appSessionId}; the launch reuses it`);

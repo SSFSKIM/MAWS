@@ -14,7 +14,7 @@ import type { SideThreadRow, SideThreadStore } from '../index/side-threads';
 export const SIDE_QUESTION_TITLE = 'Side question';
 
 // A side thread's name: what `finishBinding` renames it to through the engine, and (M5) the first prompt its record is
-// seeded with, so the row is never titled by the anchored text (its lead, preamble and tag) before the engine's title
+// created with, so the row is never titled by the anchored text (its lead, preamble and tag) before the engine's title
 // is read back from its store.
 export function sideThreadTitle(lineage: Pick<Lineage, 'openedBy' | 'anchor'>): string {
   return lineage.openedBy === 'btw' ? SIDE_QUESTION_TITLE : lineage.anchor?.label.trim() || SIDE_QUESTION_TITLE;

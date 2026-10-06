@@ -36,7 +36,6 @@ import type { SideThreadFrom } from '@shared/ipc/schema/side';
 import { commentContent, screenshotRoots, withoutScreenshot } from '../side/content';
 import { InvalidSideInput } from '../side/invalid';
 import { sendToMain, type SendToMainInput, type SendToMainOutput } from '../side/send-to-main';
-import { sideThreadTitle } from '../side/side-threads';
 // E3 end
 import { trustKeyOf, trustStateOf } from './trust';
 import { findPane, paneCall, readProcesses } from './pane-holder';
@@ -571,6 +570,7 @@ export class SessionService {
           : [{ type: 'text', text: promotionMessage(from.exchanges, from.text) }];
       const tooLarge = sendContentRefusal(content);
       if (tooLarge !== null) throw new InvalidSideInput([], `the side thread's first message is too large: ${tooLarge.message}`);
+      const display = String(content.at(-1)!.text); // the anchored text, whole: what a failed setup hands back to the editor
       const lineage: Lineage = {
         kind: 'side-thread',
         parentAppSessionId: source.appId,
@@ -578,9 +578,6 @@ export class SessionService {
         ...(from.kind === 'comment' ? { anchor: withoutScreenshot(from.anchor) } : {}),
         openedBy: from.kind,
       };
-      // the record's title until the engine's is read back: the name the thread is given (M5; the anchored text would
-      // title it by its lead, preamble and tag)
-      const display = sideThreadTitle(lineage);
       const intent = await forkIntentOf(s, source, { kind: 'inPlace' }, { message: { content, display }, rewindTo: null }, lineage);
       if ('invalid' in intent) return { status: 'invalid', appSessionId, field: 'target', message: intent.invalid }; // never for an in-place fork
       await this.putIntent(intent);
