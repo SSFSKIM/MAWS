@@ -142,6 +142,21 @@ async function openPlugins(maws: BackendLaunch): Promise<Locator> {
 const configHome = (maws: MawsLaunch) => join(maws.userData, 'claude-config');
 // The stub's calls that changed something (no listing), each argv after the binary.
 const mutations = (maws: BackendLaunch) => stubCalls(maws.cli).filter((argv) => argv[0] === 'plugin' && !argv.includes('list'));
+// The stub's whole calls.log once no read is still landing in it (the same for half a second).
+async function settledLog(maws: BackendLaunch): Promise<string> {
+  const text = () => (existsSync(maws.cli.callsLog) ? readFileSync(maws.cli.callsLog, 'utf8') : '');
+  let last = text();
+  await expect
+    .poll(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const now = text();
+      const same = now === last;
+      last = now;
+      return same;
+    }, { timeout: 15_000 })
+    .toBe(true);
+  return last;
+}
 const installedRow = (w: Locator, id: string, scope = 'user') => w.locator(`[data-plugins-section="installed"] [data-plugin-row="${id}"][data-plugin-scope="${scope}"]`);
 const marketplaceRow = (w: Locator, name: string) => w.locator(`[data-marketplace-row="${name}"]`);
 const sheetOf = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);
@@ -941,10 +956,13 @@ test.describe('plugin management (E8)', () => {
     await expect(lineOf(row)).toHaveText('Successfully enabled plugin: e8-tools (scope: user) · No running session to reload');
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
 
-    // Cancel: the sheet closes and the CLI never runs
+    // Cancel: the sheet closes and the CLI never runs: the whole calls.log, reads included, is as it was
+    const log = await settledLog(backend);
     await row.getByRole('button', { name: 'Update' }).click();
     await sheetOf(page, 'update').getByRole('button', { name: 'Cancel' }).click();
     await expect(sheetOf(page, 'update')).toBeHidden();
+    await page.waitForTimeout(500);
+    expect(readFileSync(backend.cli.callsLog, 'utf8')).toBe(log);
     expect(mutations(backend)).toEqual(shown);
 
     // Update: the marketplace now offers 1.1.0
@@ -980,6 +998,7 @@ test.describe('plugin management (E8)', () => {
     backend.cli.setState({ ...state, marketplaces: state.marketplaces.map((m) => ({ ...m, plugins: m.plugins.filter((p) => p.name !== 'e8-extra') })) });
     const extra = group.locator('[data-plugin-row="e8-extra@e8-scratch"]');
     await extra.getByRole('button', { name: 'Install…' }).click();
+    const shown = [await argvOf(sheetOf(page, 'install'))]; // each argv a sheet showed and its confirm ran, in order
     await sheetOf(page, 'install').getByRole('button', { name: 'Install', exact: true }).click();
     await expect(group.locator('summary')).toHaveText('e8-scratch · 1 plugin'); // read again once the CLI ended: no longer offered
     await expect(extra).toHaveCount(0);
@@ -993,6 +1012,7 @@ test.describe('plugin management (E8)', () => {
     backend.cli.setState({ ...backend.cli.state(), fail: { install: { failureCode: 'command_source_refused', message: 'e8-probe declares a command to run before it installs', shownCommand: { sha256, command: ['node', './scripts/setup.js'] } } } });
     const probe = group.locator('[data-plugin-row="e8-probe@e8-scratch"]');
     await probe.getByRole('button', { name: 'Install…' }).click();
+    shown.push(await argvOf(sheetOf(page, 'install')));
     await sheetOf(page, 'install').getByRole('button', { name: 'Install', exact: true }).click();
     const declared = sheetOf(page, 'install');
     await expect(declared.getByRole('heading', { name: 'Run the command e8-probe@e8-scratch declares?' })).toBeVisible();
@@ -1002,11 +1022,12 @@ test.describe('plugin management (E8)', () => {
     await declared.getByRole('button', { name: 'Run it' }).click();
     await expect(probe).toHaveCount(0);
     await expect(availableResult(w, 'e8-probe@e8-scratch')).toHaveText('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · No running session to reload');
-    expect(mutations(backend)).toEqual([
+    shown.push(accepted);
+    expect(shown.slice(0, 2)).toEqual([
       ['plugin', 'install', 'e8-extra@e8-scratch', '--scope', 'user', '--json'],
       ['plugin', 'install', 'e8-probe@e8-scratch', '--scope', 'user', '--json'],
-      accepted,
     ]);
+    expect(mutations(backend)).toEqual(shown); // the rejected runs included: exactly what the three sheets showed
     expect(stubCalls(backend.cli).flat()).not.toContain('-y');
     expect(backend.consoleErrors()).toEqual([]);
   });
