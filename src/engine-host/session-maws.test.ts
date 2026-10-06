@@ -439,6 +439,36 @@ describe('a blocking ask as a question attention item (scripted)', () => {
     expect(run.session.brokerItems()).toEqual([]);
   });
 
+  // M5 fix: exit parity with an AskUserQuestion. The broker confirmed the ask's permission at its tools/call, so it is
+  // no longer the broker's loss; the blocking ask, still published, is counted (and named) as a question lost. An async
+  // ask, never an attention item, is not counted.
+  it('a blocking ask pending at the exit is lost attention on the exit row and the process.exited event; an async one is not', async () => {
+    const run = await attended();
+    run.transport.push({ type: 'control_request', request_id: 'perm-1', request: { subtype: 'can_use_tool', tool_name: 'mcp__maws__ask', input: { questions: QUESTIONS }, tool_use_id: 'toolu_lost' } });
+    await until(() => run.last().length === 1, 'the permission');
+    expect(await run.session.answer('perm-1' as RequestId, { kind: 'permission', decision: 'allow', scope: 'once' })).toBe('delivered');
+    run.call('ask', { questions: QUESTIONS }, 'toolu_lost');
+    run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_async');
+    await until(() => run.session.asks().length === 2, 'both asks');
+    expect(run.last().map((i) => [i.kind, i.state])).toEqual([['permission', 'confirmed'], ['question', 'pending']]);
+    run.transport.exit(1);
+    expect((await run.session.exited).lostAttentionCount).toBe(1);
+    const exitRow = run.journal.rows.find((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'exit')!;
+    expect(exitRow.frame).toMatchObject({ event: 'exit', reason: 'crash', lostAttentionCount: 1, lostAskCount: 1 });
+    expect(run.events.at(-1)).toMatchObject({ kind: 'process.exited', reason: 'crash', lostAttentionCount: 1, lostAskCount: 1 });
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  it('an exit with no blocking ask pending writes no lostAskCount', async () => {
+    const run = await attended();
+    await run.answered(run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_async'));
+    run.transport.exit(1);
+    expect((await run.session.exited).lostAttentionCount).toBe(0);
+    const exitRow = run.journal.rows.find((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'exit')!;
+    expect(exitRow.frame).not.toHaveProperty('lostAskCount');
+    expect(run.events.at(-1)).not.toHaveProperty('lostAskCount');
+  });
+
   it('an async ask is no attention item, and publishes nothing', async () => {
     const run = await attended();
     const before = run.published.length;

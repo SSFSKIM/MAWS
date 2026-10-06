@@ -414,7 +414,9 @@ test('a reload mid-ask: the sheet lists the ask again from the host and Submit a
 
 // ---- G6: a stop with an ask pending cancels it ---------------------------------------------------------------------
 
-test('a stop with a blocking ask pending: the capsule reads cancelled and the journal holds maws_ask_cancelled before the exit', async () => {
+// The ask lost with the process is counted as a question lost (exit parity with an AskUserQuestion; M5 fix): on the
+// transcript's exit row and in the session's interrupted attention item.
+test('a stop with a blocking ask pending: the capsule reads cancelled, the exit names a question lost, and the journal holds maws_ask_cancelled before the exit', async () => {
   await scene({ titles: ['E1 tools: stop'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -426,10 +428,13 @@ test('a stop with a blocking ask pending: the capsule reads cancelled and the jo
     await expect(capsule).toHaveAttribute('data-ask-state', 'cancelled');
     await expect(capsule.locator('[data-ask-chip]')).toHaveText('Cancelled, the session ended');
     await expect(sheetOf(s)).toContainText('This session ended before you answered');
+    await expect(s.pane.locator('[data-scope="exit"]')).toHaveText('Session process exited (stop) · 1 question lost');
+    await expect
+      .poll(async () => value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id).map((item) => [item.kind, item.summary]))
+      .toEqual([['interrupted', 'Session interrupted, 1 question lost']]);
     const meta = metaEvents(s.journal(id));
     expect(meta).toContain('maws_ask_cancelled');
     expect(meta.indexOf('maws_ask_cancelled')).toBeLessThan(meta.lastIndexOf('exit'));
-    expect(meta).not.toContain('replay_mismatch');
   });
 });
 

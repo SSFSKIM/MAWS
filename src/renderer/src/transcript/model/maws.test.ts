@@ -177,6 +177,20 @@ describe('the ask capsule', () => {
     expect(capsule(rowsOf(applyEvents(createState(null, null), b.events)))).toMatchObject({ state: 'cancelled' });
   });
 
+  // M5 fix: a blocking ask lost at the exit is named a question on the exit row, beside any approval lost with it
+  it('names the blocking asks the exit lost as questions on the exit row; approvals alone keep their wording', () => {
+    const exitText = (lostAttentionCount: number, lostAskCount?: number) => {
+      const b = builder();
+      b.turn('u1');
+      askCall(b, 'toolu_a');
+      b.emit('process.exited', { code: 1, signal: null, reason: 'crash', lostAttentionCount, ...(lostAskCount === undefined ? {} : { lostAskCount }), budget: null });
+      return ofKind(foldedRows(b.events), 'error').find((row) => row.scope === 'exit')?.text;
+    };
+    expect(exitText(1, 1)).toBe('Session process exited (crash) · 1 question lost');
+    expect(exitText(3, 2)).toBe('Session process exited (crash) · 1 approval and 2 questions lost');
+    expect(exitText(2)).toBe('Session process exited (crash) · 2 approvals lost');
+  });
+
   it('stays in view when its turn folds, and counts as work for where the answer starts', () => {
     const b = builder();
     b.turn('u1');

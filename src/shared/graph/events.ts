@@ -226,8 +226,10 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   // whose last turn never ended (SDK entrypoints write no turn_duration): the process is gone and nobody saw it go.
   // C12: reason 'budget' is MAWS's release under the memory budget (charter §4.4; never on the wire, which carries
   // end_session `stop`), with the budget and the sum at the release in `budget`, non-null exactly then.
+  // E1: `lostAskCount` is how many of `lostAttentionCount` were blocking `maws` asks (questions, not approvals); absent
+  // when none was.
   event('process.exited', {
-    code: z.number().nullable(), signal: nullableString(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */]), lostAttentionCount: z.number(),
+    code: z.number().nullable(), signal: nullableString(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */]), lostAttentionCount: z.number(), lostAskCount: z.number().optional() /* E1 */,
     budget: z.strictObject({ limitKiB: z.number(), totalKiB: z.number() }).nullable(), // C12
   }),
   // R1: `plugin` is the engine's registry name for the plugin; `text` is plain text. A toast's `timeoutMs` is the

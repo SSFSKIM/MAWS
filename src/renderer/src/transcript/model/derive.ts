@@ -1057,7 +1057,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         // C4's synthesised end of a holder-less transcript whose last turn never ended (disk-derived, reason unknown)
         // closed that turn in the reducer; nobody witnessed an exit, so it is no notice. C3's exits carry a seq.
         if (event.reason === 'unknown' && event.seq === null) break;
-        rows.push({ id: rowId.error(event.id), turnId: null, at: event.at, kind: 'error', severity: event.reason === 'crash' ? 'error' : 'notice', text: processExitCopy(event.reason, event.lostAttentionCount), attempt: null, scope: 'exit', lostAttentionCount: event.lostAttentionCount });
+        rows.push({ id: rowId.error(event.id), turnId: null, at: event.at, kind: 'error', severity: event.reason === 'crash' ? 'error' : 'notice', text: processExitCopy(event.reason, event.lostAttentionCount, event.lostAskCount /* E1 */), attempt: null, scope: 'exit', lostAttentionCount: event.lostAttentionCount });
         break;
       case 'permission.requested':
       case 'question.requested':

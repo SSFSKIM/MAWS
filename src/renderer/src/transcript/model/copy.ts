@@ -299,8 +299,13 @@ export const RELEASED_COPY = 'Released to stay under the memory budget · sendin
 export const RESUMING_COPY = 'Resuming…';
 export const RESUMED_COPY = 'Resumed';
 // C12 end
-export const processExitCopy = (reason: string, lostAttentionCount: number) =>
-  reason === 'budget' ? RELEASED_COPY /* C12 */ : `Session process exited (${reason})${lostAttentionCount > 0 ? ` · ${plural(lostAttentionCount, 'approval')} lost` : ''}`;
+// E1: `lostAskCount` of the lost were blocking `maws` asks, named questions; the rest stay approvals.
+const lostCopy = (lostAttentionCount: number, lostAskCount: number) => {
+  const approvals = lostAttentionCount - lostAskCount;
+  return [approvals > 0 ? plural(approvals, 'approval') : null, lostAskCount > 0 ? plural(lostAskCount, 'question') : null].filter((part) => part !== null).join(' and ');
+};
+export const processExitCopy = (reason: string, lostAttentionCount: number, lostAskCount = 0) =>
+  reason === 'budget' ? RELEASED_COPY /* C12 */ : `Session process exited (${reason})${lostAttentionCount > 0 ? ` · ${lostCopy(lostAttentionCount, lostAskCount)} lost` : ''}`;
 export const bashHeader = (command: string) => `! ${command}`;
 export const LOCAL_COMMAND_HEADER = 'Command output';
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init

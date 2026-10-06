@@ -531,7 +531,7 @@ export class Normalizer {
         const reason = typeof meta.reason === 'string' ? (meta.reason as 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget' /* C12 */) : code === 0 && signal === null ? 'unknown' : 'crash';
         // C12: a release carries the budget and the sum it was made at (the exit row's `budget`)
         const budget = reason === 'budget' ? budgetOf(meta.budget) : null;
-        out.emit({ kind: 'process.exited', code, signal, reason, lostAttentionCount: typeof meta.lostAttentionCount === 'number' ? meta.lostAttentionCount : 0, budget }, main);
+        out.emit({ kind: 'process.exited', code, signal, reason, lostAttentionCount: typeof meta.lostAttentionCount === 'number' ? meta.lostAttentionCount : 0, ...(typeof meta.lostAskCount === 'number' && meta.lostAskCount > 0 ? { lostAskCount: meta.lostAskCount } : {}) /* E1 */, budget }, main);
         return;
       }
       case 'reconnect':

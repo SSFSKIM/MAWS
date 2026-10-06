@@ -1080,7 +1080,11 @@ export class EngineSession {
     this.heard(); // C3 corrective: the bound ends with the process
     if (!this.handshakeDone && !this.initFailed && this.stopReason === null) this.writeInitFailed('the process exited before answering initialize', 'exited');
     const reason: ExitReason = this.stopReason ?? (this.initFailed ? 'crash' : exit.code === 0 && exit.signal === null ? 'unknown' : 'crash');
-    const { lost } = this.broker.processExited();
+    const { lost: lostApprovals } = this.broker.processExited();
+    // E1 M5 fix: a blocking ask still published is attention lost like a pending AskUserQuestion (the architect's ruling
+    // 1), counted before the tool server aborts it; `lostAskCount` names the asks among them (absent when none)
+    const lostAsks = this.askItems.size;
+    const lost = lostApprovals + lostAsks;
     // E1: every tool call in flight is aborted (no pipe takes its answer) and every pane request settles
     this.toolServer.processExited(); // a blocking ask's call aborts with it, cancelling the ask (meta row)
     this.panes.processExited();
@@ -1095,7 +1099,7 @@ export class EngineSession {
     queueSettled.catch((error: unknown) => this.log(`queue not settled at exit: ${messageOf(error)}`));
     const release = reason === 'budget' ? this.release : null; // C12
     try {
-      this.record('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost, peakTreeRssKiB: this.tracker.peakTreeRssKiB, budget: release /* C12 */ });
+      this.record('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost, ...(lostAsks > 0 ? { lostAskCount: lostAsks } : {}), peakTreeRssKiB: this.tracker.peakTreeRssKiB, budget: release /* C12 */ });
     } catch (error) {
       this.log(`exit not journaled: ${messageOf(error)}`);
     }
