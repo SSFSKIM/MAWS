@@ -8,3 +8,53 @@ Pre-gate targeted checks (light, outside the slot), 2026-10-05 22:50 KST, load 3
   pnpm exec tsc --noEmit -p tsconfig.e2e.json --composite false
     -> no output, exit 0
 
+Load-gate history: three waits armed between 22:56 and 23:10 KST at a one-minute load of 375 to 390 were stopped
+before any opened (the controller paused M5 for M6); the gates below ran on 082a69e8 (M6's head 05c77377 plus M5's
+spec update).
+
+== typecheck   2026-10-05 23:33 KST
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> typecheck
+   start: eligible: load 14.32 after 0s · slot slot.2 acquired at 23:33:24 load { 14.32 31.95 147.30 }
+   tail:
+     $ tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false
+     (no diagnostics; exit 0)
+
+== lint   2026-10-05 23:34 KST
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> lint
+   start: eligible: load 17.63 after 0s · slot slot.2 acquired at 23:34:29 load { 17.63 29.41 137.85 }
+   tail:
+     $ eslint .
+     (no findings; exit 0)
+
+== unit suite   2026-10-05 23:34 KST
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> test --maxWorkers=4
+   start: eligible: load 15.25 after 0s · slot slot.1 acquired at 23:34:53 load { 15.25 27.90 134.17 }
+   tail:
+     Test Files  458 passed | 1 skipped (459)
+          Tests  6046 passed | 1 skipped (6047)
+     Type Errors  no errors
+       Duration  136.53s
+     (exit 0; one Node DEP0137 FileHandle deprecation warning printed by the run)
+
+== e2e:voice run 1   2026-10-05 23:36 KST   (exit 1: 12 passed, 2 failed, 1 skipped = the packaged case)
+   command: /tmp/maws-review/waitload20.sh && MAWS_E9_SHOTS=docs/doperpowers/evidence/p1-e9 /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:voice
+   start: eligible: load 17.40 after 0s
+   failures (full text in e2e-voice.txt):
+     - mid-paragraph caret: interim read `alpha be hello worldta` (expected `alpha hello world beta`): the caret placed by
+       eleven ArrowLefts was three positions behind when the hold began
+     - click toggle: the 300 ms window of the first partial `hello` had passed before the assertion (test timing; the
+       case now asserts its one partial)
+
+== e2e:voice run 2   2026-10-05 23:39 KST   (exit 1: 13 passed, 1 failed, 1 skipped = the packaged case)
+   command: as run 1
+   start: eligible: load 16.50 after 0s · slot slot.1 acquired at 23:39:09 load { 16.50 22.50 104.24 }
+   failure:
+     - mid-paragraph caret, now placed by Meta+ArrowUp then five ArrowRights: interim read `alph hello worlda beta`;
+       the caret one position behind. A PRODUCT DEFECT, not timing alone: `beginDictation` reads ProseMirror's
+       `state.selection`, but the hold's keydown is handled by C5's capture-phase dispatcher before ProseMirror's own
+       keydown (which flushes the DOM observer), so a caret moved by arrow keys whose `selectionchange` has not yet
+       been read is stale. The arrows' default action had already moved the DOM selection.
+   Gates stopped here at the controller's rule (a product defect is reported, a fixer takes it).
+   Screenshots from run 2: dictation-listening.png, dictation-denied.png, settings-voice.png.
+
+Unrun on this head: e2e:c7, build:app, the packaged checks, the packaged e2e.

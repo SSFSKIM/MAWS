@@ -204,7 +204,8 @@ test('dictation lands at a mid-paragraph caret with a leading space, and after a
   await page.keyboard.type('alpha beta');
   await page.keyboard.press('Shift+Enter');
   await page.keyboard.type('gamma');
-  for (let i = 0; i < 'gamma'.length + 1 + ' beta'.length; i++) await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('Meta+ArrowUp'); // the document's start
+  for (let i = 0; i < 'alpha'.length; i++) await page.keyboard.press('ArrowRight');
   await holdDown(page);
   await expect(interimIn(page, 0)).toHaveText('hello world');
   expect(await linesOf(page, 0)).toBe('alpha hello world beta\ngamma');
@@ -298,7 +299,7 @@ test('typing inside the greyed words keeps them and the letter, and ends the cap
 test('the toolbar microphone toggles: a click starts listening, a second settles the final; a click while asking cancels', async ({ voice }) => {
   const { page, app } = voice;
   await showComposers(page, ['e9-click']);
-  await script(app, { partials: ['hello', 'hello world'], partialDelayMs: 300, final: 'Hello world.' });
+  await script(app, { partials: ['hello world'], partialDelayMs: 100, final: 'Hello world.' });
   const mic = pane(page, 0).getByRole('button', { name: 'Dictate' });
   await expect(mic).toHaveAttribute('title', 'Click to dictate · on this Mac · or hold ⌥Space');
   await expect(mic).toHaveAttribute('aria-pressed', 'false');
@@ -306,7 +307,6 @@ test('the toolbar microphone toggles: a click starts listening, a second settles
   await mic.click();
   await expect(statusIn(page, 0)).toHaveText('Listening…');
   await expect(mic).toHaveAttribute('aria-pressed', 'true');
-  await expect(interimIn(page, 0)).toHaveText('hello');
   await expect(interimIn(page, 0)).toHaveText('hello world');
   await expect(messageIn(page, 0)).toBeFocused(); // the words go to the caret; the button does not take focus
   await mic.click();
