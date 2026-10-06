@@ -3,6 +3,7 @@ import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import { event, replayed } from '../../../../../../test/support/agents-events';
 import { matchesReceipt, matchesSendMessage, parentRoundsBetween, relayText, type Relay } from './relay';
+import { loadJournal } from '../../../../../../test/support/fixtures'; // E7
 
 const events = replayed('pass3', 'relay-to-child');
 const LOOPER = 'a7aea42f9bed9b3ea' as AgentId; // the idle and busy cases' background child
@@ -91,3 +92,30 @@ describe('relay model', () => {
     });
   });
 });
+
+// E7 start (E7 execution document, Design §4; Decision Log 6): the Reply to another session rides the relay, its target
+// a peer address. M0 ran the reply wording verbatim (pass3/e7-peer-a: the steer at seq 160, its SendMessage at 191),
+// and A's own unasked answer to the same sender (seq 130) shows why the owner's text must be in the match.
+describe('peer relay (E7)', () => {
+  const peerA = replayed('pass3', 'e7-peer-a');
+  const peerAt = (seq: number) => peerA.find((e) => e.seq === seq && e.kind === 'tool.use')!;
+  const B = { kind: 'peer', address: 'uds:/tmp/cc-socks/10562.sock', name: 'repo-b-gen1il-79', mode: 'reply' } as const;
+  const STEER = (loadJournal('pass3', 'e7-peer-a').find((row) => row.seq === 160)!.frame as { message: { content: string } }).message.content;
+
+  it('relayText asks the session to reply to the sender’s address with exactly the owner’s text (the wording M0 ran)', () => {
+    expect(relayText(B, 'E7 probe: reply from A')).toBe(STEER);
+    expect(relayText({ ...B, name: null }, 'hi')).toBe('Reply to the cross-session message from uds:/tmp/cc-socks/10562.sock with SendMessage, to: "uds:/tmp/cc-socks/10562.sock", sending exactly this text, then continue what you were doing: hi');
+    expect(relayText({ kind: 'peer', address: 'repo-b', name: 'repo-b', mode: 'message' }, 'hi')).toBe('Send a message to repo-b with SendMessage, to: "repo-b", sending exactly this text, then continue what you were doing: hi');
+  });
+
+  it('matches the parent’s SendMessage to the address or the sender’s name only when its message carries the owner’s text', () => {
+    expect(matchesSendMessage(peerAt(191), B, 'E7 probe: reply from A')).toBe(true);
+    expect(matchesSendMessage(peerAt(130), B, 'E7 probe: reply from A')).toBe(false); // the agent's own answer, to the name
+    const byName = event('tool.use', { toolName: 'SendMessage', input: { to: 'repo-b-gen1il-79', message: 'Sure. E7 probe: reply from A' } }, { seq: 400 });
+    expect(matchesSendMessage(byName, B, 'E7 probe: reply from A')).toBe(true);
+    expect(matchesSendMessage(byName, { ...B, name: null }, 'E7 probe: reply from A')).toBe(false);
+    const fromChild = event('tool.use', { toolName: 'SendMessage', input: { to: B.address, message: 'E7 probe: reply from A' }, agentId: WALKER }, { seq: 401 });
+    expect(matchesSendMessage(fromChild, B, 'E7 probe: reply from A')).toBe(false);
+  });
+});
+// E7 end

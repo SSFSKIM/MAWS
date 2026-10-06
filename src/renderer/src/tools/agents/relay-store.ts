@@ -12,14 +12,18 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { agentWorkClient } from './client';
 import { RELAY_COPY } from './copy';
 import { isPending, matchesReceipt, matchesSendMessage, parentRoundsBetween, relayText, type Relay } from './model/relay';
+import { sendMessageOutcome } from '@shared/engine/peer-envelope'; // E7
+import { isPeerPending, isPeerTarget, type AgentTarget, type PeerRelay, type PeerTarget } from './model/relay'; // E7
 
 export interface RelayStore {
   relays: Map<string, Relay>; // key `appSessionId:agentId`; one relay per agent: a send is refused while it is `asked` (or its steer unanswered) and replaces a `forwarded` one
-  send(appSessionId: AppSessionId, agent: { agentId: AgentId; name: string | null }, text: string, parentTurnOpen: boolean): Promise<void>;
+  send(appSessionId: AppSessionId, agent: AgentTarget | PeerTarget /* E7 */, text: string, parentTurnOpen: boolean): Promise<void>;
   dismiss(key: string): void;
+  peers: Map<string, PeerRelay>; // E7: key `appSessionId:peer:address`; one per address, by the agent relay's rules
 }
 
 export const relayKey = (appSessionId: AppSessionId, agentId: AgentId) => `${appSessionId}:${agentId}`;
+export const peerRelayKey = (appSessionId: AppSessionId, address: string) => `${appSessionId}:peer:${address}`; // E7
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const DROPPED = new Set(['cancelled', 'discarded', 'refused']);
@@ -56,6 +60,7 @@ export function createRelayStore() {
       set({ relays });
     };
     const ofSession = (id: AppSessionId) => [...get().relays].filter(([, r]) => r.appSessionId === id);
+    const peersOf = (id: AppSessionId) => [...get().peers].filter(([, r]) => r.appSessionId === id); // E7
 
     // Releases the child follow this store started, once its relay is delivered or ended. Not while the child's drill-in
     // holds a transcript entry under the same key: the host keeps one follower per child, and a drill-in over an ended
@@ -74,6 +79,7 @@ export function createRelayStore() {
       if (w.inFlight === 0) w.buffered = [];
       if (w.inFlight === 0 && !relays.some((r) => r.state.kind === 'asked')) w.rounds = [];
       if (w.inFlight > 0 || relays.some((r) => isPending(r.state))) return;
+      if (peersOf(id).some(([, r]) => isPeerPending(r.state))) return; // E7
       w.off();
       watches.delete(id);
     };
@@ -149,6 +155,7 @@ export function createRelayStore() {
         if (w.inFlight > 0) w.buffered.push(e);
         if (e.kind === 'assistant.block.complete' && e.agentId === null && e.seq !== null && e.block.type === 'tool_use') w.rounds.push(e);
         for (const [key] of ofSession(id)) step(key, e);
+        for (const [key] of peersOf(id)) stepPeer(key, e); // E7
       }
       tidy(id);
     };
@@ -163,10 +170,67 @@ export function createRelayStore() {
       return w;
     };
 
+    // E7 start: a relay to another session (E7 execution document, Design §4; Decision Log 6): asked → forwarded on the
+    // parent's SendMessage to the address carrying the owner's text → sent or failed on that call's result; failed when
+    // the engine drops the steer before starting it; gone with the parent's process, as an agent relay is. No child to
+    // follow and no receipt: the other session's inbox is not this one's to watch.
+    const putPeer = (key: string, relay: PeerRelay | null) => {
+      const peers = new Map(get().peers);
+      if (relay) peers.set(key, relay);
+      else peers.delete(key);
+      set({ peers });
+    };
+    const stepPeer = (key: string, e: SessionEvent) => {
+      const relay = get().peers.get(key);
+      if (!relay || !isPeerPending(relay.state)) return;
+      const { state } = relay;
+      if (e.kind === 'process.exited' && e.agentId === null && e.seq !== null) return putPeer(key, null);
+      if (state.kind === 'asked') {
+        if (e.kind === 'command.lifecycle' && e.commandUuid === state.messageUuid) {
+          if (e.state === 'started') started.add(e.commandUuid);
+          else if (DROPPED.has(e.state) && !started.has(e.commandUuid)) putPeer(key, { ...relay, state: { kind: 'failed', message: RELAY_COPY.dropped(e.state as 'cancelled' | 'discarded' | 'refused') } });
+          return;
+        }
+        if (e.kind === 'tool.use' && e.seq !== null && matchesSendMessage(e, relay.target, relay.text)) {
+          putPeer(key, { ...relay, state: { kind: 'forwarded', messageUuid: state.messageUuid, sentAt: state.sentAt, toolUseId: e.toolUseId, forwardedAt: e.at } });
+        }
+        return;
+      }
+      if (state.kind === 'forwarded' && e.kind === 'tool.result' && e.agentId === null && e.toolUseId === state.toolUseId) {
+        const outcome = sendMessageOutcome(e);
+        putPeer(key, { ...relay, state: outcome.ok ? { kind: 'sent', sentAt: e.at } : { kind: 'failed', message: outcome.message } });
+      }
+    };
+    const sendPeer = async (appSessionId: AppSessionId, target: PeerTarget, text: string, parentTurnOpen: boolean) => {
+      const key = peerRelayKey(appSessionId, target.address);
+      if (inFlight.has(key) || get().peers.get(key)?.state.kind === 'asked') return; // a second would race the first
+      const base = { appSessionId, target, text };
+      const content = relayText(target, text);
+      const refusal = sendContentRefusal(content);
+      if (refusal) return putPeer(key, { ...base, state: { kind: 'failed', message: refusal.message } });
+      const w = subscribe(appSessionId);
+      w.inFlight += 1;
+      inFlight.add(key);
+      try {
+        const { messageUuid } = await agentWorkClient().steer(appSessionId, content, 'next');
+        putPeer(key, { ...base, state: { kind: 'asked', messageUuid, sentAt: new Date().toISOString(), parentTurnOpenAtSend: parentTurnOpen } });
+        for (const e of w.buffered) stepPeer(key, e);
+      } catch (error) {
+        putPeer(key, { ...base, state: { kind: 'failed', message: messageOf(error) } });
+      } finally {
+        w.inFlight -= 1;
+        inFlight.delete(key);
+        tidy(appSessionId);
+      }
+    };
+    // E7 end
+
     return {
       relays: new Map(),
+      peers: new Map(), // E7
 
       async send(appSessionId, agent, text, parentTurnOpen) {
+        if (isPeerTarget(agent)) return sendPeer(appSessionId, agent, text, parentTurnOpen); // E7
         const key = relayKey(appSessionId, agent.agentId);
         const existing = get().relays.get(key);
         // Only an unforwarded steer blocks (controller, M2 review): a second would race it. A `forwarded` relay rests there
@@ -194,6 +258,11 @@ export function createRelayStore() {
       },
 
       dismiss(key) {
+        const peer = get().peers.get(key); // E7
+        if (peer) {
+          putPeer(key, null);
+          return tidy(peer.appSessionId);
+        }
         const relay = get().relays.get(key);
         if (!relay) return;
         release(key, relay);

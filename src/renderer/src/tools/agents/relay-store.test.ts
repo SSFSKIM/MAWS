@@ -6,6 +6,7 @@ import { createBackfillContext, recordToEvents } from '../../../../engine-host/f
 import { setAgentWorkClient } from './client';
 import { relayText, restoreDraft } from './model/relay';
 import { createRelayStore, relayKey } from './relay-store';
+import { peerRelayKey } from './relay-store'; // E7
 import { useTranscriptStore } from '../../stores/transcript';
 import { event, recordedReceiptRecord, replayed } from '../../../../../test/support/agents-events';
 import { fakeAgentWorkClient, type FakeAgentWorkClient } from './fake-work-client';
@@ -285,3 +286,77 @@ describe('relay store', () => {
     expect(fake.listeners()).toBe(0);
   });
 });
+
+// E7 start (E7 execution document, Design §4; Decision Log 6): a Reply to another session, over M0's peer probe
+// (pass3/e7-peer-a: A's own answer to B at seq 130; the owner's reply steered at 160 (uuid fab15aee…), sent by the
+// SendMessage at 191 and answered `success: true` at 195; a send to `nobody-e7` at 307, answered `success: false` at 311).
+describe('relay store, peer targets (E7)', () => {
+  const peerA = replayed('pass3', 'e7-peer-a');
+  const peerBetween = (from: number, to: number) => peerA.filter((e) => e.seq !== null && e.seq > from && e.seq <= to);
+  const B = { kind: 'peer', address: 'uds:/tmp/cc-socks/10562.sock', name: 'repo-b-gen1il-79', mode: 'reply' } as const;
+  const NOBODY = { kind: 'peer', address: 'nobody-e7', name: null, mode: 'message' } as const;
+  const REPLY_UUID = 'fab15aee-8755-4d22-be95-fe6a693bb43e';
+  const peerOf = (target: { address: string }) => relays.getState().peers.get(peerRelayKey(A, target.address));
+  const sendPeer = async (target: typeof B | typeof NOBODY, text: string, uuid: string, parentTurnOpen = false) => {
+    const sent = relays.getState().send(A, target, text, parentTurnOpen);
+    await fake.answer('steer', { messageUuid: uuid });
+    await sent;
+  };
+
+  it('keys a peer relay by the session and address, beside the agent key format', () => {
+    expect(peerRelayKey(A, B.address)).toBe('A:peer:uds:/tmp/cc-socks/10562.sock');
+    expect(relayKey(A, LOOPER.agentId)).toBe('A:a7aea42f9bed9b3ea');
+  });
+
+  it('steers once with the peer relayText; asked, not matched by the agent’s own answer, forwarded on the SendMessage carrying the owner’s text, sent on its result', async () => {
+    const sent = relays.getState().send(A, B, 'E7 probe: reply from A', true);
+    expect(fake.inputs.steer).toEqual([['A', relayText(B, 'E7 probe: reply from A'), 'next']]);
+    await fake.answer('steer', { messageUuid: REPLY_UUID });
+    await sent;
+    expect(peerOf(B)).toMatchObject({ appSessionId: 'A', target: B, text: 'E7 probe: reply from A', state: { kind: 'asked', messageUuid: REPLY_UUID, parentTurnOpenAtSend: true } });
+    expect(relays.getState().relays.size).toBe(0); // the agent relays are not touched
+    batch(peerBetween(100, 140)); // A's own answer to B by name: not the owner's text
+    expect(peerOf(B)?.state.kind).toBe('asked');
+    batch(peerBetween(160, 192));
+    const use = peerA.find((e) => e.seq === 191 && e.kind === 'tool.use')!;
+    expect(peerOf(B)?.state).toMatchObject({ kind: 'forwarded', toolUseId: 'toolu_014MYinuDDFrreJtW6nkbeVh', forwardedAt: use.at });
+    batch(peerBetween(192, 200));
+    expect(peerOf(B)?.state).toEqual({ kind: 'sent', sentAt: peerA.find((e) => e.seq === 195 && e.kind === 'tool.result')!.at });
+    expect(fake.listeners()).toBe(0);
+  });
+
+  it('reads failed with the engine’s message when the send answers `success: false`', async () => {
+    await sendPeer(NOBODY, 'E7 probe: nobody', 'c762441a-e67e-4d7d-bf40-f40a32c465ec');
+    batch(peerBetween(281, 340));
+    expect(peerOf(NOBODY)?.state).toEqual({ kind: 'failed', message: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." });
+    expect(fake.listeners()).toBe(0);
+  });
+
+  it('reads failed when the engine drops the steer before starting it, or the host refuses it; dismissed with the session’s exit', async () => {
+    await sendPeer(B, 'one', REPLY_UUID);
+    batch([event('command.lifecycle', { commandUuid: REPLY_UUID, state: 'discarded' }, { seq: 161 })]);
+    expect(peerOf(B)?.state).toEqual({ kind: 'failed', message: 'the engine discarded it before starting it' });
+    expect(restoreDraft('', peerOf(B))).toBe('one');
+    const refused = relays.getState().send(A, B, 'two', false);
+    await fake.fail('steer', 'the session is not ready');
+    await refused;
+    expect(peerOf(B)?.state).toEqual({ kind: 'failed', message: 'the session is not ready' });
+    await sendPeer(B, 'three', 'third');
+    batch([event('process.exited', {}, { seq: 170 })]);
+    expect(peerOf(B)).toBeUndefined();
+    expect(fake.listeners()).toBe(0);
+  });
+
+  it('refuses a second reply to the same address while one is asked; dismiss removes it by key', async () => {
+    await sendPeer(B, 'one', REPLY_UUID);
+    await relays.getState().send(A, B, 'two', false);
+    expect(fake.inputs.steer).toHaveLength(1);
+    await sendPeer(NOBODY, 'elsewhere', 'other-uuid'); // another address goes
+    expect(fake.inputs.steer).toHaveLength(2);
+    relays.getState().dismiss(peerRelayKey(A, B.address));
+    relays.getState().dismiss(peerRelayKey(A, NOBODY.address));
+    expect(relays.getState().peers.size).toBe(0);
+    expect(fake.listeners()).toBe(0);
+  });
+});
+// E7 end
