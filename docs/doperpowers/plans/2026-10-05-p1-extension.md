@@ -152,6 +152,7 @@ The spine (A) first, with S3. Deliverables (B) after A; anchored messages (C) af
 | A-11 | An interface ledger opens when the second wave is dispatched, since E2, E3, E4 and E7 all extend X9, X1, the TabRef kinds and the settings and index versions before any of them lands. | The decomposing skill's rule for siblings extending one contract; P0's wave-2 ledger is the precedent. |
 | A-12 | Spike findings are written as `.txt` under `spikes/` and folded into this document by the architect. | Workers never create `.md` files (standing rule); the architect is this document's one writer. |
 | A-13 | At most four workers run at once, heavy runs through the slot script, the e2e load rule unchanged. | The owner's machine also runs ClaudeUsage's relay and the owner's own sessions. |
+| P-15 | The cut, the contracts and the waves of §9 to §11 are approved as written ("Approve and dispatch wave one"); wave one dispatched the same day: E0a, E0b, E8, E9 in isolated worktrees on astra-high, E1 to follow as a spike finishes, then E5 and E6. | Owner, 2026-10-05, the decomposing gate. |
 | A-14 | Verification call: every plan child gets a whole-branch review at `doperpowers:reviewer-high` (the panel when the diff is panel-sized), each spike a `reviewer-medium` read of its findings and fixtures, the finish child a scale review of the P1 tree at level max; verified findings are fixed by separate workers, two rounds at most, tiny ones to the tracker. | The P0 retrospective: per-child reviews did not substitute for a scale review. |
 
 # Roadmap
@@ -183,7 +184,7 @@ What exists, read-only, that the children build on or replace.
 - **Contracts:** feeds X9's shapes and X11's lineage source.
 - **Design inheritance:** §3 A and C [binding for what to probe]; §4 S3 and S4 [the questions].
 - **Required:** required.
-- **Status:** not-dispatched, dispatchable now.
+- **Status:** in-flight, dispatched 2026-10-05 (wave one).
 
 ### E0b: Electron probes — spike (findings, never a merge)
 
@@ -193,7 +194,7 @@ What exists, read-only, that the children build on or replace.
 - **Contracts:** feeds X9's browser tools and E4's cut.
 - **Design inheritance:** §3 D [binding: own tools over CDP; import is a copy]; §4 S1 and S2.
 - **Required:** required.
-- **Status:** not-dispatched, dispatchable now.
+- **Status:** in-flight, dispatched 2026-10-05 (wave one).
 
 ### E1: The tool server: `ask`, `send_file`, `show_pane` — plan
 
@@ -273,7 +274,7 @@ What exists, read-only, that the children build on or replace.
 - **Contracts:** consumes the palette's widget slot, X5.
 - **Design inheritance:** §3 G and P-10 [binding: Claude Desktop's model; the write rule]; `claude-desktop-extensions.txt` §8 [advisory].
 - **Required:** required.
-- **Status:** not-dispatched, dispatchable now.
+- **Status:** in-flight, dispatched 2026-10-05 (wave one).
 
 ### E9: Voice — plan
 
@@ -283,7 +284,7 @@ What exists, read-only, that the children build on or replace.
 - **Contracts:** consumes the composer's insertion seam (C7).
 - **Design inheritance:** §3 H [binding: push-to-talk into the composer]; Apple speech [advisory, A-6].
 - **Required:** required.
-- **Status:** not-dispatched, dispatchable now.
+- **Status:** in-flight, dispatched 2026-10-05 (wave one).
 
 ### E10: The detachable supervisor — plan
 
@@ -338,8 +339,8 @@ What exists, read-only, that the children build on or replace.
 
 | Child | Grain | Status | Ledger / artifact |
 |---|---|---|---|
-| E0a Engine probes | spike | not-dispatched, dispatchable now | `spikes/protocol-probe/findings-pass3-p1-extension.txt`, `fixtures/pass3/p1-*` |
-| E0b Electron probes | spike | not-dispatched, dispatchable now | `spikes/browser-probe/findings.txt` |
+| E0a Engine probes | spike | in-flight (dispatched 2026-10-05, wave one) | `spikes/protocol-probe/findings-pass3-p1-extension.txt`, `fixtures/pass3/p1-*` |
+| E0b Electron probes | spike | in-flight (dispatched 2026-10-05, wave one) | `spikes/browser-probe/findings.txt` |
 | E1 Tool server | plan | not-dispatched, blocked-by E0a | execution document at dispatch |
 | E2 Deliverables and viewer | plan | not-dispatched, blocked-by E1 | execution document at dispatch |
 | E3 Anchored messages and side threads | plan | not-dispatched, blocked-by E0a | execution document at dispatch |
@@ -347,8 +348,8 @@ What exists, read-only, that the children build on or replace.
 | E5 Editor | plan | not-dispatched, dispatchable now | execution document at dispatch |
 | E6 Source control | plan | not-dispatched, dispatchable now | execution document at dispatch |
 | E7 Orchestration views | plan | not-dispatched, dispatchable now | execution document at dispatch |
-| E8 Plugins, marketplaces and mods | plan | not-dispatched, dispatchable now | execution document at dispatch |
-| E9 Voice | plan | not-dispatched, dispatchable now | execution document at dispatch |
+| E8 Plugins, marketplaces and mods | plan | in-flight (dispatched 2026-10-05, wave one) | execution document at dispatch |
+| E9 Voice | plan | in-flight (dispatched 2026-10-05, wave one) | execution document at dispatch |
 | E10 Detachable supervisor | plan | not-dispatched, blocked-by E1 | execution document at dispatch |
 | E11 Finish | plan | not-dispatched, deliberately late | execution document at dispatch |
 
