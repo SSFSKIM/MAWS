@@ -36,6 +36,15 @@ export function formatAgo(ms: number): string {
   return `${Math.floor(ms / DAY)}d ago`;
 }
 
+// E7: how long until a time to come, in the same form (a scheduled job's next run): `in under a minute`, `in 3m`,
+// `in 2h`, `in 1d`.
+export function formatIn(ms: number): string {
+  if (ms < MINUTE) return 'in under a minute';
+  if (ms < HOUR) return `in ${Math.floor(ms / MINUTE)}m`;
+  if (ms < DAY) return `in ${Math.floor(ms / HOUR)}h`;
+  return `in ${Math.floor(ms / DAY)}d`;
+}
+
 // `512`, `38.1k`, `1.2M`: a token count where its column names the unit (a workflow's agent table).
 export function formatTokenCount(n: number): string {
   if (n < 1000) return String(n);

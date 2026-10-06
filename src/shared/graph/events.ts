@@ -104,6 +104,9 @@ export const EVENT_KINDS = [
   // E3 start: side threads (P1 X10/X11): a thread opened from this session, and its latest turn's summary
   'side.thread.opened', 'side.thread.summarised',
   // E3 end
+  // E7 start: a message from another session, parsed from the engine's envelope
+  'peer.message',
+  // E7 end
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -274,6 +277,15 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('side.thread.opened', { childAppSessionId: AppSessionIdSchema, childEngineSessionId: SessionIdSchema.nullable(), anchor: AnchorSchema.nullable(), openedBy: z.enum(['comment', 'btw']) }),
   event('side.thread.summarised', { childAppSessionId: AppSessionIdSchema, text: nullableString(), isError: z.boolean(), turns: z.number().int().positive() }),
   // E3 end
+  // E7 start: a message from another session, parsed from the engine's envelope (SPEC 38 §38.23); emitted beside the
+  // `user.message` that carried it, by the live normaliser and the disk backfill alike. `replyable` is false when the
+  // suffix says SendMessage cannot reach the sender (a host-injected message).
+  event('peer.message', {
+    messageUuid: MessageUuidSchema.nullable(), from: z.string(), fromSession: nullableString(), fromName: nullableString(),
+    fromMode: nullableString(), fromPlugin: nullableString(), hopChain: z.array(z.string()), text: z.string(),
+    midTurn: z.boolean(), lineage: z.enum(['peer', 'descendant']), replyable: z.boolean(),
+  }),
+  // E7 end
 ]);
 
 export type SessionEvent = z.infer<typeof SessionEventSchema>;

@@ -10,6 +10,14 @@
 //   events/agents-stop-workflow  pass 2's `workflow` through its last progress frame, then `stop-task`'s workflow stop.
 //   events/agents-stop-shell     pass 2's `per-task-stop-on` through the Bash result naming the shell's output file
 //                                (seq 44), then `stop-task`'s shell stop.
+//   events/agents-peer           E7 (M7): the disk path of G3, C4's backfill over session A's recorded JSONL (pass 3's
+//                                `e7-peer-transcripts`: A listed its peers, was messaged idle and mid-turn, replied on
+//                                the owner's steer and failed a send to nobody), one context in file order as
+//                                `backfill.test.ts`'s parity case maps it. Its events carry no seq: all of it is history.
+//   events/agents-cron           E7 (M7): pass 3's `e7-cron` (two session-only jobs and their fires, a CronDelete, then
+//                                a durable and a session-only job) with `e7-cron-resume`'s launch appended (the session
+//                                resumed by its id, one CronList turn), so the Scheduled rows read one transcript across a
+//                                resume.
 // Appended events continue the journal's clock at 300 ms steps and its seq, one seq per recorded row, with ids
 // `<fixture>:journal:<seq>:<n>`: the `journal` launch segment is the one the replayed ids carry and `feed` sets on the
 // fed status, so the task-graph store's launch check keeps them. A recorded stop is re-keyed to the task it stops: its
@@ -18,18 +26,22 @@
 import { join } from 'node:path';
 import type { SessionEvent } from '@shared/graph/events';
 import type { EventId } from '@shared/graph/ids';
+import type { SessionId } from '@shared/graph/ids';
+import { createBackfillContext, recordToEvents } from '../../src/engine-host/fs/backfill'; // E7
 import { journalToEvents } from '../../src/renderer/src/transcript/dev/journal';
 import { AGENTS_RELAY_TAIL } from './agents-fixtures-tail';
-import { loadJournal, TEST_FIXTURE_DIR, type FixturePass } from './fixtures';
+import { loadJournal, loadTranscript, TEST_FIXTURE_DIR, type FixturePass } from './fixtures';
 import { firstChildOf } from './panel-child-fixture';
 
-export { AGENTS_RELAY_TAIL, AGENTS_STOP_SHELL_TAIL, AGENTS_STOP_WORKFLOW_TAIL } from './agents-fixtures-tail';
+export { AGENTS_CRON_TAIL, AGENTS_RELAY_TAIL, AGENTS_STOP_SHELL_TAIL, AGENTS_STOP_WORKFLOW_TAIL, E7_NESTED_AGENTS, E7_PEER_A } from './agents-fixtures-tail';
 
 const EVENTS_DIR = join(TEST_FIXTURE_DIR, 'transcript/events');
 export const AGENTS_FIXTURE_FILES = {
   relay: join(EVENTS_DIR, 'agents-relay.events.jsonl'),
   stopWorkflow: join(EVENTS_DIR, 'agents-stop-workflow.events.jsonl'),
   stopShell: join(EVENTS_DIR, 'agents-stop-shell.events.jsonl'),
+  peer: join(EVENTS_DIR, 'agents-peer.events.jsonl'), // E7
+  cron: join(EVENTS_DIR, 'agents-cron.events.jsonl'), // E7
 } as const;
 
 const STEP_MS = 300;
@@ -137,6 +149,25 @@ export function deriveAgentsStopShellFixture(): SessionEvent[] {
   return appendStop('agents-stop-shell', history, recordedStop('local_bash', true), target);
 }
 
+// E7 start (M7)
+export const E7_PEER_TRANSCRIPT = 'pass3/e7-peer-transcripts/db45d92e-e979-4edf-a62a-61f21dc01acb.jsonl'; // session A's
+
+export function deriveAgentsPeerFixture(): SessionEvent[] {
+  const records = loadTranscript(E7_PEER_TRANSCRIPT);
+  const sessionId = records.find((record) => typeof record.sessionId === 'string')!.sessionId as SessionId;
+  const ctx = createBackfillContext({ sessionId, agent: null });
+  return records.flatMap((record) => recordToEvents(record, ctx));
+}
+
+// e7-cron's launch, then e7-cron-resume's rows appended (its ids re-keyed into this fixture, its clock continued).
+export function deriveAgentsCronFixture(): SessionEvent[] {
+  const history = replayed('pass3', 'e7-cron');
+  const resumed = replayed('pass3', 'e7-cron-resume');
+  const seqs = [...new Set(resumed.map((event) => event.seq!))];
+  return appendRows('agents-cron', history, seqs.map((seq) => rowOf(resumed, seq)));
+}
+// E7 end
+
 export const serializeAgentsFixture = (events: SessionEvent[]): string => events.map((event) => JSON.stringify(event)).join('\n') + '\n';
 
 const firstAppended = (events: SessionEvent[], name: string) => events.find((event) => event.id.startsWith(`${name}:`))!.seq!;
@@ -181,3 +212,64 @@ export function measureAgentsStopShell(events: SessionEvent[]) {
   if (notification?.kind !== 'task.notification') throw new Error('agents-stop-shell: no notification');
   return { first, batches: Array.from({ length: tailLength(events, first) }, () => 1), taskId: notification.taskId as string, outputFile: notification.outputFile };
 }
+
+// E7 start (M7): the boundaries the E7 cases release to, measured from the recorded journals and the derived cron fixture.
+const toolUse = (events: SessionEvent[], pick: (event: Extract<SessionEvent, { kind: 'tool.use' }>) => boolean) => {
+  const found = events.find((event): event is Extract<SessionEvent, { kind: 'tool.use' }> => event.kind === 'tool.use' && pick(event));
+  if (!found) throw new Error('agents fixtures: no such tool use');
+  return found;
+};
+const resultOf = (events: SessionEvent[], toolUseId: string) => events.find((event) => event.kind === 'tool.result' && event.toolUseId === toolUseId)!;
+const input = (event: Extract<SessionEvent, { kind: 'tool.use' }>) => event.input as Record<string, unknown>;
+
+export function measureE7PeerA(events: SessionEvent[]) {
+  const inbound = events.filter((event): event is Extract<SessionEvent, { kind: 'peer.message' }> => event.kind === 'peer.message');
+  const [idle, midTurn] = inbound;
+  const listing = toolUse(events, (event) => event.toolName === 'ListAgents');
+  const send = toolUse(events, (event) => event.toolName === 'SendMessage' && input(event).to === idle.from);
+  const steer = events.findLast((event) => event.kind === 'user.message' && event.origin === 'human' && event.seq! < send.seq!)!;
+  const failed = events.find((event) => event.kind === 'tool.result' && (event.structured as { success?: unknown } | null)?.success === false)!;
+  const unasked = toolUse(events, (event) => event.toolName === 'SendMessage' && input(event).to === idle.fromName);
+  return {
+    listingResult: resultOf(events, listing.toolUseId).seq!,
+    inbound: idle.seq!,
+    unaskedResult: resultOf(events, unasked.toolUseId).seq!,
+    replyFrom: steer.seq!,
+    replySend: send.seq!,
+    replyResult: resultOf(events, send.toolUseId).seq!,
+    midTurn: midTurn.seq!,
+    failureResult: failed.seq!,
+    address: idle.from,
+    name: idle.fromName!,
+    text: input(send).message as string,
+  };
+}
+
+export function measureAgentsCron(events: SessionEvent[]) {
+  const creates = events.filter((event): event is Extract<SessionEvent, { kind: 'tool.use' }> => event.kind === 'tool.use' && event.toolName === 'CronCreate');
+  const job = (prompt: string) => {
+    const call = creates.find((event) => input(event).prompt === prompt)!;
+    const result = resultOf(events, call.toolUseId);
+    return { id: (result.kind === 'tool.result' ? (result.structured as { id: string }).id : ''), toolUseId: call.toolUseId as string, cron: input(call).cron as string };
+  };
+  const deleted = toolUse(events, (event) => event.toolName === 'CronDelete');
+  const turnEnds = events.filter((event) => event.kind === 'turn.ended' && event.origin === 'human').map((event) => event.seq!);
+  return {
+    first: firstAppended(events, 'agents-cron'),
+    firstTurnEnd: turnEnds[0],
+    deleteResult: resultOf(events, deleted.toolUseId).seq!,
+    lastLaunchEnd: turnEnds[2],
+    jobs: { tick: job('E7 cron tick'), oneShot: job('E7 one-shot'), durable: job('E7 durable weekly'), nightly: job('E7 nightly') },
+  };
+}
+
+export function measureE7NestedAgents(events: SessionEvent[]) {
+  const starts = events.filter((event): event is Extract<SessionEvent, { kind: 'subagent.started' }> => event.kind === 'subagent.started');
+  const finished = (taskId: string) => events.find((event) => event.kind === 'subagent.finished' && event.taskId === taskId)!;
+  const [outer, inner] = starts;
+  return {
+    outer: outer.taskId as string, inner: inner.taskId as string, innerStart: inner.seq!,
+    innerFinish: finished(inner.taskId).seq!, innerFinishAt: finished(inner.taskId).at, outerFinish: finished(outer.taskId).seq!,
+  };
+}
+// E7 end

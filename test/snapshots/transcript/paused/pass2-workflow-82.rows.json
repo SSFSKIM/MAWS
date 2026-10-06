@@ -67,6 +67,7 @@
         "glyph": 3,
         "kind": "workflow",
         "name": "Two echo agents in one phase",
+        "runId": "wf_7cacbb2d-902",
         "subagentType": null,
         "taskId": "wayue3on6",
         "toolUseId": "toolu_01SawqFE14rcE7JMMJt8jBAg"

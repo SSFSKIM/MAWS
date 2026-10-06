@@ -516,7 +516,7 @@ const nodesOf = (graph: TaskGraph) => graph.order.map((taskId) => graph.tasks.ge
 const endedMs = (n: TaskNode) => (n.endedAt === null ? -Infinity : Date.parse(n.endedAt));
 // Newest end first; a node without an end time after the ones with one, each group in first-seen order (a stable sort).
 const newestEndFirst = (nodes: TaskNode[]) => [...nodes].sort((a, b) => endedMs(b) - endedMs(a) || 0);
-const listedAgent = (n: TaskNode) => n.kind === 'agent' && (n.agent?.runId ?? null) === null;
+export const listedAgent = (n: TaskNode) => n.kind === 'agent' && (n.agent?.runId ?? null) === null;
 
 export type AgentSection = 'active' | 'done' | 'disk';
 export interface AgentRow {
@@ -567,6 +567,80 @@ export function agentRows(graph: TaskGraph, section: AgentSection): AgentRow[] {
     return rows;
   });
 }
+
+// E7 start: the topology tree (E7 execution document, Design §3 and §5; Decision Log 13, 19). One tree over the listed
+// agents whose status is known (On disk keeps the rest, through `agentRows`): a node's parent is its `parentAgentId`
+// only when that agent is in the tree's own set, else the node is a root, and an orphan when it names a parent at all.
+// A node is active when it runs or any descendant does. `agents` holds the active roots in first-seen order with their
+// subtrees; `done` the other roots, newest end first, with theirs. Under a running parent its active children come
+// first, then one `done-fold` row over its other children, whose rows (with their own subtrees) carry `foldedUnder`;
+// a parent that is itself done lists every child unfolded, since a fold would hide why it is listed. `team` and
+// `roster` rows are the teammates' grouping (`model/teammates.ts`, `withTeam`); this selector makes neither.
+export type TreeRow =
+  | { kind: 'agent'; taskId: TaskId; depth: number; parentTaskId: TaskId | null; orphan: boolean; foldedUnder: TaskId | null }
+  | { kind: 'done-fold'; parentTaskId: TaskId; count: number; depth: number; expanded: boolean }
+  | { kind: 'team'; depth: number }
+  | { kind: 'roster'; name: string; ref: string | null; extras: string[]; at: string; depth: number };
+type AgentTreeRow = Extract<TreeRow, { kind: 'agent' }>;
+
+export interface AgentTree {
+  agents: TreeRow[];
+  done: TreeRow[];
+  running: number; // the tree's running agents, nested ones included
+}
+
+export function agentTree(graph: TaskGraph): AgentTree {
+  return memoised(graph, 'tree', () => {
+    const members = nodesOf(graph).filter((n) => listedAgent(n) && n.status !== 'unknown');
+    const inTree = new Set(members.map((n) => n.taskId));
+    const named = (n: TaskNode) => (n.agent?.parentAgentId ?? null) as unknown as TaskId | null;
+    const children = new Map<TaskId, TaskNode[]>();
+    const roots: TaskNode[] = [];
+    for (const n of members) {
+      const parent = named(n);
+      if (parent !== null && parent !== n.taskId && inTree.has(parent)) children.set(parent, [...(children.get(parent) ?? []), n]);
+      else roots.push(n);
+    }
+    const active = new Map<TaskId, boolean>();
+    const isActive = (n: TaskNode): boolean => {
+      const known = active.get(n.taskId);
+      if (known !== undefined) return known;
+      active.set(n.taskId, n.status === 'running'); // provisional: a parent cycle reads its own start
+      const result = n.status === 'running' || (children.get(n.taskId) ?? []).some(isActive);
+      active.set(n.taskId, result);
+      return result;
+    };
+    const seen = new Set<TaskId>();
+    const visit = (out: TreeRow[], n: TaskNode, depth: number, foldedUnder: TaskId | null) => {
+      if (seen.has(n.taskId)) return;
+      seen.add(n.taskId);
+      const parent = named(n);
+      out.push({ kind: 'agent', taskId: n.taskId, depth, parentTaskId: parent, orphan: depth === 0 && parent !== null, foldedUnder } satisfies AgentTreeRow);
+      const kids = children.get(n.taskId) ?? [];
+      const rest = kids.filter((k) => !isActive(k));
+      for (const k of kids.filter(isActive)) visit(out, k, depth + 1, foldedUnder);
+      const folds = n.status === 'running' && rest.length > 0;
+      if (folds) out.push({ kind: 'done-fold', parentTaskId: n.taskId, count: rest.length, depth: depth + 1, expanded: false });
+      for (const k of rest) visit(out, k, depth + 1, folds ? (foldedUnder ?? n.taskId) : foldedUnder);
+    };
+    const agents: TreeRow[] = [];
+    const done: TreeRow[] = [];
+    for (const root of roots.filter(isActive)) visit(agents, root, 0, null);
+    for (const root of newestEndFirst(roots.filter((n) => !isActive(n)))) visit(done, root, 0, null);
+    for (const n of members) visit(isActive(n) ? agents : done, n, 0, null); // a parent cycle leaves its members unvisited: list them flat rather than lose them
+    return { agents, done, running: members.filter((n) => n.status === 'running').length };
+  });
+}
+
+// The rows a section shows: a fold's members only while the fold is expanded, each fold row saying whether it is.
+export function shownRows(rows: readonly TreeRow[], expandedFolds: ReadonlySet<TaskId>): TreeRow[] {
+  return rows.flatMap((row): TreeRow[] => {
+    if (row.kind === 'done-fold') return [{ ...row, expanded: expandedFolds.has(row.parentTaskId) }];
+    if (row.kind === 'agent' && row.foldedUnder !== null && !expandedFolds.has(row.foldedUnder)) return [];
+    return [row];
+  });
+}
+// E7 end
 
 const runningFirst = (nodes: TaskNode[]) => [...nodes.filter((n) => n.status === 'running'), ...newestEndFirst(nodes.filter((n) => n.status !== 'running'))];
 

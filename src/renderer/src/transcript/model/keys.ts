@@ -46,6 +46,9 @@ export const rowId = {
   delivery: (toolUse: ToolUseId) => row(`delivery:${toolUse}`),
   // E1 end
   sideThread: (child: string) => row(`side:${child}`), // E3: one row per side thread, keyed by the child's app session id
+  // E7 start: a `ListAgents` call's listing row, keyed by the tool use
+  agentList: (toolUse: ToolUseId) => row(`agents:${toolUse}`),
+  // E7 end
 };
 
 export const cellId = {

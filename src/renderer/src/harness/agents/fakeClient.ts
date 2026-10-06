@@ -4,12 +4,17 @@
 // and spills (`fakeFs`), announcing each change as C4's `fs.*Changed` events would, since main refuses `fs.*` for the
 // fake ids; its wire half is bound by `feed` to the loaded fixture's player, so the task graph and the relay see the
 // stream the transcript sees (until then `session.events` answers nothing, as a session whose stream is not connected
-// yet); its command half records the relay's steers and Stop's calls, a stop answered as `answerStop` set it.
+// yet); its command half records the relay's steers and Stop's calls, a stop answered as `answerStop` set it. E7: its
+// files half serves the fake session's project files (the durable cron file) to `files.read` with their hash and
+// `utf8` as main answers `hash: true` (E5's rule), finds every directory a watch names, and announces each file
+// `fakeFs` sets as `files.changed`; a refusal staged for a path is answered with its message (M7), the session's roots
+// (`roots`, its record's directory) still resolving, as main's are when it refuses a path for its own reason.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
 import type { EventPayload } from '@shared/ipc/schema';
 import type { FsReadSpillInput, FsReadSpillOutput, SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import type { EventsSnapshot } from '@shared/ipc/schema/session';
+import type { FilesChanged } from '@shared/ipc/schema/files'; // E7
 import type { PersistedTask } from '@shared/wire/store';
 import type { AgentWorkClient } from '../../tools/agents/client';
 import { FAKE_STOP_REFUSAL, type AgentsHarnessCalls } from './api';
@@ -21,6 +26,8 @@ export interface FakeDisk {
   runs: WorkflowRun[];
   tasks: Record<string, PersistedTask[]>; // by list id
   spills: Record<string, string>; // by path
+  files: Record<string, string>; // E7: the session's project files by path (the durable cron file)
+  refusals: Record<string, string>; // E7 (M7): a `files.read` refusal's message by path, ahead of any file there
 }
 
 // A session's wire: the snapshot `session.events` answers and the batches `session.eventBatch` carries.
@@ -40,6 +47,13 @@ export interface FakeAgentWorkClient {
 }
 
 const SPILL_NOT_FOUND = 'spill not found';
+
+// E7: a stand-in for main's SHA-256 (64 lowercase hex), a function of the text alone.
+function fakeFileHash(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0').repeat(8);
+}
 
 // `session.events { afterSeq, limit: null }` over a replayed fixture: the fixture's own events the transcript has applied
 // (`released` holds their ids), in fixture order, above `afterSeq`; `lastSeq` the highest kept (whole rows: the player
@@ -67,8 +81,8 @@ const upsert = <T>(list: T[], items: T[] | undefined, key: (item: T) => string):
   return [...next.values()];
 };
 
-export function createFakeAgentWorkClient(init: { session: AppSessionId } & Partial<FakeDisk>): FakeAgentWorkClient {
-  const disk: FakeDisk = { sidecars: [], runs: [], tasks: {}, spills: {} };
+export function createFakeAgentWorkClient(init: { session: AppSessionId; roots?: string[] } & Partial<FakeDisk>): FakeAgentWorkClient {
+  const disk: FakeDisk = { sidecars: [], runs: [], tasks: {}, spills: {}, files: {}, refusals: {} };
   const recorded: AgentsHarnessCalls = { steer: [], stopTask: [], readSpill: [] };
   const stopAnswers = new Map<string, 'ok' | 'error'>();
   const inFlight = new Set<Promise<unknown>>();
@@ -78,6 +92,7 @@ export function createFakeAgentWorkClient(init: { session: AppSessionId } & Part
   const subagentListeners = new Set<(payload: EventPayload<'fs.subagentsChanged'>) => void>();
   const workflowListeners = new Set<(payload: EventPayload<'fs.workflowChanged'>) => void>();
   const taskListeners = new Set<(payload: EventPayload<'fs.tasksChanged'>) => void>();
+  const filesListeners = new Set<(payload: FilesChanged) => void>(); // E7
   const listen = <L>(set: Set<L>, listener: L) => {
     set.add(listener);
     return () => void set.delete(listener);
@@ -98,6 +113,7 @@ export function createFakeAgentWorkClient(init: { session: AppSessionId } & Part
     if (changed.sidecars) subagentListeners.forEach((l) => l({ appSessionId: init.session, agents: disk.sidecars }));
     for (const run of changed.runs ?? []) workflowListeners.forEach((l) => l({ appSessionId: init.session, runId: run.runId }));
     for (const listId of Object.keys(changed.tasks ?? {})) taskListeners.forEach((l) => l({ listId }));
+    for (const path of [...Object.keys(changed.files ?? {}), ...Object.keys(changed.refusals ?? {})]) filesListeners.forEach((l) => l({ appSessionId: init.session, path, kind: 'changed' })); // E7
   };
 
   const fakeFs = (data: Partial<FakeDisk>) => {
@@ -105,6 +121,8 @@ export function createFakeAgentWorkClient(init: { session: AppSessionId } & Part
     disk.runs = upsert(disk.runs, data.runs, (run) => run.runId);
     disk.tasks = { ...disk.tasks, ...data.tasks };
     disk.spills = { ...disk.spills, ...data.spills };
+    disk.files = { ...disk.files, ...data.files }; // E7
+    disk.refusals = { ...disk.refusals, ...data.refusals }; // E7 (M7)
     announce(data);
   };
   fakeFs(init);
@@ -139,6 +157,19 @@ export function createFakeAgentWorkClient(init: { session: AppSessionId } & Part
     onSubagentsChanged: (listener) => listen(subagentListeners, listener),
     onWorkflowChanged: (listener) => listen(workflowListeners, listener),
     onTasksChanged: (listener) => listen(taskListeners, listener),
+    // E7 start
+    async readFile({ appSessionId, path, hash }) {
+      if (ours(appSessionId) && disk.refusals[path] !== undefined) throw new Error(disk.refusals[path]);
+      const text = ours(appSessionId) ? disk.files[path] : undefined;
+      if (text === undefined) throw new Error(`not found: ${path}`);
+      const bytes = new TextEncoder().encode(text).length;
+      return { encoding: 'utf8', content: text, bytes, offset: 0, length: bytes, truncated: false, mime: 'application/json', hash: hash ? fakeFileHash(text) : null, utf8: hash ? true : null };
+    },
+    watchDir: async () => {},
+    unwatchDir: async () => {},
+    onFilesChanged: (listener) => listen(filesListeners, listener),
+    listRoots: async (appSessionId) => (ours(appSessionId) ? [...(init.roots ?? [])] : []), // the roots resolve: a staged refusal reads as one
+    // E7 end
   };
 
   return {

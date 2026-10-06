@@ -2,24 +2,33 @@
 // pattern, reimplemented because C8a's is under `panel/summary/` and not exported), with an optional muted suffix.
 import type { ReactNode } from 'react';
 
-export type BackgroundSection = 'workflows' | 'shells' | 'monitors' | 'tasks';
+export type BackgroundSection = 'workflows' | 'shells' | 'monitors' | 'tasks' | /* E7 */ 'scheduled';
 
-// `suffix` renders muted beside the heading's toggle (the checklist's `session list`).
+// `suffix` renders muted beside the heading's toggle (the checklist's `session list`). E7: `action` sits at the heading's
+// right end, sticky with it (the Tasks heading's `Open`), outside the `h3` so the heading's accessible name stays its
+// own text; the `h3` keeps its toggle as its one button.
 export function Group({
-  id, heading, suffix, expanded, onToggle, children,
-}: { id: BackgroundSection; heading: string; suffix?: string | null; expanded: boolean; onToggle: (id: BackgroundSection) => void; children: ReactNode }) {
+  id, heading, suffix, action, expanded, onToggle, children,
+}: { id: BackgroundSection; heading: string; suffix?: string | null; action?: ReactNode; expanded: boolean; onToggle: (id: BackgroundSection) => void; children: ReactNode }) {
   return (
     <section data-section={id} aria-label={heading} className="flex shrink-0 flex-col border-b border-border pb-2 last:border-b-0">
-      <h3 className="sticky top-0 z-10 flex h-9 items-center gap-1.5 bg-bg-raised px-3.5 text-ui font-semibold">
-        <button type="button" aria-expanded={expanded} onClick={() => onToggle(id)} className="rounded-sm outline-accent focus-visible:outline-2">
-          {heading}
-        </button>
-        {suffix && (
-          <span data-part="label" className="text-ui-sm font-normal text-fg-muted">
-            {suffix}
+      <div className="sticky top-0 z-10 flex h-9 items-center gap-1.5 bg-bg-raised px-3.5">
+        <h3 className="flex min-w-0 items-center gap-1.5 text-ui font-semibold">
+          <button type="button" aria-expanded={expanded} onClick={() => onToggle(id)} className="rounded-sm outline-accent focus-visible:outline-2">
+            {heading}
+          </button>
+          {suffix && (
+            <span data-part="label" className="text-ui-sm font-normal text-fg-muted">
+              {suffix}
+            </span>
+          )}
+        </h3>
+        {action && (
+          <span data-part="action" className="ml-auto flex">
+            {action}
           </span>
         )}
-      </h3>
+      </div>
       {expanded && children}
     </section>
   );

@@ -7,8 +7,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 export const SUBAGENTS_COPY = {
   title: 'Subagents',
   // lists
-  active: (n: number) => `Active · ${n}`,
-  done: (n: number) => `Done · ${n}`,
+  done: (n: number) => `Done · ${n}`, // the Done section's heading, and (E7) a running parent's fold over its finished children
   onDisk: (n: number) => `On disk · ${n}`,
   showMore: (n: number) => `Show ${n} more`,
   working: 'Working', // a row's second line when it has neither a summary nor (under a real name) a description
@@ -45,6 +44,13 @@ export const SUBAGENTS_COPY = {
   stopping: 'stopping…',
   stopFailed: (message: string) => `Couldn't stop it: ${message}`,
   waitingToStart: 'Waiting for the agent to start',
+  // E7 start: the topology tree (Design §3, §5)
+  agents: (running: number) => `Agents · ${running} running`,
+  foldLabel: (n: number, parentTitle: string) => `Done · ${n} under ${parentTitle}`, // the fold's accessible name
+  team: 'Team · led by this session',
+  teammateListed: (extras: string[], ago: string) => [...extras, `listed ${ago}`].join(' · '), // the listing's own extras, then when it was listed
+  teammateNoTranscript: 'Named by the team listing; no transcript of it is known here',
+  // E7 end
 } as const;
 
 // The relay composer (Interfaces *The relay*): its label, its disabled reasons (shown as the placeholder) and the pending
@@ -73,6 +79,7 @@ export const RELAY_COPY = {
     `${session} sent it with SendMessage after ${plural(rounds, 'parent round')} · ${title} gets it at its next tool round`,
   failed: (message: string) => `Relay failed: ${message}`,
   dropped: (state: 'cancelled' | 'discarded' | 'refused') => `the engine ${state} it before starting it`, // the failed state's message (O1)
+  notSent: 'the session ended that turn without sending it', // E7: a peer relay whose steer's own turn ended with no matching SendMessage
 } as const;
 
 export const BACKGROUND_COPY = {
@@ -87,14 +94,12 @@ export const BACKGROUND_COPY = {
   // name no frame or snapshot gave reads `workflow · …`
   workflowLine: (workflowName: string | null, elapsed: string, agents: number, tokens: string) =>
     `workflow${workflowName ? ` ${workflowName}` : ''} · ${elapsed} · ${plural(agents, 'agent')} · ${tokens}`,
-  phasesLabel: 'Phases', // the card's disclosure over its phase rows and tables
+  phasesLabel: 'Phases', // the widget's phase column, by its accessible name (E7: the card's disclosure left with its tables)
   // an ended task's state word (a card's badge, a row's `· <status> <ago>`)
   status: { completed: 'completed', failed: 'failed', stopped: 'stopped', exited: 'ended with the session', unknown: 'status unavailable' },
   runsUnavailable: (message: string) => `Workflow runs unavailable: ${message}`,
-  phase: (title: string, done: number, total: number) => `${title} ${done}/${total}`,
-  phaseQueued: (title: string) => `${title} · Queued`,
   phaseUntitled: (index: number) => `Phase ${index}`, // agents naming a phaseIndex with no workflow_phase row
-  columns: { agent: 'Agent', model: 'Model', tokens: 'Tokens', time: 'Time' },
+  columns: { agent: 'Agent', model: 'Model', tokens: 'Tokens', time: 'Time', /* E7 */ state: 'State' }, // the widget's agent table
   phasesPending: 'Phases arrive with the first progress frame',
   stopWorkflow: 'Stop workflow',
   stop: 'Stop',
@@ -116,7 +121,57 @@ export const BACKGROUND_COPY = {
   shellsDiskOnly: 'Shells and monitors are known only while the session runs here',
   runsOnDisk: (n: number) => `Workflow runs on disk · ${n}`,
   nothingRunning: 'Nothing running',
+  // E7 start: the workflow widget and the compact card (E7 execution document, Design §2): the card shows one summary
+  // line where its per-phase tables were, and its title and chevron open the widget.
+  back: '‹ Background work',
+  openRun: (description: string) => `Open ${description}`, // the card's chevron, by its accessible name
+  allPhases: 'All phases',
+  phaseCount: (done: number, total: number) => `${done}/${total}`,
+  phaseCountQueued: 'Queued',
+  agentsLabel: (phase: string) => `Agents · ${phase}`, // the agent table's accessible name
+  notStarted: 'Not started', // a queued agent row: nothing to open yet
+  noTranscript: 'No transcript known for this agent', // a started row whose id neither the row nor the run's journal gives
+  phaseDone: 'done', // the phase mark of a finished phase, by its accessible name
+  noAgentsInPhase: 'No agents in this phase yet',
+  runNotFound: 'Run not found yet', // a hand-off named a run no read has brought yet; the widget opens when one does
+  runSummary: {
+    queued: 'Queued',
+    done: 'Done',
+    phase: (title: string, done: number, total: number) => `${title} · ${done}/${total} agents`,
+  },
+  // E7 end
 } as const;
+
+// E7 start: the Tasks panel (E7 execution document, Design §6 as superseded by P-20): the read-only checklist as its own
+// tool; its list's notes are the checklist's (`BACKGROUND_COPY`), shared with the Background work section.
+export const TASKS_COPY = {
+  title: 'Tasks',
+  noSession: 'Open a session to see its tasks', // a pinned tab while no session is shown
+  progress: (completed: number, total: number) => `${completed} of ${total} completed`,
+  open: 'Open', // the Background work Tasks heading's action
+  openPanel: 'Open the Tasks panel', // its accessible name
+} as const;
+// E7 end
+
+// E7 start: Background work's Scheduled section (E7 execution document, Design §7): one row per job the engine holds for
+// the session, its schedule in the create result's words (else the cron), its kind and store, the prompt's first line,
+// its next run with the engine's jitter named in the tooltip (SPEC 22 §22.7), its expiry, and a link to its creating call.
+export const SCHEDULED_COPY = {
+  heading: (n: number) => `Scheduled · ${n}`,
+  recurring: 'recurring',
+  oneShot: 'one-shot',
+  store: { 'durable-this': 'durable · this session', 'durable-other': 'durable · another session', session: 'session-only' },
+  next: (time: string, relative: string) => `Next ≈ ${time} (${relative})`,
+  nextUnknown: 'next run unknown', // a cron MAWS's parser refuses
+  jitter: 'The engine fires recurring jobs up to half a period late (30 min at most) and one-shots on :00 or :30 up to 90 s early',
+  expires: (date: string) => `Expires ${date}`,
+  expired: (date: string) => `Expired ${date}`, // a durable job past seven days: the engine deletes it after its next fire
+  lastRan: (ago: string) => `Last ran ${ago}`, // a durable job's `lastFiredAt`
+  dormant: 'Resumes with the session', // a session-only job of a session not running here (the engine resurrects it on resume)
+  openTurn: 'Open creating turn',
+  unavailable: (message: string) => `Scheduled jobs unavailable: ${message}`,
+} as const;
+// E7 end
 
 export const LOG_COPY = {
   title: 'Log',

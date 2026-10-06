@@ -430,3 +430,45 @@ export const PANE_CELL = {
 // A-17: the engine refused an AskUserQuestion call before any request reached the human (a preview that is not HTML).
 export const questionRefused = (text: string) => `The engine refused this question: ${text}`;
 // E1 end
+
+// E7 start: the messages between sessions and agents, the Reply under an inbound one, and the `ListAgents` listing (E7
+// execution document, Design §4 and §10). A composer's `mode` is `reply` under a message from another session and
+// `message` from a listing row; the line under it walks the steer that asks the session to send it.
+type PeerMode = 'reply' | 'message';
+export const peerMessageCopy = {
+  inbound: (sender: string, preview: string) => `Message from ${sender}: ${preview}`,
+  outbound: (recipient: string, preview: string) => `Sent to ${recipient}: ${preview}`,
+  report: (title: string | null) => `Report from ${title ?? 'agent'}`, // a subagent's hand-back; the report folds under it
+  sender: (name: string) => `@ ${name}`, // the row's lead, the address as its tooltip
+  recipient: (name: string) => `To @ ${name}`,
+  result: { pending: 'Sending', sent: 'Sent', failed: 'Not sent' } as const, // an outbound send's state
+  showMessage: 'Show the whole message',
+  showReport: 'Show the report',
+  hide: 'Hide',
+  reply: 'Reply',
+  send: 'Send',
+  label: (mode: PeerMode, session: string) => (mode === 'reply' ? `Reply via ${session}` : `Message via ${session}`),
+  placeholder: (mode: PeerMode, name: string) => (mode === 'reply' ? `Reply to ${name}…` : `Message ${name}…`),
+  disabled: {
+    notRunningHere: (mode: PeerMode) => (mode === 'reply' ? 'Replying needs the session running here' : 'Messaging needs the session running here'),
+    pending: (mode: PeerMode) => (mode === 'reply' ? 'Waiting for the last reply' : 'Waiting for the last message'),
+  },
+  asked: (mode: PeerMode, session: string, elapsed: string) => `Asked ${session} to ${mode === 'reply' ? 'reply' : 'send it'} · ${elapsed}`,
+  askedTurnOpen: (mode: PeerMode, session: string, elapsed: string) =>
+    `Asked ${session} to ${mode === 'reply' ? 'reply' : 'send it'} · ${elapsed} · ${session} sends it at its next tool boundary or when this turn ends`,
+  askedLongWait: (mode: PeerMode, session: string, elapsed: string) =>
+    `Asked ${session} to ${mode === 'reply' ? 'reply' : 'send it'} · ${elapsed} · ${session} is inside a long tool call; it sends it when that call returns or this turn ends`,
+  forwarded: (mode: PeerMode, session: string) => (mode === 'reply' ? `${session} is replying with SendMessage` : `${session} is sending it with SendMessage`),
+  sent: (mode: PeerMode, session: string) => (mode === 'reply' ? `${session} replied with SendMessage` : `${session} sent it with SendMessage`),
+  failed: (mode: PeerMode, message: string) => `${mode === 'reply' ? 'Reply' : 'Message'} failed: ${message}`,
+} as const;
+
+export const agentListCopy = {
+  pending: 'Listing the agents and sessions…',
+  self: (self: string) => `This session is ${self}`,
+  section: (title: string, count: number) => `${title} · ${count}`,
+  message: 'Message',
+  messageLabel: (name: string) => `Message ${name}`,
+  serialized: (subagents: number, teammates: number, peers: number) => `Agents: ${plural(subagents, 'subagent')}, ${plural(teammates, 'teammate')}, ${plural(peers, 'peer session')}`,
+} as const;
+// E7 end

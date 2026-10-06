@@ -9,6 +9,7 @@ import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
 import { serializeRows } from './serialize';
 import { api, builder, request, task, tool, uuid, USAGE } from './test-events';
+import { parent } from './test-events'; // E7
 
 const reduce = (events: SessionEvent[]) => applyEvents(createState(null, null), events);
 const rows = (events: SessionEvent[]) => rowsOf(withAllExpanded(reduce(events)));
@@ -991,3 +992,120 @@ describe('a release and the resume after it', () => {
   });
 });
 // C12 end
+
+// E7 start (E7 execution document, Design §2, §4 and §7; M0's recorded texts): peer.message reaches the turn the derive
+// draws from; the activity carries the turn's cron calls and listings on both paths; a Workflow ref names its run.
+describe('orchestration facts (E7)', () => {
+  const peer = (b: ReturnType<typeof builder>) => b.emit('peer.message', {
+    messageUuid: uuid('p1'), from: 'uds:/tmp/cc-socks/1.sock', fromSession: null, fromName: 'repo-b', fromMode: 'prompting', fromPlugin: null,
+    hopChain: [], text: 'hello from B', midTurn: false, lineage: 'peer', replyable: true,
+  });
+
+  it('routes peer.message onto the current turn, bumping it, and keeps it loose with no turn open', () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'peer' });
+    b.emit('user.message', { messageUuid: uuid('p1'), content: 'Another Claude session sent a message:\n…', isReplay: true, isSynthetic: true, origin: 'peer', bash: null });
+    const before = reduce(b.events);
+    const version = before.turns.get(before.order[0]!)!.version;
+    const event = peer(b);
+    const state = applyEvents(before, [event]);
+    const turn = state.turns.get(state.order[0]!)!;
+    expect(turn.events.at(-1)).toBe(event);
+    expect(turn.version).toBeGreaterThan(version);
+    const alone = builder();
+    peer(alone);
+    expect(reduce(alone.events).loose.map((e) => e.kind)).toEqual(['peer.message']);
+  });
+
+  it("records each CronCreate and CronDelete of the turn with its outcome, on the turn's activity", () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('c1', 'CronCreate', { cron: '*/2 * * * *', prompt: 'E7 cron tick', recurring: true });
+    b.result('c1', 'Scheduled recurring job 481abb0a (Every 2 minutes). Session-only (not written to disk, dies when Claude exits). Auto-expires after 7 days. Use CronDelete to cancel sooner.');
+    b.toolUse('c2', 'CronCreate', { cron: '15 4 6 10 *', prompt: 'E7 one-shot', recurring: false });
+    b.result('c2', 'Scheduled one-shot task 8d1a2582 (15 4 6 10 *). Session-only (not written to disk, dies when Claude exits). It will fire once then auto-delete.');
+    b.toolUse('c3', 'CronCreate', { cron: '0 9 * * 1', prompt: 'E7 durable weekly', durable: true });
+    b.result('c3', 'Scheduled recurring job 598b1690 (Every Monday at 9:00 AM). Persisted to .claude/scheduled_tasks.json. Auto-expires after 7 days. Use CronDelete to cancel sooner.');
+    b.toolUse('c4', 'CronCreate', { cron: '* *', prompt: 'bad' });
+    b.result('c4', "<tool_use_error>Invalid cron expression '* *'. Expected 5 fields: M H DoM Mon DoW.</tool_use_error>", { isError: true });
+    b.toolUse('c5', 'CronCreate', { cron: '0 3 * * *', prompt: 'reworded' });
+    b.result('c5', 'A wording no engine wrote.', { structured: { id: '1040f3a5', humanSchedule: 'Every day at 3:00 AM', recurring: true, durable: false } });
+    b.toolUse('d1', 'CronDelete', { id: '481abb0a' });
+    b.result('d1', 'Cancelled job 481abb0a.');
+    b.toolUse('d2', 'CronDelete', { id: 'nope' });
+    b.result('d2', 'No job with id nope', { isError: true });
+    b.toolUse('c6', 'CronCreate', { cron: '0 0 * * *', prompt: 'pending' });
+    b.toolUse('l1', 'CronList', {});
+    const [activity] = turnActivity(reduce(b.events));
+    expect(activity!.crons.map(({ toolUseId, call, result }) => ({ toolUseId, call, result }))).toEqual([
+      { toolUseId: 'c1', call: { kind: 'create', cron: '*/2 * * * *', prompt: 'E7 cron tick', recurring: true, durable: false }, result: { ok: true, id: '481abb0a', humanSchedule: 'Every 2 minutes', durable: false } },
+      { toolUseId: 'c2', call: { kind: 'create', cron: '15 4 6 10 *', prompt: 'E7 one-shot', recurring: false, durable: false }, result: { ok: true, id: '8d1a2582', humanSchedule: '15 4 6 10 *', durable: false } },
+      { toolUseId: 'c3', call: { kind: 'create', cron: '0 9 * * 1', prompt: 'E7 durable weekly', recurring: true, durable: true }, result: { ok: true, id: '598b1690', humanSchedule: 'Every Monday at 9:00 AM', durable: true } },
+      { toolUseId: 'c4', call: { kind: 'create', cron: '* *', prompt: 'bad', recurring: true, durable: false }, result: { ok: false, text: "<tool_use_error>Invalid cron expression '* *'. Expected 5 fields: M H DoM Mon DoW.</tool_use_error>" } },
+      { toolUseId: 'c5', call: { kind: 'create', cron: '0 3 * * *', prompt: 'reworded', recurring: true, durable: false }, result: { ok: true, id: '1040f3a5', humanSchedule: 'Every day at 3:00 AM', durable: false } },
+      { toolUseId: 'd1', call: { kind: 'delete', id: '481abb0a' }, result: { ok: true } },
+      { toolUseId: 'd2', call: { kind: 'delete', id: 'nope' }, result: { ok: false, text: 'No job with id nope' } },
+      { toolUseId: 'c6', call: { kind: 'create', cron: '0 0 * * *', prompt: 'pending', recurring: true, durable: false }, result: null },
+    ]);
+    expect(activity!.crons[0]!.at).toBe(b.events.find((e) => e.kind === 'tool.use' && e.toolUseId === 'c1')!.at);
+  });
+
+  it('records each ListAgents listing of the turn, parsed once its result arrives; a child lane adds none', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('l1', 'ListAgents', {});
+    expect(turnActivity(reduce(b.events))[0]!.listings.map((l) => [l.toolUseId, l.parsed])).toEqual([['l1', null]]);
+    b.result('l1', 'This session is repo-a [804260] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nPeer sessions (1):\n  repo-b [61303a]  ·  interactive  ·  idle  ·  started 2s ago');
+    b.emit('tool.use', { toolUseId: tool('child-l'), toolName: 'ListAgents', input: {}, apiMessageId: null, messageUuid: null }, { parentToolUseId: parent('l1') });
+    b.emit('tool.use', { toolUseId: tool('child-c'), toolName: 'CronCreate', input: { cron: '* * * * *', prompt: 'x' }, apiMessageId: null, messageUuid: null }, { parentToolUseId: parent('l1') });
+    const [activity] = turnActivity(reduce(b.events));
+    expect(activity!.listings).toEqual([{
+      toolUseId: 'l1', at: b.events.find((e) => e.kind === 'tool.use')!.at,
+      parsed: { self: 'repo-a [804260]', sections: [{ title: 'Peer sessions', count: 1, rows: [{ name: 'repo-b', ref: '61303a', extras: ['interactive', 'idle', 'started 2s ago'] }] }], notes: [] },
+    }]);
+    expect(activity!.crons).toEqual([]);
+  });
+
+  it('leaves out a call whose message was retracted or superseded, as the rest of the activity does', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('c1', 'CronCreate', { cron: '0 3 * * *', prompt: 'refused attempt' });
+    b.emit('boundary.retraction', { retractedMessageUuids: [uuid('msg-c1-u0')], reason: 'model refusal', fallbackModel: null });
+    b.toolUse('l1', 'ListAgents', {});
+    b.toolUse('c2', 'CronCreate', { cron: '0 4 * * *', prompt: 'kept' });
+    b.emit('assistant.block.complete', {
+      messageUuid: uuid('m3-u0'), apiMessageId: api('m3'), blockIndex: 0, block: { type: 'text', text: 'again' }, model: 'claude-test',
+      supersedes: [uuid('msg-l1-u0')], aborted: false, userMessageUuids: [],
+    });
+    const [activity] = turnActivity(reduce(b.events));
+    expect(activity!.crons.map((c) => c.toolUseId)).toEqual(['c2']);
+    expect(activity!.listings).toEqual([]);
+  });
+
+  const WORKFLOW_RESULT = { status: 'async_launched', taskId: 'wayue3on6', taskType: 'local_workflow', workflowName: 'maws-probe', runId: 'wf_7cacbb2d-902', summary: 'Two echo agents in one phase' }; // pass2/workflow seq 80
+
+  it("names a disk-only Workflow ref's task and run from its launch result, keeping the row's id", () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_wf', 'Workflow', { description: 'Two echo agents in one phase' });
+    b.result('toolu_wf', 'Workflow launched in the background.', { structured: WORKFLOW_RESULT });
+    b.emit('workflow.progress', { taskId: task('wayue3on6'), workflowName: 'maws-probe', progress: [{ type: 'workflow_phase', index: 0, title: 'Echo', status: 'running' }] });
+    const state = reduce(b.events);
+    expect(turnActivity(state)[0]!.subagents).toEqual([expect.objectContaining({ taskId: 'wayue3on6', runId: 'wf_7cacbb2d-902', toolUseId: 'toolu_wf', kind: 'workflow', status: 'working' })]);
+    const row = find(rowsOf(withAllExpanded(state)), 'subagent');
+    expect(row.id).toBe(rowId.subagent(task('toolu_wf')));
+    expect(row.agents[0]).toMatchObject({ taskId: 'wayue3on6', runId: 'wf_7cacbb2d-902' });
+  });
+
+  it('adds the run id to a live Workflow ref its task.started already renamed', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_wf', 'Workflow', { description: 'Two echo agents in one phase' });
+    b.emit('task.started', { taskId: task('wayue3on6'), toolUseId: tool('toolu_wf'), taskType: 'local_workflow', description: 'Two echo agents in one phase', isBackground: true, workflowName: 'maws-probe' });
+    b.result('toolu_wf', 'Workflow launched in the background.', { structured: WORKFLOW_RESULT });
+    const state = reduce(b.events);
+    expect(turnActivity(state)[0]!.subagents).toEqual([expect.objectContaining({ taskId: 'wayue3on6', runId: 'wf_7cacbb2d-902', status: 'started' })]);
+    expect(find(rowsOf(withAllExpanded(state)), 'subagent').id).toBe(rowId.subagent(task('wayue3on6')));
+  });
+});
+// E7 end

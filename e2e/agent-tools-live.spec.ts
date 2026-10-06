@@ -77,7 +77,9 @@ const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd,
 // ---- the in-page probe ---------------------------------------------------------------------------------------------------
 // Installed once per page: DOM readers for the three tools (the selectors the harness's agentsProbes reads) and a
 // recorder that notes, on every DOM mutation, when an agent row first showed and in which section, each row's elapsed and
-// line, each workflow card's phases, a `stopping…` sighting per card and the relay line's history.
+// line, each run's phase progress (E7: the compact card's summary line while the list shows, the run widget's phase
+// rows once it is open, both as `<phase> <done>/<total>`), a `stopping…` sighting per card, shell or widget and the relay
+// line's history.
 function installProbes(): void {
   const w = window as unknown as { __c8b?: unknown };
   if (w.__c8b) return;
@@ -105,12 +107,18 @@ function installProbes(): void {
       push(r.elapsed, text(row.querySelector('[data-part="elapsed"]')), 30);
       push(r.lines, text(row.querySelector('[data-part="line"]')), 30);
     }
+    // E7: a card shows one summary line (`Echo · 0/2 agents`, `Queued`, `Done`); the widget one row per phase.
     for (const card of all<HTMLElement>(root, '[data-workflow]')) {
-      const phases = all(card, '[data-phase]').map(text).join(' | ');
-      push((rec.cards[card.dataset.workflow!] ??= []), phases, 60);
+      const summary = text(card.querySelector('[data-part="summary"]'));
+      const phase = /^(.+) · (\d+\/\d+) agents$/.exec(summary);
+      push((rec.cards[card.dataset.workflow!] ??= []), phase ? `${phase[1]} ${phase[2]}` : summary, 60);
     }
-    for (const el of all<HTMLElement>(root, '[data-workflow], [data-shell]')) {
-      if (all(el, 'button').some((b) => text(b) === 'stopping…')) rec.stopping[el.dataset.workflow ?? el.dataset.shell!] ??= Date.now();
+    for (const run of all<HTMLElement>(root, '[data-view="run"][data-run]')) {
+      const phases = all(run, '[role="option"]:not([data-phase-option="all"])').map((o) => `${text(o.querySelector('[data-part="title"]'))} ${text(o.querySelector('[data-part="count"]'))}`);
+      push((rec.cards[run.dataset.run!] ??= []), phases.join(' | '), 60);
+    }
+    for (const el of all<HTMLElement>(root, '[data-workflow], [data-shell], [data-view="run"][data-run]')) {
+      if (all(el, 'button').some((b) => text(b) === 'stopping…')) rec.stopping[el.dataset.workflow ?? el.dataset.shell ?? el.dataset.run!] ??= Date.now();
     }
     const line = root.querySelector('[data-part="relay-line"]');
     push(rec.relay, line ? text(line) : '', 600);
@@ -135,7 +143,7 @@ function installProbes(): void {
     return {
       headings: all(lists, 'section[data-section] > h3').map(text),
       notes: all(lists, ':scope > p').map(text),
-      active: rows('active'),
+      agents: rows('agents'), // E7: the tree's Agents section (Done is collapsed by default)
       done: rows('done'),
       disk: rows('disk'),
       drillIn: agent
@@ -157,15 +165,14 @@ function installProbes(): void {
     const body = tabpanel();
     const tasks = body?.querySelector('section[data-section="tasks"]');
     return {
-      headings: all(body, 'section[data-section] > h3').map(text),
+      headings: all(body, 'section[data-section] h3').map(text),
       notes: all(body, 'p').map(text).filter(Boolean),
       workflows: all<HTMLElement>(body, '[data-workflow]').map((card) => ({
         taskId: card.dataset.workflow!,
         title: text(card.querySelector('h4')),
         line: text(card.querySelector('[data-part="line"]')),
         status: text(card.querySelector('[data-part="status"]')),
-        phases: all(card, '[data-phase]').map(text),
-        table: all(card, 'tbody tr').map((tr) => all(tr, 'td').map(text)),
+        summary: text(card.querySelector('[data-part="summary"]')), // E7: the compact card's one line
         buttons: all(card, 'button').map(text),
       })),
       shells: all<HTMLElement>(body, '[data-shell]').map((row) => ({
@@ -183,6 +190,21 @@ function installProbes(): void {
       },
     };
   };
+  // E7: the run widget Background work shows for one run (its phases and the selected phase's agent table).
+  const widget = () => {
+    const run = tabpanel()?.querySelector<HTMLElement>('[data-view="run"][data-run]');
+    if (!run) return null;
+    const cell = (tr: Element, part: string) => text(tr.querySelector(`[data-part="${part}"]`));
+    return {
+      taskId: run.dataset.run!,
+      title: text(run.querySelector('h2')),
+      line: text(run.querySelector('[data-part="line"]')),
+      status: text(run.querySelector('[data-part="status"]')),
+      phases: all(run, '[role="option"]').map((o) => `${text(o.querySelector('[data-part="title"]'))} ${text(o.querySelector('[data-part="count"]'))}`.trim()),
+      agents: all(run, 'tbody tr').map((tr) => ({ label: cell(tr, 'agent-label'), model: cell(tr, 'model'), state: cell(tr, 'state'), time: cell(tr, 'time'), tokens: cell(tr, 'tokens') })),
+      buttons: all(run.querySelector('header'), 'button').map(text),
+    };
+  };
   const log = () => {
     const body = tabpanel();
     const shown = body?.querySelector('[data-log]');
@@ -190,14 +212,14 @@ function installProbes(): void {
       ? { heading: text(shown.querySelector('h2')), path: text(shown.querySelector('[data-part="path"]')), size: text(shown.querySelector('[data-part="size"]')), pages: body!.querySelectorAll('pre[data-log-page]').length }
       : { noFile: text(body?.querySelector('p')) };
   };
-  w.__c8b = { rec, subagents, background, log };
+  w.__c8b = { rec, subagents, background, widget, log };
 }
 
 type Probe = {
   rec: { rows: Record<string, { firstSeen: number; sections: { t: number; v: string }[]; elapsed: { t: number; v: string }[]; lines: { t: number; v: string }[] }>; cards: Record<string, { t: number; v: string }[]>; stopping: Record<string, number>; relay: { t: number; v: string }[] };
   subagents(): {
     headings: string[]; notes: string[];
-    active: { agentId: string; depth: number; title: string; elapsed: string; line: string; waiting: boolean; nested: boolean }[];
+    agents: { agentId: string; depth: number; title: string; elapsed: string; line: string; waiting: boolean; nested: boolean }[];
     done: { agentId: string; depth: number; title: string; elapsed: string; line: string; waiting: boolean; nested: boolean }[];
     disk: { agentId: string; depth: number; title: string; elapsed: string; line: string; waiting: boolean; nested: boolean }[];
     drillIn: { header: string; meta: string; dispatchedBy: string; requestCards: number; label: string; disabled: string | null; tooltip: string | null; line: string | null } | null;
@@ -205,11 +227,16 @@ type Probe = {
   };
   background(): {
     headings: string[]; notes: string[];
-    workflows: { taskId: string; title: string; line: string; status: string; phases: string[]; table: string[][]; buttons: string[] }[];
+    workflows: { taskId: string; title: string; line: string; status: string; summary: string; buttons: string[] }[];
     shells: { taskId: string; line: string; output: string; buttons: string[] }[];
     monitors: string[];
     tasks: { heading: string; label: string | null; rows: string[]; text: string };
   };
+  widget(): {
+    taskId: string; title: string; line: string; status: string; phases: string[];
+    agents: { label: string; model: string; state: string; time: string; tokens: string }[];
+    buttons: string[];
+  } | null;
   log(): { heading?: string; path?: string; size?: string; pages?: number; noFile?: string };
 };
 const probe = <T,>(page: Page, read: (p: Probe) => T): Promise<T> => page.evaluate(`(${read.toString()})(window.__c8b)`) as Promise<T>;
@@ -337,6 +364,12 @@ async function showTool(page: Page, name: 'Subagents' | 'Background work'): Prom
   await page.locator('[data-region="panel"]').getByRole('button', { name: 'Add a tool' }).click();
   await page.getByRole('menuitem', { name }).click();
   await expect(tabOf(page, name)).toHaveCount(1);
+}
+
+// E7: the Subagents tree's Done section is collapsed by default; this opens it, once listed, unless it is open already.
+async function openDone(page: Page): Promise<void> {
+  const toggle = page.locator('[data-region="panel"] section[data-section="done"] > h3 button');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
 // The owner's home after the run, read only (C8c's check): nothing in ~/.claude/history.jsonl or ~/.claude.json names the
@@ -480,7 +513,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     const agents = <T,>(read: string) => page.evaluate(`(() => { const a = window.__maws_agents; return (${read})(a); })()`) as Promise<T>;
     const ids = { first: [] as string[], perm: '', relayBusy: '', relayIdle: '', foreground: '' };
 
-    await step('i', 'two background agents under Active, then Done', async () => {
+    await step('i', 'two background agents under Agents, then Done', async () => {
       await showTool(page, 'Subagents');
       const from = await s.send('Dispatch two general-purpose agents in the background, model haiku: one lists the files under docs/, the other under mockups/; report both.');
       const started = await s.until('two subagent.started', (ev) => {
@@ -488,11 +521,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         return found.length >= 2 ? found.slice(0, 2) : undefined;
       });
       ids.first = started.map((e) => e.taskId as string);
-      await expect.poll(() => probe(page, (p) => p.subagents().headings), { timeout: 15_000 }).toContain('Active · 2');
-      const shownActive = await probe(page, (p) => p.subagents().active);
-      const t1 = await probe(page, (p) => p.subagents().active.map((r) => r.elapsed));
+      await expect.poll(() => probe(page, (p) => p.subagents().headings), { timeout: 15_000 }).toContain('Agents · 2 running');
+      const shownActive = await probe(page, (p) => p.subagents().agents);
+      const t1 = await probe(page, (p) => p.subagents().agents.map((r) => r.elapsed));
       await sleep(2_200);
-      const t2 = await probe(page, (p) => p.subagents().active.map((r) => r.elapsed));
+      const t2 = await probe(page, (p) => p.subagents().agents.map((r) => r.elapsed));
       const rec = await probe(page, (p) => p.rec.rows);
       const latency = started.map((e) => ({ agentId: e.taskId, description: e.description, isBackground: e.isBackground, startedAt: e.at, rowShownAfterMs: rec[e.taskId as string] ? rec[e.taskId as string].firstSeen - Date.parse(e.at) : null }));
       note('i.active', { rows: shownActive, elapsedThen: t1, elapsedLater: t2, latency });
@@ -500,6 +533,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       for (const l of latency) expect(l.rowShownAfterMs, `row of ${l.agentId} shown within a second of its start`).toBeLessThan(1_000);
       await s.until('both agents finished', (ev) => ids.first.every((id) => ev.some((e) => e.kind === 'subagent.finished' && e.taskId === id)), 240_000);
       await expect.poll(() => probe(page, (p) => p.subagents().headings), { timeout: 15_000 }).toContain('Done · 2');
+      await openDone(page);
       const done = await probe(page, (p) => p.subagents().done);
       note('i.done', { rows: done, finished: s.after(from).filter((e) => e.kind === 'subagent.finished').map((e) => ({ taskId: e.taskId, status: e.status, summary: e.summary })) });
       for (const row of done.filter((r) => ids.first.includes(r.agentId))) expect(row.line).toMatch(/^finished · /);
@@ -579,8 +613,8 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const from = await s.send(`Dispatch one general-purpose agent in the background, model haiku: run "touch ${TMP.perm}" with Bash and reply OK.`);
       const asked = await s.until('the child’s permission request', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'permission.requested' && e.agentId !== null), 180_000);
       ids.perm = asked.agentId!;
-      await expect.poll(() => probe(page, (p) => p.subagents().active.find((r) => r.waiting) ?? null), { timeout: 15_000 }).not.toBeNull();
-      const row = (await probe(page, (p) => p.subagents().active)).find((r) => r.agentId === ids.perm);
+      await expect.poll(() => probe(page, (p) => p.subagents().agents.find((r) => r.waiting) ?? null), { timeout: 15_000 }).not.toBeNull();
+      const row = (await probe(page, (p) => p.subagents().agents)).find((r) => r.agentId === ids.perm);
       expect(row?.waiting, 'the waiting agent’s row carries the badge').toBe(true);
       expect(row?.line).toMatch(/^Approval needed · /);
       await panel.locator(`[data-agent-row="${ids.perm}"]`).click();
@@ -631,39 +665,54 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await s.idle();
     });
 
-    await step('v', 'a workflow shows its phases and table; Stop workflow ends a re-run', async () => {
+    // E7: the card is compact; its phases and agent table live in the run's widget, opened from the card's title. The
+    // recorder reads the card's summary line until the widget opens and the widget's phase rows after, in one form.
+    const openRun = async (taskId: string) => {
+      const back = panel.getByRole('button', { name: '‹ Background work' });
+      if (await back.isVisible()) await back.click();
+      await panel.locator(`[data-workflow="${taskId}"] h4 button`).click();
+      await expect(panel.locator(`[data-view="run"][data-run="${taskId}"]`)).toBeVisible();
+    };
+    await step('v', 'a workflow shows its phases and agent table in its widget; Stop workflow ends a re-run', async () => {
       await showTool(page, 'Background work');
       const from = await s.send(`Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:\n\n${WORKFLOW_SCRIPT}`);
       const started = await s.until('the workflow’s task.started', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'task.started' && e.taskType === 'local_workflow'));
       const taskId = started.taskId as string;
+      await openRun(taskId);
       await s.until('the workflow’s notification', (ev) => ev.find((e) => e.kind === 'task.notification' && e.taskId === taskId), 300_000);
       await sleep(1_500);
-      const card = (await probe(page, (p) => p.background().workflows)).find((c) => c.taskId === taskId);
+      const widget = await probe(page, (p) => p.widget());
       const history = (await probe(page, (p) => p.rec.cards))[taskId] ?? [];
-      note('v.run', { taskId, description: started.description, workflowName: started.workflowName, card, phaseHistory: history.map((h) => h.v), frames: s.events.filter((e) => e.kind === 'workflow.progress' && e.taskId === taskId).length });
-      const phases = history.map((h) => h.v).filter(Boolean);
-      expect(phases[0], 'the first phase row: Echo 0/2, or Queued before any agent started').toMatch(/^Echo (0\/2|· Queued)$/);
+      note('v.run', { taskId, description: started.description, workflowName: started.workflowName, widget, phaseHistory: history.map((h) => h.v), frames: s.events.filter((e) => e.kind === 'workflow.progress' && e.taskId === taskId).length });
+      // what carries phase progress: neither the card's line before the first frame nor the widget's empty phase list
+      const phases = history.map((h) => h.v).filter((v) => v !== '' && v !== 'Phases arrive with the first progress frame');
+      expect(phases[0], 'the first phase row: Echo 0/2, or Queued before any agent started').toMatch(/^(Echo 0\/2|Echo Queued|Queued)$/);
       expect(phases.at(-1)).toBe('Echo 2/2');
       // `Echo 1/2` is recorded, not asserted: two agents finishing inside one progress frame would skip it.
-      expect(card?.table.map((row) => row[2]), 'the table’s tokens').toEqual(card?.table.map(() => expect.stringMatching(/^\d+(\.\d)?[kM]?$/)));
+      expect(widget?.taskId).toBe(taskId);
+      expect(widget?.agents, 'the run’s two agents').toHaveLength(2); // E7 (M7): an empty table passed the tokens check
+      expect(widget?.agents.map((row) => row.tokens), 'the agent table’s tokens').toEqual(widget?.agents.map(() => expect.stringMatching(/^\d+(\.\d)?[kM]?$/)));
       await s.idle();
       const again = await s.send(`Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:\n\n${SLOW_WORKFLOW_SCRIPT}`);
       const slow = await s.until('the slow workflow’s task.started', (ev) => ev.find((e) => e.seq !== null && e.seq > again && e.kind === 'task.started' && e.taskType === 'local_workflow'));
       const slowId = slow.taskId as string;
       await s.until('the slow workflow’s first progress', (ev) => ev.find((e) => e.kind === 'workflow.progress' && e.taskId === slowId), 120_000);
-      const cardLoc = panel.locator(`[data-workflow="${slowId}"]`);
-      await expect(cardLoc.getByRole('button', { name: 'Stop workflow' })).toBeEnabled({ timeout: 15_000 });
+      await openRun(slowId);
+      const runLoc = panel.locator(`[data-view="run"][data-run="${slowId}"]`);
+      await expect(runLoc.getByRole('button', { name: 'Stop workflow' })).toBeEnabled({ timeout: 15_000 });
       const stopFrom = s.seq;
-      await cardLoc.getByRole('button', { name: 'Stop workflow' }).click();
+      await runLoc.getByRole('button', { name: 'Stop workflow' }).click();
       await s.until('the slow workflow’s notification', (ev) => ev.find((e) => e.kind === 'task.notification' && e.taskId === slowId), 30_000);
       await sleep(1_500);
-      const stopped = (await probe(page, (p) => p.background().workflows)).find((c) => c.taskId === slowId);
+      const stopped = await probe(page, (p) => p.widget());
       const order = s.taskLog(stopFrom, slowId);
       const stoppingSeen = (await probe(page, (p) => p.rec.stopping))[slowId];
-      note('v.stop', { taskId: slowId, card: stopped, stoppingSeen: stoppingSeen ?? null, order });
-      expect(stoppingSeen, 'the card showed stopping…').toBeDefined();
+      note('v.stop', { taskId: slowId, widget: stopped, stoppingSeen: stoppingSeen ?? null, order });
+      expect(stoppingSeen, 'the widget showed stopping…').toBeDefined();
+      expect(stopped?.taskId).toBe(slowId);
       expect(stopped?.status).toBe('stopped');
       expectStopOrder(order, slowId);
+      await panel.getByRole('button', { name: '‹ Background work' }).click(); // the list again, for the checklist's step
       await s.idle();
     });
 
@@ -770,6 +819,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await showTool(pg, 'Subagents');
       const back = pnl.getByRole('button', { name: '‹ Subagents' });
       if (await back.isVisible()) await back.click();
+      await openDone(pg); // E7: a finished root is listed under Done, collapsed by default
       await pnl.locator(`[data-agent-row="${agentId}"]`).click();
       await expect.poll(() => probe(pg, (p) => p.subagents().drillIn?.disabled ?? null), { timeout: 10_000 }).toBe('This agent has finished');
       const drill = await probe(pg, (p) => p.subagents().drillIn);

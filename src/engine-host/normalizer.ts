@@ -38,6 +38,7 @@ import { bashPartOf, denialKindOf, engineUserMarkerOf, spillPathOf, stringOrNull
 import { mapInboundCancel, mapInboundRequest, mapMawsAskMeta, mapOutboundResponse, type InboundEntry } from './normalizer-controls';
 import { mapSystemFrame, pluginLoadIssues, type TaskRegistry } from './normalizer-system';
 import type { SafeguardVerdict } from '@shared/graph/enums';
+import { messageText, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 
 export interface NormalizerWarning {
   event: 'block_pairing' | 'unknown_denial_kind' | 'unmatched_response' | 'unknown_permission_mode';
@@ -357,6 +358,13 @@ export class Normalizer {
       kind: 'user.message', messageUuid: uuid, content: bash === null ? content : bash.part === 'input' ? bash.command : bash.stdout,
       isReplay: frame.isReplay ?? false, isSynthetic: frame.isSynthetic ?? false, origin: frame.origin?.kind ?? null, bash,
     }, attribution);
+    // E7 start: a message from another session (or an in-process agent's to this conversation) also yields its parsed
+    // event, from the same parser the disk backfill uses (E7 execution document, Design §4)
+    if (frame.origin?.kind === 'peer') {
+      const companion = peerEventsOf(messageText(content), uuid, frame.origin);
+      if (companion) out.emit(companion, attribution);
+    }
+    // E7 end
   }
 
   private result(frame: ResultFrame, out: Emitter, attribution: Attribution): void {

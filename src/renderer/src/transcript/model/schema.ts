@@ -41,6 +41,7 @@ export const CellDetailSchema = z.discriminatedUnion('kind', [
 
 const SubagentRefSchema = z.strictObject({
   taskId: z.string(), agentId: nullable(z.string()), toolUseId: nullable(z.string()), name: z.string(), glyph: z.number().int().min(0).max(7), kind: z.enum(['agent', 'workflow']), subagentType: nullable(z.string()),
+  runId: z.string().optional(), // E7
 });
 
 const cellShape = {
@@ -58,6 +59,12 @@ export const TurnSummarySchema = z.strictObject({
 });
 
 const base = { id: z.string(), turnId: nullable(z.string()), at: z.string() };
+// E7 start: a message between sessions (rows.ts's PeerMessage)
+const PeerMessageSchema = z.strictObject({
+  sender: nullable(z.strictObject({ name: nullable(z.string()), address: z.string(), session: nullable(z.string()) })), recipient: nullable(z.strictObject({ name: nullable(z.string()), address: z.string() })), body: z.string(), preview: z.string(),
+  replyTo: nullable(z.string()), toolUseId: nullable(z.string()), messageUuid: nullable(z.string()), result: nullable(z.enum(['pending', 'sent', 'failed'])), resultText: nullable(z.string()), summary: nullable(z.string()),
+});
+// E7 end
 const AttachmentSchema = z.strictObject({ kind: z.enum(['image', 'file', 'text']), name: z.string(), bytes: nullable(z.number()), dataUrl: nullable(z.string()), mediaType: nullable(z.string()), text: nullable(z.string()) });
 
 export const RowSchema = z.discriminatedUnion('kind', [
@@ -75,7 +82,10 @@ export const RowSchema = z.discriminatedUnion('kind', [
     added: z.number(), removed: z.number(), state: z.enum(['applied', 'undoing', 'undone', 'reapplying']), canUndo: z.boolean(), canReapply: z.boolean(),
   }),
   z.strictObject({ ...base, kind: z.literal('subagent'), agents: z.array(SubagentRefSchema), sentence: z.string(), status: z.enum(['started', 'working', 'finished', 'finished_with_errors', 'stopped']), overflow: z.number() }),
-  z.strictObject({ ...base, kind: z.literal('agent_message'), direction: z.enum(['to_child', 'from_child', 'between']), from: nullable(SubagentRefSchema), to: nullable(SubagentRefSchema), text: z.string() }),
+  z.strictObject({
+    ...base, kind: z.literal('agent_message'), direction: z.enum(['to_child', 'from_child', 'between']), from: nullable(SubagentRefSchema), to: nullable(SubagentRefSchema), text: z.string(),
+    peer: PeerMessageSchema.optional(), report: z.string().optional(), body: z.string().optional(), // E7
+  }),
   z.strictObject({ ...base, kind: z.literal('thinking'), messageUuid: nullable(z.string()), text: z.string(), live: z.boolean(), durationMs: nullable(z.number()) }),
   z.strictObject({ ...base, kind: z.literal('plan'), toolUseId: z.string(), plan: z.string(), outcome: nullable(z.enum(PLAN_OUTCOMES)), feedback: nullable(z.string()) }),
   z.strictObject({ ...base, kind: z.literal('question'), toolUseId: z.string(), questions: z.array(QuestionSchema), answers: nullable(z.record(z.string(), z.string())), error: nullable(z.string()) /* E1 */ }),
@@ -106,4 +116,11 @@ export const RowSchema = z.discriminatedUnion('kind', [
     state: z.enum(['opened', 'finished', 'failed']), text: nullable(z.string()), turns: z.number().int().nonnegative(),
   }),
   // E3 end
+  // E7 start
+  z.strictObject({
+    ...base, kind: z.literal('agent_list'), toolUseId: z.string(), self: nullable(z.string()),
+    sections: z.array(z.strictObject({ title: z.enum(['Subagents', 'Teammates', 'Peer sessions']), count: z.number().int(), rows: z.array(z.strictObject({ name: z.string(), ref: nullable(z.string()), extras: z.array(z.string()) })) })),
+    notes: z.array(z.string()), raw: z.string(), pending: z.boolean(),
+  }),
+  // E7 end
 ]);

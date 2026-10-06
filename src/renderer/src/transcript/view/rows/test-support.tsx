@@ -37,6 +37,7 @@ export function spyActions(): TranscriptActions {
     loadSpill: NO_ACTIONS.loadSpill,
     openAsk: vi.fn(), openDelivered: vi.fn(async () => null), revealDelivered: vi.fn(async () => null), // E1
     openSideThread: vi.fn(), // E3
+    replyToPeer: vi.fn(async () => {}), peerReplies: NO_ACTIONS.peerReplies, // E7
   };
 }
 

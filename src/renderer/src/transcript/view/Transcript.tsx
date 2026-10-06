@@ -31,6 +31,7 @@ const ESTIMATES: Record<RowKind, number> = {
   thinking: 32, plan: 260, question: 64, request_slot: 48, error: 36, boundary: 36, bash: 120, local_command: 48,
   ask: 72, delivery: 88, // E1
   side_thread: 36, // E3
+  agent_list: 96, // E7: the self line and one short section
 };
 export function estimateRow(row: Row): number {
   if (row.kind === 'group' && row.expanded) return 280;

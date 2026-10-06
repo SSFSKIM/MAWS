@@ -3,6 +3,8 @@
 // untagged (pasted bodies in place of their placeholders); answer markdown is emitted verbatim.
 import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, NOT_SENT, planBadge, plural, QUESTION, requestSlotPlaceholder } from './copy';
 import { ASK, askAnswerCopy, DELIVERY } from './copy'; // E1
+import { agentListCopy } from './copy'; // E7
+import { previewHidesBody } from './rows'; // E7
 import type { Cell, Row } from './rows';
 import { untaggedUserText } from './user-text';
 import { SIDE_COPY, sideRowStatus } from '../../side/copy'; // E3
@@ -30,7 +32,7 @@ function partOf(row: Row): string | null {
     case 'cell': return cellLines(row, '').join('\n');
     case 'receipt': return [`**${plural(row.files.length, 'file')} changed · +${row.added} −${row.removed}**`, ...row.files.map((file) => `- ${file.path} (+${file.added} −${file.removed})`)].join('\n');
     case 'subagent': return `- ${row.sentence}`;
-    case 'agent_message': return `- ${row.text}`;
+    case 'agent_message': return messagePart(row); // E7: the body or report under the line when it shows more
     case 'thinking': return row.text.length > 0 ? `*${row.live ? 'Thinking' : 'Thought'}*\n${indent(row.text, '> ')}` : null;
     case 'plan': return `**Plan · ${planBadge(row.outcome, row.feedback)}**\n\n${row.plan}`;
     case 'question': return row.questions.map((q) => `**${q.header}** ${q.question}: ${row.answers?.[q.question] ?? (row.answers !== null && Object.keys(row.answers).length === 0 ? QUESTION.skipped : '—')}`).join('\n'); // an empty answer map: skipped (a plain deny)
@@ -44,8 +46,24 @@ function partOf(row: Row): string | null {
     case 'delivery': return [`**${(row.error === null ? DELIVERY.delivered : DELIVERY.failed)(row.files)}**${row.caption ? ` · ${row.caption}` : ''}`, ...row.files.map((file) => `- ${file.path}`), ...(row.error === null ? [] : [`*${row.error}*`])].join('\n');
     // E1 end
     case 'side_thread': return `*${SIDE_COPY.row.lead} \`${SIDE_COPY.label(row.label, row.openedBy)}\` ${sideRowStatus(row)}*`; // E3
+    case 'agent_list': return listPart(row); // E7
   }
 }
+
+// E7 start: a message's line, then its whole body (a message whose line shows only its first line) or a hand-back's
+// report, quoted; a listing as its counts, a pending one as such, one the parser did not read as its notes
+function messagePart(row: Extract<Row, { kind: 'agent_message' }>): string {
+  const more = row.report ?? row.body ?? (row.peer && previewHidesBody(row.peer.body, row.peer.preview) ? row.peer.body : null);
+  return more === null ? `- ${row.text}` : `- ${row.text}\n${indent(more, '  > ')}`;
+}
+
+function listPart(row: Extract<Row, { kind: 'agent_list' }>): string {
+  if (row.pending) return `- ${agentListCopy.pending}`;
+  if (row.sections.length === 0) return `- Agents: ${row.notes.join(' ')}`;
+  const count = (title: string) => row.sections.find((section) => section.title === title)?.count ?? 0;
+  return `- ${agentListCopy.serialized(count('Subagents'), count('Teammates'), count('Peer sessions'))}`;
+}
+// E7 end
 
 export function serializeRows(rows: Row[]): string {
   return rows.map(partOf).filter((part): part is string => part !== null).join('\n\n');

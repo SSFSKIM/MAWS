@@ -11,6 +11,7 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // E1
 import type { Anchor, AnchorKind } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 // E3 end
+import type { ListingSection } from './agent-listing'; // E7
 
 export type TurnId = string & z.$brand<'TurnId'>; // `turn:<userMessageUuid>`; `turn:e<eventId>` for engine-initiated turns or a user message without uuid
 export type RowId = string & z.$brand<'RowId'>; // formats in keys.ts
@@ -57,7 +58,11 @@ export type Row = RowBase &
     | ({ kind: 'cell' } & Cell) // a standalone cell
     | { kind: 'receipt'; files: ChangedFile[]; added: number; removed: number; state: 'applied' | 'undoing' | 'undone' | 'reapplying'; canUndo: boolean; canReapply: boolean }
     | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; overflow: number } // overflow: agents beyond the four glyphs
-    | { kind: 'agent_message'; direction: 'to_child' | 'from_child' | 'between'; from: SubagentRef | null; to: SubagentRef | null; text: string }
+    | {
+        kind: 'agent_message'; direction: 'to_child' | 'from_child' | 'between'; from: SubagentRef | null; to: SubagentRef | null; text: string;
+        peer?: PeerMessage; report?: string; // E7: a message between sessions (`between`); an in-process agent's hand-back report
+        body?: string; // E7: an in-process agent's whole message, when the text shows only its preview
+      }
     | { kind: 'thinking'; messageUuid: MessageUuid | null; text: string; live: boolean; durationMs: number | null }
     | { kind: 'plan'; toolUseId: ToolUseId; plan: string; outcome: (typeof PLAN_OUTCOMES)[number] | null; feedback: string | null }
     | { kind: 'question'; toolUseId: ToolUseId; questions: Question[]; answers: Record<string, string> | null; error: string | null } // E1 (A-17): error, the engine's refusal of the call, tags stripped
@@ -87,11 +92,39 @@ export type Row = RowBase &
         state: 'opened' | 'finished' | 'failed'; text: string | null; turns: number;
       }
     // E3 end
+    // E7 start: a `ListAgents` result as the lists it names (E7 execution document, Design §4): pending until the result
+    // arrives; `raw` is the result's text, the sections and notes its parse (agent-listing.ts)
+    | { kind: 'agent_list'; toolUseId: ToolUseId; self: string | null; sections: ListingSection[]; notes: string[]; raw: string; pending: boolean }
+    // E7 end
   );
 
 // E1: an ask as its capsule holds it, without the row base: what the Question sheet shows when the capsule reopens it
 // (residue 14), so an answered ask reopens from its own data after a reload or in a disk-only session.
 export type AskRowData = Omit<Extract<Row, { kind: 'ask' }>, keyof RowBase | 'kind'>;
+
+// E7 start: a message between sessions (E7 execution document, Design §4). Inbound (`sender` set) from a `peer.message`;
+// outbound (`recipient` set) from a SendMessage whose `to` names no agent of this transcript. `sender.name` is the
+// envelope's `from-name` (null when it had none; the view labels the address as the TUI does); `recipient.address` the
+// call's `to`, its `name` the one an earlier message from that address gave. `replyTo` is the address a Reply answers,
+// null when the engine says SendMessage cannot reach it. `result` is an outbound send's: pending until its tool result,
+// failed with `resultText` when the engine could not send it; `summary` the call's own summary.
+export interface PeerMessage {
+  sender: { name: string | null; address: string; session: string | null } | null;
+  recipient: { name: string | null; address: string } | null;
+  body: string;
+  preview: string; // the body's first line, cut to 120 columns
+  replyTo: string | null;
+  toolUseId: ToolUseId | null;
+  messageUuid: MessageUuid | null;
+  result: 'pending' | 'sent' | 'failed' | null;
+  resultText: string | null;
+  summary: string | null;
+}
+
+// Whether a message's preview leaves some of its body out (more lines, or a cut first line): then the row offers the
+// whole of it and the markdown copy quotes it. Surrounding whitespace hides nothing.
+export const previewHidesBody = (body: string, preview: string): boolean => body.trim() !== preview;
+// E7 end
 
 export type RowKind = Row['kind'];
 
@@ -118,6 +151,9 @@ export interface SubagentRef {
   glyph: number;
   kind: 'agent' | 'workflow';
   subagentType: string | null;
+  // E7 start: a workflow's run id, from the Workflow call's launch result (E7 execution document, Design §2)
+  runId?: string;
+  // E7 end
 }
 export type SubagentStatus = 'started' | 'working' | 'finished' | 'finished_with_errors' | 'stopped';
 

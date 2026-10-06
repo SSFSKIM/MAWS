@@ -1177,6 +1177,18 @@ for (const { fixture, headers } of sittingReplays) test(`M3 owner sitting preser
     await captureR3bEvidence(page, fixture);
   }, (base) => sittingSeed(base, true, headers), async (pane) => {
     await unfoldSeedWork(pane);
-    await expect(pane.locator('[data-kind="assistant_text"]')).toHaveCount(3); // hi plus the two status messages
+    // hi plus the two status messages, counted over the whole list: the rows are virtual, and the status turn's rows
+    // (E7: its ListAgents call is a listing row of its own) can leave the first answer outside the mounted window
+    await expect.poll(() => pane.locator('[data-transcript-scroller]').evaluate(async (scroller) => {
+      const seen = new Set<string>();
+      scroller.scrollTop = 0;
+      for (let guard = 0; guard < 100; guard += 1) {
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        for (const row of Array.from(scroller.querySelectorAll<HTMLElement>('[data-kind="assistant_text"]'))) seen.add(row.id);
+        if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
+        scroller.scrollTop += Math.max(1, scroller.clientHeight / 2);
+      }
+      return seen.size;
+    })).toBe(3);
   });
 });

@@ -128,7 +128,15 @@
     "id": "agentmsg:agents-relay:journal:333:1",
     "kind": "agent_message",
     "text": "Sent message to ad286defbc77bc090: Say PING in your next inbox line",
-    "to": null,
+    "to": {
+      "agentId": "ad286defbc77bc090",
+      "glyph": 3,
+      "kind": "agent",
+      "name": "Read and report one.txt content",
+      "subagentType": "general-purpose",
+      "taskId": "ad286defbc77bc090",
+      "toolUseId": "toolu_01CYiK6ncgQLFUQ2iqC1b4oB"
+    },
     "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"
   },
   {

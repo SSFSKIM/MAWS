@@ -724,6 +724,21 @@ describe('a holder-less transcript whose last turn never ended', () => {
     expect(out.of('process.exited').map((e) => e.id)).toEqual([`session:${MARKER}:exited`]);
   });
 
+  // E7: a message from another session opens a turn of its own (an `isMeta` peer `user` record, backfill.ts), so a
+  // process that died while running it left that turn unended, though the human turn before it wrote its turn_duration.
+  it('a peer message turn that never ended still exits, after a human turn that did', async () => {
+    const peer = joined([
+      line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'go' } }),
+      line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: at(1), message: { id: 'm1', model: 'x', content: [{ type: 'text', text: 'ok' }] } }),
+      line({ type: 'system', subtype: 'turn_duration', uuid: 's1', parentUuid: 'a1', durationMs: 5, timestamp: at(2) }),
+      line({ type: 'user', uuid: 'p1', parentUuid: 's1', timestamp: at(3), isMeta: true, origin: { kind: 'peer', from: 'uds:/tmp/cc-socks/1.sock' }, message: { role: 'user', content: '<cross-session-message from="uds:/tmp/cc-socks/1.sock">\nhi\n</cross-session-message>' } }),
+      line({ type: 'assistant', uuid: 'a2', parentUuid: 'p1', timestamp: at(4), message: { id: 'm2', model: 'x', content: [{ type: 'text', text: 'on it' }] } }),
+    ]);
+    const { out } = await follow(peer, 'S' as SessionId, 0);
+    expect(out.of('turn.started').map((e) => e.origin)).toEqual([null, 'peer']);
+    expect(out.of('process.exited')).toHaveLength(1);
+  });
+
   it("an agent's own transcript (a sidecar follow) carries no process exit", async () => {
     const { out } = await follow(joined(SDK_LINES), SDK, 0, { agentId: 'a1' as AgentId, parentToolUseId: null });
     expect(out.of('turn.started')).toHaveLength(1);

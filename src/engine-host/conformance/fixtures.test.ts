@@ -85,7 +85,10 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const e1 = ['p1-maws-ask-async', 'p1-maws-ask-blocking', 'p1-maws-send-file', 'p1-maws-show-pane'];
     // E3 M0: a side thread forked while the parent's turn runs, an [image, text] `next` steer, and the thread resumed by its id (2.1.291)
     const e3 = ['p1-side-thread-live', 'p1-side-thread-live-fork', 'p1-side-thread-live-resume'];
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3].sort());
+    // E7 (P1, docs/doperpowers/plans/2026-10-06-e7-orchestration.md M0): two peer sessions messaging each other, CronCreate
+    // with its fires and the resume, a named agent under the teams gate, on the installed 2.1.291
+    const e7 = ['e7-cron', 'e7-cron-resume', 'e7-peer-a', 'e7-peer-b', 'e7-team'];
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -624,6 +627,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       // E1 M2: pass3/p1-maws-* (every recorded ask is answered before the stop, so no fixture yields maws.ask.cancelled;
       // session-maws.test.ts pins it over a scripted session)
       'maws.ask.opened', 'maws.ask.answered', 'maws.delivery.file', 'maws.pane.shown',
+      'peer.message', // E7 M1: pass3/e7-peer-a and e7-peer-b (no pass journal carries an in-process agent's message: subagent.message is pinned over test/fixtures/engine/handback-pointer in normalizer.test.ts)
     ].sort());
     void kinds;
   });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TaskId } from '@shared/graph/ids';
 import { event } from '../../../../../../test/support/agents-events';
 import { elapsedOf, formatAgo, formatElapsed, formatTokens } from './elapsed';
+import { formatIn } from './elapsed'; // E7
 import { applyTaskEvents, emptyGraph, type TaskNode } from './task-graph';
 
 const T = Date.parse('2026-09-29T10:00:00.000Z');
@@ -54,5 +55,14 @@ describe('elapsed', () => {
     expect(formatAgo(2 * 3_600_000 + 5)).toBe('2h ago');
     expect(formatAgo(26 * 3_600_000)).toBe('1d ago');
     expect(formatAgo(-5_000)).toBe('just now'); // a clock a little behind the engine's
+  });
+
+  // E7: a scheduled job's next run, in the same form ahead of now.
+  it('formats how long until a time to come', () => {
+    expect(formatIn(40_000)).toBe('in under a minute');
+    expect(formatIn(-1)).toBe('in under a minute');
+    expect(formatIn(180_000)).toBe('in 3m');
+    expect(formatIn(2 * 3_600_000 + 5)).toBe('in 2h');
+    expect(formatIn(26 * 3_600_000)).toBe('in 1d');
   });
 });

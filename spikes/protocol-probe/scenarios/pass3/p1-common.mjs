@@ -17,7 +17,7 @@ import {assertScratch,RELAY_ENV,records,slug,success,check,endAsStop,initFrame,a
 import {clearEngineEnvironment} from './mods-environment.mjs';
 import {probeInitialize} from '../../probe-initialize.mjs';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,realpathSync,readdirSync} from 'node:fs';
-import {join} from 'node:path';
+import {join,dirname} from 'node:path';
 import {homedir} from 'node:os';
 import {randomUUID,createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
@@ -68,9 +68,10 @@ function engineEnv(home,vars){
 
 // The engine's debug lines about the probed features, copied into the fixture (redacted by the harness).
 const DEBUG_RE=/mcp|sdk|side.?question|fork|preview|AskUserQuestion|question/i;
-function noteDebug(p,file){
+function noteDebug(p,file,re=DEBUG_RE){
  if(!existsSync(file))return p.note({event:'debug_lines',file:null});
- const lines=readFileSync(file,'utf8').split('\n').filter(l=>DEBUG_RE.test(l)).map(l=>l.slice(0,400));
+ // matched with the scratch root's path removed, so a label in the path (e7-peer, e7-cron) selects nothing by itself
+ const root=dirname(file);const lines=readFileSync(file,'utf8').split('\n').filter(l=>re.test(l.split(root).join(''))).map(l=>l.slice(0,400));
  p.note({event:'debug_lines',count:lines.length,lines:lines.slice(0,120)});
 }
 
@@ -93,8 +94,9 @@ export const resultSummary=r=>r?{subtype:r.subtype,is_error:r.is_error,num_turns
 // `pinned: false` (E3 M0) omits `--session-id`, as MAWS does for a plain `--resume` (launch.ts: the resumed id is kept).
 // Handlers answer every engine→host request the protocol can send besides the ones a scenario registers itself, so a
 // recording never leaves one open. Throws when the scenario body failed, the engine exited non-zero or the owner-file
-// delta is not empty.
-export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[],debugFile=run.debugFile,pinned=true}={},body){
+// delta is not empty. `sessionId: null` passes no --session-id (a plain `--resume <id>` launch, E7), as `pinned: false`
+// does; `spendCap` is the probe's --max-budget-usd guard; `debugPattern` picks the debug lines copied into the fixture.
+export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[],debugFile=run.debugFile,pinned=true,spendCap=SPEND_CAP,debugPattern=DEBUG_RE}={},body){
  const env=engineEnv(run.home,vars);
  const {configHome,globalConfig}=assertScratch(env);
  await relayReady();
@@ -110,8 +112,8 @@ export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance
   p.on('ui_prompt_fill',()=>({filled:false}));
   p.on('ui_prompt_suggest',()=>({shown:false}));
   try{await body(p,{sessionId,run});}catch(e){failure=e;throw e;}
-  finally{noteDebug(p,debugFile);p.note({event:'spend',result:resultSummary(lastResult(p))});}
- },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,...(pinned?['--session-id',sessionId]:[]),'--max-budget-usd',SPEND_CAP,'--debug-file',debugFile,...flags]});
+  finally{noteDebug(p,debugFile,debugPattern);p.note({event:'spend',result:resultSummary(lastResult(p))});}
+ },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,...(pinned&&sessionId?['--session-id',sessionId]:[]),'--max-budget-usd',spendCap,'--debug-file',debugFile,...flags]});
  const exit=await p.closed;
  const after=ownerTmpKeys();
  const same=JSON.stringify(after)===JSON.stringify(before);

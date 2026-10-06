@@ -25,14 +25,18 @@ export const isPending = (state: RelayState) => state.kind === 'asked' || state.
 
 // R1 routed this wording first time in the idle, busy and foreground cases (verdict (1)). 2.1.283's `Agent` tool takes
 // no `name`, so the named clause fires only for a sidecar that carries one.
-export function relayText(agent: { agentId: AgentId; name: string | null }, text: string): string {
+export function relayText(agent: RelayTarget, text: string): string {
+  if (isPeerTarget(agent)) return peerRelayText(agent, text); // E7
   return `Relay to agent ${agent.agentId}${agent.name ? ` (named "${agent.name}")` : ''} with SendMessage, verbatim, then continue what you were doing: ${text}`;
 }
 
 // (b): the parent's own SendMessage (a child's is not the relay) addressed to the agent's id or its real name; the
 // description never matches.
-export function matchesSendMessage(event: SessionEvent, agent: { agentId: AgentId; name: string | null }): boolean {
+export function matchesSendMessage(event: SessionEvent, agent: AgentTarget): boolean;
+export function matchesSendMessage(event: SessionEvent, peer: PeerTarget, text: string): boolean; // E7
+export function matchesSendMessage(event: SessionEvent, agent: RelayTarget, text?: string): boolean {
   if (event.kind !== 'tool.use' || event.agentId !== null || event.toolName !== 'SendMessage') return false;
+  if (isPeerTarget(agent)) return matchesPeerSend(event, agent, text ?? ''); // E7
   const to = (event.input as { to?: unknown } | null)?.to;
   return to === agent.agentId || (agent.name !== null && to === agent.name);
 }
@@ -52,7 +56,7 @@ export function matchesReceipt(event: SessionEvent, relay: Relay): boolean {
 }
 
 // A failed relay's text returns to the composer's box when the box is empty, never over a draft typed since (O1).
-export function restoreDraft(draft: string, relay: Relay | undefined): string {
+export function restoreDraft(draft: string, relay: Relay | PeerRelay | undefined): string {
   return relay?.state.kind === 'failed' && draft.trim() === '' ? relay.text : draft;
 }
 
@@ -70,3 +74,52 @@ export function parentRoundsBetween(events: SessionEvent[], fromSeq: number, toS
   }
   return rounds.size;
 }
+
+// E7 start: the relay to another session (E7 execution document, Design §4; Decision Log 6). The transcript's Reply under
+// a message from another session, and its Message on a `ListAgents` row, ask the session by one `'next'` steer to
+// `SendMessage` the owner's text to an address: the envelope's `from` (SPEC 38 §38.24.2: copy it as `to`), or the name
+// a listing gave. The observables are the agent relay's (the steer answered, the parent's matching SendMessage) and then
+// the send's own result: sent, or failed with the engine's message. An agent target is the C8b shape, unchanged (its
+// wording and its key are byte for byte today's: `release()` compares the key with the child transcript's).
+export type AgentTarget = { kind?: 'agent'; agentId: AgentId; name: string | null };
+export interface PeerTarget {
+  kind: 'peer';
+  address: string; // what SendMessage's `to` gets
+  name: string | null; // the sender's name, which the parent may address it by instead
+  mode: 'reply' | 'message'; // answering a message, or a new message from a listing row
+}
+export type RelayTarget = AgentTarget | PeerTarget;
+export const isPeerTarget = (target: RelayTarget): target is PeerTarget => target.kind === 'peer';
+
+export type PeerRelayState =
+  | { kind: 'asked'; messageUuid: MessageUuid; sentAt: string; parentTurnOpenAtSend: boolean }
+  | { kind: 'forwarded'; messageUuid: MessageUuid; sentAt: string; toolUseId: ToolUseId; forwardedAt: string }
+  | { kind: 'sent'; sentAt: string } // the SendMessage's result said it went
+  | { kind: 'failed'; message: string }; // the steer refused or dropped, or the send answered `success: false` (or an error)
+
+export interface PeerRelay {
+  appSessionId: AppSessionId;
+  target: PeerTarget;
+  text: string;
+  state: PeerRelayState;
+}
+
+export const isPeerPending = (state: PeerRelayState) => state.kind === 'asked' || state.kind === 'forwarded';
+
+// M0 ran the reply wording verbatim on the first try (pass3/e7-peer-a seq 160 → 191).
+function peerRelayText(target: PeerTarget, text: string): string {
+  const tail = `with SendMessage, to: "${target.address}", sending exactly this text, then continue what you were doing: ${text}`;
+  if (target.mode === 'message') return `Send a message to ${target.name ?? target.address} ${tail}`;
+  return `Reply to the cross-session message from ${target.name ? `${target.name} (${target.address})` : target.address} ${tail}`;
+}
+
+// The parent's own SendMessage to the address (or the sender's name) whose message carries the owner's text: the
+// envelope's trailer tells the agent to answer the same sender on its own (M0 saw it, seq 130), which must not satisfy
+// the owner's relay.
+function matchesPeerSend(event: Extract<SessionEvent, { kind: 'tool.use' }>, target: PeerTarget, text: string): boolean {
+  const input = (event.input ?? {}) as { to?: unknown; message?: unknown; content?: unknown };
+  const to = input.to;
+  const message = typeof input.message === 'string' ? input.message : typeof input.content === 'string' ? input.content : '';
+  return (to === target.address || (target.name !== null && to === target.name)) && text !== '' && message.includes(text);
+}
+// E7 end

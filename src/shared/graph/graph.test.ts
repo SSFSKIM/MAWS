@@ -81,7 +81,8 @@ describe('graph schemas accept and reject', () => {
 
     it('lists every event kind once and the union covers each', () => {
       expect(new Set(EVENT_KINDS).size).toBe(EVENT_KINDS.length);
-      expect(EVENT_KINDS).toHaveLength(65); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds
+      expect(EVENT_KINDS).toHaveLength(66); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds; E7: peer.message
+      expect(EVENT_KINDS.at(-1)).toBe('peer.message'); // E7: appended after E1's block (X1 is append-only)
       const covered = SessionEventSchema.options.map((option) => option.shape.kind.value).sort();
       expect(covered).toEqual([...EVENT_KINDS].sort());
     });
@@ -184,6 +185,12 @@ describe('graph schemas accept and reject', () => {
         'side.thread.opened': { childAppSessionId: 'app-child', childEngineSessionId: null, anchor: { kind: 'file-line', locator: '/r/a.ts#L3', label: 'a.ts:3', path: '/r/a.ts', line: 3 }, openedBy: 'comment' },
         'side.thread.summarised': { childAppSessionId: 'app-child', text: 'Done.', isError: false, turns: 1 },
         // E3 end
+        // E7 start: a message from another session (SPEC 38 §38.23)
+        'peer.message': {
+          messageUuid: 'u-peer', from: 'uds:/tmp/cc-socks/10562.sock', fromSession: null, fromName: 'repo-b', fromMode: 'prompting', fromPlugin: null,
+          hopChain: ['b4a75fd9e01cdb83eea3f9ee'], text: 'hello from B', midTurn: false, lineage: 'peer', replyable: true,
+        },
+        // E7 end
       };
       expect(Object.keys(samples).sort()).toEqual([...EVENT_KINDS].sort());
       for (const [kind, payload] of Object.entries(samples)) {

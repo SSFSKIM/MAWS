@@ -4,6 +4,7 @@ import type { AgentId, SessionId } from '@shared/graph/ids';
 import { ChainFollower, type ChainFollowerOptions } from '../../../../engine-host/fs/chain-follower';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { TEST_FIXTURE_DIR } from '../../../../../test/support/fixtures';
+import { FIXTURE_DIR } from '../../../../../test/support/fixtures'; // E7
 import type { SessionEvent } from '@shared/graph/events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../test/support/fixtures';
@@ -575,3 +576,46 @@ describe('FX8 disk conversation history', () => {
     expect(ofKind(rows, 'local_command').map((row) => row.text)).toEqual(['Ready', 'Ready again']);
   });
 });
+
+// E7 start (E7 execution document, Design §4, §8 and G3): session A of M0's peer probe, live (its journal through C3's
+// normaliser) and from disk (its JSONL through C4's follower). The messages between sessions draw the same rows on both
+// paths: two inbound (idle, then mid-turn), A's own answer, the owner's reply and a send no session could take; the
+// inbound ones stay in view with every turn folded; the listing is a row; no envelope is ever a bubble.
+describe('cross-session rows (E7)', () => {
+  const SESSION_A = 'db45d92e-e979-4edf-a62a-61f21dc01acb';
+  const B = 'uds:/tmp/cc-socks/10562.sock';
+  const messages = (rows: Row[]) => ofKind(rows, 'agent_message').map(({ direction, text, peer }) => ({
+    direction, text, sender: peer?.sender ?? null, recipient: peer?.recipient ?? null, replyTo: peer?.replyTo ?? null, result: peer?.result ?? null, resultText: peer?.resultText ?? null,
+  }));
+  const EXPECTED = [
+    { direction: 'between', text: 'Message from repo-b-gen1il-79: E7 probe: hello from B', sender: { name: 'repo-b-gen1il-79', address: B, session: null }, recipient: null, replyTo: B, result: null, resultText: null },
+    { direction: 'between', text: 'Sent to repo-b-gen1il-79: Hello from A — received your probe message.', sender: null, recipient: { name: null, address: 'repo-b-gen1il-79' }, replyTo: null, result: 'sent', resultText: null },
+    { direction: 'between', text: 'Sent to repo-b-gen1il-79: E7 probe: reply from A', sender: null, recipient: { name: 'repo-b-gen1il-79', address: B }, replyTo: null, result: 'sent', resultText: null },
+    { direction: 'between', text: 'Message from repo-b-gen1il-79: E7 probe: second message while you work', sender: { name: 'repo-b-gen1il-79', address: B, session: null }, recipient: null, replyTo: B, result: null, resultText: null },
+    { direction: 'between', text: 'Sent to nobody-e7: E7 probe: nobody', sender: null, recipient: { name: null, address: 'nobody-e7' }, replyTo: null, result: 'failed', resultText: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." },
+  ];
+  const LISTING = { self: 'repo-h6xooi-51 [804260]', sections: [{ title: 'Peer sessions', count: 1, rows: [{ name: 'repo-b-gen1il-79', ref: '61303a', extras: ['interactive', 'idle', 'started 2s ago'] }] }], notes: [], pending: false };
+
+  async function disk(): Promise<SessionEvent[]> {
+    const events: SessionEvent[] = [];
+    const bytes = readFileSync(join(FIXTURE_DIR, 'pass3', 'e7-peer-transcripts', `${SESSION_A}.jsonl`));
+    const follower = new ChainFollower(new MemoryFileReader(bytes), SESSION_A as SessionId, null, (event) => { if (event.t === 'events') events.push(...event.events); }, { holders: () => 0 });
+    await follower.start();
+    follower.stop();
+    return events;
+  }
+
+  it.each([
+    ['live', async () => journalToEvents(loadJournal('pass3', 'e7-peer-a'))],
+    ['from disk', disk],
+  ])('%s: the messages, the listing, no envelope bubble, and the inbound rows kept when every turn folds', async (_, load) => {
+    const state = stateOf(await load());
+    const rows = rowsOf(withAllExpanded(state));
+    expect(messages(rows)).toEqual(EXPECTED);
+    expect(ofKind(rows, 'agent_list').map(({ self, sections, notes, pending }) => ({ self, sections, notes, pending }))).toEqual([LISTING]);
+    expect(ofKind(rows, 'user').filter((row) => row.text.includes('cross-session-message'))).toEqual([]);
+    expect(cellsOf(rows).filter((cell) => cell.toolName === 'ListAgents' || cell.toolName === 'SendMessage')).toEqual([]);
+    expect(messages(rowsOf(state)).filter((row) => row.sender !== null)).toEqual([EXPECTED[0], EXPECTED[3]]);
+  });
+});
+// E7 end

@@ -6,6 +6,7 @@ import { loadEngineJournal } from '../../../../../../test/support/fixtures';
 import { journalToEvents } from '../../../transcript/dev/journal';
 import {
   agentRows,
+  agentTree, // E7
   applySnapshot,
   applyTaskEvents,
   counts,
@@ -21,6 +22,7 @@ import {
   rowTitle,
   setStopping,
   shells,
+  shownRows, // E7
   workflows,
   type TaskGraph,
   type TaskNode,
@@ -396,6 +398,113 @@ describe('task graph', () => {
       expect(agentRows(graph, 'active')).toBe(agentRows(graph, 'active'));
     });
   });
+
+  // E7 start: the topology tree (E7 execution document, Design §3; G2)
+  describe('agentTree: the Subagents resting tree', () => {
+    const start = (taskId: string, seq: number, toolUseId = `tu_${taskId}`) => event('subagent.started', { taskId, agentId: taskId, toolUseId, description: taskId }, { seq });
+    const issue = (by: string, toolUseId: string, seq: number) => event('tool.use', { toolName: 'Agent', toolUseId, agentId: by }, { seq });
+    const child = (parent: string, taskId: string, seq: number) => [issue(parent, `tu_${taskId}`, seq), start(taskId, seq + 1)];
+    const finish = (taskId: string, seq: number, at: string) => event('subagent.finished', { taskId, agentId: taskId }, { seq, at });
+    const agent = (taskId: string, depth: number, over: Record<string, unknown> = {}) => ({ kind: 'agent', taskId, depth, parentTaskId: null, orphan: false, foldedUnder: null, ...over });
+    const fold = (parentTaskId: string, count: number, depth: number) => ({ kind: 'done-fold', parentTaskId, count, depth, expanded: false });
+    const OUTER = 'a38d4aebfaea9f6b1';
+    const INNER = 'a425e926e506edeb1';
+    const nested = replayed('pass3', 'nested-agents');
+
+    it('pass3/nested-agents: the inner agent at depth 1 under the outer, folded under Done · 1 once it finishes, both under Done at the end', () => {
+      expect(agentTree(graphOf(upTo(nested, 112)))).toEqual({
+        agents: [agent(OUTER, 0), agent(INNER, 1, { parentTaskId: OUTER })],
+        done: [],
+        running: 2,
+      });
+      expect(agentTree(graphOf(upTo(nested, 121)))).toEqual({
+        agents: [agent(OUTER, 0), fold(OUTER, 1, 1), agent(INNER, 1, { parentTaskId: OUTER, foldedUnder: OUTER })],
+        done: [],
+        running: 1,
+      });
+      const ended = mergeSidecars(graphOf(nested), sidecarsOf('pass3/nested-agents-sidecars'));
+      expect(agentTree(ended)).toEqual({ agents: [], done: [agent(OUTER, 0), agent(INNER, 1, { parentTaskId: OUTER })], running: 0 });
+    });
+
+    it('running roots first in first-seen order; a running parent lists its running children first and folds its done ones', () => {
+      const graph = graphOf([
+        start('P', 1), ...child('P', 'D1', 2), ...child('P', 'C', 4), ...child('P', 'D2', 6), start('Q', 8), start('R', 9),
+        finish('D1', 10, '2026-09-29T10:00:10.000Z'), finish('D2', 11, '2026-09-29T10:00:11.000Z'), finish('Q', 12, '2026-09-29T10:00:12.000Z'),
+      ]);
+      expect(agentTree(graph)).toEqual({
+        agents: [
+          agent('P', 0), agent('C', 1, { parentTaskId: 'P' }), fold('P', 2, 1),
+          agent('D1', 1, { parentTaskId: 'P', foldedUnder: 'P' }), agent('D2', 1, { parentTaskId: 'P', foldedUnder: 'P' }),
+          agent('R', 0),
+        ],
+        done: [agent('Q', 0)],
+        running: 3,
+      });
+    });
+
+    it('a done ancestor of a running agent stays with the running roots, its children unfolded, a folded child keeping its own subtree', () => {
+      const graph = graphOf([
+        start('P', 1), ...child('P', 'C', 2), ...child('C', 'G', 4), ...child('P', 'D', 6), ...child('D', 'E', 8), ...child('P', 'F', 10),
+        finish('E', 12, '2026-09-29T10:00:12.000Z'), finish('D', 13, '2026-09-29T10:00:13.000Z'), finish('C', 14, '2026-09-29T10:00:14.000Z'),
+        finish('P', 15, '2026-09-29T10:00:15.000Z'),
+      ]);
+      // P and C are done, G (under C) and F run: P lists C (active) and F first, then D unfolded, since P is done.
+      expect(agentTree(graph).agents).toEqual([
+        agent('P', 0), agent('C', 1, { parentTaskId: 'P' }), agent('G', 2, { parentTaskId: 'C' }), agent('F', 1, { parentTaskId: 'P' }),
+        agent('D', 1, { parentTaskId: 'P' }), agent('E', 2, { parentTaskId: 'D' }),
+      ]);
+      // Once F alone runs under a running P, D and its own child fold together under P.
+      const running = graphOf([start('P', 1), ...child('P', 'D', 2), ...child('D', 'E', 4), ...child('P', 'F', 6), finish('E', 8, '2026-09-29T10:00:08.000Z'), finish('D', 9, '2026-09-29T10:00:09.000Z')]);
+      expect(agentTree(running).agents).toEqual([
+        agent('P', 0), agent('F', 1, { parentTaskId: 'P' }), fold('P', 1, 1),
+        agent('D', 1, { parentTaskId: 'P', foldedUnder: 'P' }), agent('E', 2, { parentTaskId: 'D', foldedUnder: 'P' }),
+      ]);
+    });
+
+    it('done roots newest end first, each with its children unfolded under it', () => {
+      const graph = graphOf([
+        start('P', 1), ...child('P', 'C', 2), start('Q', 4),
+        finish('C', 5, '2026-09-29T10:00:05.000Z'), finish('P', 6, '2026-09-29T10:00:06.000Z'), finish('Q', 7, '2026-09-29T10:00:07.000Z'),
+      ]);
+      expect(agentTree(graph)).toEqual({ agents: [], done: [agent('Q', 0), agent('P', 0), agent('C', 1, { parentTaskId: 'P' })], running: 0 });
+    });
+
+    it('the parent must be in the tree’s own set: a parent known only on disk, unknown to the graph or a workflow agent makes an orphan root', () => {
+      const [outer] = sidecarsOf('pass3/nested-agents-sidecars');
+      const onDisk = applyTaskEvents(mergeSidecars(emptyGraph(), [outer]), [...child(OUTER, 'C', 1)]);
+      expect(node(onDisk, OUTER).status).toBe('unknown');
+      expect(agentTree(onDisk).agents).toEqual([agent('C', 0, { parentTaskId: OUTER, orphan: true })]);
+      expect(agentTree(graphOf(child('ghost', 'C', 1))).agents).toEqual([agent('C', 0, { parentTaskId: 'ghost', orphan: true })]);
+      const [wfAgent] = sidecarsOf('pass2/workflow-disk', 'wf_7cacbb2d-902');
+      const underWorkflow = applyTaskEvents(mergeSidecars(emptyGraph(), [wfAgent]), child(wfAgent.agentId, 'C', 1));
+      expect(agentTree(underWorkflow)).toEqual({ agents: [agent('C', 0, { parentTaskId: wfAgent.agentId, orphan: true })], done: [], running: 1 });
+    });
+
+    it('lists no workflow agent and no agent of unknown status (On disk keeps those)', () => {
+      expect(agentTree(mergeSidecars(emptyGraph(), sidecarsOf('pass2/workflow-disk', 'wf_7cacbb2d-902')))).toEqual({ agents: [], done: [], running: 0 });
+      expect(agentTree(mergeSidecars(emptyGraph(), sidecarsOf('pass3/nested-agents-sidecars')))).toEqual({ agents: [], done: [], running: 0 });
+    });
+
+    it('a parent cycle leaves its members unvisited: they are listed flat at the end, once each', () => {
+      const graph = graphOf([issue('C', 'tu_P', 1), start('P', 2), issue('P', 'tu_C', 3), start('C', 4), start('R', 5)]);
+      expect(node(graph, 'P').agent?.parentAgentId).toBe('C');
+      expect(agentTree(graph).agents).toEqual([agent('R', 0), agent('P', 0, { parentTaskId: 'C', orphan: true }), agent('C', 1, { parentTaskId: 'P' })]);
+    });
+
+    it('is memoised on the graph object', () => {
+      const graph = graphOf([start('P', 1)]);
+      expect(agentTree(graph)).toBe(agentTree(graph));
+    });
+
+    it('shownRows hides a fold’s members until the fold is expanded, and marks the fold expanded', () => {
+      const tree = agentTree(graphOf(upTo(nested, 121)));
+      expect(shownRows(tree.agents, new Set())).toEqual([agent(OUTER, 0), fold(OUTER, 1, 1)]);
+      expect(shownRows(tree.agents, new Set([id(OUTER)]))).toEqual([
+        agent(OUTER, 0), { ...fold(OUTER, 1, 1), expanded: true }, agent(INNER, 1, { parentTaskId: OUTER, foldedUnder: OUTER }),
+      ]);
+    });
+  });
+  // E7 end
 
   describe('identity', () => {
     const graph = graphOf(upTo(replayed('pass1', 'subagent'), 224));

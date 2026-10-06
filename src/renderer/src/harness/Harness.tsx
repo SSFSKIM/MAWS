@@ -10,6 +10,7 @@ import { rowId } from '../transcript/model/keys';
 import type { Row, SubagentRef } from '../transcript/model/rows';
 import type { TranscriptSource } from '../transcript/source/types';
 import type { TranscriptActions, RewindInterface } from '../transcript/view/context';
+import { NO_ACTIONS } from '../transcript/view/context'; // E7
 import { Transcript, type TranscriptListHandle } from '../transcript/view/Transcript';
 import type { HarnessApi, HarnessMetrics } from './api';
 import { FIXTURES, loadFixture } from './fixtures';
@@ -246,6 +247,13 @@ function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) =>
       },
       // E1 end
       openSideThread: (_parent, child) => say(`openSideThread ${child}`), // E3
+      // E7 start: a Reply or a Message is announced; no relay store answers it here
+      replyToPeer: (_appSessionId, target, text) => {
+        say(`replyToPeer ${target.address} ${text}`);
+        return Promise.resolve();
+      },
+      peerReplies: NO_ACTIONS.peerReplies,
+      // E7 end
       loadSpill: (spill) => {
         say(`loadSpill ${spill.path}`);
         return Promise.resolve(`(the harness has no spill content for ${spill.path})`);

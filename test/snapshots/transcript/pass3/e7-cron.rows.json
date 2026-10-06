@@ -1,0 +1,922 @@
+[
+  {
+    "at": "2026-10-06T11:12:15.035Z",
+    "id": "time:turn:386cd114-7010-4342-abb7-eac942bb2812",
+    "kind": "time",
+    "label": "Oct 6, 2026 11:12 AM",
+    "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
+  },
+  {
+    "at": "2026-10-06T11:12:15.035Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:386cd114-7010-4342-abb7-eac942bb2812",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "386cd114-7010-4342-abb7-eac942bb2812",
+    "placeholders": [],
+    "steer": false,
+    "text": "Use CronCreate (find it with ToolSearch) to schedule a recurring job \"*/2 * * * *\" with prompt \"E7 cron tick\", then a one-shot at \"15 4 6 10 *\" with prompt \"E7 one-shot\", then call CronList and reply with its output.",
+    "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
+  },
+  {
+    "at": "2026-10-06T11:12:15.035Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T11:12:25.823Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:386cd114-7010-4342-abb7-eac942bb2812",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-06T11:12:15.042Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 3,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.028520600000000004,
+      "denials": [],
+      "durationMs": 10779,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 4,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 4,
+      "usage": {
+        "cacheCreationInputTokens": 11858,
+        "cacheReadInputTokens": 82161,
+        "inputTokens": 36,
+        "outputTokens": 884,
+        "thinkingTokens": 405
+      }
+    },
+    "toolCalls": 4,
+    "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
+  },
+  {
+    "at": "2026-10-06T11:12:17.521Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfktBzYzGVMsxFt7fGnTJ:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "I'll help you set up those cron jobs. First, let me fetch the schemas for the CronCreate and CronList tools.",
+    "messageUuid": "9ef65b76-dc85-4f48-8b30-4d33cdc8c3bc",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "commentary",
+    "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
+  },
+  {
+    "agent": null,
+    "at": "2026-10-06T11:12:18.069Z",
+    "category": "skills",
+    "classification": {
+      "category": "skills",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "input": {
+        "query": "select:CronCreate,CronList"
+      },
+      "isError": false,
+      "kind": "generic",
+      "result": [
+        {
+          "tool_name": "CronCreate",
+          "type": "tool_reference"
+        },
+        {
+          "tool_name": "CronList",
+          "type": "tool_reference"
+        }
+      ],
+      "spill": null,
+      "structured": {
+        "matches": [
+          "CronCreate",
+          "CronList"
+        ],
+        "query": "select:CronCreate,CronList",
+        "total_deferred_tools": 17
+      },
+      "truncated": null
+    },
+    "endedAt": "2026-10-06T11:12:18.074Z",
+    "expanded": true,
+    "id": "cell:toolu_0112RGk9yAoHCW5WAHGkxDTF",
+    "kind": "cell",
+    "label": "Loaded 2 tools",
+    "paths": [],
+    "startedAt": "2026-10-06T11:12:18.069Z",
+    "status": "done",
+    "toolName": "ToolSearch",
+    "toolUseId": "toolu_0112RGk9yAoHCW5WAHGkxDTF",
+    "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
+  },
+  {
+    "at": "2026-10-06T11:12:20.220Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfktCDHxm2noa46vdbsyk:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Now I'll create the two cron jobs and then list them.",
+    "messageUuid": "f93bd038-7dc8-4675-afaf-4cfb3f9975da",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "commentary",
+    "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-10-06T11:12:20.899Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "cron": "*/2 * * * *",
+            "prompt": "E7 cron tick",
+            "recurring": true
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": "Scheduled recurring job 481abb0a (Every 2 minutes). Session-only (not written to disk, dies when Claude exits). Auto-expires after 7 days. Use CronDelete to cancel sooner.",
+          "spill": null,
+          "structured": {
+            "durable": false,
+            "humanSchedule": "Every 2 minutes",
+            "id": "481abb0a",
+            "recurring": true
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T11:12:20.902Z",
+        "expanded": true,
+        "id": "cell:toolu_015d8GrxGZ4yJdT1N1rNLyct",
+        "label": "Used CronCreate",
+        "paths": [],
+        "startedAt": "2026-10-06T11:12:20.899Z",
+        "status": "done",
+        "toolName": "CronCreate",
+        "toolUseId": "toolu_015d8GrxGZ4yJdT1N1rNLyct"
+      },
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "cron": "15 4 6 10 *",
+            "prompt": "E7 one-shot",
+            "recurring": false
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": "Scheduled one-shot task 8d1a2582 (15 4 6 10 *). Session-only (not written to disk, dies when Claude exits). It will fire once then auto-delete.",
+          "spill": null,
+          "structured": {
+            "durable": false,
+            "humanSchedule": "15 4 6 10 *",
+            "id": "8d1a2582",
+            "recurring": false
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T11:12:21.239Z",
+        "expanded": true,
+        "id": "cell:toolu_01CLe4A37sTciznqrMHJFUbf",
+        "label": "Used CronCreate",
+        "paths": [],
+        "startedAt": "2026-10-06T11:12:21.236Z",
+        "status": "done",
+        "toolName": "CronCreate",
+        "toolUseId": "toolu_01CLe4A37sTciznqrMHJFUbf"
+      },
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {},
+          "isError": false,
+          "kind": "generic",
+          "result": "481abb0a — Every 2 minutes (recurring) [session-only]: E7 cron tick\n8d1a2582 — 15 4 6 10 * (one-shot) [session-only]: E7 one-shot",
+          "spill": null,
+          "structured": {
+            "jobs": [
+              {
+                "cron": "*/2 * * * *",
+                "durable": false,
+                "humanSchedule": "Every 2 minutes",
+                "id": "481abb0a",
+                "prompt": "E7 cron tick",
+                "recurring": true
+              },
+              {
+                "cron": "15 4 6 10 *",
+                "durable": false,
+                "humanSchedule": "15 4 6 10 *",
+                "id": "8d1a2582",
+                "prompt": "E7 one-shot"
+              }
+            ]
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T11:12:22.669Z",
+        "expanded": true,
+        "id": "cell:toolu_01MGor3Q1fdwsAWc4hqcnTb7",
+        "label": "Used CronList",
+        "paths": [],
+        "startedAt": "2026-10-06T11:12:22.666Z",
+        "status": "done",
+        "toolName": "CronList",
+        "toolUseId": "toolu_01MGor3Q1fdwsAWc4hqcnTb7"
+      }
+    ],
+    "expanded": true,
+    "icon": "other",
+    "id": "group:cell:toolu_015d8GrxGZ4yJdT1N1rNLyct",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Used 3 tools",
+    "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
+  },
+  {
+    "at": "2026-10-06T11:12:24.911Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfktCZ667c7CaQDXVU8FZ:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Done! Here's the output from CronList:\n\n```\n481abb0a — Every 2 minutes (recurring) [session-only]: E7 cron tick\n8d1a2582 — 15 4 6 10 * (one-shot) [session-only]: E7 one-shot\n```\n\nBoth jobs are scheduled and session-only (not written to disk). The recurring job fires every 2 minutes and auto-expires after 7 days. The one-shot fires once on October 6, 2026 at 4:15 AM, then auto-deletes.",
+    "messageUuid": "19b5e2fe-184f-4b60-941b-02eb7ee324a0",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:386cd114-7010-4342-abb7-eac942bb2812"
+  },
+  {
+    "at": "2026-10-06T11:14:17.141Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T11:14:20.654Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:ereplay:journal:174:1",
+    "kind": "divider",
+    "origin": "engine",
+    "startedAt": "2026-10-06T11:14:17.141Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0320201,
+      "denials": [],
+      "durationMs": 3513,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 344,
+        "cacheReadInputTokens": 24345,
+        "inputTokens": 10,
+        "outputTokens": 125,
+        "thinkingTokens": 63
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:ereplay:journal:174:1"
+  },
+  {
+    "at": "2026-10-06T11:14:20.103Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfktM15kX5Pk9MgKUVHWB:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Cron job executed! The recurring task \"E7 cron tick\" has fired (job 481abb0a). This will continue firing every 2 minutes until it auto-expires in 7 days or you cancel it with CronDelete.",
+    "messageUuid": "477683f9-fd61-4ee3-8f67-5123bdcdb2a9",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:ereplay:journal:174:1"
+  },
+  {
+    "at": "2026-10-06T11:15:00.221Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T11:15:02.711Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:ereplay:journal:218:1",
+    "kind": "divider",
+    "origin": "engine",
+    "startedAt": "2026-10-06T11:15:00.221Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.035559,
+      "denials": [],
+      "durationMs": 2494,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 176,
+        "cacheReadInputTokens": 24689,
+        "inputTokens": 10,
+        "outputTokens": 168,
+        "thinkingTokens": 113
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:ereplay:journal:218:1"
+  },
+  {
+    "at": "2026-10-06T11:15:02.315Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfktQBtTbhdkDsStPReaK:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "One-shot task executed! The task \"E7 one-shot\" (job 8d1a2582) has fired. Since it was a one-shot, it will now auto-delete and won't run again.",
+    "messageUuid": "c9dd6bee-14bf-4567-87ee-64db7803b65e",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:ereplay:journal:218:1"
+  },
+  {
+    "at": "2026-10-06T11:16:17.358Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T11:16:20.235Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:ereplay:journal:254:1",
+    "kind": "divider",
+    "origin": "engine",
+    "startedAt": "2026-10-06T11:16:17.358Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.038726750000000004,
+      "denials": [],
+      "durationMs": 2857,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 217,
+        "cacheReadInputTokens": 24865,
+        "inputTokens": 10,
+        "outputTokens": 80,
+        "thinkingTokens": 47
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:ereplay:journal:254:1"
+  },
+  {
+    "at": "2026-10-06T11:16:19.907Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfktVrU5E8JUyvErsw5Wv:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Cron tick received! The recurring job 481abb0a has fired again as scheduled (every 2 minutes).",
+    "messageUuid": "ee89cada-eb91-4d37-80ea-fb02cd7dc64c",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:ereplay:journal:254:1"
+  },
+  {
+    "at": "2026-10-06T11:16:23.246Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:703e0237-f5f9-48f0-bac9-94cbb17c2692",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "703e0237-f5f9-48f0-bac9-94cbb17c2692",
+    "placeholders": [],
+    "steer": false,
+    "text": "Use CronDelete to cancel the job with id 481abb0a. Then call CronList and reply with its output.",
+    "turnId": "turn:703e0237-f5f9-48f0-bac9-94cbb17c2692"
+  },
+  {
+    "at": "2026-10-06T11:16:23.246Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T11:16:40.388Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:703e0237-f5f9-48f0-bac9-94cbb17c2692",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-06T11:16:23.250Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 2,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.04951905,
+      "denials": [],
+      "durationMs": 17137,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 3,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 3,
+      "usage": {
+        "cacheCreationInputTokens": 926,
+        "cacheReadInputTokens": 76168,
+        "inputTokens": 28,
+        "outputTokens": 398,
+        "thinkingTokens": 169
+      }
+    },
+    "toolCalls": 3,
+    "turnId": "turn:703e0237-f5f9-48f0-bac9-94cbb17c2692"
+  },
+  {
+    "agent": null,
+    "at": "2026-10-06T11:16:27.913Z",
+    "category": "skills",
+    "classification": {
+      "category": "skills",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "input": {
+        "query": "select:CronDelete"
+      },
+      "isError": false,
+      "kind": "generic",
+      "result": [
+        {
+          "tool_name": "CronDelete",
+          "type": "tool_reference"
+        }
+      ],
+      "spill": null,
+      "structured": {
+        "matches": [
+          "CronDelete"
+        ],
+        "query": "select:CronDelete",
+        "total_deferred_tools": 17
+      },
+      "truncated": null
+    },
+    "endedAt": "2026-10-06T11:16:27.917Z",
+    "expanded": true,
+    "id": "cell:toolu_01KaJYbSzo7huyceS2v8nzgw",
+    "kind": "cell",
+    "label": "Loaded 1 tool",
+    "paths": [],
+    "startedAt": "2026-10-06T11:16:27.913Z",
+    "status": "done",
+    "toolName": "ToolSearch",
+    "toolUseId": "toolu_01KaJYbSzo7huyceS2v8nzgw",
+    "turnId": "turn:703e0237-f5f9-48f0-bac9-94cbb17c2692"
+  },
+  {
+    "at": "2026-10-06T11:16:29.733Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfktWdvoBRKUFDmRW3Ggx:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Now I'll delete the recurring job and list the remaining cron jobs.",
+    "messageUuid": "af7f8200-08bb-47f8-a951-335518d660f4",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "commentary",
+    "turnId": "turn:703e0237-f5f9-48f0-bac9-94cbb17c2692"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-10-06T11:16:29.836Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "id": "481abb0a"
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": "Cancelled job 481abb0a.",
+          "spill": null,
+          "structured": {
+            "id": "481abb0a"
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T11:16:29.838Z",
+        "expanded": true,
+        "id": "cell:toolu_01C3RJib9kA1n5d1emarjtEy",
+        "label": "Used CronDelete",
+        "paths": [],
+        "startedAt": "2026-10-06T11:16:29.836Z",
+        "status": "done",
+        "toolName": "CronDelete",
+        "toolUseId": "toolu_01C3RJib9kA1n5d1emarjtEy"
+      },
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {},
+          "isError": false,
+          "kind": "generic",
+          "result": "No scheduled jobs.",
+          "spill": null,
+          "structured": {
+            "jobs": []
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T11:16:29.851Z",
+        "expanded": true,
+        "id": "cell:toolu_01XobviRRCUEeQfoAckm68g9",
+        "label": "Used CronList",
+        "paths": [],
+        "startedAt": "2026-10-06T11:16:29.849Z",
+        "status": "done",
+        "toolName": "CronList",
+        "toolUseId": "toolu_01XobviRRCUEeQfoAckm68g9"
+      }
+    ],
+    "expanded": true,
+    "icon": "other",
+    "id": "group:cell:toolu_01C3RJib9kA1n5d1emarjtEy",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Used 2 tools",
+    "turnId": "turn:703e0237-f5f9-48f0-bac9-94cbb17c2692"
+  },
+  {
+    "at": "2026-10-06T11:16:40.147Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfktWmsXimVoNTX7BynLW:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Done! Job 481abb0a (E7 cron tick) has been cancelled. Here's the output from CronList:\n\n```\nNo scheduled jobs.\n```\n\nAll cron jobs have been cleared—the one-shot already fired and auto-deleted, and I've now deleted the recurring job.",
+    "messageUuid": "329d024a-6eee-49c9-9a30-cfd59329eec1",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:703e0237-f5f9-48f0-bac9-94cbb17c2692"
+  },
+  {
+    "at": "2026-10-06T11:16:40.388Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:d3323742-c528-4b10-8297-36c14387b554",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "d3323742-c528-4b10-8297-36c14387b554",
+    "placeholders": [],
+    "steer": false,
+    "text": "Use CronCreate to schedule a recurring job \"0 9 * * 1\" with prompt \"E7 durable weekly\" and durable set to true. Then use CronCreate again to schedule a recurring job \"0 3 * * *\" with prompt \"E7 nightly\" (not durable). Then call CronList and reply with its output.",
+    "turnId": "turn:d3323742-c528-4b10-8297-36c14387b554"
+  },
+  {
+    "at": "2026-10-06T11:16:40.388Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T11:16:52.375Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:d3323742-c528-4b10-8297-36c14387b554",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-06T11:16:40.389Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 3,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0589336,
+      "denials": [],
+      "durationMs": 11985,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 3,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 3,
+      "usage": {
+        "cacheCreationInputTokens": 973,
+        "cacheReadInputTokens": 52303,
+        "inputTokens": 18,
+        "outputTokens": 590,
+        "thinkingTokens": 188
+      }
+    },
+    "toolCalls": 3,
+    "turnId": "turn:d3323742-c528-4b10-8297-36c14387b554"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-10-06T11:16:48.184Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "cron": "0 9 * * 1",
+            "durable": true,
+            "prompt": "E7 durable weekly",
+            "recurring": true
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": "Scheduled recurring job 598b1690 (Every Monday at 9:00 AM). Persisted to .claude/scheduled_tasks.json. Auto-expires after 7 days. Use CronDelete to cancel sooner.",
+          "spill": null,
+          "structured": {
+            "durable": true,
+            "humanSchedule": "Every Monday at 9:00 AM",
+            "id": "598b1690",
+            "recurring": true
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T11:16:48.194Z",
+        "expanded": true,
+        "id": "cell:toolu_01BuDFh81XgBTkFdrA3jog5x",
+        "label": "Used CronCreate",
+        "paths": [],
+        "startedAt": "2026-10-06T11:16:48.184Z",
+        "status": "done",
+        "toolName": "CronCreate",
+        "toolUseId": "toolu_01BuDFh81XgBTkFdrA3jog5x"
+      },
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "cron": "0 3 * * *",
+            "durable": false,
+            "prompt": "E7 nightly",
+            "recurring": true
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": "Scheduled recurring job 1040f3a5 (Every day at 3:00 AM). Session-only (not written to disk, dies when Claude exits). Auto-expires after 7 days. Use CronDelete to cancel sooner.",
+          "spill": null,
+          "structured": {
+            "durable": false,
+            "humanSchedule": "Every day at 3:00 AM",
+            "id": "1040f3a5",
+            "recurring": true
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T11:16:48.196Z",
+        "expanded": true,
+        "id": "cell:toolu_01MsAPejq7jjdf3yfoyUG6Fc",
+        "label": "Used CronCreate",
+        "paths": [],
+        "startedAt": "2026-10-06T11:16:48.186Z",
+        "status": "done",
+        "toolName": "CronCreate",
+        "toolUseId": "toolu_01MsAPejq7jjdf3yfoyUG6Fc"
+      },
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {},
+          "isError": false,
+          "kind": "generic",
+          "result": "598b1690 — Every Monday at 9:00 AM (recurring): E7 durable weekly\n1040f3a5 — Every day at 3:00 AM (recurring) [session-only]: E7 nightly",
+          "spill": null,
+          "structured": {
+            "jobs": [
+              {
+                "cron": "0 9 * * 1",
+                "humanSchedule": "Every Monday at 9:00 AM",
+                "id": "598b1690",
+                "prompt": "E7 durable weekly",
+                "recurring": true
+              },
+              {
+                "cron": "0 3 * * *",
+                "durable": false,
+                "humanSchedule": "Every day at 3:00 AM",
+                "id": "1040f3a5",
+                "prompt": "E7 nightly",
+                "recurring": true
+              }
+            ]
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T11:16:48.198Z",
+        "expanded": true,
+        "id": "cell:toolu_01W3nQj2FVzztZvNNoouq67t",
+        "label": "Used CronList",
+        "paths": [],
+        "startedAt": "2026-10-06T11:16:48.187Z",
+        "status": "done",
+        "toolName": "CronList",
+        "toolUseId": "toolu_01W3nQj2FVzztZvNNoouq67t"
+      }
+    ],
+    "expanded": true,
+    "icon": "other",
+    "id": "group:cell:toolu_01BuDFh81XgBTkFdrA3jog5x",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Used 3 tools",
+    "turnId": "turn:d3323742-c528-4b10-8297-36c14387b554"
+  },
+  {
+    "at": "2026-10-06T11:16:51.456Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfktYFMJ8sFSXbRCyhvkM:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Done! Here's the output from CronList:\n\n```\n598b1690 — Every Monday at 9:00 AM (recurring): E7 durable weekly\n1040f3a5 — Every day at 3:00 AM (recurring) [session-only]: E7 nightly\n```\n\nTwo recurring jobs are now scheduled:\n- **598b1690** (durable): Fires every Monday at 9:00 AM, persisted to `.claude/scheduled_tasks.json`\n- **1040f3a5** (session-only): Fires daily at 3:00 AM, lives only in this session\n\nBoth auto-expire after 7 days.",
+    "messageUuid": "0b502047-72f3-4119-b513-0f9d56a25551",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:d3323742-c528-4b10-8297-36c14387b554"
+  },
+  {
+    "at": "2026-10-06T11:16:55.546Z",
+    "attempt": null,
+    "id": "error:replay:journal:502:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

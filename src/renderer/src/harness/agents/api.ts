@@ -32,10 +32,10 @@ export interface AgentRowView {
 }
 
 export interface SubagentsView {
-  active: AgentRowView[];
-  done: AgentRowView[];
+  agents: AgentRowView[]; // E7: the tree's Agents section (its agent rows; `tree()` reads its folds and team rows too)
+  done: AgentRowView[]; // the rows shown: none while Done is collapsed, its default (E7)
   disk: AgentRowView[];
-  headings: string[]; // the sections' headings as shown (`Active · 2`)
+  headings: string[]; // the sections' headings as shown (`Agents · 2 running`, `Done · 1`)
   notes: string[]; // the lines above the sections (the disk-only header line, an unavailable read)
   drillIn: {
     agentId: string;
@@ -49,13 +49,75 @@ export interface SubagentsView {
 }
 
 export interface BackgroundView {
-  workflows: { taskId: string; title: string; line: string; status: string; phases: { title: string; count: string; state: string }[]; table: { label: string; model: string; tokens: string; time: string }[]; stopping: boolean; error: string | null }[];
+  // E7: a card is compact (its per-phase tables live in the widget); `summary` is its one line under the run's line
+  workflows: { taskId: string; title: string; line: string; status: string; summary: string; stopping: boolean; error: string | null }[];
   shells: { taskId: string; line: string; output: 'enabled' | 'disabled'; stopping: boolean; error: string | null }[];
   monitors: { taskId: string; line: string }[];
   tasks: { heading: string; label: string | null; rows: string[]; earlier: number; unavailable: string | null };
   notes: string[]; // the disk-only sentence, `Nothing running`, an unavailable read
   headings: string[];
 }
+
+// E7 start: the Subagents tree as shown (E7 execution document, Interfaces *Harness and e2e*): the Agents and Done
+// sections' rows in order. An agent row by its id; a running parent's `Done · N` fold by that parent's id, with its
+// count and whether it is open; the team header, and a roster teammate (no agent of its own) by its name in `title`.
+export interface TreeRowView {
+  section: 'agents' | 'done';
+  kind: 'agent' | 'done-fold' | 'team' | 'roster';
+  agentId: string | null;
+  title: string;
+  depth: number;
+  count: number | null;
+  expanded: boolean | null;
+  orphan: boolean;
+}
+
+// the workflow widget as shown (E7 execution document, Interfaces *Harness and e2e*): the run's header, its
+// phase options (`All phases` first, its count and state empty) and the selected phase's agent rows.
+export interface RunWidgetView {
+  taskId: string;
+  header: string;
+  line: string;
+  status: string;
+  phases: { title: string; count: string; state: string; selected: boolean }[];
+  agents: { label: string; model: string; state: string; time: string; tokens: string; openable: boolean }[];
+  note: string | null; // `Phases arrive with the first progress frame`, `Run not found yet`
+  stopping: boolean;
+  error: string | null;
+}
+
+// M7: the Tasks panel as shown (read-only, P-20): its rows in order, the completed fold's rows only once opened.
+export interface TasksView {
+  progress: string | null; // `<c> of <t> completed`
+  label: string | null; // `session list` for a session that is not live here
+  rows: { id: string; subject: string; status: string; selected: boolean }[];
+  completedToggle: string | null; // the completed fold's button (`N earlier tasks completed`)
+  note: string | null; // the line shown in place of a list (unavailable, no session)
+}
+
+// M7: Background work's Scheduled rows as shown, in order (durable first).
+export interface ScheduledRowView {
+  id: string;
+  store: string; // `durable-this` | `durable-other` | `session`
+  schedule: string; // the schedule in words, or the cron
+  kind: string; // `recurring · session-only`, `one-shot · durable · this session`
+  prompt: string;
+  when: string; // `Next ≈ <time> (<relative>)` with any expiry and last run, or `Resumes with the session`
+  dormant: boolean; // greyed: a session-only job of a session not running here
+  link: boolean; // `Open creating turn` offered
+}
+export interface ScheduledView {
+  heading: string | null; // `Scheduled · N`, null when the section is not shown
+  rows: ScheduledRowView[];
+  error: string | null; // `Scheduled jobs unavailable: <message>`
+}
+
+// M7: the column transcript's messages between sessions and its `ListAgents` listings, as shown (rows inside a folded
+// turn are not shown, so a row's presence before and after `expandAll` tells its persistence).
+export type PeerRowView =
+  | { kind: 'message'; direction: 'inbound' | 'outbound'; who: string; address: string | null; preview: string; result: string | null; resultText: string | null; reply: boolean; line: string | null }
+  | { kind: 'listing'; self: string; sections: { heading: string; rows: { name: string; ref: string | null; extras: string }[] }[]; notes: string[] };
+// E7 end
 
 export interface LogView {
   title: string; // the tab's title as the strip shows it (`Log · <basename>`)
@@ -77,7 +139,8 @@ export interface AgentsHarnessApi {
   // watches the session. The block's column shows the fed transcript from then on.
   feed(id: AgentsFakeId, fixture: string): Promise<void>;
   reset(id: AgentsFakeId): void; // the session's task graph started over (as `feed` does first), the status's background list emptied
-  fakeFs(data: { sidecars?: SubagentEntry[]; runs?: WorkflowRun[]; tasks?: Record<string, PersistedTask[]>; spills?: Record<string, string> }): void;
+  // E7: `files` the session's project files by path, `refusals` a `files.read` refusal's message by path (M7)
+  fakeFs(data: { sidecars?: SubagentEntry[]; runs?: WorkflowRun[]; tasks?: Record<string, PersistedTask[]>; spills?: Record<string, string>; files?: Record<string, string>; refusals?: Record<string, string> }): void;
   fixtureFs(name: 'subagent-sidecars' | 'workflow-disk' | 'nested-agents-sidecars'): Promise<void>;
   patchStatus(id: AgentsFakeId, patch: Partial<EngineSessionStatus>): void; // the current status (or A's live one) with the patch
   releaseThrough(id: AgentsFakeId, seq: number): Promise<number>; // the fed fixture's unreleased events through `seq`, as panel.transcript(id).release(n) would; resolves with n
@@ -85,8 +148,25 @@ export interface AgentsHarnessApi {
   answerStop(taskId: string, outcome: 'ok' | 'error'): void; // 'error' rejects with FAKE_STOP_REFUSAL's message
 
   subagents(): SubagentsView | null; // the selected tab's Subagents body, else null
+  tree(): TreeRowView[] | null; // E7: the selected Subagents tab's tree rows, else null
   background(): BackgroundView | null;
+  widget(): RunWidgetView | null; // E7: the selected Background work tab's run widget, else null
   log(): LogView | null;
+  // E7 start (M7)
+  tasks(): TasksView | null; // the selected Tasks tab, else null
+  scheduled(): ScheduledView | null; // the selected Background work tab's Scheduled section, else null
+  peerRows(): Promise<PeerRowView[]>; // the column's rows, read from its top down (the list scrolled to mount each)
+  columnTexts(): Promise<string[]>; // every row of the column as text, read from its top down
+  scrollColumnTo(text: string): Promise<void>; // the column's first row whose text holds `text`, at the list's top
+  pushTasks(listId: string, tasks: PersistedTask[]): void; // the list's new contents, announced as `fs.tasksChanged`
+  setClock(iso: string | null): void; // the agent tools' clock fixed at `iso` (null: the wall clock again)
+  clearStatus(id: AgentsFakeId): void; // a disk-only session: no status, its task graph started over on disk
+  selectPhase(n: number): void; // the widget's n-th phase option (0 is `All phases`)
+  toggleFold(parentId: string): void; // the Subagents tree's `Done · N` fold under that parent
+  reply(n: number, text: string): Promise<void>; // the n-th (1-based) Reply of the column: opened, typed, sent; resolves once the steer is answered
+  openCreatingTurn(id: string): void; // the Scheduled row's `Open creating turn`
+  setColumnWidth(px: number): number; // the debug strip (C5's sidebar column, clamped as C5 clamps it) holding the column; answers the width it had
+  // E7 end
 
   clickRow(agentId: string): void;
   back(): void;
