@@ -13,7 +13,7 @@ To see it: in a MAWS session, send *Write a self-contained HTML page dashboard.h
 - [x] M0 — The image-block probe — 2026-10-06, verdict yes, reviewed clean (the one engine fact this child depends on and no fixture records)
 - [x] M1 (2026-10-06, reviewed clean) — X9: the four artifact tools in the shared module and the host; the store's artifact half; the capture bridge; `maws.delivery.artifact`
 - [x] M2 (2026-10-06, reviewed clean; US$0.1332 over two Haiku runs, A-15 identical at 25 keys) — The live recording through `LiveHost`: `p1-maws-artifacts`, its transcript, conformance admission
-- [ ] M3 — Main: the reader, `deliverables.*`, the `maws-deliverable` scheme and the frame policies, the files-service admission, the capture, console attribution
+- [x] M3 (2026-10-06, reviewed clean after one fix wave; PDF frame case c) — Main: the reader, `deliverables.*`, the `maws-deliverable` scheme and the frame policies, the files-service admission, the capture, console attribution
 - [ ] M4 — Renderer: the Deliverables tool (list, viewer, versions, actions), the summary section, the `deliverable` tab
 - [ ] M5 — Transcript: the artifact row, the cells, the delivery row's Open, `SendUserFile` retired, replay parity
 - [ ] M6 — Comment mode on an artifact element (G6; the composer E3's when landed, else the documented stub)
