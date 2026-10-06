@@ -6,10 +6,8 @@ import { commandLine, writesOf, type PluginsAction, type PluginsActionInputs, ty
 import type { AvailablePlugin, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { OPERATION, PLUGIN_MANAGEMENT as W } from '../copy';
 
-// What a request knows beyond the CLI's input: the directory it runs in when that is not the session's (an installation
-// of another project is changed in its own project), and for a marketplace removal the installations it uninstalls.
+// What a request knows beyond the CLI's input: for a marketplace removal, the installations it uninstalls.
 export interface RequestContext {
-  cwd?: string;
   uninstalls?: PluginsInstallation[];
 }
 
@@ -44,11 +42,12 @@ export const commandWords = (binary: string, argv: readonly string[]): string =>
 export const sourceKindOfTyped = (source: string): string | null => (/^[/~.]/.test(source.trim()) ? 'directory' : null);
 
 // `writesOf`'s files as paths: the scope's settings file under the config home (user) or the project (`where.cwd`, the
-// directory the request runs in), the others under `<config home>/plugins/` with the segments the request already
-// names filled in, then for a marketplace removal the settings of each scope its uninstalled plugins are at, each once.
+// session's directory, where the request runs), the others under `<config home>/plugins/` with the segments the request
+// already names filled in, then for a marketplace removal every settings file that may hold its uninstalled plugins or
+// an override for them, each once.
 export function writesWords(request: PluginsRequest, where: { configHome: string; cwd: string }): string[] {
   const scope = scopeOf(request);
-  const manifest = writesOf(request.action, scope, request.source, request.uninstalls ?? []);
+  const manifest = writesOf(request.action, scope, request.source, request.uninstalls ?? [], where.cwd);
   const input = request.input as { plugin?: string; name?: string };
   const fill = (path: string): string => {
     if (input.plugin !== undefined) {
@@ -69,6 +68,9 @@ export function writesWords(request: PluginsRequest, where: { configHome: string
 
 // For an install or update, what the `<dependency>` cache entry stands for (null for any other action).
 export const dependencyWords = (action: PluginsAction): string | null => (action === 'install' || action === 'update' ? W.dependencies : null);
+
+// For a marketplace removal that uninstalls plugins, what its project settings files are named for.
+export const overridesWords = (request: PluginsRequest): string | null => (request.action === 'marketplace-remove' && (request.uninstalls ?? []).length > 0 ? W.overrides : null);
 
 // For a marketplace removal, the installed plugins it uninstalls with it (the engine deletes their saved options and
 // data too), each with its scope and, for a project or local one, its project; null when none is installed from it.

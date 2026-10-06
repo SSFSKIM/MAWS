@@ -10,7 +10,7 @@ import { PLUGINS_SCOPES, type PluginsScope } from '@shared/plugins/cli';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, DANGER, PRIMARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../copy';
-import { argvOf, commandWords, dependencyWords, DESTRUCTIVE, SCOPED, scopeOf, targetOf, thenWords, uninstallsWords, writesWords, type PluginsRequest } from './present';
+import { argvOf, commandWords, dependencyWords, DESTRUCTIVE, overridesWords, SCOPED, scopeOf, targetOf, thenWords, uninstallsWords, writesWords, type PluginsRequest } from './present';
 
 // A resolved `plugins.env` answer: the binary (the probe's real path; an answer without one is unresolved), the config
 // home the CLI writes and the engine's global config file (inside a `CLAUDE_CONFIG_DIR`, else `~/.claude.json` beside
@@ -25,7 +25,7 @@ export interface EngineEnv {
 export type EngineResolution = { state: 'loading' } | { state: 'error'; error: string } | { state: 'ready'; env: EngineEnv };
 
 export interface ManageEnv {
-  cwd: string; // the CLI's cwd: the session's directory, unless the request names its own (another project's installation)
+  cwd: string; // the CLI's cwd: the session's directory
   engine: EngineResolution;
   readySessions: number; // sessions with a ready process, which a change reloads
 }
@@ -47,8 +47,9 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
   const argv = argvOf(asked);
   const target = targetOf(request);
   const engine = env.engine.state === 'ready' ? env.engine.env : null;
-  const cwd = request.cwd ?? env.cwd;
+  const { cwd } = env;
   const dependencies = dependencyWords(request.action);
+  const overrides = overridesWords(request);
   const uninstalls = uninstallsWords(request);
   return (
     <Sheet title={declared ? W.declaredTitle(target) : W.title(W.verb[request.action], target)} width="w-[min(520px,90vw)]" onClose={onClose} data-plugins-sheet={request.action}>
@@ -103,6 +104,7 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
               ))}
             </ul>
             {dependencies && <p className="m-0">{dependencies}</p>}
+            {overrides && <p className="m-0">{overrides}</p>}
             <p className="m-0">{W.records(engine.globalConfig)}</p>
           </div>
         )}

@@ -3,8 +3,8 @@
 // Uninstall…; each change asks first. A plugin the change took out of the list keeps its result beneath the rows. One
 // id may be installed at several scopes (the user's, a project's, a local one), so a row is an installation: id, scope
 // and project path (M2 review); `data-plugin-row` names the id and `data-plugin-scope` the scope. `plugin list` lists
-// every project's installations, so a project or local one of another project names its project and is changed there
-// (the CLI runs in its project path, E8 whole-branch review).
+// every project's installations but reports their enabled state as this project sees it, so an installation of another
+// project is read-only here: it names its project and offers no action (E8 whole-branch review, round two).
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { PLUGINS_SCOPES, type PluginsAction, type PluginsScope } from '@shared/plugins/cli';
 import { PLUGIN_MANAGEMENT as W } from '../copy';
@@ -30,10 +30,8 @@ function InstalledRow({ plugin }: { plugin: InstalledPlugin }) {
   const { ops, ask, cwd } = useManage();
   const key = installedKey(plugin);
   const busy = ops.entries.get(key)?.state.phase === 'working';
-  const scope = scopeOfRow(plugin.scope);
-  // a project or local installation is changed in its own project, wherever this session runs
-  const project = scope !== 'user' && plugin.projectPath !== null ? plugin.projectPath : null;
-  const asking = (action: Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>) => ask(key, requestFor(action, { plugin: plugin.id, scope }, null, project === null ? {} : { cwd: project }));
+  const elsewhere = plugin.projectPath !== null && plugin.projectPath !== cwd ? plugin.projectPath : null;
+  const asking = (action: Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>) => ask(key, requestFor(action, { plugin: plugin.id, scope: scopeOfRow(plugin.scope) }, null));
   return (
     <Row
       data-plugin-row={plugin.id}
@@ -42,8 +40,9 @@ function InstalledRow({ plugin }: { plugin: InstalledPlugin }) {
       note={plugin.version ?? undefined}
       detail={
         <span className="flex flex-col gap-0.5">
-          <span>{[plugin.scope, plugin.enabled ? W.enabled : W.disabled, plugin.marketplace].filter((part) => part !== '').join(' · ')}</span>
-          {project !== null && project !== cwd && <span className="font-mono break-all">{W.inProject(project)}</span>}
+          {/* another project's enabled state is not what this listing reports, so it is not shown */}
+          <span>{[plugin.scope, elsewhere !== null ? '' : plugin.enabled ? W.enabled : W.disabled, plugin.marketplace].filter((part) => part !== '').join(' · ')}</span>
+          {elsewhere !== null && <span className="break-all">{W.elsewhere(elsewhere)}</span>}
           {plugin.errors.map((error, i) => (
             <span key={`e${i}`} className="text-danger">
               {error}
@@ -56,15 +55,17 @@ function InstalledRow({ plugin }: { plugin: InstalledPlugin }) {
         </span>
       }
       actions={
-        <span className="flex shrink-0 items-center gap-1">
-          <Switch checked={plugin.enabled} label={W.enabledSwitch(plugin.id)} disabled={busy} onClick={() => asking(plugin.enabled ? 'disable' : 'enable')} />
-          <TextButton onClick={() => asking('update')} disabled={busy}>
-            {W.update}
-          </TextButton>
-          <TextButton onClick={() => asking('uninstall')} disabled={busy}>
-            {W.uninstall}
-          </TextButton>
-        </span>
+        elsewhere === null && (
+          <span className="flex shrink-0 items-center gap-1">
+            <Switch checked={plugin.enabled} label={W.enabledSwitch(plugin.id)} disabled={busy} onClick={() => asking(plugin.enabled ? 'disable' : 'enable')} />
+            <TextButton onClick={() => asking('update')} disabled={busy}>
+              {W.update}
+            </TextButton>
+            <TextButton onClick={() => asking('uninstall')} disabled={busy}>
+              {W.uninstall}
+            </TextButton>
+          </span>
+        )
       }
     />
   );

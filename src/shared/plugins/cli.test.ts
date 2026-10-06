@@ -141,8 +141,9 @@ describe('writesOf', () => {
   });
 
   it('names the registry and cache entries of each action under plugins/', () => {
-    expect(writesOf('install', 'user', null).others).toEqual(['installed_plugins.json', 'cache/<marketplace>/<plugin>/<version>/', 'cache/<marketplace>/<dependency>/']);
-    expect(writesOf('update', 'project', null).others).toEqual(['installed_plugins.json', 'cache/<marketplace>/<plugin>/<version>/', 'cache/<marketplace>/<dependency>/']);
+    // a dependency may come from another marketplace the root one allowlists (allowCrossMarketplaceDependenciesOn)
+    expect(writesOf('install', 'user', null).others).toEqual(['installed_plugins.json', 'cache/<marketplace>/<plugin>/<version>/', 'cache/<any-marketplace>/<dependency>/']);
+    expect(writesOf('update', 'project', null).others).toEqual(['installed_plugins.json', 'cache/<marketplace>/<plugin>/<version>/', 'cache/<any-marketplace>/<dependency>/']);
     expect(writesOf('uninstall', 'user', null).others).toEqual(['installed_plugins.json', 'cache/<marketplace>/<plugin>/<version>/', 'data/<id>/']);
     expect(writesOf('enable', 'user', null).others).toEqual([]);
     expect(writesOf('disable', 'local', null).others).toEqual([]);
@@ -176,26 +177,39 @@ describe('writesOf', () => {
     expect(at('install e8-probe@e8-scratch')).toEqual(expect.arrayContaining(['settings.json', 'plugins/installed_plugins.json', 'plugins/cache/e8-scratch/e8-probe/0.1.0']));
   });
 
-  it('a marketplace removal announces what uninstalling its plugins writes: the registry, its cache, each plugin’s data and the settings of every scope one is installed at', () => {
-    // 2.1.291 uninstalls a removed marketplace's plugins (the E8 whole-branch review)
+  it('a marketplace removal announces what uninstalling its plugins writes: the registry, its cache, each plugin’s data and every settings file that may hold one of them or an override for it', () => {
+    // 2.1.291 uninstalls a removed marketplace's plugins and clears their enable or disable overrides at any scope (the
+    // E8 whole-branch review: a user install disabled with --scope local in a project lost that local override too)
     const installed = [
       { id: 'a@m', scope: 'user', projectPath: null },
       { id: 'b@m', scope: 'project', projectPath: '/w/app' },
       { id: 'c@m', scope: 'local', projectPath: '/w/app' },
       { id: 'd@m', scope: 'session', projectPath: null }, // a pseudo-scope: no settings file of its own
     ];
-    const writes = writesOf('marketplace-remove', 'user', 'directory', installed);
+    const writes = writesOf('marketplace-remove', 'user', 'directory', installed, '/w/session');
     expect(writes.settings).toBe('settings.json');
     expect(writes.others).toEqual(['known_marketplaces.json', 'installed_plugins.json', 'cache/<name>/', 'data/a@m/', 'data/b@m/', 'data/c@m/', 'data/d@m/']);
+    // the config home's, and both project files of every project an installation names and of the session's directory
     expect(writes.scopeSettings).toEqual([
       { project: null, file: 'settings.json' },
       { project: '/w/app', file: '.claude/settings.json' },
       { project: '/w/app', file: '.claude/settings.local.json' },
+      { project: '/w/session', file: '.claude/settings.json' },
+      { project: '/w/session', file: '.claude/settings.local.json' },
     ]);
+    // a user-scoped plugin with a local override in the session's project: that project's settings.local.json is named
+    expect(writesOf('marketplace-remove', 'user', 'directory', installed.slice(0, 1), '/w/session').scopeSettings).toEqual([
+      { project: null, file: 'settings.json' },
+      { project: '/w/session', file: '.claude/settings.json' },
+      { project: '/w/session', file: '.claude/settings.local.json' },
+    ]);
+    // the session's directory named by an installation too: each file once
+    expect(writesOf('marketplace-remove', 'user', 'directory', installed.slice(1, 2), '/w/app').scopeSettings).toHaveLength(3);
     expect(writesOf('marketplace-remove', 'user', 'github', installed.slice(0, 1)).others).toEqual(['known_marketplaces.json', 'marketplaces/<name>/', 'installed_plugins.json', 'cache/<name>/', 'data/a@m/']);
     // with nothing installed from it, the removal writes only the catalogue's records; no other action names other scopes
     expect(writesOf('marketplace-remove', 'user', 'directory', [])).toEqual({ settings: 'settings.json', others: ['known_marketplaces.json'], scopeSettings: [] });
-    for (const action of PLUGINS_ACTIONS.filter((a) => a !== 'marketplace-remove')) expect(writesOf(action, 'user', null, installed).scopeSettings, action).toEqual([]);
+    expect(writesOf('marketplace-remove', 'user', 'directory', [], '/w/session').scopeSettings).toEqual([]);
+    for (const action of PLUGINS_ACTIONS.filter((a) => a !== 'marketplace-remove')) expect(writesOf(action, 'user', null, installed, '/w/session').scopeSettings, action).toEqual([]);
   });
 
   it('knows the three scopes', () => {

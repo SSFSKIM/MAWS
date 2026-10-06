@@ -63,8 +63,8 @@ export function commandLine<A extends PluginsAction>(action: A, input: PluginsAc
 export interface PluginsWrites {
   settings: string; // the scope's settings file: relative to the config home (user) or to the project (project, local)
   others: string[]; // relative to the config home's `plugins/`; `<…>` names a segment the operation fills
-  // a marketplace removal only: the settings file of every scope one of the plugins it uninstalls is installed at,
-  // relative to the config home (`project: null`) or to that installation's project
+  // a marketplace removal only: every settings file that may hold one of the plugins it uninstalls or an enable or
+  // disable override for one, relative to the config home (`project: null`) or to a project
   scopeSettings: { project: string | null; file: string }[];
 }
 
@@ -81,14 +81,13 @@ const READ_IN_PLACE = new Set(['directory', 'file']);
 
 const settingsOf = (scope: PluginsScope): string => (scope === 'user' ? 'settings.json' : scope === 'project' ? '.claude/settings.json' : '.claude/settings.local.json');
 
-// The settings file of each scope the installations are at (a pseudo-scope has none), each named once.
-function settingsOfInstallations(installations: readonly PluginsInstallation[]): PluginsWrites['scopeSettings'] {
-  const out: PluginsWrites['scopeSettings'] = [];
-  for (const { scope, projectPath } of installations) {
-    const entry = scope === 'user' ? { project: null, file: settingsOf('user') } : (scope === 'project' || scope === 'local') && projectPath !== null ? { project: projectPath, file: settingsOf(scope) } : null;
-    if (entry && !out.some((seen) => seen.project === entry.project && seen.file === entry.file)) out.push(entry);
-  }
-  return out;
+// The settings files an uninstall-by-removal may write: the engine clears the plugins' entries and any enable or disable
+// override for them at every scope (a user install disabled with `--scope local` loses that local override too), so a
+// conservative superset: the config home's, and both project files of every project an installation names and of the
+// session's directory (`cwd`, where the CLI runs and an override may sit), each project once.
+function settingsOfRemoval(installations: readonly PluginsInstallation[], cwd: string | null): PluginsWrites['scopeSettings'] {
+  const projects = [...new Set([...installations.flatMap((i) => (i.projectPath === null ? [] : [i.projectPath])), ...(cwd === null ? [] : [cwd])])];
+  return [{ project: null, file: settingsOf('user') }, ...projects.flatMap((project) => [{ project, file: settingsOf('project') }, { project, file: settingsOf('local') }])];
 }
 
 // The files the engine's CLI writes for one action (the sheet's "Writes" line). `source` is the marketplace's source
@@ -97,11 +96,13 @@ function settingsOfInstallations(installations: readonly PluginsInstallation[]):
 // the empty `plugins/marketplaces/`; an update writes the settings file only when the version pin changes; an
 // uninstall's cache and data entries are what the engine may remove. Two writes the probe did not exercise (E8's
 // whole-branch review, 2.1.291): an install or update also installs the dependencies the marketplace declares (each its
-// own cache directory, and its `enabledPlugins` entry in the same settings file), and a marketplace removal uninstalls
-// the plugins installed from it (`uninstalls`, that marketplace's installations: the registry, the marketplace's cache,
-// each one's data and the settings of each scope one is installed at). The CLI's own `.claude.json` bookkeeping (usage
-// counters, first-start identifiers) is not plugin configuration and is not listed (D-12).
-export function writesOf(action: PluginsAction, scope: PluginsScope, source: string | null, uninstalls: readonly PluginsInstallation[] = []): PluginsWrites {
+// own cache directory, in this marketplace or one it allowlists through `allowCrossMarketplaceDependenciesOn`, and its
+// `enabledPlugins` entry in the same settings file), and a marketplace removal uninstalls the plugins installed from it
+// (`uninstalls`, that marketplace's installations: the registry, the marketplace's cache, each one's data and every
+// settings file that may hold them or an override for them, `settingsOfRemoval` with the session's directory `cwd`). The
+// CLI's own `.claude.json` bookkeeping (usage counters, first-start identifiers) is not plugin configuration and is not
+// listed (D-12).
+export function writesOf(action: PluginsAction, scope: PluginsScope, source: string | null, uninstalls: readonly PluginsInstallation[] = [], cwd: string | null = null): PluginsWrites {
   const settings = settingsOf(scope);
   const cloned = source === null || !READ_IN_PLACE.has(source);
   const cache = 'cache/<marketplace>/<plugin>/<version>/';
@@ -109,7 +110,7 @@ export function writesOf(action: PluginsAction, scope: PluginsScope, source: str
   switch (action) {
     case 'install':
     case 'update':
-      return writes(['installed_plugins.json', cache, 'cache/<marketplace>/<dependency>/']);
+      return writes(['installed_plugins.json', cache, 'cache/<any-marketplace>/<dependency>/']);
     case 'uninstall':
       return writes(['installed_plugins.json', cache, 'data/<id>/']);
     case 'enable':
@@ -122,7 +123,7 @@ export function writesOf(action: PluginsAction, scope: PluginsScope, source: str
     case 'marketplace-remove': {
       const own = ['known_marketplaces.json', ...(cloned ? ['marketplaces/<name>/'] : [])];
       if (uninstalls.length === 0) return writes(own);
-      return writes([...own, 'installed_plugins.json', 'cache/<name>/', ...uninstalls.map((u) => `data/${u.id}/`)], settingsOfInstallations(uninstalls));
+      return writes([...own, 'installed_plugins.json', 'cache/<name>/', ...uninstalls.map((u) => `data/${u.id}/`)], settingsOfRemoval(uninstalls, cwd));
     }
   }
   throw new Error(`unknown plugins action ${String(action)}`);

@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { commandLine, PLUGINS_ACTIONS, PLUGINS_SCOPES, writesOf, type PluginsAction } from '@shared/plugins/cli';
 import type { AvailablePlugin, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
-import { argvOf, availableGroups, commandWords, declaredOf, dependencyWords, operationWords, requestFor, sourceKindOfTyped, thenWords, uninstallsWords, writesWords, type PluginOpState, type PluginsRequest } from './present';
+import { argvOf, availableGroups, commandWords, declaredOf, dependencyWords, operationWords, overridesWords, requestFor, sourceKindOfTyped, thenWords, uninstallsWords, writesWords, type PluginOpState, type PluginsRequest } from './present';
 
 const HOME = '/tmp/scratch/claude-config';
 const CWD = '/work/app';
@@ -49,7 +49,7 @@ describe('the sheet’s command and writes', () => {
       `${HOME}/settings.json`,
       `${HOME}/plugins/installed_plugins.json`,
       `${HOME}/plugins/cache/e8-scratch/e8-probe/<version>/`,
-      `${HOME}/plugins/cache/e8-scratch/<dependency>/`,
+      `${HOME}/plugins/cache/<any-marketplace>/<dependency>/`,
     ]);
     expect(writesWords(requestFor('uninstall', { plugin: 'e8-probe@e8-scratch', scope: 'local' }, null), { configHome: HOME, cwd: CWD })).toEqual([
       `${CWD}/.claude/settings.local.json`,
@@ -64,13 +64,13 @@ describe('the sheet’s command and writes', () => {
   });
 
   it('announces the dependency caches an install or update may write, in words beside the placeholder path', () => {
-    expect(writesWords(requestFor('install', { plugin: 'e8-probe@e8-scratch', scope: 'user' }, null), { configHome: HOME, cwd: CWD })).toContain(`${HOME}/plugins/cache/e8-scratch/<dependency>/`);
-    expect(dependencyWords('install')).toBe('and the cache directories of any dependencies the marketplace declares, each enabled in the settings file above');
+    expect(writesWords(requestFor('install', { plugin: 'e8-probe@e8-scratch', scope: 'user' }, null), { configHome: HOME, cwd: CWD })).toContain(`${HOME}/plugins/cache/<any-marketplace>/<dependency>/`);
+    expect(dependencyWords('install')).toBe('and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above');
     expect(dependencyWords('update')).toBe(dependencyWords('install'));
     for (const action of PLUGINS_ACTIONS.filter((a) => a !== 'install' && a !== 'update')) expect(dependencyWords(action), action).toBeNull();
   });
 
-  it('a marketplace removal names the plugins it uninstalls and every file that writes, each scope’s settings once', () => {
+  it('a marketplace removal names the plugins it uninstalls and every file that writes, overrides at any scope included, each once', () => {
     const uninstalls = [
       { id: 'e8-probe@e8-scratch', scope: 'user', projectPath: null },
       { id: 'e8-tools@e8-scratch', scope: 'project', projectPath: '/work/other' },
@@ -86,17 +86,19 @@ describe('the sheet’s command and writes', () => {
       `${HOME}/plugins/data/e8-tools@e8-scratch/`,
       `${HOME}/plugins/data/e8-extra@e8-scratch/`,
       '/work/other/.claude/settings.json',
+      '/work/other/.claude/settings.local.json',
+      `${CWD}/.claude/settings.json`,
       `${CWD}/.claude/settings.local.json`,
     ]);
+    expect(overridesWords(remove)).toBe('and any enable or disable override for them in these settings files');
+    expect(overridesWords(requestFor('marketplace-remove', { name: 'e8-scratch' }, 'directory', { uninstalls: [] }))).toBeNull();
+    expect(overridesWords(requestFor('uninstall', { plugin: 'e8-probe@e8-scratch', scope: 'user' }, null))).toBeNull();
+    // a user-scoped plugin alone still names the session's project files, where a narrower override may sit
+    expect(writesWords(requestFor('marketplace-remove', { name: 'e8-scratch' }, 'directory', { uninstalls: uninstalls.slice(0, 1) }), { configHome: HOME, cwd: CWD }).slice(-2)).toEqual([`${CWD}/.claude/settings.json`, `${CWD}/.claude/settings.local.json`]);
     expect(uninstallsWords(remove)).toBe('Also uninstalls 3 plugins: e8-probe@e8-scratch (user), e8-tools@e8-scratch (project, /work/other), e8-extra@e8-scratch (local, /work/app)');
     expect(uninstallsWords(requestFor('marketplace-remove', { name: 'e8-scratch' }, 'directory', { uninstalls: uninstalls.slice(0, 1) }))).toBe('Also uninstalls 1 plugin: e8-probe@e8-scratch (user)');
     expect(uninstallsWords(requestFor('marketplace-remove', { name: 'e8-scratch' }, 'directory', { uninstalls: [] }))).toBeNull();
     expect(uninstallsWords(requestFor('marketplace-remove', { name: 'e8-scratch' }, 'directory'))).toBeNull();
-  });
-
-  it('a project or local change for another project’s installation names that project’s settings file', () => {
-    const elsewhere = requestFor('enable', { plugin: 'e8-probe@e8-scratch', scope: 'project' }, null, { cwd: '/work/other' });
-    expect(writesWords(elsewhere, { configHome: HOME, cwd: elsewhere.cwd ?? CWD })).toEqual(['/work/other/.claude/settings.json']);
   });
 
   it('reads a typed folder as a directory source and leaves every other source unknown (the clone directory announced)', () => {

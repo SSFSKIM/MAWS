@@ -435,7 +435,9 @@ export const PLUGIN_MANAGEMENT = {
   inProject: (path: string) => `In ${path}`,
   writes: "The engine's CLI writes:",
   records: (globalConfig: string) => `and keeps its own records in ${globalConfig}`, // `plugins.env`'s path, verbatim
-  dependencies: 'and the cache directories of any dependencies the marketplace declares, each enabled in the settings file above',
+  dependencies: 'and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above',
+  overrides: 'and any enable or disable override for them in these settings files',
+  elsewhere: (path: string) => `In ${path} · manage it from a session there`, // another project's installation, read-only here
   alsoUninstalls: (plugins: string[]) => `Also uninstalls ${plugins.length} plugin${plugins.length === 1 ? '' : 's'}: ${plugins.join(', ')}`,
   resolving: 'Resolving the engine…',
   unresolved: 'The engine could not be resolved; choose a binary in Settings › Engine', // a refusal that came with no words

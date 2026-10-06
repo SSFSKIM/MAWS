@@ -13,7 +13,7 @@ import { usePluginOperations, type PluginOperations } from './operation';
 import { declaredOf, operationWords, scopeOf, type PluginsRequest } from './present';
 
 export interface Manage {
-  cwd: string; // the session's directory, where a change runs unless its request names another project
+  cwd: string; // the session's directory, where every change runs
   ops: PluginOperations;
   ask(key: string, request: PluginsRequest): void; // opens the confirm sheet for the row `key`
   reloadMods: (() => void) | null; // `session.reloadPlugins` for this session; null without a ready process
@@ -54,7 +54,7 @@ export function useManageState(base: { cwd: string; readySessions: number }, rel
   const confirm = useCallback(
     async (key: string, request: PluginsRequest, binary: string) => {
       setAsking(null);
-      const done = await run(key, request, request.cwd ?? cwd, binary);
+      const done = await run(key, request, cwd, binary);
       const declared = declaredOf(done, request.action);
       if (declared) open(key, { ...request, input: { ...request.input, acceptCommand: declared.sha256 } } as PluginsRequest, declared);
     },

@@ -504,26 +504,23 @@ describe('plugins widget: whole-branch review fixes', () => {
     await waitFor(() => expect(invoked('plugins.update')).toEqual([{ cwd, binary: OTHER, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
   });
 
-  it('an installation of another project is changed in that project: its row names the project, the sheet says In it, and the CLI runs there', async () => {
-    installed = [plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work/other' }), plugin('e8-tools@e8-scratch', { scope: 'project', projectPath: cwd })];
+  it('an installation of another project is read-only here: its row names the project and offers no switch, Update or Uninstall', async () => {
+    // `plugin list` from this project reports another project's installation with this project's enabled state, so no
+    // action is offered for it (E8 whole-branch review, round two)
+    installed = [plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work/other', enabled: false }), plugin('e8-tools@e8-scratch', { scope: 'project', projectPath: cwd })];
     await ready();
-    expect(row('e8-probe@e8-scratch').textContent).toContain('In /work/other');
-    expect(row('e8-tools@e8-scratch').textContent).not.toContain(`In ${cwd}`); // this project's own needs no naming
-    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('switch', { name: 'Enabled: e8-probe@e8-scratch' }));
-    await waitFor(() => expect(argvShown()).toEqual(['plugin', 'disable', 'e8-probe@e8-scratch', '--scope', 'project', '--json']));
-    expect(within(sheet()).getByText('In /work/other')).toBeTruthy();
-    expect(within(sheet()).getByRole('list', { name: "The engine's CLI writes:" }).textContent).toBe('/work/other/.claude/settings.json');
-    fireEvent.click(within(sheet()).getByRole('button', { name: 'Disable' }));
-    await waitFor(() => expect(invoked('plugins.disable')).toEqual([{ cwd: '/work/other', binary: BINARY, plugin: 'e8-probe@e8-scratch', scope: 'project' }]));
-    // Install from Available keeps the session's directory
-    fireEvent.click(within(section('available')).getByText('Available'));
-    await waitFor(() => expect(within(section('available')).getByText('e8-scratch · 2 plugins')).toBeTruthy());
-    fireEvent.click(within(section('available')).getByText('e8-scratch · 2 plugins'));
-    const other = await waitFor(() => section('available').querySelector<HTMLElement>('[data-plugin-row="e8-other@e8-scratch"]')!);
-    fireEvent.click(within(other).getByRole('button', { name: 'Install…' }));
-    await waitFor(() => expect(argvShown()).toEqual(['plugin', 'install', 'e8-other@e8-scratch', '--scope', 'user', '--json']));
-    fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
-    await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd, binary: BINARY, plugin: 'e8-other@e8-scratch', scope: 'user' }]));
+    const elsewhere = row('e8-probe@e8-scratch');
+    expect(elsewhere.textContent).toContain('In /work/other · manage it from a session there');
+    expect(elsewhere.textContent).not.toContain('disabled'); // the state this listing reports for it is not its own
+    expect(within(elsewhere).queryByRole('switch')).toBeNull();
+    expect(within(elsewhere).queryByRole('button')).toBeNull();
+    // this project's own installation keeps its actions and needs no naming
+    const own = row('e8-tools@e8-scratch');
+    expect(own.textContent).not.toContain('In ');
+    expect(within(own).getByRole('switch', { name: 'Enabled: e8-tools@e8-scratch' })).toBeTruthy();
+    fireEvent.click(within(own).getByRole('button', { name: 'Uninstall…' }));
+    await waitFor(() => expect(argvShown()).toEqual(['plugin', 'uninstall', 'e8-tools@e8-scratch', '--scope', 'project', '--json']));
+    expect(within(sheet()).getByText(`In ${cwd}`)).toBeTruthy();
   });
 
   it('removing a marketplace names the installed plugins it uninstalls and the files that writes, behind the acknowledgement', async () => {
@@ -542,7 +539,11 @@ describe('plugins widget: whole-branch review fixes', () => {
       `${HOME}/plugins/data/e8-probe@e8-scratch/`,
       `${HOME}/plugins/data/e8-tools@e8-scratch/`,
       '/work/other/.claude/settings.json',
+      '/work/other/.claude/settings.local.json',
+      `${cwd}/.claude/settings.json`,
+      `${cwd}/.claude/settings.local.json`,
     ]);
+    expect(within(sheet()).getByText('and any enable or disable override for them in these settings files')).toBeTruthy();
     const confirm = within(sheet()).getByRole('button', { name: 'Remove' });
     expect(confirm).toHaveProperty('disabled', true);
     fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
