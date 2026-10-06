@@ -26,7 +26,16 @@ import { readSettings, seedPermissionMode } from './launch-mapping';
 import { archiveRecord, deleteRecord, forkIntentOf, previewDeletion, renameRecord, revealablePath } from './record-actions';
 import { markInterrupted, reconcileIntent } from './recovery';
 import { removeCreatedWorktree, retainedWorktree, type Setup } from './setup';
-import { forkRefusal, guardIntentStart, guardResumeStart, type GuardContext, type Guarded } from './start-guards';
+import { forkRefusal, guardIntentStart, guardResumeStart, sideThreadRefusal, type GuardContext, type Guarded } from './start-guards';
+// E3 start
+import { promotionMessage } from '@shared/anchor/message';
+import type { ContentBlock } from '@shared/graph/events';
+import type { Lineage } from '@shared/graph/session';
+import { sendContentRefusal } from '@shared/engine/session-state-store';
+import type { SideThreadFrom } from '@shared/ipc/schema/side';
+import { commentContent, screenshotRoots, withoutScreenshot } from '../side/content';
+import { sendToMain, type SendToMainInput, type SendToMainOutput } from '../side/send-to-main';
+// E3 end
 import { trustKeyOf, trustStateOf } from './trust';
 import { findPane, paneCall, readProcesses } from './pane-holder';
 import { pauseTakeOver, until } from './pause-take-over';
@@ -93,6 +102,7 @@ export class SessionService {
     const env = await this.deps.env;
     this.setup = {
       sessions: this.deps.index.sessions,
+      sideThreads: this.deps.index.sideThreads ?? null, // E3
       dispatch: this.deps.host.dispatch,
       onEvent: this.deps.host.onEvent,
       worktrees: this.deps.worktrees,
@@ -526,17 +536,60 @@ export class SessionService {
       await this.putIntent(intent);
       return intent.appSessionId;
     });
-    if (typeof allocated !== 'string') return allocated;
+    return typeof allocated === 'string' ? this.startFork(allocated) : allocated;
+  }
+
+  // A fork's intent, started at once; one its start rejects or that throws is dropped before the answer.
+  private async startFork(forkId: AppSessionId): Promise<StartOutcome> {
     let outcome: StartOutcome;
     try {
-      outcome = await this.startSession(allocated, { message: null, options: {} });
+      outcome = await this.startSession(forkId, { message: null, options: {} });
     } catch (error) {
-      await this.dropForkIntent(allocated);
+      await this.dropForkIntent(forkId);
       throw error;
     }
-    if (outcome.status === 'invalid' || outcome.status === 'missing_directory' || outcome.status === 'refused') await this.dropForkIntent(allocated);
+    if (outcome.status === 'invalid' || outcome.status === 'missing_directory' || outcome.status === 'refused') await this.dropForkIntent(forkId);
     return outcome;
   }
+
+  // E3 start: `side.thread.open` (E3 execution document, Design §3): C10's fork of the parent, in place and at its current
+  // point, under the side thread's own guard (a running turn does not refuse it), its intent carrying the lineage the
+  // record takes and the anchored first message (or the promotion of answered side questions). The outcome's id is the
+  // thread's. A screenshot outside the allowed roots throws `ScreenshotRefused`; a first message larger than a send may
+  // be is refused `invalid` on `from`, before anything is created.
+  async openSideThread(appSessionId: AppSessionId, from: SideThreadFrom): Promise<StartOutcome> {
+    const allocated = await this.serial(appSessionId, async (): Promise<StartOutcome | AppSessionId> => {
+      const s = await this.ready();
+      const source = s.sessions.get(appSessionId);
+      const refusal = sideThreadRefusal(s, appSessionId);
+      if (source === null || refusal !== null) return { status: 'refused', appSessionId, ...(refusal ?? { reason: 'unknown_session', message: `no session ${appSessionId}` }) };
+      const content: ContentBlock[] =
+        from.kind === 'comment'
+          ? await commentContent({ ...from, destination: 'thread' }, () => screenshotRoots(this.deps.userData, source))
+          : [{ type: 'text', text: promotionMessage(from.exchanges, from.text) }];
+      const tooLarge = sendContentRefusal(content);
+      if (tooLarge !== null) throw new IntentRefused('invalid', `the side thread's first message is too large: ${tooLarge.message}`, 'from');
+      const display = String(content.at(-1)!.text); // the anchored text: the record's title until the thread is named
+      const lineage: Lineage = {
+        kind: 'side-thread',
+        parentAppSessionId: source.appId,
+        parentEngineSessionId: source.engineSessionId,
+        ...(from.kind === 'comment' ? { anchor: withoutScreenshot(from.anchor) } : {}),
+        openedBy: from.kind,
+      };
+      const intent = await forkIntentOf(s, source, { kind: 'inPlace' }, { message: { content, display }, rewindTo: null }, lineage);
+      if ('invalid' in intent) return { status: 'invalid', appSessionId, field: 'target', message: intent.invalid }; // never for an in-place fork
+      await this.putIntent(intent);
+      return intent.appSessionId;
+    });
+    return typeof allocated === 'string' ? this.startFork(allocated) : allocated;
+  }
+
+  // `side.sendToMain` (Design §8): the anchored comment to the parent itself.
+  async sendToMain(input: SendToMainInput): Promise<SendToMainOutput> {
+    return sendToMain(await this.ready(), this.deps.userData, input);
+  }
+  // E3 end
 
   private dropForkIntent(forkId: AppSessionId): Promise<void> {
     return this.serial(forkId, async () => {

@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
+import type { Lineage, SessionRecord } from '@shared/graph/session';
 import type { FirstMessage, ForkTarget, Location, SetupIntent } from '@shared/sessions/intent';
 import type { ArchiveOutcome, DeleteOutcome } from '@shared/ipc/schema/session';
 import { EffortSchema } from '@shared/engine/launch-spec';
@@ -146,11 +146,13 @@ export async function revealablePath(s: Setup, projects: Pick<ProjectStore, 'lis
 
 // The intent a fork starts: the source's conversation (its current engine id), its directories, model, effort, mode
 // and route, in place or in a new worktree of its repository; `null` with the reason when the target cannot be one.
+// E3: with the lineage its record will carry, a fork of the source unless the caller says otherwise (a side thread).
 export async function forkIntentOf(
   s: Setup,
   source: SessionRecord,
   target: ForkTarget,
   args: { message: FirstMessage | null; rewindTo: MessageUuid | null },
+  lineage?: Lineage,
 ): Promise<SetupIntent | { invalid: string }> {
   let location: Location;
   if (target.kind === 'inPlace') location = { kind: 'directory', path: source.directory };
@@ -180,5 +182,6 @@ export async function forkIntentOf(
     message: args.message,
     draft: null,
     progress: emptyProgress(),
+    lineage: lineage ?? { kind: 'fork', parentAppSessionId: source.appId, parentEngineSessionId: source.engineSessionId, openedBy: 'fork' }, // E3 (X11)
   };
 }

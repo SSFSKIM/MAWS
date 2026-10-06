@@ -9,7 +9,7 @@
 // report; rollback is per resource, never forced, and never a transcript.
 import { randomUUID } from 'node:crypto';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
+import type { Lineage, SessionRecord } from '@shared/graph/session';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { SetupEvent, SetupPhase, SetupResources } from '@shared/sessions/setup';
 import { WorktreeAddFailed } from '../git/worktrees';
@@ -34,6 +34,7 @@ import {
   type Setup,
 } from './setup-steps';
 import { trustStateOf } from './trust';
+import { openedEvent, SIDE_QUESTION_TITLE } from '../side/side-threads'; // E3
 
 export { SetupFailure, type Setup } from './setup-steps';
 
@@ -213,6 +214,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
       effort: intent.effort,
       permissionMode: { requested: mode, effective: mode, refusal: null },
       firstPrompt: intent.message?.display ?? null, // W11 (I1): the row's title until the transcript's first summary
+      lineage: intent.lineage ?? null, // E3 (X11): the record carries it before the engine runs
     });
     if (!created.ok) s.log(`a record already exists under ${appSessionId}; the launch reuses it`);
     run.event('launching', 'Starting');
@@ -257,7 +259,9 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
 // intent goes, and `ready` is told. A failure here is logged (the next start's reconciliation drops a leftover intent).
 async function finishBinding(s: Setup, run: IntentRun, intent: SetupIntent, engineSessionId: SessionId, firstTurn: 'sent' | 'queued' | 'none'): Promise<void> {
   const { appSessionId } = run;
-  if (intent.kind === 'fork' && intent.source !== null) {
+  // E3: a side thread is named for what it is about and shown in its parent's transcript
+  if (intent.lineage?.kind === 'side-thread') await bindSideThread(s, appSessionId, intent.lineage);
+  else if (intent.kind === 'fork' && intent.source !== null) {
     const title = s.sessions.get(intent.source.appSessionId)?.title;
     if (title?.source === 'user' && title.text !== '') {
       await hostCall(s.dispatch, 'session.renameSession', { appSessionId, title: `${title.text} (fork)` }).catch((error: unknown) => s.log(`the fork ${appSessionId} kept the engine's title: ${messageOf(error)}`));
@@ -271,6 +275,30 @@ async function finishBinding(s: Setup, run: IntentRun, intent: SetupIntent, engi
   run.event('ready', null, { kind: 'ready', engineSessionId, firstTurn });
   s.emit('session.intent.changed', { appSessionId, intent: null });
 }
+
+// E3 start (Design §3 and §5): the thread's title through the engine, so a terminal's picker says what it is (the
+// index's override when the engine refuses: the copied history would otherwise title it by the parent's prompt), then
+// its row in the parent's transcript. Nothing here rolls back: the thread runs whatever the bookkeeping does.
+async function bindSideThread(s: Setup, appSessionId: AppSessionId, lineage: Lineage): Promise<void> {
+  const title = lineage.openedBy === 'btw' ? SIDE_QUESTION_TITLE : lineage.anchor?.label.trim() || SIDE_QUESTION_TITLE;
+  await hostCall(s.dispatch, 'session.renameSession', { appSessionId, title }).catch((error: unknown) => {
+    s.log(`the side thread ${appSessionId} is named in the index, since the engine refused: ${messageOf(error)}`);
+    try {
+      s.sessions.update(appSessionId, { title: { text: title, source: 'user' } });
+    } catch (fallback) {
+      s.log(`the side thread ${appSessionId} could not be named: ${messageOf(fallback)}`);
+    }
+  });
+  try {
+    const child = s.sessions.get(appSessionId);
+    if (s.sideThreads === null || child === null) return;
+    const event = openedEvent(s.sideThreads.opened(appSessionId, lineage.parentAppSessionId, s.now()), child);
+    if (event !== null) s.emit('session.eventBatch', { appSessionId: lineage.parentAppSessionId, events: [event] });
+  } catch (error) {
+    s.log(`the side thread ${appSessionId} is not shown in its parent: ${messageOf(error)}`);
+  }
+}
+// E3 end
 
 // `git worktree add` threw: with `-b` git creates the branch before the checkout, and a failing post-checkout hook
 // leaves the checkout, so what this attempt created is read back from git and recorded, for rollback to undo.

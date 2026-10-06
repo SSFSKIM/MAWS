@@ -50,7 +50,8 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   const dirs = await checkAdditionalDirectories(intent, await sessionDirectoryOf(s, location));
   if (!dirs.ok && dirs.kind === 'invalid') return reject({ status: 'invalid', appSessionId, field: dirs.field, message: dirs.message });
   if (intent.kind === 'fork') {
-    const refusal = await forkRefusal(s, intent.source!.appSessionId);
+    // E3: a side thread forks a parent with a turn running, which is the moment it exists for (Design §3)
+    const refusal = intent.lineage?.kind === 'side-thread' ? sideThreadRefusal(s, intent.source!.appSessionId) : await forkRefusal(s, intent.source!.appSessionId);
     if (refusal !== null) return reject({ status: 'refused', appSessionId, ...refusal });
   }
   // a relay alias on the direct route (C7's model chip, or a Direct default route, can leave one): refused before any
@@ -90,11 +91,19 @@ export const directRouteRefusal = (model: string) =>
 // A fork is refused for a source that is gone, has no engine id, or has a turn open in MAWS (a copy taken mid-turn
 // would hold a half-written turn).
 export async function forkRefusal(s: Setup, sourceId: AppSessionId): Promise<{ reason: 'no_engine_session' | 'busy' | 'unknown_session'; message: string } | null> {
+  const refusal = sideThreadRefusal(s, sourceId);
+  if (refusal !== null) return refusal;
+  const live = await reservationOf(s.dispatch, sourceId);
+  if (live !== null && live.turn !== null) return { reason: 'busy', message: 'the session has a turn running; fork it once the turn ends' };
+  return null;
+}
+
+// E3 (Design §3): a side thread's guard is the fork's without the turn: the engine forks a parent mid-turn (M0's verdict
+// (a), the engine copying up to its last flushed record), and the comment carries its own context.
+export function sideThreadRefusal(s: Pick<Setup, 'sessions'>, sourceId: AppSessionId): { reason: 'no_engine_session' | 'unknown_session'; message: string } | null {
   const source = s.sessions.get(sourceId);
   if (source === null) return { reason: 'unknown_session', message: `no session ${sourceId}` };
   if (source.engineSessionId === null) return { reason: 'no_engine_session', message: 'the session has no engine conversation to fork yet' };
-  const live = await reservationOf(s.dispatch, sourceId);
-  if (live !== null && live.turn !== null) return { reason: 'busy', message: 'the session has a turn running; fork it once the turn ends' };
   return null;
 }
 

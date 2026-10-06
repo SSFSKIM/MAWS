@@ -15,6 +15,7 @@ import type { GitRun } from '../git/runner';
 import type { WorktreeService } from '../git/worktrees';
 import type { ProjectStore } from '../index/projects';
 import type { SessionStore } from '../index/sessions';
+import type { SideThreadStore } from '../index/side-threads'; // E3
 import type { HostDispatch } from '../ipc/router';
 import type { C10Settings } from './launch-mapping';
 import type { BootstrapNotes, IntentStore } from './intents';
@@ -28,7 +29,7 @@ export type Emit = <N extends EventName>(name: N, payload: EventPayload<N>) => b
 export type HostEvents = <N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void) => () => void;
 
 export interface SessionServiceDeps {
-  index: { sessions: SessionStore; projects: Pick<ProjectStore, 'list'> };
+  index: { sessions: SessionStore; projects: Pick<ProjectStore, 'list'>; sideThreads?: SideThreadStore }; // E3: sideThreads
   host: { dispatch: HostDispatch; onEvent: HostEvents; ready?: () => Promise<void> }; // ready: the engine host answers
   git: GitRun;
   worktrees: WorktreeService;

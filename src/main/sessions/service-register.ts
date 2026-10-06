@@ -10,6 +10,7 @@ import type { HostState } from '@shared/ipc/schema';
 import type { HostSupervisor } from '../hosts/supervisor';
 import { CommandFailure, registerMainHandler } from '../ipc/router';
 import { IntentRefused, type SessionService } from './service';
+import { ScreenshotRefused } from '../side/screenshot'; // E3
 
 // The runtime hands a handler the schema's parsed value; the ids in it passed the branded id schemas, which is what the
 // brands stand for (as C4's handlers read them).
@@ -36,6 +37,10 @@ export function registerSessionServiceHandlers(service: SessionService): void {
   registerMainHandler('session.deletions.list', async () => ({ manifests: await service.listDeletions() }));
   registerMainHandler('session.deletions.keep', ({ appSessionId }) => service.keepDeletion(id(appSessionId)));
   registerMainHandler('session.deletions.preview', ({ appSessionId }) => service.previewDeletion(id(appSessionId)));
+  // E3 start: the side namespace's main commands (E3 execution document, Design §3, §8 and §9)
+  registerMainHandler('side.thread.open', ({ appSessionId, from }) => relaySide(['from'], () => service.openSideThread(id(appSessionId), from)));
+  registerMainHandler('side.sendToMain', (input) => relaySide([], () => service.sendToMain(input)));
+  // E3 end
 }
 
 // The engine host answers: its first launch is ready, or it has given up (a crashed host answers `host_unavailable`,
@@ -50,6 +55,19 @@ export function engineHostSettled(hosts: Pick<HostSupervisor, 'snapshot' | 'onSt
       resolve();
     });
   });
+}
+
+// E3: a refused screenshot (its field under `screenshotAt`, where the command's input holds it) and an oversized first
+// message (`IntentRefused` naming its field) are `invalid_input`; the host's own refusal stays `internal`, verbatim.
+async function relaySide<T>(screenshotAt: string[], call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    const path = error instanceof ScreenshotRefused ? [...screenshotAt, 'screenshot'] : error instanceof IntentRefused && error.reason === 'invalid' ? [error.field ?? 'from'] : null;
+    if (path === null) throw error;
+    const message = (error as Error).message;
+    throw new CommandFailure(ipcError('invalid_input', message, [{ path, message }]));
+  }
 }
 
 async function relay<T>(call: () => Promise<T>): Promise<T> {

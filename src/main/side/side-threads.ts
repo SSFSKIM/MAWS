@@ -5,7 +5,7 @@
 // `side_threads` row, from which `sideThreadEvents` re-synthesises them for a transcript's snapshot with the ids and
 // times the live run emitted (so they bypass the read model's capped store of app events).
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import type { AppSessionId, EventId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { Emit, HostEvents } from '../sessions/context';
 import type { SideThreadRow, SideThreadStore } from '../index/side-threads';
@@ -36,7 +36,7 @@ function threadOf(child: SessionRecord): { parent: AppSessionId; sessionId: Sess
   return { parent: lineage.parentAppSessionId, sessionId: lineage.parentEngineSessionId, openedBy: lineage.openedBy };
 }
 
-const base = (parent: AppSessionId, sessionId: SessionId, id: string, at: string) => ({ id: `${parent}:side-thread:${id}`, sessionId, at, seq: null, agentId: null, parentToolUseId: null });
+const base = (parent: AppSessionId, sessionId: SessionId, id: string, at: string) => ({ id: `${parent}:side-thread:${id}` as EventId, sessionId, at, seq: null, agentId: null, parentToolUseId: null });
 
 export function openedEvent(row: SideThreadRow, child: SessionRecord): SessionEvent | null {
   const thread = threadOf(child);
