@@ -93,6 +93,12 @@ function surfaceKey(request: Frame): string {
   return request.subtype === 'ui_render' ? `ui_render\u0000${String(request.component)}\u0000${String(request.instance_id)}` : String(request.subtype);
 }
 
+// A control that mutates nothing, so answering it unrecorded cannot change what the fixture replays next: a read, and
+// E1 M5: a `rewind_files` dry run (the transcript's file-change receipt asks one as it draws, `canUndo`).
+function isReplayRead(request: { subtype: string; dry_run?: unknown }): boolean {
+  return requestClassOf(request.subtype) === 'read' || (request.subtype === 'rewind_files' && request.dry_run === true);
+}
+
 export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[]; onHold?: (row: JournalRow) => void; surfaceReads?: boolean }): ReplayTransport {
   const rows = journal;
   // R2: the recorded surface reads (their out row's index, key and the engine's answer), and the rows the cursor passes over
@@ -326,7 +332,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
           return Promise.resolve();
         }
       }
-      if (f.type === 'control_request' && requestClassOf((f as ControlRequest).request.subtype) === 'read') {
+      if (f.type === 'control_request' && isReplayRead((f as ControlRequest).request)) {
         const upcoming = nextOut();
         if (!upcoming || !sameControl(upcoming.frame as Frame, f) || ((f as ControlRequest).request.subtype.startsWith('ui_') && !matches(upcoming.frame as Frame, f, idMap))) {
           const { subtype } = (f as ControlRequest).request;

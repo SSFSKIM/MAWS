@@ -60,6 +60,7 @@ export class SessionStream {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly requests = new Map<string, SessionEvent>();
   private liveItems = new Set<string>(); // request ids of pending or delivered broker items
+  private listed = new Set<string>(); // E1 M5: the request ids of the last published list
   private readonly ringSize: number;
   private readonly batchMs: number;
   private readonly exitedRingSize: number; // C12
@@ -116,7 +117,11 @@ export class SessionStream {
   brokerItems(items: AttentionItem[]): void {
     this.flush();
     this.liveItems = new Set(items.filter((i) => i.state === 'pending' || i.state === 'delivered').map((i) => i.request.requestId!));
-    for (const requestId of this.requests.keys()) if (!items.some((i) => i.request.requestId === requestId)) this.requests.delete(requestId);
+    // E1 M5: a request's event is forgotten once its item has left the list, never before its item was first listed: a
+    // blocking ask's item is listed after a list the same frame caused (the broker confirming the call's permission)
+    const listed = new Set<string>(items.map((i) => i.request.requestId!));
+    for (const requestId of this.listed) if (!listed.has(requestId)) this.requests.delete(requestId);
+    this.listed = listed;
     this.opts.emit('session.brokerItems', { appSessionId: this.opts.appSessionId, items });
   }
 

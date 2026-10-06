@@ -185,6 +185,28 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
     expect(stream.pendingRequest(requestId)).toBeNull();
     expect(stream.pendingRequest('nope' as never)).toBeNull();
   });
+
+  // E1 M5: a list published between a request's event and its item (a blocking `maws` ask opens its item after the
+  // broker re-published for the same frame, which confirmed the call's permission) must not forget the event
+  it('keeps a request event whose item has not been listed yet across an earlier list', async () => {
+    const run = await replayedSession('pass1', 'permission-roundtrip', (row, { session, ready, fixture, transport }) => {
+      const frame = row.frame as { type: string };
+      if (frame.type === 'user' && row.seq === 4) void ready().then(() => session.send((fixture.find((r) => r.seq === 4)!.frame as { message: { content: string } }).message.content));
+      else transport.kill('SIGTERM');
+    });
+    const requested = run.events.find((e) => e.kind === 'permission.requested')!;
+    const stream = new SessionStream({ appSessionId: run.session.status().appSessionId, launchId: 'L', sessionId: null, journalPath: join(dir, 'L.jsonl'), emit: recorder().emit });
+    stream.events(run.events);
+    const requestId = (requested as { requestId: string }).requestId as never;
+    stream.brokerItems([]);
+    const item = { id: 'a' as never, appSessionId: run.session.status().appSessionId, sessionId: null, kind: 'permission' as const, request: { requestId, toolUseId: null, taskId: null, agentId: null }, summary: 's', createdAt: 't', state: 'pending' as const, stateChangedAt: 't', expiresAt: null };
+    stream.brokerItems([item]);
+    expect(stream.pendingRequest(requestId)).toEqual(requested);
+    stream.brokerItems([]);
+    expect(stream.pendingRequest(requestId)).toBeNull();
+    stream.brokerItems([item]); // forgotten once its item left the list: a later listing finds nothing to answer
+    expect(stream.pendingRequest(requestId)).toBeNull();
+  });
 });
 
 // C12 start: the exited-history cap (C12 execution document, M1 task 5)
