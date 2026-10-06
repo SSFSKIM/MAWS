@@ -18,7 +18,8 @@ To see it working: `pnpm dev`, open a session, open a file from Files, hover a l
 - [x] (2026-10-06 14:30Z) M2 — Main: index migration 4, lineage from the intent and from the disk, the side-thread rows as app-synthesised events, `side.thread.open` and `side.sendToMain`. Landed de430700..8da99dd4, fix a50c5dfd..b1ffc2be. The task review (Opus) found one Important issue: a summary stored before migration 4 made a `/clear` rebind throw. That and five Minors were fixed, and round 2 approved.
 - [x] (2026-10-06 16:20Z) M3 — Renderer: the comment composer in E5's seam, the Side pane hosting a thread, the anchored prompt row and the side-thread row. Landed 18f9cc07..fc66313b; full suite 6,757 passed, typecheck and lint clean (closing M2's deferred typecheck); task review (Opus) approved, no Critical or Important findings.
 - [x] (2026-10-06 18:00Z) M4 — Renderer: `/btw` (the `btw` slash widget, the pane's question view, promotion) and the sidebar's nesting. Landed 8262c918..e7b97062. Full suite 6,795 passed; typecheck clean at e7b97062. Task review (Opus) approved, no Critical or Important findings; its minors go to the final fix wave or the tracker.
-- [ ] M5 — End to end (`pnpm e2e:side`), the `code` and `c7` groups re-run, the gates, the evidence, the hand-back.
+- [x] (2026-10-06 20:10Z) M5 — End to end (`pnpm e2e:side`), the `code` and `c7` groups re-run, the gates, the evidence. Landed bcdcf03a..387aafb9. Gates on ae204075 and ee7136ef: typecheck, lint and the composite node `tsc` all exit 0. Units: 6,795 passed, 1 skipped. e2e: side 8, code 35, c7 29, widgets 24 and panel 23 passed; panel's first run failed on the "+" menu list until ee7136ef added Side to it. Probe integrity: 148/148. The evidence is `docs/doperpowers/evidence/p1-e3/gates.txt` and `shots/{light,dark}/`.
+- [ ] Whole-branch review (`doperpowers:reviewer-high` on Opus), its fix wave, the re-run gates, Outcomes, the charter §19 line, the hand-back.
 
 ## Terms
 
@@ -593,6 +594,25 @@ Every e2e run is under `MAWS_E2E=1` with its own `userData` and an empty `CLAUDE
 
   One design gap is left as built and put to the owner: a `/btw` typed in a side thread's own composer, inside the parent's pane, follows the panel rule. It answers in the child's own panel, off screen, and a toast says where.
   Rationale: M4's task review; the gap needs a product call on where a child's side questions belong, and the panel rule as written is honoured meanwhile.
+  Date/Author: 2026-10-06, the E3 executor.
+
+- Decision (M5, as built):
+  - The e2e journals use a new `SideJournal` builder, because C7's builders pin one session id. The journals answer `get_status` as a direct session, so no case meets the relay or its route notice.
+  - Case 4 sends its screenshots through `side.sendToMain` directly, both idle and mid-turn: no producer passes a screenshot yet.
+  - Case 6 does not assert the order of the disk-found siblings, because they tie on `createdAt`.
+  - Case 7 writes the parent's transcript before the relaunch.
+  - Case 2 also sends a second thread turn from the pane's composer.
+  - The thread's name (the anchor's label, or "Side question") seeds the record's first prompt at launch, so the sidebar never shows the tagged text before the rename. The intent's message stays the whole anchored text, so a failed setup hands it back to the editor.
+  - Dated C7 amendment: the composer's ModeChip and ModelChip stay whole on one line, and the location label truncates first. This applies to every composer; a chip breaking mid-word was a defect everywhere, and the Side pane made it visible.
+  - The panel group's product host offers Side from "+".
+  - Tracker rows: `e2e:code` rewrites E5's committed shots on every run; the composite `tsc` writes `tsconfig.node.tsbuildinfo`.
+  Rationale: task 6's report; the architect's acceptance of the C7 chip change (2026-10-06).
+  Date/Author: 2026-10-06, the E3 executor.
+- Decision (the architect's rulings on the three owner questions, 2026-10-06):
+  - (a) The screenshot shows as a chip, not a thumbnail. This is accepted for E3; a tracker row says E2's deliverable reader can serve the thumbnail later.
+  - (b) A `/btw` typed in a side thread's own composer answers in the pane that hosts that thread, inline under its view, not in a hidden panel behind a toast. This is built in the review fix wave if small; otherwise it is recorded as the rule plus a tracker row. This supersedes the "left as built" clause of M4's review entry.
+  - (c) The one-time first-launch cost (about 10 s) is accepted, and the owner is informed.
+  Rationale: the architect's message after M5.
   Date/Author: 2026-10-06, the E3 executor.
 
 ## Deferred
