@@ -1,0 +1,1580 @@
+E8 G0 CLI probe · 2026-10-06T02:48:04Z · bin /Users/new/.local/share/claude/versions/2.1.290 · 2.1.290 (Claude Code) · CLAUDE_CONFIG_DIR=/tmp/e8-g0/run1/claude-config · marketplace /tmp/e8-g0/run1/market
+--- files after: setup
+## settings.json
+{}
+## plugins/known_marketplaces.json (absent)
+## plugins/installed_plugins.json (absent)
+## .claude.json
+{
+ "hasCompletedOnboarding": true,
+ "projects": {},
+ "theme": "light"
+}
+## plugins/ tree
+
+=== validate the scratch marketplace
+$ claude plugin validate /tmp/e8-g0/run1/market --json
+exit 0
+stdout:
+{
+  "success": true,
+  "strict": false,
+  "target": "/tmp/e8-g0/run1/market/.claude-plugin/marketplace.json",
+  "manifest": {
+    "file": "/tmp/e8-g0/run1/market/.claude-plugin/marketplace.json",
+    "type": "marketplace",
+    "errors": [],
+    "warnings": [],
+    "notes": [],
+    "gatingHooks": []
+  },
+  "contents": []
+}
+--- files after: validate the scratch marketplace
+## settings.json
+{
+ "theme": "light"
+}
+## plugins/known_marketplaces.json (absent)
+## plugins/installed_plugins.json (absent)
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+
+=== marketplace list (empty home)
+$ claude plugin marketplace list --json
+exit 0
+stdout:
+[]
+--- files after: marketplace list (empty home)
+## settings.json
+{
+ "theme": "light"
+}
+## plugins/known_marketplaces.json (absent)
+## plugins/installed_plugins.json (absent)
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+
+=== marketplace add (directory)
+$ claude plugin marketplace add /tmp/e8-g0/run1/market --json
+exit 0
+stdout:
+{"command":"marketplace-add","outcome":"ok","marketplace":"e8-scratch","message":"Successfully added marketplace: e8-scratch (declared in user settings)"}
+--- files after: marketplace add (directory)
+## settings.json
+{
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:06.482Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json (absent)
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/known_marketplaces.json
+plugins/marketplaces
+
+=== marketplace list (after add)
+$ claude plugin marketplace list --json
+exit 0
+stdout:
+[
+  {
+    "name": "e8-scratch",
+    "source": "directory",
+    "path": "/tmp/e8-g0/run1/market",
+    "installLocation": "/tmp/e8-g0/run1/market"
+  }
+]
+--- files after: marketplace list (after add)
+## settings.json
+{
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:06.482Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json (absent)
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/known_marketplaces.json
+plugins/marketplaces
+
+=== plugin list --available
+$ claude plugin list --json --available
+exit 0
+stdout:
+{
+  "installed": [],
+  "available": [
+    {
+      "pluginId": "e8-probe@e8-scratch",
+      "name": "e8-probe",
+      "description": "One skill and one command, for the probe",
+      "marketplaceName": "e8-scratch",
+      "source": "./plugins/e8-probe"
+    },
+    {
+      "pluginId": "frontend-design@anthropic-plugin-directory",
+      "name": "frontend-design",
+      "description": "Frontend design skill for UI/UX implementation",
+      "marketplaceName": "anthropic-plugin-directory",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official",
+        "path": "plugins/frontend-design",
+        "sha": "d4226d062928f8d9505dbdeadd10217d23361052"
+      }
+    },
+    {
+      "pluginId": "figma@anthropic-plugin-directory",
+      "name": "figma",
+      "description": "Figma design platform integration. Access design files, extract component information, read design tokens, and translate designs into code. Bridge the gap between design and development workflows.",
+      "marketplaceName": "anthropic-plugin-directory",
+      "version": "2.2.108",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/figma/mcp-server-guide.git",
+        "sha": "f74a51c9aaec87a2e65c9121753b63fb42203d96"
+      }
+    },
+    {
+      "pluginId": "productivity@anthropic-plugin-directory",
+      "name": "productivity",
+      "description": "Manage tasks, plan your day, and build up memory of important context about your work. Syncs with your calendar, email, and chat to keep everything organized and on track.",
+      "marketplaceName": "anthropic-plugin-directory",
+      "version": "1.3.1",
+  ... [trimmed by the executor: 38217 lines; `available` holds 3139 entries: anthropic-plugin-directory=3138, e8-scratch=1; `installed` holds 0]
+--- files after: plugin list --available
+## settings.json
+{
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:06.482Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json (absent)
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== install e8-probe@e8-scratch
+$ claude plugin install e8-probe@e8-scratch --json
+exit 0
+stdout:
+{"command":"install","outcome":"ok","plugin":"e8-probe@e8-scratch","pluginId":"e8-probe@e8-scratch","scope":"user","message":"Successfully installed plugin: e8-probe@e8-scratch (scope: user)"}
+--- files after: install e8-probe@e8-scratch
+## settings.json
+{
+ "enabledPlugins": {
+  "e8-probe@e8-scratch": true
+ },
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:06.482Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {
+  "e8-probe@e8-scratch": [
+   {
+    "installPath": "/tmp/e8-g0/run1/claude-config/plugins/cache/e8-scratch/e8-probe/0.1.0",
+    "installedAt": "2026-10-06T02:48:10.733Z",
+    "lastUpdated": "2026-10-06T02:48:10.733Z",
+    "scope": "user",
+    "version": "0.1.0"
+   }
+  ]
+ },
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== plugin list (after install)
+$ claude plugin list --json
+exit 0
+stdout:
+[
+  {
+    "id": "e8-probe@e8-scratch",
+    "version": "0.1.0",
+    "scope": "user",
+    "enabled": true,
+    "installPath": "/tmp/e8-g0/run1/claude-config/plugins/cache/e8-scratch/e8-probe/0.1.0",
+    "readFromFolder": "/tmp/e8-g0/run1/market/plugins/e8-probe",
+    "folderVersion": "0.1.0",
+    "installedAt": "2026-10-06T02:48:10.733Z",
+    "lastUpdated": "2026-10-06T02:48:10.733Z",
+    "projectEnabled": false
+  }
+]
+--- files after: plugin list (after install)
+## settings.json
+{
+ "enabledPlugins": {
+  "e8-probe@e8-scratch": true
+ },
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:06.482Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {
+  "e8-probe@e8-scratch": [
+   {
+    "installPath": "/tmp/e8-g0/run1/claude-config/plugins/cache/e8-scratch/e8-probe/0.1.0",
+    "installedAt": "2026-10-06T02:48:10.733Z",
+    "lastUpdated": "2026-10-06T02:48:10.733Z",
+    "scope": "user",
+    "version": "0.1.0"
+   }
+  ]
+ },
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== disable e8-probe@e8-scratch
+$ claude plugin disable e8-probe@e8-scratch --json
+exit 0
+stdout:
+{"command":"disable","outcome":"ok","plugin":"e8-probe@e8-scratch","pluginId":"e8-probe@e8-scratch","scope":"user","message":"Successfully disabled plugin: e8-probe (scope: user)"}
+--- files after: disable e8-probe@e8-scratch
+## settings.json
+{
+ "enabledPlugins": {
+  "e8-probe@e8-scratch": false
+ },
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:06.482Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {
+  "e8-probe@e8-scratch": [
+   {
+    "installPath": "/tmp/e8-g0/run1/claude-config/plugins/cache/e8-scratch/e8-probe/0.1.0",
+    "installedAt": "2026-10-06T02:48:10.733Z",
+    "lastUpdated": "2026-10-06T02:48:10.733Z",
+    "scope": "user",
+    "version": "0.1.0"
+   }
+  ]
+ },
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== disable again (no-op)
+$ claude plugin disable e8-probe@e8-scratch --json
+exit 1
+stdout:
+{"command":"disable","outcome":"failed","plugin":"e8-probe@e8-scratch","message":"Plugin \"e8-probe@e8-scratch\" is already disabled","failureCode":"already_in_goal_state","alreadyInGoalState":true}
+stderr:
+✘ Failed to disable plugin "e8-probe@e8-scratch": Plugin "e8-probe@e8-scratch" is already disabled
+--- files after: disable again (no-op)
+## settings.json
+{
+ "enabledPlugins": {
+  "e8-probe@e8-scratch": false
+ },
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:06.482Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {
+  "e8-probe@e8-scratch": [
+   {
+    "installPath": "/tmp/e8-g0/run1/claude-config/plugins/cache/e8-scratch/e8-probe/0.1.0",
+    "installedAt": "2026-10-06T02:48:10.733Z",
+    "lastUpdated": "2026-10-06T02:48:10.733Z",
+    "scope": "user",
+    "version": "0.1.0"
+   }
+  ]
+ },
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== enable e8-probe@e8-scratch
+$ claude plugin enable e8-probe@e8-scratch --json
+exit 0
+stdout:
+{"command":"enable","outcome":"ok","plugin":"e8-probe@e8-scratch","pluginId":"e8-probe@e8-scratch","scope":"user","message":"Successfully enabled plugin: e8-probe (scope: user)"}
+--- files after: enable e8-probe@e8-scratch
+## settings.json
+{
+ "enabledPlugins": {
+  "e8-probe@e8-scratch": true
+ },
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:06.482Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {
+  "e8-probe@e8-scratch": [
+   {
+    "installPath": "/tmp/e8-g0/run1/claude-config/plugins/cache/e8-scratch/e8-probe/0.1.0",
+    "installedAt": "2026-10-06T02:48:10.733Z",
+    "lastUpdated": "2026-10-06T02:48:10.733Z",
+    "scope": "user",
+    "version": "0.1.0"
+   }
+  ]
+ },
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "e8-probe@e8-scratch": {
+   "lastUsedAt": 1791254894448,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== update e8-probe@e8-scratch
+$ claude plugin update e8-probe@e8-scratch --json
+exit 0
+stdout:
+{"command":"update","outcome":"ok","plugin":"e8-probe@e8-scratch","pluginId":"e8-probe@e8-scratch","scope":"user","message":"e8-probe is already at the latest version (0.1.0).","updateOutcome":"up_to_date","oldVersion":"0.1.0","newVersion":"0.1.0"}
+--- files after: update e8-probe@e8-scratch
+## settings.json
+{
+ "enabledPlugins": {
+  "e8-probe@e8-scratch": true
+ },
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:06.482Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {
+  "e8-probe@e8-scratch": [
+   {
+    "installPath": "/tmp/e8-g0/run1/claude-config/plugins/cache/e8-scratch/e8-probe/0.1.0",
+    "installedAt": "2026-10-06T02:48:10.733Z",
+    "lastUpdated": "2026-10-06T02:48:10.733Z",
+    "scope": "user",
+    "version": "0.1.0"
+   }
+  ]
+ },
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "e8-probe@e8-scratch": {
+   "lastUsedAt": 1791254894448,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== marketplace update e8-scratch
+$ claude plugin marketplace update e8-scratch --json
+exit 0
+stdout:
+{"command":"marketplace-update","outcome":"ok","marketplace":"e8-scratch","message":"Validating local marketplace\nSuccessfully updated marketplace: e8-scratch"}
+--- files after: marketplace update e8-scratch
+## settings.json
+{
+ "enabledPlugins": {
+  "e8-probe@e8-scratch": true
+ },
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:16.198Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {
+  "e8-probe@e8-scratch": [
+   {
+    "installPath": "/tmp/e8-g0/run1/claude-config/plugins/cache/e8-scratch/e8-probe/0.1.0",
+    "installedAt": "2026-10-06T02:48:10.733Z",
+    "lastUpdated": "2026-10-06T02:48:10.733Z",
+    "scope": "user",
+    "version": "0.1.0"
+   }
+  ]
+ },
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "e8-probe@e8-scratch": {
+   "lastUsedAt": 1791254894448,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== install unknown plugin (error shape)
+$ claude plugin install nope@e8-scratch --json
+exit 1
+stdout:
+{"command":"install","outcome":"failed","plugin":"nope@e8-scratch","scope":"user","message":"Plugin \"nope\" not found in marketplace \"e8-scratch\". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`.","failureCode":"not_found"}
+stderr:
+✘ Failed to install plugin "nope@e8-scratch": Plugin "nope" not found in marketplace "e8-scratch". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`.
+--- files after: install unknown plugin (error shape)
+## settings.json
+{
+ "enabledPlugins": {
+  "e8-probe@e8-scratch": true
+ },
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:16.198Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {
+  "e8-probe@e8-scratch": [
+   {
+    "installPath": "/tmp/e8-g0/run1/claude-config/plugins/cache/e8-scratch/e8-probe/0.1.0",
+    "installedAt": "2026-10-06T02:48:10.733Z",
+    "lastUpdated": "2026-10-06T02:48:10.733Z",
+    "scope": "user",
+    "version": "0.1.0"
+   }
+  ]
+ },
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "e8-probe@e8-scratch": {
+   "lastUsedAt": 1791254894448,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== marketplace add unknown directory (error shape)
+$ claude plugin marketplace add /tmp/e8-does-not-exist --json
+exit 1
+stdout:
+{"command":"marketplace-add","outcome":"failed","message":"Path does not exist: /tmp/e8-does-not-exist","failureCode":"invalid_source"}
+stderr:
+✘ Path does not exist: /tmp/e8-does-not-exist
+--- files after: marketplace add unknown directory (error shape)
+## settings.json
+{
+ "enabledPlugins": {
+  "e8-probe@e8-scratch": true
+ },
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:16.198Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {
+  "e8-probe@e8-scratch": [
+   {
+    "installPath": "/tmp/e8-g0/run1/claude-config/plugins/cache/e8-scratch/e8-probe/0.1.0",
+    "installedAt": "2026-10-06T02:48:10.733Z",
+    "lastUpdated": "2026-10-06T02:48:10.733Z",
+    "scope": "user",
+    "version": "0.1.0"
+   }
+  ]
+ },
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "e8-probe@e8-scratch": {
+   "lastUsedAt": 1791254894448,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== marketplace add again (idempotence)
+$ claude plugin marketplace add /tmp/e8-g0/run1/market --json
+exit 0
+stdout:
+{"command":"marketplace-add","outcome":"ok","marketplace":"e8-scratch","message":"Marketplace 'e8-scratch' already on disk — declared in user settings"}
+--- files after: marketplace add again (idempotence)
+## settings.json
+{
+ "enabledPlugins": {
+  "e8-probe@e8-scratch": true
+ },
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:16.198Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {
+  "e8-probe@e8-scratch": [
+   {
+    "installPath": "/tmp/e8-g0/run1/claude-config/plugins/cache/e8-scratch/e8-probe/0.1.0",
+    "installedAt": "2026-10-06T02:48:10.733Z",
+    "lastUpdated": "2026-10-06T02:48:10.733Z",
+    "scope": "user",
+    "version": "0.1.0"
+   }
+  ]
+ },
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "e8-probe@e8-scratch": {
+   "lastUsedAt": 1791254894448,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {},
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== STOP: plugin kept installed and enabled for the reload probe; uninstall and marketplace remove run in probe-cli-tail.sh
+
+=== TAIL · 2026-10-06T02:57:26Z
+
+=== uninstall e8-probe@e8-scratch
+$ claude plugin uninstall e8-probe@e8-scratch --json
+exit 0
+stdout:
+{"command":"uninstall","outcome":"ok","plugin":"e8-probe@e8-scratch","pluginId":"e8-probe@e8-scratch","scope":"user","keptData":false,"message":"Successfully uninstalled plugin: e8-probe (scope: user)"}
+--- files after: uninstall e8-probe@e8-scratch
+## settings.json
+{
+ "enabledPlugins": {},
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:16.198Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {},
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "cc-plugin-agents-md@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-plugin-authoring@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-telemetry@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {
+  "/private/tmp/e8-g0/run1/repo-hssfHL": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-nONzQ0": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-r5wjA7": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-waUhqn": {
+   "hasTrustDialogAccepted": true
+  }
+ },
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== uninstall again (error shape)
+$ claude plugin uninstall e8-probe@e8-scratch --json
+exit 1
+stdout:
+{"command":"uninstall","outcome":"failed","plugin":"e8-probe@e8-scratch","scope":"user","message":"Plugin \"e8-probe@e8-scratch\" not found in installed plugins","failureCode":"not_installed"}
+stderr:
+✘ Failed to uninstall plugin "e8-probe@e8-scratch": Plugin "e8-probe@e8-scratch" not found in installed plugins
+--- files after: uninstall again (error shape)
+## settings.json
+{
+ "enabledPlugins": {},
+ "extraKnownMarketplaces": {
+  "e8-scratch": {
+   "source": {
+    "path": "/tmp/e8-g0/run1/market",
+    "source": "directory"
+   }
+  }
+ },
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{
+ "e8-scratch": {
+  "installLocation": "/tmp/e8-g0/run1/market",
+  "lastUpdated": "2026-10-06T02:48:16.198Z",
+  "source": {
+   "path": "/tmp/e8-g0/run1/market",
+   "source": "directory"
+  }
+ }
+}
+## plugins/installed_plugins.json
+{
+ "plugins": {},
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "cc-plugin-agents-md@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-plugin-authoring@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-telemetry@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {
+  "/private/tmp/e8-g0/run1/repo-hssfHL": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-nONzQ0": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-r5wjA7": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-waUhqn": {
+   "hasTrustDialogAccepted": true
+  }
+ },
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== marketplace remove e8-scratch
+$ claude plugin marketplace remove e8-scratch --json
+exit 0
+stdout:
+{"command":"marketplace-remove","outcome":"ok","marketplace":"e8-scratch","message":"Successfully removed marketplace: e8-scratch"}
+--- files after: marketplace remove e8-scratch
+## settings.json
+{
+ "enabledPlugins": {},
+ "extraKnownMarketplaces": {},
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{}
+## plugins/installed_plugins.json
+{
+ "plugins": {},
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "cc-plugin-agents-md@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-plugin-authoring@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-telemetry@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {
+  "/private/tmp/e8-g0/run1/repo-hssfHL": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-nONzQ0": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-r5wjA7": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-waUhqn": {
+   "hasTrustDialogAccepted": true
+  }
+ },
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== marketplace remove again (error shape)
+$ claude plugin marketplace remove e8-scratch --json
+exit 1
+stdout:
+{"command":"marketplace-remove","marketplace":"e8-scratch","outcome":"failed","message":"Marketplace 'e8-scratch' not found","failureCode":"not_configured"}
+stderr:
+✘ Failed to remove marketplace: Marketplace 'e8-scratch' not found
+--- files after: marketplace remove again (error shape)
+## settings.json
+{
+ "enabledPlugins": {},
+ "extraKnownMarketplaces": {},
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{}
+## plugins/installed_plugins.json
+{
+ "plugins": {},
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "cc-plugin-agents-md@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-plugin-authoring@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-telemetry@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {
+  "/private/tmp/e8-g0/run1/repo-hssfHL": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-nONzQ0": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-r5wjA7": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-waUhqn": {
+   "hasTrustDialogAccepted": true
+  }
+ },
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== marketplace list (after remove)
+$ claude plugin marketplace list --json
+exit 0
+stdout:
+[]
+--- files after: marketplace list (after remove)
+## settings.json
+{
+ "enabledPlugins": {},
+ "extraKnownMarketplaces": {},
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{}
+## plugins/installed_plugins.json
+{
+ "plugins": {},
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "cc-plugin-agents-md@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-plugin-authoring@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-telemetry@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {
+  "/private/tmp/e8-g0/run1/repo-hssfHL": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-nONzQ0": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-r5wjA7": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-waUhqn": {
+   "hasTrustDialogAccepted": true
+  }
+ },
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json
+
+=== plugin list (after remove)
+$ claude plugin list --json
+exit 0
+stdout:
+[]
+--- files after: plugin list (after remove)
+## settings.json
+{
+ "enabledPlugins": {},
+ "extraKnownMarketplaces": {},
+ "theme": "light"
+}
+## plugins/known_marketplaces.json
+{}
+## plugins/installed_plugins.json
+{
+ "plugins": {},
+ "version": 2
+}
+## .claude.json
+{
+ "firstStartTime": "2026-10-06T02:48:04.697Z",
+ "firstStartVersion": "2.1.290",
+ "hasCompletedOnboarding": true,
+ "hasResetAutoModeOptInForDefaultOffer": true,
+ "machineID": "faa61d4da870d46e394e79d049cc85385ebe582ca6a62bcdb6ad4346f1395280",
+ "migrationVersion": 14,
+ "opusProMigrationComplete": true,
+ "pluginUsage": {
+  "cc-plugin-agents-md@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-plugin-authoring@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  },
+  "cc-plugin-telemetry@builtin": {
+   "lastUsedAt": 1791255060557,
+   "lastUsedNumStartups": 0,
+   "usageCount": 0
+  }
+ },
+ "projects": {
+  "/private/tmp/e8-g0/run1/repo-hssfHL": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-nONzQ0": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-r5wjA7": {
+   "hasTrustDialogAccepted": true
+  },
+  "/private/tmp/e8-g0/run1/repo-waUhqn": {
+   "hasTrustDialogAccepted": true
+  }
+ },
+ "seenNotifications": {},
+ "sonnet1m45MigrationComplete": true,
+ "theme": "light",
+ "userID": "791ce957084acaab438eba57831ba757175c7d82ca228b34b6b48354dfdb2690"
+}
+## plugins/ tree
+plugins
+plugins/cache
+plugins/cache/e8-scratch
+plugins/cache/e8-scratch/e8-probe
+plugins/cache/e8-scratch/e8-probe/0.1.0
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/marketplaces
+plugins/plugin-catalog-cache.json
+plugins/plugin-directory-cache-v2.json

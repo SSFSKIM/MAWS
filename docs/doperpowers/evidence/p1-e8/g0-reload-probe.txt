@@ -1,0 +1,104 @@
+E8 G0 reload probe · engine /Users/new/.local/share/claude/versions/2.1.290 · scratch CLAUDE_CONFIG_DIR /tmp/e8-g0/run1/claude-config · relay http://127.0.0.1:8641 · haiku
+Scenarios: spikes/protocol-probe/scenarios/pass3/e8-plugins-reload.mjs (reload right after each CLI write) and e8-plugins-reload-settle.mjs (4 s settle, two reloads each, one turn without a reload).
+
+=== first probe: reload issued right after the CLI write · fixture spikes/protocol-probe/fixtures/pass3/e8-plugins-reload.jsonl
+2 {"event": "provenance", "spec": "docs/doperpowers/plans/2026-10-05-p1-extension.md", "child": "E8", "pin": "f11ae359af82c86831f052140683ed620dd25500", "document": "docs/doperpowers/plans/2026-10-05-e8-plugins.md", "question": "G0: reload_plugins and reload_skills answers; does a live session reflect CLI disable, enable and install", "engine": "/Users/new/.local/share/claude/versions/2.1.290", "configHome": "/tmp/e8-g0/run1/claude-config", "globalConfig": "/tmp/e8-g0/run1/claude-config/.claude.json", "pinnedSessionId": "697523b2-fa91-45d7-88ae-9e1f7dc112be", "envKeys": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS", "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "CLAUDE_CODE_FORK_SUBAGENT", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "ENABLE_TOOL_SEARCH", "TERM"]}
+25 RESULT E8_OK cost_usd 0.028574000000000002
+26 {"event": "init_summary", "capabilities": ["ui_surface_v1"], "plugins": [{"name": "e8-probe", "path": "/tmp/e8-g0/run1/market/plugins/e8-probe", "source": "e8-probe@e8-scratch", "version": "0.1.0"}, {"name": "cc-plugin-agents-md", "path": "builtin", "source": "cc-plugin-agents-md@builtin"}, {"name": "cc-plugin-telemetry", "path": "builtin", "source": "cc-plugin-telemetry@builtin"}, {"name": "cc-plugin-plugin-authoring", "path": "builtin", "source": "cc-plugin-plugin-authoring@builtin"}], "plugin_errors": null, "plugin_warnings": null, "skills": ["e8-probe:e8-hello"], "slash_commands": ["e8-probe:e8-ping", "e8-probe:e8-hello"]}
+27 {"event": "check", "label": "init lists e8-probe", "ok": true}
+31 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['e8-probe', 'cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+32 {"event": "reload_plugins_1", "keys": ["agents", "commands", "error_count", "mcpServers", "plugins"], "commands": ["e8-probe:e8-ping", "e8-probe:e8-hello"], "agents_count": 5, "plugins": ["e8-probe", "cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "mcpServers": [], "error_count": 0, "held": null, "cache_impact": null, "skills": []}
+34 control_response keys=['skills'] plugins=None skills_count=15
+35 {"event": "reload_skills_1", "keys": ["skills"], "skills_total": 15, "e8": ["e8-probe:e8-ping", "e8-probe:e8-hello"], "sample": [{"name": "e8-probe:e8-ping", "description": "(e8-probe) Answers pong, for the E8 probe.", "argumentHint": ""}, {"name": "e8-probe:e8-hello", "description": "(e8-probe) Says hello from the E8 probe plugin.", "argumentHint": "", "aliases": ["e8-hello"]}]}
+37 control_response keys=['skills'] plugins=None skills_count=1
+38 {"event": "skills_dialog_1", "total": 1, "e8": [{"name": "e8-probe:e8-hello", "display_name": "e8-probe:e8-hello", "description": "Says hello from the E8 probe plugin.", "source": "plugin", "tokens": 14, "state": "on", "locked_by": "plugin", "advertised": true, "handles": {"aliases": ["e8-hello"]}}]}
+40 control_response keys=['agents', 'commands', 'error_count', 'held', 'mcpServers', 'plugins'] plugins=['e8-probe', 'cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+41 {"event": "reload_plugins_hold", "keys": ["agents", "commands", "error_count", "held", "mcpServers", "plugins"], "commands": ["e8-probe:e8-ping", "e8-probe:e8-hello"], "agents_count": 5, "plugins": ["e8-probe", "cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "mcpServers": [], "error_count": 0, "held": false, "cache_impact": null, "skills": []}
+42 {"event": "cli", "args": ["disable", "e8-probe@e8-scratch"], "code": 0, "json": {"command": "disable", "outcome": "ok", "plugin": "e8-probe@e8-scratch", "pluginId": "e8-probe@e8-scratch", "scope": "user", "message": "Successfully disabled plugin: e8-probe (scope: user)"}, "enabledPlugins": {"e8-probe@e8-scratch": false}}
+43 {"event": "check", "label": "cli disable ok", "ok": true}
+45 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['e8-probe', 'cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+46 {"event": "reload_plugins_after_disable", "keys": ["agents", "commands", "error_count", "mcpServers", "plugins"], "commands": ["e8-probe:e8-ping", "e8-probe:e8-hello"], "agents_count": 5, "plugins": ["e8-probe", "cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "mcpServers": [], "error_count": 0, "held": null, "cache_impact": null, "skills": []}
+48 control_response keys=['skills'] plugins=None skills_count=1
+49 {"event": "skills_dialog_after_disable", "total": 1, "e8": [{"name": "e8-probe:e8-hello", "display_name": "e8-probe:e8-hello", "description": "Says hello from the E8 probe plugin.", "source": "plugin", "tokens": 14, "state": "on", "locked_by": "plugin", "advertised": true, "handles": {"aliases": ["e8-hello"]}}]}
+50 {"event": "cli", "args": ["enable", "e8-probe@e8-scratch"], "code": 0, "json": {"command": "enable", "outcome": "ok", "plugin": "e8-probe@e8-scratch", "pluginId": "e8-probe@e8-scratch", "scope": "user", "message": "Successfully enabled plugin: e8-probe (scope: user)"}, "enabledPlugins": {"e8-probe@e8-scratch": true}}
+51 {"event": "check", "label": "cli enable ok", "ok": true}
+54 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+55 {"event": "reload_plugins_after_enable", "keys": ["agents", "commands", "error_count", "mcpServers", "plugins"], "commands": [], "agents_count": 5, "plugins": ["cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "mcpServers": [], "error_count": 0, "held": null, "cache_impact": null, "skills": []}
+56 {"event": "cli", "args": ["uninstall", "e8-probe@e8-scratch"], "code": 0, "json": {"command": "uninstall", "outcome": "ok", "plugin": "e8-probe@e8-scratch", "pluginId": "e8-probe@e8-scratch", "scope": "user", "keptData": false, "message": "Successfully uninstalled plugin: e8-probe (scope: user)"}, "enabledPlugins": {}}
+57 {"event": "check", "label": "cli uninstall ok", "ok": true}
+59 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+60 {"event": "reload_plugins_after_uninstall", "keys": ["agents", "commands", "error_count", "mcpServers", "plugins"], "commands": [], "agents_count": 5, "plugins": ["cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "mcpServers": [], "error_count": 0, "held": null, "cache_impact": null, "skills": []}
+61 {"event": "cli", "args": ["install", "e8-probe@e8-scratch"], "code": 0, "json": {"command": "install", "outcome": "ok", "plugin": "e8-probe@e8-scratch", "pluginId": "e8-probe@e8-scratch", "scope": "user", "message": "Successfully installed plugin: e8-probe@e8-scratch (scope: user)"}, "enabledPlugins": {"e8-probe@e8-scratch": true}}
+62 {"event": "check", "label": "cli install ok", "ok": true}
+64 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+65 {"event": "reload_plugins_after_install", "keys": ["agents", "commands", "error_count", "mcpServers", "plugins"], "commands": [], "agents_count": 5, "plugins": ["cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "mcpServers": [], "error_count": 0, "held": null, "cache_impact": null, "skills": []}
+67 control_response keys=['skills'] plugins=None skills_count=13
+68 {"event": "reload_skills_after_install", "skills_total": 13, "e8": []}
+70 control_response keys=['skills'] plugins=None skills_count=0
+71 {"event": "skills_dialog_after_install", "total": 0, "e8": []}
+92 RESULT E8_OK cost_usd 0.03307355
+95 {"event": "init_summary_after_install", "plugins": [{"name": "cc-plugin-agents-md", "path": "builtin", "source": "cc-plugin-agents-md@builtin"}, {"name": "cc-plugin-telemetry", "path": "builtin", "source": "cc-plugin-telemetry@builtin"}, {"name": "cc-plugin-plugin-authoring", "path": "builtin", "source": "cc-plugin-plugin-authoring@builtin"}], "plugin_errors": null, "plugin_warnings": null, "skills": [], "slash_commands": []}
+96 {"event": "e8_summary", "init_after_install_lists": false, "reflects_disable": false, "reflects_enable": false, "reflects_uninstall": true, "reflects_install": false, "reload_plugins_keys": ["agents", "commands", "error_count", "mcpServers", "plugins"], "reload_skills_keys": ["skills"]}
+
+=== second probe: 4 s settle before each reload · fixture spikes/protocol-probe/fixtures/pass3/e8-plugins-reload-settle.jsonl
+2 {"event": "provenance", "spec": "docs/doperpowers/plans/2026-10-05-p1-extension.md", "child": "E8", "pin": "f11ae359af82c86831f052140683ed620dd25500", "document": "docs/doperpowers/plans/2026-10-05-e8-plugins.md", "question": "G0 Q1: reload after a settling delay reflects the CLI write; Q2: the engine applies a settings change at the next turn without a reload", "settleMs": 4000, "engine": "/Users/new/.local/share/claude/versions/2.1.290", "configHome": "/tmp/e8-g0/run1/claude-config", "globalConfig": "/tmp/e8-g0/run1/claude-config/.claude.json", "pinnedSessionId": "a653e835-8767-4b44-80cf-f35f39bdc664", "envKeys": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS", "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "CLAUDE_CODE_FORK_SUBAGENT", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "ENABLE_TOOL_SEARCH", "TERM"]}
+24 RESULT E8_OK cost_usd 0.01422145
+25 {"event": "init", "label": "start", "plugins": ["e8-probe", "cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "e8": true}
+26 {"event": "check", "label": "init lists e8-probe at start", "ok": true}
+30 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['e8-probe', 'cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+31 {"event": "reload", "label": "baseline", "plugins": ["e8-probe", "cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "commands": ["e8-probe:e8-ping", "e8-probe:e8-hello"], "error_count": 0}
+32 {"event": "cli", "label": "disable", "args": ["disable", "e8-probe@e8-scratch"], "code": 0, "json": {"command": "disable", "outcome": "ok", "plugin": "e8-probe@e8-scratch", "pluginId": "e8-probe@e8-scratch", "scope": "user", "message": "Successfully disabled plugin: e8-probe (scope: user)"}, "enabledPlugins": {"e8-probe@e8-scratch": false}}
+33 {"event": "check", "label": "cli disable ok", "ok": true}
+54 RESULT E8_OK cost_usd 0.018759150000000002
+55 {"event": "init", "label": "after disable, no reload", "plugins": ["e8-probe", "cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "e8": true}
+60 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+61 {"event": "reload", "label": "after disable, settled", "plugins": ["cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "commands": [], "error_count": 0}
+63 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+64 {"event": "reload", "label": "after disable, second", "plugins": ["cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "commands": [], "error_count": 0}
+65 {"event": "cli", "label": "enable", "args": ["enable", "e8-probe@e8-scratch"], "code": 0, "json": {"command": "enable", "outcome": "ok", "plugin": "e8-probe@e8-scratch", "pluginId": "e8-probe@e8-scratch", "scope": "user", "message": "Successfully enabled plugin: e8-probe (scope: user)"}, "enabledPlugins": {"e8-probe@e8-scratch": true}}
+66 {"event": "check", "label": "cli enable ok", "ok": true}
+69 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['e8-probe', 'cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+70 {"event": "reload", "label": "after enable, settled", "plugins": ["e8-probe", "cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "commands": ["e8-probe:e8-ping", "e8-probe:e8-hello"], "error_count": 0}
+72 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['e8-probe', 'cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+73 {"event": "reload", "label": "after enable, second", "plugins": ["e8-probe", "cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "commands": ["e8-probe:e8-ping", "e8-probe:e8-hello"], "error_count": 0}
+74 {"event": "cli", "label": "uninstall", "args": ["uninstall", "e8-probe@e8-scratch"], "code": 0, "json": {"command": "uninstall", "outcome": "ok", "plugin": "e8-probe@e8-scratch", "pluginId": "e8-probe@e8-scratch", "scope": "user", "keptData": false, "message": "Successfully uninstalled plugin: e8-probe (scope: user)"}, "enabledPlugins": {}}
+75 {"event": "check", "label": "cli uninstall ok", "ok": true}
+78 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+79 {"event": "reload", "label": "after uninstall, settled", "plugins": ["cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "commands": [], "error_count": 0}
+81 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+82 {"event": "reload", "label": "after uninstall, second", "plugins": ["cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "commands": [], "error_count": 0}
+83 {"event": "cli", "label": "install", "args": ["install", "e8-probe@e8-scratch"], "code": 0, "json": {"command": "install", "outcome": "ok", "plugin": "e8-probe@e8-scratch", "pluginId": "e8-probe@e8-scratch", "scope": "user", "message": "Successfully installed plugin: e8-probe@e8-scratch (scope: user)"}, "enabledPlugins": {"e8-probe@e8-scratch": true}}
+84 {"event": "check", "label": "cli install ok", "ok": true}
+87 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['e8-probe', 'cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+88 {"event": "reload", "label": "after install, settled", "plugins": ["e8-probe", "cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "commands": ["e8-probe:e8-ping", "e8-probe:e8-hello"], "error_count": 0}
+90 control_response keys=['agents', 'commands', 'error_count', 'mcpServers', 'plugins'] plugins=['e8-probe', 'cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring'] skills_count=None
+91 {"event": "reload", "label": "after install, second", "plugins": ["e8-probe", "cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "commands": ["e8-probe:e8-ping", "e8-probe:e8-hello"], "error_count": 0}
+111 RESULT E8_OK cost_usd 0.023469550000000002
+113 {"event": "init", "label": "after install and reload", "plugins": ["e8-probe", "cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"], "e8": true}
+114 {"event": "e8_summary", "settleMs": 4000, "baseline": true, "q2_init_applies_disable_without_reload": false, "q1_disable": {"first": true, "second": true}, "q1_enable": {"first": true, "second": true}, "q1_uninstall": {"first": true, "second": true}, "q1_install": {"first": true, "second": true}, "init_after_install": true}
+115 DEBUG lines matching plugin|settings (398), the ones about the settings watcher and reloads:
+    2026-10-06T02:54:30.272Z [DEBUG] Found 4 plugins (4 enabled, 0 disabled)
+    2026-10-06T02:54:30.328Z [DEBUG] Watching for changes in setting files /tmp/e8-g0/run1/claude-config/settings.json...
+    2026-10-06T02:54:31.421Z [DEBUG] refreshActivePlugins: clearing all plugin caches
+    2026-10-06T02:54:31.421Z [DEBUG] Cleared installed plugins cache
+    2026-10-06T02:54:31.425Z [DEBUG] Found 4 plugins (4 enabled, 0 disabled)
+    2026-10-06T02:54:31.426Z [DEBUG] Found 4 plugins (4 enabled, 0 disabled)
+    2026-10-06T02:54:31.448Z [DEBUG] refreshActivePlugins: 4 enabled, 1 commands, 1 skills, 5 agents, 0 hooks, 0 MCP, 0 LSP
+    2026-10-06T02:54:32.719Z [DEBUG] Detected change to /tmp/e8-g0/run1/claude-config/settings.json
+    2026-10-06T02:54:32.721Z [DEBUG] Settings changed from userSettings, updating app state
+    2026-10-06T02:54:37.130Z [DEBUG] refreshActivePlugins: clearing all plugin caches
+    2026-10-06T02:54:37.130Z [DEBUG] Cleared installed plugins cache
+    2026-10-06T02:54:37.136Z [DEBUG] Found 4 plugins (3 enabled, 1 disabled)
+    2026-10-06T02:54:37.137Z [DEBUG] Found 4 plugins (3 enabled, 1 disabled)
+    2026-10-06T02:54:37.176Z [DEBUG] refreshActivePlugins: 3 enabled, 0 commands, 0 skills, 5 agents, 0 hooks, 0 MCP, 0 LSP
+    2026-10-06T02:54:37.187Z [DEBUG] refreshActivePlugins: clearing all plugin caches
+    2026-10-06T02:54:37.187Z [DEBUG] Cleared installed plugins cache
+    2026-10-06T02:54:37.190Z [DEBUG] Found 4 plugins (3 enabled, 1 disabled)
+    2026-10-06T02:54:37.191Z [DEBUG] Found 4 plugins (3 enabled, 1 disabled)
+    2026-10-06T02:54:37.213Z [DEBUG] refreshActivePlugins: 3 enabled, 0 commands, 0 skills, 5 agents, 0 hooks, 0 MCP, 0 LSP
+    2026-10-06T02:54:38.497Z [DEBUG] Detected change to /tmp/e8-g0/run1/claude-config/settings.json
+    2026-10-06T02:54:38.499Z [DEBUG] Settings changed from userSettings, updating app state
+    2026-10-06T02:54:41.997Z [DEBUG] refreshActivePlugins: clearing all plugin caches
+    2026-10-06T02:54:41.997Z [DEBUG] Cleared installed plugins cache
+    2026-10-06T02:54:42.000Z [DEBUG] Found 4 plugins (4 enabled, 0 disabled)
+    2026-10-06T02:54:42.001Z [DEBUG] Found 4 plugins (4 enabled, 0 disabled)
