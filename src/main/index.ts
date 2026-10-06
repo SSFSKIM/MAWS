@@ -74,6 +74,9 @@ import { installWidgetBackend } from './widgets/fixture-backend';
 // W13 start
 import { rm } from 'node:fs/promises';
 // W13 end
+// E9 start (emit comes with C3's imports, registerMainHandler with C3's, shell with C8c's)
+import { startVoice } from './voice/register';
+// E9 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -379,4 +382,17 @@ void startWithProfileLock(app, () => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow();
   });
   app.on('will-quit', () => hosts.stop());
+  // E9 start: push-to-talk dictation (E9 execution document, M2): voice.* over the bundled helper, spawned on first use
+  // (or, under the harness, the scripted backend or the probe-only helper); the helper is asked to quit at will-quit.
+  const voice = startVoice({
+    env: process.env,
+    packaged: app.isPackaged,
+    appRoot: process.cwd(), // the development app root, as C5's sessions read it
+    resourcesPath: process.resourcesPath,
+    emit: (event) => void emit('voice.event', event),
+    openExternal: (url) => shell.openExternal(url),
+    register: registerMainHandler,
+  });
+  app.on('will-quit', () => voice.dispose());
+  // E9 end
 });
