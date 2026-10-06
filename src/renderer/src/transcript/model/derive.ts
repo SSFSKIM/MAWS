@@ -600,7 +600,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       }
       // E1 start
       case 'ask':
-        resolved.push({ kind: 'row', row: askRow(asks.get(item.toolUseId)!, turn.id, context, state?.index.askSteers) });
+        resolved.push({ kind: 'row', row: askRow(asks.get(item.toolUseId)!, turn.id, context, turn.askSteers) });
         break;
       case 'delivery':
         resolved.push({ kind: 'row', row: deliveryRow(deliveries.get(item.toolUseId)!, turn.id) });

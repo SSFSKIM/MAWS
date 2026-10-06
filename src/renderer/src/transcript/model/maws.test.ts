@@ -125,6 +125,23 @@ describe('the ask capsule', () => {
     expect(ofKind(rows, 'user').find((row) => row.turnId === 'turn:u3')).toMatchObject({ text: steer, steer: false });
   });
 
+  it('a steer applied to the latest state leaves an earlier snapshot readable as it was: asked there, answered in the latest', () => {
+    const b = builder();
+    b.turn('u1');
+    askCall(b, 'toolu_a', { blocking: false, questions: QUESTIONS });
+    b.result('toolu_a', json({ status: 'asked', askId: 'toolu_a' }));
+    b.end(['u1']);
+    const before = applyEvents(createState(null, null), b.events);
+    expect(capsule(rowsOf(before))).toMatchObject({ state: 'asked' }); // derived (and memoised) before the steer
+    const later = builder(new Date(b.at).toISOString());
+    later.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' }, { id: 'late-1' });
+    later.emit('user.message', { messageUuid: uuid('u2'), content: askSteerText('toolu_a', FILLED, ANSWERS), isReplay: false, isSynthetic: false, origin: 'human', bash: null }, { id: 'late-2' });
+    const after = applyEvents(before, later.events);
+    expect(capsule(rowsOf(after))).toMatchObject({ state: 'answered', answers: ANSWERS });
+    expect(capsule(rowsOf(before))).toMatchObject({ state: 'asked', answers: null });
+    expect(capsule(rowsOf(withAllExpanded(before)))).toMatchObject({ state: 'asked', answers: null }); // a fresh derivation of the old snapshot too
+  });
+
   it('a steer naming another ask, or carrying no answered block, answers nothing', () => {
     const b = builder();
     b.turn('u1');

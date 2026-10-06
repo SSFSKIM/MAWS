@@ -54,6 +54,9 @@ export interface TurnState {
   // was opened by the engine's own output). A prompt's `user.message` arrives at the write and opens its turn pending
   // (`false`): its bubble shows, it has no divider, and it never receives another turn's events until it starts.
   accepted: boolean;
+  // Additive (E1, residue 13): the answers an async ask's steer carried, by askId, on the turn that holds the ask's call
+  // (the steer usually runs as a turn of its own). Replaced, never mutated, so an earlier snapshot keeps its own map.
+  askSteers?: ReadonlyMap<string, AskAnswer[]>;
 }
 
 export interface TranscriptUi {
@@ -140,9 +143,7 @@ export interface TranscriptState {
   placement: Map<EventId, TurnId | null>;
   // `pluginIssues` (R1): the load issues already retained, by plugin, level and message, so an issue every init repeats
   // makes one notice per session.
-  // `askSteers` (E1, residue 13): the answers each async ask's steer carried, by askId (the first steer naming an ask),
-  // read by derive.ts for that ask's capsule, which may sit in a turn the steer never reached.
-  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; askSteers: Map<string, AskAnswer[]> };
+  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string> };
   memo: Map<TurnId, MemoEntry>;
   lineage: { latest: TranscriptState | null };
 }
@@ -158,7 +159,7 @@ export function createState(sessionId: SessionId | null, agentId: AgentId | null
     sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
     ui: { assistantInk: new Set(), expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
     current: null, cwd: null, pluginStatus: new Map(), placement: new Map(),
-    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set(), askSteers: new Map() },
+    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set() },
     memo: new Map(),
     lineage: { latest: null },
   };
@@ -714,17 +715,21 @@ function apply(batch: Batch, event: SessionEvent): void {
 }
 
 // E1 start (residue 13): a user message that is an async ask's steer (`[MAWS ask <askId>]` and the answered result's
-// fenced block) carries that ask's answers. They are kept by askId, and the turn holding the ask's call is re-derived,
-// since the steer usually runs as a turn of its own (pass3/p1-maws-ask-async) and on the disk path it is the only
-// record of the answers. The message itself is placed as any other prompt: its bubble stays a user row.
+// fenced block) carries that ask's answers. They go on the turn holding the ask's call (copy-on-write: that turn is
+// cloned for this batch and given a new map, so a snapshot taken before the steer still reads `asked`), and that turn
+// re-derives, since the steer usually runs as a turn of its own (pass3/p1-maws-ask-async) and on the disk path it is
+// the only record of the answers. A steer naming no call this state holds answers nothing (the call always precedes
+// its steer). The first steer naming an ask wins. The message itself is placed as any other prompt: its bubble stays a
+// user row.
 function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
   const text = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n');
   const steer = parseAskSteer(text);
-  const { askSteers, toolUses } = batch.state.index;
-  if (steer === null || askSteers.has(steer.askId)) return;
-  askSteers.set(steer.askId, steer.result.answers);
-  const owner = toolUses.get(steer.askId as ToolUseId); // the askId is the call's tool use id (residue 2)
-  if (owner !== undefined) batch.touch(owner).version += 1;
+  if (steer === null) return;
+  const owner = batch.state.index.toolUses.get(steer.askId as ToolUseId); // the askId is the call's tool use id (residue 2)
+  if (owner === undefined || batch.state.turns.get(owner)?.askSteers?.has(steer.askId)) return;
+  const turn = batch.touch(owner);
+  turn.askSteers = new Map(turn.askSteers).set(steer.askId, steer.result.answers);
+  turn.version += 1;
 }
 // E1 end
 
