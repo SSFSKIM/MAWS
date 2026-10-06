@@ -352,6 +352,22 @@ describe('recovery with kept sessions (E10)', () => {
     expect(h.host.launches).toEqual([]);
   });
 
+  it('a live trust bootstrap is stopped and forgotten by a deferred recovery too, after its intent is marked', async () => {
+    const other = (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.dir('untrusted') } })).appSessionId;
+    h.host.script = (spec) => (spec.appSessionId !== other ? { ready: false } : {});
+    await h.service.startSession(other, { message: MESSAGE, options: { trust: 'accepted' } });
+    await h.until(() => intentFile(h, other)?.progress.bootstrap != null && h.host.table.size > 0);
+    const bootstrapId = intentFile(h, other)!.progress.bootstrap!.appSessionId;
+    await h.until(() => h.host.table.get(bootstrapId)?.process === 'initializing');
+    await h.restart({ keep: true, unavailable: true });
+    expect(h.host.calledWith('session.stop')).toEqual([]);
+    h.host.becomeReady();
+    await h.service.listIntents();
+    expect(h.host.calledWith('session.stop')).toEqual([{ appSessionId: bootstrapId, reason: 'stop' }]);
+    expect(h.host.forgotten).toEqual([bootstrapId]);
+    expect(intentFile(h, other)).toMatchObject({ progress: { bootstrap: null, lastFailure: { phase: 'trusting', message: 'MAWS quit before the session started' } } });
+  });
+
   it("a resume's noted bootstrap with a live row is stopped and forgotten, its note removed", async () => {
     const notes = new BootstrapNotes(join(h.userData, 'sessions', 'bootstraps'));
     const bootstrapId = '00000000-0000-4000-8000-0000000b0075' as AppSessionId;
@@ -409,6 +425,48 @@ describe('recovery with kept sessions (E10)', () => {
       h.host.becomeReady();
       await h.service.listIntents();
       handedOff(pin);
+    });
+
+    it('a re-run leaves what commands touched meanwhile: a trust card start and a patched intent are not read as a quit', async () => {
+      await h.restart({ keep: true, unavailable: true });
+      const card = (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.dir('untrusted') } })).appSessionId;
+      expect(await h.service.startSession(card, { message: MESSAGE, options: {} })).toMatchObject({ status: 'needs_trust' });
+      await h.service.patch(interrupted, { draft: { doc: { type: 'doc' }, attachments: [], updatedAt: '2026-10-06T00:00:00.000Z' } });
+      h.host.becomeReady();
+      await h.service.listIntents();
+      handedOff(pin); // what the deferring boot left is still recovered
+      expect(intentFile(h, card)).toMatchObject({ message: MESSAGE, progress: { lastFailure: null } });
+      expect(intentFile(h, interrupted)).toMatchObject({ message: MESSAGE, progress: { lastFailure: null } });
+      expect(h.host.calledWith('session.forget')).toEqual([{ appSessionId: deadBootstrap }]); // the noted bootstrap too
+    });
+
+    it('a streaming during the boot’s table read reads it again rather than waiting for the next one', async () => {
+      let reads = 0;
+      await h.restart({
+        keep: true,
+        unavailable: true,
+        onCall: (name) => {
+          if (name !== 'engine.sessions') return;
+          reads += 1;
+          if (reads === 1) h.host.becomeReady({ reachable: false }); // it streams while this read fails
+          else h.host.unavailable = false;
+        },
+      });
+      expect(reads).toBe(2);
+      handedOff(pin);
+    });
+
+    it('a re-run whose step fails logs it and goes on with the rest', async () => {
+      await h.restart({ keep: true, unavailable: true });
+      const list = vi.spyOn(BootstrapNotes.prototype, 'list').mockRejectedValueOnce(new Error('EACCES: the notes are unreadable'));
+      try {
+        h.host.becomeReady();
+        await h.service.listIntents();
+        handedOff(pin);
+        expect(intentFile(h, interrupted)).toMatchObject({ progress: { lastFailure: { message: 'MAWS quit before the session started' } } });
+      } finally {
+        list.mockRestore();
+      }
     });
 
     it('a deferred recovery passes over an intent whose start is in flight', async () => {

@@ -21,7 +21,7 @@ import { SessionService } from '../../src/main/sessions/service';
 import type { SessionServiceDeps } from '../../src/main/sessions/context'; // C12
 import type { C10Settings } from '../../src/main/sessions/launch-mapping';
 import type { ReplaySeam } from '../../src/main/sessions/replay-seam';
-import { FakeEngineHost } from './session-host';
+import { FakeEngineHost, type RestartOptions } from './session-host';
 import { TrustStoreFixture } from './trust-store';
 
 const noopWriter = { observeRecord: () => {}, observeRemoved: () => {}, observeProject: () => {}, observeProjectRemoved: () => {}, setDigest: () => {} };
@@ -126,7 +126,7 @@ export class SessionHarness {
 
   // The app quits and starts again: nothing it ran survives but the disk. E10: with `keep` the detached supervisor kept
   // its rows; with `unavailable` main cannot reach it until `host.becomeReady()` (FakeEngineHost.afterRestart).
-  async restart(opts: { keep?: boolean; unavailable?: boolean } = {}): Promise<void> {
+  async restart(opts: RestartOptions = {}): Promise<void> {
     this.gate = new CrashGate(); // the old store keeps its own, still closed
     this.service.dispose();
     this.stopSource();

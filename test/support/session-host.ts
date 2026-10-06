@@ -43,6 +43,13 @@ export class HostDisk {
 export const OK_RELAY: RelayHealth = { url: 'http://127.0.0.1:8641', ok: true, status: 200, latencyMs: 1, checkedAt: T0, error: null };
 export const DOWN_RELAY: RelayHealth = { url: 'http://127.0.0.1:8641', ok: false, status: null, latencyMs: null, checkedAt: T0, error: 'ECONNREFUSED' };
 
+// E10: how the app finds the host at a restart (FakeEngineHost.afterRestart).
+export interface RestartOptions {
+  keep?: boolean;
+  unavailable?: boolean;
+  onCall?: (name: string) => void;
+}
+
 export class FakeEngineHost {
   readonly launches: LaunchSpec[] = [];
   readonly calls: { name: string; input: unknown }[] = [];
@@ -62,6 +69,7 @@ export class FakeEngineHost {
   launchHangs: boolean | ((spec: LaunchSpec) => boolean) = false; // a crash point: `session.launch` never answers and nothing is reserved
   binaryPath = '/opt/engine/2.1.283';
   unavailable = false; // E10: every command answers host_unavailable (a supervisor main cannot reach)
+  onCall: ((name: string) => void) | null = null; // E10: runs as each command arrives, before it is answered
   private readonly readyListeners = new Set<() => void>(); // E10: the session service's, told at becomeReady()
   private readonly listeners = new Map<string, Set<(payload: unknown) => void>>();
   private hostState: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
@@ -70,13 +78,14 @@ export class FakeEngineHost {
 
   // The app restarted: no process survives; the state files, queues and registry do. E10: with `keep` the supervisor
   // kept its process table (live and exited rows) and their events; with `unavailable` main cannot reach it yet.
-  afterRestart(opts: { keep?: boolean; unavailable?: boolean } = {}): FakeEngineHost {
+  afterRestart(opts: RestartOptions = {}): FakeEngineHost {
     const next = new FakeEngineHost(this.disk);
     if (opts.keep) {
       for (const [id, s] of this.table) next.table.set(id, s);
       for (const [id, events] of this.events) next.events.set(id, events);
     }
     next.unavailable = opts.unavailable ?? false;
+    next.onCall = opts.onCall ?? null;
     return next;
   }
 
@@ -119,6 +128,7 @@ export class FakeEngineHost {
   readonly dispatch: HostDispatch = async (owner, name, input) => {
     if (owner !== 'engine-host') throw new Error(`unexpected owner ${owner}`);
     this.calls.push({ name, input });
+    this.onCall?.(name);
     if (this.unavailable) return { ok: false, error: { code: 'host_unavailable', message: 'the engine host is not connected' } };
     try {
       return { ok: true, value: (await this.answer(name, input as Record<string, unknown>)) as never };
