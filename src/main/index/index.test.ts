@@ -153,14 +153,15 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const sizes = db.prepare('SELECT app_id, transcript_size, transcript_mtime_ms, lineage, lineage_source FROM sessions ORDER BY app_id').all();
       expect(sizes).toEqual([
         { app_id: 'no-transcript', transcript_size: null, transcript_mtime_ms: null, lineage: null, lineage_source: null },
-        { app_id: 'on-disk', transcript_size: null, transcript_mtime_ms: null, lineage: null, lineage_source: null }, // the next sync re-summarises it
+        { app_id: 'on-disk', transcript_size: 4096, transcript_mtime_ms: -1, lineage: null, lineage_source: null }, // the next sync re-summarises it
         { app_id: 'replay', transcript_size: 10, transcript_mtime_ms: 2_000, lineage: null, lineage_source: null },
       ]);
     } finally {
       db.close();
     }
-    // the host is told the on-disk transcript is unknown in size, so its next scan re-reads it
-    expect(index.sessions.bindings().find((b) => b.appSessionId === 'on-disk')).toMatchObject({ size: null, mtimeMs: null });
+    // the host is told the on-disk transcript as known with an mtime no file has, so its next scan re-reads it and, the
+    // row staying in `known`, still marks it removed when the file went while MAWS was closed (the whole-branch review)
+    expect(index.sessions.bindings().find((b) => b.appSessionId === 'on-disk')).toMatchObject({ size: 4096, mtimeMs: -1 });
     expect(index.sessions.get('on-disk' as AppSessionId)!.lineage).toBeNull();
   });
 

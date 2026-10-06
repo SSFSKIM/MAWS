@@ -250,8 +250,9 @@ export class SessionStore {
       // the previous summary: a branch the engine stopped naming (a non-repository's `HEAD`, a detached checkout) must not
       // outlive it, and migration 3 cleared the `HEAD` an earlier summary stored.
       const branch = branchName(summary.gitBranch);
-      // E3: a summary stored before migration 4 (re-upserted unvalidated by a rebind) has no root fields; its transcript
-      // is left unknown in size so the next scan reads it again and fills them
+      // E3: a summary stored before migration 4 (re-upserted unvalidated by a rebind) has no root fields. Its mtime is
+      // stored as -1, as migration 4 does, so the next scan reads it again and fills them while the row stays in `known`
+      // and a removal is still seen.
       const preV4 = summary.birthtimeMs === undefined;
       const facts: Record<string, Value> = {
         project_id: projectId,
@@ -265,8 +266,8 @@ export class SessionStore {
         first_prompt: summary.firstPrompt ?? existing?.first_prompt ?? null,
         engine_version: summary.engineVersion ?? existing?.engine_version ?? null,
         transcript_path: summary.transcriptPath,
-        transcript_size: preV4 ? null : summary.size,
-        transcript_mtime_ms: preV4 ? null : summary.mtimeMs,
+        transcript_size: summary.size,
+        transcript_mtime_ms: preV4 ? -1 : summary.mtimeMs,
         first_record_at: summary.firstRecordAt,
         last_record_at: summary.lastRecordAt,
         last_assistant_text: summary.lastAssistantText,

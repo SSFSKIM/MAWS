@@ -219,7 +219,8 @@ describe('lineage in the index (X11)', () => {
     expect(() => index.sessions.bindEngineId(fork.appId, sessionIdFor(3))).not.toThrow();
     const old = index.sessions.getByEngineId(first)!;
     expect(old.lineage).toBeNull(); // no root read yet: in no family
-    expect(index.sessions.bindings().find((b) => b.appSessionId === old.appId)).toMatchObject({ size: null, mtimeMs: null }); // re-read at the next scan
+    // re-read at the next scan, and still in `known` so a removal is seen
+    expect(index.sessions.bindings().find((b) => b.appSessionId === old.appId)).toMatchObject({ size: 100, mtimeMs: -1 });
     expect(lineageOf(fork.appId)).toEqual(lineage);
   });
 

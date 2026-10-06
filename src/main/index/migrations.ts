@@ -67,7 +67,9 @@ UPDATE sessions SET summary = json_set(summary, '$.gitBranch', json('null')) WHE
     // root) with where it came from (`intent`: MAWS launched it so, never recomputed; `disk`: the disk rule's reading,
     // recomputed per family), the transcript's root uuid and birth time the disk rule groups and orders a fork family
     // by, and one row per side thread mirroring its two app-synthesised events. Every indexed engine transcript is
-    // re-summarised once (size and mtime cleared make the next sync read it again) so the new columns fill.
+    // re-summarised once so the new columns fill: an mtime of -1, which no file has, fails the next scan's `known` match
+    // while the row stays in `known` (its size kept), so a transcript deleted while MAWS was closed is still marked
+    // removed; a null size would make the row bare, bound rather than known, and never checked for removal.
     sql: `
 ALTER TABLE sessions ADD COLUMN lineage TEXT;
 ALTER TABLE sessions ADD COLUMN lineage_source TEXT CHECK (lineage_source IN ('intent','disk'));
@@ -78,7 +80,7 @@ CREATE TABLE side_threads (child_app_id TEXT PRIMARY KEY REFERENCES sessions(app
   opened_at TEXT NOT NULL, summarised_at TEXT, text TEXT, is_error INTEGER NOT NULL DEFAULT 0, turns INTEGER NOT NULL DEFAULT 0,
   last_turn_event_id TEXT);
 CREATE INDEX side_threads_parent ON side_threads(parent_app_id);
-UPDATE sessions SET transcript_size = NULL, transcript_mtime_ms = NULL WHERE kind = 'engine' AND transcript_path IS NOT NULL;
+UPDATE sessions SET transcript_mtime_ms = -1 WHERE kind = 'engine' AND transcript_path IS NOT NULL;
 `,
   },
 ];
