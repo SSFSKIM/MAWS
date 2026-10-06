@@ -183,10 +183,21 @@ async function unfoldWork(pane: Locator): Promise<void> {
   if ((await divider.getAttribute('aria-expanded')) === 'false') await divider.click();
 }
 
+// A toast ("<session> needs you") lands over the panel's bottom edge, where the sheet's Submit bar sits: cleared first.
+// Every open toast dismissed, then none left open (a closing one still animates out over the bar), so the next click
+// lands on the sheet.
+async function clearToasts(page: Page): Promise<void> {
+  const region = page.getByRole('region', { name: /^Notifications/ });
+  const open = region.locator('li[data-state="open"]');
+  await expect(async () => {
+    for (const dismiss of await open.getByRole('button', { name: 'Dismiss' }).all()) await dismiss.click({ timeout: 2_000 }).catch(() => undefined);
+    await expect(region.locator('li')).toHaveCount(0, { timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
+}
+
 async function shoot(s: Scene, surface: string): Promise<void> {
   if (SHOTS === null) return;
-  const toasts = s.page.getByRole('region', { name: /^Notifications/ }).getByRole('button', { name: 'Dismiss' });
-  while ((await toasts.count()) > 0) await toasts.first().click();
+  await clearToasts(s.page);
   for (const theme of THEMES) {
     value(await invoke(s.page, 'settings.set', { theme }));
     await expect(s.page.locator('html')).toHaveAttribute('data-theme', theme);
@@ -318,6 +329,7 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
     await sectionOf(sheet, 'q5').getByRole('radio', { name: 'repo' }).click();
     await sectionOf(sheet, 'q5').getByRole('button', { name: 'Decide for me' }).click();
     await shoot(s, 'sheet');
+    await clearToasts(s.page);
     await sheet.getByRole('button', { name: 'Submit · 1 skipped' }).click();
 
     const text = (questionId: string) => opened!.questions.find((q) => q.id === questionId)!.question;
@@ -372,6 +384,7 @@ test('a reload mid-ask: the sheet lists the ask again from the host and Submit a
     await sectionOf(sheet, 'q1').getByRole('button', { name: 'Decide for me' }).click();
     await sectionOf(sheet, 'q3').getByRole('textbox').fill('Release notes');
     await sectionOf(sheet, 'q5').getByRole('radio', { name: 'repo' }).click();
+    await clearToasts(s.page);
     await sheet.getByRole('button', { name: 'Submit · 2 skipped' }).click();
     const text = (questionId: string) => pending!.questions.find((q) => q.id === questionId)!.question;
     expect(await answersWritten(s, id, pending!.requestId)).toEqual([
@@ -447,6 +460,7 @@ test('an ask from a session not shown never switches the main view; its sheet op
     await show(s, asking);
     await expect(sheetOf(s)).toHaveAttribute('data-ask-id', opened!.askId);
     await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'pending');
+    await clearToasts(s.page);
     await sheetOf(s).getByRole('button', { name: 'Submit · 5 skipped' }).click();
     await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'answered');
     await idle(s, asking);
@@ -475,6 +489,7 @@ test('an async ask: acknowledged at once, Submit sends the recorded steer, and t
     const sheet = sheetOf(s);
     await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
     await sectionOf(sheet, 'q1').getByRole('radio', { name: 'Yes' }).click();
+    await clearToasts(s.page);
     await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
 
     // the steer written is the recorded one, word for word, at priority next
