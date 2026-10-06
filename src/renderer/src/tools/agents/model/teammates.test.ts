@@ -27,15 +27,15 @@ describe('teammatesOf', () => {
     expect(teammatesOf([listingTurn([recorded('e7-peer-a', 29)]), listingTurn([recorded('e7-team', 98)])])).toEqual(new Map());
   });
 
-  it('reads the newest listing’s Teammates section: name, ref and agent type, at the listing’s time', () => {
+  it('reads the newest listing’s Teammates section: name, ref and every extra the row carries, at the listing’s time', () => {
     const older = listingTurn([team('scout [15083b]  ·  general-purpose  ·  in-process  ·  joined 4m ago')], '2026-10-06T09:00:00.000Z');
     const newer = listingTurn([
       team('researcher [9c1f00]  ·  Explore  ·  in-process  ·  joined 1m ago', 'tester  ·  general-purpose  ·  idle  ·  joined 9m ago'),
       null, // a listing still waiting for its result says nothing yet
     ]);
     expect(teammatesOf([older, newer])).toEqual(new Map([
-      ['researcher', { name: 'researcher', ref: '9c1f00', agentType: 'Explore', at: T }],
-      ['tester', { name: 'tester', ref: null, agentType: 'general-purpose', at: T }],
+      ['researcher', { name: 'researcher', ref: '9c1f00', extras: ['Explore', 'in-process', 'joined 1m ago'], at: T }],
+      ['tester', { name: 'tester', ref: null, extras: ['general-purpose', 'idle', 'joined 9m ago'], at: T }],
     ]));
   });
 
@@ -55,10 +55,10 @@ describe('withTeam', () => {
     mergeSidecars(graph, Object.entries(names).map(([agentId, name]) => ({
       agentId: agentId as never, meta: { agentType: 'general-purpose', description: `Agent ${agentId}`, name }, transcriptPath: `/x/agent-${agentId}.jsonl`, size: 1, mtimeMs: 1, runId: null,
     })));
-  const roster = (...names: string[]) => new Map(names.map((name) => [name, { name, ref: null, agentType: 'general-purpose', at: T }]));
+  const roster = (...names: string[]) => new Map(names.map((name) => [name, { name, ref: null, extras: ['general-purpose', 'idle'], at: T }]));
   const agent = (taskId: string, depth: number, over: Record<string, unknown> = {}) => ({ kind: 'agent', taskId, depth, parentTaskId: null, orphan: false, foldedUnder: null, ...over });
 
-  it('groups the teammates (running or done, with their subtrees) under one header first among the running roots, then the roster rows no agent matches', () => {
+  it('groups the active teammates (with their subtrees) under one header first among the running roots, then the roster rows no agent matches; a finished teammate stays under Done', () => {
     const graph = named(applyTaskEvents(emptyGraph(), [
       start('S', 1), start('R', 2), issue('R', 'tu_K', 3), start('K', 4), start('D', 5), finish('D', 6, '2026-10-06T10:00:06.000Z'),
     ]), { R: 'researcher', D: 'tester' });
@@ -66,13 +66,20 @@ describe('withTeam', () => {
     expect(tree).toEqual({
       agents: [
         { kind: 'team', depth: 0 },
-        agent('R', 1), agent('K', 2, { parentTaskId: 'R' }), agent('D', 1),
-        { kind: 'roster', name: 'ghost', ref: null, agentType: 'general-purpose', at: T, depth: 1 },
+        agent('R', 1), agent('K', 2, { parentTaskId: 'R' }),
+        { kind: 'roster', name: 'ghost', ref: null, extras: ['general-purpose', 'idle'], at: T, depth: 1 },
         agent('S', 0),
       ],
-      done: [],
+      done: [agent('D', 0)], // matched by name, so no roster row either
       running: 3,
     });
+  });
+
+  it('draws no header when every matched teammate has finished and none is unmatched: they stay under Done', () => {
+    const graph = named(applyTaskEvents(emptyGraph(), [start('S', 1), start('D', 2), finish('D', 3, '2026-10-06T10:00:03.000Z')]), { D: 'tester' });
+    const tree = agentTree(graph);
+    expect(withTeam(tree, graph, roster('tester'))).toBe(tree);
+    expect(tree.done).toEqual([agent('D', 0)]);
   });
 
   it('matches by the agent’s own name only, and only a root: a nested agent of that name stays where it is, and no header is drawn over nothing', () => {
@@ -93,7 +100,7 @@ describe('withTeam', () => {
   it('draws a teammate no agent matches as a roster row even when nothing else runs', () => {
     const graph = emptyGraph();
     expect(withTeam(agentTree(graph), graph, roster('ghost')).agents).toEqual([
-      { kind: 'team', depth: 0 }, { kind: 'roster', name: 'ghost', ref: null, agentType: 'general-purpose', at: T, depth: 1 },
+      { kind: 'team', depth: 0 }, { kind: 'roster', name: 'ghost', ref: null, extras: ['general-purpose', 'idle'], at: T, depth: 1 },
     ]);
   });
 

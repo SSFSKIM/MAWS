@@ -48,7 +48,7 @@ export const SUBAGENTS_COPY = {
   agents: (running: number) => `Agents · ${running} running`,
   foldLabel: (n: number, parentTitle: string) => `Done · ${n} under ${parentTitle}`, // the fold's accessible name
   team: 'Team · led by this session',
-  teammateListed: (agentType: string | null, ago: string) => (agentType ? `${agentType} · listed ${ago}` : `listed ${ago}`),
+  teammateListed: (extras: string[], ago: string) => [...extras, `listed ${ago}`].join(' · '), // the listing's own extras, then when it was listed
   teammateNoTranscript: 'Named by the team listing; no transcript of it is known here',
   // E7 end
 } as const;

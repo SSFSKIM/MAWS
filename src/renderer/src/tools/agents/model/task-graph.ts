@@ -580,7 +580,7 @@ export type TreeRow =
   | { kind: 'agent'; taskId: TaskId; depth: number; parentTaskId: TaskId | null; orphan: boolean; foldedUnder: TaskId | null }
   | { kind: 'done-fold'; parentTaskId: TaskId; count: number; depth: number; expanded: boolean }
   | { kind: 'team'; depth: number }
-  | { kind: 'roster'; name: string; ref: string | null; agentType: string | null; at: string; depth: number };
+  | { kind: 'roster'; name: string; ref: string | null; extras: string[]; at: string; depth: number };
 type AgentTreeRow = Extract<TreeRow, { kind: 'agent' }>;
 
 export interface AgentTree {

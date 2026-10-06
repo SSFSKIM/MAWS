@@ -1,11 +1,11 @@
 // The Subagents lists (C8b execution document, M2; mockup 03 study 01), as E7 makes them a tree (E7 execution document,
 // Design §3 and §5; G2): **Agents**, the running roots in first-seen order with their subtrees (a running parent's
-// finished children folded under one `Done · N`, the teammates grouped under the team header first), **Done**, the
-// finished roots newest end first with their children, collapsed by default, and **On disk** as before (status unknown,
-// `agentRows`). A child whose parent the tree does not hold reads `· nested` at depth 0 with a tooltip naming the
+// finished children folded under one `Done · N`, the running teammates grouped first under the team header, in one
+// labelled group), **Done**, the finished roots newest end first with their children, collapsed by default, and
+// **On disk** as before (status unknown, `agentRows`). A child whose parent the tree does not hold reads `· nested` at depth 0 with a tooltip naming the
 // parent. A workflow's agents are in no list. A row reads by its own status wherever it sits: a running one ticks its
 // elapsed once a second while shown and the tool visible, a finished one its `<ago>` on the slow tick.
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import type { PanelToolContext } from '../../../panel/tool';
@@ -91,9 +91,13 @@ export function AgentList({ appSessionId, handle, expanded, shown, expandedFolds
           </h3>
           {expanded[name] && (
             <>
-              {rows[name].slice(0, boundOf(name)).map((row) => (
-                <TreeRowView key={keyOf(row)} row={row} graph={graph} waiting={waiting} now={now} handle={handle} />
-              ))}
+              {grouped(rows[name].slice(0, boundOf(name))).map((part) =>
+                Array.isArray(part) ? (
+                  <TeamGroup key="team" rows={part} graph={graph} waiting={waiting} now={now} handle={handle} />
+                ) : (
+                  <TreeRowView key={keyOf(part)} row={part} graph={graph} waiting={waiting} now={now} handle={handle} />
+                ),
+              )}
               {rows[name].length > boundOf(name) && name !== 'disk' && (
                 <button type="button" onClick={() => handle.showMore(name, rows[name].length)} className="ml-12 h-7 self-start rounded-sm px-2 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
                   {SUBAGENTS_COPY.showMore(rows[name].length - boundOf(name))}
@@ -114,11 +118,41 @@ export function AgentList({ appSessionId, handle, expanded, shown, expandedFolds
   );
 }
 
+// The rows as drawn: the team header and its members (the deeper rows after it) as one part, every other row alone.
+function grouped(rows: TreeRow[]): (TreeRow | TreeRow[])[] {
+  const out: (TreeRow | TreeRow[])[] = [];
+  for (const row of rows) {
+    const last = out.at(-1);
+    if (row.kind === 'team') out.push([row]);
+    else if (Array.isArray(last) && row.depth > 0) last.push(row);
+    else out.push(row);
+  }
+  return out;
+}
+
+type RowProps = { graph: TaskGraph; waiting: ReadonlySet<string>; now: number; handle: SubagentsHandle };
+
+// The team header and its rows in one group named by the header.
+function TeamGroup({ rows, ...props }: RowProps & { rows: TreeRow[] }) {
+  const id = useId();
+  const [header, ...members] = rows;
+  return (
+    <div role="group" aria-labelledby={id} className="flex flex-col">
+      <div id={id} data-team data-depth={header!.depth} className="flex h-8 items-center px-3.5 text-ui-sm font-medium text-fg-muted">
+        {SUBAGENTS_COPY.team}
+      </div>
+      {members.map((row) => (
+        <TreeRowView key={keyOf(row)} row={row} {...props} />
+      ))}
+    </div>
+  );
+}
+
 const keyOf = (row: TreeRow) =>
   row.kind === 'agent' ? row.taskId : row.kind === 'done-fold' ? `fold:${row.parentTaskId}` : row.kind === 'roster' ? `roster:${row.name}` : 'team';
 const indent = (depth: number) => ({ marginInlineStart: depth * 24 });
 
-function TreeRowView({ row, graph, waiting, now, handle }: { row: TreeRow; graph: TaskGraph; waiting: ReadonlySet<string>; now: number; handle: SubagentsHandle }) {
+function TreeRowView({ row, graph, waiting, now, handle }: RowProps & { row: TreeRow }) {
   if (row.kind === 'agent') return <AgentRowButton row={row} graph={graph} waiting={waiting.has(row.taskId as string)} now={now} onOpen={handle.openAgent} />;
   if (row.kind === 'done-fold') {
     const parent = graph.tasks.get(row.parentTaskId);
@@ -140,13 +174,7 @@ function TreeRowView({ row, graph, waiting, now, handle }: { row: TreeRow; graph
       </button>
     );
   }
-  if (row.kind === 'team') {
-    return (
-      <div data-team data-depth={row.depth} className="flex h-8 items-center px-3.5 text-ui-sm font-medium text-fg-muted">
-        {SUBAGENTS_COPY.team}
-      </div>
-    );
-  }
+  if (row.kind === 'team') return null; // drawn by TeamGroup
   return (
     <div data-roster={row.name} data-depth={row.depth} title={SUBAGENTS_COPY.teammateNoTranscript} style={indent(row.depth)} className="flex min-h-12 items-center gap-2.5 border-l border-border-strong px-3.5 py-2">
       <span aria-hidden className="size-4 shrink-0 rounded-full border border-dashed border-border-strong" />
@@ -155,7 +183,7 @@ function TreeRowView({ row, graph, waiting, now, handle }: { row: TreeRow; graph
           {row.name}
         </span>
         <span data-part="line" className="block truncate text-ui-sm text-fg-muted">
-          {SUBAGENTS_COPY.teammateListed(row.agentType, formatAgo(now - Date.parse(row.at)))}
+          {SUBAGENTS_COPY.teammateListed(row.extras, formatAgo(now - Date.parse(row.at)))}
         </span>
       </span>
     </div>

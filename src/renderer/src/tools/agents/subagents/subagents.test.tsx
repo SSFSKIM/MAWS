@@ -243,7 +243,7 @@ describe('subagents lists', () => {
   });
 
   // E7 (Design §5; Decision Log 7, 24): no recorded listing names a teammate, so the roster is a hand-built one.
-  it('groups the teammates the newest listing names under Team · led by this session, a teammate no agent matches as a roster row', async () => {
+  it('groups the running teammates the newest listing names under Team · led by this session, a teammate no agent matches as a roster row, in one labelled group', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const b = builder();
     b.turn('u1');
@@ -257,8 +257,11 @@ describe('subagents lists', () => {
     await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(b.events) }));
     const [one] = sidecarsOf('subagent-sidecars');
     await mount({ events: [started('solo', 1), started(one.agentId, 2)], sidecars: [{ ...one, meta: { ...one.meta!, name: 'researcher' } }] });
-    expect(treeOf('agents')).toEqual(['Team · led by this session', `  ${one.agentId}`, '  testergeneral-purpose · listed 2m ago', 'solo']);
+    expect(treeOf('agents')).toEqual(['Team · led by this session', `  ${one.agentId}`, '  testergeneral-purpose · idle · joined 2m ago · listed 2m ago', 'solo']);
     expect(heading('agents')).toBe('Agents · 2 running');
+    const group = within(section('agents')!).getByRole('group', { name: 'Team · led by this session' });
+    expect(Array.from(group.querySelectorAll<HTMLElement>('[data-agent-row], [data-roster]')).map((el) => el.dataset.agentRow ?? el.dataset.roster)).toEqual([one.agentId, 'tester']);
+    expect(row('solo').closest('[role="group"]')).toBeNull();
     const roster = document.querySelector<HTMLElement>('[data-roster="tester"]')!;
     expect(roster.tagName).not.toBe('BUTTON'); // no transcript to open
     expect(roster.querySelector('[data-part="title"]')?.textContent).toBe('tester');
