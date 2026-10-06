@@ -47,10 +47,9 @@ Settings (`src/shared/settings/defaults.ts`, `migrateSettings`): version 8 today
 | Version | Owner | What it adds | State |
 |---|---|---|---|
 | 9 | E9 | the push-to-talk binding and voice preferences | provisional, named in E9's brief |
-| 10 | E8 | plugin-management preferences, if any | reserved |
-| 11 | E2 | deliverables and viewer preferences, if any | reserved |
-| 12 | E4 | browser preferences (imported profile, default partition) | reserved |
-| 13 | E10 | supervisor idle time and the keep-running default | reserved |
+| 10 | E2 | deliverables and viewer preferences, if any | reserved (E8 released 10 unused on 2026-10-05; renumbered) |
+| 11 | E4 | browser preferences (imported profile, default partition) | reserved |
+| 12 | E10 | supervisor idle time and the keep-running default | reserved |
 
 A child that needs no setting releases its number back here in its hand-back; the architect renumbers before the next dispatch so migrations stay contiguous.
 
@@ -72,7 +71,7 @@ Index (`src/main/index/migrations.ts`, `PRAGMA user_version`): versions 1 to 3 t
 | `files.write` | E5 | reserved |
 | `scm.*` (stage, unstage, discard, commit, push, pr, prState) | E6 | reserved |
 | `tasks.edit` (a steer through the session, P-11) | E7 | reserved |
-| `plugins.*`, `marketplaces.*` | E8 | reserved |
+| `plugins.env`, `plugins.list`, `plugins.available`, `plugins.install`, `plugins.update`, `plugins.uninstall`, `plugins.enable`, `plugins.disable`, `plugins.cancel`; events `plugins.operation`, `plugins.changed`; `marketplaces.list`, `marketplaces.add`, `marketplaces.update`, `marketplaces.remove`; `session.reloadSkills` beside `session.reloadPlugins` | E8 | named 2026-10-05 (interim hand-back) |
 | `voice.*` | E9 | reserved |
 | `host.*` (supervisor connect, status, stop all) | E10 | reserved |
 
@@ -83,3 +82,4 @@ Files more than one child touches: `src/shared/graph/events.ts`, `src/shared/ipc
 ## 7. Record
 
 - 2026-10-05: opened at wave one's dispatch with the reservations above; E9 holds settings version 9 provisionally.
+- 2026-10-05 (E8 interim): E8 names its `plugins.*`, `marketplaces.*` and `session.reloadSkills` commands and events (§5) and releases settings version 10; E2, E4 and E10 renumbered to 10, 11, 12. Exception to §6's append-only rule, dated: E8 replaces two lines in place inside the C3 block of `src/shared/wire/control.ts` (`ReloadPluginsResponseSchema`, a lower-bound `Void` schema replaced by the fixture's shape) and makes `engine.shutdown` await its runner's stop; E1 edits the same file for `mcp_message`, so the architect merges the two on semantics.
