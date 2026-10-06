@@ -40,14 +40,12 @@ export const SIDE_COPY = {
     questions: '/btw', // the question view's chip: the command that asks there (a promoted thread is titled "Side question")
     questionsTitle: 'Side questions',
   },
-  // `/btw`: the widget, the pane's question view, and the composer's refusals
+  // `/btw`: the widget and the pane's question view (the composer's refusals are its own copy, `editor/controller.ts`)
   btw: {
     field: 'Ask a side question',
     placeholder: 'Asked beside the running turn; nothing is added to the conversation',
     ask: 'Ask',
     notRunning: 'Start the session to ask a side question',
-    attachments: 'Side questions take text only; remove the attachment',
-    unavailable: 'Side questions are not available here',
     askedElsewhere: (parentTitle: string) => `Side question asked in the panel of ${parentTitle}`,
     empty: 'Ask about the conversation without adding to it. The model answers beside the running turn, with no tools.',
     answering: 'Answering…',

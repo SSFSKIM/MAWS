@@ -27,7 +27,6 @@ import { historyNavigation, recallDoc, recallEntries, type HistoryNav, type Reca
 import { classifyFile, classifyText, mentionPath } from './paste';
 import { mentionLabel, prefillToDoc } from './recall';
 import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
-import { SIDE_COPY } from '../../side/copy'; // E3
 import { submitSerialized } from './submit';
 
 // Where the draft lives: C4's `session.drafts.*` by default; C10's intent on an unstarted session (M4 passes it).
@@ -100,6 +99,11 @@ export interface ControllerView {
 
 const HISTORY_LIMIT = 200;
 const warn = (text: string) => void toast({ level: 'warning', text, actions: [], dismissible: true });
+
+// E3 start: the composer's refusals of a `/btw` draft it will not ask (submit below)
+const BTW_UNAVAILABLE = 'Side questions are not available here';
+const BTW_TEXT_ONLY = 'Side questions take text only; remove the attachment';
+// E3 end
 
 // C4's drafts, which need the session's index record: a session the index does not hold has no draft to restore, and
 // its writes fail (said once per mount, not on every pause).
@@ -298,7 +302,7 @@ export class EditorController {
     // `/btw` draft reaches `session.send` or `session.steer`.
     const btw = /^\/btw(?:\s|$)/.test(s.display.trim());
     if (btw) {
-      const refusal = !slashWidget('btw') ? SIDE_COPY.btw.unavailable : typeof s.content !== 'string' ? SIDE_COPY.btw.attachments : null;
+      const refusal = !slashWidget('btw') ? BTW_UNAVAILABLE : typeof s.content !== 'string' ? BTW_TEXT_ONLY : null;
       if (refusal !== null) {
         warn(refusal);
         return;
