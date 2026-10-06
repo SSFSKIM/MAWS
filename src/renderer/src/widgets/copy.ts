@@ -45,7 +45,7 @@ export const WIDGET_FOOT: Record<FramedWidgetName, WidgetFoot> = {
   permissions: { readWith: 'list_permission_rules', editedWhere: 'Sets the mode with `set_permission_mode` for this session only · rules are edited in their settings files; session grants come from approval cards' },
   usage: { readWith: 'get_usage', editedWhere: 'Windows come from ClaudeUsage; the engine reports none through the relay' },
   config: { readWith: 'get_settings and get_memory_dialog', editedWhere: "Settings are edited in their files or the terminal's `/config`; MAWS's own settings are in the Settings tab" },
-  plugins: { readWith: 'system/init', editedWhere: "Reload with `reload_plugins` is for this session · enable and disable in settings (`enabledPlugins`) or the terminal's `/plugins`; the engine lists what it loaded" },
+  plugins: pluginsFoot('<config home>'), // E8: the widget words it with the config home `plugins.env` answers
   mcp: {
     readWith: 'mcp_status',
     editedWhere: 'Servers are configured in `.mcp.json` and settings · Reconnect is for this session · Enable and disable: recorded by the engine for this project in `~/.claude.json`',
@@ -161,7 +161,16 @@ export const CONFIG = {
 };
 
 // Plugins.
-export const PLUGINS = { lastReported: `${NOT_RUNNING} · the plugins it last reported`, none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded', loadedList: 'Loaded plugins' };
+export const PLUGINS = { lastReported: `${NOT_RUNNING} · the plugins it last reported`, none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded in this session', loadedList: 'Loaded plugins' };
+
+// E8: the `/plugins` widget's foot. Every change runs the engine's CLI after a sheet; a listing writes no configuration
+// but refreshes the engine's own catalogue cache (E8 D-12), and the CLI keeps its own records in `.claude.json`.
+export function pluginsFoot(home: string): WidgetFoot {
+  return {
+    readWith: 'claude plugin list --json · marketplace list --json · system/init',
+    editedWhere: `Every change runs the engine's CLI after you confirm it; the engine writes \`${home}/settings.json\` and \`${home}/plugins\` and keeps its own records in \`${home}/.claude.json\` · listing refreshes the engine's own catalogue cache under \`${home}/plugins\``,
+  };
+}
 
 // MCP.
 export const MCP = { none: 'No MCP servers', list: 'MCP servers', scope: (scope: string) => `scope ${scope}`, from: (source: string) => `from ${source}`, tools: (n: number) => `${n} tool${n === 1 ? '' : 's'}` };
@@ -367,6 +376,79 @@ export const RELOAD = {
   reload: 'Reload',
   done: 'Reloaded',
   reloaded: (commands: number, agents: number, plugins: number, errors: number) => `Reloaded · ${commands} commands · ${agents} agents · ${plugins} plugins · ${errors} error${errors === 1 ? '' : 's'}`,
+  skills: (n: number) => `Reloaded · ${n} skill${n === 1 ? '' : 's'}`, // E8: `reload_skills`
+};
+
+// E8: plugin management in `/plugins` (E8 execution document, M2): the sections, the confirm sheet and a row's
+// operation line. The engine's own `message` and `failureCode` are shown as it printed them, never paraphrased.
+const sessionCount = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
+export const PLUGIN_MANAGEMENT = {
+  reloadMods: 'Reload mods',
+  reloadSkills: 'Reload skills',
+  // Installed
+  installed: 'Installed',
+  installedList: 'Installed plugins',
+  noInstalled: 'No plugins installed',
+  enabled: 'enabled',
+  disabled: 'disabled',
+  enabledSwitch: (id: string) => `Enabled: ${id}`,
+  update: 'Update',
+  uninstall: 'Uninstall…',
+  // Marketplaces
+  marketplaces: 'Marketplaces',
+  marketplaceList: 'Known marketplaces',
+  noMarketplaces: 'No marketplaces configured',
+  refresh: 'Refresh',
+  remove: 'Remove…',
+  addMarketplace: 'Add marketplace',
+  addPlaceholder: 'owner/repo, URL or folder',
+  add: 'Add…',
+  chooseFolder: 'Choose folder…',
+  // Available
+  available: 'Available',
+  filterPlaceholder: 'Filter available plugins',
+  availableIn: (marketplace: string, n: number) => `${marketplace} · ${n} plugin${n === 1 ? '' : 's'}`,
+  availableList: (marketplace: string) => `Available in ${marketplace}`,
+  noAvailable: 'No plugins available to install',
+  noMatch: 'No available plugin matches the filter',
+  install: 'Install…',
+  installedNote: 'installed',
+  // the confirm sheet
+  verb: {
+    install: 'Install',
+    update: 'Update',
+    uninstall: 'Uninstall',
+    enable: 'Enable',
+    disable: 'Disable',
+    'marketplace-add': 'Add marketplace',
+    'marketplace-update': 'Refresh marketplace',
+    'marketplace-remove': 'Remove marketplace',
+  } as const,
+  submit: { install: 'Install', update: 'Update', uninstall: 'Uninstall', enable: 'Enable', disable: 'Disable', 'marketplace-add': 'Add', 'marketplace-update': 'Refresh', 'marketplace-remove': 'Remove' } as const,
+  title: (verb: string, target: string) => `${verb} ${target}?`,
+  scope: 'Scope',
+  scopeName: { user: 'User', project: 'Project', local: 'Local' } as const,
+  inProject: (path: string) => `In ${path}`,
+  writes: "The engine's CLI writes:",
+  records: (home: string) => `and keeps its own records in ${home}/.claude.json`,
+  reloadsIn: (n: number) => `Reloads plugins in ${n} running ${n === 1 ? 'session' : 'sessions'}`,
+  noSessionToReload: 'No running session to reload',
+  nothingToReload: 'Nothing to reload: an added marketplace loads no plugin',
+  understand: 'I understand',
+  declaredTitle: (target: string) => `Run the command ${target} declares?`,
+  declared: "The marketplace declares this command; the engine's CLI runs it only once you accept it:",
+  runIt: 'Run it',
+  // a row's operation line
+  reloading: 'Reloading running sessions…',
+  reloadedIn: (n: number) => `Reloaded in ${sessionCount(n)}`,
+  reflected: 'reflected',
+  notReflectedIn: (title: string) => `not reflected in ${title}`,
+  mayOverride: 'a project setting may override it',
+  failedIn: (title: string, error: string) => `failed in ${title} · ${error}`,
+  versionChange: (from: string, to: string) => `${from} → ${to}`,
+  done: 'Done',
+  cancel: 'Stop', // `plugins.cancel`: stops the CLI, or drops an operation still queued behind another
+  reloadAgain: 'Reload again',
 };
 
 // MCP's Reconnect and the persistent enable switch.

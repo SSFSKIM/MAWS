@@ -1,9 +1,14 @@
+// `/plugins` over the fixture-backed widget backend (C11) with the E8 plugin CLI stood in by scripted answers: the
+// three CLI reads, the operations' receipts, and `plugins.operation` / `plugins.changed` emitted by the test as the
+// engine host would emit them. Nothing here runs a CLI or touches a config home.
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { EventName, MawsBridge } from '@shared/ipc/schema';
+import type { InstalledPlugin, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
+import { commandLine } from '@shared/plugins/cli';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { useSessions } from '../stores/sessions';
@@ -11,11 +16,57 @@ import { PluginsWidget } from './PluginsWidget';
 
 const ROOT = join(__dirname, '../../../..');
 const ID = 'app-7412a115' as AppSessionId;
+const HOME = '/tmp/e8-scratch/claude-config';
+const BINARY = '/Users/me/.local/share/claude/versions/2.1.290';
+const SHA = 'e'.repeat(64);
 let backend: WidgetBackend;
+let cwd: string;
+let emit: (name: EventName, payload: unknown) => void;
+let installed: InstalledPlugin[];
+let opSeq: number;
+
+const plugin = (id: string, over: Partial<InstalledPlugin> = {}): InstalledPlugin => {
+  const [name, marketplace] = id.split('@');
+  return { id, name, marketplace, version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: `${HOME}/plugins/cache/${marketplace}/${name}/0.1.0`, errors: [], notes: [], ...over };
+};
+
+// The plugin CLI's answers as the engine host gives them, and its events delivered to the widget's listeners.
+function standIn() {
+  installed = [plugin('e8-probe@e8-scratch')];
+  opSeq = 0;
+  backend.script('plugins.env', () => ({ binary: BINARY, configHome: HOME }));
+  backend.script('plugins.list', () => ({ plugins: installed }));
+  backend.script('marketplaces.list', () => ({ marketplaces: [{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8-scratch/market', installLocation: '/tmp/e8-scratch/market' }] }));
+  backend.script('plugins.available', () => ({
+    plugins: [
+      { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'The probe', version: '0.1.0' },
+      { pluginId: 'e8-other@e8-scratch', name: 'e8-other', marketplaceName: 'e8-scratch', description: 'Another', version: null },
+      { pluginId: 'review@anthropic-plugin-directory', name: 'review', marketplaceName: 'anthropic-plugin-directory', description: 'Code review', version: '1.0.0' },
+    ],
+  }));
+  for (const command of ['plugins.install', 'plugins.update', 'plugins.uninstall', 'plugins.enable', 'plugins.disable', 'marketplaces.add', 'marketplaces.update', 'marketplaces.remove'] as const) backend.script(command, () => ({ opId: `pop-${++opSeq}` }));
+  backend.script('plugins.cancel', () => ({ cancelled: true }));
+  const base = backend.bridge();
+  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const bridge: MawsBridge = {
+    ...base,
+    on(name, listener) {
+      if (!name.startsWith('plugins.')) return base.on(name, listener);
+      const set = listeners.get(name) ?? new Set();
+      listeners.set(name, set);
+      const entry = listener as (payload: unknown) => void;
+      set.add(entry);
+      return () => void set.delete(entry);
+    },
+  };
+  emit = (name, payload) => listeners.get(name)?.forEach((listener) => listener(payload));
+  window.maws = bridge;
+}
 
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
-  window.maws = backend.bridge();
+  cwd = backend.status(ID).cwd;
+  standIn();
 });
 afterEach(() => {
   cleanup();
@@ -30,54 +81,263 @@ const mount = () =>
     </QueryClientProvider>,
   );
 
-describe('plugins widget', () => {
-  it('lists what a ready process loaded, with no caption', () => {
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
-    mount();
-    expect(screen.getAllByRole('listitem')).toHaveLength(11);
+const invoked = (command: string) => backend.calls.filter((c) => c.command === command).map((c) => c.input);
+const section = (name: string) => document.querySelector<HTMLElement>(`[data-plugins-section="${name}"]`)!;
+const row = (id: string) => section('installed').querySelector<HTMLElement>(`[data-plugin-row="${id}"]`)!;
+const sheet = () => screen.getByRole('dialog');
+const argvShown = () => JSON.parse(sheet().querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!) as string[];
+const event = (over: Partial<PluginsOperationEvent> & Pick<PluginsOperationEvent, 'opId' | 'phase'>): PluginsOperationEvent => ({ action: 'install', target: 'e8-probe@e8-scratch', ...over });
+const ready = async () => {
+  useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+  mount();
+  await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+  await waitFor(() => expect(section('marketplaces').querySelector('[data-marketplace-row="e8-scratch"]')).toBeTruthy());
+};
+
+describe('plugins widget: loaded in this session and the reloads', () => {
+  it('lists what a ready process loaded once the installed plugins are read, with no caption', async () => {
+    await ready();
+    expect(within(screen.getByRole('list', { name: 'Loaded plugins' })).getAllByRole('listitem')).toHaveLength(11);
     expect(screen.queryByText(/last reported/)).toBeNull();
+    expect(invoked('plugins.list')).toEqual([{ cwd }]);
+    expect(invoked('marketplaces.list')).toEqual([{ cwd }]);
   });
 
-  it('operations show working, outcome and late correction: Reload shows Working… from the receipt, then the reload summarised', async () => {
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+  it('Reload mods shows Working… from the receipt, then the reload summarised', async () => {
     backend.holdOperations(true);
-    mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Working…'));
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload mods' }));
+    await waitFor(() => expect(screen.getByText('Working…')).toBeTruthy());
     expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Reload' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Reload mods' })).toHaveProperty('disabled', true);
     act(() => void backend.settleOperations());
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Reloaded · 52 commands · 5 agents · 11 plugins · 0 errors'));
-    expect(screen.getByRole('button', { name: 'Reload' })).toHaveProperty('disabled', false);
+    await waitFor(() => expect(screen.getByText('Reloaded · 52 commands · 5 agents · 11 plugins · 0 errors')).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Reload mods' })).toHaveProperty('disabled', false);
   });
 
-  it('shows a failed reload in its words with the list as it was, and a late success corrects it to Applied after all', async () => {
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+  it('Reload skills runs reload_skills and says how many skills the engine now offers', async () => {
+    backend.script('session.reloadSkills', () => {
+      setTimeout(() => backend.emitOperation({ appSessionId: ID, opId: 'op-skills', command: 'session.reloadSkills', late: false, outcome: { ok: true, value: { skills: [{ name: 'e8-probe:e8-hello' }, { name: 'review' }] } } }), 0);
+      return { opId: 'op-skills' };
+    });
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload skills' }));
+    await waitFor(() => expect(screen.getByText('Reloaded · 2 skills')).toBeTruthy());
+  });
+
+  it('shows a failed reload in red in its words with the list as it was, and a late success corrects it to Applied after all', async () => {
     backend.scriptOutcome('session.reloadPlugins', () => ({ ok: false, error: { code: 'timeout', message: 'reload_plugins unanswered after 60 s', engineCode: null } }));
-    mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('reload_plugins unanswered after 60 s · timeout'));
-    expect(screen.getAllByRole('listitem')).toHaveLength(11);
-    const opId = 'op-1'; // the backend's first operation
-    act(() => backend.emitOperation({ appSessionId: ID, opId, command: 'session.reloadPlugins', late: true, outcome: { ok: true, value: { commands: [], agents: [], plugins: [], mcpServers: [], error_count: 0 } } }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Applied after all'));
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload mods' }));
+    await waitFor(() => expect(screen.getByText('reload_plugins unanswered after 60 s · timeout').className).toContain('text-danger'));
+    expect(within(screen.getByRole('list', { name: 'Loaded plugins' })).getAllByRole('listitem')).toHaveLength(11);
+    act(() => backend.emitOperation({ appSessionId: ID, opId: 'op-1', command: 'session.reloadPlugins', late: true, outcome: { ok: true, value: { commands: [], agents: [], plugins: [], mcpServers: [], error_count: 0 } } }));
+    await waitFor(() => expect(screen.getByText('Applied after all')).toBeTruthy());
   });
 
   it('refuses a reload the host would not start as the transport branch, asking nothing of the engine', async () => {
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
     backend.script('session.reloadPlugins', () => {
       throw new WidgetBackendError({ code: 'timeout', message: 'the host did not answer' });
     });
-    mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('The engine did not answer · showing the last value it reported'));
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload mods' }));
+    await waitFor(() => expect(screen.getByText('The engine did not answer · showing the last value it reported')).toBeTruthy());
   });
 
-  it('keeps an exited session’s last list and says it is what the session last reported', () => {
+  it('keeps an exited session’s last list, offers no reload, and still manages plugins through the CLI', async () => {
     useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) });
     mount();
-    expect(screen.getAllByRole('listitem')).toHaveLength(11);
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    expect(within(screen.getByRole('list', { name: 'Loaded plugins' })).getAllByRole('listitem')).toHaveLength(11);
     expect(screen.getByText('The session is not running · the plugins it last reported')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull(); // nothing to reload without a process
+    expect(screen.queryByRole('button', { name: 'Reload mods' })).toBeNull();
+    expect(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' })).toHaveProperty('disabled', false);
+  });
+
+  it('frames the CLI’s refusal of the installed-plugins read as the widget’s error', async () => {
+    backend.script('plugins.list', () => {
+      throw new WidgetBackendError({ code: 'internal', message: 'Path does not exist: /nope' });
+    });
+    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    mount();
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Path does not exist: /nope'));
+  });
+});
+
+describe('plugins widget: management', () => {
+  it('lists installed plugins and marketplaces, and reads the catalogue only when Available opens', async () => {
+    await ready();
+    expect(row('e8-probe@e8-scratch').textContent).toContain('user · enabled · e8-scratch');
+    expect(section('marketplaces').querySelector('[data-marketplace-row="e8-scratch"]')!.textContent).toContain('/tmp/e8-scratch/market');
+    expect(invoked('plugins.available')).toEqual([]);
+    fireEvent.click(within(section('available')).getByText('Available'));
+    await waitFor(() => expect(within(section('available')).getByText('e8-scratch · 2 plugins')).toBeTruthy());
+    expect(invoked('plugins.available')).toEqual([{ cwd }]);
+    fireEvent.change(within(section('available')).getByRole('textbox', { name: 'Filter available plugins' }), { target: { value: 'review' } });
+    expect(within(section('available')).getByRole('list', { name: 'Available in anthropic-plugin-directory' })).toBeTruthy();
+    expect(within(section('available')).queryByText('e8-scratch · 2 plugins')).toBeNull();
+    // a change rereads the lists, and the catalogue only while its section is open
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(invoked('plugins.available')).toHaveLength(2));
+    expect(invoked('plugins.list')).toHaveLength(2);
+    expect(invoked('marketplaces.list')).toHaveLength(2);
+    fireEvent.click(within(section('available')).getByText('Available'));
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(invoked('plugins.list')).toHaveLength(3));
+    expect(invoked('plugins.available')).toHaveLength(2);
+  });
+
+  it('Cancel on the confirm sheet runs nothing; a confirmed install runs the argument list the sheet showed, at the scope chosen', async () => {
+    await ready();
+    fireEvent.click(within(section('available')).getByText('Available'));
+    await waitFor(() => expect(within(section('available')).getByText('e8-scratch · 2 plugins')).toBeTruthy());
+    fireEvent.click(within(section('available')).getByText('e8-scratch · 2 plugins'));
+    const other = await waitFor(() => section('available').querySelector<HTMLElement>('[data-plugin-row="e8-other@e8-scratch"]')!);
+    expect(within(section('available').querySelector<HTMLElement>('[data-plugin-row="e8-probe@e8-scratch"]')!).getByText('installed')).toBeTruthy();
+
+    fireEvent.click(within(other).getByRole('button', { name: 'Install…' }));
+    expect(sheet().getAttribute('data-plugins-sheet')).toBe('install');
+    expect(within(sheet()).getByRole('heading', { name: 'Install e8-other@e8-scratch?' })).toBeTruthy();
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(invoked('plugins.install')).toEqual([]);
+
+    fireEvent.click(within(other).getByRole('button', { name: 'Install…' }));
+    expect(argvShown()).toEqual(commandLine('install', { plugin: 'e8-other@e8-scratch', scope: 'user' }));
+    expect(within(sheet()).getByText('2.1.290 plugin install e8-other@e8-scratch --scope user --json')).toBeTruthy();
+    expect(within(sheet()).getByText(`${HOME}/settings.json`)).toBeTruthy();
+    expect(within(sheet()).getByText(`and keeps its own records in ${HOME}/.claude.json`)).toBeTruthy();
+    expect(within(sheet()).getByText('Reloads plugins in 1 running session')).toBeTruthy();
+    fireEvent.click(within(sheet()).getByRole('radio', { name: 'Project' }));
+    expect(argvShown()).toEqual(commandLine('install', { plugin: 'e8-other@e8-scratch', scope: 'project' }));
+    expect(within(sheet()).getByText(`${cwd}/.claude/settings.json`)).toBeTruthy();
+    expect(within(sheet()).getByText(`In ${cwd}`)).toBeTruthy();
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+    await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd, plugin: 'e8-other@e8-scratch', scope: 'project' }]));
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    await waitFor(() => expect(within(other).getByRole('status').textContent).toBe('Working…'));
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'started' })));
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'output', line: 'Cloning e8-other…' })));
+    expect(within(other).getByRole('status').textContent).toBe('Cloning e8-other…');
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'reloading' })));
+    expect(within(other).getByRole('status').textContent).toBe('Reloading running sessions…');
+    act(() =>
+      emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'done', outcome: { ok: true, result: { message: 'Successfully installed plugin: e8-other@e8-scratch (scope: project)' } }, reload: { sessions: [{ appSessionId: ID, outcome: 'reflected', error: null }] } })),
+    );
+    expect(within(other).getByRole('status').textContent).toBe('Successfully installed plugin: e8-other@e8-scratch (scope: project) · Reloaded in 1 session · reflected');
+  });
+
+  it('the switch asks first and stands where the next read puts it, never where the outcome suggests', async () => {
+    await ready();
+    const toggle = () => within(row('e8-probe@e8-scratch')).getByRole('switch', { name: 'Enabled: e8-probe@e8-scratch' });
+    expect(toggle().getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(toggle());
+    expect(within(sheet()).getByRole('heading', { name: 'Disable e8-probe@e8-scratch?' })).toBeTruthy();
+    expect(argvShown()).toEqual(['plugin', 'disable', 'e8-probe@e8-scratch', '--scope', 'user', '--json']);
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Disable' }));
+    await waitFor(() => expect(invoked('plugins.disable')).toEqual([{ cwd, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
+    // the CLI says it disabled the plugin, but the read that follows still lists it enabled: the switch stays on
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(invoked('plugins.list')).toHaveLength(2));
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'disable', phase: 'done', outcome: { ok: true, result: { message: 'Successfully disabled plugin: e8-probe (scope: user)' } }, reload: { sessions: [] } })));
+    expect(toggle().getAttribute('aria-checked')).toBe('true');
+    // the next read lists it disabled: the switch moves with it
+    installed = [plugin('e8-probe@e8-scratch', { enabled: false })];
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(toggle().getAttribute('aria-checked')).toBe('false'));
+    expect(row('e8-probe@e8-scratch').textContent).toContain('user · disabled · e8-scratch');
+  });
+
+  it('a marketplace-declared command opens a second sheet whose Run it reruns with --accept-command only', async () => {
+    await ready();
+    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(invoked('plugins.update')).toHaveLength(1));
+    const shownCommand = { sha256: SHA, command: 'npx fetch-helper', kind: 'command-source' };
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'update', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message: 'This plugin runs a command its marketplace declares', failureCode: 'command_source_refused', shownCommand } } })));
+    await waitFor(() => expect(within(sheet()).getByRole('heading', { name: 'Run the command e8-probe@e8-scratch declares?' })).toBeTruthy());
+    expect(sheet().querySelector('[data-plugins-declared]')!.textContent).toBe('npx fetch-helper');
+    expect(argvShown()).toEqual(['plugin', 'update', 'e8-probe@e8-scratch', '--scope', 'user', '--accept-command', SHA, '--json']);
+    // beneath the modal sheet, the row says why the CLI stopped
+    expect(row('e8-probe@e8-scratch').querySelector('[role="status"]')!.textContent).toBe('This plugin runs a command its marketplace declares · command_source_refused');
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Run it' }));
+    await waitFor(() => expect(invoked('plugins.update')).toHaveLength(2));
+    expect(invoked('plugins.update')[1]).toEqual({ cwd, plugin: 'e8-probe@e8-scratch', scope: 'user', acceptCommand: SHA });
+    expect(JSON.stringify(backend.calls)).not.toContain('"-y"');
+  });
+
+  it('an uninstall asks for the acknowledgement, and its result outlives the row the change removed', async () => {
+    await ready();
+    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Uninstall…' }));
+    const confirm = within(sheet()).getByRole('button', { name: 'Uninstall' });
+    expect(confirm).toHaveProperty('disabled', true);
+    fireEvent.submit(confirm.closest('form')!); // Enter alone never destroys
+    expect(invoked('plugins.uninstall')).toEqual([]);
+    expect(within(sheet()).getByText(`${HOME}/plugins/data/e8-probe@e8-scratch/`)).toBeTruthy();
+    fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
+    fireEvent.click(confirm);
+    await waitFor(() => expect(invoked('plugins.uninstall')).toEqual([{ cwd, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
+    installed = [];
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(section('installed').querySelector('[data-plugin-row]')).toBeNull());
+    expect(within(section('installed')).getByText('No plugins installed')).toBeTruthy();
+    act(() =>
+      emit('plugins.operation', event({ opId: 'pop-1', action: 'uninstall', phase: 'done', outcome: { ok: true, result: { message: 'Successfully uninstalled plugin: e8-probe (scope: user)' } }, reload: { sessions: [{ appSessionId: ID, outcome: 'not_reflected', error: null }] } })),
+    );
+    const gone = section('installed').querySelector<HTMLElement>('[data-plugin-result="e8-probe@e8-scratch"]')!;
+    expect(within(gone).getByRole('status').textContent).toBe(
+      `Successfully uninstalled plugin: e8-probe (scope: user) · Reloaded in 1 session · not reflected in ${ID} · a project setting may override it`,
+    );
+    // Reload again runs reload_plugins for this session
+    fireEvent.click(within(gone).getByRole('button', { name: 'Reload again' }));
+    await waitFor(() => expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toHaveLength(1));
+  });
+
+  it('adds a chosen folder as a marketplace and shows the engine’s failure in red with its code', async () => {
+    backend.script('layout.pickFiles', () => ({ files: [{ path: '/tmp/e8-does-not-exist', name: 'e8-does-not-exist', bytes: 0, mediaType: 'inode/directory', data: null }] }));
+    await ready();
+    fireEvent.click(within(section('marketplaces')).getByRole('button', { name: 'Choose folder…' }));
+    await waitFor(() => expect(within(section('marketplaces')).getByRole('textbox', { name: 'Add marketplace' })).toHaveProperty('value', '/tmp/e8-does-not-exist'));
+    expect(invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: null, multiple: false }]);
+    fireEvent.click(within(section('marketplaces')).getByRole('button', { name: 'Add…' }));
+    expect(argvShown()).toEqual(['plugin', 'marketplace', 'add', '/tmp/e8-does-not-exist', '--json']);
+    expect(within(sheet()).getByText('Nothing to reload: an added marketplace loads no plugin')).toBeTruthy();
+    expect(within(sheet()).queryByRole('radio')).toBeNull();
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, source: '/tmp/e8-does-not-exist' }]));
+    act(() =>
+      emit('plugins.operation', event({ opId: 'pop-1', action: 'marketplace-add', target: '/tmp/e8-does-not-exist', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message: 'Path does not exist: /tmp/e8-does-not-exist', failureCode: 'invalid_source', shownCommand: null } } })),
+    );
+    const line = within(section('marketplaces')).getByRole('status');
+    expect(line.textContent).toBe('Path does not exist: /tmp/e8-does-not-exist · invalid_source');
+    expect(line.className).toContain('text-danger');
+  });
+
+  it('refreshes and removes a marketplace through its sheet, the removal behind the acknowledgement', async () => {
+    await ready();
+    const market = () => section('marketplaces').querySelector<HTMLElement>('[data-marketplace-row="e8-scratch"]')!;
+    fireEvent.click(within(market()).getByRole('button', { name: 'Refresh' }));
+    expect(argvShown()).toEqual(['plugin', 'marketplace', 'update', 'e8-scratch', '--json']);
+    expect(within(sheet()).getByText(`${HOME}/plugins/known_marketplaces.json`)).toBeTruthy();
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(invoked('marketplaces.update')).toEqual([{ cwd, name: 'e8-scratch' }]));
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'marketplace-update', target: 'e8-scratch', phase: 'done', outcome: { ok: true, result: { message: 'Validating local marketplace\nSuccessfully updated marketplace: e8-scratch' } }, reload: { sessions: [] } })));
+    expect(within(market()).getByRole('status').textContent).toBe('Validating local marketplace\nSuccessfully updated marketplace: e8-scratch · No running session to reload');
+    fireEvent.click(within(market()).getByRole('button', { name: 'Remove…' }));
+    expect(argvShown()).toEqual(['plugin', 'marketplace', 'remove', 'e8-scratch', '--json']);
+    expect(within(sheet()).getByRole('button', { name: 'Remove' })).toHaveProperty('disabled', true);
+    fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(invoked('marketplaces.remove')).toEqual([{ cwd, name: 'e8-scratch' }]));
+  });
+
+  it('Stop asks the host to cancel the running CLI', async () => {
+    await ready();
+    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Stop' })).toBeTruthy());
+    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(invoked('plugins.cancel')).toEqual([{ opId: 'pop-1' }]));
   });
 });

@@ -1,24 +1,25 @@
-// `/plugins` (C11 execution document, the widget table): the plugins the engine loaded, from the latest `system/init`
-// as C3's status carries them (name, version, source, path), with the init frame's plugin errors and warnings. The
-// enable state lives in settings (`enabledPlugins`) and the terminal's `/plugins`; the widget shows what loaded. Reload
-// is `reload_plugins` as an operation (session-only for configuration): `Working…` from the receipt, then the reload
-// summarised, or the error in words with the list as it was; the list itself follows the next init frame.
-import * as z from 'zod';
+// `/plugins` (C11 execution document, the widget table; E8 execution document, M2): the plugin-management surface. From
+// the top: Reload mods and Reload skills for this session; Installed (`claude plugin list --json`), Marketplaces
+// (`claude plugin marketplace list --json`, with Add marketplace), Available (`--available`, read only once its section
+// is opened), each change through the engine's own CLI after a confirm sheet (`plugins/`); and "Loaded in this
+// session", the plugins the engine loaded, from the latest `system/init` or `reload_plugins` answer as C3's status
+// carries them, with the init frame's plugin errors and warnings. The CLI needs no engine process, so a session that is
+// not running still manages plugins; only the reloads and the Loaded list need one. The frame's state follows the
+// installed-plugins read.
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
+import { NOT_RUNNING } from '../statusline/mode-menu';
 import { useSessions } from '../stores/sessions';
-import { PLUGINS, RELOAD, WIDGET_FOOT, WIDGET_TITLE } from './copy';
-import { operationLine, useOperation } from './operation';
-import { Group, Mono, Row, Rows, TextButton } from './parts';
+import { PLUGINS, pluginsFoot, WIDGET_TITLE } from './copy';
+import { Group, Mono, Row, Rows } from './parts';
+import { AvailableSection } from './plugins/Available';
+import type { ManageEnv } from './plugins/ConfirmSheet';
+import { InstalledSection } from './plugins/Installed';
+import { ManageProvider, useManageState } from './plugins/manage';
+import { MarketplacesSection } from './plugins/Marketplaces';
+import { usePluginsEnv, usePluginsRead } from './plugins/read';
+import { ReloadControls, useReloads } from './plugins/reload';
 import { WidgetFrame } from './WidgetFrame';
-
-// `reload_plugins`'s value: the refreshed lists and the error count (SPEC 45 §45.17:4207).
-const ReloadValueSchema = z.looseObject({ commands: z.array(z.unknown()), agents: z.array(z.unknown()), plugins: z.array(z.unknown()), error_count: z.number() });
-
-export const reloadSummary = (value: unknown): string => {
-  const parsed = ReloadValueSchema.safeParse(value);
-  return parsed.success ? RELOAD.reloaded(parsed.data.commands.length, parsed.data.agents.length, parsed.data.plugins.length, parsed.data.error_count) : RELOAD.done;
-};
 
 export interface PluginsView {
   plugins: { name: string; version: string | null; source: string | null; path: string }[];
@@ -62,27 +63,45 @@ export function PluginsBody({ view }: { view: PluginsView }) {
   );
 }
 
-// No read: the status is C3's and already held, so only a session that never reported one is not running here.
+// The sessions a change reloads: those with a ready process (the host's fan-out targets).
+const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): number => {
+  let n = 0;
+  for (const status of engine.values()) if (status.process === 'ready') n += 1;
+  return n;
+};
+
+const NO_HOME = '<config home>';
+
 export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
-  const reload = useOperation(appSessionId, 'session.reloadPlugins');
-  const line = operationLine(reload.state, reloadSummary);
+  // the CLI's cwd: the launch's directory (which the host compares for project and local scope), else the record's
+  const cwd = useSessions((s) => s.engine.get(appSessionId)?.cwd ?? s.records.get(appSessionId)?.directory ?? null);
+  const readySessions = useSessions((s) => readyCount(s.engine));
+  const env = usePluginsEnv();
+  const installed = usePluginsRead('plugins.list', cwd);
+  const reloads = useReloads(appSessionId);
+  const ready = status?.process === 'ready';
+  const configHome = env?.configHome ?? NO_HOME;
+  const manageEnv: ManageEnv = { cwd: cwd ?? '', binary: env?.binary ?? null, configHome, readySessions };
+  const { manage, sheet } = useManageState(manageEnv, ready ? reloads.reloadMods : null);
+  const plugins = installed.data?.plugins ?? [];
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" foot={WIDGET_FOOT.plugins} state={status ? 'ready' : 'not_running'} error={null} close={close}>
-      {status && status.process !== 'ready' && <p className="m-0 mb-1 text-ui-sm text-fg-muted">{PLUGINS.lastReported}</p>}
-      {status?.process === 'ready' && (
-        <div className="mb-2 flex items-baseline gap-2">
-          <TextButton onClick={() => void reload.run({})} disabled={reload.state.phase === 'working'}>
-            {RELOAD.reload}
-          </TextButton>
-          {line !== null && (
-            <span role="status" className="min-w-0 text-ui-sm text-fg-muted">
-              {line}
-            </span>
-          )}
-        </div>
-      )}
-      {status && <PluginsBody view={present(status)} />}
-    </WidgetFrame>
+    <ManageProvider value={manage}>
+      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" foot={pluginsFoot(configHome)} state={installed.state} error={installed.error} close={close}>
+        {ready && (
+          <div className="mb-2">
+            <ReloadControls reloads={reloads} />
+          </div>
+        )}
+        <InstalledSection plugins={plugins} />
+        {cwd !== null && <MarketplacesSection cwd={cwd} />}
+        {cwd !== null && <AvailableSection cwd={cwd} installed={new Set(plugins.map((p) => p.id))} />}
+        <section data-plugins-section="loaded" className="mt-3">
+          {status && !ready && <p className="m-0 mb-1 text-ui-sm text-fg-muted">{PLUGINS.lastReported}</p>}
+          {status ? <PluginsBody view={present(status)} /> : <p className="m-0 text-ui-sm text-fg-muted">{NOT_RUNNING}</p>}
+        </section>
+      </WidgetFrame>
+      {sheet}
+    </ManageProvider>
   );
 }

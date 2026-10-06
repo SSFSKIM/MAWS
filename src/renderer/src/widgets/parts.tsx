@@ -45,10 +45,11 @@ export function KeyValues({ rows, label }: { rows: readonly { label: string | nu
   );
 }
 
-// One line of a list: the main text, a quiet note at the right, optional detail under it, optional actions.
-export function Row({ main, note, detail, actions }: { main: ReactNode; note?: ReactNode; detail?: ReactNode; actions?: ReactNode }) {
+// One line of a list: the main text, a quiet note at the right, optional detail under it, optional actions, and the
+// `data-*` attributes an end-to-end test locates it by.
+export function Row({ main, note, detail, actions, ...data }: { main: ReactNode; note?: ReactNode; detail?: ReactNode; actions?: ReactNode } & { [attribute: `data-${string}`]: string }) {
   return (
-    <li className="flex flex-col gap-0.5 border-t border-border py-1 text-ui-sm first:border-t-0">
+    <li {...data} className="flex flex-col gap-0.5 border-t border-border py-1 text-ui-sm first:border-t-0">
       <div className="flex min-w-0 items-baseline gap-2">
         <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{main}</span>
         {note !== undefined && note !== null && <span className="shrink-0 text-fg-muted">{note}</span>}
