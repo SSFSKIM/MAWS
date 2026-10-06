@@ -77,6 +77,9 @@ import { rm } from 'node:fs/promises';
 // E9 start (emit comes with C3's imports, registerMainHandler with C3's, shell with C8c's)
 import { startVoice } from './voice/register';
 // E9 end
+// E5 start
+import { trackUnsavedFiles } from './lifecycle/quit-guard';
+// E5 end
 // E6 start (createGitRunner comes with C7's imports; the login-shell capture is C7's engineEnv)
 import { createMutatingRunner } from './git/mutate';
 import { registerScmHandlers } from './scm/register';
@@ -229,6 +232,7 @@ void startWithProfileLock(app, () => {
   const filesService = registerFilesHandlers(sessions.model, {
     emit: (payload) => void emit('files.changed', payload),
     openPath: (path) => shell.openPath(path),
+    showItemInFolder: (path) => shell.showItemInFolder(path), // E1: files.reveal
   });
   app.on('will-quit', () => filesService.dispose());
   // C8c end
@@ -356,6 +360,14 @@ void startWithProfileLock(app, () => {
   };
   openWindow();
 
+  // E5 start: each window's unsaved editor files for the quit guard (E5 execution document, M5): the page pushes its
+  // whole dirty set, forgotten when the window navigates or closes; the question's Save all asks every window to save
+  // and waits for the answers of the windows that hold files.
+  const unsavedFiles = trackUnsavedFiles();
+  registerMainHandler('layout.unsavedFiles', ({ paths }, { sender }) => unsavedFiles.update(sender, paths));
+  registerMainHandler('layout.saveAllDone', ({ requestId, failed }, { sender }) => unsavedFiles.done(sender, requestId, failed));
+  // E5 end
+
   // ---- C5: notifications, dock badge and the quit guard ----
   startAttention(sessions.model, { restoredIds: attention.restoredIds, settings: () => settings.state().settings, openWindow });
   // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
@@ -377,14 +389,18 @@ void startWithProfileLock(app, () => {
     publish: (waiting) => void emit('layout.quitWait', { waiting }),
     log: process.env.MAWS_E2E === '1' ? (line) => console.error(line) : undefined,
     // C12 end
-    ask: (report) =>
-      askToQuit(report, {
-        env: process.env,
-        show: (options) => {
-          const win = BrowserWindow.getFocusedWindow();
-          return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options);
+    ask: (report, asked /* E5 */) =>
+      askToQuit(
+        report,
+        {
+          env: process.env,
+          show: (options) => {
+            const win = BrowserWindow.getFocusedWindow();
+            return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options);
+          },
         },
-      }),
+        asked,
+      ),
     // C3's engine host stops its sessions within the grace; a host that cannot answer (not started, or a build without
     // C3's command) has nothing to stop.
     shutdownEngine: async () => {
@@ -395,6 +411,10 @@ void startWithProfileLock(app, () => {
     },
     // debt wave 6: past the bound, the ladder's SIGKILL rung for the engines still the engine host's children
     engines: { hostPid: () => hosts.snapshot('engine-host').pid, ps: listProcesses, kill: (pid) => process.kill(pid, 'SIGKILL') },
+    // E5 start: the unsaved files the windows pushed, and Save all's round trip
+    unsavedFiles: () => unsavedFiles.paths(),
+    saveAll: () => unsavedFiles.saveAll((requestId) => void emit('layout.saveAll', { requestId })),
+    // E5 end
   });
   // C12 start: the banner's reads and answers
   registerMainHandler('layout.quitWait', () => ({ waiting: quitGuard.waiting() }));

@@ -59,3 +59,25 @@ export function itemFor(event: RequestEvent, appSessionId = 'app-test', over: Pa
     summary: event.kind, createdAt: event.at, state: 'pending', stateChangedAt: event.at, expiresAt: null, ...over,
   };
 }
+
+// E1 M4b: a blocking ask's `maws.ask.opened` and the `question` item the engine host publishes for it (`askAttentionItem`).
+export type AskOpenedEvent = Extract<SessionEvent, { kind: 'maws.ask.opened' }>;
+export function askOpened(over: Partial<AskOpenedEvent> = {}): AskOpenedEvent {
+  return {
+    id: 'evt-ask' as AskOpenedEvent['id'], sessionId: 's-1' as AskOpenedEvent['sessionId'], at: '2026-10-06T09:00:00.000Z', seq: null, agentId: null, parentToolUseId: null,
+    kind: 'maws.ask.opened', askId: 'toolu_ask', toolUseId: 'toolu_ask' as AskOpenedEvent['toolUseId'], requestId: 'req-ask' as AskOpenedEvent['requestId'], blocking: true,
+    title: 'Release setup', context: null,
+    questions: [
+      { id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] },
+      { id: 'q2', question: 'What title?', modality: 'text' },
+    ],
+    ...over,
+  };
+}
+export function askItemFor(event: AskOpenedEvent, appSessionId = 'app-test', over: Partial<AttentionItem> = {}): AttentionItem {
+  return {
+    id: `${appSessionId}:${event.requestId}` as AttentionId, appSessionId: appSessionId as AppSessionId, sessionId: event.sessionId, kind: 'question',
+    request: { requestId: event.requestId, toolUseId: event.toolUseId, taskId: null, agentId: null },
+    summary: event.title ?? event.questions[0]!.question, createdAt: event.at, state: 'pending', stateChangedAt: event.at, expiresAt: null, ...over,
+  };
+}

@@ -25,6 +25,9 @@ import * as marketplaces from './schema/marketplaces';
 // E9 start
 import * as voice from './schema/voice';
 // E9 end
+// E1 start
+import * as maws from './schema/maws';
+// E1 end
 // E6 start
 import * as scm from './schema/scm';
 // E6 end
@@ -97,6 +100,9 @@ export const commands = {
   // E9 start
   ...voice.commands,
   // E9 end
+  // E1 start
+  ...maws.commands,
+  // E1 end
   // E6 start
   ...scm.commands,
   // E6 end
@@ -119,6 +125,9 @@ export const events = {
   // E9 start
   ...voice.events,
   // E9 end
+  // E1 start
+  ...maws.events,
+  // E1 end
   // E6 start
   ...scm.events,
   // E6 end

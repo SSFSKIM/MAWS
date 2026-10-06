@@ -63,6 +63,16 @@ import { registerUsage } from './usage';
 // E9 start
 import { DictationKeys } from './composer';
 // E9 end
+// E5 start
+import { EditorDialogs } from './tools/code';
+// E5 end
+// E1 start
+import { mawsTranscriptActions } from './tools/maws/actions';
+import { askSheetTool } from './tools/maws/ask/AskSheetTool';
+import { connectAsks } from './tools/maws/ask/connect';
+import { connectPaneShows } from './tools/maws/panes/connect';
+import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
+// E1 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -160,6 +170,16 @@ export function App() {
   // W6 start: the top bar's usage pill and its popover, the copy of ClaudeUsage's panel (E1), and the Usage action
   useEffect(() => registerUsage(), []);
   // W6 end
+  // E1 start: the maws tool server's renderer side: a pane `show_pane` asks for, opened by a window that knows the
+  // session; the capsule's and the delivery row's actions (the Question sheet, Open externally, Reveal in Finder)
+  useEffect(() => connectPaneShows(), []);
+  useEffect(() => registerMawsTranscriptActions(mawsTranscriptActions), []);
+  // M4: the Question sheet, registered once and never unregistered (C8a's rule above), and the live asks that open it
+  useEffect(() => {
+    registerPanelTool(askSheetTool);
+  }, []);
+  useEffect(() => connectAsks(), []);
+  // E1 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
@@ -186,6 +206,9 @@ export function App() {
       {/* E9 start: dictation's one controller, for the composer microphone's clicks and the composer.dictate hold once bound */}
       <DictationKeys />
       {/* E9 end */}
+      {/* E5 start: the editor's close sheet (registerEditor's guard, registered by C8c's registerCodeTools) */}
+      <EditorDialogs />
+      {/* E5 end */}
     </QueryClientProvider>
   );
 }

@@ -30,7 +30,7 @@ import { ENGINE_COMPAT_NOTICE_KEY, EngineCompatWatch } from './engine-compat'; /
 import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { Normalizer, type NormalizerWarning } from './normalizer';
-import { JournalClosed, OutboundWriter } from './outbound-writer';
+import { JournalClosed, OutboundWriter, type WriteOptions } from './outbound-writer';
 import { MessageQueue, type SteerPriority } from './queue';
 // C12 start
 import { hardReasons } from './budget';
@@ -42,6 +42,17 @@ import { isPermissionMode, SessionStatusTracker, type Catalog } from './session-
 import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionSurface } from './surface'; // R2
+// E1 start
+import type { MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
+import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/ask';
+import type { AskAnswer, AskResult } from '@shared/maws/tools';
+import { MemoryDeliverableStore, type DeliverableWriter } from './deliverables/store';
+import { AskAnswerMismatch } from './tool-server/ask';
+import { askAttentionItem, AskTable, type AskCancelReason } from './tool-server/asks';
+import { PaneBridge, type PaneShowRequest } from './tool-server/panes';
+import { MawsToolServer, toolText } from './tool-server/server';
+import { mawsTools } from './tool-server/tools';
+// E1 end
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
 
 export { HostHookRegistry } from './host-hooks';
@@ -87,6 +98,7 @@ export interface EngineSessionOptions {
   reconnectTrigger?: 'user' | 'process_exit';
   // C12 end
   sessionStartHookMs?: (plan: LaunchPlan) => Promise<number>; // debt wave 6: the hooks' bound; read from the settings by default
+  deliverables?: DeliverableWriter; // E1: where `send_file` records deliveries (the launcher's FileDeliverableStore; in memory by default)
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -102,6 +114,7 @@ interface Listeners {
   exited: (summary: ExitSummary) => void;
   catalog: (catalog: Catalog) => void; // C7: the whole catalogue, whenever its revision moved
   models: (models: unknown[]) => void; // C10: the initialize response's model list, for the catalogue cache
+  paneShow: (request: PaneShowRequest & { appSessionId: LaunchSpec['appSessionId'] }) => void; // E1: `show_pane` asks the windows (maws.pane.show)
 }
 
 type ProcessState = EngineSessionStatus['process'];
@@ -124,9 +137,14 @@ export class EngineSession {
   private readonly clearAndImplement: ClearAndImplementSequence;
   private readonly compat = new EngineCompatWatch(); // W13: one notice per session process
   readonly surface: SessionSurface; // R2: the remote surface MAWS attaches as
+  // E1: the `maws` MCP server the engine handshakes over `mcp_message`, and the bridge `show_pane` opens panes through
+  readonly toolServer: MawsToolServer;
+  private readonly panes: PaneBridge;
+  private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
+  private askItems = new Map<string, AttentionItem>(); // E1 M4b: the blocking asks' attention items, published with the broker's
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */ };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
@@ -179,13 +197,31 @@ export class EngineSession {
     this.lastUsedAt = this.launchedAt; // C12
     this.tracker = new SessionStatusTracker(opts.spec, () => this.touch());
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
+    // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
+    this.panes = new PaneBridge({ show: (request) => this.emit('paneShow', { appSessionId: opts.spec.appSessionId, ...request }) });
+    this.askTable = new AskTable({
+      onChange: () => {
+        this.publishAsks(); // E1 M4b
+        this.touch();
+      },
+    });
+    this.toolServer = new MawsToolServer({
+      tools: mawsTools({ deliverables: opts.deliverables ?? new MemoryDeliverableStore(), bridge: this.panes, asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason) }),
+      respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
+      cwd: () => this.tracker.engineCwd ?? this.spec.cwd,
+      appSessionId: opts.spec.appSessionId,
+      version: opts.appVersion ?? 'unknown',
+      log: this.log,
+      onChange: () => this.touch(),
+    });
+    // E1 end
     this.normalizer = new Normalizer({ appSessionId: opts.spec.appSessionId, launchId: opts.plan.launchId, sessionId: opts.plan.sessionId, warn: (w) => this.pendingWarnings.push(w) });
     this.broker = new PermissionBroker({
       appSessionId: opts.spec.appSessionId,
       client: { respond: (requestId, response, opts) => (this.client ? this.client.respond(requestId, response, opts) : Promise.reject(new Error('no engine process'))) },
       meta: (frame) => this.record('meta', frame),
       onAttention: (items) => {
-        this.emit('brokerItems', items);
+        this.emit('brokerItems', [...items, ...this.askItems.values()]); // E1 M4b: with the blocking asks'
         this.touch();
       },
       onGrant: (updates) => {
@@ -228,7 +264,7 @@ export class EngineSession {
       },
       log: this.log,
     });
-    const writeFrame = (frame: Parameters<OutboundWriter['write']>[0]) => (this.writer ? this.writer.write(frame) : Promise.reject(new Error('no engine process')));
+    const writeFrame = (frame: Parameters<OutboundWriter['write']>[0], writeOpts?: WriteOptions) => (this.writer ? this.writer.write(frame, writeOpts) : Promise.reject(new Error('no engine process')));
     this.queue = new MessageQueue({
       appSessionId: opts.spec.appSessionId,
       store: this.store,
@@ -325,7 +361,73 @@ export class EngineSession {
     return this.surface.answer(requestId, answer, this.respond);
   }
 
-  private readonly respond = (requestId: RequestId, response: unknown): Promise<void> => (this.client ? this.client.respond(requestId, response) : Promise.reject(new Error('no engine process')));
+  private readonly respond = (requestId: RequestId, response: unknown, opts?: WriteOptions): Promise<void> => (this.client ? this.client.respond(requestId, response, opts) : Promise.reject(new Error('no engine process')));
+
+  // E1: a window's answer to a `show_pane` (`maws.pane.answer`); the first one wins.
+  answerPane(requestId: RequestId, result: MawsPaneAnswerResult): 'delivered' | 'not_pending' {
+    return this.panes.answer(requestId, result);
+  }
+
+  // E1 M2: the asks waiting for the human (`maws.asks.list`), pending or being answered.
+  asks(): PendingAsk[] {
+    return this.askTable.list();
+  }
+
+  // E1 M2 (residue 12): the human's answers to one ask (`maws.ask.answer`), checked against its questions first (a
+  // mismatch throws AskAnswerMismatch and writes nothing), then claimed, written, and committed only once the write
+  // settled: a blocking ask's call is answered with the AskResult (committed at the flushed row), an async ask's answers
+  // go as a `next` steer whose write carries `maws_ask_answered` as its preface. A refused write releases the ask
+  // (`write_failed`, still pending, so the human can retry); a live journal failure does not (answerNotWritten); an exit
+  // meanwhile cancels it with the rest.
+  async answerAsk(askId: string, answers: AskAnswer[]): Promise<'delivered' | 'not_pending' | 'write_failed'> {
+    const held = this.askTable.get(askId);
+    if (held === null) return 'not_pending';
+    const problem = askAnswersProblem(held.questions, answers);
+    if (problem !== null) throw new AskAnswerMismatch(`ask ${askId}: ${problem}`);
+    const ask = this.askTable.claim(askId);
+    if (ask === null) return 'not_pending';
+    this.markUsed();
+    if (ask.blocking) {
+      const result: AskResult = { status: 'answered', askId, answers };
+      const written = toolText(result);
+      try {
+        await this.toolServer.reply(ask.requestId, written, { flushed: () => this.askTable.commit(askId, written) });
+      } catch (error) {
+        return this.answerNotWritten(askId, error);
+      }
+      this.askTable.commit(askId, written); // a client that does not call `flushed` still ends committed
+      return 'delivered';
+    }
+    // the meta row rides the steer's own write as its preface: journaled just before the steer's row, and only if the
+    // write succeeded, under the writer's journal-failure handling
+    try {
+      await this.queue.steer(askSteerText(askId, ask.questions, answers), { priority: 'next', preface: [{ event: 'maws_ask_answered', askId, toolUseId: ask.toolUseId, answers }] });
+    } catch (error) {
+      return this.answerNotWritten(askId, error);
+    } finally {
+      this.touch();
+    }
+    this.askTable.commit(askId);
+    return 'delivered';
+  }
+
+  // E1 M2: an answer whose write failed. A refused write releases the ask for a retry. A journal failure while live
+  // (the frame may have reached the engine, only its row is missing) leaves it claimed: the writer has already ended
+  // the process through the journal-failure path, a retry could deliver the answers twice, and the exit cancels it.
+  private answerNotWritten(askId: string, error: unknown): 'write_failed' {
+    if (!(error instanceof JournalWriteFailed)) this.askTable.release(askId);
+    return 'write_failed';
+  }
+
+  // E1 M2: an ask nobody will answer any more (the engine withdrew its call, or the process ended): journaled, since no
+  // frame carries the fact.
+  private askCancelled(ask: PendingAsk, reason: AskCancelReason): void {
+    try {
+      this.record('meta', { event: 'maws_ask_cancelled', askId: ask.askId, toolUseId: ask.toolUseId, reason });
+    } catch (error) {
+      this.log(`maws_ask_cancelled for ${ask.askId} not journaled: ${messageOf(error)}`);
+    }
+  }
 
   // Ends the process through the termination ladder; `graceMs` (the end_session wait) is capped at 3 s. Before the
   // process is spawned there is nothing to ladder: the reason is recorded, `run()` sees it and ends the session with no
@@ -421,8 +523,19 @@ export class EngineSession {
     this.touch();
   }
 
+  // The session's attention list: the broker's items, then the blocking asks' (E1 M4b).
   brokerItems(): AttentionItem[] {
-    return this.broker.snapshot();
+    return [...this.broker.snapshot(), ...this.askItems.values()];
+  }
+
+  // E1 M4b (the architect's ruling 1): the attention list again whenever the blocking asks held changed (one opened,
+  // was answered or was cancelled); an async ask, or a claim or release that leaves the set alone, publishes nothing.
+  // An item is built once per ask, so its fields never move between publications.
+  private publishAsks(): void {
+    const blocking = this.askTable.list().filter((ask) => ask.blocking);
+    if (blocking.length === this.askItems.size && blocking.every((ask) => this.askItems.has(ask.askId))) return;
+    this.askItems = new Map(blocking.map((ask) => [ask.askId, this.askItems.get(ask.askId) ?? askAttentionItem(ask, this.spec.appSessionId, this.normalizer.state.sessionId)]));
+    this.emit('brokerItems', this.brokerItems());
   }
 
   // The command catalogue C7's `session.catalog` answers from (coordinator, C7's asks).
@@ -452,7 +565,7 @@ export class EngineSession {
       bin: this.plan.bin, // W13: the spawn row's
       fastMode: tracked.fastMode, plugins: tracked.plugins, pluginErrors: tracked.pluginErrors, pluginWarnings: tracked.pluginWarnings,
       backgroundTasks: tracked.backgroundTasks, grants: [...this.grants.allow], mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages,
-      pendingRequests: this.broker.live + (this.client?.pending ?? 0), queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
+      pendingRequests: this.broker.live + (this.client?.pending ?? 0) + this.toolServer.inFlight + this.askTable.asyncCount /* E1 */, queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
       keepAlive: [], busy: this.busy, lastUsedAt: this.lastUsedAt, // C12: keepAlive from the hard reasons below
       memory: tracked.memory,
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
@@ -536,6 +649,7 @@ export class EngineSession {
     const client = new ControlClient(transport, { row: (direction, frame) => this.record(direction, frame) }, this.plan.launchId, { warn: this.log, writer });
     this.client = client;
     client.onInbound((req) => this.inbound(req));
+    client.onInboundCancel((requestId) => this.toolServer.cancel(requestId)); // E1: the engine withdrew a tool call
     // A late read applied nothing, and a host-issued one (the gateway and context reads) showed no error to anyone: only a
     // late mutation gets the notice (debt wave 3 review).
     client.onLateResponse((late) => {
@@ -794,6 +908,11 @@ export class EngineSession {
       case 'ui_prompt_suggest':
         this.surface.accept(req, this.respond);
         return;
+      // E1 start: the `maws` server's JSON-RPC traffic (the server answers another server's name itself)
+      case 'mcp_message':
+        this.toolServer.accept(req);
+        return;
+      // E1 end
       default:
         this.log(`inbound ${req.request.subtype} request ${req.request_id} is not handled; answering an error`);
         this.client?.respondError(req.request_id as RequestId, `MAWS does not handle ${req.request.subtype}`).catch((error: unknown) => this.log(`error answer not written: ${messageOf(error)}`));
@@ -967,7 +1086,15 @@ export class EngineSession {
     this.heard(); // C3 corrective: the bound ends with the process
     if (!this.handshakeDone && !this.initFailed && this.stopReason === null) this.writeInitFailed('the process exited before answering initialize', 'exited');
     const reason: ExitReason = this.stopReason ?? (this.initFailed ? 'crash' : exit.code === 0 && exit.signal === null ? 'unknown' : 'crash');
-    const { lost } = this.broker.processExited();
+    const { lost: lostApprovals } = this.broker.processExited();
+    // E1 M5 fix: a blocking ask still published is attention lost like a pending AskUserQuestion (the architect's ruling
+    // 1), counted before the tool server aborts it; `lostAskCount` names the asks among them (absent when none)
+    const lostAsks = this.askItems.size;
+    const lost = lostApprovals + lostAsks;
+    // E1: every tool call in flight is aborted (no pipe takes its answer) and every pane request settles
+    this.toolServer.processExited(); // a blocking ask's call aborts with it, cancelling the ask (meta row)
+    this.panes.processExited();
+    for (const ask of this.askTable.cancelAll('exit')) this.askCancelled(ask, 'exit'); // E1 M2: the async asks, before the exit row
     this.client?.close('the process exited');
     this.clearAndImplement.processExited();
     this.bashMode.processExited();
@@ -978,7 +1105,7 @@ export class EngineSession {
     queueSettled.catch((error: unknown) => this.log(`queue not settled at exit: ${messageOf(error)}`));
     const release = reason === 'budget' ? this.release : null; // C12
     try {
-      this.record('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost, peakTreeRssKiB: this.tracker.peakTreeRssKiB, budget: release /* C12 */ });
+      this.record('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost, ...(lostAsks > 0 ? { lostAskCount: lostAsks } : {}), peakTreeRssKiB: this.tracker.peakTreeRssKiB, budget: release /* C12 */ });
     } catch (error) {
       this.log(`exit not journaled: ${messageOf(error)}`);
     }

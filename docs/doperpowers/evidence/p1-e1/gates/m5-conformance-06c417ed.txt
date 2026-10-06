@@ -1,0 +1,16 @@
+$ pnpm exec vitest run src/engine-host/conformance (head 06c417ed, 2026-10-06 02:17:43)
+eligible: load 18.79 after 30s
+slot slot.1 acquired at 02:18:13 load { 18.79 22.76 19.87 }
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v5.0.2 /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-acafe2873e45094e5
+
+
+ Test Files  5 passed (5)
+      Tests  199 passed (199)
+Type Errors  no errors
+   Start at  02:18:13
+   Duration  1.17s (transform 48%, tests 33%, import 18%)
+
+exit 0

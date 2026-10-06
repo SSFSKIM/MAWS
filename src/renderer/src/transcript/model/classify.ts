@@ -2,15 +2,24 @@
 // overrides, total over MCP, plugin and future tools. The table is the contract; `presentationOf` says which tool
 // names are rows of another kind rather than cells.
 import type { DenialKind, SafeguardVerdict } from '@shared/graph/enums';
+import { MAWS_SERVER_NAME, type MawsToolName } from '@shared/maws/tools'; // E1
 import type { ToolCategory, ToolClassification } from './rows';
 
-export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan';
+export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery';
+
+// E1 start: the names the engine gives the `maws` server's tools (X9), as tool uses carry them
+export const MAWS_TOOL_USE: Record<MawsToolName, string> = { send_file: `mcp__${MAWS_SERVER_NAME}__send_file`, ask: `mcp__${MAWS_SERVER_NAME}__ask`, show_pane: `mcp__${MAWS_SERVER_NAME}__show_pane` };
+// E1 end
 
 const ROW_KIND_TOOLS: Record<string, Presentation> = {
   Agent: 'subagent', Task: 'subagent', Workflow: 'subagent',
   SendMessage: 'agent_message',
   AskUserQuestion: 'question',
   ExitPlanMode: 'plan',
+  // E1 start: an ask is a capsule, a delivered file a delivery row
+  [MAWS_TOOL_USE.ask]: 'ask',
+  [MAWS_TOOL_USE.send_file]: 'delivery',
+  // E1 end
 };
 
 export function presentationOf(toolName: string): Presentation {
@@ -32,13 +41,17 @@ const TABLE: Record<string, TableRow> = {
   TodoWrite: grouped('other', true), TaskCreate: grouped('other', true), TaskUpdate: grouped('other', true), TaskList: grouped('other', true),
   TaskGet: grouped('other', true), TaskOutput: grouped('other', true), TaskStop: grouped('other', true),
   SendUserFile: standalone('other'),
+  // E1 start: a pane shown for the model is a cell of its own, never folded into a group of MCP calls
+  [MAWS_TOOL_USE.show_pane]: standalone('other'),
+  // E1 end
 };
 
 export const MCP_TOOL = /^mcp__([^_].*?)__(.+)$/;
 
+// The table first (E1: a `maws` tool may have its own row), then the MCP pattern.
 export function tableRowOf(toolName: string): TableRow {
-  if (MCP_TOOL.test(toolName)) return grouped('mcp');
-  return Object.hasOwn(TABLE, toolName) ? TABLE[toolName] : grouped('other');
+  if (Object.hasOwn(TABLE, toolName)) return TABLE[toolName];
+  return MCP_TOOL.test(toolName) ? grouped('mcp') : grouped('other');
 }
 
 export interface ClassifyContext {

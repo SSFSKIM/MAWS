@@ -41,6 +41,10 @@ export const rowId = {
   bashOfEvent: (id: EventId) => row(`bash:${id}`),
   local: (message: MessageUuid) => row(`local:${message}`), // a local-command echo row
   localOfEvent: (id: EventId) => row(`local:${id}`),
+  // E1 start: an `ask` call's capsule and a `send_file` call's delivery row, keyed by the tool use (the ask's askId)
+  ask: (toolUse: ToolUseId) => row(`ask:${toolUse}`),
+  delivery: (toolUse: ToolUseId) => row(`delivery:${toolUse}`),
+  // E1 end
 };
 
 export const cellId = {

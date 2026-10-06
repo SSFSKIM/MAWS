@@ -35,7 +35,7 @@ export type ExitKind = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budg
 export interface MessageQueueDeps {
   appSessionId: AppSessionId;
   store: SessionStateStore;
-  write: (frame: UserInputFrame) => Promise<void>; // the process's OutboundWriter: resolves at the flushed out row, rejects after a write_failed row
+  write: (frame: UserInputFrame, opts?: { preface?: Record<string, unknown>[] }) => Promise<void>; // the process's OutboundWriter: resolves at the flushed out row, rejects after a write_failed row; `preface` rows are journaled just before the out row, only with a successful write
   meta: (frame: Record<string, unknown>) => void; // journals a meta row (queue, notice) through the session's record path
   turnOpen: () => boolean; // the normaliser holds a main-lane turn open
   canWrite: () => boolean; // the process is ready
@@ -201,14 +201,15 @@ export class MessageQueue {
   // preempts the running turn and runs as the next turn (M6 live 3.7); `next` (the composer's
   // Send during a turn, W10; C8b's relay) folds into the running turn at its next tool boundary, and one result names both prompts
   // (pass3/steer-next seq 71, 239).
-  async steer(content: SendContent, opts: { priority?: SteerPriority } = {}): Promise<{ messageUuid: MessageUuid }> {
+  // E1: `preface` rows ride the steer's own write (an async ask's `maws_ask_answered`), journaled only if it succeeded.
+  async steer(content: SendContent, opts: { priority?: SteerPriority; preface?: Record<string, unknown>[] } = {}): Promise<{ messageUuid: MessageUuid }> {
     this.checkContent(content);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
     const uuid = randomUUID() as MessageUuid;
     const next = opts.priority === 'next';
     if (next) this.registerSteer(uuid, content);
     try {
-      await this.deps.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' });
+      await this.deps.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' }, opts.preface ? { preface: opts.preface } : undefined);
     } catch (error) {
       if (next) {
         this.steers = this.steers.filter((s) => s.messageUuid !== uuid);

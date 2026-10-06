@@ -12,6 +12,7 @@ import type { AgentId, AppSessionId, AttentionId, RequestId, SessionId, ToolUseI
 import type { RequestAnswer } from '@shared/engine/answers';
 import { CanUseToolRequestSchema, PermissionUpdateSchema, type PermissionUpdate } from '@shared/wire/control';
 import { ControlRequestFrameSchema, type ControlRequestFrame } from '@shared/wire/frames';
+import { toolCallOf } from '@shared/maws/rpc';
 import { CLEAR_AND_IMPLEMENT_MESSAGE } from './normalizer-controls';
 import type { ControlClient } from './rpc';
 
@@ -171,8 +172,12 @@ export class PermissionBroker {
         changed = this.confirm(f.tool_use_id, at);
         break;
       case 'control_request': {
-        const request = (f.request ?? {}) as { subtype?: unknown; tool_use_id?: unknown; input?: { tool_use_id?: unknown } };
+        const request = (f.request ?? {}) as { subtype?: unknown; tool_use_id?: unknown; input?: { tool_use_id?: unknown }; message?: unknown };
         if (request.subtype === 'hook_callback') changed = this.confirm(request.tool_use_id ?? request.input?.tool_use_id, at);
+        // E1 M5: an SDK MCP server's `tools/call` names the tool use it runs, so the engine acted on the allow; a
+        // blocking `maws` ask holds the tool's result until the human answers, and the answered permission must not
+        // stand in Needs you for the question meanwhile
+        if (request.subtype === 'mcp_message') changed = this.confirm(mcpToolUseOf(request.message), at);
         break;
       }
       case 'system':
@@ -380,4 +385,11 @@ function localSettingsRule(request: Record<string, unknown>): PermissionUpdate {
   const local = suggestions.find((s) => s.destination === 'localSettings');
   if (local) return local; // the suggestion as the engine sent it
   return suggestions[0] ? { ...suggestions[0], destination: 'localSettings' } : ruleFromRequest(request, 'localSettings');
+}
+
+// The tool use an `mcp_message` `tools/call` runs (`_meta["claudecode/toolUseId"]`), whichever SDK server it addresses.
+function mcpToolUseOf(message: unknown): ToolUseId | null {
+  const m = (message ?? {}) as { method?: unknown; params?: unknown };
+  if (m.method !== 'tools/call' || typeof m.params !== 'object' || m.params === null || Array.isArray(m.params)) return null;
+  return toolCallOf(m.params as Record<string, unknown>).toolUseId;
 }

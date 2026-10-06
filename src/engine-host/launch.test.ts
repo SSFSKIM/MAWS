@@ -223,6 +223,16 @@ describe('launch contract builds the X6 command line and environment', () => {
     });
     // C12 end
 
+    // E1 start (P1 A-17; E0a Q4): the AskUserQuestion preview format is a launch variable only, and the owner's shell may
+    // export another value under the CLAUDE_ prefix, so MAWS sets html at every launch over whatever the capture holds
+    it('sets CLAUDE_CODE_QUESTION_PREVIEW_FORMAT=html under both gateway modes, over an inherited value', () => {
+      expect(buildLaunch(spec(), CAPTURED, OPTS).env.CLAUDE_CODE_QUESTION_PREVIEW_FORMAT).toBe('html');
+      const captured = { ...CAPTURED, CLAUDE_CODE_QUESTION_PREVIEW_FORMAT: 'markdown' };
+      expect(buildLaunch(spec(), captured, OPTS).env.CLAUDE_CODE_QUESTION_PREVIEW_FORMAT).toBe('html');
+      expect(buildLaunch(spec({ gateway: 'direct' }), captured, OPTS).env.CLAUDE_CODE_QUESTION_PREVIEW_FORMAT).toBe('html');
+    });
+    // E1 end
+
     it('passes the allowlisted shell keys through, by name and by prefix', () => {
       const { env } = buildLaunch(spec(), CAPTURED, OPTS);
       expect(env).toMatchObject({

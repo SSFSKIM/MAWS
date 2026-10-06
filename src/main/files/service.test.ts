@@ -3,13 +3,14 @@
 // the two negative controls run the same substitutions against the check-then-use shape K1 corrects and read outside
 // bytes and outside metadata, so the service's refusal in the same scenario is evidence, not an accident of the point.
 import { execFileSync } from 'node:child_process';
-import fs, { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import fs, { appendFileSync, chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { FILES_LIST_MAX_ENTRIES, type FilesChanged } from '@shared/ipc/schema/files';
+import { FILES_LIST_MAX_ENTRIES, FILES_READ_MAX_LENGTH, FILES_WRITE_MAX_BYTES, type FilesChanged } from '@shared/ipc/schema/files';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { createFilesService, O_NOFOLLOW_ANY, OPEN_FLAGS, type BoundaryPoint, type FilesServiceOptions } from './service';
 
@@ -483,7 +484,7 @@ describe('files service listing and reading', () => {
     write(inRoot('ten.txt'), '0123456789');
     const files = service();
     expect(await files.read({ appSessionId: A, path: inRoot('ten.txt'), offset: 2, length: 3 })).toEqual({
-      encoding: 'utf8', content: '234', bytes: 10, offset: 2, length: 3, truncated: true, mime: 'text/plain',
+      encoding: 'utf8', content: '234', bytes: 10, offset: 2, length: 3, truncated: true, mime: 'text/plain', hash: null, utf8: null,
     });
     expect(await files.read({ appSessionId: A, path: inRoot('ten.txt'), offset: 7 })).toMatchObject({ content: '789', length: 3, truncated: false });
     expect(await files.read({ appSessionId: A, path: inRoot('ten.txt'), offset: 10 })).toMatchObject({ content: '', length: 0, truncated: false, offset: 10 });
@@ -535,7 +536,7 @@ describe('files service listing and reading', () => {
     write(inRoot('label.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><text>Ünïcødé</text></svg>');
     const files = service();
     expect(await files.read({ appSessionId: A, path: inRoot('dot.png') })).toEqual({
-      encoding: 'base64', content: png.toString('base64'), bytes: png.length, offset: 0, length: png.length, truncated: false, mime: 'image/png',
+      encoding: 'base64', content: png.toString('base64'), bytes: png.length, offset: 0, length: png.length, truncated: false, mime: 'image/png', hash: null, utf8: null,
     });
     expect(await files.read({ appSessionId: A, path: inRoot('data.bin') })).toMatchObject({ encoding: 'base64', bytes: 12, mime: 'application/octet-stream' });
     expect(await files.read({ appSessionId: A, path: inRoot('label.svg') })).toMatchObject({ encoding: 'utf8', mime: 'image/svg+xml', content: expect.stringContaining('Ünïcødé') });
@@ -675,3 +676,365 @@ describe('files openExternal', () => {
     expect(openPath).toHaveBeenCalledTimes(1);
   });
 });
+
+// E5 M1: `files.write`, the hash-checked save through the open-first boundary, and the hash `files.read` answers when
+// asked (E5 execution document, Interfaces "The write" and "`files.write` and the read hash").
+describe('files service write', () => {
+  const sha = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
+  const ORIGINAL = 'export const a = 1;\n';
+  const file = () => inRoot('src', 'a.ts');
+  function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  it('writes in place over a matching hash, answers the written bytes’ hash, and chains on each answer', async () => {
+    const files = service();
+    const first = await files.write({ appSessionId: A, path: file(), content: 'export const a = 2;\n', expectedHash: sha(ORIGINAL) });
+    expect(first).toEqual({ status: 'ok', hash: sha('export const a = 2;\n') });
+    expect(readFileSync(file(), 'utf8')).toBe('export const a = 2;\n');
+    // shorter than what it replaces: the file is exactly the new bytes
+    const second = await files.write({ appSessionId: A, path: file(), content: 'ü€\n', expectedHash: first.hash });
+    expect(second).toEqual({ status: 'ok', hash: sha(Buffer.from('ü€\n', 'utf8')) });
+    expect(readFileSync(file())).toEqual(Buffer.from('ü€\n', 'utf8'));
+    const third = await files.write({ appSessionId: A, path: file(), content: '', expectedHash: second.hash });
+    expect(third).toEqual({ status: 'ok', hash: sha('') });
+    expect(statSync(file()).size).toBe(0);
+    // what read hashes is what write answered
+    expect((await files.read({ appSessionId: A, path: file(), hash: true })).hash).toBe(third.hash);
+  });
+
+  it('answers conflict with the current bytes’ hash and writes nothing, the mtime unchanged', async () => {
+    const past = new Date('2020-01-01T00:00:00Z');
+    fs.utimesSync(file(), past, past);
+    const before = statSync(file()).mtimeMs;
+    const answer = await service().write({ appSessionId: A, path: file(), content: 'mine\n', expectedHash: sha('a stale baseline\n') });
+    expect(answer).toEqual({ status: 'conflict', hash: sha(ORIGINAL) });
+    expect(readFileSync(file(), 'utf8')).toBe(ORIGINAL);
+    expect(statSync(file()).mtimeMs).toBe(before);
+  });
+
+  // The second write is started by the test when the first has opened (its `after-open` point), and the first is
+  // released only once the second has opened too, so both compare against the same bytes unless the service serialises.
+  async function concurrently<T>(first: () => Promise<T>, second: () => Promise<T>): Promise<T[]> {
+    let late: Promise<T> | undefined;
+    points['after-open'] = async () => {
+      const opened = deferred();
+      points['after-open'] = () => opened.resolve();
+      late = second();
+      await opened.promise;
+    };
+    const early = await first();
+    return [early, await late!];
+  }
+
+  it('serialises two concurrent writes with the same expected hash: one ok, one conflict, the file the ok one’s content', async () => {
+    const files = service();
+    const [one, two] = await concurrently(
+      () => files.write({ appSessionId: A, path: file(), content: 'one\n', expectedHash: sha(ORIGINAL) }),
+      () => files.write({ appSessionId: A, path: file(), content: 'two\n', expectedHash: sha(ORIGINAL) }),
+    );
+    expect([one.status, two.status].sort()).toEqual(['conflict', 'ok']);
+    const [won, lost] = one.status === 'ok' ? [one, two] : [two, one];
+    expect(lost.hash).toBe(won.hash); // the loser found the winner's bytes
+    expect(sha(readFileSync(file()))).toBe(won.hash);
+    expect(readFileSync(file(), 'utf8')).toBe(won === one ? 'one\n' : 'two\n');
+  });
+
+  it('serialises by the file’s identity: a hard-link alias written from another session waits its turn', async () => {
+    linkSync(file(), inRoot('alias.ts'));
+    records.set(B, record(root));
+    const files = service();
+    const answers = await concurrently(
+      () => files.write({ appSessionId: A, path: file(), content: 'via a\n', expectedHash: sha(ORIGINAL) }),
+      () => files.write({ appSessionId: B, path: inRoot('alias.ts'), content: 'via alias\n', expectedHash: sha(ORIGINAL) }),
+    );
+    expect(answers.map((answer) => answer.status).sort()).toEqual(['conflict', 'ok']);
+  });
+
+  it('keeps the mode, the inode and a hard link’s shared content across a write', async () => {
+    chmodSync(file(), 0o644);
+    linkSync(file(), inRoot('hard.ts'));
+    const before = statSync(file());
+    expect(await service().write({ appSessionId: A, path: file(), content: 'linked\n', expectedHash: sha(ORIGINAL) })).toMatchObject({ status: 'ok' });
+    const after = statSync(file());
+    expect(after.mode & 0o777).toBe(0o644);
+    expect(after.ino).toBe(before.ino);
+    expect(after.nlink).toBe(2);
+    expect(readFileSync(inRoot('hard.ts'), 'utf8')).toBe('linked\n');
+  });
+
+  // E5 M4 (M1's review): a descriptor write may take fewer bytes than asked; the write loops until every byte is down.
+  it('writes the whole content and answers its hash when each write call takes only part of what it is given', async () => {
+    const open = fs.promises.open.bind(fs.promises);
+    const asked: number[] = [];
+    vi.spyOn(fs.promises, 'open').mockImplementation(async (...args: Parameters<typeof fs.promises.open>) => {
+      const handle = await open(...args);
+      const write = handle.write.bind(handle) as (buffer: Buffer, offset: number, length: number, position: number) => Promise<{ bytesWritten: number; buffer: Buffer }>;
+      Object.assign(handle, {
+        write: (buffer: Buffer, offset: number, length: number, position: number) => {
+          asked.push(length);
+          return write(buffer, offset, Math.min(length, 7), position); // at most seven bytes per call
+        },
+      });
+      return handle;
+    });
+    const content = 'export const ünïcødé = "日本語";\n'.repeat(4);
+    const answer = await service().write({ appSessionId: A, path: file(), content, expectedHash: sha(ORIGINAL) });
+    expect(answer).toEqual({ status: 'ok', hash: sha(Buffer.from(content, 'utf8')) });
+    expect(readFileSync(file(), 'utf8')).toBe(content);
+    expect(asked.length).toBe(Math.ceil(Buffer.byteLength(content, 'utf8') / 7)); // one call per seven bytes: the loop resumed each time
+  });
+
+  it('never creates a file: a missing in-root name, or one removed before the open, answers not found and nothing appears', async () => {
+    const files = service();
+    await expect(files.write({ appSessionId: A, path: inRoot('src', 'new.ts'), content: 'x', expectedHash: sha('') })).rejects.toThrow(new Error(`not found: ${inRoot('src', 'new.ts')}`));
+    expect(fs.existsSync(inRoot('src', 'new.ts'))).toBe(false);
+    points['before-open'] = () => unlinkSync(file());
+    await expect(files.write({ appSessionId: A, path: file(), content: 'x', expectedHash: sha(ORIGINAL) })).rejects.toThrow(new Error(`not found: ${file()}`));
+    expect(fs.existsSync(file())).toBe(false);
+  });
+
+  it('answers not writable for a file the user cannot write, and leaves it alone', async () => {
+    chmodSync(file(), 0o444);
+    await expect(service().write({ appSessionId: A, path: file(), content: 'x', expectedHash: sha(ORIGINAL) })).rejects.toThrow(new Error(`not writable: ${file()}`));
+    expect(readFileSync(file(), 'utf8')).toBe(ORIGINAL);
+  });
+
+  it('opens real0 with O_RDWR | O_NONBLOCK | O_NOFOLLOW_ANY and neither O_CREAT nor O_TRUNC, and never writes by path', async () => {
+    symlinkSync(root, at('root-link'));
+    records.set(A, record(at('root-link')));
+    const open = vi.spyOn(fs.promises, 'open');
+    const writeFileSpy = vi.spyOn(fs.promises, 'writeFile');
+    const renameSpy = vi.spyOn(fs.promises, 'rename');
+    await service().write({ appSessionId: A, path: at('root-link', 'src', 'a.ts'), content: 'x', expectedHash: sha(ORIGINAL) });
+    expect(open.mock.calls.map(([path]) => path)).toEqual([file()]); // the realpath, not the path as given
+    const flags = open.mock.calls[0][1] as number;
+    const { O_RDWR, O_WRONLY, O_NONBLOCK, O_CREAT, O_TRUNC, O_NOFOLLOW } = fs.constants;
+    expect(typeof flags).toBe('number');
+    expect(flags & (O_RDWR | O_WRONLY)).toBe(O_RDWR);
+    expect(flags & O_NONBLOCK).toBe(O_NONBLOCK);
+    expect(flags & O_NOFOLLOW_ANY).toBe(O_NOFOLLOW_ANY);
+    expect(flags & (O_CREAT | O_TRUNC | O_NOFOLLOW)).toBe(0);
+    expect(writeFileSpy).not.toHaveBeenCalled();
+    expect(renameSpy).not.toHaveBeenCalled();
+  });
+
+  describe('the boundary: each refusal writes nothing', () => {
+    const attempt = (path: string, content = 'pwned\n') => service().write({ appSessionId: A, path, content, expectedHash: sha(ORIGINAL) });
+
+    it('refuses a path outside the roots, a `..`, a path not already normal, and a look-alike sibling', async () => {
+      await expect(attempt(join(outside, 'secret.txt'))).rejects.toThrow(new Error(OUT));
+      await expect(attempt(`${root}/../outside/secret.txt`)).rejects.toThrow(new Error(OUT));
+      await expect(attempt(`${root}/src/../src/a.ts`)).rejects.toThrow(new Error(OUT));
+      await expect(attempt(at('root2', 'x.txt'))).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('secret');
+      expect(readFileSync(at('root2', 'x.txt'), 'utf8')).toBe('look-alike');
+      expect(readFileSync(file(), 'utf8')).toBe(ORIGINAL);
+    });
+
+    it('refuses a relative path and an unknown session', async () => {
+      await expect(attempt('src/a.ts')).rejects.toThrow('path must be absolute');
+      await expect(service().write({ appSessionId: 'nope' as AppSessionId, path: file(), content: 'x', expectedHash: sha(ORIGINAL) })).rejects.toThrow('unknown app session: nope');
+    });
+
+    it('refuses a final-component symlink, to an outside file or even to an in-root one', async () => {
+      symlinkSync(join(outside, 'secret.txt'), inRoot('leak'));
+      symlinkSync(file(), inRoot('a-link.ts'));
+      await expect(attempt(inRoot('leak'))).rejects.toThrow(new Error(OUT));
+      await expect(attempt(inRoot('a-link.ts'))).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('secret');
+      expect(readFileSync(file(), 'utf8')).toBe(ORIGINAL);
+    });
+
+    it('refuses a dangling in-root link rather than answering not found, and creates nothing at its target', async () => {
+      symlinkSync(join(outside, 'absent'), inRoot('dangling'));
+      await expect(attempt(inRoot('dangling'))).rejects.toThrow(new Error(OUT));
+      expect(fs.existsSync(join(outside, 'absent'))).toBe(false);
+    });
+
+    it('writes through a stable in-root symlinked ancestor, as read reads through it', async () => {
+      symlinkSync(inRoot('src'), inRoot('alias'));
+      expect(await attempt(inRoot('alias', 'a.ts'), 'through the alias\n')).toEqual({ status: 'ok', hash: sha('through the alias\n') });
+      expect(readFileSync(file(), 'utf8')).toBe('through the alias\n');
+    });
+
+    it('refuses an in-root directory, and answers not a regular file for a FIFO within a second', async () => {
+      execFileSync('mkfifo', [inRoot('pipe')]);
+      await expect(attempt(inRoot('src'))).rejects.toThrow(new Error(OUT)); // EISDIR at the open: no descriptor, no type named
+      await expect(within(attempt(inRoot('pipe')), 1000)).rejects.toThrow(new Error(`not a regular file: ${inRoot('pipe')}`));
+    });
+
+    it('refuses a final component replaced by an outside link at before-open', async () => {
+      points['before-open'] = () => {
+        unlinkSync(file());
+        symlinkSync(join(outside, 'secret.txt'), file());
+      };
+      await expect(attempt(file())).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('secret');
+    });
+
+    it('refuses an ancestor swapped to an outside link at before-open (ELOOP), writing nothing outside', async () => {
+      points['before-open'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
+      const open = vi.spyOn(fs.promises, 'open');
+      await expect(attempt(file())).rejects.toThrow(new Error(OUT));
+      await expect(open.mock.results[0].value).rejects.toMatchObject({ code: 'ELOOP' });
+      expect(readFileSync(join(outside, 'src', 'a.ts'), 'utf8')).toBe('outside secret a');
+    });
+
+    it('refuses when the opened file is no longer the path’s at after-open (dev, ino), writing nothing', async () => {
+      points['after-open'] = () => renameSync(inRoot('src', 'other.ts'), file());
+      await expect(attempt(file())).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(file(), 'utf8')).toBe('export const other = 2;\n');
+    });
+  });
+
+  describe('the caps', () => {
+    it('answers content too large for content past the cap in UTF-8 bytes, before any open', async () => {
+      const open = vi.spyOn(fs.promises, 'open');
+      const content = 'é'.repeat(FILES_WRITE_MAX_BYTES / 2 + 1); // within the cap in characters, past it in bytes
+      await expect(service().write({ appSessionId: A, path: file(), content, expectedHash: sha(ORIGINAL) })).rejects.toThrow(new Error('content too large'));
+      expect(open).not.toHaveBeenCalled();
+      expect(readFileSync(file(), 'utf8')).toBe(ORIGINAL);
+    });
+
+    it('writes content of exactly the cap', async () => {
+      const content = 'x'.repeat(FILES_WRITE_MAX_BYTES);
+      expect(await service().write({ appSessionId: A, path: file(), content, expectedHash: sha(ORIGINAL) })).toEqual({ status: 'ok', hash: sha(content) });
+      expect(statSync(file()).size).toBe(FILES_WRITE_MAX_BYTES);
+    });
+
+    it('answers too large to edit for a file past the cap, and for one grown past it after the open', async () => {
+      const big = Buffer.alloc(FILES_WRITE_MAX_BYTES + 1, 0x61);
+      write(inRoot('big.log'), big);
+      const files = service();
+      await expect(files.write({ appSessionId: A, path: inRoot('big.log'), content: 'x', expectedHash: sha(big) })).rejects.toThrow(new Error(`too large to edit: ${inRoot('big.log')}`));
+      expect(statSync(inRoot('big.log')).size).toBe(FILES_WRITE_MAX_BYTES + 1);
+      points['after-open'] = () => appendFileSync(file(), Buffer.alloc(FILES_WRITE_MAX_BYTES, 0x62));
+      await expect(files.write({ appSessionId: A, path: file(), content: 'x', expectedHash: sha(ORIGINAL) })).rejects.toThrow(new Error(`too large to edit: ${file()}`));
+      expect(statSync(file()).size).toBe(ORIGINAL.length + FILES_WRITE_MAX_BYTES);
+      // the failure inside the file's critical section left it: the next write of the same file is not held behind it
+      writeFileSync(file(), ORIGINAL);
+      expect(await within(files.write({ appSessionId: A, path: file(), content: 'after\n', expectedHash: sha(ORIGINAL) }), 5000)).toEqual({ status: 'ok', hash: sha('after\n') });
+    });
+  });
+
+  describe('the read hash', () => {
+    it('answers null when not asked, and the whole file’s hash when asked, text or base64', async () => {
+      const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+      write(inRoot('dot.png'), png);
+      const files = service();
+      expect((await files.read({ appSessionId: A, path: file() })).hash).toBeNull();
+      expect((await files.read({ appSessionId: A, path: file(), hash: false })).hash).toBeNull();
+      expect(await files.read({ appSessionId: A, path: file(), hash: true })).toEqual({
+        encoding: 'utf8', content: ORIGINAL, bytes: ORIGINAL.length, offset: 0, length: ORIGINAL.length, truncated: false, mime: 'text/x-typescript', hash: sha(ORIGINAL), utf8: true,
+      });
+      // a chunk answers the whole file's hash, not its own
+      expect(await files.read({ appSessionId: A, path: file(), offset: 7, length: 5, hash: true })).toMatchObject({ content: 'const', hash: sha(ORIGINAL) });
+      expect(await files.read({ appSessionId: A, path: inRoot('dot.png'), hash: true })).toMatchObject({ encoding: 'base64', content: png.toString('base64'), hash: sha(png) });
+    });
+
+    it('answers null for a file past the cap (a head is never edited), and a hash at the cap', async () => {
+      const atCap = Buffer.alloc(FILES_READ_MAX_LENGTH, 0x61);
+      write(inRoot('cap.log'), atCap);
+      write(inRoot('past.log'), Buffer.concat([atCap, Buffer.from('b')]));
+      const files = service();
+      expect(await files.read({ appSessionId: A, path: inRoot('cap.log'), hash: true })).toMatchObject({ hash: sha(atCap), bytes: FILES_READ_MAX_LENGTH });
+      expect(await files.read({ appSessionId: A, path: inRoot('past.log'), hash: true })).toMatchObject({ hash: null, utf8: null, bytes: FILES_READ_MAX_LENGTH + 1, length: MiB, truncated: true });
+    });
+
+    it('answers whether the hashed bytes are valid UTF-8, a truncated multi-byte sequence included; null when not hashed', async () => {
+      // `f0 9f 92` is a 4-byte sequence cut short: a lenient decode gives U+FFFD, also 3 bytes, so a byte-length comparison
+      // would pass it, and a save would write `ef bf bd` over the original bytes.
+      const truncated = Buffer.from([0x61, 0xf0, 0x9f, 0x92, 0x0a]);
+      const valid = Buffer.from('café € 💡\n', 'utf8');
+      write(inRoot('cut.txt'), truncated);
+      write(inRoot('multi.txt'), valid);
+      const files = service();
+      const cut = await files.read({ appSessionId: A, path: inRoot('cut.txt'), hash: true });
+      expect(cut).toMatchObject({ encoding: 'utf8', bytes: truncated.length, hash: sha(truncated), utf8: false });
+      expect(Buffer.byteLength(cut.content, 'utf8')).toBe(truncated.length); // the length test the flag replaces
+      expect(await files.read({ appSessionId: A, path: inRoot('multi.txt'), hash: true })).toMatchObject({ content: valid.toString('utf8'), hash: sha(valid), utf8: true });
+      // a chunk answers the whole file's validity, not its own
+      expect(await files.read({ appSessionId: A, path: inRoot('cut.txt'), offset: 0, length: 1, hash: true })).toMatchObject({ content: 'a', utf8: false });
+      expect((await files.read({ appSessionId: A, path: inRoot('multi.txt') })).utf8).toBeNull();
+    });
+
+    it('answers one hash for every chunk of an unchanged file, and each chunk’s bytes are its own hash’s file when it changes between reads', async () => {
+      const first = Buffer.alloc(2 * MiB, 0x61);
+      const second = Buffer.alloc(2 * MiB, 0x62);
+      write(inRoot('two.log'), first);
+      const files = service();
+      const head = await files.read({ appSessionId: A, path: inRoot('two.log'), offset: 0, hash: true });
+      const tail = await files.read({ appSessionId: A, path: inRoot('two.log'), offset: MiB, hash: true });
+      expect(head.hash).toBe(sha(first));
+      expect(tail.hash).toBe(head.hash);
+      writeFileSync(inRoot('two.log'), second); // replaced between two reads of one load
+      const replaced = await files.read({ appSessionId: A, path: inRoot('two.log'), offset: MiB, hash: true });
+      expect(replaced.hash).toBe(sha(second));
+      expect(replaced.hash).not.toBe(head.hash);
+      expect(Buffer.from(head.content).equals(first.subarray(0, head.length))).toBe(true);
+      expect(Buffer.from(replaced.content).equals(second.subarray(MiB, MiB + replaced.length))).toBe(true);
+    });
+
+    it('answers the bytes it hashed when the file grows after the fstat: one read of the descriptor, not two', async () => {
+      points['after-open'] = () => appendFileSync(file(), 'export const b = 2;\n');
+      const grown = `${ORIGINAL}export const b = 2;\n`;
+      expect(await service().read({ appSessionId: A, path: file(), hash: true })).toMatchObject({
+        content: grown, bytes: grown.length, length: grown.length, truncated: false, hash: sha(grown),
+      });
+    });
+
+    it('settles a hashed chunk by the same rules as an unhashed one (character boundaries, CRLF)', async () => {
+      const files = service();
+      for (const [name, text] of [['euro.txt', 'ab€cd'], ['crlf.txt', 'ab\r\ncd\r\n'], ['cr-end.txt', 'ab\r']] as const) {
+        write(inRoot(name), text);
+        for (const [offset, length] of [[0, 3], [2, 3], [2, 1], [0, 100], [50, 3]]) {
+          const plain = await files.read({ appSessionId: A, path: inRoot(name), offset, length });
+          const hashed = await files.read({ appSessionId: A, path: inRoot(name), offset, length, hash: true });
+          expect(hashed, `${name} ${offset} ${length}`).toEqual({ ...plain, hash: sha(Buffer.from(text, 'utf8')), utf8: true });
+        }
+      }
+    });
+  });
+});
+// E1 start: a delivered file's Reveal in Finder (E1 residue 8)
+describe('files reveal', () => {
+  beforeEach(() => {
+    write(inRoot('hello.txt'), 'HELLO_E1');
+    write(inRoot('tool.py'), 'print("hi")\n');
+    write(inRoot('run.sh'), '#!/bin/sh\n');
+    fs.chmodSync(inRoot('run.sh'), 0o755);
+  });
+
+  it('shows any regular file in the roots, whatever its kind, since revealing runs nothing', async () => {
+    const showItemInFolder = vi.fn<(path: string) => void>();
+    const files = service({ showItemInFolder, env: {} });
+    for (const name of ['hello.txt', 'tool.py', 'run.sh']) expect(await files.reveal(A, inRoot(name))).toEqual({ revealed: true, message: null });
+    expect(showItemInFolder.mock.calls.map(([path]) => path)).toEqual([inRoot('hello.txt'), inRoot('tool.py'), inRoot('run.sh')]);
+  });
+
+  it('answers revealed: false with the boundary\'s message for a path outside, a symlink, a directory or a missing file', async () => {
+    const showItemInFolder = vi.fn<(path: string) => void>();
+    const files = service({ showItemInFolder, env: {} });
+    symlinkSync(join(outside, 'secret.txt'), inRoot('leak'));
+    mkdirSync(inRoot('dir'));
+    expect(await files.reveal(A, join(outside, 'secret.txt'))).toEqual({ revealed: false, message: OUT });
+    expect(await files.reveal(A, inRoot('leak'))).toEqual({ revealed: false, message: OUT });
+    expect(await files.reveal(A, inRoot('dir'))).toEqual({ revealed: false, message: `not a file: ${inRoot('dir')}` });
+    expect(await files.reveal(A, inRoot('gone.txt'))).toEqual({ revealed: false, message: `not found: ${inRoot('gone.txt')}` });
+    expect(await files.reveal(B, inRoot('hello.txt'))).toEqual({ revealed: false, message: 'unknown app session: B' });
+    expect(showItemInFolder).not.toHaveBeenCalled();
+  });
+
+  it('under MAWS_E2E=1 with MAWS_E2E_OPEN_LOG appends `reveal <realpath>` instead of revealing', async () => {
+    const showItemInFolder = vi.fn<(path: string) => void>();
+    const log = at('open.log');
+    const files = service({ showItemInFolder, env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
+    expect(await files.reveal(A, inRoot('hello.txt'))).toEqual({ revealed: true, message: null });
+    expect(readFileSync(log, 'utf8')).toBe(`reveal ${inRoot('hello.txt')}\n`);
+    expect(showItemInFolder).not.toHaveBeenCalled();
+  });
+});
+// E1 end

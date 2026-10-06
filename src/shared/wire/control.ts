@@ -133,6 +133,7 @@ export interface InitializeRequest {
   perTaskStopAffordance?: boolean;
   hooks?: Record<string, { matcher?: string; hookCallbackIds: string[]; timeout?: number }[]>;
   workspaceTrust?: { accepted: true; directory: string };
+  sdkMcpServers?: string[]; // E1: the SDK-hosted MCP servers the host serves over `mcp_message` (SPEC 45 §45.21; pass3/p1-sdk-mcp-roundtrip seq 4)
 }
 export interface InterruptRequest { reason?: string; cancel_queued?: boolean }
 export interface SetPermissionModeRequest { mode: string }
@@ -435,3 +436,8 @@ export const isSurfaceRequest = (subtype: string): subtype is SurfaceRequestSubt
 export const ReloadSkillsResponseSchema = z.looseObject({ skills: z.array(z.looseObject({ name: z.string(), description: z.string().optional(), argumentHint: z.string().optional(), aliases: z.array(z.string()).optional() })) });
 export type ReloadSkillsResponse = z.infer<typeof ReloadSkillsResponseSchema>;
 // E8 end
+// E1 start: the engine's JSON-RPC message for an SDK-hosted MCP server (pass3/p1-sdk-mcp-roundtrip seqs 5, 10, 13, 71),
+// answered `{mcp_response: <the JSON-RPC response>}`; `message` is validated by the server, not here
+export const McpMessageRequestSchema = z.looseObject({ subtype: z.literal('mcp_message'), server_name: z.string(), message: z.unknown() });
+export type McpMessageRequest = z.infer<typeof McpMessageRequestSchema>;
+// E1 end

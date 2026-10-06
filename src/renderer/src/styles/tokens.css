@@ -50,6 +50,10 @@
   --code-meta: #6e7781; --code-invalid: #82071e;
   --code-gutter-fg: rgba(31,30,27,0.36); --code-line-active-bg: rgba(20,18,14,0.035); --code-selection-bg: rgba(201,102,63,0.20);
   /* C8c end */
+  /* E5 start: the conflict-marker view's three sections (X7 extension; names binding, values advisory): mine in the
+     accent's tint, theirs in the added green's, the base neutral, each read beside --diff-*-bg and --accent-soft. */
+  --code-conflict-mine-bg: rgba(201,102,63,0.12); --code-conflict-theirs-bg: rgba(31,143,85,0.12); --code-conflict-base-bg: rgba(20,18,14,0.06);
+  /* E5 end */
 }
 
 /* Codex narrows the light composer elevation only below a 640px window. */
@@ -85,4 +89,7 @@
   --code-meta: #8b949e; --code-invalid: #ffa198;
   --code-gutter-fg: rgba(232,230,227,0.34); --code-line-active-bg: rgba(255,255,255,0.04); --code-selection-bg: rgba(217,119,87,0.28);
   /* C8c end */
+  /* E5 start: the same roles on the dark ground. */
+  --code-conflict-mine-bg: rgba(217,119,87,0.15); --code-conflict-theirs-bg: rgba(76,195,138,0.13); --code-conflict-base-bg: rgba(255,255,255,0.06);
+  /* E5 end */
 }

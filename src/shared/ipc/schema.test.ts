@@ -25,6 +25,9 @@ import * as plugins from './schema/plugins';
 import * as marketplaces from './schema/marketplaces';
 import { E8_SESSION_COMMANDS } from './schema/session';
 // E8 end
+// E1 start
+import * as maws from './schema/maws';
+// E1 end
 // C11 start
 import { SETTINGS_DEFAULTS_V9 } from '../settings/defaults';
 // C11 end
@@ -36,7 +39,7 @@ import * as scm from './schema/scm';
 // E6 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, scm /* E6 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -183,7 +186,7 @@ describe('ipc schema validates both directions', () => {
 
     // C8c start: the read-only files.* service over a session's own directories, owned by main.
     it('carries the C8c files.* entries, every command owned by main, with the read bounds', () => {
-      expect(Object.keys(files.commands).sort()).toEqual(['files.list', 'files.openExternal', 'files.read', 'files.unwatch', 'files.watch']);
+      expect(Object.keys(files.commands).sort()).toEqual(['files.list', 'files.openExternal', 'files.read', 'files.reveal' /* E1 */, 'files.unwatch', 'files.watch', 'files.write']);
       for (const spec of Object.values(files.commands)) expect(spec.owner).toBe('main');
       expect(Object.keys(files.events)).toEqual(['files.changed']);
       const read = (extra: object) => validateCommandInput('files.read', { appSessionId: 'a', path: '/r/a.ts', ...extra }).ok;
@@ -196,7 +199,7 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('files.list', { appSessionId: 'a' }).ok).toBe(true);
       expect(validateCommandInput('files.list', { appSessionId: 'a', path: '/r', depth: 2 }).ok).toBe(false);
       expect(validateCommandInput('files.watch', { appSessionId: 'a' }).ok).toBe(false);
-      const out = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain' };
+      const out = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain', hash: null, utf8: null };
       expect(validateCommandOutput('files.read', out)).toEqual({ ok: true, value: out });
       expect(validateCommandOutput('files.read', { ...out, encoding: 'latin1' }).ok).toBe(false);
       const entry = { name: 'a', path: '/r/a', kind: 'other', size: 0, mtimeMs: 1, target: null };
@@ -204,8 +207,50 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('files.openExternal', { opened: false, message: 'no app' }).ok).toBe(true);
       expect(validateEventPayload('files.changed', { appSessionId: 'a', path: '/r', kind: 'invalidated' }).ok).toBe(true);
       expect(validateEventPayload('files.changed', { appSessionId: 'a', path: '/r', kind: 'renamed' }).ok).toBe(false);
+      // E1: Reveal in Finder answers like openExternal
+      expect(validateCommandInput('files.reveal', { appSessionId: 'a', path: '/r/hello.txt' }).ok).toBe(true);
+      expect(validateCommandOutput('files.reveal', { revealed: false, message: "path outside the session's directories" }).ok).toBe(true);
+      expect(validateCommandOutput('files.reveal', { revealed: true }).ok).toBe(false);
     });
     // C8c end
+
+    // E5 start: files.write, the hash-checked save, and the hash files.read answers on request.
+    it('carries E5 files.write with the hash pattern and the content cap, and the read hash with its UTF-8 validity', () => {
+      const hash = 'a'.repeat(64);
+      expect(files.FILES_WRITE_MAX_BYTES).toBe(files.FILES_READ_MAX_LENGTH);
+      expect(files.HashSchema.safeParse('0123456789abcdef'.repeat(4)).success).toBe(true);
+      for (const bad of ['A'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), 'g'.repeat(64), ` ${'a'.repeat(63)}`]) {
+        expect(files.HashSchema.safeParse(bad).success, bad).toBe(false);
+      }
+
+      const write = (extra: object) => validateCommandInput('files.write', { appSessionId: 'a', path: '/r/a.ts', content: 'x', expectedHash: hash, ...extra }).ok;
+      expect(write({})).toBe(true);
+      expect(write({ content: '' })).toBe(true);
+      expect(write({ content: 'x'.repeat(files.FILES_WRITE_MAX_BYTES) })).toBe(true);
+      expect(write({ content: 'x'.repeat(files.FILES_WRITE_MAX_BYTES + 1) })).toBe(false);
+      expect(write({ expectedHash: 'A'.repeat(64) })).toBe(false);
+      expect(write({ expectedHash: null })).toBe(false);
+      expect(write({ create: true })).toBe(false);
+      expect(validateCommandInput('files.write', { appSessionId: 'a', path: '/r/a.ts', content: 'x' }).ok).toBe(false);
+
+      expect(validateCommandOutput('files.write', { status: 'ok', hash }).ok).toBe(true);
+      expect(validateCommandOutput('files.write', { status: 'conflict', hash }).ok).toBe(true);
+      expect(validateCommandOutput('files.write', { status: 'conflict', hash: null }).ok).toBe(false);
+      expect(validateCommandOutput('files.write', { status: 'denied', hash }).ok).toBe(false);
+      expect(validateCommandOutput('files.write', { status: 'ok', hash, path: '/r/a.ts' }).ok).toBe(false);
+
+      const read = (extra: object) => validateCommandInput('files.read', { appSessionId: 'a', path: '/r/a.ts', ...extra }).ok;
+      expect(read({ hash: true })).toBe(true);
+      expect(read({ hash: 'yes' })).toBe(false);
+      const out = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain' };
+      expect(validateCommandOutput('files.read', { ...out, hash, utf8: true }).ok).toBe(true);
+      expect(validateCommandOutput('files.read', { ...out, hash, utf8: false }).ok).toBe(true);
+      expect(validateCommandOutput('files.read', { ...out, utf8: null }).ok).toBe(false); // the fields are always answered, null when not hashed
+      expect(validateCommandOutput('files.read', { ...out, hash: null }).ok).toBe(false);
+      expect(validateCommandOutput('files.read', { ...out, hash, utf8: 'yes' }).ok).toBe(false);
+      expect(validateCommandOutput('files.read', { ...out, hash: 'A'.repeat(64), utf8: true }).ok).toBe(false);
+    });
+    // E5 end
 
     it('names channels by kind so a command and an event of the same name never share one', () => {
       expect(commandChannel('engine.hostState')).toBe('maws:cmd:engine.hostState');
@@ -524,10 +569,10 @@ describe('ipc schema validates both directions', () => {
     it('adds its six commands under existing namespaces with their owners, and no namespace or event', () => {
       const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'layout.captureChords': 'main', 'engine.configure': 'engine-host' } as const;
       // Every C11 command sits under a namespace that existed before C11 (C8c's `files`, E8's `plugins` and
-      // `marketplaces`, E9's `voice` and E6's `scm` are the ones added since).
+      // `marketplaces`, E9's `voice`, E1's `maws` and E6's `scm` are the ones added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'scm']);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm']);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -763,6 +808,63 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E8 end
+  // E5 start: the quit guard names unsaved files (E5 execution document, Interfaces "The quit guard and unsaved files (M5)")
+  describe('E5 layout entries', () => {
+    it('layout.unsavedFiles and layout.saveAllDone are main’s bridged commands and layout.saveAll an event; the busy report always names the unsaved files', () => {
+      for (const name of ['layout.unsavedFiles', 'layout.saveAllDone'] as const) {
+        expect(commands[name].owner, name).toBe('main');
+        expect(NAMES.layout.commands, name).toContain(name);
+      }
+      expect(NAMES.layout.events).toContain('layout.saveAll');
+
+      const report = { midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: ['/r/a.ts'] };
+      expect(validateEventPayload('layout.quitWait', { waiting: report }).ok).toBe(true);
+      expect(validateEventPayload('layout.quitWait', { waiting: { ...report, unsavedFiles: [] } }).ok).toBe(true);
+      const withoutFiles = { midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false };
+      expect(validateEventPayload('layout.quitWait', { waiting: withoutFiles }).ok).toBe(false); // always said, never defaulted
+      expect(validateEventPayload('layout.quitWait', { waiting: { ...report, unsavedFiles: [1] } }).ok).toBe(false);
+
+      expect(validateCommandInput('layout.unsavedFiles', { paths: ['/r/a.ts', '/r/b.ts'] }).ok).toBe(true);
+      expect(validateCommandInput('layout.unsavedFiles', { paths: [] }).ok).toBe(true);
+      expect(validateCommandInput('layout.unsavedFiles', { paths: [1] }).ok).toBe(false);
+      expect(validateCommandInput('layout.unsavedFiles', {}).ok).toBe(false);
+      expect(validateCommandOutput('layout.unsavedFiles', undefined).ok).toBe(true);
+
+      expect(validateCommandInput('layout.saveAllDone', { requestId: 'r1', failed: [{ path: '/r/a.ts', message: 'Changed on disk since you opened it' }] }).ok).toBe(true);
+      expect(validateCommandInput('layout.saveAllDone', { requestId: 'r1', failed: [] }).ok).toBe(true);
+      expect(validateCommandInput('layout.saveAllDone', { requestId: 'r1', failed: [{ path: '/r/a.ts' }] }).ok).toBe(false);
+      expect(validateCommandInput('layout.saveAllDone', { failed: [] }).ok).toBe(false);
+      expect(validateCommandOutput('layout.saveAllDone', undefined).ok).toBe(true);
+
+      expect(validateEventPayload('layout.saveAll', { requestId: 'r1' }).ok).toBe(true);
+      expect(validateEventPayload('layout.saveAll', {}).ok).toBe(false);
+      expect(validateEventPayload('layout.saveAll', { requestId: 'r1', paths: [] }).ok).toBe(false);
+    });
+  });
+  // E5 end
+  // E1 start: the maws tool server's commands and its pane request (P1 ledger §5)
+  describe('E1 entries', () => {
+    it('adds the maws namespace: three engine-host commands and the pane request, all bridged', () => {
+      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer']);
+      for (const spec of Object.values(maws.commands)) expect(spec.owner).toBe('engine-host');
+      expect(Object.keys(maws.events)).toEqual(['maws.pane.show']);
+      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
+    });
+
+    it('validates the asks, an answer, a pane request and its answer', () => {
+      const ask = { askId: 'toolu_1', toolUseId: 'toolu_1', requestId: 'r1', blocking: true, title: null, context: null, questions: [{ id: 'q1', question: 'Q?', modality: 'text' }], openedAt: '2026-10-05T00:00:00.000Z' };
+      expect(validateCommandOutput('maws.asks.list', { asks: [ask] }).ok).toBe(true);
+      expect(validateCommandInput('maws.ask.answer', { appSessionId: 'a', askId: 'toolu_1', answers: [{ id: 'q1', question: 'Q?', status: 'skipped' }] }).ok).toBe(true);
+      expect(validateCommandOutput('maws.ask.answer', { outcome: 'write_failed' }).ok).toBe(true);
+      expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'file', target: '/r/a.ts', line: 3 }).ok).toBe(true);
+      expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'nope', target: null, line: null }).ok).toBe(false);
+      expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 't', title: 'Terminal' } } }).ok).toBe(true);
+      expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false, error: 'show_pane: the deliverable pane is not available in this build of MAWS' } }).ok).toBe(true);
+      expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false } }).ok).toBe(false);
+      expect(validateCommandOutput('maws.pane.answer', { outcome: 'write_failed' }).ok).toBe(false);
+    });
+  });
+  // E1 end
   // E6 start: source control (E6 execution document, Interfaces "X2 `scm.*`")
   describe('E6 entries', () => {
     const appSessionId = 'a1111111-1111-4111-8111-111111111111';

@@ -146,6 +146,8 @@ describe('layout value shapes', () => {
       'layout.captureChords': 'main', // C11 (M5 fix wave: the chord capture sets the menu aside)
       'layout.quitWait': 'main', // C12: Quit when idle's wait
       'layout.quitWaitAnswer': 'main', // C12: its banner's Quit now and Cancel
+      'layout.unsavedFiles': 'main', // E5: a window's dirty file tabs, for the quit question
+      'layout.saveAllDone': 'main', // E5: a window's answer to the quit question's Save all
     });
   });
 
@@ -157,7 +159,7 @@ describe('layout value shapes', () => {
 
   // C12 start: Quit when idle (C12 execution document, Interfaces "The quit question")
   it('carries the busy report main waits on, or null, and the banner’s two answers', () => {
-    const report = { midTurn: 1, backgroundWork: 0, busyTerminals: 2, terminalsUnknown: false };
+    const report = { midTurn: 1, backgroundWork: 0, busyTerminals: 2, terminalsUnknown: false, unsavedFiles: [] /* E5 */ };
     expect(QuitWaitSchema.safeParse({ waiting: report }).success).toBe(true);
     expect(QuitWaitSchema.safeParse({ waiting: null }).success).toBe(true);
     expect(QuitWaitSchema.safeParse({ waiting: { ...report, busyTerminals: -1 } }).success).toBe(false);

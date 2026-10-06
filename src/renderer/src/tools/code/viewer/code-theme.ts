@@ -61,6 +61,52 @@ const spec = {
   '.cm-textfield:focus, .cm-button:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-1px' }, // not the UA's ring
   '.cm-panel.cm-search input[type=checkbox]': { accentColor: 'var(--accent)' },
   '.cm-panel.cm-search [name=close]': { color: 'var(--fg-muted)' },
+  // E5 M3 start: the merge view. Every colour `@codemirror/merge` 6.12.2's base theme sets, restated: its rules are one
+  // class of scope (`&light`, `&dark` or the base's own) plus the selector, as these are, so each tie goes to this theme.
+  // Mine's lines (the editor's, `cm-merge-b`) in the diff's added ground, theirs' deleted chunks in its removed ground,
+  // the changed text within either in the accent's tint; the unified view never draws side a, restated all the same.
+  '&.cm-merge-b .cm-changedLine, .cm-inlineChangedLine': { backgroundColor: 'var(--diff-add-bg)' },
+  '&.cm-merge-a .cm-changedLine, .cm-deletedChunk': { backgroundColor: 'var(--diff-del-bg)' },
+  '&.cm-merge-a .cm-changedText, &.cm-merge-b .cm-changedText, .cm-deletedChunk .cm-deletedText': { background: 'var(--accent-soft)' },
+  '&.cm-merge-b .cm-deletedText': { background: 'var(--diff-del-bg)' },
+  '.cm-collapsedLines': { color: 'var(--fg-muted)', background: 'var(--bg-hover)', fontFamily: 'var(--font-ui)', fontSize: 'var(--text-ui-sm)' },
+  '&.cm-merge-a .cm-changedLineGutter, .cm-deletedLineGutter': { background: 'var(--danger)' },
+  '&.cm-merge-b .cm-changedLineGutter': { background: 'var(--success)' },
+  '.cm-inlineChangedLineGutter': { background: 'var(--accent)' },
+  // The chunk controls: MAWS's own buttons (merge.ts), drawn as the editor's other buttons; the library's default ones
+  // (never drawn here) restated too.
+  '.cm-deletedChunk .cm-chunkButtons': { fontFamily: 'var(--font-ui)', fontSize: 'var(--text-ui-sm)' },
+  '.cm-deletedChunk .cm-merge-control, .cm-deletedChunk button[name=accept], .cm-deletedChunk button[name=reject]': {
+    backgroundColor: 'var(--bg-raised)', color: 'var(--fg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0 6px', margin: '0 2px', cursor: 'pointer',
+  },
+  '.cm-deletedChunk .cm-merge-control:hover': { backgroundColor: 'var(--bg-hover)' },
+  '.cm-deletedChunk .cm-merge-control:active': { backgroundColor: 'var(--bg-active)' },
+  '.cm-deletedChunk .cm-merge-control:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-1px' },
+  // Conflict blocks (conflicts.ts): the marker lines muted, the three sections in their own grounds (after the active
+  // line's rule, so a section keeps its ground under the cursor), and the actions above each block.
+  '.cm-conflict-marker': { backgroundColor: 'var(--bg-active)', color: 'var(--fg-muted)' },
+  '.cm-conflict-mine': { backgroundColor: 'var(--code-conflict-mine-bg)' },
+  '.cm-conflict-base': { backgroundColor: 'var(--code-conflict-base-bg)' },
+  '.cm-conflict-theirs': { backgroundColor: 'var(--code-conflict-theirs-bg)' },
+  '.cm-conflict-actions': { display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 6px 2px', fontFamily: 'var(--font-ui)', fontSize: 'var(--text-ui-sm)', color: 'var(--fg-muted)' },
+  '.cm-conflict-action': { backgroundColor: 'var(--bg-raised)', color: 'var(--fg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0 6px', cursor: 'pointer' },
+  '.cm-conflict-action:hover': { backgroundColor: 'var(--bg-hover)' },
+  '.cm-conflict-action:active': { backgroundColor: 'var(--bg-active)' },
+  '.cm-conflict-action:disabled': { color: 'var(--fg-faint)', cursor: 'default', backgroundColor: 'var(--bg-raised)' },
+  '.cm-conflict-action:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-1px' },
+  '.cm-conflict-label': { padding: '0 6px', borderRadius: 'var(--radius-sm)', color: 'var(--fg-muted)' },
+  '.cm-conflict-label-mine': { marginLeft: '8px', backgroundColor: 'var(--code-conflict-mine-bg)' },
+  '.cm-conflict-label-base': { backgroundColor: 'var(--code-conflict-base-bg)' },
+  '.cm-conflict-label-theirs': { backgroundColor: 'var(--code-conflict-theirs-bg)' },
+  // The comment gutter (comment-gutter.ts): a narrow column whose mark shows while its line's gutter element is hovered.
+  '.cm-commentGutter': { width: '18px' },
+  '.cm-commentGutter .cm-gutterElement': { display: 'flex', alignItems: 'flex-start', justifyContent: 'center', cursor: 'pointer' },
+  '.cm-comment-mark': {
+    visibility: 'hidden', width: '14px', lineHeight: '14px', marginTop: '3px', textAlign: 'center', borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-ui)',
+    color: 'var(--bg-raised)', backgroundColor: 'var(--accent)',
+  },
+  '.cm-commentGutter .cm-gutterElement:hover .cm-comment-mark': { visibility: 'visible' },
+  // E5 M3 end
 };
 
 export const codeThemeLight = EditorView.theme(spec);

@@ -16,6 +16,10 @@ import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { displayTitle } from '../sessions/title';
+// E5 start
+import { EDITOR_COPY } from '../tools/code/copy';
+import { useViewer } from '../tools/code/viewer/viewer-store';
+// E5 end
 
 export const TAB_DRAG_TYPE = 'application/x-maws-tab';
 
@@ -84,6 +88,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
   const label = useTabLabel(tab);
   const name = label.secondary ? `${label.title} · ${label.secondary}` : label.title;
   const closeChord = useChordHint('tab.close');
+  const dirty = useFileTabDirty(tab); // E5
 
   const onAuxClick = (event: MouseEvent) => {
     if (event.button === 1) void requestCloseTab(tab.id);
@@ -97,6 +102,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
       aria-label={name}
       tabIndex={stop ? 0 : -1}
       data-tab-id={tab.id}
+      data-dirty={dirty ? 'true' : undefined} // E5
       draggable
       onDragStart={(event) => {
         event.dataTransfer.setData(TAB_DRAG_TYPE, tab.id);
@@ -115,6 +121,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
       {label.glyph && <GlyphMark glyph={label.glyph} />}
       {label.fileType && <span className="font-mono text-info">{label.fileType}</span>}
       {tab.pinned && <span aria-label="Pinned" role="img" className="size-1 shrink-0 rounded-full bg-fg-muted" />}
+      {dirty && <DirtyMark />}{/* E5 */}
       <span className="truncate">{label.title}</span>
       {label.secondary && <small className="shrink-0 text-fg-muted">{label.secondary}</small>}
       <button
@@ -175,3 +182,18 @@ async function closeOthers(id: string, pane: 0 | 1) {
   const others = currentSet(useLayout.getState().main).panes[pane]?.tabs.filter((t) => t.id !== id && !t.pinned) ?? [];
   for (const other of others) await requestCloseTab(other.id);
 }
+
+// E5 start: a file tab with unsaved edits (E5 execution document, M2's decisions): a dot before the title and
+// `data-dirty`, from the viewer store, which is already in the main chunk.
+function useFileTabDirty(tab: TabRef): boolean {
+  return useViewer((s) => tab.kind === 'file' && (s.entries.get(tab.id)?.dirty ?? false));
+}
+
+function DirtyMark() {
+  return (
+    <span role="img" aria-label={EDITOR_COPY.unsaved} className="shrink-0 text-fg">
+      •
+    </span>
+  );
+}
+// E5 end

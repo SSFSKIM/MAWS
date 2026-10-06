@@ -3,7 +3,9 @@
 // each once its request is read, so the frame hides in the same commit the card's frame mounts and takes focus; a
 // dialog only when its payload reads as one of the two declared kinds, so an undeclared or invalid one never swaps the
 // editor out). The oldest open item that is actionable but not answerable here (an undeclared dialog, a request main
-// no longer holds, an error, an interruption, auto mode unavailable) shows as a notice above the frame instead. Pure.
+// no longer holds, an error, an interruption, auto mode unavailable) shows as a notice above the frame instead. E1 M4b:
+// a blocking `maws` ask (a question item read as `maws.ask.opened`) is answered in the Question sheet, not here, so it
+// is a notice too and the editor stays. Pure.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AttentionId } from '@shared/graph/ids';
@@ -40,7 +42,8 @@ export function swapOf(items: readonly AttentionItem[], requests: ReadonlyMap<At
       notices.push(item);
       continue;
     }
-    if (item.kind === 'dialog') {
+    if (request?.kind === 'maws.ask.opened') notices.push(item);
+    else if (item.kind === 'dialog') {
       const declared = request?.kind === 'dialog.requested' && declaredDialog(request.dialogKind, request.payload).ok;
       (declared ? answerable : notices).push(item);
     } else if (REQUEST_KINDS.has(item.kind)) answerable.push(item);
