@@ -17,6 +17,9 @@ import { PushState } from './PushState';
 import { Sources } from './Sources';
 import { Subagents } from './Subagents';
 import { displayTitle } from '../../sessions/title';
+// E2 start
+import { Section, ToolSummary, useToolSummary } from './Section';
+// E2 end
 
 export interface SummaryProps {
   appSessionId: AppSessionId | null;
@@ -56,6 +59,22 @@ function SessionSummary({ appSessionId, record }: { appSessionId: AppSessionId; 
       <Subagents appSessionId={appSessionId} />
       <BackgroundWork appSessionId={appSessionId} />
       <Sources appSessionId={appSessionId} directory={directory} />
+      {/* E2 start */}
+      <Deliverables appSessionId={appSessionId} />
+      {/* E2 end */}
     </div>
   );
 }
+
+// E2 start: Deliverables (E2 execution document, Design §4 "The summary"), after Sources: the tool's own summary fills
+// it; a build without the tool shows no section (there is nothing to open).
+function Deliverables({ appSessionId }: { appSessionId: AppSessionId }) {
+  const custom = useToolSummary('deliverables');
+  if (!custom) return null;
+  return (
+    <Section id="deliverables">
+      <ToolSummary toolId="deliverables" appSessionId={appSessionId} component={custom} />
+    </Section>
+  );
+}
+// E2 end

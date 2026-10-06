@@ -17,7 +17,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 // The summary card (Interfaces *Copy*).
 export const SUMMARY_COPY = {
   title: 'Session overview',
-  sections: { environment: 'Environment', push: 'Push state', subagents: 'Subagents', background: 'Background work', sources: 'Sources', plugins: 'Plugins' /* R1 */ },
+  sections: { environment: 'Environment', push: 'Push state', subagents: 'Subagents', background: 'Background work', sources: 'Sources', plugins: 'Plugins' /* R1 */, deliverables: 'Deliverables' /* E2 */ },
   // Environment
   branch: (branch: string) => `⎇ ${branch}`,
   detached: (head: string) => `detached at ${head.slice(0, 7)}`,

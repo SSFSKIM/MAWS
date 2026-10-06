@@ -84,6 +84,8 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
       );
     case 'settings':
       return <SettingsTab section={tab.section} />;
+    case 'deliverable': // E2
+      return <DeliverableTab tab={tab} />;
   }
 }
 
@@ -131,6 +133,13 @@ function FileTab({ tab }: { tab: Extract<TabRef, { kind: 'file' }> }) {
 
 function DiffTab({ tab }: { tab: Extract<TabRef, { kind: 'diff' }> }) {
   const Slot = useSlot('diffTab');
+  // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
+  return <Slot tab={tab} />;
+}
+
+// E2: a deliverable's viewer (X14), the slot E2 registers.
+function DeliverableTab({ tab }: { tab: Extract<TabRef, { kind: 'deliverable' }> }) {
+  const Slot = useSlot('deliverableTab');
   // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
   return <Slot tab={tab} />;
 }

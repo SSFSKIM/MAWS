@@ -226,6 +226,10 @@ describe('toolbar', () => {
     expect(toolbarTitle(sessionTab('app-a'), records)).toEqual({ title: 'Fix sidebar drag', branch: 'feat/sidebar' });
     expect(toolbarTitle({ id: 'file:/r/src/app.ts', kind: 'file', path: '/r/src/app.ts', line: null, appSessionId: null, pinned: false }, records)).toEqual({ title: 'app.ts', branch: null });
     expect(toolbarTitle({ id: 'diagnostics', kind: 'diagnostics', pinned: false }, records).title).toBe('Diagnostics');
+    // E2: a deliverable tab by its record's title, else "Deliverable" until the store holds the record
+    const deliverable = { id: 'deliverable:app-a:d1', kind: 'deliverable', appSessionId: A, deliverableId: 'd1', pinned: false } as const;
+    expect(toolbarTitle(deliverable, records, 'Dashboard')).toEqual({ title: 'Dashboard', branch: null });
+    expect(toolbarTitle(deliverable, records)).toEqual({ title: 'Deliverable', branch: null });
     // W9 (H2): the engine's HEAD (a folder that is no repository) is no branch, so no chip
     expect(toolbarTitle(sessionTab('app-a'), new Map([[A, record('app-a', { branch: 'HEAD' })]])).branch).toBeNull();
   });

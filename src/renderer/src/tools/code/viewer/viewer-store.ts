@@ -69,6 +69,7 @@ export interface ViewerEntry {
   loads: number; // loads of this entry completed, whether or not they landed anything (a superseded one when its read answers)
   pending: number; // loads of this entry in flight; the e2e's own-save barrier is a `loads` increase with `pending` at 0
   // E5 end
+  readOnly: boolean; // E2: mounted read-only (the deliverables viewer, Decision Log 7): never editable, whatever the file
 }
 
 // E5: what the disk holds past the baseline, shown as the notice (Changed on disk) or, once compared or a save found
@@ -98,7 +99,7 @@ export interface ViewState {
 export interface ViewerStore {
   entries: Map<string, ViewerEntry>;
   wrap: boolean; // the Wrap toggle, one for every code view
-  mount(tabId: string, target: { appSessionId: AppSessionId; path: string; line: number | null }): () => void;
+  mount(tabId: string, target: { appSessionId: AppSessionId; path: string; line: number | null; readOnly?: boolean }): () => void;
   loadMore(tabId: string): void;
   toggleSource(tabId: string): void;
   setWrap(wrap: boolean): void;
@@ -171,6 +172,7 @@ export const isEditable = (file: Pick<ViewerEntry, 'kind' | 'complete' | 'encodi
 export function readOnlyReason(entry: ViewerEntry): 'head' | 'encoding' | 'loading' | null {
   if (entry.editable) return null;
   if (entry.kind === 'head') return 'head';
+  if (entry.readOnly) return null; // E2: a read-only mount is read-only by design, not for a reason of the file's
   if (entry.kind !== 'code' && entry.kind !== 'markdown') return null;
   if (entry.complete && entry.hash !== null && entry.encoding === 'utf8') return 'encoding';
   return 'loading';
@@ -279,7 +281,7 @@ export function createViewerStore(client: MawsBridge) {
         return;
       }
       const { utf8, ...file } = read;
-      patch(tabId, { ...ready, ...file, editable: isEditable({ ...file, utf8 }), epoch: entry.epoch + 1, updated: entry.updated + 1 });
+      patch(tabId, { ...ready, ...file, editable: !entry.readOnly && isEditable({ ...file, utf8 }), epoch: entry.epoch + 1, updated: entry.updated + 1 });
     };
 
     // One load per tab at a time: a newer one (or the entry's removal) makes an older one's answers land nowhere. A
@@ -318,7 +320,7 @@ export function createViewerStore(client: MawsBridge) {
       const file = { kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes };
       const opened = { status: 'ready' as const, error: null, removed: false, loadingMore: false, epoch: (get().entries.get(tabId)?.epoch ?? 0) + 1, dirty: false, theirs: null, saveError: null };
       const commit = ({ utf8, ...loaded }: LoadedFile) =>
-        reason === 'change' ? commitChange(tabId, { ...loaded, utf8 }) : patch(tabId, { ...opened, ...loaded, editable: isEditable({ ...loaded, utf8 }) });
+        reason === 'change' ? commitChange(tabId, { ...loaded, utf8 }) : patch(tabId, { ...opened, ...loaded, editable: !entry.readOnly && isEditable({ ...loaded, utf8 }) });
       // A markdown file opened at a line is shown as its source, where the line exists.
       const sourceView = kind === 'markdown' && get().entries.get(tabId)?.pendingJump != null ? true : undefined;
 
@@ -422,7 +424,7 @@ export function createViewerStore(client: MawsBridge) {
       entries: new Map(),
       wrap: false,
 
-      mount(tabId, { appSessionId, path, line }) {
+      mount(tabId, { appSessionId, path, line, readOnly = false }) {
         used.set(tabId, ++clock);
         if (!unsubscribe) unsubscribe = useLayout.subscribe((state, prev) => state.main !== prev.main && prune());
         const entry = get().entries.get(tabId);
@@ -442,7 +444,7 @@ export function createViewerStore(client: MawsBridge) {
           supersede(tabId);
           patch(tabId, { appSessionId, ...(line !== entry.line ? { line, pendingJump: line } : {}) });
           watchThenRead('change');
-        } else if (!entry || entry.appSessionId !== appSessionId || entry.path !== path) {
+        } else if (!entry || entry.appSessionId !== appSessionId || entry.path !== path || entry.readOnly !== readOnly) {
           holds.get(tabId)?.release();
           views.delete(tabId);
           stale.delete(tabId);
@@ -450,7 +452,7 @@ export function createViewerStore(client: MawsBridge) {
           const fresh: ViewerEntry = {
             tabId, appSessionId, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
             text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
-            hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, baseline: 0, loads: 0, pending: 0,
+            hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, baseline: 0, loads: 0, pending: 0, readOnly,
           };
           incarnations.set(tabId, ++lastIncarnation);
           set((s) => ({ entries: new Map(s.entries).set(tabId, fresh) }));

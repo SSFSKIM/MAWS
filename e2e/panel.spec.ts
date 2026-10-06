@@ -1008,7 +1008,8 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       expect(disabled).toHaveLength(0); // C8b, C8c and C11: every summary row's tool is registered
 
       await panel.getByRole('button', { name: 'Add a tool' }).click();
-      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info']); // by MENU_ORDER; Log is menu: false
+      // E2: Deliverables registers from App.tsx's E2 block, after MENU_ORDER's tools (the Question sheet is menu: false)
+      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Deliverables']); // by MENU_ORDER; Log is menu: false
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });

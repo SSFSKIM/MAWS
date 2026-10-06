@@ -6,7 +6,11 @@
 // E5: a code view of an editable entry edits; the bar carries the editor's controls (`editor/EditorControls.tsx`), and
 // the viewer says what it holds as data attributes (`data-editable`, `data-dirty`, `data-theirs`, and `data-loads` with
 // `data-pending`, the entry's completed and in-flight loads: an e2e's barrier for the re-reads after an own save).
-import { lazy, Suspense, useEffect } from 'react';
+//
+// E2 (E2 execution document, Design §3): the body is `FileBody` (the mount, the notices, the Wrap and Source controls and
+// the content), which the deliverables viewer mounts read-only under its own header; the file tab adds the path at the
+// bar's start and E5's editor controls beside the notices.
+import { lazy, Suspense, useEffect, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { opensExternally } from '@shared/ipc/schema/files';
@@ -28,7 +32,12 @@ const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-m
 
 export function FileViewer({ tab }: { tab: FileTab }) {
   if (tab.appSessionId === null) return <NoSession path={tab.path} />;
-  return <SessionFile tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} />;
+  const lead = (
+    <span className="min-w-0 flex-1 truncate font-mono text-fg-muted" title={tab.path}>
+      {tab.path}
+    </span>
+  );
+  return <FileBody tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} lead={lead} controls={(entry) => <EditorControls entry={entry} />} />;
 }
 
 function NoSession({ path }: { path: string }) {
@@ -51,10 +60,20 @@ function Refused({ path, message }: { path: string; message: string }) {
 
 const Loading = () => <p className="p-4 text-ui text-fg-muted">{VIEWER_COPY.loading}</p>;
 
-function SessionFile({ tabId, appSessionId, path, line }: { tabId: string; appSessionId: AppSessionId; path: string; line: number | null }) {
+interface FileBodyProps {
+  tabId: string; // the viewer store's key: a file tab's id, or the deliverables viewer's `deliverable:<id>:v<n>`
+  appSessionId: AppSessionId;
+  path: string;
+  line?: number | null;
+  readOnly?: boolean; // E2: never editable (the viewer store's mount option)
+  lead?: ReactNode; // the bar's start (the file tab's path); without one the notices lead and the controls keep right
+  controls?: (entry: ViewerEntry) => ReactNode; // beside the notices (the file tab's editor controls)
+}
+
+export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, lead, controls }: FileBodyProps) {
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
-  useEffect(() => useViewer.getState().mount(tabId, { appSessionId, path, line }), [tabId, appSessionId, path, line]);
+  useEffect(() => useViewer.getState().mount(tabId, { appSessionId, path, line, readOnly }), [tabId, appSessionId, path, line, readOnly]);
   const entry = found && found.appSessionId === appSessionId && found.path === path ? found : null;
 
   if (entry?.status === 'error' && entry.error?.startsWith('unknown app session')) return <NoSession path={path} />;
@@ -71,11 +90,9 @@ function SessionFile({ tabId, appSessionId, path, line }: { tabId: string; appSe
       className="flex h-full min-h-0 flex-col bg-bg"
     >
       <div className={bar}>
-        <span className="min-w-0 flex-1 truncate font-mono text-fg-muted" title={path}>
-          {path}
-        </span>
+        {lead ?? <span className="flex-1" />}
         {entry ? <Notices entry={entry} /> : null}
-        {entry ? <EditorControls entry={entry} /> : null}
+        {entry ? controls?.(entry) : null}
         {entry ? <Controls entry={entry} wrap={wrap} /> : null}
       </div>
       <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} /> : <Loading />}</div>

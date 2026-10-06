@@ -20,6 +20,10 @@ import { displayTitle } from '../sessions/title';
 import { EDITOR_COPY } from '../tools/code/copy';
 import { useViewer } from '../tools/code/viewer/viewer-store';
 // E5 end
+// E2 start
+import { DELIVERABLES_COPY } from '../tools/deliverables/copy';
+import { useDeliverableTitle } from '../tools/deliverables/store';
+// E2 end
 
 export const TAB_DRAG_TYPE = 'application/x-maws-tab';
 
@@ -59,6 +63,7 @@ function useSessionLabel(appSessionId: AppSessionId): TabLabel {
 function useTabLabel(tab: TabRef): TabLabel {
   const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : ('' as AppSessionId);
   const session = useSessionLabel(appSessionId);
+  const deliverableTitle = useDeliverableTitle(tab.kind === 'deliverable' ? tab.appSessionId : null, tab.kind === 'deliverable' ? tab.deliverableId : null); // E2
   switch (tab.kind) {
     case 'session':
       return session;
@@ -72,6 +77,8 @@ function useTabLabel(tab: TabRef): TabLabel {
       return { title: 'Diagnostics', secondary: null, glyph: null, fileType: null };
     case 'settings':
       return { title: 'Settings', secondary: null, glyph: null, fileType: null };
+    case 'deliverable': // E2
+      return { title: deliverableTitle ?? DELIVERABLES_COPY.fallbackTitle, secondary: null, glyph: null, fileType: null };
   }
 }
 

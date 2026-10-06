@@ -73,6 +73,11 @@ import { connectAsks } from './tools/maws/ask/connect';
 import { connectPaneShows } from './tools/maws/panes/connect';
 import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
 // E1 end
+// E2 start
+import { deliverablesTool } from './tools/deliverables/DeliverablesTool';
+import { DeliverableTab } from './tools/deliverables/DeliverableTab';
+import { connectDeliverables } from './tools/deliverables/store';
+// E2 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -180,6 +185,15 @@ export function App() {
   }, []);
   useEffect(() => connectAsks(), []);
   // E1 end
+  // E2 start: the Deliverables tool and its main tab, registered once and never unregistered (C8a's rule above), and
+  // the host's write announcements and main's console attribution into the deliverables store. The transcript's
+  // openDeliverable joins TranscriptActions with M5's rows.
+  useEffect(() => {
+    registerPanelTool(deliverablesTool);
+    registerSlot('deliverableTab', DeliverableTab);
+  }, []);
+  useEffect(() => connectDeliverables(), []);
+  // E2 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

@@ -465,7 +465,7 @@ describe('ipc schema validates both directions', () => {
       expect(layout.SummarySectionsSchema.safeParse({ version: 1, collapsed: ['files'] }).success).toBe(false);
       expect(layout.SummarySectionsSchema.safeParse({ version: 2, collapsed: [] }).success).toBe(false);
       expect(layout.SummarySectionsSchema.safeParse({ ...value, open: [] }).success).toBe(false);
-      expect(layout.SUMMARY_SECTIONS).toEqual(['environment', 'push', 'subagents', 'background', 'sources', 'plugins']);
+      expect(layout.SUMMARY_SECTIONS).toEqual(['environment', 'push', 'subagents', 'background', 'sources', 'plugins', 'deliverables']); // E2: deliverables appended
     });
   });
   // C8a end
