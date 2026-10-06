@@ -224,13 +224,14 @@ export class TerminalRegistry {
 
   // Re-adopts the host's ptys after a reload: for each one the page accepts, a handle that claims the pty before it
   // asks for the attach, then restores the screen exactly or lossily. Resolves with the adopted ids. `onListed` hears,
-  // once `pty.list` has answered (with nothing when it failed), each handle created and its attach still under way.
-  async adopt(accept: (info: PtyInfo) => boolean = () => true, onListed?: (adopting: Adopting[]) => void): Promise<TerminalId[]> {
+  // once `pty.list` has answered (with nothing when it failed), each handle created and its attach still under way, and
+  // whether the host answered (E10: a restored tab the host listed nothing for lost its shell when MAWS quit).
+  async adopt(accept: (info: PtyInfo) => boolean = () => true, onListed?: (adopting: Adopting[], listed: boolean) => void): Promise<TerminalId[]> {
     this.start();
     const listed = await this.deps.ipc.invoke('pty.list', undefined);
     if (!listed.ok) {
       console.error('[terminal] pty.list failed', listed.error);
-      onListed?.([]);
+      onListed?.([], false);
       return [];
     }
     const known = new Set([...this.entries.values()].map((entry) => entry.info.ptyId));
@@ -240,7 +241,7 @@ export class TerminalRegistry {
         const entry = this.claimAdopted(info);
         return { label: info.label, id: entry.info.id, attached: this.attachAdopted(entry, info) };
       });
-    onListed?.(adopting);
+    onListed?.(adopting, true);
     const ids = await Promise.all(adopting.map(({ attached }) => attached));
     return ids.filter((id): id is TerminalId => id !== null);
   }

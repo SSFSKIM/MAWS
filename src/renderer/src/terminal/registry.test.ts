@@ -416,9 +416,11 @@ describe('terminal registry reattaches without a gap', () => {
     const held = new Map([kept, slow].map((info) => [info.ptyId, deferred<PtyAttach>()]));
     ipc.handlers['pty.attach'] = (input) => held.get((input as { ptyId: PtyId }).ptyId)!.promise;
     const heard: Adopting[][] = [];
-    const adopted = registry.adopt((info) => info.appSessionId === A, (adopting) => heard.push(adopting));
+    const answered: boolean[] = [];
+    const adopted = registry.adopt((info) => info.appSessionId === A, (adopting, listed) => (heard.push(adopting), answered.push(listed)));
     await settle();
     expect(heard.map((adopting) => adopting.map(({ label }) => label))).toEqual([['terminal:kept', 'terminal:slow']]);
+    expect(answered).toEqual([true]);
     const [first, second] = heard[0];
     expect(registry.get(first.id)?.info.label).toBe('terminal:kept'); // the handle exists before its attach answers
     registry.release(second.id);
@@ -429,6 +431,17 @@ describe('terminal registry reattaches without a gap', () => {
     await expect(first.attached).resolves.toBe(first.id);
     await expect(second.attached).resolves.toBeNull(); // released before its attach answered: nothing restored
     await expect(adopted).resolves.toEqual([first.id]);
+  });
+
+  // E10: the page tells "the host listed no pty for this tab" (a relaunch) from "the host could not say".
+  it('tells onListed when pty.list failed, with nothing claimed', async () => {
+    const registry = makeRegistry();
+    ipc.handlers['pty.list'] = () => fail('host_unavailable', 'pty-host is restarting; cannot answer pty.list');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onListed = vi.fn();
+    await expect(registry.adopt(undefined, onListed)).resolves.toEqual([]);
+    expect(onListed).toHaveBeenCalledExactlyOnceWith([], false);
+    log.mockRestore();
   });
 
   it('adopts only what the page accepts, and a dead pty as exited with its screen', async () => {

@@ -27,12 +27,14 @@ export interface TerminalTabUi {
   confirmed: boolean;
   closeError: string | null;
   terminalId: TerminalId | null; // null until the tab has a session and a directory to start in
+  lostAtQuit: boolean; // E10: the tab's previous shell closed when MAWS quit; its line shows until dismissed
 }
 
 export interface TerminalTabState {
   readonly terminalId: TerminalId | null; // the registry's terminal, once started (reads `ui`)
   readonly ui: StoreApi<TerminalTabUi>;
   readonly instanceId: string; // the terminal's label, which is how a reloaded page re-adopts it
+  readonly restored: boolean; // E10: restored from layout.json (X5 gives such a tab no params)
   params: TerminalParams;
   owner: AppSessionId | null; // the session the tab was opened for, when known
   focusSeen: number; // the last X5 `focusRequest` the view acted on or used up (the counter outlives the view's mounts)
@@ -59,6 +61,10 @@ let adoption: Promise<TerminalId[]> | null = null;
 let listing: Promise<void> | null = null; // answers when `pty.list` has, or its wait ran out
 // The attaches still waited for, by handle (two ptys may carry one label); null while listing.
 let attaching: Map<TerminalId, { label: string; wait: Promise<TerminalId | null> }> | null = null;
+// E10: the labels the pty host listed when it answered in time; null when it did not (or no adoption ran). The pty host
+// dies with the app and keeps a pty that exited as a dead entry, so a restored tab whose label it did not list lost its
+// shell when MAWS quit (a relaunch); after a renderer reload the host lists it and the tab re-adopts it.
+let listedLabels: Set<string> | null = null;
 const abandoned = new Set<TerminalId>(); // re-adopted handles released, never taken by a tab
 const timers = new Set<ReturnType<typeof setTimeout>>();
 let generation = 0; // tests reset the page's adoption; an earlier one's answers are then ignored
@@ -110,13 +116,16 @@ export function adoptTerminals(accept: (info: PtyInfo) => boolean = () => true):
   let listExpired = false;
   let inTime!: (adopting: Adopting[]) => void;
   const listed = new Promise<Adopting[]>((resolve) => (inTime = resolve));
-  const heard = (adopting: Adopting[]) => {
-    if (!listExpired) inTime(adopting);
+  const heard = (adopting: Adopting[], listed: boolean) => {
+    if (!listExpired) {
+      if (listed && page === generation) listedLabels = new Set(adopting.map(({ label }) => label));
+      inTime(adopting);
+    }
     else if (page === generation && attaching) track(attaching, adopting, true);
   };
   terminals.adopt(accept, heard).catch((error: unknown) => {
     console.error('[terminal] re-adoption failed; tabs open new shells', error);
-    heard([]);
+    heard([], false);
   });
   const expireList = (): Adopting[] => {
     listExpired = true;
@@ -139,7 +148,7 @@ export function resetTerminalAdoption(): void {
   for (const timer of timers) clearTimeout(timer);
   timers.clear();
   abandoned.clear();
-  adoption = listing = attaching = null;
+  adoption = listing = attaching = listedLabels = null;
 }
 
 // What a tab under `label` still waits for before it may open a shell: nothing once every pty listed under its label
@@ -176,11 +185,13 @@ export function ensureTerminal(state: TerminalTabState, shown: { appSessionId: A
   const owner = state.owner ?? shown.appSessionId ?? shown.session?.appId ?? null;
   const cwd = state.params.cwd ?? (shown.session ? sessionDirectory(shown.session) : undefined);
   let terminalId: TerminalId | null = adopted?.id ?? null;
+  let lostAtQuit = false;
   if (!terminalId && owner && cwd) {
     const { command } = state.params;
     terminalId = terminals.open({ appSessionId: owner, label: state.instanceId, cwd, ...(command ? { command } : {}) });
+    lostAtQuit = state.restored && listedLabels !== null && !listedLabels.has(state.instanceId); // E10, §Design 5
   }
-  if (terminalId) state.ui.setState({ terminalId });
+  if (terminalId) state.ui.setState(lostAtQuit ? { terminalId, lostAtQuit } : { terminalId });
   return terminalId;
 }
 
@@ -192,13 +203,14 @@ export function takeFocusRequest(state: TerminalTabState, request: number): bool
 }
 
 function createState({ appSessionId, session, instanceId, params }: PanelToolInit<TerminalParams>): TerminalTabState {
-  const ui = createStore<TerminalTabUi>()(() => ({ confirmClose: false, process: null, confirmed: false, closeError: null, terminalId: null }));
+  const ui = createStore<TerminalTabUi>()(() => ({ confirmClose: false, process: null, confirmed: false, closeError: null, terminalId: null, lostAtQuit: false }));
   const state: TerminalTabState = {
     get terminalId() {
       return ui.getState().terminalId;
     },
     ui,
     instanceId,
+    restored: params === undefined,
     params: { ...params },
     owner: appSessionId ?? session?.appId ?? params?.owner ?? null, // a restored tab has no params
     focusSeen: 0,

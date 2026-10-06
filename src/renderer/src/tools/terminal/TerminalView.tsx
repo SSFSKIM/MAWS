@@ -9,6 +9,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { PanelToolContext } from '../../panel/tool';
 import { useTerminals } from '../../stores/terminals';
 import { terminals, type TerminalInfo } from '../../terminal/registry';
+import { TERMINAL } from './copy';
 import { ensureTerminal, takeFocusRequest, type TerminalTabState } from './index';
 
 // Where a session runs: its worktree when it has one, else its directory (the worktree warning compares against it).
@@ -107,6 +108,20 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
           Open a session to start a terminal
         </div>
       )}
+      {confirm.lostAtQuit ? (
+        // E10: the shell already respawned; the line only says what happened to the one before it
+        <div role="status" aria-label={TERMINAL.lostAtQuitLabel} className={`${bar} text-fg-muted`}>
+          <span className="min-w-0 flex-1">{TERMINAL.lostAtQuit}</span>
+          <button
+            type="button"
+            aria-label={TERMINAL.dismiss}
+            onClick={() => state.ui.setState({ lostAtQuit: false })}
+            className="shrink-0 rounded-sm px-1.5 text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
+          >
+            <span aria-hidden>×</span>
+          </button>
+        </div>
+      ) : null}
       {info ? <StatusBar info={info} hostReady={hostReady} close={ctx.close} /> : null}
       {info?.reconnect === 'lossy' ? (
         <div role="status" aria-label="reconnect notice" className={`${bar} text-fg-muted`}>

@@ -84,9 +84,9 @@ const registry = vi.hoisted(() => {
         infos = infos.filter((info) => info.id !== id);
         publish();
       }),
-      adopt: vi.fn(async (accept?: (info: PtyInfo) => boolean, onListed?: (adopting: { label: string; id: string; attached: Promise<string | null> }[]) => void): Promise<string[]> => {
+      adopt: vi.fn(async (accept?: (info: PtyInfo) => boolean, onListed?: (adopting: { label: string; id: string; attached: Promise<string | null> }[], listed: boolean) => void): Promise<string[]> => {
         void accept;
-        onListed?.([]);
+        onListed?.([], true);
         return [];
       }),
     },
@@ -123,6 +123,11 @@ function context(overrides: Partial<PanelToolContext> = {}): PanelToolContext {
 
 function newState(init: { session?: SessionRecord | null; params?: { cwd?: string; command?: string }; instanceId?: string } = {}) {
   return terminalTool.createState({ appSessionId: A, session: init.session === undefined ? SESSION_A : init.session, instanceId: init.instanceId ?? 'terminal:1', params: init.params ?? {} });
+}
+
+// A tab restored from layout.json: X5 gives it no params.
+function restoredState(instanceId: string) {
+  return terminalTool.createState({ appSessionId: A, session: SESSION_A, instanceId, params: undefined as never });
 }
 
 const View = terminalTool.render;
@@ -276,7 +281,7 @@ describe('re-adoption before a tab opens a shell', () => {
                 return { label, id, attached };
               });
             registry.terminals.open.mockClear();
-            onListed?.(adopting);
+            onListed?.(adopting, true);
             void Promise.all(adopting.map(({ attached }) => attached)).then((ids) => resolveAll(ids.filter((id): id is string => id !== null)));
           };
         }),
@@ -398,6 +403,65 @@ describe('re-adoption before a tab opens a shell', () => {
     host.attach('terminal:dup');
     await vi.waitFor(() => expect(state.terminalId).toBe('t1'));
     expect(registry.terminals.open).not.toHaveBeenCalled();
+  });
+});
+
+// E10 (§Design 5 "Terminals are lost on relaunch"): the pty host dies with the app, so after a relaunch a restored tab
+// finds no pty under its label and opens a new shell as before, saying once that the previous one closed at the quit;
+// after a renderer reload the pty host still runs and the tab re-adopts its shell, saying nothing.
+describe('a restored tab whose shell closed when MAWS quit', () => {
+  beforeEach(() => resetTerminalAdoption());
+  afterEach(() => resetTerminalAdoption());
+  const lost = (state: ReturnType<typeof newState>) => state.ui.getState().lostAtQuit;
+
+  it('opens a new shell and says the previous one closed when the host listed no pty for it (a relaunch)', async () => {
+    await adoptTerminals();
+    const state = restoredState('terminal:restored');
+    expect(state.terminalId).toBe('t1');
+    expect(lost(state)).toBe(true);
+  });
+
+  it('says nothing for a restored tab that re-adopted its shell (a renderer reload)', async () => {
+    registry.terminals.adopt.mockImplementationOnce(async (_accept, onListed) => {
+      const id = registry.terminals.open({ appSessionId: A, label: 'terminal:restored', cwd: '/tmp/maws-harness/a' });
+      registry.terminals.open.mockClear();
+      onListed?.([{ label: 'terminal:restored', id, attached: Promise.resolve(id) }], true);
+      return [id];
+    });
+    await adoptTerminals();
+    const state = restoredState('terminal:restored');
+    await vi.waitFor(() => expect(state.terminalId).toBe('t1'));
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+    expect(lost(state)).toBe(false);
+  });
+
+  it('says nothing for a new tab, nor when the host could not list its ptys, nor before any adoption ran', async () => {
+    await adoptTerminals();
+    expect(lost(newState({ instanceId: 'terminal:fresh' }))).toBe(false);
+
+    resetTerminalAdoption();
+    registry.terminals.adopt.mockImplementationOnce(async (_accept, onListed) => {
+      onListed?.([], false);
+      return [];
+    });
+    await adoptTerminals();
+    const unlisted = restoredState('terminal:unlisted');
+    expect(unlisted.terminalId).not.toBeNull();
+    expect(lost(unlisted)).toBe(false);
+
+    resetTerminalAdoption();
+    expect(lost(restoredState('terminal:early'))).toBe(false);
+  });
+
+  it('shows one dismissible line above the new shell', async () => {
+    await adoptTerminals();
+    const state = restoredState('terminal:restored');
+    render(<View state={state} ctx={context()} />);
+    const line = screen.getByRole('status', { name: 'previous shell' });
+    expect(line.textContent).toContain('The previous shell closed when MAWS quit');
+    act(() => void fireEvent.click(within(line).getByRole('button', { name: 'Dismiss' })));
+    expect(screen.queryByRole('status', { name: 'previous shell' })).toBeNull();
+    expect(lost(state)).toBe(false);
   });
 });
 
