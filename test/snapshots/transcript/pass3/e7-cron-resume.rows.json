@@ -1,0 +1,200 @@
+[
+  {
+    "at": "2026-10-06T11:16:56.038Z",
+    "id": "time:turn:7a30e587-493f-47fc-a592-2397d7fe9938",
+    "kind": "time",
+    "label": "Oct 6, 2026 11:16 AM",
+    "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
+  },
+  {
+    "at": "2026-10-06T11:16:56.038Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:7a30e587-493f-47fc-a592-2397d7fe9938",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "7a30e587-493f-47fc-a592-2397d7fe9938",
+    "placeholders": [],
+    "steer": false,
+    "text": "Call CronList (find it with ToolSearch) and reply with its output verbatim.",
+    "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
+  },
+  {
+    "at": "2026-10-06T11:16:56.038Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T11:17:02.990Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:7a30e587-493f-47fc-a592-2397d7fe9938",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-06T11:16:56.059Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 1,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0700409,
+      "denials": [],
+      "durationMs": 6929,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 2,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 2,
+      "usage": {
+        "cacheCreationInputTokens": 926,
+        "cacheReadInputTokens": 81968,
+        "inputTokens": 28,
+        "outputTokens": 345,
+        "thinkingTokens": 185
+      }
+    },
+    "toolCalls": 2,
+    "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-10-06T11:16:59.033Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "skills",
+        "classification": {
+          "category": "skills",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "query": "select:CronList"
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": [
+            {
+              "tool_name": "CronList",
+              "type": "tool_reference"
+            }
+          ],
+          "spill": null,
+          "structured": {
+            "matches": [
+              "CronList"
+            ],
+            "query": "select:CronList",
+            "total_deferred_tools": 17
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T11:16:59.039Z",
+        "expanded": true,
+        "id": "cell:toolu_01GkV4kpFesa5bppWSWaHvUa",
+        "label": "Loaded 1 tool",
+        "paths": [],
+        "startedAt": "2026-10-06T11:16:59.033Z",
+        "status": "done",
+        "toolName": "ToolSearch",
+        "toolUseId": "toolu_01GkV4kpFesa5bppWSWaHvUa"
+      },
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {},
+          "isError": false,
+          "kind": "generic",
+          "result": "598b1690 — Every Monday at 9:00 AM (recurring): E7 durable weekly\n1040f3a5 — Every day at 3:00 AM (recurring) [session-only]: E7 nightly",
+          "spill": null,
+          "structured": {
+            "jobs": [
+              {
+                "cron": "0 9 * * 1",
+                "humanSchedule": "Every Monday at 9:00 AM",
+                "id": "598b1690",
+                "prompt": "E7 durable weekly",
+                "recurring": true
+              },
+              {
+                "cron": "0 3 * * *",
+                "durable": false,
+                "humanSchedule": "Every day at 3:00 AM",
+                "id": "1040f3a5",
+                "prompt": "E7 nightly",
+                "recurring": true
+              }
+            ]
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T11:17:00.595Z",
+        "expanded": true,
+        "id": "cell:toolu_019bfsoJm7MwnLf8fE8DcYdw",
+        "label": "Used CronList",
+        "paths": [],
+        "startedAt": "2026-10-06T11:17:00.592Z",
+        "status": "done",
+        "toolName": "CronList",
+        "toolUseId": "toolu_019bfsoJm7MwnLf8fE8DcYdw"
+      }
+    ],
+    "expanded": true,
+    "icon": "skills",
+    "id": "group:cell:toolu_01GkV4kpFesa5bppWSWaHvUa",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Loaded 1 tool",
+    "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
+  },
+  {
+    "at": "2026-10-06T11:17:02.958Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfktZ3G3efS6dW3WALNVx:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "598b1690 — Every Monday at 9:00 AM (recurring): E7 durable weekly\n1040f3a5 — Every day at 3:00 AM (recurring) [session-only]: E7 nightly",
+    "messageUuid": "12602645-5191-4aa2-99ef-2f9e373de295",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
+  },
+  {
+    "at": "2026-10-06T11:17:03.235Z",
+    "attempt": null,
+    "id": "error:replay:journal:80:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

@@ -5,6 +5,7 @@
 import { turnWork } from './derive';
 import type { TranscriptState, TurnState, TurnWork } from './reduce';
 import type { SubagentRef, TurnId } from './rows';
+import { turnOrchestration, type TurnOrchestration } from './orchestration'; // E7
 
 export interface SubagentActivity {
   lastTool: string | null; // the child's latest tool call, else the latest progress report's
@@ -30,7 +31,7 @@ export function subagentActivity(turn: TurnState, ref: SubagentRef): SubagentAct
 // derivation: the work is computed with the turn's rows and memoised beside them (derive.ts, `turnWork`), and each
 // entry is kept on the `TurnState` reference, which a turn keeps until an event changes it, so a ui change recomputes
 // nothing.
-export interface TurnActivity extends TurnWork {
+export interface TurnActivity extends TurnWork, TurnOrchestration /* E7: the turn's cron calls and listings */ {
   turnId: TurnId;
   origin: 'human' | 'engine' | 'peer';
   state: TurnState['state'];
@@ -53,7 +54,8 @@ export function turnActivity(state: TranscriptState): TurnActivity[] {
     const turn = state.turns.get(id)!;
     const kept = known.get(id);
     if (kept && kept.version === turn.version) return kept.activity;
-    const activity: TurnActivity = { turnId: turn.id, origin: turn.origin, state: turn.state, startedAt: turn.startedAt, endedAt: turn.endedAt, ...turnWork(state, turn) };
+    const activity: TurnActivity = { turnId: turn.id, origin: turn.origin, state: turn.state, startedAt: turn.startedAt, endedAt: turn.endedAt, ...turnWork(state, turn),
+      ...turnOrchestration(turn) }; // E7
     known.set(id, { version: turn.version, activity });
     return activity;
   });

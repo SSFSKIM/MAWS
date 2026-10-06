@@ -18,7 +18,7 @@ const activityOf = (name: string) => turnActivity(applyEvents(createState(null, 
 
 // A synthetic turn: only the fields the derivations read matter.
 function turn(over: Partial<TurnActivity>): TurnActivity {
-  return { turnId: 'turn:x' as TurnId, origin: 'human', state: 'closed', startedAt: '', endedAt: null, files: [], tools: [], subagents: [], ...over };
+  return { turnId: 'turn:x' as TurnId, origin: 'human', state: 'closed', startedAt: '', endedAt: null, files: [], tools: [], subagents: [], crons: [], listings: [] /* E7 */, ...over };
 }
 const agent = (n: number, status: TurnActivity['subagents'][number]['status']): TurnActivity['subagents'][number] => ({
   taskId: `t${n}` as TaskId, agentId: null, toolUseId: null, name: `agent ${n}`, glyph: n % 8, kind: 'agent', subagentType: null, status,

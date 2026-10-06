@@ -403,6 +403,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (group && ref && event.isError) group.statuses.set(ref.taskId, 'finished_with_errors');
         const agentId = record(event.structured).agentId;
         if (typeof agentId === 'string') agentIds.set(event.toolUseId, agentId as AgentId);
+        if (group && ref?.kind === 'workflow') nameWorkflowRun(group, ref, event.structured, byTask); // E7
         const pending = pendingRows.get(event.toolUseId);
         if (pending?.kind === 'question' && pending.answers === null) {
           const answers = record(event.structured).answers;
@@ -933,6 +934,24 @@ function deliveryRow(delivery: DeliveryRecord, turnId: TurnId): RowOf<'delivery'
   };
 }
 // E1 end
+
+// E7 start: a Workflow call's launch result names its task and run (`{ status: 'async_launched', taskId, runId, … }`,
+// pass2/workflow seq 80; X1's `tool.result.structured`, live and from disk). The ref takes the task's id, as a
+// `task.started` renames it live (the disk backfill emits none for a Workflow), with that id's glyph, and gains the run
+// id; the row keeps the id it was created with (E7 execution document, Design §2, Decision Log 18).
+function nameWorkflowRun(group: SubagentGroup, ref: SubagentRef, structured: unknown, byTask: Map<TaskId, SubagentGroup>): void {
+  const launch = record(structured);
+  if (launch.status !== 'async_launched' || typeof launch.taskId !== 'string' || typeof launch.runId !== 'string') return;
+  const taskId = launch.taskId as TaskId;
+  group.refs[group.refs.indexOf(ref)] = { ...ref, taskId, runId: launch.runId, glyph: glyphFor(taskId) };
+  byTask.set(taskId, group);
+  const status = group.statuses.get(ref.taskId);
+  if (ref.taskId !== taskId && status !== undefined) {
+    group.statuses.delete(ref.taskId);
+    group.statuses.set(taskId, status);
+  }
+}
+// E7 end
 
 function slotRow(event: Event<'permission.requested' | 'question.requested' | 'plan.requested' | 'dialog.requested' | 'elicitation.requested'>, turnId: TurnId | null, toolUseId: ToolUseId | null): RowOf<'request_slot'> {
   const requestKind = event.kind.split('.')[0] as RowOf<'request_slot'>['requestKind'];

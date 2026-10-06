@@ -709,6 +709,13 @@ function apply(batch: Batch, event: SessionEvent): void {
       return;
     }
     // E1 end
+    // E7 start: a message from another session, parsed beside the user.message that carried it, at its arrival position
+    // in the turn it arrived in, as subagent.message is (E7 execution document, Design §4)
+    case 'peer.message': {
+      if (!pushRouted(null)) batch.loose(event);
+      return;
+    }
+    // E7 end
     default:
       return; // session lifecycle, accounting, snapshots and unknown frames: nothing the transcript shows
   }

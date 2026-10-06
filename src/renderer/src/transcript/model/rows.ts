@@ -101,6 +101,9 @@ export interface SubagentRef {
   glyph: number;
   kind: 'agent' | 'workflow';
   subagentType: string | null;
+  // E7 start: a workflow's run id, from the Workflow call's launch result (E7 execution document, Design §2)
+  runId?: string;
+  // E7 end
 }
 export type SubagentStatus = 'started' | 'working' | 'finished' | 'finished_with_errors' | 'stopped';
 

@@ -40,6 +40,7 @@ export const CellDetailSchema = z.discriminatedUnion('kind', [
 
 const SubagentRefSchema = z.strictObject({
   taskId: z.string(), agentId: nullable(z.string()), toolUseId: nullable(z.string()), name: z.string(), glyph: z.number().int().min(0).max(7), kind: z.enum(['agent', 'workflow']), subagentType: nullable(z.string()),
+  runId: z.string().optional(), // E7
 });
 
 const cellShape = {

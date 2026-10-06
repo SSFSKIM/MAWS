@@ -1,0 +1,372 @@
+[
+  {
+    "at": "2026-10-06T10:59:45.543Z",
+    "id": "time:turn:22be2241-f79e-4248-a05b-7553331810d5",
+    "kind": "time",
+    "label": "Oct 6, 2026 10:59 AM",
+    "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
+  },
+  {
+    "at": "2026-10-06T10:59:45.543Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:22be2241-f79e-4248-a05b-7553331810d5",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "22be2241-f79e-4248-a05b-7553331810d5",
+    "placeholders": [],
+    "steer": false,
+    "text": "Spawn a general-purpose Agent named \"scout\" in the background, model haiku: read one.txt and reply. Then call ListAgents (find it with ToolSearch) and reply with the listing.",
+    "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
+  },
+  {
+    "at": "2026-10-06T10:59:45.543Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T10:59:55.284Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:22be2241-f79e-4248-a05b-7553331810d5",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-06T10:59:45.551Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 1,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 1,
+      "costUsd": 0.0563969,
+      "denials": [],
+      "durationMs": 9731,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 2,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 2,
+      "usage": {
+        "cacheCreationInputTokens": 23666,
+        "cacheReadInputTokens": 45511,
+        "inputTokens": 28,
+        "outputTokens": 851,
+        "thinkingTokens": 484
+      }
+    },
+    "toolCalls": 2,
+    "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
+  },
+  {
+    "agents": [
+      {
+        "agentId": "a1ba7eb1ffe9f0ffa",
+        "glyph": 7,
+        "kind": "agent",
+        "name": "Read one.txt and reply",
+        "subagentType": "general-purpose",
+        "taskId": "a1ba7eb1ffe9f0ffa",
+        "toolUseId": "toolu_01PYVnxq2dZfn8SELHkAe5nk"
+      }
+    ],
+    "at": "2026-10-06T10:59:51.178Z",
+    "id": "subagent:a1ba7eb1ffe9f0ffa",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Read one.txt and reply finished",
+    "status": "finished",
+    "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-10-06T10:59:51.601Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "skills",
+        "classification": {
+          "category": "skills",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "max_results": 1,
+            "query": "select:ListAgents"
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": [
+            {
+              "tool_name": "ListAgents",
+              "type": "tool_reference"
+            }
+          ],
+          "spill": null,
+          "structured": {
+            "matches": [
+              "ListAgents"
+            ],
+            "query": "select:ListAgents",
+            "total_deferred_tools": 17
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T10:59:51.604Z",
+        "expanded": true,
+        "id": "cell:toolu_019KFUCtczzkzzV5QQtsSnM5",
+        "label": "Loaded 1 tool",
+        "paths": [],
+        "startedAt": "2026-10-06T10:59:51.601Z",
+        "status": "done",
+        "toolName": "ToolSearch",
+        "toolUseId": "toolu_019KFUCtczzkzzV5QQtsSnM5"
+      },
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {},
+          "isError": false,
+          "kind": "generic",
+          "result": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  running  ·  started 1s ago",
+          "spill": null,
+          "structured": {
+            "listing": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  running  ·  started 1s ago"
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T10:59:52.797Z",
+        "expanded": true,
+        "id": "cell:toolu_014MV1xUpn4aobtBRqoVJdXz",
+        "label": "Used ListAgents",
+        "paths": [],
+        "startedAt": "2026-10-06T10:59:52.793Z",
+        "status": "done",
+        "toolName": "ListAgents",
+        "toolUseId": "toolu_014MV1xUpn4aobtBRqoVJdXz"
+      }
+    ],
+    "expanded": true,
+    "icon": "skills",
+    "id": "group:cell:toolu_019KFUCtczzkzzV5QQtsSnM5",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Loaded 1 tool",
+    "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
+  },
+  {
+    "at": "2026-10-06T10:59:54.477Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfksFGgKLZCMpv51Xrfss:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Scout agent spawned and running in the background. Here's the agent listing:\n\n**Current Session:** repo-y2xidi-73 [48fa39]\n\n**Subagents (1):**\n- `scout [15083b]` — general-purpose — running — started 1s ago\n\nThe scout agent is currently reading one.txt; you'll be notified when it completes.",
+    "messageUuid": "0f041080-e0b3-484f-a5ea-2643196613dd",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
+  },
+  {
+    "at": "2026-10-06T10:59:55.288Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T10:59:56.729Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:ereplay:journal:157:1",
+    "kind": "divider",
+    "origin": "engine",
+    "startedAt": "2026-10-06T10:59:55.288Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.06013975,
+      "denials": [],
+      "durationMs": 1444,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 693,
+        "cacheReadInputTokens": 23666,
+        "inputTokens": 10,
+        "outputTokens": 100,
+        "thinkingTokens": 45
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:ereplay:journal:157:1"
+  },
+  {
+    "at": "2026-10-06T10:59:56.253Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfksFTREyiUmuxiGA1ysF:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Scout agent completed. The file `/private/tmp/maws-e0a-e7-team-hKldQe/repo-y2XIDi/one.txt` contains:\n\n```\nONE\n```",
+    "messageUuid": "c34b3ab7-ac50-4d57-b46e-a1ada669d053",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:ereplay:journal:157:1"
+  },
+  {
+    "at": "2026-10-06T10:59:59.286Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:d1b2523a-e8f7-4406-b01a-c350f5375391",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "d1b2523a-e8f7-4406-b01a-c350f5375391",
+    "placeholders": [],
+    "steer": false,
+    "text": "Call ListAgents again and reply with the listing verbatim.",
+    "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
+  },
+  {
+    "at": "2026-10-06T10:59:59.286Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T11:00:02.141Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:d1b2523a-e8f7-4406-b01a-c350f5375391",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-06T10:59:59.288Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 1,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0665419,
+      "denials": [],
+      "durationMs": 2852,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 419,
+        "cacheReadInputTokens": 48904,
+        "inputTokens": 18,
+        "outputTokens": 194,
+        "thinkingTokens": 68
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
+  },
+  {
+    "agent": null,
+    "at": "2026-10-06T11:00:00.390Z",
+    "category": "other",
+    "classification": {
+      "category": "other",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "input": {},
+      "isError": false,
+      "kind": "generic",
+      "result": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  completed  ·  started 9s ago",
+      "spill": null,
+      "structured": {
+        "listing": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  completed  ·  started 9s ago"
+      },
+      "truncated": null
+    },
+    "endedAt": "2026-10-06T11:00:00.396Z",
+    "expanded": true,
+    "id": "cell:toolu_01VXfwtV7Aw7rweu8K86J74p",
+    "kind": "cell",
+    "label": "Used ListAgents",
+    "paths": [],
+    "startedAt": "2026-10-06T11:00:00.390Z",
+    "status": "done",
+    "toolName": "ListAgents",
+    "toolUseId": "toolu_01VXfwtV7Aw7rweu8K86J74p",
+    "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
+  },
+  {
+    "at": "2026-10-06T11:00:01.557Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfksFr6W84EVgq3p8gRg7:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "This session is repo-y2xidi-73 [48fa39] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nSubagents (1):\n  scout [15083b]  ·  general-purpose  ·  completed  ·  started 9s ago",
+    "messageUuid": "3216c175-03ba-4d78-8069-62993e9651d3",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:d1b2523a-e8f7-4406-b01a-c350f5375391"
+  },
+  {
+    "at": "2026-10-06T11:00:05.317Z",
+    "attempt": null,
+    "id": "error:replay:journal:248:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

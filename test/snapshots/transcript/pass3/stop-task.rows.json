@@ -334,6 +334,7 @@
         "glyph": 0,
         "kind": "workflow",
         "name": "One slow agent",
+        "runId": "wf_2994ca11-04f",
         "subagentType": null,
         "taskId": "wkmzd07jp",
         "toolUseId": "toolu_01KZBcpNypx9RMPRzuX56XF7"
