@@ -85,6 +85,38 @@ export interface RunWidgetView {
   stopping: boolean;
   error: string | null;
 }
+
+// M7: the Tasks panel as shown (read-only, P-20): its rows in order, the completed fold's rows only once opened.
+export interface TasksView {
+  progress: string | null; // `<c> of <t> completed`
+  label: string | null; // `session list` for a session that is not live here
+  rows: { id: string; subject: string; status: string; selected: boolean }[];
+  completedToggle: string | null; // the completed fold's button (`N earlier tasks completed`)
+  note: string | null; // the line shown in place of a list (unavailable, no session)
+}
+
+// M7: Background work's Scheduled rows as shown, in order (durable first).
+export interface ScheduledRowView {
+  id: string;
+  store: string; // `durable-this` | `durable-other` | `session`
+  schedule: string; // the schedule in words, or the cron
+  kind: string; // `recurring · session-only`, `one-shot · durable · this session`
+  prompt: string;
+  when: string; // `Next ≈ <time> (<relative>)` with any expiry and last run, or `Resumes with the session`
+  dormant: boolean; // greyed: a session-only job of a session not running here
+  link: boolean; // `Open creating turn` offered
+}
+export interface ScheduledView {
+  heading: string | null; // `Scheduled · N`, null when the section is not shown
+  rows: ScheduledRowView[];
+  error: string | null; // `Scheduled jobs unavailable: <message>`
+}
+
+// M7: the column transcript's messages between sessions and its `ListAgents` listings, as shown (rows inside a folded
+// turn are not shown, so a row's presence before and after `expandAll` tells its persistence).
+export type PeerRowView =
+  | { kind: 'message'; direction: 'inbound' | 'outbound'; who: string; address: string | null; preview: string; result: string | null; resultText: string | null; reply: boolean; line: string | null }
+  | { kind: 'listing'; self: string; sections: { heading: string; rows: { name: string; ref: string | null; extras: string }[] }[]; notes: string[] };
 // E7 end
 
 export interface LogView {
@@ -107,7 +139,8 @@ export interface AgentsHarnessApi {
   // watches the session. The block's column shows the fed transcript from then on.
   feed(id: AgentsFakeId, fixture: string): Promise<void>;
   reset(id: AgentsFakeId): void; // the session's task graph started over (as `feed` does first), the status's background list emptied
-  fakeFs(data: { sidecars?: SubagentEntry[]; runs?: WorkflowRun[]; tasks?: Record<string, PersistedTask[]>; spills?: Record<string, string> }): void;
+  // E7: `files` the session's project files by path, `refusals` a `files.read` refusal's message by path (M7)
+  fakeFs(data: { sidecars?: SubagentEntry[]; runs?: WorkflowRun[]; tasks?: Record<string, PersistedTask[]>; spills?: Record<string, string>; files?: Record<string, string>; refusals?: Record<string, string> }): void;
   fixtureFs(name: 'subagent-sidecars' | 'workflow-disk' | 'nested-agents-sidecars'): Promise<void>;
   patchStatus(id: AgentsFakeId, patch: Partial<EngineSessionStatus>): void; // the current status (or A's live one) with the patch
   releaseThrough(id: AgentsFakeId, seq: number): Promise<number>; // the fed fixture's unreleased events through `seq`, as panel.transcript(id).release(n) would; resolves with n
@@ -119,6 +152,19 @@ export interface AgentsHarnessApi {
   background(): BackgroundView | null;
   widget(): RunWidgetView | null; // E7: the selected Background work tab's run widget, else null
   log(): LogView | null;
+  // E7 start (M7)
+  tasks(): TasksView | null; // the selected Tasks tab, else null
+  scheduled(): ScheduledView | null; // the selected Background work tab's Scheduled section, else null
+  peerRows(): Promise<PeerRowView[]>; // the column's rows, read from its top down (the list scrolled to mount each)
+  columnTexts(): Promise<string[]>; // every row of the column as text, read from its top down
+  pushTasks(listId: string, tasks: PersistedTask[]): void; // the list's new contents, announced as `fs.tasksChanged`
+  setClock(iso: string | null): void; // the agent tools' clock fixed at `iso` (null: the wall clock again)
+  clearStatus(id: AgentsFakeId): void; // a disk-only session: no status, its task graph started over on disk
+  selectPhase(n: number): void; // the widget's n-th phase option (0 is `All phases`)
+  toggleFold(parentId: string): void; // the Subagents tree's `Done · N` fold under that parent
+  reply(n: number, text: string): Promise<void>; // the n-th (1-based) Reply of the column: opened, typed, sent; resolves once the steer is answered
+  openCreatingTurn(id: string): void; // the Scheduled row's `Open creating turn`
+  // E7 end
 
   clickRow(agentId: string): void;
   back(): void;

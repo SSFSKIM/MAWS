@@ -3,17 +3,21 @@
 // reaches; the fake client's disk half and recorded calls; and the column's transcript hand-offs.
 import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
 import type { SubagentEntry } from '@shared/ipc/schema/fs';
+import type { PersistedTask } from '@shared/wire/store';
 import { SubagentMetaSchema, WorkflowSnapshotSchema } from '@shared/wire/store';
 import { instanceIds, instanceOf, usePanelHost } from '../../panel/host';
 import { useLayout } from '../../stores/layout';
 import { activeTab, sessionOfTab } from '../../stores/layout-model';
-import { BACKGROUND_COPY, LOG_COPY, RELAY_COPY, SUBAGENTS_COPY } from '../../tools/agents/copy';
+import { BACKGROUND_COPY, LOG_COPY, RELAY_COPY, SCHEDULED_COPY, SUBAGENTS_COPY } from '../../tools/agents/copy';
 import { relayKey, useRelays } from '../../tools/agents/relay-store';
 import { STOP_SETTLE_MS, useTaskGraph } from '../../tools/agents/store';
+import { setAgentsClock } from '../../tools/agents/subagents/shared'; // E7
 import { useTranscriptStore } from '../../transcript';
+import { peerMessageCopy } from '../../transcript/model/copy'; // E7
 import { fakeId } from '../panel/fakeSessions';
-import { attachesOf, childSourceFor, columnHandle, columnView, fake, feed, patchStatus, releaseThrough, reset, setAgentTab } from './AgentsHarnessBlock';
-import type { AgentRowView, AgentsHarnessApi, BackgroundView, LogView, RunWidgetView, SubagentsView, TreeRowView } from './api';
+import { summaryProbes } from '../panel/summaryProbes'; // E7
+import { attachesOf, childSourceFor, columnHandle, columnSource, columnView, fake, feed, patchStatus, releaseThrough, reset, setAgentTab } from './AgentsHarnessBlock';
+import type { AgentRowView, AgentsFakeId, AgentsHarnessApi, BackgroundView, LogView, PeerRowView, RunWidgetView, ScheduledView, SubagentsView, TasksView, TreeRowView } from './api';
 
 // The fixture directories, raw, as C4's `fs.subagents` and `fs.workflows` would answer them (sizes and times are nominal;
 // the lists read neither).
@@ -194,6 +198,156 @@ function widget(): RunWidgetView | null {
   };
 }
 
+// ---- E7 (M7): the Tasks panel, the Scheduled rows, the column's peer rows ---------------------------------------------------
+
+function tasks(): TasksView | null {
+  const body = bodyOf('tasks')?.querySelector<HTMLElement>('[data-tool="tasks"]');
+  if (!body) return null;
+  const part = (name: string) => (body.querySelector(`[data-part="${name}"]`) ? text(body.querySelector(`[data-part="${name}"]`)) : null);
+  const items = [...body.querySelectorAll<HTMLElement>('li')].filter((li) => li.querySelector('[data-task]') !== null);
+  const notes = body.tagName === 'P' ? [text(body)] : [...body.querySelectorAll(':scope > p')].filter((p) => p.querySelector('[data-part]') === null).map(text);
+  const toggle = body.querySelector(':scope > button[aria-expanded]');
+  return {
+    progress: part('progress'),
+    label: part('label'),
+    rows: items.map((li) => ({
+      id: li.querySelector<HTMLElement>('[data-task]')!.dataset.task!,
+      subject: text(li.querySelector('[data-task]')),
+      status: li.querySelector('[role="img"]')?.getAttribute('aria-label') ?? '',
+      selected: li.getAttribute('aria-current') === 'true',
+    })),
+    completedToggle: toggle ? text(toggle) : null,
+    note: notes[0] ?? null,
+  };
+}
+
+function scheduled(): ScheduledView | null {
+  const body = bodyOf('background');
+  if (!body || body.querySelector('[data-view="run"]')) return null;
+  const section = body.querySelector<HTMLElement>('section[data-section="scheduled"]');
+  if (!section) return { heading: null, rows: [], error: null };
+  const part = (row: Element, name: string) => text(row.querySelector(`[data-part="${name}"]`));
+  return {
+    heading: text(section.querySelector('h3 button')),
+    rows: [...section.querySelectorAll<HTMLElement>('[data-scheduled]')].map((row) => ({
+      id: row.dataset.scheduled!,
+      store: row.dataset.store!,
+      schedule: part(row, 'schedule'),
+      kind: part(row, 'kind'),
+      prompt: part(row, 'prompt'),
+      when: part(row, 'when'),
+      dormant: part(row, 'when').startsWith(SCHEDULED_COPY.dormant),
+      link: buttonNamed(row, SCHEDULED_COPY.openTurn) !== null,
+    })),
+    error: [...section.querySelectorAll('p')].map(text).find((line) => line.startsWith(SCHEDULED_COPY.unavailable(''))) ?? null,
+  };
+}
+
+function peerRowOf(el: HTMLElement): PeerRowView | null {
+  const message = el.querySelector<HTMLElement>('.transcript-peer[data-peer]');
+  if (message) {
+    const who = message.querySelector('.transcript-peer-who');
+    const state = message.querySelector<HTMLElement>('.transcript-peer-state');
+    const error = message.querySelector('.transcript-peer-error');
+    const line = message.querySelector('[data-part="peer-line"]');
+    return {
+      kind: 'message',
+      direction: message.dataset.peer as 'inbound' | 'outbound',
+      who: text(who),
+      address: who?.getAttribute('title') ?? null,
+      preview: text(message.querySelector('.transcript-peer-text > span:last-child')),
+      result: state?.dataset.result ?? null,
+      resultText: error ? text(error) : (state?.getAttribute('title') ?? null),
+      reply: buttonNamed(message, peerMessageCopy.reply) !== null,
+      line: line ? text(line) : null,
+    };
+  }
+  const listing = el.querySelector<HTMLElement>('.transcript-listing');
+  if (!listing) return null;
+  return {
+    kind: 'listing',
+    self: text(listing.querySelector(':scope > .transcript-lifecycle span')),
+    sections: [...listing.querySelectorAll<HTMLElement>('.transcript-listing-section')].map((section) => ({
+      heading: text(section.querySelector('.transcript-listing-heading')),
+      rows: [...section.querySelectorAll('li.transcript-listing-entry')].map((li) => {
+        const ref = li.querySelector('.transcript-listing-ref');
+        return { name: text(li.querySelector('.transcript-listing-name')), ref: ref ? text(ref) : null, extras: text(li.querySelector('.transcript-listing-extras')) };
+      }),
+    })),
+    notes: [...listing.querySelectorAll('.transcript-listing-note')].map(text),
+  };
+}
+
+// The column's rows in order, `visit` reading each once until it answers true: each row by its index, the list scrolled
+// to it when the virtualiser has not mounted it (a following list may pull itself back to its end between frames, so
+// no scroll position is relied on); the list is left where the visit stopped.
+async function scanColumn(visit: (row: HTMLElement) => boolean): Promise<void> {
+  const session = columnView().session;
+  if (!session) throw new Error('agents: nothing fed yet');
+  await until(() => (columnHandle.current?.scrollElement ?? null) !== null, 'the column’s transcript to mount');
+  const count = useTranscriptStore.getState().rows(columnSource(session).key!).length;
+  for (let index = 0; index < count; index += 1) {
+    const mounted = () => columnHandle.current?.scrollElement?.querySelector<HTMLElement>(`[data-index="${index}"]`) ?? null;
+    if (!mounted()) {
+      columnHandle.current!.scrollToIndex(index, 'start');
+      await until(() => mounted() !== null, `the column’s row ${index}`);
+      await frames(1);
+    }
+    if (visit(mounted()!)) return;
+  }
+}
+
+async function peerRows(): Promise<PeerRowView[]> {
+  const rows: PeerRowView[] = [];
+  await scanColumn((row) => {
+    const view = peerRowOf(row);
+    if (view) rows.push(view);
+    return false;
+  });
+  return rows;
+}
+
+async function columnTexts(): Promise<string[]> {
+  const texts: string[] = [];
+  await scanColumn((row) => {
+    texts.push(text(row));
+    return false;
+  });
+  return texts;
+}
+
+// The n-th Reply of the column, opened, typed and sent; resolves once the steer is answered (or the send refused).
+async function reply(n: number, value: string): Promise<void> {
+  let rowId: string | null = null;
+  let count = 0;
+  await scanColumn((row) => {
+    if (buttonNamed(row.querySelector('.transcript-peer[data-peer="inbound"]'), peerMessageCopy.reply) === null) return false;
+    count += 1;
+    if (count === n) rowId = row.dataset.rowId!;
+    return count === n;
+  });
+  if (rowId === null) throw new Error(`agents: no Reply ${n} in the column (${count} found)`);
+  const id: string = rowId;
+  const rowEl = () => document.querySelector<HTMLElement>(`[data-agents-harness-transcript] [data-row-id="${CSS.escape(id)}"]`);
+  const toggle = buttonNamed(rowEl()?.querySelector('.transcript-peer'), peerMessageCopy.reply);
+  if (toggle?.getAttribute('aria-expanded') !== 'true') click(toggle, `Reply ${n}`);
+  await until(() => (rowEl()?.querySelector('textarea') ?? null) !== null, 'the reply composer');
+  const box = rowEl()!.querySelector('textarea')!;
+  if (box.disabled) throw new Error(`agents: the reply box is disabled (${box.placeholder})`);
+  type(box, value);
+  await frames(1);
+  const before = fake.calls().steer.length;
+  click(rowEl()?.querySelector('.transcript-peer-send'), 'Send');
+  await until(() => fake.calls().steer.length > before || (rowEl()?.querySelector('[data-part="peer-line"][data-failed]') ?? null) !== null, 'the reply’s steer to be answered');
+  await frames();
+}
+
+// A disk-only session: the status gone (C3's live status is what makes a session live here), the task graph started over.
+function clearStatus(id: AgentsFakeId): void {
+  summaryProbes.setStatus(id, null);
+  reset(id);
+}
+
 // ---- Log -------------------------------------------------------------------------------------------------------------------
 
 function log(): LogView | null {
@@ -287,7 +441,7 @@ async function clickTranscriptSubagent(n: number): Promise<void> {
   // C6's Transcript loads lazily (its first render is a tick after mount), and the subagent rows sit in the turns' work
   // areas: expanded, then waited for.
   await until(() => columnHandle.current !== null, 'the column’s transcript to mount');
-  useTranscriptStore.getState().expandAll(session.key);
+  useTranscriptStore.getState().expandAll(columnSource(session).key!);
   const controls = () => [...(column()?.querySelectorAll('button.transcript-subagent-line, button.transcript-glyph') ?? [])];
   await until(() => controls().length >= n, `transcript agent control ${n}`);
   click(controls()[n - 1], `transcript agent control ${n}`);
@@ -299,7 +453,7 @@ async function clickTranscriptFullLog(n: number): Promise<void> {
   const session = columnView().session;
   if (!session) throw new Error('agents: nothing fed yet');
   await until(() => columnHandle.current !== null, 'the column’s transcript to mount'); // C6's Transcript loads lazily
-  useTranscriptStore.getState().expandAll(session.key, { cells: true });
+  useTranscriptStore.getState().expandAll(columnSource(session).key!, { cells: true });
   await frames();
   const scroller = columnHandle.current?.scrollElement;
   if (!scroller) throw new Error('agents: the column’s transcript is not mounted');
@@ -352,6 +506,19 @@ export const agentsProbes: AgentsHarnessApi = {
   background,
   widget, // E7
   log,
+  // E7 start (M7)
+  tasks,
+  scheduled,
+  peerRows,
+  columnTexts,
+  pushTasks: (listId: string, list: PersistedTask[]) => fake.fakeFs({ tasks: { [listId]: list } }),
+  setClock: (iso) => setAgentsClock(iso === null ? null : Date.parse(iso)),
+  clearStatus,
+  selectPhase: (n) => click(bodyOf('background')?.querySelectorAll('[data-view="run"] [role="option"]')[n], `phase option ${n}`),
+  toggleFold: (parentId) => click(bodyOf('subagents')?.querySelector(`[data-fold="${CSS.escape(parentId)}"]`), `the fold under ${parentId}`),
+  reply,
+  openCreatingTurn: (id) => click(buttonNamed(bodyOf('background')?.querySelector(`[data-scheduled="${CSS.escape(id)}"]`), SCHEDULED_COPY.openTurn), `Open creating turn of ${id}`),
+  // E7 end
   clickRow: (agentId) => click(bodyOf('subagents')?.querySelector(`[data-agent-row="${CSS.escape(agentId)}"]`), `the row of ${agentId}`),
   back: () => click(buttonNamed(bodyOf('subagents'), SUBAGENTS_COPY.back), 'Back'),
   typeRelay(value) {

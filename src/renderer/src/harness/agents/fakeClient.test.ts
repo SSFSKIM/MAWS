@@ -109,6 +109,21 @@ describe('agents harness fake client', () => {
     expect(seen).toEqual([`A ${path} changed`]);
   });
 
+  // E7 (M7): a refusal staged for a path is answered as main refuses it, while the session's root still resolves, so the
+  // durable file's reader shows the reason rather than taking the root for gone.
+  it('answers a staged refusal with its message, announced as a change, and lists the session’s roots', async () => {
+    const fake = createFakeAgentWorkClient({ session: A, roots: ['/repo'] });
+    const seen: string[] = [];
+    fake.client.onFilesChanged(({ path }) => seen.push(path));
+    const path = '/repo/.claude/scheduled_tasks.json';
+    fake.fakeFs({ files: { [path]: '{"tasks":[]}' }, refusals: { [path]: 'path outside the session’s directories' } });
+    await expect(fake.client.readFile({ appSessionId: A, path, hash: true })).rejects.toThrow('path outside the session’s directories');
+    expect(seen).toEqual([path, path]);
+    expect(await fake.client.listRoots(A)).toEqual(['/repo']);
+    expect(await fake.client.listRoots(B)).toEqual([]);
+    expect(await createFakeAgentWorkClient({ session: A }).client.listRoots(A)).toEqual([]);
+  });
+
   it('records steers and stops, answering a stop as answerStop set it (ok by default)', async () => {
     const fake = createFakeAgentWorkClient({ session: A });
     const { messageUuid } = await fake.client.steer(A, 'Relay to agent x …', 'next');

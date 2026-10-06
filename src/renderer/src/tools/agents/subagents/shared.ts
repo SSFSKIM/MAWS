@@ -14,11 +14,28 @@ import type { TaskGraphEntry } from '../store';
 // by the tool's visibility, which `useNow` cannot be. The clock is read again whenever the ticker (re)activates, so a
 // list shown again does not read a stale time for a whole period.
 export const SLOW_TICK_MS = 30_000;
+
+// E7 (M7): the clock every ticker reads, the wall clock unless the `#panel` harness fixed it (`setClock`), so a case
+// reads the widget's elapsed and the Scheduled rows' next runs and expiries at a known now. Fixing or releasing it
+// gives every mounted ticker the new time at once.
+let fixedAt: number | null = null;
+const clockListeners = new Set<() => void>();
+export const wallClock = (): number => fixedAt ?? Date.now();
+export function setAgentsClock(at: number | null): void {
+  fixedAt = at;
+  clockListeners.forEach((listener) => listener());
+}
+
 export function useTicker(active: boolean, periodMs = 1000): number {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(wallClock);
+  useEffect(() => {
+    const listener = () => setNow(wallClock());
+    clockListeners.add(listener);
+    return () => void clockListeners.delete(listener);
+  }, []);
   useEffect(() => {
     if (!active) return;
-    const tick = () => setNow(Date.now());
+    const tick = () => setNow(wallClock());
     const first = setTimeout(tick, 0); // the clock as the ticker (re)activates, off the effect's own pass
     const timer = setInterval(tick, periodMs);
     return () => {

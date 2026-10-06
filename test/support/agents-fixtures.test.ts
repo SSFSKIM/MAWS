@@ -2,9 +2,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { describe, expect, it } from 'vitest';
 import { applyTaskEvents, emptyGraph } from '../../src/renderer/src/tools/agents/model/task-graph';
-import { matchesSendMessage } from '../../src/renderer/src/tools/agents/model/relay';
+import { matchesSendMessage, relayText /* E7 */ } from '../../src/renderer/src/tools/agents/model/relay';
 import { phasesOf } from '../../src/renderer/src/tools/agents/model/workflow-progress';
+import { journalToEvents } from '../../src/renderer/src/transcript/dev/journal'; // E7
+import { loadJournal } from './fixtures'; // E7
 import {
+  AGENTS_CRON_TAIL, // E7
   AGENTS_FIXTURE_FILES,
   AGENTS_RELAY_TAIL,
   AGENTS_STOP_SHELL_TAIL,
@@ -16,6 +19,15 @@ import {
   measureAgentsStopShell,
   measureAgentsStopWorkflow,
   serializeAgentsFixture,
+  // E7 start
+  deriveAgentsCronFixture,
+  deriveAgentsPeerFixture,
+  E7_NESTED_AGENTS,
+  E7_PEER_A,
+  measureAgentsCron,
+  measureE7NestedAgents,
+  measureE7PeerA,
+  // E7 end
 } from './agents-fixtures';
 
 // Regenerate the committed fixtures after a deliberate change with:
@@ -128,3 +140,53 @@ describe('agents fixtures are reproducible', () => {
     expect(graph.tasks.get(taskId as never)?.status).toBe('stopped');
   });
 });
+
+// E7 start (M7): the derived disk-path peer fixture and the cron fixture across a resume, and the boundaries the E7
+// cases release to in the recorded journals.
+describe('E7 agents fixtures are reproducible', () => {
+  const e7 = { peer: deriveAgentsPeerFixture(), cron: deriveAgentsCronFixture() };
+  const live = (name: string) => journalToEvents(loadJournal('pass3', name));
+  const BASE = new Set(['id', 'sessionId', 'at', 'seq', 'agentId', 'parentToolUseId']); // as backfill.test.ts's parity case
+  const peerPayloads = (events: SessionEvent[]) =>
+    events.filter((event) => event.kind === 'peer.message').map((event) => Object.fromEntries(Object.entries(event).filter(([key]) => !BASE.has(key))));
+
+  it.each(Object.keys(e7) as (keyof typeof e7)[])('%s regenerates its committed file byte for byte, valid X1 with unique ids', (name) => {
+    if (process.env.MAWS_WRITE_AGENTS_FIXTURES === '1') writeFileSync(AGENTS_FIXTURE_FILES[name], serializeAgentsFixture(e7[name]));
+    expect(readFileSync(AGENTS_FIXTURE_FILES[name], 'utf8')).toBe(serializeAgentsFixture(e7[name]));
+    for (const event of e7[name]) SessionEventSchema.parse(event);
+    expect(new Set(e7[name].map((event) => event.id)).size).toBe(e7[name].length);
+  });
+
+  it('agents-peer: the disk path gives the live peer messages, the listing and the two sends’ results', () => {
+    const events = e7.peer;
+    expect(peerPayloads(events)).toEqual(peerPayloads(live('e7-peer-a')));
+    expect(events.filter((event) => event.kind === 'user.message' && event.origin === 'peer')).toHaveLength(2); // the idle record and the mid-turn attachment (Decision Log 25)
+    const sends = events.filter((event) => event.kind === 'tool.use' && event.toolName === 'SendMessage').map((event) => (event as { input: { to: string } }).input.to);
+    expect(sends).toEqual([E7_PEER_A.name, E7_PEER_A.address, 'nobody-e7']);
+    expect(events.some((event) => event.kind === 'tool.use' && event.toolName === 'ListAgents')).toBe(true);
+    expect(events.every((event) => event.seq === null)).toBe(true); // history: the harness releases it at load
+  });
+
+  it('pass3/e7-peer-a: the boundaries, and the recorded reply steer is the peer relayText of the owner’s text', () => {
+    const events = live('e7-peer-a');
+    expect(measureE7PeerA(events)).toEqual(E7_PEER_A);
+    const steer = events.find((event) => event.seq === E7_PEER_A.replyFrom && event.kind === 'user.message');
+    expect(steer?.kind === 'user.message' ? steer.content : null).toBe(relayText({ kind: 'peer', address: E7_PEER_A.address, name: E7_PEER_A.name, mode: 'reply' }, E7_PEER_A.text));
+  });
+
+  it('pass3/nested-agents: the inner agent starts and finishes inside the outer one', () => {
+    expect(measureE7NestedAgents(live('nested-agents'))).toEqual(E7_NESTED_AGENTS);
+  });
+
+  it('agents-cron: e7-cron then the resumed launch, the replay launch in every appended id, the jobs’ calls kept', () => {
+    const events = e7.cron;
+    expect(measureAgentsCron(events)).toEqual(AGENTS_CRON_TAIL);
+    const seqs = events.map((event) => event.seq!);
+    expect(seqs.every((seq, i) => i === 0 || seq >= seqs[i - 1])).toBe(true);
+    const appended = events.filter((event) => event.seq! >= AGENTS_CRON_TAIL.first);
+    expect(appended.every((event) => event.id.startsWith('agents-cron:journal:') && event.id.split(':').at(-2) === String(event.seq))).toBe(true);
+    expect(appended.map((event) => event.kind)).toEqual(live('e7-cron-resume').map((event) => event.kind));
+    expect(appended.some((event) => event.kind === 'tool.use' && event.toolName === 'CronList')).toBe(true);
+  });
+});
+// E7 end

@@ -7,7 +7,8 @@
 // yet); its command half records the relay's steers and Stop's calls, a stop answered as `answerStop` set it. E7: its
 // files half serves the fake session's project files (the durable cron file) to `files.read` with their hash and
 // `utf8` as main answers `hash: true` (E5's rule), finds every directory a watch names, and announces each file
-// `fakeFs` sets as `files.changed`.
+// `fakeFs` sets as `files.changed`; a refusal staged for a path is answered with its message (M7), the session's roots
+// (`roots`, its record's directory) still resolving, as main's are when it refuses a path for its own reason.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
 import type { EventPayload } from '@shared/ipc/schema';
@@ -26,6 +27,7 @@ export interface FakeDisk {
   tasks: Record<string, PersistedTask[]>; // by list id
   spills: Record<string, string>; // by path
   files: Record<string, string>; // E7: the session's project files by path (the durable cron file)
+  refusals: Record<string, string>; // E7 (M7): a `files.read` refusal's message by path, ahead of any file there
 }
 
 // A session's wire: the snapshot `session.events` answers and the batches `session.eventBatch` carries.
@@ -79,8 +81,8 @@ const upsert = <T>(list: T[], items: T[] | undefined, key: (item: T) => string):
   return [...next.values()];
 };
 
-export function createFakeAgentWorkClient(init: { session: AppSessionId } & Partial<FakeDisk>): FakeAgentWorkClient {
-  const disk: FakeDisk = { sidecars: [], runs: [], tasks: {}, spills: {}, files: {} };
+export function createFakeAgentWorkClient(init: { session: AppSessionId; roots?: string[] } & Partial<FakeDisk>): FakeAgentWorkClient {
+  const disk: FakeDisk = { sidecars: [], runs: [], tasks: {}, spills: {}, files: {}, refusals: {} };
   const recorded: AgentsHarnessCalls = { steer: [], stopTask: [], readSpill: [] };
   const stopAnswers = new Map<string, 'ok' | 'error'>();
   const inFlight = new Set<Promise<unknown>>();
@@ -111,7 +113,7 @@ export function createFakeAgentWorkClient(init: { session: AppSessionId } & Part
     if (changed.sidecars) subagentListeners.forEach((l) => l({ appSessionId: init.session, agents: disk.sidecars }));
     for (const run of changed.runs ?? []) workflowListeners.forEach((l) => l({ appSessionId: init.session, runId: run.runId }));
     for (const listId of Object.keys(changed.tasks ?? {})) taskListeners.forEach((l) => l({ listId }));
-    for (const path of Object.keys(changed.files ?? {})) filesListeners.forEach((l) => l({ appSessionId: init.session, path, kind: 'changed' })); // E7
+    for (const path of [...Object.keys(changed.files ?? {}), ...Object.keys(changed.refusals ?? {})]) filesListeners.forEach((l) => l({ appSessionId: init.session, path, kind: 'changed' })); // E7
   };
 
   const fakeFs = (data: Partial<FakeDisk>) => {
@@ -120,6 +122,7 @@ export function createFakeAgentWorkClient(init: { session: AppSessionId } & Part
     disk.tasks = { ...disk.tasks, ...data.tasks };
     disk.spills = { ...disk.spills, ...data.spills };
     disk.files = { ...disk.files, ...data.files }; // E7
+    disk.refusals = { ...disk.refusals, ...data.refusals }; // E7 (M7)
     announce(data);
   };
   fakeFs(init);
@@ -156,6 +159,7 @@ export function createFakeAgentWorkClient(init: { session: AppSessionId } & Part
     onTasksChanged: (listener) => listen(taskListeners, listener),
     // E7 start
     async readFile({ appSessionId, path, hash }) {
+      if (ours(appSessionId) && disk.refusals[path] !== undefined) throw new Error(disk.refusals[path]);
       const text = ours(appSessionId) ? disk.files[path] : undefined;
       if (text === undefined) throw new Error(`not found: ${path}`);
       const bytes = new TextEncoder().encode(text).length;
@@ -164,7 +168,7 @@ export function createFakeAgentWorkClient(init: { session: AppSessionId } & Part
     watchDir: async () => {},
     unwatchDir: async () => {},
     onFilesChanged: (listener) => listen(filesListeners, listener),
-    listRoots: async () => [], // a read here never refuses, so nothing asks
+    listRoots: async (appSessionId) => (ours(appSessionId) ? [...(init.roots ?? [])] : []), // the roots resolve: a staged refusal reads as one
     // E7 end
   };
 

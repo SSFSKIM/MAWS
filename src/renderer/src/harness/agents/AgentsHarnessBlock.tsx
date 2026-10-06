@@ -9,6 +9,7 @@
 // child's permission request seeds C5's attention store as main's attention service would (nothing supplies it here),
 // so C7's inline card renders in the drill-in and the row reads `waiting`.
 import { useSyncExternalStore } from 'react';
+import { flushSync } from 'react-dom';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
@@ -23,13 +24,13 @@ import type { TranscriptListHandle } from '../../transcript/view/Transcript';
 import { loadFixture } from '../fixtures';
 import type { HarnessSession } from '../player';
 import { FAKE_RECORDS, fakeId, liveStatus } from '../panel/fakeSessions';
-import { loadedSession, summaryProbes } from '../panel/summaryProbes';
+import { loadedSession, onTranscriptLoading, sessionSourceOf, summaryProbes } from '../panel/summaryProbes';
 import type { AgentsFakeId } from './api';
 import { createFakeAgentWorkClient, snapshotOf, type FakeWire } from './fakeClient';
 
 export const REPLAY_LAUNCH = 'journal'; // the launch segment of every replayed and derived event id
 
-export const fake = createFakeAgentWorkClient({ session: fakeId('A') });
+export const fake = createFakeAgentWorkClient({ session: fakeId('A'), roots: [FAKE_RECORDS.get(fakeId('A'))!.directory] }); // E7: A's root resolves
 
 // ---- the column's state: what was fed, and the second child transcript -------------------------------------------------
 
@@ -53,6 +54,12 @@ export const setAgentTab = (agentId: AgentId | null) => setView({ agentTab: agen
 
 // The column's session transcript list, for the probes (scrolling to reach a row the virtualiser has not mounted).
 export const columnHandle: { current: TranscriptListHandle | null } = { current: null };
+
+// E7 (M7): the column shows A's own key, as the product's column shows a session's: what a jump to the session's
+// transcript (the Scheduled rows' `Open creating turn`) and `panel.transcript('A')` reach, and what its rows take for
+// their session. The source is the one the load attached under that key, so the column shares its attachment; a new
+// load of A unmounts the column first (`onTranscriptLoading`), so its detach never reaches the next load's attachment.
+export const columnSource = (session: HarnessSession): TranscriptSource => sessionSourceOf(session) ?? session.source;
 
 // ---- the drill-in's child source ----------------------------------------------------------------------------------------
 
@@ -132,6 +139,9 @@ export function installAgentsHarness(): void {
   registerAgentTools();
   setAgentWorkClient(fake.client);
   setChildSourceFor(childSourceFor);
+  onTranscriptLoading((appSessionId) => {
+    if (appSessionId === fakeId('A') && view.session !== null) flushSync(() => setView({ session: null, agentTab: null })); // E7 (M7)
+  });
   fake.client.onEventBatch(({ appSessionId, events }) => seedAttention(appSessionId, events));
   const attach = useTranscriptStore.getState().attach;
   useTranscriptStore.setState({
@@ -182,7 +192,8 @@ export function reset(id: AgentsFakeId, bind: () => void = () => fake.bindWire(f
     entries.delete(appSessionId);
     return { entries };
   });
-  for (const key of useRelays.getState().relays.keys()) if (key.startsWith(`${appSessionId}:`)) useRelays.getState().dismiss(key);
+  const { relays, peers } = useRelays.getState(); // E7: and its replies to other sessions
+  for (const key of [...relays.keys(), ...peers.keys()]) if (key.startsWith(`${appSessionId}:`)) useRelays.getState().dismiss(key);
   bind();
   if (status) summaryProbes.setStatus(id, { ...status, launchId: REPLAY_LAUNCH, backgroundTasks: [] });
   if (!watching.has(appSessionId)) watching.set(appSessionId, useTaskGraph.getState().watch(appSessionId));
@@ -213,7 +224,7 @@ export function AgentsHarnessBlock() {
     <div data-agents-harness className="mt-3 flex flex-col gap-2 border-t border-border pt-3 font-sans">
       <p>agents: the fed transcript of A</p>
       <div data-agents-harness-transcript className="flex h-[26rem] min-h-0 flex-col rounded-sm border border-border bg-bg">
-        <Transcript key={session.key} source={session.source} variant="session" actions={agentTranscriptActions} handle={columnHandle} className="min-h-0 flex-1" />
+        <Transcript key={session.key} source={columnSource(session)} variant="session" actions={agentTranscriptActions} handle={columnHandle} className="min-h-0 flex-1" />
       </div>
       {agentTab !== null && (
         <div data-agents-harness-agent-tab={agentTab} className="flex h-64 min-h-0 flex-col rounded-sm border border-border bg-bg">

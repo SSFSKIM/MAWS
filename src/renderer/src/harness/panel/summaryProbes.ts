@@ -5,13 +5,17 @@
 import type { SessionEvent } from '@shared/graph/events';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore } from '../../stores/transcript';
-import type { TurnId } from '../../transcript';
+import type { TranscriptSource, TurnId } from '../../transcript';
 import { loadFixture } from '../fixtures';
 import { HarnessSession } from '../player';
 import type { PanelHarnessApi } from './api';
 import { fakeId } from './fakeSessions';
 
 const loaded = new Map<string, HarnessSession>();
+// E7 (M7): the source attached under the fake session's id, the player's keyed as the session (one object per load, so
+// a view that renders it, the agents harness's column, shares that attachment and shows what the session's key holds).
+const sessionSources = new WeakMap<HarnessSession, TranscriptSource>();
+export const sessionSourceOf = (session: HarnessSession): TranscriptSource | null => sessionSources.get(session) ?? null;
 
 // The transcript loaded into a fake session (the `child` tool reads its first child agent), and a listener told after
 // each load has released its history.
@@ -20,6 +24,13 @@ const loadListeners = new Set<(appSessionId: string) => void>();
 export function onTranscriptLoaded(listener: (appSessionId: string) => void): () => void {
   loadListeners.add(listener);
   return () => void loadListeners.delete(listener);
+}
+// E7 (M7): told as a load starts, before the session's key is dropped, so a view rendering that key (the agents
+// harness's column) lets go of its attachment first rather than after the new one is made.
+const loadingListeners = new Set<(appSessionId: string) => void>();
+export function onTranscriptLoading(listener: (appSessionId: string) => void): () => void {
+  loadingListeners.add(listener);
+  return () => void loadingListeners.delete(listener);
 }
 
 // A replaced player stops and leaves the store with its children's keys (HarnessSession.dispose pauses and drops them).
@@ -69,6 +80,7 @@ export const summaryProbes: Pick<PanelHarnessApi, 'setSession' | 'setStatus' | '
 
   async loadTranscript(id, fixture, opts = {}) {
     const key = fakeId(id);
+    loadingListeners.forEach((listener) => listener(key)); // E7 (M7)
     const fixtureEvents = loadFixture(fixture);
     // Before and after the fetch: a load that landed while this one fetched its fixture is replaced too, so no player
     // key is left behind.
@@ -79,10 +91,12 @@ export const summaryProbes: Pick<PanelHarnessApi, 'setSession' | 'setStatus' | '
     // Nothing released at construction (a fixture's own stream point would reach the player's key alone): the seek
     // below decides what is history.
     const session = new HarnessSession({ ...events, streamFrom: null }, 0);
+    const sessionSource: TranscriptSource = { ...session.source, key }; // E7 (M7)
+    sessionSources.set(session, sessionSource);
     loaded.set(key, session);
     // Both keys hydrated (the player's snapshot is empty) before anything is released, so each hears every event. The
     // player's key is the constructor's one attachment (childSource reads it); the session's key is this one.
-    await Promise.all([settled(session.key), useTranscriptStore.getState().attach(key, session.source)]);
+    await Promise.all([settled(session.key), useTranscriptStore.getState().attach(key, sessionSource)]);
     session.player.seek(opts.releaseTo ?? Number.POSITIVE_INFINITY);
     if (loaded.get(key) === session) loadListeners.forEach((listener) => listener(key));
   },
