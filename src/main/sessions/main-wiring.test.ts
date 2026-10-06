@@ -115,8 +115,10 @@ describe('main setup-intent and shell-environment wiring', () => {
   });
 
   // E6 start: scm.* resolves the session's checkout from the read model and reads trust with the captured environment
-  it('registers the local scm.* commands and reads their trust from the same captured environment as the engine', async () => {
-    for (const name of ['scm.status', 'scm.stage', 'scm.unstage', 'scm.discard', 'scm.commit']) expect(state.handlers.has(name), name).toBe(true);
+  it('registers every scm.* command and reads their trust from the same captured environment as the engine', async () => {
+    vi.stubEnv('MAWS_GH', ''); // gh is looked up on the capture's PATH, which has none: no gh runs here
+    const names = ['status', 'stage', 'unstage', 'discard', 'commit', 'push.plan', 'push', 'pr.plan', 'pr.create', 'remote.cancel', 'remote.last', 'pr.state'];
+    for (const name of names) expect(state.handlers.has(`scm.${name}`), name).toBe(true);
     const checkout = realpathSync(join(state.root, 'additional'));
     (state.model as { record: (id: AppSessionId) => unknown }).record = (id) => (id === ID ? { directory: checkout, worktree: null } : null);
     const trusting = JSON.stringify({ projects: { [checkout]: { hasTrustDialogAccepted: true } } });

@@ -23,6 +23,7 @@ export const KILL_AFTER_MS = 2_000;
 export const CHUNK_BYTES = 16 * 1024;
 export const OUTPUT_CAP_BYTES = 1024 * 1024; // per run, both streams together
 export const LATEST_RUN_KEPT_MS = 10 * 60_000; // after the run ends
+export const BUSY_DETAIL = 'A push or pull request is already running for this checkout; wait for it or cancel it';
 
 export interface RemoteSpawnOptions {
   cwd: string;
@@ -98,7 +99,7 @@ export class RemoteRunner {
   start({ appSessionId, key, plan, captured }: RemoteRunStart): ScmRunStarted {
     if (this.disposed) return refusal('busy', 'MAWS is quitting; nothing more runs');
     this.sweep();
-    if (this.isRunning(key)) return refusal('busy', 'A push or pull request is already running for this checkout; wait for it or cancel it');
+    if (this.isRunning(key)) return refusal('busy', BUSY_DETAIL);
     const child = this.spawn(plan.program, plan.argv, spawnOptions(plan.cwd, captured));
     const run: Run = {
       appSessionId, plan, child, running: true, exitCode: null, signal: null, output: '', bytes: 0, truncated: false, seq: 0,

@@ -1,5 +1,5 @@
-// `scm.*` through the router: the five local commands reach the service with the session id as sent, refusals arrive as
-// values, a git timeout as `timeout` and anything else as `internal`.
+// `scm.*` through the router: every command reaches the service with the session id as sent (a run with its kind),
+// refusals arrive as values, a git timeout as `timeout` and anything else as `internal`.
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScmService } from './service';
@@ -22,13 +22,16 @@ const event = { sender, senderFrame: mainFrame };
 const appSessionId = 'a1111111-1111-4111-8111-111111111111';
 
 describe('main answers scm.* through the router', () => {
-  let service: { [K in 'status' | 'stage' | 'unstage' | 'discard' | 'commit']: ReturnType<typeof vi.fn> };
+  let service: { [K in Exclude<keyof ScmService, 'dispose'>]: ReturnType<typeof vi.fn> };
   beforeEach(async () => {
     vi.resetModules();
     electron.handlers.clear();
     electron.windows.clear();
     electron.windows.set(sender, { webContents: sender });
-    service = { status: vi.fn(), stage: vi.fn(), unstage: vi.fn(), discard: vi.fn(), commit: vi.fn() };
+    service = {
+      status: vi.fn(), stage: vi.fn(), unstage: vi.fn(), discard: vi.fn(), commit: vi.fn(), planPush: vi.fn(), planPr: vi.fn(), run: vi.fn(),
+      cancel: vi.fn(), last: vi.fn(), prState: vi.fn(),
+    };
     const { registerScmHandlers } = await import('./register');
     const { installRouter } = await import('../ipc/router');
     registerScmHandlers(service as unknown as ScmService);
@@ -54,6 +57,36 @@ describe('main answers scm.* through the router', () => {
     });
     expect(await invoke('scm.status', { appSessionId })).toMatchObject({ ok: true, value: { directory: '/r' } });
     expect(service.status).toHaveBeenCalledWith(appSessionId);
+  });
+
+  it('binds the plans, the runs by kind, cancel, the latest run and PR state', async () => {
+    const token = '11111111-1111-4111-8111-111111111111';
+    const expired = { refused: 'plan_expired', detail: 'This confirmation is no longer valid; review the command again', output: '' };
+    service.planPush.mockResolvedValue(expired);
+    service.planPr.mockResolvedValue(expired);
+    service.run.mockResolvedValue({ started: true, token });
+    service.cancel.mockResolvedValue(undefined);
+    service.last.mockResolvedValue(null);
+    service.prState.mockResolvedValue({ checkedAt: 'now', branch: null, gh: { state: 'missing' }, pr: null, error: 'untrusted' });
+
+    expect(await invoke('scm.push.plan', { appSessionId, remote: 'origin' })).toEqual({ ok: true, value: expired });
+    expect(service.planPush).toHaveBeenCalledWith({ appSessionId, remote: 'origin' });
+    const pr = { appSessionId, title: 'T', body: '', base: 'main', draft: true };
+    expect(await invoke('scm.pr.plan', pr)).toEqual({ ok: true, value: expired });
+    expect(service.planPr).toHaveBeenCalledWith(pr);
+    expect(await invoke('scm.push', { appSessionId, token })).toEqual({ ok: true, value: { started: true, token } });
+    expect(service.run).toHaveBeenLastCalledWith({ appSessionId, token }, 'push');
+    expect(await invoke('scm.pr.create', { appSessionId, token })).toEqual({ ok: true, value: { started: true, token } });
+    expect(service.run).toHaveBeenLastCalledWith({ appSessionId, token }, 'pr');
+    expect(await invoke('scm.remote.cancel', { appSessionId, token })).toEqual({ ok: true, value: undefined });
+    expect(service.cancel).toHaveBeenCalledWith({ appSessionId, token });
+    expect(await invoke('scm.remote.last', { appSessionId })).toEqual({ ok: true, value: null });
+    expect(service.last).toHaveBeenCalledWith(appSessionId);
+    expect(await invoke('scm.pr.state', { appSessionId, refresh: true })).toMatchObject({ ok: true, value: { error: 'untrusted' } });
+    expect(service.prState).toHaveBeenCalledWith({ appSessionId, refresh: true });
+    // a token is a uuid: anything else never reaches the service
+    expect(await invoke('scm.push', { appSessionId, token: 'push origin main' })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(service.run).toHaveBeenCalledTimes(2);
   });
 
   it('answers timeout for a git timeout and internal for anything else', async () => {

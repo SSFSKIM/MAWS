@@ -1,6 +1,8 @@
 // The local service against real temporary repositories (E6 acceptance item 1): C4's read runner and status, the
 // mutating runner under a captured environment, a trust store of the test's own. Every repository here is a fresh
-// directory under the system temp root; global and system git configuration are kept out by the fixture's empty HOME.
+// directory under the system temp root; global git configuration is kept out by the fixture's empty HOME. System
+// configuration is not: the mutating runner drops every inherited `GIT_*`, `GIT_CONFIG_NOSYSTEM` included, by design (a
+// panel commit is the one Terminal.app would make), so `/usr/bin/git`'s system gitconfig applies here as it does there.
 import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +26,8 @@ describe('scm service stages, unstages, discards and commits against a real repo
   let directory: string;
 
   function service(): ScmService {
-    const captured = { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: repo.home, CLAUDE_CONFIG_DIR: trust.configHome };
+    // the system PATH: enough for the hooks here, and no gh on it, so `status` never probes the owner's gh
+    const captured = { PATH: '/usr/bin:/bin', HOME: repo.home, CLAUDE_CONFIG_DIR: trust.configHome };
     return new ScmService({
       records: (id) => (id === ID ? { directory, worktree: null } : null),
       read: createGitRunner({ env: repo.serviceEnv() }),
@@ -144,6 +147,14 @@ describe('scm service stages, unstages, discards and commits against a real repo
     expect(await service().stage({ appSessionId: ID, paths: ['a.txt'] })).toMatchObject({ refused: 'untrusted' });
     expect(await porcelain()).toEqual(['?? a.txt']);
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("reads the default base from the remote's HEAD even when a local branch is named like the remote ref", async () => {
+    await repo.addBareRemote();
+    await repo.git('remote', 'set-head', 'origin', 'main');
+    await repo.git('branch', 'origin/main'); // `refs/heads/origin/main` beside `refs/remotes/origin/main`
+    expect((await repo.git('symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD')).trim()).toBe('remotes/origin/main'); // why not --short
+    expect(await service().status(ID)).toMatchObject({ defaultRemote: 'origin', defaultBase: 'main' });
   });
 
   it('refuses to discard a conflict and accepts staging it, which marks it resolved', async () => {

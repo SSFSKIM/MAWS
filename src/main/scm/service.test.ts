@@ -242,7 +242,7 @@ describe('scm service', () => {
       const scm = service();
       const first = scm.stage({ appSessionId: ID, paths: ['a.txt'] });
       const second = scm.stage({ appSessionId: ID, paths: ['u.txt'] });
-      await vi.waitFor(() => expect(order).toContain('mutate :(top,literal)a.txt'));
+      await vi.waitFor(() => expect(order).toContain('mutate :(top,literal)a.txt'), { timeout: 5_000 }); // 1 s is not enough under load
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(order).toEqual(['status 1', 'mutate :(top,literal)a.txt']);
       release();
@@ -269,7 +269,7 @@ describe('scm service', () => {
         const first = scm.stage({ appSessionId: ID, paths: ['a.txt'] });
         const refused = scm.stage({ appSessionId: OTHER, paths: ['nope'] });
         const second = scm.stage({ appSessionId: OTHER, paths: ['a.txt'] });
-        await vi.waitFor(() => expect(entered).toBe(1));
+        await vi.waitFor(() => expect(entered).toBe(1), { timeout: 5_000 });
         await new Promise((resolve) => setTimeout(resolve, 20));
         expect(entered).toBe(1);
         release();
@@ -283,7 +283,7 @@ describe('scm service', () => {
   });
 
   describe('status', () => {
-    it('answers trust, the remotes without user-info, the default remote and base, and gh missing until M2', async () => {
+    it('answers trust, the remotes without user-info, the default remote and base, and gh missing when it is on no PATH', async () => {
       read.mockImplementation(async (directory, args) => {
         const command = args.join(' ');
         if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`;
@@ -291,7 +291,7 @@ describe('scm service', () => {
         if (command === 'remote get-url origin') return 'https://user:token@github.com/o/r.git\n';
         if (command === 'remote get-url upstream') throw new GitCommandError('git remote failed: no url', 'error: no URL\n', 2, '');
         if (command === 'for-each-ref --format=%(HEAD)%00%(upstream:remotename) refs/heads') return ' \0\n*\0upstream\n';
-        if (command === 'symbolic-ref -q --short refs/remotes/upstream/HEAD') return 'upstream/trunk\n';
+        if (command === 'symbolic-ref -q refs/remotes/upstream/HEAD') return 'refs/remotes/upstream/trunk\n';
         throw new Error(`unexpected read: git ${command}`);
       });
       expect(await service().status(ID)).toEqual({

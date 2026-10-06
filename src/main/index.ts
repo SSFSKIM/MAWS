@@ -77,7 +77,7 @@ import { rm } from 'node:fs/promises';
 // E9 start (emit comes with C3's imports, registerMainHandler with C3's, shell with C8c's)
 import { startVoice } from './voice/register';
 // E9 end
-// E6 start (createGitRunner comes with C7's imports, captureShellEnvironment with C10's)
+// E6 start (createGitRunner comes with C7's imports; the login-shell capture is C7's engineEnv)
 import { createMutatingRunner } from './git/mutate';
 import { registerScmHandlers } from './scm/register';
 import { ScmService } from './scm/service';
@@ -260,10 +260,11 @@ void startWithProfileLock(app, () => {
   registerSessionServiceHandlers(sessionService);
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   // C10 end
-  // E6 start: source control (E6 execution document, M1): scm.* over the session's checkout, from the read model in both
-  // launch modes; mutations through the mutating runner under the login-shell capture, which is also the environment
+  // E6 start: source control (E6 execution document, M1, M2): scm.* over the session's checkout, from the read model in
+  // both launch modes; mutations through the mutating runner under the login-shell capture, which is also the environment
   // its trust gate reads (the engine's); after each mutation C4's watcher re-reads the root, so git.changed tells every
-  // surface. Main's process.env serves only MAWS_GIT and MAWS_GH.
+  // surface. Push and gh run only from a confirmed plan, under the same capture with the owner's credential helpers, and
+  // stream as scm.remote.output; will-quit stops them. Main's process.env serves only MAWS_GIT and MAWS_GH.
   const scm = new ScmService({
     records: (id) => sessions.model.record(id),
     read: createGitRunner(),
