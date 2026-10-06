@@ -9,7 +9,9 @@ export interface Migration {
 // A column a released entry was amended to add after some database had already applied it, so that database lacks it.
 // The opener adds each one missing from a database at or past `version`, before the pending entries (which are written
 // against the amended history) and in their transaction. `definition` is what follows the column name in
-// `ALTER TABLE … ADD COLUMN`, so SQLite's limits on an added column apply to it.
+// `ALTER TABLE … ADD COLUMN`, so SQLite's limits on an added column apply to it. A repair holds at every later version
+// (a branch without it may have carried a database past the amended entry), so a later entry that drops or renames the
+// column, or its table, must bound the repair to the versions before it, or the opener would add the column back.
 export interface Repair {
   version: number; // the amended entry
   table: string;
