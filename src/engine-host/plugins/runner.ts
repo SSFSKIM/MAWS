@@ -79,6 +79,7 @@ interface Operation {
   state: 'queued' | 'running' | 'ended';
   abort: 'cancelled' | 'stopped' | null; // asked while running, whether or not its CLI was spawned yet
   group: OwnedGroup | null; // while its CLI's process group is owned
+  latest: PluginsOperationEvent | null; // E10: its last event, which a connecting client is sent again (null while queued)
 }
 
 const FAILED_WORDS = { timeout: `the CLI was still running after ${CLI_TIMEOUT_MS / 60_000} minutes and was stopped`, cancelled: 'cancelled before the CLI finished', stopped: 'stopped with the engine host' } as const;
@@ -197,7 +198,7 @@ export class PluginsRunner {
     if (this.closed) throw new Error('the engine host is stopping: no plugin operation starts');
     const argv = commandLine(action, input);
     const i = input as { plugin?: string; source?: string; name?: string };
-    const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', binary, state: 'queued', abort: null, group: null };
+    const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', binary, state: 'queued', abort: null, group: null, latest: null };
     this.operations.set(op.opId, op);
     this.queue = this.queue
       .then(() => new Promise<void>((resolve) => this.timers.setTimeout(resolve, 0))) // after the receipt's answer is posted
@@ -213,6 +214,12 @@ export class PluginsRunner {
     if (!op || op.state === 'ended') return false;
     this.abort(op, 'cancelled', KILL_GRACE_MS);
     return true;
+  }
+
+  // E10: the latest event of every operation that has started and not completed (`reloading` included), in start order,
+  // for the connect burst: a client that was away learns where each stands (the renderer keeps the last line, not a log).
+  running(): PluginsOperationEvent[] {
+    return [...this.operations.values()].flatMap((op) => (op.latest ? [op.latest] : []));
   }
 
   // The host stops: nothing new runs, every queued operation is dropped, every operation still preparing completes
@@ -235,7 +242,10 @@ export class PluginsRunner {
   private async run(op: Operation): Promise<void> {
     if (op.state !== 'queued') return; // cancelled while it waited
     op.state = 'running';
-    const emit = (event: Omit<PluginsOperationEvent, 'opId' | 'action' | 'target'>) => this.deps.emit({ opId: op.opId, action: op.action, target: op.target, ...event });
+    const emit = (event: Omit<PluginsOperationEvent, 'opId' | 'action' | 'target'>) => {
+      op.latest = { opId: op.opId, action: op.action, target: op.target, ...event }; // E10
+      this.deps.emit(op.latest);
+    };
     emit({ phase: 'started' });
     const ended = await this.exec(op.argv, op.cwd, (line) => emit({ phase: 'output', line }), op);
     op.state = 'ended';

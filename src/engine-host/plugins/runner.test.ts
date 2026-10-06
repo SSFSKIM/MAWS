@@ -334,6 +334,22 @@ describe('PluginsRunner mutations', () => {
     expect(events.find((e) => e.opId === opId && e.phase === 'output')?.line).toBe('Cloning \u2026');
     expect(finished.outcome).toMatchObject({ ok: true, result: { message: 'done \u2026' } });
   });
+
+  // E10: the connect burst re-emits each running operation's latest event (E10 execution document, \u00a7Design 3)
+  it('lists each running operation by its latest event; a queued one, having none yet, and an ended one are not listed', async () => {
+    behave(`echo "step one" >&2\necho "step two" >&2\nwhile [ ! -f "${fake}/go" ]; do sleep 0.02; done\n${INSTALLED}\n`);
+    const { runner, events, done } = make();
+    expect(runner.running()).toEqual([]);
+    const first = await runner.start('install', { plugin: 'e8-probe@e8-scratch' }, cwd, bin);
+    const queued = await runner.start('enable', { plugin: 'e8-probe@e8-scratch' }, cwd, bin);
+    await until(() => events.some((e) => e.line === 'step two'), 'the second line');
+    expect(runner.running()).toEqual([{ opId: first.opId, action: 'install', target: 'e8-probe@e8-scratch', phase: 'output', line: 'step two' }]);
+    expect(runner.running().some((e) => e.opId === queued.opId)).toBe(false);
+    writeFileSync(join(fake, 'go'), '');
+    await done(first.opId);
+    await done(queued.opId);
+    expect(runner.running()).toEqual([]);
+  });
 });
 
 describe('PluginsRunner reads', () => {
