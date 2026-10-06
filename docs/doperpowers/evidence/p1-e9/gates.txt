@@ -58,3 +58,30 @@ spec update).
    Screenshots from run 2: dictation-listening.png, dictation-denied.png, settings-voice.png.
 
 Unrun on this head: e2e:c7, build:app, the packaged checks, the packaged e2e.
+
+---- Rerun of the whole sequence on 47dfa1b2 (code tree 7d0442ac: the stale-caret fix) ----
+
+== typecheck   2026-10-05 23:47 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> typecheck
+   start: eligible: load 10.27 after 0s · slot slot.1 acquired at 23:47:47 load { 10.27 12.67 61.62 }
+   tail: $ tsc --noEmit -p tsconfig.node.json … && tsc … tsconfig.web.json … && tsc … tsconfig.e2e.json …   (no diagnostics)
+
+== lint   2026-10-05 23:48 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> lint
+   start: eligible: load 12.90 after 0s · slot slot.1 acquired at 23:48:22 load { 12.90 13.06 59.78 }
+   tail: $ eslint .   (no findings)
+
+== unit suite   2026-10-05 23:48 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> test --maxWorkers=4
+   start: eligible: load 13.56 after 0s · slot slot.1 acquired at 23:48:44 load { 13.56 13.21 58.75 }
+   tail:
+     Tests  6047 passed | 1 skipped (6048)
+     Type Errors  no errors
+     Duration  136.78s
+     (Node printed MODULE_TYPELESS_PACKAGE_JSON warnings for test/support/engine-pin.ts, pre-existing and not E9's)
+
+== e2e:voice run 3   2026-10-05 23:51 KST   (exit 0: 14 passed, 1 skipped = the packaged case, which runs below)
+   command: /tmp/maws-review/waitload20.sh && MAWS_E9_SHOTS=docs/doperpowers/evidence/p1-e9 /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:voice
+   start: eligible: load 18.97 after 0s · slot slot.1 acquired at 23:51:07 load { 18.97 16.08 52.78 }
+   tail: 14 passed (25.2s), 1 skipped; every case listed in e2e-voice.txt; screenshots refreshed
+
