@@ -45,6 +45,13 @@ describe('appIdentity', () => {
     expect([empty.buildId(), empty.wire()]).toEqual([buildIdOf(modulePath), wireFingerprint()]);
   });
 
+  it('a utility host ignores the seams: it is never compared with a supervisor, so host.status reads what the app is', () => {
+    const utility = appIdentity(modulePath, { MAWS_E2E: '1', MAWS_E2E_BUILD_ID: 'stale', MAWS_E2E_WIRE: 'other' }, 'utility');
+    expect([utility.buildId(), utility.wire()]).toEqual([buildIdOf(modulePath), wireFingerprint()]);
+    const detached = appIdentity(modulePath, { MAWS_E2E: '1', MAWS_E2E_BUILD_ID: 'stale', MAWS_E2E_WIRE: 'other' }, 'detached');
+    expect([detached.buildId(), detached.wire()]).toEqual(['stale', 'other']);
+  });
+
   it('once this app run starts a supervisor of its own (always of its build), the seams no longer apply', () => {
     const identity = appIdentity(modulePath, { MAWS_E2E: '1', MAWS_E2E_BUILD_ID: 'stale', MAWS_E2E_WIRE: 'other' });
     identity.startedOwn();

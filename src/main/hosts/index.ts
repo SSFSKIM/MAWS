@@ -19,8 +19,8 @@ export function createHosts(): HostSupervisor {
   const mode = hostModeFromEnv(process.env);
   console.log(`[hosts] the engine host runs ${mode === 'detached' ? 'detached (the supervisor)' : 'as a utility process'}`);
   // E10 Task 2.4: one identity for the hello and for host.status, so the e2e seams (MAWS_E2E_BUILD_ID, MAWS_E2E_WIRE)
-  // read the same in both
-  const identity = appIdentity(engineHostPath, process.env);
+  // read the same in both; a utility host is never compared, so they apply only when detached
+  const identity = appIdentity(engineHostPath, process.env, mode);
   const supervisor = createHostSupervisor({
     hosts: {
       'engine-host': { modulePath: engineHostPath, serviceName: 'maws-engine-host', transport: mode },
