@@ -465,7 +465,8 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     // §5.6's order for the registered menu tools (Log and the harness's child transcript are `menu: false`).
     // C8c (a C8a test amended by C8c): the page registers C8c's Review and Files, as App.tsx does.
     // C8b (a C8a test amended by C8b): and C8b's Subagents and Background work (its Log is `menu: false`).
-    await expect(panel.page.getByRole('menuitem')).toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Stub']);
+    // E7 (a C8a test amended by E7): and the Tasks panel, registered with the agent tools ahead of the page's stub.
+    await expect(panel.page.getByRole('menuitem')).toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Tasks', 'Stub']);
     await panel.page.getByRole('menuitem', { name: 'Terminal' }).click();
     const terminal = (await panel.tabs()).find((tab) => tab.toolId === 'terminal');
     expect(terminal?.id).toMatch(/^terminal:[0-9a-z]{8}$/);
