@@ -16,7 +16,7 @@ export function record(appId: string, over: Partial<SessionRecord> = {}): Sessio
     worktree: null, branch: null, title: { text: appId, source: 'user' }, pinned: false, archived: false, holder: { kind: 'self' },
     lastSeen: { messageUuid: null, at: null }, unread: false, engineVersion: '2.1.283', gateway: { routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'unknown' },
     model: { requested: null, resolved: 'claude-opus' }, effort: null, permissionMode: { requested: 'auto', effective: 'auto', refusal: null },
-    createdAt: T0, updatedAt: T0, ...over,
+    lineage: null /* E3 */, createdAt: T0, updatedAt: T0, ...over,
   };
 }
 

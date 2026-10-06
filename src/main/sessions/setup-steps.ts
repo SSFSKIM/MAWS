@@ -10,6 +10,7 @@ import type { UserEngineDefaults } from '@shared/ipc/schema/settings'; // W3
 import type { GitRun } from '../git/runner';
 import type { WorktreeService } from '../git/worktrees';
 import type { SessionStore } from '../index/sessions';
+import type { SideThreadStore } from '../index/side-threads'; // E3
 import type { HostDispatch } from '../ipc/router';
 import { attachCommand } from '@shared/sessions/attach';
 import { bgRefusalOf } from './attach';
@@ -22,6 +23,7 @@ import type { ReplaySeam } from './replay-seam';
 // The service's dependencies, resolved (the engine's environment in hand).
 export interface Setup {
   sessions: SessionStore;
+  sideThreads: SideThreadStore | null; // E3: the side-thread rows (null where the service runs without them)
   dispatch: HostDispatch;
   onEvent: HostEvents;
   worktrees: WorktreeService;

@@ -246,6 +246,7 @@ function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) =>
         return Promise.resolve(null);
       },
       // E1 end
+      openSideThread: (_parent, child) => say(`openSideThread ${child}`), // E3
       // E7 start: a Reply or a Message is announced; no relay store answers it here
       replyToPeer: (_appSessionId, target, text) => {
         say(`replyToPeer ${target.address} ${text}`);

@@ -34,6 +34,7 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   export: 'Export',
   diff: 'Changes',
   rewind: 'Rewind', // W3 (B7)
+  btw: 'Side question', // E3
 };
 
 // `/usage` on a direct session: its windows are the engine's own, not ClaudeUsage's (C11 M6, live).
@@ -63,6 +64,7 @@ export const WIDGET_FOOT: Record<FramedWidgetName, WidgetFoot> = {
   export: { readWith: 'export_conversation', editedWhere: "The engine's own text export; the JSONL stays where it is" },
   diff: { readWith: 'get_workspace_diff', editedWhere: 'Read-only; staging and commits are P1' },
   rewind: { readWith: 'rewind_conversation and rewind_files', editedWhere: 'The transcript on disk is never truncated: the next turn branches from the earlier message' }, // W3 (B7)
+  btw: { readWith: 'side_question', editedWhere: 'Answered beside the running turn with no tools; nothing is added to the conversation · answers show in the Side pane' }, // E3
 };
 
 // The frame.

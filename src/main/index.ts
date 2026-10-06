@@ -80,6 +80,14 @@ import { startVoice } from './voice/register';
 // E5 start
 import { trackUnsavedFiles } from './lifecycle/quit-guard';
 // E5 end
+// E6 start (createGitRunner comes with C7's imports; the login-shell capture is C7's engineEnv)
+import { createMutatingRunner } from './git/mutate';
+import { registerScmHandlers } from './scm/register';
+import { ScmService } from './scm/service';
+// E6 end
+// E3 start
+import { sideThreadEvents, startSideThreads } from './side/side-threads';
+// E3 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -144,7 +152,19 @@ void startWithProfileLock(app, () => {
   registerOpenExternal();
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
-  const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource });
+  const sessions = startSessions({
+    env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource,
+    // E3: a parent's side-thread rows, re-synthesised from the index (none while the index is unavailable)
+    appEventsExtra: (appSessionId) => {
+      if (index.unavailable !== null) return [];
+      try {
+        return sideThreadEvents(index, appSessionId);
+      } catch (error) {
+        console.warn(`[side] ${appSessionId}: the side-thread rows could not be read: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+      }
+    },
+  });
   const sessionsDir = join(app.getPath('userData'), 'sessions');
   const intents = new FileIntentStore(join(sessionsDir, 'intents'));
   const stopChatPanels = registerChatPanels(layout, sessions.model, intents);
@@ -259,9 +279,31 @@ void startWithProfileLock(app, () => {
   registerSessionServiceHandlers(sessionService);
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   // C10 end
+  // E6 start: source control (E6 execution document, M1, M2): scm.* over the session's checkout, from the read model in
+  // both launch modes; mutations through the mutating runner under the login-shell capture, which is also the environment
+  // its trust gate reads (the engine's); after each mutation C4's watcher re-reads the root, so git.changed tells every
+  // surface. Push and gh run only from a confirmed plan, under the same capture with the owner's credential helpers, and
+  // stream as scm.remote.output; will-quit stops them. Main's process.env serves only MAWS_GIT and MAWS_GH.
+  const scm = new ScmService({
+    records: (id) => sessions.model.record(id),
+    read: createGitRunner(),
+    status: (directory) => git.status(directory),
+    mutate: createMutatingRunner({ captured: () => engineEnv }),
+    refresh: (directory) => git.refresh(directory),
+    captured: () => engineEnv,
+    env: process.env,
+    emit: (event) => void emit('scm.remote.output', event),
+  });
+  registerScmHandlers(scm);
+  app.on('will-quit', () => scm.dispose());
+  // E6 end
   // W7: a live MAWS process yields when a terminal or job that resumed its session starts writing into it
   const stopYield = startYield({ dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), sessions: index.sessions, emit });
   app.on('will-quit', stopYield);
+  // E3 start: each live turn end of a side thread summarises it in its parent's transcript (E3 execution document, Design §5)
+  const stopSideThreads = startSideThreads({ onEvent: (name, listener) => hosts.onEvent(name, listener), emit, sessions: index.sessions, sideThreads: index.sideThreads });
+  app.on('will-quit', stopSideThreads);
+  // E3 end
 
   // C11 start: the plumbing of settings v3 (C11 execution document, M1). The engine host's binary configuration follows
   // settings.engine; ClaudeUsage's hand-off and status; the reveal guard; the export's Save as….

@@ -21,7 +21,7 @@
     "e2e:packaged": "MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} playwright test",
     "build:helper": "scripts/build-voice-helper.sh",
     "build:app": "pnpm build:helper && electron-vite build && if [ -n \"$MAWS_SIGN_IDENTITY\" ]; then electron-builder --mac dir -c.mac.identity=\"$MAWS_SIGN_IDENTITY\"; else CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir; fi",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm e2e && pnpm build:app && pnpm e2e:packaged && pnpm e2e:transcript && pnpm e2e:terminal && pnpm e2e:panel && pnpm e2e:c7 && pnpm e2e:voice && pnpm e2e:code && pnpm e2e:agents && pnpm e2e:widgets && pnpm e2e:settings && pnpm e2e:c12 && pnpm e2e:tools",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm e2e && pnpm build:app && pnpm e2e:packaged && pnpm e2e:transcript && pnpm e2e:terminal && pnpm e2e:panel && pnpm e2e:c7 && pnpm e2e:voice && pnpm e2e:code && pnpm e2e:agents && pnpm e2e:widgets && pnpm e2e:settings && pnpm e2e:c12 && pnpm e2e:tools && pnpm e2e:scm && pnpm e2e:side",
     "rebuild:native": "electron-rebuild -f -w node-pty",
     "dev:harness": "MAWS_HARNESS=1 electron-vite dev",
     "e2e:transcript": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/transcript.spec.ts",
@@ -37,6 +37,8 @@
     "e2e:settings": "MAWS_HARNESS=1 electron-vite build && playwright test e2e/settings.spec.ts e2e/accounts.spec.ts",
     "e2e:c12": "electron-vite build && MAWS_C12_E2E=1 playwright test e2e/c12-budget.spec.ts e2e/c12-quit.spec.ts e2e/c12-sweep.spec.ts",
     "e2e:tools": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/maws-tools.spec.ts",
+    "e2e:scm": "electron-vite build && MAWS_SCM_E2E=1 playwright test e2e/scm.spec.ts",
+    "e2e:side": "MAWS_HARNESS=1 electron-vite build && MAWS_ENGINE_REPLAY=1 playwright test e2e/side.spec.ts",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper && install-electron"
   },
   "dependencies": {

@@ -24,6 +24,7 @@
       "model": { "requested": "opus", "resolved": "claude-opus-4-1" },
       "effort": null,
       "permissionMode": { "requested": "default", "effective": "default", "refusal": null },
+      "lineage": null,
       "createdAt": "2026-09-29T09:00:00.000Z",
       "updatedAt": "2026-09-29T09:00:00.000Z"
     },
@@ -46,6 +47,7 @@
       "model": { "requested": "opus", "resolved": "claude-opus-4-1" },
       "effort": null,
       "permissionMode": { "requested": "default", "effective": "default", "refusal": null },
+      "lineage": null,
       "createdAt": "2026-09-29T09:00:00.000Z",
       "updatedAt": "2026-09-29T09:00:00.000Z"
     }

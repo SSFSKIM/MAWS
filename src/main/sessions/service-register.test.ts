@@ -57,6 +57,29 @@ describe('main answers the session service commands through the router', () => {
     expect(await invoke('session.intent.patch', { appSessionId: id, patch: { model: 'opus' } })).toMatchObject({ ok: false, error: { code: 'internal', message: expect.stringMatching(/^starting/) } });
   });
 
+  // E3: the side namespace's two main commands; a screenshot's refusal and an oversized first message are invalid_input
+  it('opens a side thread and sends to main through the router, refusing a bad screenshot as invalid_input naming it', async () => {
+    const { summary, sessionIdFor } = await import('../../../test/support/index-fixture');
+    h.trustDirectory(h.work);
+    h.host.script = () => ({});
+    const parent = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0x3e3), directory: h.work })).record.appId;
+    const anchor = { kind: 'file-line', locator: '/r/x.ts#L1', label: 'x.ts:1', path: '/r/x.ts', line: 1 };
+    expect(await invoke('side.thread.open', { appSessionId: parent, from: { kind: 'comment', anchor, text: 'why?', screenshot: null } })).toMatchObject({ ok: true, value: { status: 'starting' } });
+    const shot = { path: join(h.root, 'nowhere.png'), width: 1, height: 1 };
+    expect(await invoke('side.thread.open', { appSessionId: parent, from: { kind: 'comment', anchor, text: 'why?', screenshot: shot } })).toMatchObject({
+      ok: false, error: { code: 'invalid_input', message: 'screenshot: not found', issues: [{ path: ['from', 'screenshot'] }] },
+    });
+    expect(await invoke('side.sendToMain', { appSessionId: parent, anchor, text: 'look', screenshot: shot })).toMatchObject({
+      ok: false, error: { code: 'invalid_input', message: 'screenshot: not found', issues: [{ path: ['screenshot'] }] },
+    });
+    const exchanges = Array.from({ length: 11 }, (_, i) => ({ question: `q${i}`, response: 'r'.repeat(100_000) }));
+    expect(await invoke('side.thread.open', { appSessionId: parent, from: { kind: 'btw', exchanges, text: null } })).toMatchObject({
+      ok: false, error: { code: 'invalid_input', issues: [{ path: ['from'] }] },
+    });
+    // the parent has no process in this host: its refusal goes back verbatim
+    expect(await invoke('side.sendToMain', { appSessionId: parent, anchor, text: 'look', screenshot: null })).toMatchObject({ ok: false, error: { code: 'internal', message: `unknown session ${parent}` } });
+  });
+
   it('answers an unknown session’s delete as internal', async () => {
     expect(await invoke('session.delete', { appSessionId: '00000000-0000-4000-8000-000000000000', stopIfLive: false })).toMatchObject({ ok: false, error: { code: 'internal', message: expect.stringContaining('unknown app session') } });
   });

@@ -9,7 +9,6 @@
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { Fragment, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
-import type { SessionRecord } from '@shared/graph/session';
 import { FolderIcon, GearIcon, IconButton, PlusIcon, SortIcon } from '../app/IconButton';
 import { useChordHint } from '../app/IconButton'; // C11
 import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';
@@ -20,7 +19,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
 import { openDialog } from '../sessions/dialogs';
-import { filterProjectList, OTHER_SESSIONS, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, type ProjectEntry, type ProjectKey } from './derive';
+import { filterProjectList, nestLineage, OTHER_SESSIONS, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, type ProjectEntry, type ProjectKey, type SessionTreeRow } from './derive';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
 import { ProjectRow, ShowMoreRow } from './ProjectRow';
 import { ResumePickerHost } from './ResumePicker';
@@ -51,7 +50,7 @@ export function Sidebar() {
 interface ShownProject {
   entry: ProjectEntry;
   open: boolean;
-  sessions: SessionRecord[];
+  sessions: SessionTreeRow[]; // E3: each nested under its lineage parent when that is listed
   more: number;
 }
 
@@ -102,9 +101,9 @@ function SidebarBody() {
       listed.map((entry) => {
         const open = searching || expanded.has(entry.key);
         if (!open) return { entry, open, sessions: [], more: 0 };
-        const all = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches });
+        const all = nestLineage(projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches })); // E3: the caps count trees
         const count = shownCount(all.length, more.has(entry.key));
-        return { entry, open, sessions: all.slice(0, count), more: Math.min(all.length, SESSIONS_CAP) - count };
+        return { entry, open, sessions: all.slice(0, count).flatMap((tree) => tree.rows), more: Math.min(all.length, SESSIONS_CAP) - count };
       }),
     [listed, searching, expanded, digests, rows, sidebar.sort, matches, more],
   );
@@ -119,7 +118,8 @@ function SidebarBody() {
       const id = projectNodeId(entry.key);
       out.push({ id, kind: 'project', key: entry.key, expanded: open });
       if (!open) return;
-      out.push(...sessions.map((r): TreeNode => ({ id: sessionNodeId(r.appId), kind: 'session', appSessionId: r.appId, parent: id })));
+      // E3: a nested row's parent is its lineage parent's row, so ArrowLeft lands there
+      out.push(...sessions.map(({ record: r, nestedUnder }): TreeNode => ({ id: sessionNodeId(r.appId), kind: 'session', appSessionId: r.appId, parent: nestedUnder === null ? id : sessionNodeId(nestedUnder) })));
       if (hidden > 0) out.push({ id: moreNodeId(entry.key), kind: 'more', key: entry.key, parent: id });
     });
     if (moreAt === shown.length) out.push({ id: MORE_PROJECTS, kind: 'more', key: null, parent: null });
@@ -186,7 +186,8 @@ function SidebarBody() {
     const group = shown.find((p) => p.entry.key === key);
     if (!group) return;
     setMore(new Set(more).add(key));
-    const next = projectSessions({ sessions: group.entry.sessions, digests, rows, sort: sidebar.sort, matches })[group.sessions.length];
+    const shownTrees = group.sessions.filter((row) => row.nestedUnder === null).length; // E3: the next tree's root
+    const next = nestLineage(projectSessions({ sessions: group.entry.sessions, digests, rows, sort: sidebar.sort, matches }))[shownTrees]?.root;
     if (next) focusItem(sessionNodeId(next.appId));
   };
 

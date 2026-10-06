@@ -2,26 +2,11 @@
 // minus the variables that belong to the Claude session the app itself may have been started from, plus what names
 // this terminal. Nothing here injects engine-launch settings (gateway variables, `CLAUDE_CODE_FORK_SUBAGENT`): a
 // shell the owner types into must behave exactly like Terminal.app (D-12).
+import { LAUNCHER_PREFIXES, PARENT_SESSION_VARIABLES } from '@shared/host/session-variables';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 
-// §4.1's parent-session exclusions: a `claude` started in the terminal must never believe it is inside the session
-// that started the app (the executor's own shell is one).
-export const PARENT_SESSION_VARIABLES = [
-  'CLAUDE_CODE_SESSION_ID',
-  'CLAUDE_PID',
-  'CLAUDE_CODE_MESSAGING_SOCKET',
-  'CLAUDE_CODE_MESSAGING_TOKEN',
-  'CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS',
-  'CLAUDECODE',
-  'CLAUDE_CODE_ENTRYPOINT',
-  'CLAUDE_CODE_SSE_PORT',
-  // Observed in M1 (not in the charter's list): with only the seven above stripped, a claude started from the
-  // terminal under the executor's own session reported "Transcript saving is off — inherited
-  // CLAUDE_CODE_CHILD_SESSION marker". These three are what a nested claude reads to know it is nested.
-  'CLAUDE_CODE_CHILD_SESSION',
-  'CLAUDE_CODE_EXECPATH',
-  'CLAUDE_CODE_SESSION_ATTENDED',
-] as const;
+// §4.1's parent-session exclusions, shared with main's git children (E6) and re-exported for this host's importers.
+export { PARENT_SESSION_VARIABLES };
 
 // Engine-launch settings the host may carry from its own environment; a terminal never forwards them (X6: the
 // terminal is not an engine launch).
@@ -35,15 +20,10 @@ const GATEWAY_MODEL_VARIABLE = /^ANTHROPIC_DEFAULT_[A-Z_]*MODEL$/;
 const SHELL_SESSION_VARIABLES = ['SHLVL', 'OLDPWD', '_'] as const;
 
 // What the app's launcher and main put in the environment the hosts inherit at fork, which the PTY host's login-shell
-// capture would pass on to every terminal, dropped by prefix as the engine's allowlist does. `MAWS_` is the app's own
-// switches: main sets `MAWS_USER_DATA` for its hosts (C3: the engine host's profile directory travels this way), and a
-// launcher may set `MAWS_HARNESS`, `MAWS_SESSION_SOURCE`, `MAWS_ENGINE_REPLAY`, `MAWS_SCENARIO_CLOCK` or `MAWS_E2E`; a
-// MAWS started in a terminal would otherwise open this app's profile or load the harness or stub sessions. `ELECTRON_`
-// is Electron's (`ELECTRON_RENDERER_URL` from `electron-vite dev` makes a built MAWS a dev-server client and trips
-// `window.ts`'s dev-CSP guard; `ELECTRON_RUN_AS_NODE` turns any Electron app into Node). `NODE_OPTIONS` is dropped only
+// capture would pass on to every terminal, dropped by prefix as the engine's allowlist does (`LAUNCHER_PREFIXES`,
+// shared with main's git children: `MAWS_` and `ELECTRON_`, the reasons beside the list). `NODE_OPTIONS` is dropped only
 // when it is the launcher's own value (as the host inherited it; Electron appends a space to it): the owner's rc files
 // set theirs again in the terminal's login shell, and a value of their own that differs from the launcher's passes.
-const LAUNCHER_PREFIXES = ['MAWS_', 'ELECTRON_'] as const;
 const LAUNCHER_VALUE_VARIABLES = ['NODE_OPTIONS'] as const;
 
 const LOCALE_VARIABLES = ['LANG', 'LC_ALL', 'LC_CTYPE'] as const;

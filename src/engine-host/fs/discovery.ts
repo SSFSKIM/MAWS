@@ -82,7 +82,7 @@ export class Discovery {
     }
     const sessionId = basename(path, '.jsonl');
     const sidecarTitle = await this.readSidecarTitle(join(dirname(path), sessionId, 'custom-title.json'));
-    return summarize(head, tail, { size: info.size, mtimeMs: info.mtimeMs }, path, basename(dirname(path)), sidecarTitle);
+    return summarize(head, tail, { size: info.size, mtimeMs: info.mtimeMs, birthtimeMs: info.birthtimeMs }, path, basename(dirname(path)), sidecarTitle);
   }
 
   // A sidecar that never reads whole (torn, or unreadable) keeps the title it last had; one that is gone has none.

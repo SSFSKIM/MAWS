@@ -7,6 +7,7 @@ import { agentListCopy } from './copy'; // E7
 import { previewHidesBody } from './rows'; // E7
 import type { Cell, Row } from './rows';
 import { untaggedUserText } from './user-text';
+import { SIDE_COPY, sideRowStatus } from '../../side/copy'; // E3
 
 const indent = (text: string, by: string) => text.split('\n').map((line) => `${by}${line}`).join('\n');
 
@@ -44,6 +45,7 @@ function partOf(row: Row): string | null {
     case 'ask': return [`**${row.title ?? ASK.title}** · ${ASK.count(row.questions.length)} · ${row.state === 'error' ? (row.error ?? '') : ASK.state[row.state]}`, ...(row.answers === null ? [] : row.questions.map((q) => `- ${q.header ?? q.question}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');
     case 'delivery': return [`**${(row.error === null ? DELIVERY.delivered : DELIVERY.failed)(row.files)}**${row.caption ? ` · ${row.caption}` : ''}`, ...row.files.map((file) => `- ${file.path}`), ...(row.error === null ? [] : [`*${row.error}*`])].join('\n');
     // E1 end
+    case 'side_thread': return `*${SIDE_COPY.row.lead} \`${SIDE_COPY.label(row.label, row.openedBy)}\` ${sideRowStatus(row)}*`; // E3
     case 'agent_list': return listPart(row); // E7
   }
 }

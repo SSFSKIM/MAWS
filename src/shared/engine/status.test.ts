@@ -19,7 +19,7 @@ const record = (): SessionRecord =>
     appId: 'app-1', engineSessionId: null, projectId: null, directory: '/w', additionalDirectories: [], worktree: null, branch: null, title: { text: 'Untitled', source: 'none' },
     pinned: false, archived: false, holder: { kind: 'none' }, lastSeen: { messageUuid: null, at: null }, unread: false, engineVersion: null,
     gateway: { routed: false, baseUrl: null, autoModeServer: 'unknown' }, model: { requested: null, resolved: null }, effort: null,
-    permissionMode: { requested: 'default', effective: 'default', refusal: null }, createdAt: '2026-09-28T10:00:00.000Z', updatedAt: '2026-09-28T10:00:00.000Z',
+    permissionMode: { requested: 'default', effective: 'default', refusal: null }, lineage: null, createdAt: '2026-09-28T10:00:00.000Z', updatedAt: '2026-09-28T10:00:00.000Z',
   });
 
 describe('toSessionRecordPatch', () => {

@@ -24,6 +24,12 @@ import * as voice from './names/voice';
 // E1 start
 import * as maws from './names/maws';
 // E1 end
+// E6 start
+import * as scm from './names/scm';
+// E6 end
+// E3 start
+import * as side from './names/side';
+// E3 end
 
 export const NAMESPACES = [
   'session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings',
@@ -37,6 +43,12 @@ export const NAMESPACES = [
   // E1 start
   'maws',
   // E1 end
+  // E6 start
+  'scm',
+  // E6 end
+  // E3 start
+  'side',
+  // E3 end
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
@@ -47,6 +59,8 @@ export const NAMES = {
   plugins, marketplaces, // E8
   voice, // E9
   maws, // E1
+  scm, // E6
+  side, // E3
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 
 type Names = typeof NAMES;

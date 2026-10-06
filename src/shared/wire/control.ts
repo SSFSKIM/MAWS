@@ -150,7 +150,7 @@ export interface RewindConversationRequest { target_message_uuid: string; last_s
 export interface RewindFilesRequest { user_message_id: string; dry_run?: boolean }
 export interface ClaimSessionRequest { cwd: string; include_initialize?: boolean; permission_mode?: string }
 export interface EndSessionRequest { reason?: string }
-export interface SideQuestionRequest { question: string }
+export interface SideQuestionRequest { question: string; history?: { question: string; response: string }[] } // E3 (2026-10-06, E0a Q3): the bridge's shape, accepted by the headless handler (pass3/p1-side-question-session seq 88, 95)
 export interface McpReconnectRequest { serverName: string }
 export interface McpToggleRequest { serverName: string; enabled: boolean }
 export interface GetContextUsageRequest { detail?: 'summary' | 'full' }
@@ -201,7 +201,14 @@ export const ClaimSessionResponseSchema = z.looseObject({
 });
 export type ClaimSessionResponse = z.infer<typeof ClaimSessionResponseSchema>;
 
-export const SideQuestionResponseSchema = z.looseObject({ text: z.string() });
+// E3 (2026-10-06): replaced in place from E0a's fixture (pass3/p1-side-question-session seq 92, 97, 130), as E8's D-14
+// did for reload_plugins. `synthetic` is true when the engine substituted the text (the model tried a tool, an API
+// error, a cut-off; SPEC 11 §11.11.6); `refusal_fallback` names a refusal's fallback model.
+export const SideQuestionResponseSchema = z.looseObject({
+  response: z.string().nullable(),
+  synthetic: z.boolean(),
+  refusal_fallback: z.looseObject({ original_model: z.string(), fallback_model: z.string(), content: z.string() }).optional(),
+});
 export type SideQuestionResponse = z.infer<typeof SideQuestionResponseSchema>;
 
 // E8 (D-14): replaced in place from the SPEC's lower bound by the fixture's answer, pass3/e8-plugins-reload seq 31

@@ -56,6 +56,7 @@ export class FakeEngineHost {
   relayError: string | null = null; // engine.relayHealth cannot answer at all
   unfollowError: string | null = null;
   rewound = true;
+  renameError: string | null = null; // E3: session.renameSession refused (a process that cannot rename)
   launchHangs: boolean | ((spec: LaunchSpec) => boolean) = false; // a crash point: `session.launch` never answers and nothing is reserved
   binaryPath = '/opt/engine/2.1.283';
   private readonly listeners = new Map<string, Set<(payload: unknown) => void>>();
@@ -214,6 +215,7 @@ export class FakeEngineHost {
       case 'session.rewind':
         return { rewound: this.rewound, reason: this.rewound ? null : 'not found', error: null, prefillText: null, precedingAssistantUuid: null, files: null };
       case 'session.renameSession':
+        if (this.renameError !== null) throw new Error(this.renameError);
         return undefined;
       default:
         throw new Error(`the fake host does not answer ${name}`);

@@ -42,6 +42,8 @@ export function summary(over: Partial<TranscriptSummary> = {}): TranscriptSummar
     sessionKind: null,
     hasMessages: true,
     leafUuid: null,
+    rootUuid: null, // E3
+    birthtimeMs: 0, // E3
     ...over,
   };
 }

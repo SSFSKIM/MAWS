@@ -44,7 +44,7 @@ export const GitBranchesSchema = z.strictObject({
 });
 export type GitBranches = z.infer<typeof GitBranchesSchema>;
 
-export const GitDiffScopeSchema = z.enum(['worktree', 'staged', 'all']);
+export const GitDiffScopeSchema = z.enum(['worktree', 'staged', 'all', 'untracked']); // E6: untracked needs `path` (an untracked file the status lists), refuses `base`
 export type GitDiffScope = z.infer<typeof GitDiffScopeSchema>;
 export const GitDiffInputSchema = z.strictObject({
   directory: z.string(),

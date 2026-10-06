@@ -39,6 +39,25 @@ export const SUMMARY_COPY = {
   upToDate: (upstream: string) => `Up to date with ${upstream}`,
   behind: (n: number) => ` · ${n} behind`,
   openOnGitHub: 'Open on GitHub',
+  // E6 start: the push-state row's PR line (E6 execution document, Design §6) and the push text that opens the tool
+  openSourceControl: 'Open Source control',
+  prUntrusted: 'Trust this folder to see PR state',
+  ghMissing: 'GitHub CLI not installed',
+  install: 'Install',
+  ghSignedOut: 'GitHub CLI not signed in',
+  signIn: 'Sign in',
+  noPr: (branch: string) => `No PR for ${branch}`,
+  prNumber: (n: number) => `PR #${n}`,
+  prState: { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' },
+  reviewDecision: { APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested' } as Record<string, string | undefined>,
+  // gh's buckets in the order the line counts them
+  checkBuckets: [['pass', 'passed'], ['fail', 'failed'], ['cancel', 'cancelled'], ['pending', 'pending'], ['skipping', 'skipped']] as const,
+  noChecks: 'No checks reported yet',
+  checksUnavailable: 'Checks unavailable',
+  prUnavailable: (reason: string) => `PR state unavailable · ${reason}`,
+  refreshPrState: 'Refresh PR state',
+  checkedAt: (time: string) => `Checked ${time}`,
+  // E6 end
   // Subagents and Background work
   open: 'Open',
   agents: (working: number, done: number) => `${working} working · ${done} done`,

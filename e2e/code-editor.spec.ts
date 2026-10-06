@@ -264,7 +264,8 @@ test.describe('the editor in stub mode over a scratch repository', () => {
     });
   });
 
-  test('a line’s comment mark opens the anchor placeholder with the file-line anchor', async () => {
+  // E3 (M3): the seam now opens E3's comment composer, the placeholder's successor, with the same file-line anchor
+  test('a line’s comment mark opens the comment composer with the file-line anchor', async () => {
     await withProduct(async (p) => {
       const viewer = await openEditor(p, APP);
       await p.page.mouse.move(0, 0);
@@ -278,14 +279,13 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       const path = p.scratch.path(APP);
       const sheet = p.page.getByRole('dialog', { name: 'Comment on app.ts:3' });
       await expect(sheet).toBeVisible();
-      await expect(sheet).toHaveAttribute('data-anchor-placeholder', '');
+      await expect(sheet).toHaveAttribute('data-comment-composer', '');
       await expect(sheet).toHaveAttribute('data-anchor-kind', 'file-line');
-      await expect(sheet).toHaveAttribute('data-anchor-path', path);
-      await expect(sheet).toHaveAttribute('data-anchor-line', '3');
       await expect(sheet).toHaveAttribute('data-anchor-locator', `${path}#L3`);
-      await expect(sheet).toHaveAttribute('data-anchor-label', 'app.ts:3');
-      await expect(sheet.locator('dd')).toHaveText([`${path}#L3`, 'app.ts:3', path, '3']);
-      await sheet.getByRole('button', { name: 'Close' }).click();
+      await expect(sheet.getByText(`${path}#L3`)).toBeVisible();
+      await expect(sheet.getByRole('radio', { name: /Side thread/ })).toBeChecked();
+      await expect(sheet.getByRole('button', { name: 'Send' })).toBeDisabled();
+      await sheet.getByRole('button', { name: 'Cancel' }).click();
       await expect(sheet).toHaveCount(0);
       await expect(viewer).toHaveAttribute('data-dirty', 'false');
     });

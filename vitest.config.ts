@@ -99,6 +99,9 @@ export default defineConfig({
             // C8b start: the agent tools' component suites, whose tools render from store handles as the panel's do
             'src/renderer/src/tools/agents/**/*.test.tsx',
             // C8b end
+            // E6 start: the Source control tool renders from a store handle, as the panel's tools do
+            'src/renderer/src/tools/scm/**/*.test.tsx',
+            // E6 end
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },

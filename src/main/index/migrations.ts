@@ -6,14 +6,29 @@ export interface Migration {
   sql: string;
 }
 
+// A column a released entry was amended to add after some database had already applied it, so that database lacks it.
+// The opener adds each one missing from a database at or past `version`, before the pending entries (which are written
+// against the amended history) and in their transaction. `definition` is what follows the column name in
+// `ALTER TABLE … ADD COLUMN`, so SQLite's limits on an added column apply to it. A repair holds at every later version
+// (a branch without it may have carried a database past the amended entry), so a later entry that drops or renames the
+// column, or its table, must bound the repair to the versions before it, or the opener would add the column back.
+export interface Repair {
+  version: number; // the amended entry
+  table: string;
+  column: string;
+  definition: string;
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     // The five tables of §4.4 as amended: what the engine does not hold. `sessions.summary` (beyond the document's
     // column list, advisory) keeps the last TranscriptSummary whole, so `SessionStore.summaries()` answers what discovery
     // said without a column per fact; the named columns stay for queries and the Title rule. `sessions.removed_at` marks
-    // an archive made by `fs.sessionRemoved` (not the owner's), which a returning transcript lifts (whole-branch review;
-    // v1 is unshipped, so it is part of v1).
+    // an archive made by `fs.sessionRemoved` (not the owner's), which a returning transcript lifts (whole-branch review).
+    // It was amended into this entry in the belief that v1 was unshipped; it had shipped, and the owner's database,
+    // created before the amendment, reached version 3 without the column (REPAIRS below adds it). The lesson: a released
+    // entry is never amended, even one believed unshipped; a repair entry carries the fix.
     sql: `
 CREATE TABLE projects (id TEXT PRIMARY KEY, directory TEXT NOT NULL UNIQUE, name TEXT NOT NULL, slug TEXT NOT NULL,
   origin TEXT NOT NULL CHECK (origin IN ('user','discovered')), hidden INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0,
@@ -61,4 +76,28 @@ UPDATE sessions SET worktree_branch = NULL WHERE worktree_branch IN ('HEAD', '')
 UPDATE sessions SET summary = json_set(summary, '$.gitBranch', json('null')) WHERE summary IS NOT NULL AND json_extract(summary, '$.gitBranch') IN ('HEAD', '');
 `,
   },
+  {
+    version: 4,
+    // E3 (P1 X11, A-16; E3 execution document, Interfaces "Index migration 4"): a session's lineage (X11 as JSON, null for a
+    // root) with where it came from (`intent`: MAWS launched it so, never recomputed; `disk`: the disk rule's reading,
+    // recomputed per family), the transcript's root uuid and birth time the disk rule groups and orders a fork family
+    // by, and one row per side thread mirroring its two app-synthesised events. Every indexed engine transcript is
+    // re-summarised once so the new columns fill: an mtime of -1, which no file has, fails the next scan's `known` match
+    // while the row stays in `known` (its size kept), so a transcript deleted while MAWS was closed is still marked
+    // removed; a null size would make the row bare, bound rather than known, and never checked for removal.
+    sql: `
+ALTER TABLE sessions ADD COLUMN lineage TEXT;
+ALTER TABLE sessions ADD COLUMN lineage_source TEXT CHECK (lineage_source IN ('intent','disk'));
+ALTER TABLE sessions ADD COLUMN root_uuid TEXT;
+ALTER TABLE sessions ADD COLUMN transcript_birthtime_ms REAL;
+CREATE INDEX sessions_root ON sessions(project_id, root_uuid);
+CREATE TABLE side_threads (child_app_id TEXT PRIMARY KEY REFERENCES sessions(app_id) ON DELETE CASCADE, parent_app_id TEXT NOT NULL,
+  opened_at TEXT NOT NULL, summarised_at TEXT, text TEXT, is_error INTEGER NOT NULL DEFAULT 0, turns INTEGER NOT NULL DEFAULT 0,
+  last_turn_event_id TEXT);
+CREATE INDEX side_threads_parent ON side_threads(parent_app_id);
+UPDATE sessions SET transcript_mtime_ms = -1 WHERE kind = 'engine' AND transcript_path IS NOT NULL;
+`,
+  },
 ];
+
+export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

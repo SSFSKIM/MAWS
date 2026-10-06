@@ -125,6 +125,10 @@ export const TranscriptSummarySchema = z.strictObject({
   sessionKind: z.enum(['bg', 'daemon', 'daemon-worker']).nullable(),
   hasMessages: z.boolean(), // a `"parentUuid":` marker was seen in head or tail (the engine's own `bookkeepingOnly` negation)
   leafUuid: MessageUuidSchema.nullable(), // last uuid-bearing non-progress record in the tail
+  // E3 (A-16's disk signal; E3 execution document, Interfaces "TranscriptSummary"): the first head record with
+  // `parentUuid: null`, which a `--fork-session` copy repeats from its parent; null when the head holds none
+  rootUuid: MessageUuidSchema.nullable(),
+  birthtimeMs: z.number(), // `stat().birthtimeMs`: orders a fork family, whose copied records keep the parent's timestamps
 });
 export type TranscriptSummary = z.infer<typeof TranscriptSummarySchema>;
 
