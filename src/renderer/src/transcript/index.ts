@@ -45,3 +45,4 @@ export { glyphFor, SUBAGENT_GLYPHS } from './model/glyphs';
 export { SubagentGlyph } from './view/rows/Subagent';
 
 export type { Cell, CellDetail, CellId, Row, RowId, SubagentRef, ToolCategory, ToolClassification, TurnId, TurnSummary } from './model/rows';
+export type { AskRowData } from './model/rows'; // E1: what a capsule hands the Question sheet (openAsk)

@@ -1,0 +1,5 @@
+$ pnpm typecheck (head 06c417ed, 2026-10-06 02:10:45)
+eligible: load 16.32 after 60s
+slot slot.1 acquired at 02:13:30 load { 23.82 20.37 18.01 }
+$ tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false
+exit 0

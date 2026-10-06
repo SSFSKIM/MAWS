@@ -4,6 +4,7 @@
 export const commands = [
   'files.list', 'files.read', 'files.watch', 'files.unwatch', 'files.openExternal',
   'files.write', // E5
+  'files.reveal', // E1
 ] as const;
 
 export const events = [

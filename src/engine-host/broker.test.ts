@@ -72,6 +72,9 @@ describe('permission broker states and the approvals-lost rule', () => {
       b: { type: 'control_request', request_id: 'h1', request: { subtype: 'hook_callback', callback_id: 'x', input: { hook_event_name: 'PostToolUse', tool_use_id: 'toolu_b' } } },
       c: { type: 'system', subtype: 'permission_denied', tool_name: 'Bash', tool_use_id: 'toolu_c', session_id: 's' },
       d: result({ num_turns: 0, terminal_reason: undefined, permission_denials: [{ tool_name: 'Bash', tool_use_id: 'toolu_d', tool_input: {} }] }),
+      // E1 M5: an SDK MCP server's tools/call names the tool use it runs (E0a seq 71), so it proves the allow arrived
+      // before the tool's result, which a blocking `maws` ask holds until the human answers its sheet
+      e: { type: 'control_request', request_id: 'm1', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'ask', arguments: {}, _meta: { 'claudecode/toolUseId': 'toolu_e' } } } } },
     };
     for (const [id, frame] of Object.entries(frames)) {
       const { broker } = setup();
@@ -79,6 +82,24 @@ describe('permission broker states and the approvals-lost rule', () => {
       await broker.answer(rid(id), { kind: 'permission', decision: 'deny' });
       broker.observe(frame);
       expect(broker.item(rid(id))?.attention.state).toBe('confirmed');
+    }
+  });
+
+  // E1 M5: only a tools/call naming the tool use confirms; any other SDK MCP message, or a call without the tool use in
+  // its _meta, proves nothing about the allow
+  it('an mcp_message that is not a tools/call, or a tools/call without _meta["claudecode/toolUseId"], leaves a delivered permission delivered', async () => {
+    const mcp = (message: Record<string, unknown>) => ({ type: 'control_request', request_id: 'm1', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 2, ...message } } });
+    const frames = {
+      list: mcp({ method: 'tools/list', params: { _meta: { 'claudecode/toolUseId': 'toolu_list' } } }),
+      bare: mcp({ method: 'tools/call', params: { name: 'ask', arguments: {} } }),
+      other: mcp({ method: 'tools/call', params: { name: 'ask', arguments: {}, _meta: { progressToken: 2 } } }),
+    };
+    for (const [id, frame] of Object.entries(frames)) {
+      const { broker } = setup();
+      broker.accept(canUseTool(id));
+      expect(await broker.answer(rid(id), { kind: 'permission', decision: 'allow', scope: 'once' })).toBe('delivered');
+      broker.observe(frame);
+      expect(broker.item(rid(id))?.attention.state, id).toBe('delivered');
     }
   });
 

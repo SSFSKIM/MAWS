@@ -2,6 +2,7 @@
 // One part per row (a group is one part with its cells as a nested list), joined by blank lines; user text is emitted
 // untagged (pasted bodies in place of their placeholders); answer markdown is emitted verbatim.
 import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, NOT_SENT, planBadge, plural, QUESTION, requestSlotPlaceholder } from './copy';
+import { ASK, askAnswerCopy, DELIVERY } from './copy'; // E1
 import type { Cell, Row } from './rows';
 import { untaggedUserText } from './user-text';
 
@@ -37,6 +38,10 @@ function partOf(row: Row): string | null {
     case 'boundary': return `---\n*${row.text}*`;
     case 'bash': return `\`\`\`\n${[bashHeader(row.command), row.stdout, row.stderr, bashFooter(row.exitCode)].filter((part) => part.length > 0).join('\n')}\n\`\`\``;
     case 'local_command': return `*${LOCAL_COMMAND_HEADER}*\n${row.text}`;
+    // E1 start
+    case 'ask': return [`**${row.title ?? ASK.title}** · ${ASK.count(row.questions.length)} · ${row.state === 'error' ? (row.error ?? '') : ASK.state[row.state]}`, ...(row.answers === null ? [] : row.questions.map((q) => `- ${q.header ?? q.question}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');
+    case 'delivery': return [`**${(row.error === null ? DELIVERY.delivered : DELIVERY.failed)(row.files)}**${row.caption ? ` · ${row.caption}` : ''}`, ...row.files.map((file) => `- ${file.path}`), ...(row.error === null ? [] : [`*${row.error}*`])].join('\n');
+    // E1 end
   }
 }
 

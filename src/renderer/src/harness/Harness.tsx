@@ -234,6 +234,17 @@ function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) =>
       openExternal: (url) => say(`openExternal ${url}`),
       editAndResubmit: (row) => say(`editAndResubmit ${row.id}`),
       editPrompt: (row) => say(`editPrompt ${row.id}`), // W1
+      // E1 start
+      openAsk: (_appSessionId, ask) => say(`openAsk ${ask.askId}`),
+      openDelivered: (_appSessionId, path) => {
+        say(`openDelivered ${path}`);
+        return Promise.resolve(null);
+      },
+      revealDelivered: (_appSessionId, path) => {
+        say(`revealDelivered ${path}`);
+        return Promise.resolve(null);
+      },
+      // E1 end
       loadSpill: (spill) => {
         say(`loadSpill ${spill.path}`);
         return Promise.resolve(`(the harness has no spill content for ${spill.path})`);

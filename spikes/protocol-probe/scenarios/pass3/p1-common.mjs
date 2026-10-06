@@ -15,7 +15,7 @@
 import {run as harnessRun,scratch,delay} from '../../harness.mjs';
 import {assertScratch,RELAY_ENV,records,slug,success,check,endAsStop,initFrame,answer,stat} from './c10-common.mjs';
 import {clearEngineEnvironment} from './mods-environment.mjs';
-import {appInitialize} from '../../../../src/shared/engine/initialize.ts';
+import {probeInitialize} from '../../probe-initialize.mjs';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,realpathSync,readdirSync} from 'node:fs';
 import {join,dirname} from 'node:path';
 import {homedir} from 'node:os';
@@ -29,7 +29,7 @@ export const PROVENANCE={charter:'docs/charter.md',child:'E0a',pin:'f11ae359af82
 // MAWS's flags beyond the harness's own (launch.ts ENGINE_FLAGS less what harness.mjs already passes), and its --settings.
 const PRODUCT_FLAGS=['--forward-subagent-text','--replay-user-messages','--include-hook-events','--settings',JSON.stringify({dialogExpiry:'never'})];
 const SPEND_CAP='0.30';
-export const initPayload=cwd=>appInitialize({accepted:true,directory:cwd});
+export const initPayload=cwd=>probeInitialize({accepted:true,directory:cwd}); // declares no MCP server; p1-sdk-mcp.mjs adds its own
 const RELAY_HELLO='http://127.0.0.1:8641/api/hello';
 const OWNER_GLOBAL_CONFIG=join(homedir(),'.claude.json');
 

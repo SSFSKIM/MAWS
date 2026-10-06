@@ -80,7 +80,7 @@ describe('graph schemas accept and reject', () => {
 
     it('lists every event kind once and the union covers each', () => {
       expect(new Set(EVENT_KINDS).size).toBe(EVENT_KINDS.length);
-      expect(EVENT_KINDS).toHaveLength(58); // R1: the five plugin.* kinds; R2: the surface's four
+      expect(EVENT_KINDS).toHaveLength(63); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds
       const covered = SessionEventSchema.options.map((option) => option.shape.kind.value).sort();
       expect(covered).toEqual([...EVENT_KINDS].sort());
     });
@@ -172,6 +172,13 @@ describe('graph schemas accept and reject', () => {
         'plugin.focus': { component: 'Pane', instanceId: 'mods-probe-pane', plugin: 'mods-probe', key: 'pick' },
         'plugin.ask': { requestId: 'r-1', ask: 'prompt_fill', plugin: null, text: 'MODS_PROBE_FILL', mode: 'replace' },
         'frame.unknown': { frameType: 'wibble', subtype: null },
+        // E1 start: the maws tool server's calls (X9)
+        'maws.ask.opened': { askId: 'toolu_1', toolUseId: 'toolu_1', requestId: 'r', blocking: true, title: null, context: null, questions: [{ id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }] }] },
+        'maws.ask.answered': { askId: 'toolu_1', toolUseId: 'toolu_1', answers: [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Red'] }], delivery: 'result' },
+        'maws.ask.cancelled': { askId: 'toolu_1', toolUseId: null, reason: 'exit' },
+        'maws.delivery.file': { toolUseId: 'toolu_2', requestId: 'r', deliverables: [{ id: 'd1', path: '/r/hello.txt', name: 'hello.txt' }], caption: 'the greeting', urgency: 'normal' },
+        'maws.pane.shown': { toolUseId: 'toolu_3', requestId: 'r', pane: 'terminal', target: null, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:1', title: 'Terminal' }, error: null },
+        // E1 end
       };
       expect(Object.keys(samples).sort()).toEqual([...EVENT_KINDS].sort());
       for (const [kind, payload] of Object.entries(samples)) {

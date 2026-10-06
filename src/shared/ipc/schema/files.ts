@@ -113,6 +113,13 @@ export const FilesOpenExternalOutputSchema = z.strictObject({
 });
 export type FilesOpenExternalOutput = z.infer<typeof FilesOpenExternalOutputSchema>;
 
+// E1 start: `files.reveal` shows a file in Finder (a delivered file's Reveal in Finder, E1 residue 8): the same boundary as
+// `openExternal` and any regular file, whatever its kind, since revealing runs nothing; a refusal answers `revealed:
+// false` with the boundary's message (Electron's showItemInFolder reports nothing, so `true` means it was asked).
+export const FilesRevealOutputSchema = z.strictObject({ revealed: z.boolean(), message: z.string().nullable() });
+export type FilesRevealOutput = z.infer<typeof FilesRevealOutputSchema>;
+// E1 end
+
 export const commands = {
   // No path: the roots as 'dir' entries in record order (directory, additionalDirectories…, worktree when it differs),
   // deduplicated by realpath, root null, path ''.
@@ -125,6 +132,7 @@ export const commands = {
   // E5 start: the hash-checked save. Not a read: never in the renderer's QUERY_COMMANDS.
   'files.write': { input: FilesWriteInputSchema, output: FilesWriteOutputSchema, owner: 'main' },
   // E5 end
+  'files.reveal': { input: SessionPathSchema, output: FilesRevealOutputSchema, owner: 'main' }, // E1
 } as const satisfies Record<`files.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 // `invalidated`: the watched directory (path is its confirmed realpath) failed a re-confirmation and its watch was

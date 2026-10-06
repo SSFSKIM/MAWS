@@ -25,7 +25,10 @@ export const HARD_FAILURE_REASONS: ReadonlySet<string> = new Set([
 const BROKER_KINDS: ReadonlySet<AttentionItem['kind']> = new Set(['permission', 'question', 'plan', 'dialog', 'elicitation']);
 const RETIRED_BY_NEXT_TURN: ReadonlySet<AttentionItem['kind']> = new Set(['error', 'interrupted', 'auto_mode_unavailable']);
 
-export const interruptedSummary = (n: number) => `Session interrupted, ${n} ${n === 1 ? 'approval' : 'approvals'} lost`; // the contract (§4.6)
+const count = (n: number, noun: string) => `${n} ${n === 1 ? noun : `${noun}s`}`;
+// The contract (§4.6); E1: the blocking `maws` asks among the lost are named questions, the rest stay approvals.
+export const interruptedSummary = (approvals: number, questions = 0) =>
+  `Session interrupted, ${[approvals > 0 || questions === 0 ? count(approvals, 'approval') : null, questions > 0 ? count(questions, 'question') : null].filter((part) => part !== null).join(' and ')} lost`;
 
 type Dispatch = (owner: 'engine-host', name: 'session.pendingRequest', input: CommandInput<'session.pendingRequest'>) => Promise<{ ok: true; value: unknown } | { ok: false; error: { message: string } }>;
 
@@ -164,7 +167,10 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
           state.broker = []; // the broker retired its items at the exit; a held message cannot be released by a dead process
           retireDerived(state, new Set(['held_peer_message']));
           if (event.reason === 'stop') retireDerived(state, RETIRED_BY_NEXT_TURN);
-          if (event.lostAttentionCount > 0) derive(id, state, event.id, { ...base, kind: 'interrupted', summary: interruptedSummary(event.lostAttentionCount) });
+          if (event.lostAttentionCount > 0) {
+            const questions = event.lostAskCount ?? 0; // E1: the blocking asks among them
+            derive(id, state, event.id, { ...base, kind: 'interrupted', summary: interruptedSummary(event.lostAttentionCount - questions, questions) });
+          }
           break;
       }
     }

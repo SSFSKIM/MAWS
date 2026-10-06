@@ -25,6 +25,9 @@ import * as marketplaces from './schema/marketplaces';
 // E9 start
 import * as voice from './schema/voice';
 // E9 end
+// E1 start
+import * as maws from './schema/maws';
+// E1 end
 
 export {
   HostPingSchema,
@@ -94,6 +97,9 @@ export const commands = {
   // E9 start
   ...voice.commands,
   // E9 end
+  // E1 start
+  ...maws.commands,
+  // E1 end
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -113,6 +119,9 @@ export const events = {
   // E9 start
   ...voice.events,
   // E9 end
+  // E1 start
+  ...maws.events,
+  // E1 end
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

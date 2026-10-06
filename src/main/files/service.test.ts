@@ -999,3 +999,42 @@ describe('files service write', () => {
     });
   });
 });
+// E1 start: a delivered file's Reveal in Finder (E1 residue 8)
+describe('files reveal', () => {
+  beforeEach(() => {
+    write(inRoot('hello.txt'), 'HELLO_E1');
+    write(inRoot('tool.py'), 'print("hi")\n');
+    write(inRoot('run.sh'), '#!/bin/sh\n');
+    fs.chmodSync(inRoot('run.sh'), 0o755);
+  });
+
+  it('shows any regular file in the roots, whatever its kind, since revealing runs nothing', async () => {
+    const showItemInFolder = vi.fn<(path: string) => void>();
+    const files = service({ showItemInFolder, env: {} });
+    for (const name of ['hello.txt', 'tool.py', 'run.sh']) expect(await files.reveal(A, inRoot(name))).toEqual({ revealed: true, message: null });
+    expect(showItemInFolder.mock.calls.map(([path]) => path)).toEqual([inRoot('hello.txt'), inRoot('tool.py'), inRoot('run.sh')]);
+  });
+
+  it('answers revealed: false with the boundary\'s message for a path outside, a symlink, a directory or a missing file', async () => {
+    const showItemInFolder = vi.fn<(path: string) => void>();
+    const files = service({ showItemInFolder, env: {} });
+    symlinkSync(join(outside, 'secret.txt'), inRoot('leak'));
+    mkdirSync(inRoot('dir'));
+    expect(await files.reveal(A, join(outside, 'secret.txt'))).toEqual({ revealed: false, message: OUT });
+    expect(await files.reveal(A, inRoot('leak'))).toEqual({ revealed: false, message: OUT });
+    expect(await files.reveal(A, inRoot('dir'))).toEqual({ revealed: false, message: `not a file: ${inRoot('dir')}` });
+    expect(await files.reveal(A, inRoot('gone.txt'))).toEqual({ revealed: false, message: `not found: ${inRoot('gone.txt')}` });
+    expect(await files.reveal(B, inRoot('hello.txt'))).toEqual({ revealed: false, message: 'unknown app session: B' });
+    expect(showItemInFolder).not.toHaveBeenCalled();
+  });
+
+  it('under MAWS_E2E=1 with MAWS_E2E_OPEN_LOG appends `reveal <realpath>` instead of revealing', async () => {
+    const showItemInFolder = vi.fn<(path: string) => void>();
+    const log = at('open.log');
+    const files = service({ showItemInFolder, env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
+    expect(await files.reveal(A, inRoot('hello.txt'))).toEqual({ revealed: true, message: null });
+    expect(readFileSync(log, 'utf8')).toBe(`reveal ${inRoot('hello.txt')}\n`);
+    expect(showItemInFolder).not.toHaveBeenCalled();
+  });
+});
+// E1 end

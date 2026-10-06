@@ -12,6 +12,7 @@ import { createFilesService, type FilesService } from './service';
 export interface FilesHandlerDeps {
   emit(payload: FilesChanged): void;
   openPath(path: string): Promise<string>; // Electron's shell.openPath
+  showItemInFolder(path: string): void; // E1: Electron's shell.showItemInFolder (files.reveal)
   env?: NodeJS.ProcessEnv;
 }
 
@@ -53,5 +54,6 @@ export function registerFilesHandlers(model: { record(appSessionId: AppSessionId
   });
   registerMainHandler('files.unwatch', ({ appSessionId, path }, { sender }) => files.unwatch(session(appSessionId), path, sender.id));
   registerMainHandler('files.openExternal', ({ appSessionId, path }) => files.openExternal(session(appSessionId), path));
+  registerMainHandler('files.reveal', ({ appSessionId, path }) => files.reveal(session(appSessionId), path)); // E1
   return Object.assign(files, { epochs: epochs as ReadonlyMap<number, number> });
 }

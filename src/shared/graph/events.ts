@@ -16,6 +16,10 @@ import {
   ToolUseIdSchema,
 } from './ids';
 import { PaneRosterSchema, PromptFillModeSchema, SURFACE_ASKS } from '../engine/surface'; // R2
+// E1 start
+import { PaneSchema } from '../maws/panes';
+import { AskAnswerSchema, AskQuestionSchema, DeliveredFileSchema, ShowPaneOpenedSchema } from '../maws/tools';
+// E1 end
 
 // An API content block, unknown keys kept.
 export const ContentBlockSchema = z.looseObject({ type: z.string() });
@@ -90,6 +94,9 @@ export const EVENT_KINDS = [
   'plugin.panes', 'plugin.scroll', 'plugin.focus', 'plugin.ask',
   // retention of the unknown
   'frame.unknown',
+  // E1 start: the maws tool server (P1 X9): an ask's life, a delivered file, a pane shown for the model
+  'maws.ask.opened', 'maws.ask.answered', 'maws.ask.cancelled', 'maws.delivery.file', 'maws.pane.shown',
+  // E1 end
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -219,8 +226,10 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   // whose last turn never ended (SDK entrypoints write no turn_duration): the process is gone and nobody saw it go.
   // C12: reason 'budget' is MAWS's release under the memory budget (charter §4.4; never on the wire, which carries
   // end_session `stop`), with the budget and the sum at the release in `budget`, non-null exactly then.
+  // E1: `lostAskCount` is how many of `lostAttentionCount` were blocking `maws` asks (questions, not approvals); absent
+  // when none was.
   event('process.exited', {
-    code: z.number().nullable(), signal: nullableString(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */]), lostAttentionCount: z.number(),
+    code: z.number().nullable(), signal: nullableString(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */]), lostAttentionCount: z.number(), lostAskCount: z.number().optional() /* E1 */,
     budget: z.strictObject({ limitKiB: z.number(), totalKiB: z.number() }).nullable(), // C12
   }),
   // R1: `plugin` is the engine's registry name for the plugin; `text` is plain text. A toast's `timeoutMs` is the
@@ -243,6 +252,15 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('plugin.focus', { component: z.string(), instanceId: z.string(), plugin: z.string(), key: z.string() }),
   event('plugin.ask', { requestId: RequestIdSchema, ask: z.enum(SURFACE_ASKS), plugin: nullableString(), text: nullableString(), mode: PromptFillModeSchema.nullable() }),
   event('frame.unknown', { frameType: z.string(), subtype: nullableString() }),
+  // E1 start (E1 execution document, Interfaces "X1 events", residue 1): mapped from the `maws` server's `tools/call`
+  // rows and the host's answers, an async answer and a cancellation from the host's meta rows. `askId` is the call's
+  // tool-use id (else its control request id); a call whose arguments its schema refuses yields none of these.
+  event('maws.ask.opened', { askId: z.string(), toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, blocking: z.boolean(), title: nullableString(), context: nullableString(), questions: z.array(AskQuestionSchema) }),
+  event('maws.ask.answered', { askId: z.string(), toolUseId: ToolUseIdSchema.nullable(), answers: z.array(AskAnswerSchema), delivery: z.enum(['result', 'steer']) }),
+  event('maws.ask.cancelled', { askId: z.string(), toolUseId: ToolUseIdSchema.nullable(), reason: z.enum(['exit', 'withdrawn']) }),
+  event('maws.delivery.file', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, deliverables: z.array(DeliveredFileSchema), caption: nullableString(), urgency: z.enum(['normal', 'high']) }),
+  event('maws.pane.shown', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, pane: PaneSchema, target: nullableString(), opened: ShowPaneOpenedSchema.nullable(), error: nullableString() }),
+  // E1 end
 ]);
 
 export type SessionEvent = z.infer<typeof SessionEventSchema>;

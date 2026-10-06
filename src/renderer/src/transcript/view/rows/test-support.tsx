@@ -35,6 +35,7 @@ export function spyActions(): TranscriptActions {
   return {
     openSubagent: vi.fn(), openFullLog: vi.fn(), reviewChanges: vi.fn(), openFile: vi.fn(), openExternal: vi.fn(), editAndResubmit: vi.fn(), editPrompt: vi.fn(),
     loadSpill: NO_ACTIONS.loadSpill,
+    openAsk: vi.fn(), openDelivered: vi.fn(async () => null), revealDelivered: vi.fn(async () => null), // E1
   };
 }
 

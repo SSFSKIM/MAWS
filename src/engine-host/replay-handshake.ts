@@ -14,6 +14,7 @@ export function appReplayHandshake(rows: JournalRow[], trust: LaunchSpec['trust'
     delete request.supportedDialogKinds;
     delete request.perTaskStopAffordance;
     delete request.workspaceTrust;
+    delete request.sdkMcpServers; // E1: the app's own list, never an older recording's (pass3/p1-sdk-mcp-roundtrip carries one)
     return { ...row, frame: { ...frame, request: { ...request, ...appInitialize(trust ?? undefined) } } };
   });
 }

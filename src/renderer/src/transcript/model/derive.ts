@@ -7,10 +7,12 @@ import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
+import { withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
+import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
-import { cellOf, editCounts, filePathOf, type ToolRecord, type TurnContext } from './cells';
+import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
 import { hookNotice, type HookRecord } from './hooks';
-import { agentMessageCopy, boundaryCopy, BRANCH_HISTORY_DETAIL, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
+import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
 import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
@@ -103,12 +105,13 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // it, Codex's persistent unit), a hook that got in the way, the answer, a boundary (compaction, reset, retraction:
 // charter §5.3, the visible transcript stays true to the model's context), a slash command's output and an answered
 // question's receipt (W4, the owner's ruling: what the human answered stays in view; T3's receipts outlive the fold
-// too), what a plugin said in the transcript (R1: its log lines and load issues, as the terminal keeps them), and fatal
-// API diagnostics (transient retries remain work). The divider folds everything else, so a turn of a local command
+// too), what a plugin said in the transcript (R1: its log lines and load issues, as the terminal keeps them), fatal
+// API diagnostics (transient retries remain work), and the `maws` server's capsule and delivery row (E1: what the agent
+// asked and what it delivered stay in view, as an answered question does). The divider folds everything else, so a turn of a local command
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')));
+  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')));
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
@@ -191,10 +194,35 @@ type Item =
   | { kind: 'hook'; hookId: string }
   | { kind: 'request'; toolUseId: ToolUseId }
   | { kind: 'subagents'; group: SubagentGroup }
-  | { kind: 'steer'; row: RowOf<'user'> }; // a prompt folded into this turn: a persistent row at its delivery position (W1)
+  | { kind: 'steer'; row: RowOf<'user'> } // a prompt folded into this turn: a persistent row at its delivery position (W1)
+  | { kind: 'ask' | 'delivery'; toolUseId: ToolUseId }; // E1: a `maws` call's row, filled once its result and events are seen
 
 interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null }
-interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null }
+interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null; error: string | null /* E1: the engine's refusal */ }
+
+// E1 start: what a turn's events say about one `ask` call (its capsule) and one `send_file` call (its delivery row). The
+// call opens the record; its tool result and the `maws.*` events the host's journal adds refine it; the disk path, which
+// has neither events nor meta rows, still has the call, its result and the steer (residue 13).
+interface AskRecord {
+  use: Event<'tool.use'>;
+  input: AskInput | null; // null: arguments the host refused (its result is the error)
+  opened: Event<'maws.ask.opened'> | null;
+  askId: string | null; // the result's, when it named one
+  answers: AskAnswer[] | null; // from `maws.ask.answered`, else an answered result
+  asked: boolean; // acknowledged without answers: an async ask
+  cancelled: AskCancelReason | null; // from `maws.ask.cancelled`: why
+  resulted: boolean;
+  error: string | null;
+}
+interface DeliveryRecord {
+  use: Event<'tool.use'>;
+  input: SendFileInput | null;
+  delivered: DeliveredFile[] | null;
+  caption: string | null | undefined; // undefined: no `maws.delivery.file` said
+  urgency: 'normal' | 'high' | null;
+  error: string | null;
+}
+// E1 end
 
 const isAborted = (reason: string | null) => reason !== null && reason.startsWith('aborted');
 
@@ -220,6 +248,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const byTask = new Map<TaskId, SubagentGroup>();
   const byToolUse = new Map<ToolUseId, SubagentGroup>();
   const pendingRows = new Map<ToolUseId, Pending>();
+  const asks = new Map<ToolUseId, AskRecord>(); // E1
+  const deliveries = new Map<ToolUseId, DeliveryRecord>(); // E1
   const retracted = new Set<string>();
   const superseded = new Set<string>();
   const byMarker = new Map<string, LiveBlock>();
@@ -351,8 +381,16 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           const to = str(input.to);
           const direction = to === 'parent' ? 'from_child' : 'to_child';
           items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction, from: null, to: null, text: agentMessageCopy(direction, to || null, str(input.message, str(input.content))) } });
+        } else if (presentation === 'ask') { // E1
+          const input = AskInputSchema.safeParse(event.input);
+          asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: null, resulted: false, error: null });
+          items.push({ kind: 'ask', toolUseId: event.toolUseId });
+        } else if (presentation === 'delivery') { // E1
+          const input = SendFileInputSchema.safeParse(event.input);
+          deliveries.set(event.toolUseId, { use: event, input: input.success ? input.data : null, delivered: null, caption: undefined, urgency: null, error: null });
+          items.push({ kind: 'delivery', toolUseId: event.toolUseId });
         } else {
-          pendingRows.set(event.toolUseId, { kind: presentation, use: event, answers: null, outcome: null, feedback: null, requestId: null });
+          pendingRows.set(event.toolUseId, { kind: presentation, use: event, answers: null, outcome: null, feedback: null, requestId: null, error: null });
           items.push({ kind: 'request', toolUseId: event.toolUseId });
         }
         break;
@@ -370,6 +408,14 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           const answers = record(event.structured).answers;
           if (typeof answers === 'object' && answers !== null) pending.answers = answers as Record<string, string>;
         }
+        // E1 (A-17): the engine refused the call before any request reached the human (its own validation error, such as
+        // a preview that is not HTML), so there was no card to show it on: the question row says so. A decline is a
+        // denial or a plain error text, never wrapped in `<tool_use_error>`.
+        if (pending?.kind === 'question' && event.isError && event.denial === null) pending.error = engineRefusalOf(resultText(event.content));
+        const ask = asks.get(event.toolUseId); // E1
+        if (ask) resultOfAsk(ask, event);
+        const delivery = deliveries.get(event.toolUseId); // E1
+        if (delivery) resultOfDelivery(delivery, event);
         break;
       }
       case 'tool.safeguard': {
@@ -502,6 +548,26 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'plugin.load_issue':
         items.push({ kind: 'row', row: pluginRow(event, turn.id) });
         break;
+      // E1 start: the host's account of a `maws` call, routed here by its tool use (reduce.ts)
+      case 'maws.ask.opened':
+      case 'maws.ask.answered':
+      case 'maws.ask.cancelled': {
+        const ask = event.toolUseId === null ? undefined : asks.get(event.toolUseId);
+        if (!ask) break;
+        if (event.kind === 'maws.ask.opened') ask.opened = event;
+        else if (event.kind === 'maws.ask.answered') ask.answers = event.answers;
+        else ask.cancelled = event.reason;
+        break;
+      }
+      case 'maws.delivery.file': {
+        const delivery = event.toolUseId === null ? undefined : deliveries.get(event.toolUseId);
+        if (!delivery) break;
+        delivery.delivered = event.deliverables;
+        delivery.caption = event.caption;
+        delivery.urgency = event.urgency;
+        break;
+      }
+      // E1 end
       default:
         break;
     }
@@ -532,6 +598,14 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (row) resolved.push({ kind: 'row', row });
         break;
       }
+      // E1 start
+      case 'ask':
+        resolved.push({ kind: 'row', row: askRow(asks.get(item.toolUseId)!, turn.id, context, turn.askSteers) });
+        break;
+      case 'delivery':
+        resolved.push({ kind: 'row', row: deliveryRow(deliveries.get(item.toolUseId)!, turn.id) });
+        break;
+      // E1 end
       case 'subagents': {
         if (item.group.refs.length === 0) break;
         for (const ref of item.group.refs) if (ref.toolUseId && agentIds.has(ref.toolUseId)) ref.agentId = agentIds.get(ref.toolUseId)!;
@@ -548,7 +622,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary. A hook,
   // a notice and what a plugin said (R1) are not the model's work: under MessageDisplay and Stop hooks every final text
   // is followed by hook events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
-  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error']);
+  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */]);
   const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin')));
   const lastWork = resolved.map(isWork).lastIndexOf(true);
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
@@ -802,10 +876,63 @@ function requestOrHistoricalRow(pending: Pending, turnId: TurnId, state: Transcr
       question: str(q.question), header: str(q.header), multiSelect: q.multiSelect === true,
       options: Array.isArray(q.options) ? q.options.map(record).map((o) => ({ label: str(o.label), description: typeof o.description === 'string' ? o.description : null, preview: typeof o.preview === 'string' ? o.preview : null })) : [],
     })) : [];
-    return { id: rowId.question(use.toolUseId), turnId, at: use.at, kind: 'question', toolUseId: use.toolUseId, questions, answers: pending.answers };
+    return { id: rowId.question(use.toolUseId), turnId, at: use.at, kind: 'question', toolUseId: use.toolUseId, questions, answers: pending.answers, error: pending.error };
   }
   return { id: rowId.plan(use.toolUseId), turnId, at: use.at, kind: 'plan', toolUseId: use.toolUseId, plan: str(input.plan), outcome: pending.outcome, feedback: pending.feedback };
 }
+
+// E1 start: the capsule and the delivery row from their records.
+function resultOfAsk(ask: AskRecord, result: Event<'tool.result'>): void {
+  ask.resulted = true;
+  if (result.isError) {
+    ask.error = toolErrorText(resultText(result.content));
+    return;
+  }
+  const parsed = AskResultSchema.safeParse(resultJson(result.content));
+  if (!parsed.success) return;
+  ask.askId = parsed.data.askId;
+  if (parsed.data.status === 'answered') ask.answers ??= parsed.data.answers;
+  else ask.asked = true;
+}
+
+function resultOfDelivery(delivery: DeliveryRecord, result: Event<'tool.result'>): void {
+  if (result.isError) {
+    delivery.error = toolErrorText(resultText(result.content));
+    return;
+  }
+  const parsed = SendFileResultSchema.safeParse(resultJson(result.content));
+  if (parsed.success) delivery.delivered ??= parsed.data.deliverables;
+}
+
+// The capsule's state, whatever order its sources arrived in: answers from any source (the event, the result, the steer)
+// win; then a cancellation; then the result's error; then an acknowledged async ask. A blocking ask whose turn closed
+// with no result and no cancellation (a session that ended mid-ask, read from disk, where no meta row says so) can no
+// longer be answered, so it reads cancelled rather than waiting forever; no event says why, so it carries no reason
+// (`cancelReason` is the event's, for a cancelled row only).
+function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: ReadonlyMap<string, AskAnswer[]> | undefined): RowOf<'ask'> {
+  const { use, input, opened } = ask;
+  const askId = opened?.askId ?? ask.askId ?? use.toolUseId;
+  const blocking = opened?.blocking ?? input?.blocking ?? true;
+  const answers = ask.answers ?? steers?.get(askId) ?? null;
+  const asked = ask.asked || opened?.blocking === false;
+  const state: RowOf<'ask'>['state'] = answers !== null ? 'answered' : ask.cancelled !== null ? 'cancelled' : ask.error !== null ? 'error' : asked ? 'asked' : !ask.resulted && context.closed ? 'cancelled' : 'pending';
+  return {
+    id: rowId.ask(use.toolUseId), turnId, at: use.at, kind: 'ask', toolUseId: use.toolUseId, askId,
+    title: opened ? opened.title : (input?.title ?? null), context: opened ? opened.context : (input?.context ?? null), blocking,
+    questions: opened?.questions ?? (input ? withQuestionIds(input.questions) : []), state, answers, error: ask.error,
+    cancelReason: state === 'cancelled' ? ask.cancelled : null,
+  };
+}
+
+function deliveryRow(delivery: DeliveryRecord, turnId: TurnId): RowOf<'delivery'> {
+  const { use, input } = delivery;
+  const files = delivery.delivered?.map(({ path, name, id }) => ({ path, name, id })) ?? input?.files.map((path) => ({ path, name: baseName(path), id: null })) ?? [];
+  return {
+    id: rowId.delivery(use.toolUseId), turnId, at: use.at, kind: 'delivery', toolUseId: use.toolUseId, files,
+    caption: delivery.caption !== undefined ? delivery.caption : (input?.caption ?? null), urgency: delivery.urgency ?? input?.urgency ?? 'normal', error: delivery.error,
+  };
+}
+// E1 end
 
 function slotRow(event: Event<'permission.requested' | 'question.requested' | 'plan.requested' | 'dialog.requested' | 'elicitation.requested'>, turnId: TurnId | null, toolUseId: ToolUseId | null): RowOf<'request_slot'> {
   const requestKind = event.kind.split('.')[0] as RowOf<'request_slot'>['requestKind'];
@@ -932,7 +1059,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         // C4's synthesised end of a holder-less transcript whose last turn never ended (disk-derived, reason unknown)
         // closed that turn in the reducer; nobody witnessed an exit, so it is no notice. C3's exits carry a seq.
         if (event.reason === 'unknown' && event.seq === null) break;
-        rows.push({ id: rowId.error(event.id), turnId: null, at: event.at, kind: 'error', severity: event.reason === 'crash' ? 'error' : 'notice', text: processExitCopy(event.reason, event.lostAttentionCount), attempt: null, scope: 'exit', lostAttentionCount: event.lostAttentionCount });
+        rows.push({ id: rowId.error(event.id), turnId: null, at: event.at, kind: 'error', severity: event.reason === 'crash' ? 'error' : 'notice', text: processExitCopy(event.reason, event.lostAttentionCount, event.lostAskCount /* E1 */), attempt: null, scope: 'exit', lostAttentionCount: event.lostAttentionCount });
         break;
       case 'permission.requested':
       case 'question.requested':

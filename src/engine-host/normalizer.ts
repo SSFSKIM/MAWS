@@ -35,7 +35,7 @@ import {
 } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { bashPartOf, denialKindOf, engineUserMarkerOf, spillPathOf, stringOrNull, tokenUsageOf, type Attribution, type EventSink } from './normalizer-support';
-import { mapInboundCancel, mapInboundRequest, mapOutboundResponse, type InboundEntry } from './normalizer-controls';
+import { mapInboundCancel, mapInboundRequest, mapMawsAskMeta, mapOutboundResponse, type InboundEntry } from './normalizer-controls';
 import { mapSystemFrame, pluginLoadIssues, type TaskRegistry } from './normalizer-system';
 import type { SafeguardVerdict } from '@shared/graph/enums';
 
@@ -71,6 +71,7 @@ export interface NormalizerState {
   taskTypes: Map<string, string>;
   workflowNames: Map<string, string>;
   trustNotice: { held: string | null; settled: boolean }; // C10: the engine's stderr trust line, held until the launch's initialize response settles it (or the exit does)
+  openAsks: Set<string>; // E1: the asks opened (`maws.ask.opened`) and not yet answered or cancelled
 }
 
 // C10 start: the engine's trust line on stderr (fixture pass2/trust-no-attestation seq 5). It is printed at settings
@@ -108,6 +109,7 @@ export class Normalizer {
       taskTypes: new Map(),
       workflowNames: new Map(),
       trustNotice: { held: null, settled: false }, // C10
+      openAsks: new Set(), // E1
     };
   }
 
@@ -196,7 +198,7 @@ export class Normalizer {
         return;
       }
       case 'control_request':
-        mapInboundRequest(this.state.inbound, frame as ControlRequestFrame, out, attribution);
+        mapInboundRequest(this.state.inbound, frame as ControlRequestFrame, out, attribution, this.state.openAsks);
         return;
       case 'control_response':
         this.inboundResponse(frame as ControlResponseFrame, out, attribution);
@@ -419,7 +421,7 @@ export class Normalizer {
       if (!Array.isArray(list)) continue;
       for (const raw of list) {
         const pending = ControlRequestFrameSchema.safeParse(raw);
-        if (pending.success && !this.state.inbound.has(pending.data.request_id as RequestId)) mapInboundRequest(this.state.inbound, pending.data, out, attribution);
+        if (pending.success && !this.state.inbound.has(pending.data.request_id as RequestId)) mapInboundRequest(this.state.inbound, pending.data, out, attribution, this.state.openAsks);
       }
     }
     const requestId = frame.response.request_id as RequestId;
@@ -490,7 +492,7 @@ export class Normalizer {
         const requestId = frame.response.request_id as RequestId;
         const note = this.state.answerNotes.get(requestId) ?? null;
         this.state.answerNotes.delete(requestId);
-        mapOutboundResponse(this.state.inbound, frame, out, note);
+        mapOutboundResponse(this.state.inbound, frame, out, note, this.state.openAsks);
         return;
       }
       case 'bash_command':
@@ -529,7 +531,7 @@ export class Normalizer {
         const reason = typeof meta.reason === 'string' ? (meta.reason as 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget' /* C12 */) : code === 0 && signal === null ? 'unknown' : 'crash';
         // C12: a release carries the budget and the sum it was made at (the exit row's `budget`)
         const budget = reason === 'budget' ? budgetOf(meta.budget) : null;
-        out.emit({ kind: 'process.exited', code, signal, reason, lostAttentionCount: typeof meta.lostAttentionCount === 'number' ? meta.lostAttentionCount : 0, budget }, main);
+        out.emit({ kind: 'process.exited', code, signal, reason, lostAttentionCount: typeof meta.lostAttentionCount === 'number' ? meta.lostAttentionCount : 0, ...(typeof meta.lostAskCount === 'number' && meta.lostAskCount > 0 ? { lostAskCount: meta.lostAskCount } : {}) /* E1 */, budget }, main);
         return;
       }
       case 'reconnect':
@@ -561,6 +563,12 @@ export class Normalizer {
           code: stringOrNull(meta.code) ?? String(meta.event), toolUseId: null, taskId: null, requestId: null,
         }, main);
         return;
+      // E1 start: an async ask's answers (journaled once their steer was written) and a cancelled ask
+      case 'maws_ask_answered':
+      case 'maws_ask_cancelled':
+        mapMawsAskMeta(meta, out, main, this.state.openAsks);
+        return;
+      // E1 end
       default:
         return; // spawn, relay_health, initialize, status_check, queue, the normaliser's own warnings, and the probe's notes
     }

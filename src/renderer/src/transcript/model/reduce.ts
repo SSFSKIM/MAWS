@@ -9,6 +9,8 @@ import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
 import type { CellDetail, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
 import { appendStripped, stripAnsi } from '@shared/wire/ansi';
+import { parseAskSteer } from '@shared/maws/ask'; // E1
+import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -52,6 +54,9 @@ export interface TurnState {
   // was opened by the engine's own output). A prompt's `user.message` arrives at the write and opens its turn pending
   // (`false`): its bubble shows, it has no divider, and it never receives another turn's events until it starts.
   accepted: boolean;
+  // Additive (E1, residue 13): the answers an async ask's steer carried, by askId, on the turn that holds the ask's call
+  // (the steer usually runs as a turn of its own). Replaced, never mutated, so an earlier snapshot keeps its own map.
+  askSteers?: ReadonlyMap<string, AskAnswer[]>;
 }
 
 export interface TranscriptUi {
@@ -495,6 +500,7 @@ function apply(batch: Batch, event: SessionEvent): void {
         pushRouted(null, false); // retained on the turn, no row of its own
         return;
       }
+      recordAskSteer(batch, event); // E1
       // A prompt already placed (an inbound replay of it, or of one folded into another turn) adds nothing.
       if (event.messageUuid !== null && index.messages.has(event.messageUuid)) return;
       const own = event.messageUuid === null ? undefined : state.turns.get(turnIdOf.ofMessage(event.messageUuid));
@@ -691,10 +697,41 @@ function apply(batch: Batch, event: SessionEvent): void {
     case 'session.init':
       state.cwd = event.cwd; // what the engine's cwd-relative tool output is relative to (derive.ts, grepFileScope)
       return;
+    // E1 start: the `maws` server's events go to the turn of the call they name (as its tool result does), else the
+    // current turn, and bump it, so an async ask's answer or a cancellation that arrives after the capsule's turn closed
+    // and others ran still re-derives the capsule (E1 execution document, M3's first decision)
+    case 'maws.ask.opened':
+    case 'maws.ask.answered':
+    case 'maws.ask.cancelled':
+    case 'maws.delivery.file':
+    case 'maws.pane.shown': {
+      if (!pushRouted(event.toolUseId === null ? undefined : index.toolUses.get(event.toolUseId))) batch.loose(event, false);
+      return;
+    }
+    // E1 end
     default:
       return; // session lifecycle, accounting, snapshots and unknown frames: nothing the transcript shows
   }
 }
+
+// E1 start (residue 13): a user message that is an async ask's steer (`[MAWS ask <askId>]` and the answered result's
+// fenced block) carries that ask's answers. They go on the turn holding the ask's call (copy-on-write: that turn is
+// cloned for this batch and given a new map, so a snapshot taken before the steer still reads `asked`), and that turn
+// re-derives, since the steer usually runs as a turn of its own (pass3/p1-maws-ask-async) and on the disk path it is
+// the only record of the answers. A steer naming no call this state holds answers nothing (the call always precedes
+// its steer). The first steer naming an ask wins. The message itself is placed as any other prompt: its bubble stays a
+// user row.
+function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
+  const text = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n');
+  const steer = parseAskSteer(text);
+  if (steer === null) return;
+  const owner = batch.state.index.toolUses.get(steer.askId as ToolUseId); // the askId is the call's tool use id (residue 2)
+  if (owner === undefined || batch.state.turns.get(owner)?.askSteers?.has(steer.askId)) return;
+  const turn = batch.touch(owner);
+  turn.askSteers = new Map(turn.askSteers).set(steer.askId, steer.result.answers);
+  turn.version += 1;
+}
+// E1 end
 
 // Interrupt evidence a turn retains: the engine's interrupt marker, or a call the human rejected.
 const wasInterrupted = (turn: TurnState) =>

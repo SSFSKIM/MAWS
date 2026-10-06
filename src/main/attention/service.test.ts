@@ -98,10 +98,19 @@ describe('attention service merges broker items with the derived kinds', () => {
       { id: `${APP}:interrupted:${exited.id}`, appSessionId: APP, sessionId: SID, kind: 'interrupted', request: { requestId: null, toolUseId: null, taskId: null, agentId: null }, summary: 'Session interrupted, 2 approvals lost', createdAt: AT, state: 'pending', stateChangedAt: AT, expiresAt: null },
     ]);
     expect(interruptedSummary(1)).toBe('Session interrupted, 1 approval lost');
+    // E1 M5 fix: the blocking `maws` asks among the lost are questions
+    expect(interruptedSummary(0, 1)).toBe('Session interrupted, 1 question lost');
+    expect(interruptedSummary(1, 2)).toBe('Session interrupted, 1 approval and 2 questions lost');
     await service.settled();
     expect(store.sessions.get(APP)).toMatchObject([{ kind: 'interrupted', summary: 'Session interrupted, 2 approvals lost' }]);
     batch(event('process.exited', { code: 0, signal: null, reason: 'unknown', lostAttentionCount: 0 }));
     expect(last()).toHaveLength(1); // nothing lost, nothing raised
+  });
+
+  it('a process exit that lost a blocking ask raises the interrupted item naming it a question (E1 M5 fix)', () => {
+    const { batch, last } = setup();
+    batch(event('process.exited', { code: null, signal: 'SIGTERM', reason: 'stop', lostAttentionCount: 1, lostAskCount: 1 }));
+    expect(last()).toMatchObject([{ kind: 'interrupted', summary: 'Session interrupted, 1 question lost' }]);
   });
 
   it('retires broker and held-message attention on host loss without erasing durable errors', async () => {

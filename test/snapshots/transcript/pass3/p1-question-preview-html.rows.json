@@ -23,6 +23,7 @@
   {
     "answers": null,
     "at": "2026-10-06T03:29:48.069Z",
+    "error": "Option \"A\" in question \"Which layout?\": preview must contain HTML (previewFormat is set to \"html\"). Wrap content in a tag like <div> or <pre>.",
     "id": "question:toolu_01JMPB2qnkU9UWNh7yYcXhi7",
     "kind": "question",
     "questions": [
