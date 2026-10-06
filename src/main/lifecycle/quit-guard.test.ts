@@ -919,6 +919,26 @@ describe('unsaved files in the quit question', () => {
     expect(electron.app.quits).toBe(0);
   });
 
+  // Fix wave 1: the ordinary question after a Save all that saved everything cannot loop (none of its answers asks
+  // again), so it is answered as a first question is; code-editor.spec's save_all case quits over its stub's busy sessions.
+  it('under MAWS_E2E a Save all that leaves only busy sessions is followed by the ordinary question, answered as at first', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let files = ['/r/a.ts'];
+    const env = { MAWS_E2E: '1', MAWS_E2E_QUIT_ANSWER: 'save_all' };
+    const saveAll = vi.fn(async () => ((files = []), new Map<string, string>()));
+    guard(modelWith(midTurn(1)), { unsavedFiles: () => files, saveAll, ask: (report, asked) => askToQuit(report, { env, show: vi.fn() }, asked) });
+    electron.app.attempt();
+    await settle();
+    await settle();
+    expect(log.mock.calls.map(([line]) => line)).toEqual([
+      'quit-guard: 1 unsaved file, 1 mid-turn, auto-answered save_all',
+      'quit-guard: 1 mid-turn, auto-answered quit', // save_all is not offered here: the default
+    ]);
+    log.mockRestore();
+    expect(saveAll).toHaveBeenCalledOnce();
+    expect(electron.app.quits).toBe(1);
+  });
+
   it('a Save all that fails is logged and ends the flight as Cancel; the next quit asks again', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const saveAll = vi.fn(async (): Promise<ReadonlyMap<string, string>> => {

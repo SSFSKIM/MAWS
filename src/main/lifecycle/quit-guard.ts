@@ -21,8 +21,8 @@
 // Quit anyway and Cancel: Save all asks every window to save (`layout.saveAll`), waits for each window holding files to
 // answer, bounded, then reads the report again, quitting when nothing is left and asking again otherwise; the question
 // asked again names each file a window could not save with its reason. A tab in the merge view is never saved by Save
-// all (the renderer answers it as the conflict it is). Under MAWS_E2E only a flight's first question takes the given
-// answer, so a save that keeps failing cannot loop a test.
+// all (the renderer answers it as the conflict it is). Under MAWS_E2E a question asked again about unsaved files is
+// answered Cancel, so a save that keeps failing cannot loop a test.
 // E5 end
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto'; // E5
@@ -205,8 +205,9 @@ const FIRST_ROUND: QuitRound = { round: 0, reasons: new Map() };
 
 // The question as the app asks it: the native dialog, or under `MAWS_E2E=1` the answer `MAWS_E2E_QUIT_ANSWER` gives
 // (quit by default; C12: `cancel` and `when_idle` too; E5: `save_all`, each only when the question offers it), logged to
-// stderr for the smoke to read. E5: under MAWS_E2E only the flight's first question takes that answer; every later one
-// is answered `cancel`, so a Save all that keeps failing ends the flight instead of looping.
+// stderr for the smoke to read. E5: under MAWS_E2E a later question of the flight that still names unsaved files is
+// answered `cancel`, so a Save all that keeps failing ends the flight instead of looping; a later ordinary question (Save
+// all saved everything, sessions still busy) cannot loop, none of its answers asking again, and is answered as at first.
 export async function askToQuit(
   report: BusyReport, // C12: the report, not C5's mid-turn count
   deps: { env: Record<string, string | undefined>; show(options: MessageBoxOptions): Promise<{ response: number }> },
@@ -215,7 +216,8 @@ export async function askToQuit(
   // E5: the question's three buttons as answers, in order; with unsaved files Save all, Quit anyway (a quit) and Cancel
   const offered: readonly QuitAnswer[] = report.unsavedFiles.length > 0 ? ['save_all', 'quit', 'cancel'] : ['quit', 'when_idle', 'cancel'];
   if (deps.env.MAWS_E2E === '1') {
-    const answer: QuitAnswer = asked.round > 0 ? 'cancel' : (offered.find((a) => a === deps.env.MAWS_E2E_QUIT_ANSWER) ?? 'quit');
+    const repeated = asked.round > 0 && report.unsavedFiles.length > 0;
+    const answer: QuitAnswer = repeated ? 'cancel' : (offered.find((a) => a === deps.env.MAWS_E2E_QUIT_ANSWER) ?? 'quit');
     console.error(`quit-guard: ${logParts(report)}, auto-answered ${answer}`);
     return answer;
   }
