@@ -212,6 +212,52 @@ describe('voice service owns one capture and drops late events', () => {
     expect(h.backend.start).toHaveBeenCalledTimes(3);
   });
 
+  it.each([
+    ['its renderer is gone', (from: ReturnType<typeof sender>) => from.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 })],
+    ['its page reloads', (from: ReturnType<typeof sender>) => from.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false })],
+  ])('cancels the capture when %s, and accepts the next start', async (_, end) => {
+    const h = setup();
+    const from = sender(1);
+    const { sink } = await listening(h, A, from);
+    end(from);
+    expect(h.backend.cancel).toHaveBeenCalledExactlyOnceWith(A);
+    sink({ type: 'partial', id: A, text: 'late' });
+    expect(h.emitted.map((event) => event.kind)).toEqual(['permission', 'started']);
+    const next = h.service.start({ captureId: B, locale: null }, from);
+    h.starts.at(-1)!.answer({ accepted: true });
+    await expect(next).resolves.toEqual({ accepted: true });
+  });
+
+  it.each([
+    ['a same-document navigation', { isMainFrame: true, isSameDocument: true }],
+    ['a subframe navigation', { isMainFrame: false, isSameDocument: false }],
+  ])('keeps the capture through %s', async (_, details) => {
+    const h = setup();
+    const from = sender(1);
+    await listening(h, A, from);
+    from.emit('did-start-navigation', details);
+    expect(h.backend.cancel).not.toHaveBeenCalled();
+    await expect(h.service.start({ captureId: B, locale: null }, sender(2))).resolves.toEqual({ accepted: false, reason: 'busy', path: null });
+  });
+
+  it('stops following the window once its capture ends, whichever way it ends', async () => {
+    const h = setup();
+    const from = sender(1);
+    const watched = () => ['destroyed', 'render-process-gone', 'did-start-navigation'].map((event) => from.listenerCount(event));
+    const { sink } = await listening(h, A, from);
+    expect(watched()).toEqual([1, 1, 1]);
+    sink({ type: 'final', id: A, text: '', timedOut: false });
+    expect(watched()).toEqual([0, 0, 0]);
+    await listening(h, B, from);
+    h.service.cancel({ captureId: B }, from);
+    expect(watched()).toEqual([0, 0, 0]);
+    await listening(h, A, from);
+    from.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 });
+    expect(watched()).toEqual([0, 0, 0]);
+    from.emit('destroyed');
+    expect(h.backend.cancel.mock.calls).toEqual([[B], [A]]);
+  });
+
   it('a destroyed window that holds no capture cancels nothing', async () => {
     const h = setup();
     const owner = sender(1);

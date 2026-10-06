@@ -10,10 +10,21 @@ import type { VoiceEvent, VoicePrivacyPane, VoiceStartInput, VoiceStartResult, V
 import type { HelperEvent, VoiceBackend } from './backend';
 import { voiceScriptLog } from './scripted-backend';
 
-// The window an invoke came from: its id, and its end (a closed or crashed window cancels the capture it owns).
+// The window an invoke came from: its id, and the ends of the page that holds a capture. A closed window, a crashed
+// renderer or a reload (a main-frame document navigation) leaves no composer to send the capture's cancel.
 export interface VoiceSender {
   readonly id: number;
-  once(event: 'destroyed', listener: () => void): unknown;
+  on(event: 'destroyed', listener: () => void): unknown;
+  on(event: 'render-process-gone', listener: () => void): unknown;
+  on(event: 'did-start-navigation', listener: (details: NavigationDetails) => void): unknown;
+  removeListener(event: 'destroyed', listener: () => void): unknown;
+  removeListener(event: 'render-process-gone', listener: () => void): unknown;
+  removeListener(event: 'did-start-navigation', listener: (details: NavigationDetails) => void): unknown;
+}
+
+interface NavigationDetails {
+  isMainFrame: boolean;
+  isSameDocument: boolean;
 }
 
 export interface VoiceServiceDeps {
@@ -31,11 +42,11 @@ interface Capture {
   captureId: string;
   senderId: number;
   phase: 'starting' | 'listening' | 'stopping';
+  unfollow(): void; // stops watching the owning page's end
 }
 
 export class VoiceService {
   private active: Capture | null = null;
-  private readonly followed = new Set<number>(); // the windows whose `destroyed` is already followed
 
   constructor(
     private readonly backend: VoiceBackend,
@@ -47,10 +58,10 @@ export class VoiceService {
   }
 
   async start({ captureId, locale }: VoiceStartInput, sender: VoiceSender): Promise<VoiceStartResult> {
-    this.follow(sender);
     if (this.active) return { accepted: false, reason: 'busy', path: null };
-    const capture: Capture = { captureId, senderId: sender.id, phase: 'starting' };
+    const capture: Capture = { captureId, senderId: sender.id, phase: 'starting', unfollow: () => {} };
     this.active = capture;
+    this.follow(capture, sender);
     let result: VoiceStartResult;
     try {
       result = await this.backend.start(captureId, locale, (event) => this.forward(capture, event));
@@ -86,7 +97,7 @@ export class VoiceService {
   }
 
   dispose(): void {
-    this.active = null;
+    if (this.active) this.release(this.active);
     this.backend.dispose();
   }
 
@@ -102,21 +113,31 @@ export class VoiceService {
     return capture;
   }
 
-  private follow(sender: VoiceSender): void {
-    if (this.followed.has(sender.id)) return;
-    const id = sender.id; // read now: a destroyed webContents' properties may no longer answer
-    this.followed.add(id);
-    sender.once('destroyed', () => {
-      this.followed.delete(id);
-      const capture = this.active;
-      if (capture?.senderId !== id) return;
+  // Watches the owning page for as long as `capture` lives: its end cancels the capture (the helper would otherwise
+  // keep recording for a composer that is gone, and every later start answer `busy`). Released captures unfollow.
+  private follow(capture: Capture, sender: VoiceSender): void {
+    const gone = () => {
+      if (this.active !== capture) return;
       this.release(capture);
       this.backend.cancel(capture.captureId);
-    });
+    };
+    const navigating = (details: NavigationDetails) => {
+      if (details.isMainFrame && !details.isSameDocument) gone();
+    };
+    sender.on('destroyed', gone);
+    sender.on('render-process-gone', gone);
+    sender.on('did-start-navigation', navigating);
+    capture.unfollow = () => {
+      sender.removeListener('destroyed', gone);
+      sender.removeListener('render-process-gone', gone);
+      sender.removeListener('did-start-navigation', navigating);
+    };
   }
 
   private release(capture: Capture): void {
-    if (this.active === capture) this.active = null;
+    if (this.active !== capture) return;
+    this.active = null;
+    capture.unfollow();
   }
 
   private forward(capture: Capture, event: HelperEvent): void {
