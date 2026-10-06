@@ -6,13 +6,13 @@ Purpose: siblings in flight extend the same contracts before any of them lands. 
 
 ## 1. X9 — tools on the `maws` server
 
-Owner E1. The server is named `maws`; the engine exposes each tool to the model as `mcp__maws__<tool>`. Rules: snake_case tool names; every description ends with its fallback sentence for sessions that lack the tool; every tool's input and result schema lives in `src/shared/` beside the X1 events it emits; a child adds a tool only after its row is here.
+Owner E1. The server is named `maws`; the engine exposes each tool to the model as `mcp__maws__<tool>`. Rules: snake_case tool names; every description opens with its fallback sentence for sessions that lack the tool (A-18; ToolSearch indexes descriptions); every tool's input and result schema lives in `src/shared/` beside the X1 events it emits; a child adds a tool only after its row is here.
 
 | Tool | Owner | Consumers | State |
 |---|---|---|---|
-| `send_file` | E1 | E2 (the record and the viewer) | reserved |
-| `ask` | E1 | — | reserved |
-| `show_pane` | E1 | E2, E4, E6, E7 (the panes it can name) | reserved |
+| `send_file {files: string[1..20], caption?, urgency?: 'normal'|'high'}` → `{status:'delivered', deliverables:[{id,path,name}]}`; one X12 JSON record per file at `<userData>/deliverables/<appSessionId>/<id>.json` | E1 | E2 (the record and the viewer) | built 2026-10-06 (E1 interim; `src/shared/maws/tools.ts`, `deliverable.ts`) |
+| `ask {title?, context?, blocking? (default true), questions[1..12]: {id?, question, header?, modality: 'choice'|'text'|'file'|'folder'|'repository', options?, multi?, allowOther?, multiple?, placeholder?}}` → `{status:'answered', askId, answers:[{id, question, status:'answered'|'skipped'|'decide_for_me', value?, otherText?, name?}]}` or `{status:'asked', askId}`; async answers arrive as a `priority:'next'` steer `[MAWS ask <askId>] …` with a fenced AskResult JSON; askId = tool-use id | E1 | — | built 2026-10-06 (E1 interim; `ask.ts`) |
+| `show_pane {pane: 'diff'|'file'|'terminal'|'tasks'|'deliverable'|'browser'|'source-control', target?, line?}` → `{status:'shown', pane, opened: {kind:'panel-tool', toolId, tabId, title} | {kind:'main-tab', tabId, path, line}}`; passes `{target}` to a sibling's tool and reuses the session's Terminal tab | E1 | E2, E4, E6, E7 | built 2026-10-06 (E1 interim; `panes.ts`) |
 | `artifact_create`, `artifact_update`, `artifact_list`, `artifact_screenshot` | E2 | — | reserved |
 | `browser_tabs`, `browser_navigate`, `browser_snapshot`, `browser_act`, `browser_eval`, `browser_screenshot` | E4 (its cut may rename within the `browser_` prefix) | — | reserved |
 
@@ -24,9 +24,9 @@ Rule: events the tool server emits are prefixed `maws.`; side-thread events `sid
 
 | Kind | Owner | Consumers | State |
 |---|---|---|---|
-| `maws.ask.*` (opened, answered, cancelled) | E1 | transcript rows, the Question sheet | reserved |
-| `maws.delivery.*` (file delivered, artifact version) | E1 (emit), E2 (record) | transcript rows, Deliverables | reserved |
-| `maws.pane.shown` | E1 | — | reserved |
+| `maws.ask.opened`, `maws.ask.answered`, `maws.ask.cancelled` | E1 | transcript rows, the Question sheet | built 2026-10-06 |
+| `maws.delivery.file` (E1); `maws.delivery.artifact` (E2, reserved) | E1 (emit), E2 (record) | transcript rows, Deliverables | file built 2026-10-06 |
+| `maws.pane.shown` (X1); the pane bridge is the IPC event `maws.pane.show`, not an X1 event | E1 | — | built 2026-10-06 |
 | `side.thread.*` (opened, summarised) | E3 | sidebar, transcript | reserved |
 | `peer.message`, `peer.list` | E7 | transcript rows | reserved |
 | `subagent.message` (declared in P0, never emitted) | E7 emits | existing row | reserved |
@@ -64,7 +64,7 @@ Index (`src/main/index/migrations.ts`, `PRAGMA user_version`): versions 1 to 3 t
 
 | Namespace | Owner | State |
 |---|---|---|
-| `maws.*` (host tool server control: pending asks, answers) | E1 | reserved |
+| `maws.asks.list`, `maws.ask.answer`, `maws.pane.answer`; event `maws.pane.show`; `files.reveal` added beside `files.openExternal` (main-owned) | E1 | built 2026-10-06 (E1 interim) |
 | `deliverables.*` | E2 | reserved |
 | `side.*` (open thread, send to main, side question) | E3 | reserved |
 | `browser.*` | E4 | reserved |
@@ -82,6 +82,7 @@ Files more than one child touches: `src/shared/graph/events.ts`, `src/shared/ipc
 ## 7. Record
 
 - 2026-10-05: opened at wave one's dispatch with the reservations above; E9 holds settings version 9 provisionally.
+- 2026-10-06 (E1 interim): X9's three tools, events and IPC as built (§1, §2, §5); `files.reveal` joins `files.*`; the fallback sentence opens each description (A-18 corrected §1's earlier "ends with"); the installed engine moved to 2.1.291 during E1.
 - 2026-10-06 (E5 interim): E5 names `files.write`, the `files.read` extension, `file.save` and the X10 seam (§5); adds devDependencies `@codemirror/commands` 6.11.1 and `@codemirror/merge` 6.12.2 (exact); tokens `--code-conflict-*`. E3's author reads the seam before designing the comment composer.
 - 2026-10-06: E9 landed with the names below as recorded; `package.json` gains `build:helper`, `e2e:voice`, and `build:app` chained behind `build:helper`; `electron-builder.yml` gains the E9 block (extraResources, extendInfo, entitlements); `build/entitlements.mac.plist` added.
 - 2026-10-05 (E9 interim): E9 names `voice.*` (§5), takes settings version 9 (§4), appends `voice` to the settings TabRef section enum (§3) and adds the keymap action `composer.dictate` with a hold flag; `App.tsx` gains one E9 block mounting the dictation keys.
