@@ -258,10 +258,39 @@ describe('scm remote runner streams with sequence numbers, caps, cancels, times 
     expect(runner.last('/repo')).toBeNull();
     expect(runner.isRunning('/repo')).toBe(false);
   });
+
+  it('starts nothing after dispose (a revalidation resolving after will-quit)', () => {
+    runner.dispose();
+    expect(start()).toMatchObject({ refused: 'busy', detail: expect.stringMatching(/quitting/) });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+  });
+
+  it('a start drops the latest runs of every checkout that ended more than 10 minutes ago', () => {
+    const runs = (runner as unknown as { runs: Map<string, unknown> }).runs;
+    start('/a');
+    child().close(0);
+    start('/b', { token: OTHER_TOKEN });
+    child().close(0);
+    vi.advanceTimersByTime(5 * 60_000);
+    start('/c');
+    expect([...runs.keys()].sort()).toEqual(['/a', '/b', '/c']);
+    vi.advanceTimersByTime(5 * 60_000 + 1);
+    start('/d', { token: OTHER_TOKEN });
+    expect([...runs.keys()].sort()).toEqual(['/c', '/d']);
+  });
 });
 
 describe('scm remote runner over a real process', () => {
   const tmp = realpathSync(tmpdir());
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   it('streams a real child and its exit code, with the remote environment it was given', async () => {
     const events: ScmRemoteOutput[] = [];
@@ -276,6 +305,25 @@ describe('scm remote runner over a real process', () => {
     expect(events.filter((e) => e.kind === 'stdout').map((e) => e.text).join('')).toBe(`${tmp}\n`);
     expect(events.filter((e) => e.kind === 'stderr').map((e) => e.text).join('')).toBe('unset 0');
     expect(events[events.length - 1]).toMatchObject({ kind: 'exit', exitCode: 3, signal: null });
+    runner.dispose();
+  });
+
+  it('cancel stops the whole process group, a grandchild included', async () => {
+    const events: ScmRemoteOutput[] = [];
+    let ended!: () => void;
+    const done = new Promise<void>((resolve) => { ended = resolve; });
+    const runner = new RemoteRunner({ emit: (event) => events.push(event), onExit: () => ended() });
+    runner.start({ appSessionId: ID, key: tmp, captured: { PATH: '/usr/bin:/bin' }, plan: plan({ program: '/bin/sh', argv: ['-c', 'sleep 30 & echo $!; wait'], cwd: tmp }) });
+    let grandchild = 0;
+    await vi.waitFor(() => {
+      grandchild = Number(events.find((e) => e.kind === 'stdout')?.text?.trim());
+      expect(grandchild).toBeGreaterThan(0);
+    }, { timeout: 5000 });
+    expect(alive(grandchild)).toBe(true);
+    runner.cancel(tmp, TOKEN);
+    await done;
+    expect(events[events.length - 1]).toMatchObject({ kind: 'exit', exitCode: null, signal: 'SIGTERM' });
+    await vi.waitFor(() => expect(alive(grandchild)).toBe(false), { timeout: 5000 }); // gone once launchd reaps the orphan
     runner.dispose();
   });
 

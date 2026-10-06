@@ -94,7 +94,10 @@ export class RemoteRunner {
     return this.runs.get(key)?.running === true;
   }
 
+  // After `dispose` nothing starts: a run whose revalidation resolves after will-quit spawns nothing.
   start({ appSessionId, key, plan, captured }: RemoteRunStart): ScmRunStarted {
+    if (this.disposed) return refusal('busy', 'MAWS is quitting; nothing more runs');
+    this.sweep();
     if (this.isRunning(key)) return refusal('busy', 'A push or pull request is already running for this checkout; wait for it or cancel it');
     const child = this.spawn(plan.program, plan.argv, spawnOptions(plan.cwd, captured));
     const run: Run = {
@@ -128,12 +131,9 @@ export class RemoteRunner {
   }
 
   last(key: string): ScmRemoteLast {
+    this.sweep();
     const run = this.runs.get(key);
     if (run === undefined) return null;
-    if (run.endedAt !== null && this.now() - run.endedAt > LATEST_RUN_KEPT_MS) {
-      this.runs.delete(key);
-      return null;
-    }
     return {
       token: run.plan.token, kind: run.plan.kind, plan: run.plan, running: run.running, exitCode: run.exitCode, signal: run.signal,
       output: run.output, truncated: run.truncated, seq: run.seq, startedAt: new Date(run.startedAt).toISOString(),
@@ -151,6 +151,12 @@ export class RemoteRunner {
       if (run.child.pid !== undefined) this.kill(run.child.pid, 'SIGTERM');
     }
     this.runs.clear();
+  }
+
+  // Latest runs that ended more than 10 minutes ago, of every checkout.
+  private sweep(): void {
+    const now = this.now();
+    for (const [key, run] of this.runs) if (run.endedAt !== null && now - run.endedAt > LATEST_RUN_KEPT_MS) this.runs.delete(key);
   }
 
   private stop(run: Run): void {
