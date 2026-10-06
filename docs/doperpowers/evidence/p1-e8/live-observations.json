@@ -1,0 +1,193 @@
+{
+  "start": {
+    "id": "aa404835-9d31-492a-a114-98948d84a711",
+    "model": {
+      "requested": "haiku",
+      "resolved": "claude-haiku-4-5-20251001"
+    },
+    "gateway": {
+      "mode": "gateway",
+      "baseUrl": "http://127.0.0.1:8641",
+      "verified": "routed",
+      "autoModeServer": "unknown",
+      "localLane": null
+    },
+    "plugins": [
+      {
+        "name": "cc-plugin-agents-md",
+        "path": "builtin",
+        "source": "cc-plugin-agents-md@builtin",
+        "version": null
+      },
+      {
+        "name": "cc-plugin-telemetry",
+        "path": "builtin",
+        "source": "cc-plugin-telemetry@builtin",
+        "version": null
+      },
+      {
+        "name": "cc-plugin-plugin-authoring",
+        "path": "builtin",
+        "source": "cc-plugin-plugin-authoring@builtin",
+        "version": null
+      }
+    ]
+  },
+  "plugins": "Plugins\n/plugins\n×\nReload mods\nReload skills\nINSTALLED0\n\nNo plugins installed\n\nMARKETPLACES0\n\nNo marketplaces configured\n\nAdd…\nChoose folder…\nAVAILABLE\nLOADED IN THIS SESSION3\ncc-plugin-agents-md\ncc-plugin-agents-md@builtin\ncc-plugin-telemetry\ncc-plugin-telemetry@builtin\ncc-plugin-plugin-authoring\ncc-plugin-plugin-authoring@builtin\nRead with claude plugin list --json · marketplace list --json · system/init · Every change runs the engine's CLI after you confirm it; the engine writes /private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json and /private/tmp/maws-e8-live-pSz9mH/claude-config/plugins and keeps its own records in /private/tmp/maws-e8-live-pSz9mH/claude-config/.claude.json · listing refreshes the engine's own catalogue cache under /private/tmp/maws-e8-live-pSz9mH/claude-config/plugins",
+  "add-folder": {
+    "argv": "2.1.291 plugin marketplace add /private/tmp/maws-e8-live-pSz9mH/market --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/known_marketplaces.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/marketplaces/"
+    ],
+    "then": "Nothing to reload: an added marketplace loads no plugin",
+    "row": {
+      "text": "Successfully added marketplace: e8-scratch (declared in user settings)",
+      "failed": false
+    }
+  },
+  "add-repo": {
+    "argv": "2.1.291 plugin marketplace add anthropics/claude-plugins-official --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/known_marketplaces.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/marketplaces/<name>/"
+    ],
+    "then": "Nothing to reload: an added marketplace loads no plugin",
+    "row": {
+      "text": "SSH not configured, cloning via HTTPS: https://github.com/anthropics/claude-plugins-official.git\nRefreshing marketplace cache (timeout: 120s)…\nCloning repository (timeout: 120s): https://github.com/anthropics/claude-plugins-official.git\nClone complete, validating marketplace…\nCleaning up old marketplace cache…\nSuccessfully added marketplace: claude-plugins-official (declared in user settings)",
+      "failed": false
+    }
+  },
+  "remove-repo": {
+    "argv": "2.1.291 plugin marketplace remove claude-plugins-official --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/known_marketplaces.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/marketplaces/claude-plugins-official/"
+    ],
+    "then": "Reloads plugins in 1 running session",
+    "row": {
+      "text": "Successfully removed marketplace: claude-plugins-official · Reloaded in 1 session",
+      "failed": false
+    }
+  },
+  "install": {
+    "argv": "2.1.291 plugin install e8-probe@e8-scratch --scope user --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/installed_plugins.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/cache/e8-scratch/e8-probe/<version>/"
+    ],
+    "then": "Reloads plugins in 1 running session",
+    "row": {
+      "text": "Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected",
+      "failed": false
+    }
+  },
+  "panel": "Plugins\nPlugins · 4 loaded\nReload mods\nReload skills\nReloaded · 15 skills",
+  "refresh": {
+    "argv": "2.1.291 plugin marketplace update e8-scratch --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/known_marketplaces.json"
+    ],
+    "then": "Reloads plugins in 1 running session",
+    "row": {
+      "text": "Validating local marketplace\nSuccessfully updated marketplace: e8-scratch · Reloaded in 1 session",
+      "failed": false
+    }
+  },
+  "update": {
+    "argv": "2.1.291 plugin update e8-probe@e8-scratch --scope user --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/installed_plugins.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/cache/e8-scratch/e8-probe/<version>/"
+    ],
+    "then": "Reloads plugins in 1 running session",
+    "row": {
+      "text": "Plugin \"e8-probe\" updated from 0.1.0 to 0.2.0 for scope user. Restart to apply changes. · 0.1.0 → 0.2.0 · Reloaded in 1 session",
+      "failed": false
+    }
+  },
+  "skills": [
+    "/e8-probe:e8-hello\nUse\nSays hello from the E8 probe plugin."
+  ],
+  "disable": {
+    "argv": "2.1.291 plugin disable e8-probe@e8-scratch --scope user --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json"
+    ],
+    "then": "Reloads plugins in 1 running session",
+    "row": {
+      "text": "Successfully disabled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected",
+      "failed": false
+    }
+  },
+  "enable": {
+    "argv": "2.1.291 plugin enable e8-probe@e8-scratch --scope user --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json"
+    ],
+    "then": "Reloads plugins in 1 running session",
+    "row": {
+      "text": "Successfully enabled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected",
+      "failed": false
+    }
+  },
+  "uninstall": {
+    "argv": "2.1.291 plugin uninstall e8-probe@e8-scratch --scope user --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/installed_plugins.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/cache/e8-scratch/e8-probe/<version>/",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/data/e8-probe@e8-scratch/"
+    ],
+    "then": "Reloads plugins in 1 running session",
+    "row": {
+      "text": "Successfully uninstalled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected",
+      "failed": false
+    }
+  },
+  "offer-nope-refresh": {
+    "argv": "2.1.291 plugin marketplace update e8-scratch --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/known_marketplaces.json"
+    ],
+    "then": "Reloads plugins in 1 running session",
+    "row": {
+      "text": "Validating local marketplace\nSuccessfully updated marketplace: e8-scratch · Reloaded in 1 session",
+      "failed": false
+    }
+  },
+  "error": {
+    "argv": "2.1.291 plugin install nope@e8-scratch --scope user --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/installed_plugins.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/cache/e8-scratch/nope/<version>/"
+    ],
+    "then": "Reloads plugins in 1 running session",
+    "row": {
+      "text": "Plugin \"nope\" not found in marketplace \"e8-scratch\". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`. · not_found",
+      "failed": true
+    }
+  },
+  "error.code": "not_found",
+  "remove-folder": {
+    "argv": "2.1.291 plugin marketplace remove e8-scratch --json",
+    "writes": [
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/settings.json",
+      "/private/tmp/maws-e8-live-pSz9mH/claude-config/plugins/known_marketplaces.json"
+    ],
+    "then": "Reloads plugins in 1 running session",
+    "row": {
+      "text": "Successfully removed marketplace: e8-scratch · Reloaded in 1 session",
+      "failed": false
+    }
+  },
+  "consoleErrors": []
+}
