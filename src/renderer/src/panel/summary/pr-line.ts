@@ -21,12 +21,16 @@ export interface Answer<T> {
 
 const NOTHING_TO_ASK = new Set(['no_remote', 'not_repository', 'detached']);
 
-const newerGh = (scm: ScmStatus, pr: ScmPrState | undefined): ScmGhState => (pr && pr.checkedAt >= scm.checkedAt ? pr.gh : scm.gh);
+// The PR state answered no earlier than scm.status (ties go to the PR state): its own trust and gh readings stand.
+const current = (scm: ScmStatus, pr: ScmPrState | undefined): boolean => pr !== undefined && pr.checkedAt >= scm.checkedAt;
+const newerGh = (scm: ScmStatus, pr: ScmPrState | undefined): ScmGhState => (pr && current(scm, pr) ? pr.gh : scm.gh);
 
 export function prLine({ branch, scm, pr }: { branch: string; scm: Answer<ScmStatus>; pr: Answer<ScmPrState> }): PrLine {
   if (!scm.data) return scm.error === undefined ? { kind: 'hidden' } : { kind: 'unavailable', reason: scm.error };
   const answer = pr.data;
-  if (!scm.data.trusted || answer?.error === 'untrusted') return { kind: 'untrusted' };
+  if (!scm.data.trusted) return { kind: 'untrusted' };
+  // trust withdrawn since scm.status was read; an older `untrusted` (trusted since) waits to be asked again (prStateBehind)
+  if (answer?.error === 'untrusted') return current(scm.data, answer) ? { kind: 'untrusted' } : { kind: 'hidden' };
   if (scm.data.remotes.length === 0 || (answer?.error != null && NOTHING_TO_ASK.has(answer.error))) return { kind: 'hidden' };
   const gh = newerGh(scm.data, answer);
   if (gh.state === 'missing') return { kind: 'gh_missing' };
@@ -39,10 +43,12 @@ export function prLine({ branch, scm, pr }: { branch: string; scm: Answer<ScmSta
   return { kind: 'pr', number: answer.pr.number, url: answer.pr.url, details: prDetails(answer.pr) };
 }
 
-// The PR state was answered before scm.status found gh ready, and said gh was not: an install or a sign-in happened in
-// between, and the PR state is asked again rather than waiting for the next poll.
+// The PR state was answered before scm.status, and said what scm.status no longer says: the folder was untrusted, or gh
+// was not ready (a trust, an install or a sign-in happened in between). It is asked again rather than waiting for the
+// next poll; the answer is newer than scm.status, so this asks once.
 export function prStateBehind(scm: ScmStatus | undefined, pr: ScmPrState | undefined): boolean {
-  return scm !== undefined && pr !== undefined && scm.gh.state === 'ready' && pr.gh.state !== 'ready' && pr.checkedAt < scm.checkedAt;
+  if (scm === undefined || pr === undefined || current(scm, pr)) return false;
+  return (scm.trusted && pr.error === 'untrusted') || (scm.gh.state === 'ready' && pr.gh.state !== 'ready');
 }
 
 // `Open · Changes requested · 3 passed, 1 pending`: the state (a draft only while open), the review decision when it is

@@ -34,6 +34,16 @@ describe('the push-state row’s PR line', () => {
     expect(line({ data: scmStatus() }, { data: prState({ pr: null, error: 'untrusted' }) })).toEqual({ kind: 'untrusted' });
   });
 
+  it('waits, and asks the PR state again, when the folder was trusted after the PR state found it untrusted', () => {
+    const scm = scmStatus({ checkedAt: LATE });
+    const stale = prState({ checkedAt: EARLY, pr: null, branch: null, error: 'untrusted' });
+    expect(line({ data: scm }, { data: stale })).toEqual({ kind: 'hidden' });
+    expect(prStateBehind(scm, stale)).toBe(true);
+    expect(prStateBehind(scm, { ...stale, checkedAt: LATE })).toBe(false); // asked again: its own answer stands
+    expect(line({ data: scm }, { data: { ...stale, checkedAt: LATE } })).toEqual({ kind: 'untrusted' });
+    expect(prStateBehind(scmStatus({ checkedAt: LATE, trusted: false }), stale)).toBe(false);
+  });
+
   it('says nothing for a repository without a remote', () => {
     expect(line({ data: scmStatus({ remotes: [] }) })).toEqual({ kind: 'hidden' });
     expect(line({ data: scmStatus() }, { data: prState({ pr: null, error: 'no_remote' }) })).toEqual({ kind: 'hidden' });

@@ -1,6 +1,7 @@
 // The summary's push-state row as E6 grew it (E6 execution document, Design §6, T4.2): the push text opens Source
 // control, and a second row says the PR's state from `scm.status` and `scm.pr.state` (shared with the tool's header by
 // query key), with Install, Sign in and a manual refresh; the PR state is polled only while there is something to ask.
+import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,7 +11,9 @@ import type { ScmGhState, ScmPrState, ScmPrStateInput, ScmStatus } from '@shared
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { queryClient } from '../../ipc/query';
 import { A, probeTool, resetPanelStores, TestHost } from '../../test-support/panel';
+import { useGit } from '../../stores/git';
 import { panelHost, registerPanelTool } from '../host';
+import { PushState } from './PushState';
 
 const DIR = '/work/app-a'; // A's directory in the builders' record
 const GIT: GitStatus = {
@@ -61,6 +64,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -110,10 +114,11 @@ describe('push state row shows PR state, install and sign-in states and opens th
     const view = await mount();
     expect(prLine()?.textContent).toBe('Trust this folder to see PR state');
     expect(fake.invoked('scm.pr.state')).toEqual([]);
-    // Refresh still re-reads trust (the PR state answers `untrusted` without asking gh)
+    // Refresh re-reads trust and asks gh nothing
     await user.click(within(push()).getByRole('button', { name: 'Refresh PR state' }));
     await settle();
     expect(fake.invoked('scm.status')).toHaveLength(2);
+    expect(fake.invoked('scm.pr.state')).toEqual([]);
     view.unmount();
     bridge({ 'scm.status': { ...SCM, remotes: [] } });
     await mount();
@@ -163,5 +168,62 @@ describe('push state row shows PR state, install and sign-in states and opens th
     expect(open.textContent).toBe('Up to date with origin/feature');
     await user.click(open);
     expect(addTool).toHaveBeenCalledWith('source-control', { appSessionId: A });
+  });
+
+  it('leaves the trust sentence once the folder is trusted in a session’s setup, without another click', async () => {
+    const user = userEvent.setup();
+    let scm: ScmStatus = { ...SCM, trusted: false };
+    bridge({ 'scm.status': () => scm });
+    await mount();
+    expect(prLine()?.textContent).toBe('Trust this folder to see PR state');
+    await user.click(within(push()).getByRole('button', { name: 'Refresh PR state' }));
+    await settle();
+    expect(prLine()?.textContent).toBe('Trust this folder to see PR state');
+    scm = { ...SCM, checkedAt: '2026-10-06T10:02:00.000Z' }; // main records the trust in the `trusting` phase
+    act(() => fake.event('session.setup', { appSessionId: A, phase: 'trusting', detail: null, outcome: null }));
+    for (let i = 0; i < 4; i++) await settle();
+    expect(prLine()?.textContent).toBe('PR #12 Open · 2 passed, 1 pending');
+    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }]);
+  });
+
+  it('asks the PR state again when scm.status found gh ready after the PR state found it signed out', async () => {
+    const signedOut: ScmGhState = { state: 'unauthenticated', path: '/bin/gh', version: null, detail: 'You are not logged into any GitHub hosts' };
+    const answers: ScmPrState[] = [{ ...PR, checkedAt: '2026-10-06T09:59:00.000Z', gh: signedOut, pr: null, error: 'gh_unauthenticated' }, PR];
+    bridge({ 'scm.pr.state': () => answers.shift() ?? PR });
+    await mount();
+    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }, { appSessionId: A, refresh: false }]);
+    expect(prLine()?.textContent).toBe('PR #12 Open · 2 passed, 1 pending');
+  });
+
+  it('polls the PR state every 2 minutes while the row is shown, and not at all once it is gone', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const view = await mount();
+    expect(fake.invoked('scm.pr.state')).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(119_999));
+    await settle();
+    expect(fake.invoked('scm.pr.state')).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(1));
+    await settle();
+    expect(fake.invoked('scm.pr.state')).toHaveLength(2);
+    view.unmount();
+    act(() => vi.advanceTimersByTime(600_000));
+    await settle();
+    expect(fake.invoked('scm.pr.state')).toHaveLength(2);
+  });
+
+  it('shows the push text plain and no PR line for a directory that is not the shown session’s checkout', async () => {
+    const OTHER = '/work/elsewhere';
+    registerPanelTool(probeTool('source-control', { multiInstance: false }).tool);
+    useGit.setState({ entries: new Map([[OTHER, { root: OTHER, status: { ...GIT, repoRoot: OTHER }, uncommitted: null, error: null }]]) });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PushState directory={OTHER} />
+      </QueryClientProvider>,
+    );
+    await settle();
+    expect(within(push()).getByText('Up to date with origin/feature').tagName).toBe('SPAN');
+    expect(within(push()).queryByRole('button', { name: 'Open Source control' })).toBeNull();
+    expect(prLine()).toBeNull();
+    expect(fake.invoked('scm.status')).toEqual([]);
   });
 });

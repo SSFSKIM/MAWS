@@ -16,13 +16,13 @@ import { useLayout } from '../../stores/layout';
 import { activeTab, sessionOfTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { openTerminal } from '../../tools/terminal';
-import { SCM_TOOL_ID } from '../../tools/scm/ScmTool';
 import { SUMMARY_COPY } from '../copy';
 import { panelHost, usePanelHost } from '../host';
 import { githubUrl, pushState } from './derive';
 import { prLine, prStateBehind } from './pr-line';
 import { actionClass, Row, Section } from './Section';
 
+const SCM_TOOL_ID = 'source-control'; // E6's tool id (the tool's module stays out of the summary's graph)
 const GH_INSTALL_URL = 'https://cli.github.com';
 const GH_SIGN_IN = 'gh auth login';
 const PR_STATE_STALE_MS = 60_000; // main keeps an answer 60 s; a remount within that reads the cached one
@@ -114,13 +114,16 @@ function PrRow({ appSessionId, directory, root, branch }: { appSessionId: AppSes
   if (line.kind === 'hidden') return null;
 
   // gh is asked again (the probe re-runs on `refresh: true`, keeping only a ready answer), and scm.status, whose gh and
-  // trust the row reads, is re-read after it so it finds the new probe.
+  // trust the row reads, is re-read after it so it finds the new probe. Untrusted, there is nothing to ask gh: only
+  // scm.status is re-read (an `untrusted` PR answer cached now would outlive the trust that follows).
   const refresh = async () => {
     setRefreshing(true);
     try {
-      const result = await ipc.invoke('scm.pr.state', { appSessionId, refresh: true });
-      if (result.ok) queryClient.setQueryData(prStateKey(appSessionId), result.value);
-      else await queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId) });
+      if (scm.data?.trusted) {
+        const result = await ipc.invoke('scm.pr.state', { appSessionId, refresh: true });
+        if (result.ok) queryClient.setQueryData(prStateKey(appSessionId), result.value);
+        else await queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId) });
+      }
       await queryClient.invalidateQueries({ queryKey: statusKey(appSessionId) });
     } finally {
       setRefreshing(false);
