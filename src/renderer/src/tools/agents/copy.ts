@@ -142,6 +142,17 @@ export const BACKGROUND_COPY = {
   // E7 end
 } as const;
 
+// E7 start: the Tasks panel (E7 execution document, Design §6 as superseded by P-20): the read-only checklist as its own
+// tool; its list's notes are the checklist's (`BACKGROUND_COPY`), shared with the Background work section.
+export const TASKS_COPY = {
+  title: 'Tasks',
+  noSession: 'Open a session to see its tasks', // a pinned tab while no session is shown
+  progress: (completed: number, total: number) => `${completed} of ${total} completed`,
+  open: 'Open', // the Background work Tasks heading's action
+  openPanel: 'Open the Tasks panel', // its accessible name
+} as const;
+// E7 end
+
 export const LOG_COPY = {
   title: 'Log',
   loadMore: 'Load more',

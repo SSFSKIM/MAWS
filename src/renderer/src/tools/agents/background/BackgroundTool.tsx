@@ -280,6 +280,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
         onToggle={() => handle.toggle('tasks')}
         showEarlier={own && snapshot.showEarlierTasks}
         onToggleEarlier={handle.toggleEarlierTasks}
+        onOpen={() => ctx.openTool(AGENT_TOOL_IDS.tasks, { appSessionId, params: { appSessionId } })} // E7: the Tasks panel
       />
     </div>
   );

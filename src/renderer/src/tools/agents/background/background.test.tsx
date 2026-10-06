@@ -123,7 +123,8 @@ function unmountAll(): void {
 
 const push = (events: SessionEvent[]) => act(() => fake.batch('A', events));
 const section = (name: string) => document.querySelector<HTMLElement>(`[data-section="${name}"]`);
-const heading = (name: string) => section(name)?.querySelector('h3')?.textContent;
+// the heading's own text: its toggle (E7: the Tasks heading also holds `Open`)
+const heading = (name: string) => section(name)?.querySelector('h3 > button')?.textContent;
 const card = (taskId: string) => document.querySelector<HTMLElement>(`[data-workflow="${taskId}"]`)!;
 const summaryLine = (taskId: string) => card(taskId).querySelector('[data-part="summary"]')?.textContent;
 // E7: the run's widget, as shown: the phase options (`<title>|<count>`, the selected one marked `*`) and the agent rows.
@@ -635,7 +636,7 @@ describe('task checklist', () => {
 
   it('labels a disk-only session’s list session list, read from the record’s engine session id', async () => {
     await mount({ status: null, engineSessionId: 'sess-1' });
-    await waitFor(() => expect(heading('tasks')).toBe('Tasks · 2/4session list'));
+    await waitFor(() => expect(heading('tasks')).toBe('Tasks · 2/4'));
     expect(checklist().querySelector('[data-part="label"]')?.textContent).toBe('session list');
   });
 
@@ -670,5 +671,13 @@ describe('task checklist', () => {
     expect(within(checklist()).queryByText('No tasks')).toBeNull();
     expect(within(checklist()).queryByText('TODO tools are off in this launch')).toBeNull();
     expect(query.useCommand).not.toHaveBeenCalled();
+  });
+
+  // E7 (P-20, Design §6): the section stays and its heading opens the Tasks panel on this session.
+  it('the heading’s Open opens the Tasks panel on the session', async () => {
+    await mount({ status: live({ taskListId: 'sess-1' }) });
+    await waitFor(() => expect(heading('tasks')).toBe('Tasks · 2/4'));
+    fireEvent.click(within(checklist()).getByRole('button', { name: 'Open the Tasks panel' }));
+    expect(openTool).toHaveBeenCalledWith('tasks', { appSessionId: A, params: { appSessionId: A } });
   });
 });
