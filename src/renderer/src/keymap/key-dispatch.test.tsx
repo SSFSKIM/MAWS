@@ -341,6 +341,27 @@ describe('dispatcher holds and releases a hold action', () => {
     expect(release.mock.calls).toEqual([['keyup']]);
   });
 
+  it('a fresh press of the latched key after a ⌘ hold whose letter keyup never came is not swallowed', () => {
+    keymap = { 'composer.dictate': 'Cmd+D' };
+    down({ code: 'KeyD', key: 'd', metaKey: true });
+    up({ code: 'MetaLeft', key: 'Meta' }); // releases; Chromium sent no D keyup
+    expect(down({ code: 'KeyD', key: 'd', repeat: true }).defaultPrevented).toBe(true); // the old hold's repeat
+    expect(down({ code: 'KeyD', key: 'd' }).defaultPrevented).toBe(false); // the next typed D
+    expect(down({ code: 'KeyD', key: 'd', metaKey: true }).defaultPrevented).toBe(true); // a second hold starts
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(release.mock.calls).toEqual([['keyup']]);
+    up({ code: 'MetaLeft', key: 'Meta' });
+    expect(release.mock.calls).toEqual([['keyup'], ['keyup']]);
+  });
+
+  it('a fresh press of the held chord while no keyup arrived releases the old hold and starts another', () => {
+    keymap = { 'composer.dictate': 'Cmd+D' };
+    down({ code: 'KeyD', key: 'd', metaKey: true });
+    expect(down({ code: 'KeyD', key: 'd', metaKey: true }).defaultPrevented).toBe(true);
+    expect(release.mock.calls).toEqual([['keyup']]);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   it('does not release on an unrelated key’s keyup, and lets another key’s down through while held', () => {
     down(altSpace);
     up({ code: 'KeyA', key: 'å', altKey: true });

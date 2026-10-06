@@ -135,10 +135,16 @@ onUnbind((binding) => {
 // Runs the binding a keydown belongs to and takes the key's default away; a key nobody owns is left untouched.
 export function dispatchKey(event: KeyboardEvent, keymap: KeymapOverrides): boolean {
   if (!(event.target instanceof Element)) return false;
-  // E9: the held key's repeats, with or without the chord's modifiers still down, are swallowed until its own keyup
+  // E9: the held key's repeats, with or without the chord's modifiers still down, are swallowed until its own keyup. A
+  // fresh press of it means the hold ended unseen (Chromium omits a letter's keyup while ⌘ is held): it ends the hold and
+  // dispatches as any other keydown.
   if (latch !== null && event.code === latch.code) {
-    event.preventDefault();
-    return true;
+    if (event.repeat) {
+      event.preventDefault();
+      return true;
+    }
+    releaseHold('keyup');
+    latch = null;
   }
   const target = event.target;
   // C11 start: the Settings tab's chord capture is recording this key (settings-tab/KeymapSection.tsx): it runs nothing
