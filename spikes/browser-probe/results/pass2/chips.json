@@ -1,0 +1,178 @@
+{
+  "meta": {
+    "scenario": "crosssite,oopif,snapshot,chips",
+    "electron": "44.4.5",
+    "chrome": "152.0.7977.130",
+    "node": "24.21.0",
+    "playwrightCore": "1.63.0",
+    "platform": "darwin arm64 25.6.0",
+    "startedAt": "2026-10-06T16:16:00.245Z",
+    "loadavg": [
+      6.9,
+      7.2,
+      7.2
+    ],
+    "userData": "/tmp/maws-e4-0/userData",
+    "origins": {
+      "A": "http://localhost:17334",
+      "A2": "http://localhost:17337",
+      "B": "http://127.0.0.1:17335",
+      "C": "http://[::1]:17336"
+    }
+  },
+  "chips": {
+    "setChips": {
+      "success": true,
+      "params": {
+        "name": "chips_probe",
+        "value": "partitioned-for-top-level-localhost",
+        "domain": "127.0.0.1",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "None",
+        "partitionKey": {
+          "topLevelSite": "http://localhost",
+          "hasCrossSiteAncestor": true
+        },
+        "url": "http://127.0.0.1:17335/"
+      }
+    },
+    "setPlain": {
+      "success": true,
+      "params": {
+        "name": "plain_probe",
+        "value": "unpartitioned",
+        "domain": "127.0.0.1",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "None",
+        "url": "http://127.0.0.1:17335/"
+      }
+    },
+    "electronCookiesSetWithPartitionKey": "accepted (see jar for whether it is partitioned)",
+    "jar": [
+      {
+        "name": "chips_probe",
+        "domain": "127.0.0.1",
+        "path": "/",
+        "secure": true,
+        "sameSite": "None",
+        "sourceScheme": "Secure",
+        "partitionKey": {
+          "hasCrossSiteAncestor": true,
+          "topLevelSite": "http://localhost"
+        }
+      },
+      {
+        "name": "plain_probe",
+        "domain": "127.0.0.1",
+        "path": "/",
+        "secure": true,
+        "sameSite": "None",
+        "sourceScheme": "Secure",
+        "partitionKey": null
+      },
+      {
+        "name": "electron_pk_probe",
+        "domain": "127.0.0.1",
+        "path": "/",
+        "secure": true,
+        "sameSite": "None",
+        "sourceScheme": "Secure",
+        "partitionKey": null
+      }
+    ],
+    "electronCookiesGet": [
+      {
+        "name": "chips_probe",
+        "domain": "127.0.0.1",
+        "secure": true,
+        "sameSite": "no_restriction",
+        "hasPartitionKeyField": false
+      },
+      {
+        "name": "plain_probe",
+        "domain": "127.0.0.1",
+        "secure": true,
+        "sameSite": "no_restriction",
+        "hasPartitionKeyField": false
+      },
+      {
+        "name": "electron_pk_probe",
+        "domain": "127.0.0.1",
+        "secure": true,
+        "sameSite": "no_restriction",
+        "hasPartitionKeyField": false
+      }
+    ],
+    "requests": [
+      {
+        "tag": "A-embeds-B",
+        "meaning": "top-level localhost embeds 127.0.0.1: the partition the cookie was set for",
+        "received": true,
+        "cookieNames": [
+          "chips_probe",
+          "plain_probe",
+          "electron_pk_probe"
+        ],
+        "chipsSent": true,
+        "plainSent": true,
+        "electronPkSent": true,
+        "secFetchSite": "cross-site",
+        "secFetchDest": "iframe"
+      },
+      {
+        "tag": "C-embeds-B",
+        "meaning": "top-level [::1] embeds 127.0.0.1: another partition",
+        "received": true,
+        "cookieNames": [
+          "plain_probe",
+          "electron_pk_probe"
+        ],
+        "chipsSent": false,
+        "plainSent": true,
+        "electronPkSent": true,
+        "secFetchSite": "cross-site",
+        "secFetchDest": "iframe"
+      },
+      {
+        "tag": "B-top",
+        "meaning": "top-level 127.0.0.1 itself: the unpartitioned context",
+        "received": true,
+        "cookieNames": [
+          "plain_probe",
+          "electron_pk_probe"
+        ],
+        "chipsSent": false,
+        "plainSent": true,
+        "electronPkSent": true,
+        "secFetchSite": "none",
+        "secFetchDest": "document"
+      },
+      {
+        "tag": "A-embeds-B-again",
+        "meaning": "the matching partition a second time",
+        "received": true,
+        "cookieNames": [
+          "chips_probe",
+          "plain_probe",
+          "electron_pk_probe"
+        ],
+        "chipsSent": true,
+        "plainSent": true,
+        "electronPkSent": true,
+        "secFetchSite": "cross-site",
+        "secFetchDest": "iframe"
+      }
+    ],
+    "verdict": {
+      "chipsSentOnMatchingEmbed": true,
+      "chipsAbsentOnOtherTopLevelSite": true,
+      "chipsAbsentAtTopLevelB": true,
+      "unpartitionedSentEverywhere": true
+    },
+    "totalMs": 186.2
+  }
+}

@@ -1,0 +1,469 @@
+{
+  "meta": {
+    "scenario": "crosssite,oopif,snapshot,chips",
+    "electron": "44.4.5",
+    "chrome": "152.0.7977.130",
+    "node": "24.21.0",
+    "playwrightCore": "1.63.0",
+    "platform": "darwin arm64 25.6.0",
+    "startedAt": "2026-10-06T16:16:00.245Z",
+    "loadavg": [
+      6.9,
+      7.2,
+      7.2
+    ],
+    "userData": "/tmp/maws-e4-0/userData",
+    "origins": {
+      "A": "http://localhost:17334",
+      "A2": "http://localhost:17337",
+      "B": "http://127.0.0.1:17335",
+      "C": "http://[::1]:17336"
+    }
+  },
+  "crosssite": {
+    "before": {
+      "url": "http://localhost:17334/a.html",
+      "processId": 5,
+      "osPid": 93486,
+      "routingId": 1,
+      "frameToken": "53538478DB35C62F5C6931C104496FB5"
+    },
+    "attach": {
+      "bridgeStartMs": 1.8,
+      "connectMs": 38.8
+    },
+    "frameIdBefore": "66326551783F632B57F4FDEE22DB0117",
+    "navigations": [
+      {
+        "label": "A -> B (localhost -> 127.0.0.1, cross-site)",
+        "navMs": 75.8,
+        "result": {
+          "ok": true,
+          "status": 200
+        },
+        "processSwapped": true,
+        "processBefore": 5,
+        "after": {
+          "url": "http://127.0.0.1:17335/a.html",
+          "processId": 6,
+          "osPid": 93513,
+          "routingId": 4,
+          "frameToken": "EE36FE7E85B11D35300231FF74C77695"
+        },
+        "frameIdAfter": "66326551783F632B57F4FDEE22DB0117",
+        "debuggerAttached": true,
+        "browserConnected": true,
+        "pageUrl": "http://127.0.0.1:17335/a.html",
+        "pageUrlMatches": true,
+        "evaluateHost": "127.0.0.1:17335",
+        "click": "ok",
+        "clickMs": 45.7,
+        "count": "1",
+        "snapshotMs": 4.9,
+        "targetRef": "f1e4",
+        "debuggerEvents": [
+          {
+            "at": 2.9,
+            "method": "Page.frameStartedNavigating",
+            "sessionId": null,
+            "url": "http://127.0.0.1:17335/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          },
+          {
+            "at": 63.1,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 63.5,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 63.6,
+            "method": "Page.frameNavigated",
+            "sessionId": null,
+            "url": "http://127.0.0.1:17335/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          }
+        ]
+      },
+      {
+        "label": "B -> back to A (history, cross-site)",
+        "navMs": 76.8,
+        "result": {
+          "ok": true,
+          "status": 200
+        },
+        "processSwapped": true,
+        "processBefore": 6,
+        "after": {
+          "url": "http://localhost:17334/a.html",
+          "processId": 7,
+          "osPid": 93537,
+          "routingId": 4,
+          "frameToken": "2DFFE45EBC46C2E9F753784B8D1D6AB4"
+        },
+        "frameIdAfter": "66326551783F632B57F4FDEE22DB0117",
+        "debuggerAttached": true,
+        "browserConnected": true,
+        "pageUrl": "http://localhost:17334/a.html",
+        "pageUrlMatches": true,
+        "evaluateHost": "localhost:17334",
+        "click": "ok",
+        "clickMs": 35.2,
+        "count": "1",
+        "snapshotMs": 3.9,
+        "targetRef": "f2e4",
+        "debuggerEvents": [
+          {
+            "at": 2.6,
+            "method": "Page.frameStartedNavigating",
+            "sessionId": null,
+            "url": "http://localhost:17334/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          },
+          {
+            "at": 63.5,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 64.3,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 64.4,
+            "method": "Page.frameNavigated",
+            "sessionId": null,
+            "url": "http://localhost:17334/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          }
+        ]
+      },
+      {
+        "label": "A -> A2 (localhost:17334 -> localhost:17337, same-site)",
+        "navMs": 10.3,
+        "result": {
+          "ok": true,
+          "status": 200
+        },
+        "processSwapped": false,
+        "processBefore": 7,
+        "after": {
+          "url": "http://localhost:17337/a.html",
+          "processId": 7,
+          "osPid": 93537,
+          "routingId": 9,
+          "frameToken": "C0C0B1678104FA14473D8A0397148F48"
+        },
+        "frameIdAfter": "66326551783F632B57F4FDEE22DB0117",
+        "debuggerAttached": true,
+        "browserConnected": true,
+        "pageUrl": "http://localhost:17337/a.html",
+        "pageUrlMatches": true,
+        "evaluateHost": "localhost:17337",
+        "click": "ok",
+        "clickMs": 35.9,
+        "count": "1",
+        "snapshotMs": 4.8,
+        "targetRef": "f3e4",
+        "debuggerEvents": [
+          {
+            "at": 1.4,
+            "method": "Page.frameStartedNavigating",
+            "sessionId": null,
+            "url": "http://localhost:17337/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          },
+          {
+            "at": 4.9,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 6,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 6,
+            "method": "Page.frameNavigated",
+            "sessionId": null,
+            "url": "http://localhost:17337/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          }
+        ]
+      },
+      {
+        "label": "A2 -> C (localhost -> [::1], cross-site)",
+        "navMs": 81.9,
+        "result": {
+          "ok": true,
+          "status": 200
+        },
+        "processSwapped": true,
+        "processBefore": 7,
+        "after": {
+          "url": "http://[::1]:17336/a.html",
+          "processId": 8,
+          "osPid": 93605,
+          "routingId": 4,
+          "frameToken": "4316508D234CE6E94F5E255319828941"
+        },
+        "frameIdAfter": "66326551783F632B57F4FDEE22DB0117",
+        "debuggerAttached": true,
+        "browserConnected": true,
+        "pageUrl": "http://[::1]:17336/a.html",
+        "pageUrlMatches": true,
+        "evaluateHost": "[::1]:17336",
+        "click": "ok",
+        "clickMs": 30.9,
+        "count": "1",
+        "snapshotMs": 4.1,
+        "targetRef": "f4e4",
+        "debuggerEvents": [
+          {
+            "at": 2.3,
+            "method": "Page.frameStartedNavigating",
+            "sessionId": null,
+            "url": "http://[::1]:17336/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          },
+          {
+            "at": 68.9,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 69.3,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 69.4,
+            "method": "Page.frameNavigated",
+            "sessionId": null,
+            "url": "http://[::1]:17336/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          }
+        ]
+      },
+      {
+        "label": "C -> A by webContents.loadURL (the chrome address bar, cross-site)",
+        "navMs": 75.8,
+        "result": {
+          "ok": true,
+          "status": null
+        },
+        "processSwapped": true,
+        "processBefore": 8,
+        "after": {
+          "url": "http://localhost:17334/a.html",
+          "processId": 9,
+          "osPid": 93638,
+          "routingId": 4,
+          "frameToken": "E5A59DE5704244561FFDB91196BE19CE"
+        },
+        "frameIdAfter": "66326551783F632B57F4FDEE22DB0117",
+        "debuggerAttached": true,
+        "browserConnected": true,
+        "pageUrl": "http://localhost:17334/a.html",
+        "pageUrlMatches": true,
+        "evaluateHost": "localhost:17334",
+        "click": "ok",
+        "clickMs": 40.7,
+        "count": "1",
+        "snapshotMs": 4,
+        "targetRef": "f5e4",
+        "debuggerEvents": [
+          {
+            "at": 1.4,
+            "method": "Page.frameStartedNavigating",
+            "sessionId": null,
+            "url": "http://localhost:17334/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          },
+          {
+            "at": 59.8,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 60.4,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 60.5,
+            "method": "Page.frameNavigated",
+            "sessionId": null,
+            "url": "http://localhost:17334/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          }
+        ]
+      },
+      {
+        "label": "A reload",
+        "navMs": 9.8,
+        "result": {
+          "ok": true,
+          "status": 200
+        },
+        "processSwapped": false,
+        "processBefore": 9,
+        "after": {
+          "url": "http://localhost:17334/a.html",
+          "processId": 9,
+          "osPid": 93638,
+          "routingId": 9,
+          "frameToken": "695CD7856A377B3ABEAB54645C2FD5EE"
+        },
+        "frameIdAfter": "66326551783F632B57F4FDEE22DB0117",
+        "debuggerAttached": true,
+        "browserConnected": true,
+        "pageUrl": "http://localhost:17334/a.html",
+        "pageUrlMatches": true,
+        "evaluateHost": "localhost:17334",
+        "click": "ok",
+        "clickMs": 29,
+        "count": "1",
+        "snapshotMs": 3.5,
+        "targetRef": "f6e4",
+        "debuggerEvents": [
+          {
+            "at": 1.4,
+            "method": "Page.frameStartedNavigating",
+            "sessionId": null,
+            "url": "http://localhost:17334/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          },
+          {
+            "at": 5.3,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 6,
+            "method": "Runtime.executionContextsCleared",
+            "sessionId": null,
+            "url": null,
+            "type": null,
+            "frameId": null
+          },
+          {
+            "at": 6.1,
+            "method": "Page.frameNavigated",
+            "sessionId": null,
+            "url": "http://localhost:17334/a.html",
+            "type": null,
+            "frameId": "66326551783F632B57F4FDEE22DB0117"
+          }
+        ]
+      }
+    ],
+    "pwEvents": [
+      {
+        "at": null,
+        "event": "framenavigated",
+        "url": "http://127.0.0.1:17335/a.html",
+        "main": true
+      },
+      {
+        "at": null,
+        "event": "framenavigated",
+        "url": "http://localhost:17334/a.html",
+        "main": true
+      },
+      {
+        "at": null,
+        "event": "framenavigated",
+        "url": "http://localhost:17337/a.html",
+        "main": true
+      },
+      {
+        "at": null,
+        "event": "framenavigated",
+        "url": "http://[::1]:17336/a.html",
+        "main": true
+      },
+      {
+        "at": null,
+        "event": "framenavigated",
+        "url": "http://localhost:17334/a.html",
+        "main": true
+      },
+      {
+        "at": null,
+        "event": "framenavigated",
+        "url": "http://localhost:17334/a.html",
+        "main": true
+      }
+    ],
+    "bridgeStats": {
+      "forwarded": 156,
+      "browserLevel": 4,
+      "events": 161,
+      "errors": 0,
+      "blocked": [],
+      "rejectedUpgrades": 0,
+      "unknownBrowserMethods": []
+    },
+    "frameIdsStable": true,
+    "detachMs": 4,
+    "reattach": {
+      "bridgeStartMs": 0.7,
+      "connectMs": 4.2,
+      "findPageMs": 0,
+      "firstSnapshotMs": 17.3,
+      "totalToFirstSnapshotMs": 22.2,
+      "snapshotChars": 626
+    },
+    "totalMs": 767.5
+  }
+}

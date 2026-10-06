@@ -17,7 +17,10 @@ import { WebSocketServer } from 'ws';
 
 const SESSION_TARGET_ALLOW = new Set(['Target.setAutoAttach', 'Target.detachFromTarget', 'Target.getTargetInfo']);
 
-export async function startDebuggerBridge(webContents, { host = '127.0.0.1', port = 0, log = () => {} } = {}) {
+// Pass two (E4-0) adds `onCommand`, an optional observer of every forwarded session command, called twice per command
+// ({ phase: 'send' | 'reply', id, method, params, sessionId, at, ok?, error? }); `at` is an epoch-ms timestamp. Pass one's
+// behaviour is unchanged when it is absent.
+export async function startDebuggerBridge(webContents, { host = '127.0.0.1', port = 0, log = () => {}, onCommand = null } = {}) {
   const dbg = webContents.debugger;
   const PAGE_SESSION = 'maws-bridge-page-1';
   const token = randomBytes(16).toString('hex');
@@ -87,12 +90,15 @@ export async function startDebuggerBridge(webContents, { host = '127.0.0.1', por
       }
       stats.forwarded++;
       const electronSession = sessionId === PAGE_SESSION ? undefined : sessionId;
+      onCommand?.({ phase: 'send', id, method, params, sessionId, at: performance.timeOrigin + performance.now() });
       try {
         const result = await dbg.sendCommand(method, params, electronSession);
         if (verbose) log(`bridge > ${method} ${sessionId === PAGE_SESSION ? '' : sessionId} ok ${JSON.stringify(result ?? {}).slice(0, 1200)}`);
+        onCommand?.({ phase: 'reply', id, method, params, sessionId, at: performance.timeOrigin + performance.now(), ok: true });
         reply(result ?? {});
       } catch (e) {
         if (verbose) log(`bridge > ${method} ${sessionId === PAGE_SESSION ? '' : sessionId} ERROR ${e?.message ?? e}`);
+        onCommand?.({ phase: 'reply', id, method, params, sessionId, at: performance.timeOrigin + performance.now(), ok: false, error: e?.message ?? String(e) });
         fail(-32000, e?.message ?? String(e));
       }
       return;

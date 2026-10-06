@@ -1,0 +1,642 @@
+{
+  "meta": {
+    "scenario": "snapshot",
+    "electron": "44.4.5",
+    "chrome": "152.0.7977.130",
+    "node": "24.21.0",
+    "playwrightCore": "1.63.0",
+    "platform": "darwin arm64 25.6.0",
+    "startedAt": "2026-10-06T16:21:48.671Z",
+    "loadavg": [
+      10.7,
+      9.2,
+      8.2
+    ],
+    "userData": "/tmp/maws-e4-0/userData",
+    "origins": {
+      "A": "http://localhost:17334",
+      "A2": "http://localhost:17337",
+      "B": "http://127.0.0.1:17335",
+      "C": "http://[::1]:17336"
+    }
+  },
+  "snapshot": {
+    "pages": [
+      {
+        "name": "github-front",
+        "url": "http://localhost:17334/saved/github-front.html",
+        "htmlBytes": 577099,
+        "load": {
+          "ok": true,
+          "status": 200
+        },
+        "loadMs": 69.6,
+        "title": "GitHub · Change is constant. GitHub keeps you ahead. · GitHub · GitHub",
+        "domNodes": 1776,
+        "externalRequestsBlocked": 119,
+        "whole": {
+          "chars": 47125,
+          "lines": 805,
+          "refs": 611,
+          "estTokensAt4CharsPerToken": 11781,
+          "ms": {
+            "n": 3,
+            "min": 28.26,
+            "median": 31.08,
+            "p95": 67.27,
+            "max": 67.27
+          },
+          "charsPerRef": 77.1
+        },
+        "topRoles": [
+          [
+            "generic",
+            169
+          ],
+          [
+            "link",
+            137
+          ],
+          [
+            "listitem",
+            131
+          ],
+          [
+            "text",
+            48
+          ],
+          [
+            "img",
+            29
+          ],
+          [
+            "list",
+            28
+          ],
+          [
+            "heading",
+            26
+          ],
+          [
+            "button",
+            26
+          ],
+          [
+            "paragraph",
+            24
+          ],
+          [
+            "tab",
+            8
+          ],
+          [
+            "term",
+            8
+          ],
+          [
+            "definition",
+            8
+          ]
+        ],
+        "landmarks": {
+          "banner": {
+            "count": 1,
+            "chars": 20258,
+            "lines": 351,
+            "refs": 245,
+            "ms": 11,
+            "firstLine": "- banner [ref=f1e8]:"
+          },
+          "navigation": {
+            "count": 7,
+            "chars": 17489,
+            "lines": 333,
+            "refs": 231,
+            "ms": 9.4,
+            "firstLine": "- navigation \"Global\" [ref=f1e23]:"
+          },
+          "main": {
+            "count": 1,
+            "chars": 16188,
+            "lines": 278,
+            "refs": 238,
+            "ms": 14,
+            "firstLine": "- main [ref=f1e343]:"
+          },
+          "contentinfo": {
+            "count": 1,
+            "chars": 8235,
+            "lines": 172,
+            "refs": 125,
+            "ms": 6.3,
+            "firstLine": "- contentinfo [ref=f1e966]:"
+          },
+          "search": {
+            "count": 0
+          },
+          "region": {
+            "count": 3,
+            "chars": 282,
+            "lines": 4,
+            "refs": 4,
+            "ms": 2.4,
+            "firstLine": "- region [ref=f1e352]:"
+          },
+          "complementary": {
+            "count": 0
+          }
+        },
+        "truncation": {
+          "4000": {
+            "keptChars": 3982,
+            "keptLines": 72,
+            "droppedLines": 733,
+            "keptRefs": 53,
+            "keptRefFraction": 0.087
+          },
+          "8000": {
+            "keptChars": 7977,
+            "keptLines": 137,
+            "droppedLines": 668,
+            "keptRefs": 98,
+            "keptRefFraction": 0.16
+          },
+          "12000": {
+            "keptChars": 11982,
+            "keptLines": 197,
+            "droppedLines": 608,
+            "keptRefs": 140,
+            "keptRefFraction": 0.229
+          },
+          "16000": {
+            "keptChars": 15975,
+            "keptLines": 256,
+            "droppedLines": 549,
+            "keptRefs": 179,
+            "keptRefFraction": 0.293
+          },
+          "24000": {
+            "keptChars": 24000,
+            "keptLines": 397,
+            "droppedLines": 408,
+            "keptRefs": 287,
+            "keptRefFraction": 0.47
+          },
+          "32000": {
+            "keptChars": 31994,
+            "keptLines": 523,
+            "droppedLines": 282,
+            "keptRefs": 394,
+            "keptRefFraction": 0.645
+          },
+          "48000": {
+            "keptChars": 47125,
+            "keptLines": 805,
+            "droppedLines": 0,
+            "keptRefs": 611,
+            "keptRefFraction": 1
+          }
+        },
+        "withBoxes": {
+          "chars": 59985,
+          "ms": 38.7,
+          "growth": 1.27
+        }
+      },
+      {
+        "name": "youtube-front",
+        "url": "http://localhost:17334/saved/youtube-front.html",
+        "htmlBytes": 897032,
+        "load": {
+          "ok": true,
+          "status": 200
+        },
+        "loadMs": 39,
+        "title": "YouTube",
+        "domNodes": 418,
+        "externalRequestsBlocked": 16,
+        "whole": {
+          "chars": 0,
+          "lines": 1,
+          "refs": 0,
+          "estTokensAt4CharsPerToken": 0,
+          "ms": {
+            "n": 3,
+            "min": 3.45,
+            "median": 3.79,
+            "p95": 18.25,
+            "max": 18.25
+          },
+          "charsPerRef": 0
+        },
+        "topRoles": [],
+        "landmarks": {
+          "banner": {
+            "count": 0
+          },
+          "navigation": {
+            "count": 0
+          },
+          "main": {
+            "count": 0
+          },
+          "contentinfo": {
+            "count": 0
+          },
+          "search": {
+            "count": 0
+          },
+          "region": {
+            "count": 0
+          },
+          "complementary": {
+            "count": 0
+          }
+        },
+        "truncation": {
+          "4000": {
+            "keptChars": 0,
+            "keptLines": 1,
+            "droppedLines": 0,
+            "keptRefs": 0,
+            "keptRefFraction": 0
+          },
+          "8000": {
+            "keptChars": 0,
+            "keptLines": 1,
+            "droppedLines": 0,
+            "keptRefs": 0,
+            "keptRefFraction": 0
+          },
+          "12000": {
+            "keptChars": 0,
+            "keptLines": 1,
+            "droppedLines": 0,
+            "keptRefs": 0,
+            "keptRefFraction": 0
+          },
+          "16000": {
+            "keptChars": 0,
+            "keptLines": 1,
+            "droppedLines": 0,
+            "keptRefs": 0,
+            "keptRefFraction": 0
+          },
+          "24000": {
+            "keptChars": 0,
+            "keptLines": 1,
+            "droppedLines": 0,
+            "keptRefs": 0,
+            "keptRefFraction": 0
+          },
+          "32000": {
+            "keptChars": 0,
+            "keptLines": 1,
+            "droppedLines": 0,
+            "keptRefs": 0,
+            "keptRefFraction": 0
+          },
+          "48000": {
+            "keptChars": 0,
+            "keptLines": 1,
+            "droppedLines": 0,
+            "keptRefs": 0,
+            "keptRefFraction": 0
+          }
+        },
+        "withBoxes": {
+          "chars": 0,
+          "ms": 3.2,
+          "growth": null
+        }
+      },
+      {
+        "name": "wikipedia-main",
+        "url": "http://localhost:17334/saved/wikipedia-main.html",
+        "htmlBytes": 253742,
+        "load": {
+          "ok": true,
+          "status": 200
+        },
+        "loadMs": 22.6,
+        "title": "Wikipedia, the free encyclopedia",
+        "domNodes": 2270,
+        "externalRequestsBlocked": 0,
+        "whole": {
+          "chars": 142864,
+          "lines": 2280,
+          "refs": 1401,
+          "estTokensAt4CharsPerToken": 35716,
+          "ms": {
+            "n": 3,
+            "min": 48.52,
+            "median": 49.41,
+            "p95": 91.92,
+            "max": 91.92
+          },
+          "charsPerRef": 102
+        },
+        "topRoles": [
+          [
+            "link",
+            640
+          ],
+          [
+            "listitem",
+            560
+          ],
+          [
+            "text",
+            219
+          ],
+          [
+            "generic",
+            111
+          ],
+          [
+            "list",
+            41
+          ],
+          [
+            "img",
+            18
+          ],
+          [
+            "button",
+            16
+          ],
+          [
+            "heading",
+            12
+          ],
+          [
+            "navigation",
+            9
+          ],
+          [
+            "paragraph",
+            6
+          ],
+          [
+            "search",
+            2
+          ],
+          [
+            "searchbox",
+            2
+          ]
+        ],
+        "landmarks": {
+          "banner": {
+            "count": 1,
+            "chars": 4963,
+            "lines": 104,
+            "refs": 75,
+            "ms": 5.1,
+            "firstLine": "- banner [ref=f4e4]:"
+          },
+          "navigation": {
+            "count": 9,
+            "chars": 2335,
+            "lines": 51,
+            "refs": 39,
+            "ms": 3.4,
+            "firstLine": "- navigation \"Site\" [ref=f4e6]:"
+          },
+          "main": {
+            "count": 1,
+            "chars": 125007,
+            "lines": 2091,
+            "refs": 1274,
+            "ms": 45.5,
+            "firstLine": "- main [ref=f4e95]:"
+          },
+          "contentinfo": {
+            "count": 1,
+            "chars": 3370,
+            "lines": 62,
+            "refs": 38,
+            "ms": 3.2,
+            "firstLine": "- contentinfo [ref=f4e1519]:"
+          },
+          "search": {
+            "count": 2,
+            "chars": 208,
+            "lines": 6,
+            "refs": 5,
+            "ms": 2.3,
+            "firstLine": "- search [ref=f4e55]:"
+          },
+          "region": {
+            "count": 0
+          },
+          "complementary": {
+            "count": 0
+          }
+        },
+        "truncation": {
+          "4000": {
+            "keptChars": 3935,
+            "keptLines": 86,
+            "droppedLines": 2194,
+            "keptRefs": 62,
+            "keptRefFraction": 0.044
+          },
+          "8000": {
+            "keptChars": 7965,
+            "keptLines": 166,
+            "droppedLines": 2114,
+            "keptRefs": 120,
+            "keptRefFraction": 0.086
+          },
+          "12000": {
+            "keptChars": 11997,
+            "keptLines": 226,
+            "droppedLines": 2054,
+            "keptRefs": 162,
+            "keptRefFraction": 0.116
+          },
+          "16000": {
+            "keptChars": 15926,
+            "keptLines": 294,
+            "droppedLines": 1986,
+            "keptRefs": 206,
+            "keptRefFraction": 0.147
+          },
+          "24000": {
+            "keptChars": 23957,
+            "keptLines": 407,
+            "droppedLines": 1873,
+            "keptRefs": 262,
+            "keptRefFraction": 0.187
+          },
+          "32000": {
+            "keptChars": 31968,
+            "keptLines": 534,
+            "droppedLines": 1746,
+            "keptRefs": 328,
+            "keptRefFraction": 0.234
+          },
+          "48000": {
+            "keptChars": 47946,
+            "keptLines": 775,
+            "droppedLines": 1505,
+            "keptRefs": 445,
+            "keptRefFraction": 0.318
+          }
+        },
+        "withBoxes": {
+          "chars": 172548,
+          "ms": 68,
+          "growth": 1.21
+        }
+      },
+      {
+        "name": "hn-front",
+        "url": "http://localhost:17334/saved/hn-front.html",
+        "htmlBytes": 34622,
+        "load": {
+          "ok": true,
+          "status": 200
+        },
+        "loadMs": 25.5,
+        "title": "Hacker News",
+        "domNodes": 821,
+        "externalRequestsBlocked": 0,
+        "whole": {
+          "chars": 49067,
+          "lines": 1044,
+          "refs": 560,
+          "estTokensAt4CharsPerToken": 12267,
+          "ms": {
+            "n": 3,
+            "min": 26.29,
+            "median": 27.61,
+            "p95": 45.31,
+            "max": 45.31
+          },
+          "charsPerRef": 87.6
+        },
+        "topRoles": [
+          [
+            "link",
+            226
+          ],
+          [
+            "text",
+            164
+          ],
+          [
+            "cell",
+            159
+          ],
+          [
+            "generic",
+            154
+          ],
+          [
+            "row",
+            98
+          ],
+          [
+            "table",
+            4
+          ],
+          [
+            "rowgroup",
+            4
+          ],
+          [
+            "textbox",
+            1
+          ]
+        ],
+        "landmarks": {
+          "banner": {
+            "count": 0
+          },
+          "navigation": {
+            "count": 0
+          },
+          "main": {
+            "count": 0
+          },
+          "contentinfo": {
+            "count": 0
+          },
+          "search": {
+            "count": 0
+          },
+          "region": {
+            "count": 0
+          },
+          "complementary": {
+            "count": 0
+          }
+        },
+        "truncation": {
+          "4000": {
+            "keptChars": 3942,
+            "keptLines": 94,
+            "droppedLines": 950,
+            "keptRefs": 54,
+            "keptRefFraction": 0.096
+          },
+          "8000": {
+            "keptChars": 7991,
+            "keptLines": 180,
+            "droppedLines": 864,
+            "keptRefs": 99,
+            "keptRefFraction": 0.177
+          },
+          "12000": {
+            "keptChars": 11991,
+            "keptLines": 264,
+            "droppedLines": 780,
+            "keptRefs": 144,
+            "keptRefFraction": 0.257
+          },
+          "16000": {
+            "keptChars": 15992,
+            "keptLines": 348,
+            "droppedLines": 696,
+            "keptRefs": 189,
+            "keptRefFraction": 0.338
+          },
+          "24000": {
+            "keptChars": 23984,
+            "keptLines": 515,
+            "droppedLines": 529,
+            "keptRefs": 278,
+            "keptRefFraction": 0.496
+          },
+          "32000": {
+            "keptChars": 31964,
+            "keptLines": 683,
+            "droppedLines": 361,
+            "keptRefs": 367,
+            "keptRefFraction": 0.655
+          },
+          "48000": {
+            "keptChars": 47965,
+            "keptLines": 1018,
+            "droppedLines": 26,
+            "keptRefs": 550,
+            "keptRefFraction": 0.982
+          }
+        },
+        "withBoxes": {
+          "chars": 61945,
+          "ms": 33.4,
+          "growth": 1.26
+        }
+      }
+    ],
+    "smallPage": {
+      "chars": 448,
+      "lines": 15,
+      "refs": 11
+    },
+    "totalMs": 4263.2
+  }
+}

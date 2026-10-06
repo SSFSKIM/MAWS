@@ -1,0 +1,13 @@
+:root { --split: 0.42; --toolbar-h: 44px; --sidebar-w: 240px; }
+html, body { margin: 0; height: 100%; overflow: hidden; font: 13px system-ui; color: #222; background: #faf9f6; }
+#toolbar { height: var(--toolbar-h); line-height: var(--toolbar-h); padding-left: 90px; background: #efece6; border-bottom: 1px solid #ddd; -webkit-app-region: drag; }
+#row { display: flex; height: calc(100% - var(--toolbar-h) - 1px); }
+#sidebar { width: var(--sidebar-w); flex: none; background: #f1efe9; border-right: 1px solid #ddd; padding: 12px; box-sizing: border-box; }
+#main { flex: 1; display: flex; min-width: 0; }
+#chat { flex: 0 0 calc(var(--split) * 100%); padding: 12px; box-sizing: border-box; background: repeating-linear-gradient(45deg, #fff, #fff 10px, #f6f3ec 10px, #f6f3ec 20px); }
+#handle { width: 6px; flex: none; background: #c9c2b5; cursor: col-resize; }
+#pane { flex: 1; min-width: 0; position: relative; background: #ffe0e0; outline: 2px dashed #d33; outline-offset: -2px; }
+#pane-label { position: absolute; left: 8px; bottom: 8px; color: #a00; }
+#sheet { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; z-index: 10; }
+#sheet[hidden] { display: none; }
+#sheet-card { width: 520px; padding: 28px; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }

@@ -1,0 +1,2280 @@
+- generic [active] [ref=f4e1]:
+  - link "Jump to content" [ref=f4e2] [cursor=pointer]:
+    - /url: "#bodyContent"
+  - banner [ref=f4e4]:
+    - generic [ref=f4e5]:
+      - navigation "Site" [ref=f4e6]:
+        - generic "Main menu" [ref=f4e7]:
+          - button "Main menu" [ref=f4e8]
+          - generic [aria-hidden] [ref=f4e9]: Main menu
+          - generic [ref=f4e12]:
+            - generic [ref=f4e13]:
+              - generic [ref=f4e14]: Main menu
+              - button "Move Main menu to sidebar" [ref=f4e15]: move to sidebar
+              - button "Hide Main menu" [ref=f4e16]: hide
+            - generic [ref=f4e17]:
+              - generic [ref=f4e18]: Navigation
+              - list [ref=f4e20]:
+                - listitem [ref=f4e21]:
+                  - link "Main page" [ref=f4e22] [cursor=pointer]:
+                    - /url: /wiki/Main_Page
+                - listitem [ref=f4e23]:
+                  - link "Contents" [ref=f4e24] [cursor=pointer]:
+                    - /url: /wiki/Wikipedia:Contents
+                - listitem [ref=f4e25]:
+                  - link "Current events" [ref=f4e26] [cursor=pointer]:
+                    - /url: /wiki/Portal:Current_events
+                - listitem [ref=f4e27]:
+                  - link "Random article" [ref=f4e28] [cursor=pointer]:
+                    - /url: /wiki/Special:Random
+                - listitem [ref=f4e29]:
+                  - link "About Wikipedia" [ref=f4e30] [cursor=pointer]:
+                    - /url: /wiki/Wikipedia:About
+                - listitem [ref=f4e31]:
+                  - link "Contact us" [ref=f4e32] [cursor=pointer]:
+                    - /url: //en.wikipedia.org/wiki/Wikipedia:Contact_us
+            - generic [ref=f4e33]:
+              - generic [ref=f4e34]: Contribute
+              - list [ref=f4e36]:
+                - listitem [ref=f4e37]:
+                  - link "Help" [ref=f4e38] [cursor=pointer]:
+                    - /url: /wiki/Help:Contents
+                - listitem [ref=f4e39]:
+                  - link "Learn to edit" [ref=f4e40] [cursor=pointer]:
+                    - /url: /wiki/Help:Introduction
+                - listitem [ref=f4e41]:
+                  - link "Community portal" [ref=f4e42] [cursor=pointer]:
+                    - /url: /wiki/Wikipedia:Community_portal
+                - listitem [ref=f4e43]:
+                  - link "Recent changes" [ref=f4e44] [cursor=pointer]:
+                    - /url: /wiki/Special:RecentChanges
+                - listitem [ref=f4e45]:
+                  - link "Upload file" [ref=f4e46] [cursor=pointer]:
+                    - /url: /wiki/Wikipedia:File_upload_wizard
+                - listitem [ref=f4e47]:
+                  - link "Special pages" [ref=f4e48] [cursor=pointer]:
+                    - /url: /wiki/Special:SpecialPages
+      - link [ref=f4e49] [cursor=pointer]:
+        - /url: /wiki/Main_Page
+        - generic [ref=f4e51]:
+          - img "Wikipedia" [ref=f4e52]
+          - img "The Free Encyclopedia" [ref=f4e53]
+    - generic [ref=f4e54]:
+      - search [ref=f4e55]:
+        - link "Search" [ref=f4e56] [cursor=pointer]:
+          - /url: /wiki/Special:Search
+        - generic [ref=f4e59]:
+          - searchbox "Search Wikipedia" [ref=f4e62]
+          - button "Search" [ref=f4e63]
+      - navigation "Personal tools" [ref=f4e64]:
+        - generic [ref=f4e65]:
+          - generic:
+            - generic:
+              - list
+          - generic:
+            - generic:
+              - list
+          - navigation "Appearance" [ref=f4e66]:
+            - generic "Change the appearance of the page's font size, width, and color" [ref=f4e67]:
+              - button "Appearance" [ref=f4e68]
+              - generic [aria-hidden] [ref=f4e69]: Appearance
+          - generic:
+            - generic:
+              - list
+          - list [ref=f4e72]:
+            - listitem [ref=f4e73]:
+              - link "Donate" [ref=f4e74] [cursor=pointer]:
+                - /url: https://donate.wikimedia.org/?wmf_source=donate&wmf_medium=sidebar&wmf_campaign=en.wikipedia.org&uselang=en
+            - listitem [ref=f4e75]:
+              - link "Create account" [ref=f4e76] [cursor=pointer]:
+                - /url: /w/index.php?title=Special:CreateAccount&returnto=Main+Page
+            - listitem [ref=f4e77]:
+              - link "Log in" [ref=f4e78] [cursor=pointer]:
+                - /url: /w/index.php?title=Special:UserLogin&returnto=Main+Page
+        - generic "Log in and more options" [ref=f4e79]:
+          - button "Personal tools" [ref=f4e80]
+          - generic [aria-hidden] [ref=f4e81]: Personal tools
+          - generic "User menu" [ref=f4e83]:
+            - list [ref=f4e85]:
+              - listitem [ref=f4e86]:
+                - link "Donate" [ref=f4e87] [cursor=pointer]:
+                  - /url: https://donate.wikimedia.org/?wmf_source=donate&wmf_medium=sidebar&wmf_campaign=en.wikipedia.org&uselang=en
+              - listitem [ref=f4e88]:
+                - link "Create account" [ref=f4e89] [cursor=pointer]:
+                  - /url: /w/index.php?title=Special:CreateAccount&returnto=Main+Page
+              - listitem [ref=f4e90]:
+                - link "Log in" [ref=f4e91] [cursor=pointer]:
+                  - /url: /w/index.php?title=Special:UserLogin&returnto=Main+Page
+  - generic [ref=f4e93]:
+    - generic:
+      - generic:
+        - generic:
+          - navigation "Site"
+    - main [ref=f4e95]:
+      - generic [ref=f4e97]:
+        - navigation "Namespaces" [ref=f4e99]:
+          - list [ref=f4e102]:
+            - listitem [ref=f4e103]:
+              - link "Main Page" [ref=f4e104] [cursor=pointer]:
+                - /url: /wiki/Main_Page
+            - listitem [ref=f4e105]:
+              - link "Talk" [ref=f4e106] [cursor=pointer]:
+                - /url: /wiki/Talk:Main_Page
+          - generic [ref=f4e107]:
+            - button "Change language variant" [ref=f4e108]
+            - generic [aria-hidden] [ref=f4e109]: English
+            - generic:
+              - generic:
+                - generic:
+                  - list
+        - generic [ref=f4e110]:
+          - navigation "Views" [ref=f4e111]:
+            - list [ref=f4e114]:
+              - listitem [ref=f4e115]:
+                - link "Read" [ref=f4e116] [cursor=pointer]:
+                  - /url: /wiki/Main_Page
+              - listitem [ref=f4e117]:
+                - link "View source" [ref=f4e118] [cursor=pointer]:
+                  - /url: /w/index.php?title=Main_Page&action=edit
+              - listitem [ref=f4e119]:
+                - link "View history" [ref=f4e120] [cursor=pointer]:
+                  - /url: /w/index.php?title=Main_Page&action=history
+          - navigation "Page tools" [ref=f4e121]:
+            - generic [ref=f4e122]:
+              - button "Tools" [ref=f4e123]
+              - generic [aria-hidden] [ref=f4e124]: Tools
+              - generic [ref=f4e127]:
+                - generic [ref=f4e128]:
+                  - generic [ref=f4e129]: Tools
+                  - button "Move Tools to sidebar" [ref=f4e130]: move to sidebar
+                  - button "Hide Tools" [ref=f4e131]: hide
+                - generic [ref=f4e132]:
+                  - generic [ref=f4e133]: Actions
+                  - list [ref=f4e135]:
+                    - listitem [ref=f4e136]:
+                      - link "Read" [ref=f4e137] [cursor=pointer]:
+                        - /url: /wiki/Main_Page
+                    - listitem [ref=f4e138]:
+                      - link "View source" [ref=f4e139] [cursor=pointer]:
+                        - /url: /w/index.php?title=Main_Page&action=edit
+                    - listitem [ref=f4e140]:
+                      - link "View history" [ref=f4e141] [cursor=pointer]:
+                        - /url: /w/index.php?title=Main_Page&action=history
+                - generic [ref=f4e142]:
+                  - generic [ref=f4e143]: General
+                  - list [ref=f4e145]:
+                    - listitem [ref=f4e146]:
+                      - link "What links here" [ref=f4e147] [cursor=pointer]:
+                        - /url: /wiki/Special:WhatLinksHere/Main_Page
+                    - listitem [ref=f4e148]:
+                      - link "Related changes" [ref=f4e149] [cursor=pointer]:
+                        - /url: /wiki/Special:RecentChangesLinked/Main_Page
+                    - listitem [ref=f4e150]:
+                      - link "Upload file" [ref=f4e151] [cursor=pointer]:
+                        - /url: //en.wikipedia.org/wiki/Wikipedia:File_Upload_Wizard
+                    - listitem [ref=f4e152]:
+                      - link "Permanent link" [ref=f4e153] [cursor=pointer]:
+                        - /url: /w/index.php?title=Main_Page&oldid=1358980925
+                    - listitem [ref=f4e154]:
+                      - link "Page information" [ref=f4e155] [cursor=pointer]:
+                        - /url: /w/index.php?title=Main_Page&action=info
+                    - listitem [ref=f4e156]:
+                      - link "Cite this page" [ref=f4e157] [cursor=pointer]:
+                        - /url: /w/index.php?title=Special:CiteThisPage&page=Main_Page&id=1358980925&wpFormIdentifier=titleform
+                    - listitem [ref=f4e158]:
+                      - link "Get shortened URL" [ref=f4e159] [cursor=pointer]:
+                        - /url: /w/index.php?title=Special:UrlShortener&url=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FMain_Page
+                    - listitem [ref=f4e160]:
+                      - link "Switch to legacy parser" [ref=f4e161] [cursor=pointer]:
+                        - /url: /w/index.php?title=Main_Page&useparsoid=0
+                - generic [ref=f4e162]:
+                  - generic [ref=f4e163]: Print/export
+                  - list [ref=f4e165]:
+                    - listitem [ref=f4e166]:
+                      - link "Download as PDF" [ref=f4e167] [cursor=pointer]:
+                        - /url: /w/index.php?title=Special:DownloadAsPdf&page=Main_Page&action=show-download-screen
+                    - listitem [ref=f4e168]:
+                      - link "Printable version" [ref=f4e169] [cursor=pointer]:
+                        - /url: /w/index.php?title=Main_Page&printable=yes
+                - generic [ref=f4e170]:
+                  - generic [ref=f4e171]: In other projects
+                  - list [ref=f4e173]:
+                    - listitem [ref=f4e174]:
+                      - link "Abstract Wikipedia" [ref=f4e175] [cursor=pointer]:
+                        - /url: https://abstract.wikipedia.org/wiki/Abstract_Wikipedia:Main_page
+                    - listitem [ref=f4e176]:
+                      - link "Wikimedia Commons" [ref=f4e177] [cursor=pointer]:
+                        - /url: https://commons.wikimedia.org/wiki/Main_Page
+                    - listitem [ref=f4e178]:
+                      - link "Wikimedia Foundation" [ref=f4e179] [cursor=pointer]:
+                        - /url: https://foundation.wikimedia.org/wiki/Home
+                    - listitem [ref=f4e180]:
+                      - link "MediaWiki" [ref=f4e181] [cursor=pointer]:
+                        - /url: https://www.mediawiki.org/wiki/MediaWiki
+                    - listitem [ref=f4e182]:
+                      - link "Meta-Wiki" [ref=f4e183] [cursor=pointer]:
+                        - /url: https://meta.wikimedia.org/wiki/Main_Page
+                    - listitem [ref=f4e184]:
+                      - link "Wikimedia Outreach" [ref=f4e185] [cursor=pointer]:
+                        - /url: https://outreach.wikimedia.org/wiki/Main_Page
+                    - listitem [ref=f4e186]:
+                      - link "Multilingual Wikisource" [ref=f4e187] [cursor=pointer]:
+                        - /url: https://wikisource.org/wiki/Wikisource:Main_Page
+                    - listitem [ref=f4e188]:
+                      - link "Wikispecies" [ref=f4e189] [cursor=pointer]:
+                        - /url: https://species.wikimedia.org/wiki/Main_Page
+                    - listitem [ref=f4e190]:
+                      - link "Wikibooks" [ref=f4e191] [cursor=pointer]:
+                        - /url: https://en.wikibooks.org/wiki/Main_Page
+                    - listitem [ref=f4e192]:
+                      - link "Wikidata" [ref=f4e193] [cursor=pointer]:
+                        - /url: https://www.wikidata.org/wiki/Wikidata:Main_Page
+                    - listitem [ref=f4e194]:
+                      - link "Wikifunctions" [ref=f4e195] [cursor=pointer]:
+                        - /url: https://www.wikifunctions.org/wiki/Wikifunctions:Main_Page
+                    - listitem [ref=f4e196]:
+                      - link "Wikimania" [ref=f4e197] [cursor=pointer]:
+                        - /url: https://wikimania.wikimedia.org/wiki/Wikimania
+                    - listitem [ref=f4e198]:
+                      - link "Wikinews" [ref=f4e199] [cursor=pointer]:
+                        - /url: https://en.wikinews.org/wiki/Main_Page
+                    - listitem [ref=f4e200]:
+                      - link "Wikiquote" [ref=f4e201] [cursor=pointer]:
+                        - /url: https://en.wikiquote.org/wiki/Main_Page
+                    - listitem [ref=f4e202]:
+                      - link "Wikisource" [ref=f4e203] [cursor=pointer]:
+                        - /url: https://en.wikisource.org/wiki/Main_Page
+                    - listitem [ref=f4e204]:
+                      - link "Wikiversity" [ref=f4e205] [cursor=pointer]:
+                        - /url: https://en.wikiversity.org/wiki/Wikiversity:Main_Page
+                    - listitem [ref=f4e206]:
+                      - link "Wikivoyage" [ref=f4e207] [cursor=pointer]:
+                        - /url: https://en.wikivoyage.org/wiki/Main_Page
+                    - listitem [ref=f4e208]:
+                      - link "Wiktionary" [ref=f4e209] [cursor=pointer]:
+                        - /url: https://en.wiktionary.org/wiki/Wiktionary:Main_Page
+                    - listitem [ref=f4e210]:
+                      - link "Wikidata item" [ref=f4e211] [cursor=pointer]:
+                        - /url: https://www.wikidata.org/wiki/Special:EntityPage/Q5296
+      - generic [ref=f4e213]:
+        - navigation "Page tools"
+        - navigation "Appearance" [ref=f4e214]:
+          - generic [ref=f4e217]:
+            - generic [ref=f4e218]: Appearance
+            - button "Move Appearance to sidebar" [ref=f4e219]: move to sidebar
+            - button "Hide Appearance" [ref=f4e220]: hide
+      - generic "Main Page" [ref=f4e221]:
+        - generic [ref=f4e222]: From Wikipedia, the free encyclopedia
+        - generic [ref=f4e224]:
+          - generic [ref=f4e226]:
+            - generic [ref=f4e228]:
+              - generic [ref=f4e229]:
+                - heading [level=1] [ref=f4e230]:
+                  - text: Welcome to
+                  - link "Wikipedia" [ref=f4e231] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Wikipedia
+                - text: ","
+              - generic [ref=f4e232]:
+                - text: the
+                - link "free" [ref=f4e233] [cursor=pointer]:
+                  - /url: https://en.wikipedia.org/wiki/Free_content
+                - text: encyclopedia that
+                - link "anyone can edit" [ref=f4e234] [cursor=pointer]:
+                  - /url: https://en.wikipedia.org/wiki/Help:Introduction_to_Wikipedia
+                - text: .
+              - list [ref=f4e236]:
+                - listitem [ref=f4e237]:
+                  - link "268,352" [ref=f4e238] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Special:Statistics
+                  - text: active editors
+                - listitem [ref=f4e239]:
+                  - link "7,248,691" [ref=f4e240] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Special:Statistics
+                  - text: articles in
+                  - link "English" [ref=f4e241] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/English_language
+            - generic [ref=f4e242]:
+              - generic [ref=f4e243]:
+                - heading "From today's featured article" [level=2] [ref=f4e244]
+                - generic [ref=f4e245]:
+                  - generic [ref=f4e247]:
+                    - link [ref=f4e249] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:Charles_Lennox,_2nd_Duke_of_Richmond,_by_circle_of_Jean_Marc_Nattier.jpg
+                      - img "2nd Duke of Richmond" [ref=f4e250]
+                    - generic [ref=f4e251]: 2nd Duke of Richmond
+                  - paragraph [ref=f4e252]:
+                    - text: The
+                    - link "early history of cricket" [ref=f4e254] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/History_of_cricket_to_1725
+                    - text: began with a children's game in southeast England, possibly traced to
+                    - link "Flemish" [ref=f4e255] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/Flanders
+                    - text: immigrants to that area. The earliest definite reference to
+                    - link "cricket" [ref=f4e256] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/Cricket
+                    - text: is dated 17 January 1597 (
+                    - link "Old Style" [ref=f4e257] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/Old_Style_and_New_Style_dates
+                    - text: ) in a deposition in a legal case regarding the usage of a parcel of land. Around that time, it evolved into an adults' game, and there are many references to it in the 17th century. The earliest-known "big match" was played in
+                    - link "Sussex" [ref=f4e258] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/Sussex
+                    - text: in 1697, when the sport was already acquiring wealthy and influential patrons such as
+                    - link "Charles Lennox, 2nd Duke of Richmond" [ref=f4e259] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/Charles_Lennox,_2nd_Duke_of_Richmond
+                    - text: (pictured). They hired the first professional players, and matches were played for high stakes to satisfy gambling interests. During the first quarter of the 18th century, cricket became the foremost sport in England's southeastern counties. By 1725, it was increasingly widespread and became the country's national summer sport. Meanwhile, overseas trade had taken it to both India and North America.
+                    - generic [ref=f4e260]:
+                      - text: (
+                      - link "Full article..." [ref=f4e262] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/History_of_cricket_to_1725
+                      - text: )
+                  - generic [ref=f4e263]:
+                    - text: "Recently featured:"
+                    - list [ref=f4e265]:
+                      - listitem [ref=f4e266]:
+                        - link "White-headed fruit dove" [ref=f4e267] [cursor=pointer]:
+                          - /url: https://en.wikipedia.org/wiki/White-headed_fruit_dove
+                        - text: ·
+                      - listitem [ref=f4e268]:
+                        - link "Pennsylvania State Capitol" [ref=f4e269] [cursor=pointer]:
+                          - /url: https://en.wikipedia.org/wiki/Pennsylvania_State_Capitol
+                        - text: ·
+                      - listitem [ref=f4e270]:
+                        - text: "\""
+                        - link "Blindfold Me" [ref=f4e271] [cursor=pointer]:
+                          - /url: https://en.wikipedia.org/wiki/Blindfold_Me
+                        - text: "\""
+                  - list [ref=f4e273]:
+                    - listitem [ref=f4e274]:
+                      - link "Archive" [ref=f4e276] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Wikipedia:Today's_featured_article/October_2026
+                      - text: ·
+                    - listitem [ref=f4e277]:
+                      - link "By email" [ref=f4e279] [cursor=pointer]:
+                        - /url: https://lists.wikimedia.org/postorius/lists/daily-article-l.lists.wikimedia.org/
+                      - text: ·
+                    - listitem [ref=f4e280]:
+                      - link "More featured articles" [ref=f4e282] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Wikipedia:Featured_articles_(linked_from_TFAfooter)
+                      - text: ·
+                    - listitem [ref=f4e283]:
+                      - link "About" [ref=f4e285] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Wikipedia:About_Today's_featured_article
+                - heading "Did you know ..." [level=2] [ref=f4e286]
+                - generic [ref=f4e287]:
+                  - generic [ref=f4e289]:
+                    - link [ref=f4e291] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:Charlotte_Jordan_2023_(cropped).jpg
+                      - img "Charlotte Jordan" [ref=f4e292]
+                    - generic [ref=f4e293]: Charlotte Jordan
+                  - list [ref=f4e294]:
+                    - listitem [ref=f4e295]:
+                      - text: ... that actress
+                      - link "Charlotte Jordan" [ref=f4e297] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Charlotte_Jordan
+                      - text: (pictured) was once in a girl group that she said changed names so many times it was referred to simply as "The Band"?
+                    - listitem [ref=f4e298]:
+                      - text: ... that in 1967 the
+                      - link "Cambodian Civil War" [ref=f4e299] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Cambodian_Civil_War
+                      - text: began with a rebel assault on a
+                      - link "Royal Khmer Socialist Youth" [ref=f4e301] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Royal_Khmer_Socialist_Youth
+                      - text: co-operative farm?
+                    - listitem [ref=f4e302]:
+                      - text: ... that
+                      - link "Stephanie Williams" [ref=f4e304] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Stephanie_Williams_(comics)
+                      - text: wrote a fan comic about
+                      - link "Monica Rambeau" [ref=f4e305] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Monica_Rambeau
+                      - text: before writing for the character officially?
+                    - listitem [ref=f4e306]:
+                      - text: ... that the
+                      - link "2026 Leagues Cup final" [ref=f4e308] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/2026_Leagues_Cup_final
+                      - text: featured a yellow card just eight seconds into the match?
+                    - listitem [ref=f4e309]:
+                      - text: ... that "
+                      - link "the godfather of reptile smuggling" [ref=f4e311] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Hank_Molt
+                      - text: "\" called himself \"a man of mystery somewhat by design\"?"
+                    - listitem [ref=f4e312]:
+                      - text: ... that
+                      - link "traditional dances from England" [ref=f4e314] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Anglaise_(dance)
+                      - text: were popularized across Continental Europe by the French?
+                    - listitem [ref=f4e315]:
+                      - text: ... that Baptist pastor
+                      - link "Morton Bryan Wharton" [ref=f4e317] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Morton_Bryan_Wharton
+                      - text: said he coined the term "pastorium" because other Christian denominations already used other terms for clergy houses?
+                    - listitem [ref=f4e318]:
+                      - text: ... that
+                      - link "a Pixar-themed restaurant" [ref=f4e320] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Lamplight_Lounge
+                      - text: has a secret dining room?
+                    - listitem [ref=f4e321]:
+                      - text: ... that
+                      - link "Fat Papi" [ref=f4e323] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Fat_Papi
+                      - text: became the first Kurd on the Billboard Hot 100 because of a woman with a
+                      - link "bob" [ref=f4e324] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Bob_cut
+                      - text: "?"
+                  - list [ref=f4e326]:
+                    - listitem [ref=f4e327]:
+                      - link "Archive" [ref=f4e329] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Wikipedia:Did_you_know_archive
+                      - text: ·
+                    - listitem [ref=f4e330]:
+                      - link "Start a new article" [ref=f4e332] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Help:Your_first_article
+                      - text: ·
+                    - listitem [ref=f4e333]:
+                      - link "Nominate an article" [ref=f4e335] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Template_talk:Did_you_know
+              - generic [ref=f4e336]:
+                - heading "In the news" [level=2] [ref=f4e337]
+                - generic [ref=f4e338]:
+                  - figure [ref=f4e339]:
+                    - generic [ref=f4e340]:
+                      - link [ref=f4e342] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/File:2014_Rallye_Deutschland_by_2eight_DSC2587.jpg
+                        - img "Elfyn Evans" [ref=f4e343]
+                      - generic [ref=f4e344]: Elfyn Evans
+                  - list [ref=f4e345]:
+                    - listitem [ref=f4e346]:
+                      - text: In
+                      - link "motorsport" [ref=f4e347] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Motorsport
+                      - text: ","
+                      - link "Elfyn Evans" [ref=f4e348] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Elfyn_Evans
+                      - text: (pictured) and
+                      - link "Scott Martin" [ref=f4e349] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Scott_Martin_(co-driver)
+                      - text: win
+                      - generic [ref=f4e350]:
+                        - link "the World Rally Championship" [ref=f4e351] [cursor=pointer]:
+                          - /url: https://en.wikipedia.org/wiki/2026_World_Rally_Championship
+                        - text: .
+                    - listitem [ref=f4e352]:
+                      - link "A snap election" [ref=f4e354] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/2026_Spanish_general_election
+                      - text: is announced following
+                      - link "widespread housing protests" [ref=f4e356] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/2026_Spanish_housing_protests
+                      - text: in Spain.
+                    - listitem [ref=f4e357]:
+                      - text: In
+                      - link "rugby league" [ref=f4e358] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Rugby_league
+                      - text: ","
+                      - link "the Super League Grand Final" [ref=f4e360] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/2026_Super_League_Grand_Final
+                      - text: ends with
+                      - link "Wakefield Trinity" [ref=f4e361] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Wakefield_Trinity
+                      - text: defeating the
+                      - link "Warrington Wolves" [ref=f4e362] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Warrington_Wolves
+                      - text: .
+                    - listitem [ref=f4e363]:
+                      - text: Over Saudi Arabia, the crew and passengers of
+                      - link "Flydubai Flight 1073" [ref=f4e365] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Flydubai_Flight_1073
+                      - text: avert an attempt to hijack or crash the aircraft.
+                  - generic [ref=f4e366]:
+                    - generic [ref=f4e367]:
+                      - text: "Ongoing:"
+                      - list [ref=f4e369]:
+                        - listitem [ref=f4e370]:
+                          - link "Iran war" [ref=f4e371] [cursor=pointer]:
+                            - /url: https://en.wikipedia.org/wiki/2026_Iran_war
+                          - text: ·
+                        - listitem [ref=f4e372]:
+                          - link "Russo-Ukrainian war" [ref=f4e373] [cursor=pointer]:
+                            - /url: https://en.wikipedia.org/wiki/Russo-Ukrainian_war_(2022–present)
+                          - list [ref=f4e374]:
+                            - listitem [ref=f4e375]:
+                              - text: (
+                              - link "timeline" [ref=f4e376] [cursor=pointer]:
+                                - /url: https://en.wikipedia.org/wiki/Timeline_of_the_Russo-Ukrainian_war_(1_September_2026_–_present)
+                              - text: )
+                    - generic [ref=f4e377]:
+                      - link "Recent deaths" [ref=f4e379] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Deaths_in_2026
+                      - text: ":"
+                      - list [ref=f4e381]:
+                        - listitem [ref=f4e382]:
+                          - link "Courtney Meppen-Walters" [ref=f4e384] [cursor=pointer]:
+                            - /url: https://en.wikipedia.org/wiki/Courtney_Meppen-Walters
+                          - text: ·
+                        - listitem [ref=f4e385]:
+                          - link "Angela Stribling" [ref=f4e386] [cursor=pointer]:
+                            - /url: https://en.wikipedia.org/wiki/Angela_Stribling
+                          - text: ·
+                        - listitem [ref=f4e387]:
+                          - link "Bruce Baird" [ref=f4e388] [cursor=pointer]:
+                            - /url: https://en.wikipedia.org/wiki/Bruce_Baird
+                          - text: ·
+                        - listitem [ref=f4e389]:
+                          - link "Adrian Rurawhe" [ref=f4e390] [cursor=pointer]:
+                            - /url: https://en.wikipedia.org/wiki/Adrian_Rurawhe
+                          - text: ·
+                        - listitem [ref=f4e391]:
+                          - link "Gabriel Serville" [ref=f4e392] [cursor=pointer]:
+                            - /url: https://en.wikipedia.org/wiki/Gabriel_Serville
+                          - text: ·
+                        - listitem [ref=f4e393]:
+                          - link "John Bröcheler" [ref=f4e394] [cursor=pointer]:
+                            - /url: https://en.wikipedia.org/wiki/John_Bröcheler
+                  - list [ref=f4e396]:
+                    - listitem [ref=f4e397]:
+                      - link "More current events" [ref=f4e399] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Portal:Current_events
+                      - text: ·
+                    - listitem [ref=f4e400]:
+                      - link "Nominate an article" [ref=f4e402] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Wikipedia:In_the_news/Candidates
+                - heading "On this day" [level=2] [ref=f4e403]
+                - generic [ref=f4e404]:
+                  - paragraph [ref=f4e405]:
+                    - link "October 6" [ref=f4e407] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/October_6
+                    - text: ":"
+                    - link "German-American Day" [ref=f4e409] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/German-American_Day
+                    - text: in the United States
+                  - generic [ref=f4e411]:
+                    - link [ref=f4e413] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:Egypt_flag_on_6oct_war.jpg
+                      - img "Egyptian forces raising the Egyptian flag in a captured Israeli position in the Sinai" [ref=f4e414]
+                    - generic [ref=f4e415]: Egyptian forces raising the Egyptian flag in a captured Israeli position in the Sinai
+                  - list [ref=f4e416]:
+                    - listitem [ref=f4e417]:
+                      - link "1762" [ref=f4e418] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/1762
+                      - text: –
+                      - link "Seven Years' War" [ref=f4e419] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Seven_Years'_War
+                      - text: ": The"
+                      - link "Battle of Manila" [ref=f4e421] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Battle_of_Manila_(1762)
+                      - text: concluded with a British victory over Spain, leading to
+                      - link "a twenty-month occupation" [ref=f4e422] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/British_occupation_of_Manila
+                      - text: .
+                    - listitem [ref=f4e423]:
+                      - link "1777" [ref=f4e424] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/1777
+                      - text: –
+                      - link "American Revolutionary War" [ref=f4e425] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/American_Revolutionary_War
+                      - text: ":"
+                      - link "Fort Clinton" [ref=f4e426] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Fort_Clinton
+                      - text: and
+                      - link "Fort Montgomery" [ref=f4e427] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Fort_Montgomery_(Hudson_River)
+                      - link "were captured" [ref=f4e429] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Battle_of_Forts_Clinton_and_Montgomery
+                      - text: by British forces under
+                      - link "Sir Henry Clinton" [ref=f4e430] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Henry_Clinton_(British_Army_officer,_born_1730)
+                      - text: ", dismantling the"
+                      - link "Hudson River Chains" [ref=f4e431] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Hudson_River_Chains
+                      - text: .
+                    - listitem [ref=f4e432]:
+                      - link "1973" [ref=f4e433] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/1973
+                      - text: – The
+                      - link "Egyptian Armed Forces" [ref=f4e434] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Egyptian_Armed_Forces
+                      - text: crossed the
+                      - link "Suez Canal" [ref=f4e435] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Suez_Canal
+                      - text: (pictured) to
+                      - link "attack" [ref=f4e437] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Operation_Badr_(1973)
+                      - text: occupying
+                      - link "Israel Defense Forces" [ref=f4e438] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Israel_Defense_Forces
+                      - text: at the
+                      - link "Bar Lev Line" [ref=f4e439] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Bar_Lev_Line
+                      - text: in the
+                      - link "Sinai Peninsula" [ref=f4e440] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Sinai_Peninsula
+                      - text: ", beginning the"
+                      - link "Yom Kippur War" [ref=f4e442] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Yom_Kippur_War
+                      - text: .
+                    - listitem [ref=f4e443]:
+                      - link "1995" [ref=f4e444] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/1995
+                      - text: – Astronomers
+                      - link "Michel Mayor" [ref=f4e445] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Michel_Mayor
+                      - text: and
+                      - link "Didier Queloz" [ref=f4e446] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Didier_Queloz
+                      - text: reported the discovery of
+                      - link "a planet" [ref=f4e448] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/51_Pegasi_b
+                      - text: orbiting
+                      - link "51 Pegasi" [ref=f4e450] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/51_Pegasi
+                      - text: as the first known
+                      - link "exoplanet" [ref=f4e451] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Exoplanet
+                      - text: around a
+                      - link "main-sequence star" [ref=f4e452] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Main_sequence
+                      - text: .
+                    - listitem [ref=f4e453]:
+                      - link "2000" [ref=f4e454] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/2000
+                      - text: – Denouncing corruption in Argentine president
+                      - link "Fernando de la Rúa" [ref=f4e455] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Fernando_de_la_Rúa
+                      - text: "'s administration and the"
+                      - link "Senate" [ref=f4e456] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Argentine_Senate
+                      - text: ", Vice President"
+                      - link "Carlos Álvarez" [ref=f4e458] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Carlos_Álvarez_(Argentine_politician)
+                      - text: resigned.
+                  - list [ref=f4e460]:
+                    - listitem [ref=f4e461]:
+                      - link "Sarah Crosby" [ref=f4e463] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Sarah_Crosby
+                      - text: (b. 1729) ·
+                    - listitem [ref=f4e464]:
+                      - link "Wang Huning" [ref=f4e466] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Wang_Huning
+                      - text: (b. 1955) ·
+                    - listitem [ref=f4e467]:
+                      - link "Hattie Jacques" [ref=f4e469] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Hattie_Jacques
+                      - text: (d. 1980) ·
+                    - listitem [ref=f4e470]:
+                      - link "Johan Neeskens" [ref=f4e472] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Johan_Neeskens
+                      - text: (d. 2024)
+                  - generic [ref=f4e473]:
+                    - text: "More anniversaries:"
+                    - list [ref=f4e475]:
+                      - listitem [ref=f4e476]:
+                        - link "October 5" [ref=f4e477] [cursor=pointer]:
+                          - /url: https://en.wikipedia.org/wiki/October_5
+                        - text: ·
+                      - listitem [ref=f4e478]:
+                        - link "October 6" [ref=f4e480] [cursor=pointer]:
+                          - /url: https://en.wikipedia.org/wiki/October_6
+                        - text: ·
+                      - listitem [ref=f4e481]:
+                        - link "October 7" [ref=f4e482] [cursor=pointer]:
+                          - /url: https://en.wikipedia.org/wiki/October_7
+                  - list [ref=f4e484]:
+                    - listitem [ref=f4e485]:
+                      - link "Archive" [ref=f4e487] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Wikipedia:Selected_anniversaries/October
+                      - text: ·
+                    - listitem [ref=f4e488]:
+                      - link "By email" [ref=f4e490] [cursor=pointer]:
+                        - /url: https://lists.wikimedia.org/postorius/lists/daily-article-l.lists.wikimedia.org/
+                      - text: ·
+                    - listitem [ref=f4e491]:
+                      - link "List of days of the year" [ref=f4e493] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/List_of_days_of_the_year
+                      - text: ·
+                    - listitem [ref=f4e494]:
+                      - link "About" [ref=f4e496] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Wikipedia:Selected_anniversaries
+            - generic [ref=f4e497]:
+              - heading "Today's featured picture" [level=2] [ref=f4e498]
+              - generic [ref=f4e499]:
+                - link [ref=f4e501] [cursor=pointer]:
+                  - /url: https://en.wikipedia.org/wiki/File:Thomas_Mundy_Peterson_by_William_R._Tobias.jpg
+                  - img "Thomas Mundy Peterson" [ref=f4e502]
+                - paragraph [ref=f4e503]:
+                  - link "Thomas Mundy Peterson" [ref=f4e505] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Thomas_Mundy_Peterson
+                  - text: (October 6, 1824 – February 4, 1904) was a resident of
+                  - link "Perth Amboy, New Jersey" [ref=f4e506] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Perth_Amboy,_New_Jersey
+                  - text: ", who has been claimed to be the first"
+                  - link "African American" [ref=f4e507] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/African_Americans
+                  - text: to vote in an election under the provisions of the
+                  - link "15th Amendment" [ref=f4e508] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Fifteenth_Amendment_to_the_United_States_Constitution
+                  - text: to the
+                  - link "Constitution of the United States" [ref=f4e509] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Constitution_of_the_United_States
+                  - text: . His vote was cast on March 31, 1870; the Amendment had been ratified almost two months earlier, on February 3, but was only officially certified by Secretary of State
+                  - link "Hamilton Fish" [ref=f4e510] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Hamilton_Fish
+                  - text: on March 30. To honor him as the first African-American voter after the passage of the 15th Amendment, in 1884, the citizens of Perth Amboy raised $70 ($2500 in 2024 dollars) to award him with a medal, consisting of a gold bar from which a medallion depicting
+                  - link "Abraham Lincoln" [ref=f4e511] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Abraham_Lincoln
+                  - text: was hung. This photograph shows Peterson in 1884, wearing his medal.
+                - paragraph [ref=f4e512]:
+                  - generic [ref=f4e513]:
+                    - text: "Photograph credit: William R. Tobias; restored by"
+                    - link "Adam Cuerden" [ref=f4e514] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/User:Adam_Cuerden
+                - generic [ref=f4e515]:
+                  - text: "Recently featured:"
+                  - list [ref=f4e517]:
+                    - listitem [ref=f4e518]:
+                      - link "Bukharan Jews" [ref=f4e519] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Template:POTD/2026-10-05
+                      - text: ·
+                    - listitem [ref=f4e520]:
+                      - link "Michael Mullen" [ref=f4e521] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Template:POTD/2026-10-04
+                      - text: ·
+                    - listitem [ref=f4e522]:
+                      - link "Engaged" [ref=f4e523] [cursor=pointer]:
+                        - /url: https://en.wikipedia.org/wiki/Template:POTD/2026-10-03
+                - list [ref=f4e525]:
+                  - listitem [ref=f4e526]:
+                    - link "Archive" [ref=f4e528] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/Wikipedia:Picture_of_the_day/Archive
+                    - text: ·
+                  - listitem [ref=f4e529]:
+                    - link "More featured pictures" [ref=f4e531] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/Wikipedia:Featured_pictures
+            - generic [ref=f4e532]:
+              - heading "Other areas of Wikipedia" [level=2] [ref=f4e533]
+              - list [ref=f4e535]:
+                - listitem [ref=f4e536]:
+                  - link "Community portal" [ref=f4e538] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Wikipedia:Community_portal
+                  - text: – The central hub for editors, with resources, links, tasks, and announcements.
+                - listitem [ref=f4e539]:
+                  - link "Village pump" [ref=f4e541] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Wikipedia:Village_pump
+                  - text: – Forum for discussions about Wikipedia itself, including policies and technical issues.
+                - listitem [ref=f4e542]:
+                  - link "Site news" [ref=f4e544] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Wikipedia:News
+                  - text: – Sources of news about Wikipedia and the broader Wikimedia movement.
+                - listitem [ref=f4e545]:
+                  - link "Teahouse" [ref=f4e547] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Wikipedia:Teahouse
+                  - text: – Ask basic questions about using or editing Wikipedia.
+                - listitem [ref=f4e548]:
+                  - link "Help desk" [ref=f4e550] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Wikipedia:Help_desk
+                  - text: – Ask questions about using or editing Wikipedia.
+                - listitem [ref=f4e551]:
+                  - link "Reference desk" [ref=f4e553] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Wikipedia:Reference_desk
+                  - text: – Ask research questions about encyclopedic topics.
+                - listitem [ref=f4e554]:
+                  - link "Content portals" [ref=f4e556] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Wikipedia:Contents/Portals
+                  - text: – A unique way to navigate the encyclopedia.
+              - heading "Wikipedia's sister projects" [level=2] [ref=f4e557]
+              - generic [ref=f4e558]:
+                - paragraph [ref=f4e559]:
+                  - text: Wikipedia is written by volunteer editors and hosted by the
+                  - link "Wikimedia Foundation" [ref=f4e560] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/Wikimedia_Foundation
+                  - text: ", a non-profit organization that also hosts a range of other volunteer"
+                  - link "projects" [ref=f4e561] [cursor=pointer]:
+                    - /url: https://wikimediafoundation.org/what-we-do/wikimedia-projects/
+                  - text: ":"
+                - list [ref=f4e563]:
+                  - listitem [ref=f4e564]:
+                    - link [ref=f4e567] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:Commons-logo.svg
+                      - img "Wikimedia Commons logo" [ref=f4e568]
+                    - generic [ref=f4e569]:
+                      - link "Commons" [ref=f4e571] [cursor=pointer]:
+                        - /url: https://commons.wikimedia.org/wiki/
+                      - text: Free media repository
+                  - listitem [ref=f4e572]:
+                    - link [ref=f4e575] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:MediaWiki-2020-icon.svg
+                      - img "MediaWiki logo" [ref=f4e576]
+                    - generic [ref=f4e577]:
+                      - link "MediaWiki" [ref=f4e579] [cursor=pointer]:
+                        - /url: https://www.mediawiki.org/wiki/
+                      - text: Wiki software development
+                  - listitem [ref=f4e580]:
+                    - generic [ref=f4e584]:
+                      - link "Meta-Wiki" [ref=f4e586] [cursor=pointer]:
+                        - /url: https://meta.wikimedia.org/wiki/
+                      - text: Wikimedia project coordination
+                  - listitem [ref=f4e587]:
+                    - link [ref=f4e590] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:Wikibooks-logo.svg
+                      - img "Wikibooks logo" [ref=f4e591]
+                    - generic [ref=f4e592]:
+                      - link "Wikibooks" [ref=f4e594] [cursor=pointer]:
+                        - /url: https://en.wikibooks.org/wiki/
+                      - text: Free textbooks and manuals
+                  - listitem [ref=f4e595]:
+                    - generic [ref=f4e599]:
+                      - link "Wikidata" [ref=f4e601] [cursor=pointer]:
+                        - /url: https://www.wikidata.org/wiki/
+                      - text: Free knowledge base
+                  - listitem [ref=f4e602]:
+                    - link [ref=f4e605] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:Wikifunctions-logo.svg
+                      - img "Wikifunctions logo" [ref=f4e606]
+                    - generic [ref=f4e607]:
+                      - link "Wikifunctions" [ref=f4e609] [cursor=pointer]:
+                        - /url: https://www.wikifunctions.org/wiki/
+                      - text: Catalog of computer functions
+                  - listitem [ref=f4e610]:
+                    - generic [ref=f4e614]:
+                      - link "Wikiquote" [ref=f4e616] [cursor=pointer]:
+                        - /url: https://en.wikiquote.org/wiki/
+                      - text: Collection of quotations
+                  - listitem [ref=f4e617]:
+                    - link [ref=f4e620] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:Wikisource-logo.svg
+                      - img "Wikisource logo" [ref=f4e621]
+                    - generic [ref=f4e622]:
+                      - link "Wikisource" [ref=f4e624] [cursor=pointer]:
+                        - /url: https://en.wikisource.org/wiki/
+                      - text: Free-content library
+                  - listitem [ref=f4e625]:
+                    - link [ref=f4e628] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:Wikispecies-logo.svg
+                      - img "Wikispecies logo" [ref=f4e629]
+                    - generic [ref=f4e630]:
+                      - link "Wikispecies" [ref=f4e632] [cursor=pointer]:
+                        - /url: https://species.wikimedia.org/wiki/
+                      - text: Directory of species
+                  - listitem [ref=f4e633]:
+                    - link [ref=f4e636] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:Wikiversity_logo_2017.svg
+                      - img "Wikiversity logo" [ref=f4e637]
+                    - generic [ref=f4e638]:
+                      - link "Wikiversity" [ref=f4e640] [cursor=pointer]:
+                        - /url: https://en.wikiversity.org/wiki/
+                      - text: Free learning tools
+                  - listitem [ref=f4e641]:
+                    - link [ref=f4e644] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:Wikivoyage-Logo-v3-icon.svg
+                      - img "Wikivoyage logo" [ref=f4e645]
+                    - generic [ref=f4e646]:
+                      - link "Wikivoyage" [ref=f4e648] [cursor=pointer]:
+                        - /url: https://en.wikivoyage.org/wiki/
+                      - text: Free travel guide
+                  - listitem [ref=f4e649]:
+                    - link [ref=f4e652] [cursor=pointer]:
+                      - /url: https://en.wikipedia.org/wiki/File:Wiktionary-logo-en-v2.svg
+                      - img "Wiktionary logo" [ref=f4e653]
+                    - generic [ref=f4e654]:
+                      - link "Wiktionary" [ref=f4e656] [cursor=pointer]:
+                        - /url: https://en.wiktionary.org/wiki/
+                      - text: Dictionary and thesaurus
+              - heading "Wikipedia languages" [level=2] [ref=f4e657]
+              - generic [ref=f4e659]:
+                - paragraph [ref=f4e660]:
+                  - text: This Wikipedia is written in
+                  - link "English" [ref=f4e661] [cursor=pointer]:
+                    - /url: https://en.wikipedia.org/wiki/English_language
+                  - text: . Many
+                  - link "other Wikipedias are available" [ref=f4e662] [cursor=pointer]:
+                    - /url: https://meta.wikimedia.org/wiki/List%20of%20Wikipedias
+                  - text: ; some of the largest are listed below.
+                - list [ref=f4e663]:
+                  - listitem [ref=f4e664]:
+                    - heading "1,000,000+ articles" [level=3] [ref=f4e667]
+                    - list [ref=f4e670]:
+                      - listitem [ref=f4e671]:
+                        - link "العربية" [ref=f4e672] [cursor=pointer]:
+                          - /url: https://ar.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e673]:
+                        - link "Deutsch" [ref=f4e674] [cursor=pointer]:
+                          - /url: https://de.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e675]:
+                        - link "Español" [ref=f4e676] [cursor=pointer]:
+                          - /url: https://es.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e677]:
+                        - link "فارسی" [ref=f4e678] [cursor=pointer]:
+                          - /url: https://fa.wikipedia.org/wiki/
+                        - text: ‎ ·
+                      - listitem [ref=f4e679]:
+                        - link "Français" [ref=f4e680] [cursor=pointer]:
+                          - /url: https://fr.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e681]:
+                        - link "Italiano" [ref=f4e682] [cursor=pointer]:
+                          - /url: https://it.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e683]:
+                        - link "Nederlands" [ref=f4e684] [cursor=pointer]:
+                          - /url: https://nl.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e685]:
+                        - link "日本語" [ref=f4e686] [cursor=pointer]:
+                          - /url: https://ja.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e687]:
+                        - link "Polski" [ref=f4e688] [cursor=pointer]:
+                          - /url: https://pl.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e689]:
+                        - link "Português" [ref=f4e690] [cursor=pointer]:
+                          - /url: https://pt.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e691]:
+                        - link "Русский" [ref=f4e692] [cursor=pointer]:
+                          - /url: https://ru.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e693]:
+                        - link "Svenska" [ref=f4e694] [cursor=pointer]:
+                          - /url: https://sv.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e695]:
+                        - link "Українська" [ref=f4e696] [cursor=pointer]:
+                          - /url: https://uk.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e697]:
+                        - link "Tiếng Việt" [ref=f4e698] [cursor=pointer]:
+                          - /url: https://vi.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e699]:
+                        - link "中文" [ref=f4e700] [cursor=pointer]:
+                          - /url: https://zh.wikipedia.org/wiki/
+                  - listitem [ref=f4e701]:
+                    - heading "250,000+ articles" [level=3] [ref=f4e704]
+                    - list [ref=f4e707]:
+                      - listitem [ref=f4e708]:
+                        - link "Bahasa Indonesia" [ref=f4e709] [cursor=pointer]:
+                          - /url: https://id.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e710]:
+                        - link "Bahasa Melayu" [ref=f4e711] [cursor=pointer]:
+                          - /url: https://ms.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e712]:
+                        - link "Bân-lâm-gú" [ref=f4e713] [cursor=pointer]:
+                          - /url: https://zh-min-nan.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e714]:
+                        - link "Български" [ref=f4e715] [cursor=pointer]:
+                          - /url: https://bg.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e716]:
+                        - link "Català" [ref=f4e717] [cursor=pointer]:
+                          - /url: https://ca.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e718]:
+                        - link "Čeština" [ref=f4e719] [cursor=pointer]:
+                          - /url: https://cs.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e720]:
+                        - link "Dansk" [ref=f4e721] [cursor=pointer]:
+                          - /url: https://da.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e722]:
+                        - link "Eesti" [ref=f4e723] [cursor=pointer]:
+                          - /url: https://et.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e724]:
+                        - link "Ελληνικά" [ref=f4e725] [cursor=pointer]:
+                          - /url: https://el.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e726]:
+                        - link "Esperanto" [ref=f4e727] [cursor=pointer]:
+                          - /url: https://eo.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e728]:
+                        - link "Euskara" [ref=f4e729] [cursor=pointer]:
+                          - /url: https://eu.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e730]:
+                        - link "עברית" [ref=f4e731] [cursor=pointer]:
+                          - /url: https://he.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e732]:
+                        - link "Հայերեն" [ref=f4e733] [cursor=pointer]:
+                          - /url: https://hy.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e734]:
+                        - link "한국어" [ref=f4e735] [cursor=pointer]:
+                          - /url: https://ko.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e736]:
+                        - link "Magyar" [ref=f4e737] [cursor=pointer]:
+                          - /url: https://hu.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e738]:
+                        - link "Norsk bokmål" [ref=f4e739] [cursor=pointer]:
+                          - /url: https://no.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e740]:
+                        - link "Română" [ref=f4e741] [cursor=pointer]:
+                          - /url: https://ro.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e742]:
+                        - link "Simple English" [ref=f4e743] [cursor=pointer]:
+                          - /url: https://simple.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e744]:
+                        - link "Slovenčina" [ref=f4e745] [cursor=pointer]:
+                          - /url: https://sk.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e746]:
+                        - link "Srpski" [ref=f4e747] [cursor=pointer]:
+                          - /url: https://sr.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e748]:
+                        - link "Srpskohrvatski" [ref=f4e749] [cursor=pointer]:
+                          - /url: https://sh.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e750]:
+                        - link "Suomi" [ref=f4e751] [cursor=pointer]:
+                          - /url: https://fi.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e752]:
+                        - link "Türkçe" [ref=f4e753] [cursor=pointer]:
+                          - /url: https://tr.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e754]:
+                        - link "Oʻzbekcha" [ref=f4e755] [cursor=pointer]:
+                          - /url: https://uz.wikipedia.org/wiki/
+                  - listitem [ref=f4e756]:
+                    - heading "50,000+ articles" [level=3] [ref=f4e759]
+                    - list [ref=f4e762]:
+                      - listitem [ref=f4e763]:
+                        - link "Asturianu" [ref=f4e764] [cursor=pointer]:
+                          - /url: https://ast.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e765]:
+                        - link "Azərbaycanca" [ref=f4e766] [cursor=pointer]:
+                          - /url: https://az.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e767]:
+                        - link "বাংলা" [ref=f4e768] [cursor=pointer]:
+                          - /url: https://bn.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e769]:
+                        - link "Bosanski" [ref=f4e770] [cursor=pointer]:
+                          - /url: https://bs.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e771]:
+                        - link "کوردی" [ref=f4e772] [cursor=pointer]:
+                          - /url: https://ckb.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e773]:
+                        - link "Frysk" [ref=f4e774] [cursor=pointer]:
+                          - /url: https://fy.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e775]:
+                        - link "Gaeilge" [ref=f4e776] [cursor=pointer]:
+                          - /url: https://ga.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e777]:
+                        - link "Galego" [ref=f4e778] [cursor=pointer]:
+                          - /url: https://gl.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e779]:
+                        - link "Hrvatski" [ref=f4e780] [cursor=pointer]:
+                          - /url: https://hr.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e781]:
+                        - link "ქართული" [ref=f4e782] [cursor=pointer]:
+                          - /url: https://ka.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e783]:
+                        - link "Kurdî" [ref=f4e784] [cursor=pointer]:
+                          - /url: https://ku.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e785]:
+                        - link "Latviešu" [ref=f4e786] [cursor=pointer]:
+                          - /url: https://lv.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e787]:
+                        - link "Lietuvių" [ref=f4e788] [cursor=pointer]:
+                          - /url: https://lt.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e789]:
+                        - link "മലയാളം" [ref=f4e790] [cursor=pointer]:
+                          - /url: https://ml.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e791]:
+                        - link "Македонски" [ref=f4e792] [cursor=pointer]:
+                          - /url: https://mk.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e793]:
+                        - link "မြန်မာဘာသာ" [ref=f4e794] [cursor=pointer]:
+                          - /url: https://my.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e795]:
+                        - link "Norsk nynorsk" [ref=f4e796] [cursor=pointer]:
+                          - /url: https://nn.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e797]:
+                        - link "ਪੰਜਾਬੀ" [ref=f4e798] [cursor=pointer]:
+                          - /url: https://pa.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e799]:
+                        - link "Shqip" [ref=f4e800] [cursor=pointer]:
+                          - /url: https://sq.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e801]:
+                        - link "Slovenščina" [ref=f4e802] [cursor=pointer]:
+                          - /url: https://sl.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e803]:
+                        - link "ไทย" [ref=f4e804] [cursor=pointer]:
+                          - /url: https://th.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e805]:
+                        - link "తెలుగు" [ref=f4e806] [cursor=pointer]:
+                          - /url: https://te.wikipedia.org/wiki/
+                        - text: ·
+                      - listitem [ref=f4e807]:
+                        - link "اردو" [ref=f4e808] [cursor=pointer]:
+                          - /url: https://ur.wikipedia.org/wiki/
+          - generic [ref=f4e809]:
+            - text: Retrieved from "
+            - link "https://en.wikipedia.org/w/index.php?title=Main_Page&oldid=1358980925" [ref=f4e810] [cursor=pointer]:
+              - /url: https://en.wikipedia.org/w/index.php?title=Main_Page&oldid=1358980925
+            - text: "\""
+        - generic [ref=f4e811]:
+          - button "349 languages" [ref=f4e812]
+          - generic [aria-hidden] [ref=f4e813]: 349 languages
+          - generic [ref=f4e815]:
+            - list [ref=f4e816]:
+              - listitem [ref=f4e817]:
+                - link "Аԥсшәа" [ref=f4e818] [cursor=pointer]:
+                  - /url: https://ab.wikipedia.org/wiki/%D0%98%D1%85%D0%B0%D0%B4%D0%BE%D1%83_%D0%B0%D0%B4%D0%B0%D2%9F%D1%8C%D0%B0
+              - listitem [ref=f4e819]:
+                - link "Acèh" [ref=f4e820] [cursor=pointer]:
+                  - /url: https://ace.wikipedia.org/wiki/%C3%94n_Keue
+              - listitem [ref=f4e821]:
+                - link "Адыгабзэ" [ref=f4e822] [cursor=pointer]:
+                  - /url: https://ady.wikipedia.org/wiki/%D0%9D%D1%8D%D0%BA%D3%80%D1%83%D0%B1%D0%B3%D1%8A%D0%BE_%D1%88%D1%8A%D1%85%D1%8C%D0%B0%D3%80
+              - listitem [ref=f4e823]:
+                - link "Afrikaans" [ref=f4e824] [cursor=pointer]:
+                  - /url: https://af.wikipedia.org/wiki/Tuisblad
+              - listitem [ref=f4e825]:
+                - link "Alemannisch" [ref=f4e826] [cursor=pointer]:
+                  - /url: https://als.wikipedia.org/wiki/Wikipedia:Houptsyte
+              - listitem [ref=f4e827]:
+                - link "Алтай тил" [ref=f4e828] [cursor=pointer]:
+                  - /url: https://alt.wikipedia.org/wiki/%D0%A2%D3%A7%D1%81_%D0%B1%D3%B1%D0%BA
+              - listitem [ref=f4e829]:
+                - link "አማርኛ" [ref=f4e830] [cursor=pointer]:
+                  - /url: https://am.wikipedia.org/wiki/%E1%8B%8B%E1%8A%93%E1%8B%8D_%E1%8C%88%E1%8C%BD
+              - listitem [ref=f4e831]:
+                - link "Pangcah" [ref=f4e832] [cursor=pointer]:
+                  - /url: https://ami.wikipedia.org/wiki/Sa%E2%80%99ayayaw_pising_no_tyin-naw
+              - listitem [ref=f4e833]:
+                - link "Aragonés" [ref=f4e834] [cursor=pointer]:
+                  - /url: https://an.wikipedia.org/wiki/Portalada
+              - listitem [ref=f4e835]:
+                - link "Ænglisc" [ref=f4e836] [cursor=pointer]:
+                  - /url: https://ang.wikipedia.org/wiki/Heafodtramet
+              - listitem [ref=f4e837]:
+                - link "Obolo" [ref=f4e838] [cursor=pointer]:
+                  - /url: https://ann.wikipedia.org/wiki/Uwu
+              - listitem [ref=f4e839]:
+                - link "अंगिका" [ref=f4e840] [cursor=pointer]:
+                  - /url: https://anp.wikipedia.org/wiki/%E0%A4%AE%E0%A5%81%E0%A4%96%E0%A5%8D%E0%A4%AF_%E0%A4%AA%E0%A5%83%E0%A4%B7%E0%A5%8D%E0%A4%A0
+              - listitem [ref=f4e841]:
+                - link "العربية" [ref=f4e842] [cursor=pointer]:
+                  - /url: https://ar.wikipedia.org/wiki/%D8%A7%D9%84%D8%B5%D9%81%D8%AD%D8%A9_%D8%A7%D9%84%D8%B1%D8%A6%D9%8A%D8%B3%D8%A9
+              - listitem [ref=f4e843]:
+                - link "ܐܪܡܝܐ" [ref=f4e844] [cursor=pointer]:
+                  - /url: https://arc.wikipedia.org/wiki/%DC%A6%DC%90%DC%AC%DC%90_%DC%AA%DC%9D%DC%AB%DC%9D%DC%AC%DC%90
+              - listitem [ref=f4e845]:
+                - link "الدارجة" [ref=f4e846] [cursor=pointer]:
+                  - /url: https://ary.wikipedia.org/wiki/%D8%A7%D9%84%D8%B5%D9%81%D8%AD%D8%A9_%D8%A7%D9%84%D9%84%D9%88%D9%84%D8%A7
+              - listitem [ref=f4e847]:
+                - link "مصرى" [ref=f4e848] [cursor=pointer]:
+                  - /url: https://arz.wikipedia.org/wiki/%D8%A7%D9%84%D8%B5%D9%81%D8%AD%D9%87_%D8%A7%D9%84%D8%B1%D8%A6%D9%8A%D8%B3%D9%8A%D9%87
+              - listitem [ref=f4e849]:
+                - link "অসমীয়া" [ref=f4e850] [cursor=pointer]:
+                  - /url: https://as.wikipedia.org/wiki/%E0%A6%AC%E0%A7%87%E0%A6%9F%E0%A7%81%E0%A6%AA%E0%A6%BE%E0%A6%A4
+              - listitem [ref=f4e851]:
+                - link "Asturianu" [ref=f4e852] [cursor=pointer]:
+                  - /url: https://ast.wikipedia.org/wiki/Portada
+              - listitem [ref=f4e853]:
+                - link "Atikamekw" [ref=f4e854] [cursor=pointer]:
+                  - /url: https://atj.wikipedia.org/wiki/Otitikowin
+              - listitem [ref=f4e855]:
+                - link "Авар" [ref=f4e856] [cursor=pointer]:
+                  - /url: https://av.wikipedia.org/wiki/%D0%91%D0%B5%D1%82%D3%80%D0%B5%D1%80%D0%B0%D0%B1_%D0%B3%D1%8C%D1%83%D0%BC%D0%B5%D1%80
+              - listitem [ref=f4e857]:
+                - link "Kotava" [ref=f4e858] [cursor=pointer]:
+                  - /url: https://avk.wikipedia.org/wiki/Xadola
+              - listitem [ref=f4e859]:
+                - link "अवधी" [ref=f4e860] [cursor=pointer]:
+                  - /url: https://awa.wikipedia.org/wiki/%E0%A4%AA%E0%A5%8D%E0%A4%B0%E0%A4%A7%E0%A4%BE%E0%A4%A8_%E0%A4%AA%E0%A4%A8%E0%A5%8D%E0%A4%A8%E0%A4%BE
+              - listitem [ref=f4e861]:
+                - link "Aymar aru" [ref=f4e862] [cursor=pointer]:
+                  - /url: https://ay.wikipedia.org/wiki/Nayriri_u%C3%B1stawi
+              - listitem [ref=f4e863]:
+                - link "Azərbaycanca" [ref=f4e864] [cursor=pointer]:
+                  - /url: https://az.wikipedia.org/wiki/Ana_s%C9%99hif%C9%99
+              - listitem [ref=f4e865]:
+                - link "تۆرکجه" [ref=f4e866] [cursor=pointer]:
+                  - /url: https://azb.wikipedia.org/wiki/%D8%A2%D9%86%D8%A7_%D8%B5%D9%81%D8%AD%D9%87
+              - listitem [ref=f4e867]:
+                - link "Башҡортса" [ref=f4e868] [cursor=pointer]:
+                  - /url: https://ba.wikipedia.org/wiki/%D0%91%D0%B0%D1%88_%D0%B1%D0%B8%D1%82
+              - listitem [ref=f4e869]:
+                - link "Basa Bali" [ref=f4e870] [cursor=pointer]:
+                  - /url: https://ban.wikipedia.org/wiki/Kaca_Utama
+              - listitem [ref=f4e871]:
+                - link "Boarisch" [ref=f4e872] [cursor=pointer]:
+                  - /url: https://bar.wikipedia.org/wiki/Wikipedia:Hoamseitn
+              - listitem [ref=f4e873]:
+                - link "Žemaitėška" [ref=f4e874] [cursor=pointer]:
+                  - /url: https://bat-smg.wikipedia.org/wiki/P%C4%97rms_poslapis
+              - listitem [ref=f4e875]:
+                - link "Batak Toba" [ref=f4e876] [cursor=pointer]:
+                  - /url: https://bbc.wikipedia.org/wiki/Pogu_ni_Alaman
+              - listitem [ref=f4e877]:
+                - link "Bikol Central" [ref=f4e878] [cursor=pointer]:
+                  - /url: https://bcl.wikipedia.org/wiki/Panginot_na_Pahina
+              - listitem [ref=f4e879]:
+                - link "Bajau Sama" [ref=f4e880] [cursor=pointer]:
+                  - /url: https://bdr.wikipedia.org/wiki/Tekokon_Laman
+              - listitem [ref=f4e881]:
+                - link "Беларуская (тарашкевіца)" [ref=f4e882] [cursor=pointer]:
+                  - /url: https://be-tarask.wikipedia.org/wiki/%D0%93%D0%B0%D0%BB%D0%BE%D1%9E%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D0%B0%D1%80%D0%BE%D0%BD%D0%BA%D0%B0
+              - listitem [ref=f4e883]:
+                - link "Беларуская" [ref=f4e884] [cursor=pointer]:
+                  - /url: https://be.wikipedia.org/wiki/%D0%93%D0%B0%D0%BB%D0%BE%D1%9E%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D0%B0%D1%80%D0%BE%D0%BD%D0%BA%D0%B0
+              - listitem [ref=f4e885]:
+                - link "Betawi" [ref=f4e886] [cursor=pointer]:
+                  - /url: https://bew.wikipedia.org/wiki/Bal%C3%A9-bal%C3%A9
+              - listitem [ref=f4e887]:
+                - link "Български" [ref=f4e888] [cursor=pointer]:
+                  - /url: https://bg.wikipedia.org/wiki/%D0%9D%D0%B0%D1%87%D0%B0%D0%BB%D0%BD%D0%B0_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0
+              - listitem [ref=f4e889]:
+                - link "भोजपुरी" [ref=f4e890] [cursor=pointer]:
+                  - /url: https://bh.wikipedia.org/wiki/%E0%A4%AE%E0%A5%81%E0%A4%96%E0%A5%8D%E0%A4%AF_%E0%A4%AA%E0%A4%A8%E0%A5%8D%E0%A4%A8%E0%A4%BE
+              - listitem [ref=f4e891]:
+                - link "Bislama" [ref=f4e892] [cursor=pointer]:
+                  - /url: https://bi.wikipedia.org/wiki/Nambawan_Pej
+              - listitem [ref=f4e893]:
+                - link "Banjar" [ref=f4e894] [cursor=pointer]:
+                  - /url: https://bjn.wikipedia.org/wiki/Laman_Tatambaian
+              - listitem [ref=f4e895]:
+                - link "ပအိုဝ်ႏဘာႏသာႏ" [ref=f4e896] [cursor=pointer]:
+                  - /url: https://blk.wikipedia.org/wiki/%E1%80%A1%E1%80%93%E1%80%AD%E1%80%80%E1%80%9C%E1%80%AD%E1%80%90%E1%80%BA%E1%80%99%E1%80%B2%E1%80%B7%E1%80%84%E1%80%AB
+              - listitem [ref=f4e897]:
+                - link "Bamanankan" [ref=f4e898] [cursor=pointer]:
+                  - /url: https://bm.wikipedia.org/wiki/Ny%C9%9B_f%C9%94l%C9%94
+              - listitem [ref=f4e899]:
+                - link "বাংলা" [ref=f4e900] [cursor=pointer]:
+                  - /url: https://bn.wikipedia.org/wiki/%E0%A6%AA%E0%A7%8D%E0%A6%B0%E0%A6%A7%E0%A6%BE%E0%A6%A8_%E0%A6%AA%E0%A6%BE%E0%A6%A4%E0%A6%BE
+              - listitem [ref=f4e901]:
+                - link "བོད་ཡིག" [ref=f4e902] [cursor=pointer]:
+                  - /url: https://bo.wikipedia.org/wiki/%E0%BD%82%E0%BD%99%E0%BD%BC%E0%BC%8B%E0%BD%84%E0%BD%BC%E0%BD%A6%E0%BC%8D
+              - listitem [ref=f4e903]:
+                - link "Bòo pìkkà" [ref=f4e904] [cursor=pointer]:
+                  - /url: https://bol.wikipedia.org/wiki/Peji_In_Siri
+              - listitem [ref=f4e905]:
+                - link "বিষ্ণুপ্রিয়া মণিপুরী" [ref=f4e906] [cursor=pointer]:
+                  - /url: https://bpy.wikipedia.org/wiki/%E0%A6%AA%E0%A6%AF%E0%A6%BC%E0%A6%B2%E0%A6%BE_%E0%A6%AA%E0%A6%BE%E0%A6%A4%E0%A6%BE
+              - listitem [ref=f4e907]:
+                - link "Brezhoneg" [ref=f4e908] [cursor=pointer]:
+                  - /url: https://br.wikipedia.org/wiki/Degemer
+              - listitem [ref=f4e909]:
+                - link "Bosanski" [ref=f4e910] [cursor=pointer]:
+                  - /url: https://bs.wikipedia.org/wiki/Po%C4%8Detna_strana
+              - listitem [ref=f4e911]:
+                - link "Batak Mandailing" [ref=f4e912] [cursor=pointer]:
+                  - /url: https://btm.wikipedia.org/wiki/Alaman_Utamo
+              - listitem [ref=f4e913]:
+                - link "Basa Ugi" [ref=f4e914] [cursor=pointer]:
+                  - /url: https://bug.wikipedia.org/wiki/Watangpola
+              - listitem [ref=f4e915]:
+                - link "Буряад" [ref=f4e916] [cursor=pointer]:
+                  - /url: https://bxr.wikipedia.org/wiki/%D0%9D%D1%8E%D1%83%D1%80_%D1%85%D1%83%D1%83%D0%B4%D0%B0%D2%BB%D0%B0%D0%BD
+              - listitem [ref=f4e917]:
+                - link "Català" [ref=f4e918] [cursor=pointer]:
+                  - /url: https://ca.wikipedia.org/wiki/Portada
+              - listitem [ref=f4e919]:
+                - link "Chavacano de Zamboanga" [ref=f4e920] [cursor=pointer]:
+                  - /url: https://cbk-zam.wikipedia.org/wiki/El_Primero_Pagina
+              - listitem [ref=f4e921]:
+                - link "閩東語 / Mìng-dĕ̤ng-ngṳ̄" [ref=f4e922] [cursor=pointer]:
+                  - /url: https://cdo.wikipedia.org/wiki/T%C3%A0u_Hi%C4%95k
+              - listitem [ref=f4e923]:
+                - link "Нохчийн" [ref=f4e924] [cursor=pointer]:
+                  - /url: https://ce.wikipedia.org/wiki/%D0%9A%D0%BE%D1%8C%D1%80%D1%82%D0%B0_%D0%B0%D0%B3%D3%80%D0%BE
+              - listitem [ref=f4e925]:
+                - link "Cebuano" [ref=f4e926] [cursor=pointer]:
+                  - /url: https://ceb.wikipedia.org/wiki/Unang_Panid
+              - listitem [ref=f4e927]:
+                - link "Chamoru" [ref=f4e928] [cursor=pointer]:
+                  - /url: https://ch.wikipedia.org/wiki/Fanhaluman
+              - listitem [ref=f4e929]:
+                - link "ᏣᎳᎩ" [ref=f4e930] [cursor=pointer]:
+                  - /url: https://chr.wikipedia.org/wiki/%E1%8E%A4%E1%8E%B5%E1%8E%AE%E1%8E%B5%E1%8F%8D%E1%8F%97
+              - listitem [ref=f4e931]:
+                - link "Tsetsêhestâhese" [ref=f4e932] [cursor=pointer]:
+                  - /url: https://chy.wikipedia.org/wiki/Va%27ohtama
+              - listitem [ref=f4e933]:
+                - link "کوردی" [ref=f4e934] [cursor=pointer]:
+                  - /url: https://ckb.wikipedia.org/wiki/%D8%AF%DB%95%D8%B3%D8%AA%D9%BE%DB%8E%DA%A9
+              - listitem [ref=f4e935]:
+                - link "Corsu" [ref=f4e936] [cursor=pointer]:
+                  - /url: https://co.wikipedia.org/wiki/Pagina_maestra
+              - listitem [ref=f4e937]:
+                - link "Nēhiyawēwin / ᓀᐦᐃᔭᐍᐏᐣ" [ref=f4e938] [cursor=pointer]:
+                  - /url: https://cr.wikipedia.org/wiki/%E1%93%83%E1%94%A5%E1%91%95%E1%92%BB%E1%90%B9%E1%94%85%E1%91%8C%E1%92%8B%E1%93%82%E1%91%B2%E1%93%90
+              - listitem [ref=f4e939]:
+                - link "Qırımtatarca" [ref=f4e940] [cursor=pointer]:
+                  - /url: https://crh.wikipedia.org/wiki/Ba%C5%9F_Saife
+              - listitem [ref=f4e941]:
+                - link "Čeština" [ref=f4e942] [cursor=pointer]:
+                  - /url: https://cs.wikipedia.org/wiki/Hlavn%C3%AD_strana
+              - listitem [ref=f4e943]:
+                - link "Kaszëbsczi" [ref=f4e944] [cursor=pointer]:
+                  - /url: https://csb.wikipedia.org/wiki/Prz%C3%A9dn%C3%B4_starna
+              - listitem [ref=f4e945]:
+                - link "Словѣньскъ / ⰔⰎⰑⰂⰡⰐⰠⰔⰍⰟ" [ref=f4e946] [cursor=pointer]:
+                  - /url: https://cu.wikipedia.org/wiki/%D0%93%D0%BB%D0%B0%D0%B2%D1%8C%D0%BD%D0%B0_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0
+              - listitem [ref=f4e947]:
+                - link "Чӑвашла" [ref=f4e948] [cursor=pointer]:
+                  - /url: https://cv.wikipedia.org/wiki/%D0%A2%C4%95%D0%BF_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0
+              - listitem [ref=f4e949]:
+                - link "Cymraeg" [ref=f4e950] [cursor=pointer]:
+                  - /url: https://cy.wikipedia.org/wiki/Hafan
+              - listitem [ref=f4e951]:
+                - link "Dansk" [ref=f4e952] [cursor=pointer]:
+                  - /url: https://da.wikipedia.org/wiki/Forside
+              - listitem [ref=f4e953]:
+                - link "Dagbanli" [ref=f4e954] [cursor=pointer]:
+                  - /url: https://dag.wikipedia.org/wiki/Sol%C9%94%C9%A3u
+              - listitem [ref=f4e955]:
+                - link "Deutsch" [ref=f4e956] [cursor=pointer]:
+                  - /url: https://de.wikipedia.org/wiki/Wikipedia:Hauptseite
+              - listitem [ref=f4e957]:
+                - link "Dagaare" [ref=f4e958] [cursor=pointer]:
+                  - /url: https://dga.wikipedia.org/wiki/A_Gamp%C9%9Bl%C9%9B_zu
+              - listitem [ref=f4e959]:
+                - link "Thuɔŋjäŋ" [ref=f4e960] [cursor=pointer]:
+                  - /url: https://din.wikipedia.org/wiki/Apam_k%C3%ABd%C3%AFt
+              - listitem [ref=f4e961]:
+                - link "Zazaki" [ref=f4e962] [cursor=pointer]:
+                  - /url: https://diq.wikipedia.org/wiki/Pela_Seri
+              - listitem [ref=f4e963]:
+                - link "Dolnoserbski" [ref=f4e964] [cursor=pointer]:
+                  - /url: https://dsb.wikipedia.org/wiki/G%C5%82owny_bok
+              - listitem [ref=f4e965]:
+                - link "Kadazandusun" [ref=f4e966] [cursor=pointer]:
+                  - /url: https://dtp.wikipedia.org/wiki/Natad_Tagayo
+              - listitem [ref=f4e967]:
+                - link "डोटेली" [ref=f4e968] [cursor=pointer]:
+                  - /url: https://dty.wikipedia.org/wiki/%E0%A4%AE%E0%A5%81%E0%A4%96%E0%A5%8D%E0%A4%AF_%E0%A4%AA%E0%A4%A8%E0%A5%8D%E0%A4%A8%E0%A4%BE
+              - listitem [ref=f4e969]:
+                - link "ދިވެހިބަސް" [ref=f4e970] [cursor=pointer]:
+                  - /url: https://dv.wikipedia.org/wiki/%DE%89%DE%A6%DE%87%DE%A8_%DE%9E%DE%A6%DE%8A%DE%B0%DE%99%DE%A7
+              - listitem [ref=f4e971]:
+                - link "ཇོང་ཁ" [ref=f4e972] [cursor=pointer]:
+                  - /url: https://dz.wikipedia.org/wiki/%E0%BD%98%E0%BC%8B%E0%BD%A4%E0%BD%BC%E0%BD%82%E0%BC%8D
+              - listitem [ref=f4e973]:
+                - link "Eʋegbe" [ref=f4e974] [cursor=pointer]:
+                  - /url: https://ee.wikipedia.org/wiki/Axa_do_%C5%8Ag%C9%94
+              - listitem [ref=f4e975]:
+                - link "Ελληνικά" [ref=f4e976] [cursor=pointer]:
+                  - /url: https://el.wikipedia.org/wiki/%CE%A0%CF%8D%CE%BB%CE%B7:%CE%9A%CF%8D%CF%81%CE%B9%CE%B1
+              - listitem [ref=f4e977]:
+                - link "Emiliàn e rumagnòl" [ref=f4e978] [cursor=pointer]:
+                  - /url: https://eml.wikipedia.org/wiki/PP_(MUD)
+              - listitem [ref=f4e979]:
+                - link "Esperanto" [ref=f4e980] [cursor=pointer]:
+                  - /url: https://eo.wikipedia.org/wiki/Vikipedio:%C4%88efpa%C4%9Do
+              - listitem [ref=f4e981]:
+                - link "Español" [ref=f4e982] [cursor=pointer]:
+                  - /url: https://es.wikipedia.org/wiki/Wikipedia:Portada
+              - listitem [ref=f4e983]:
+                - link "Eesti" [ref=f4e984] [cursor=pointer]:
+                  - /url: https://et.wikipedia.org/wiki/Vikipeedia:Esileht
+              - listitem [ref=f4e985]:
+                - link "Euskara" [ref=f4e986] [cursor=pointer]:
+                  - /url: https://eu.wikipedia.org/wiki/Azala
+              - listitem [ref=f4e987]:
+                - link "Estremeñu" [ref=f4e988] [cursor=pointer]:
+                  - /url: https://ext.wikipedia.org/wiki/G%C3%BCiquipedia:Port%C3%A1
+              - listitem [ref=f4e989]:
+                - link "فارسی" [ref=f4e990] [cursor=pointer]:
+                  - /url: https://fa.wikipedia.org/wiki/%D8%B5%D9%81%D8%AD%D9%87%D9%94_%D8%A7%D8%B5%D9%84%DB%8C
+              - listitem [ref=f4e991]:
+                - link "Mfantse" [ref=f4e992] [cursor=pointer]:
+                  - /url: https://fat.wikipedia.org/wiki/Kratafa_Tsitsir
+              - listitem [ref=f4e993]:
+                - link "Fulfulde" [ref=f4e994] [cursor=pointer]:
+                  - /url: https://ff.wikipedia.org/wiki/Hello_ja%C9%93%C9%93orgo
+              - listitem [ref=f4e995]:
+                - link "Suomi" [ref=f4e996] [cursor=pointer]:
+                  - /url: https://fi.wikipedia.org/wiki/Wikipedia:Etusivu
+              - listitem [ref=f4e997]:
+                - link "Võro" [ref=f4e998] [cursor=pointer]:
+                  - /url: https://fiu-vro.wikipedia.org/wiki/Wikipedia:P%C3%A4%C3%A4leht
+              - listitem [ref=f4e999]:
+                - link "Na Vosa Vakaviti" [ref=f4e1000] [cursor=pointer]:
+                  - /url: https://fj.wikipedia.org/wiki/Tabana_levu
+              - listitem [ref=f4e1001]:
+                - link "Føroyskt" [ref=f4e1002] [cursor=pointer]:
+                  - /url: https://fo.wikipedia.org/wiki/Fors%C3%AD%C3%B0a
+              - listitem [ref=f4e1003]:
+                - link "Fɔ̀ngbè" [ref=f4e1004] [cursor=pointer]:
+                  - /url: https://fon.wikipedia.org/wiki/W%C3%A9m%C3%A1_Nuk%C9%94nt%C9%94n
+              - listitem [ref=f4e1005]:
+                - link "Français" [ref=f4e1006] [cursor=pointer]:
+                  - /url: https://fr.wikipedia.org/wiki/Wikip%C3%A9dia:Accueil_principal
+              - listitem [ref=f4e1007]:
+                - link "Arpetan" [ref=f4e1008] [cursor=pointer]:
+                  - /url: https://frp.wikipedia.org/wiki/Vouiquip%C3%A8dia:Re%C3%A7ua_princip%C3%A2la
+              - listitem [ref=f4e1009]:
+                - link "Nordfriisk" [ref=f4e1010] [cursor=pointer]:
+                  - /url: https://frr.wikipedia.org/wiki/Wikipedia:Hoodsid
+              - listitem [ref=f4e1011]:
+                - link "Furlan" [ref=f4e1012] [cursor=pointer]:
+                  - /url: https://fur.wikipedia.org/wiki/Pagjine_princip%C3%A2l
+              - listitem [ref=f4e1013]:
+                - link "Frysk" [ref=f4e1014] [cursor=pointer]:
+                  - /url: https://fy.wikipedia.org/wiki/Haadside
+              - listitem [ref=f4e1015]:
+                - link "Gaeilge" [ref=f4e1016] [cursor=pointer]:
+                  - /url: https://ga.wikipedia.org/wiki/Pr%C3%ADomhleathanach
+              - listitem [ref=f4e1017]:
+                - link "Gagauz" [ref=f4e1018] [cursor=pointer]:
+                  - /url: https://gag.wikipedia.org/wiki/Ba%C5%9F_yaprak
+              - listitem [ref=f4e1019]:
+                - link "贛語" [ref=f4e1020] [cursor=pointer]:
+                  - /url: https://gan.wikipedia.org/wiki/%E5%B0%81%E9%9D%A2
+              - listitem [ref=f4e1021]:
+                - link "Kriyòl gwiyannen" [ref=f4e1022] [cursor=pointer]:
+                  - /url: https://gcr.wikipedia.org/wiki/Paj_Prensipal
+              - listitem [ref=f4e1023]:
+                - link "Gàidhlig" [ref=f4e1024] [cursor=pointer]:
+                  - /url: https://gd.wikipedia.org/wiki/Pr%C3%AComh-Dhuilleag
+              - listitem [ref=f4e1025]:
+                - link "Galego" [ref=f4e1026] [cursor=pointer]:
+                  - /url: https://gl.wikipedia.org/wiki/Portada
+              - listitem [ref=f4e1027]:
+                - link "گیلکی" [ref=f4e1028] [cursor=pointer]:
+                  - /url: https://glk.wikipedia.org/wiki/%DA%AF%D8%AA%CB%87_%D9%88%D9%84%DA%AF
+              - listitem [ref=f4e1029]:
+                - link "Avañe'ẽ" [ref=f4e1030] [cursor=pointer]:
+                  - /url: https://gn.wikipedia.org/wiki/Kuatia_%C3%91epyr%C5%A9ha
+              - listitem [ref=f4e1031]:
+                - link "गोंयची कोंकणी / Gõychi Konknni" [ref=f4e1032] [cursor=pointer]:
+                  - /url: https://gom.wikipedia.org/wiki/%E0%A4%AE%E0%A5%81%E0%A4%96%E0%A5%87%E0%A4%B2_%E0%A4%AA%E0%A4%BE%E0%A4%A8
+              - listitem [ref=f4e1033]:
+                - link "Bahasa Hulontalo" [ref=f4e1034] [cursor=pointer]:
+                  - /url: https://gor.wikipedia.org/wiki/Halaman_Bungaliyo
+              - listitem [ref=f4e1035]:
+                - link "𐌲𐌿𐍄𐌹𐍃𐌺" [ref=f4e1036] [cursor=pointer]:
+                  - /url: https://got.wikipedia.org/wiki/%F0%90%8C%B0%F0%90%8C%BD%F0%90%8C%B0%F0%90%8D%83%F0%90%8D%84%F0%90%8D%89%F0%90%8C%B3%F0%90%8C%B4%F0%90%8C%B9%F0%90%8C%BD%F0%90%8C%B9%F0%90%8C%BB%F0%90%8C%B0%F0%90%8C%BF%F0%90%8D%86%F0%90%8D%83
+              - listitem [ref=f4e1037]:
+                - link "Ghanaian Pidgin" [ref=f4e1038] [cursor=pointer]:
+                  - /url: https://gpe.wikipedia.org/wiki/Main_Page
+              - listitem [ref=f4e1039]:
+                - link "ગુજરાતી" [ref=f4e1040] [cursor=pointer]:
+                  - /url: https://gu.wikipedia.org/wiki/%E0%AA%AE%E0%AB%81%E0%AA%96%E0%AA%AA%E0%AB%83%E0%AA%B7%E0%AB%8D%E0%AA%A0
+              - listitem [ref=f4e1041]:
+                - link "Wayuunaiki" [ref=f4e1042] [cursor=pointer]:
+                  - /url: https://guc.wikipedia.org/wiki/Ee%27iyalaaya_a%27la%C3%BClaas%C3%BC
+              - listitem [ref=f4e1043]:
+                - link "Farefare" [ref=f4e1044] [cursor=pointer]:
+                  - /url: https://gur.wikipedia.org/wiki/P%C9%9Bgezure
+              - listitem [ref=f4e1045]:
+                - link "Gungbe" [ref=f4e1046] [cursor=pointer]:
+                  - /url: https://guw.wikipedia.org/wiki/Weda_Tangan
+              - listitem [ref=f4e1047]:
+                - link "Gaelg" [ref=f4e1048] [cursor=pointer]:
+                  - /url: https://gv.wikipedia.org/wiki/Ard-ghuillag
+              - listitem [ref=f4e1049]:
+                - link "Hausa" [ref=f4e1050] [cursor=pointer]:
+                  - /url: https://ha.wikipedia.org/wiki/Babban_shafi
+              - listitem [ref=f4e1051]:
+                - link "客家語 / Hak-kâ-ngî" [ref=f4e1052] [cursor=pointer]:
+                  - /url: https://hak.wikipedia.org/wiki/Th%C3%A8u-Ya%CC%8Dp
+              - listitem [ref=f4e1053]:
+                - link "Hawaiʻi" [ref=f4e1054] [cursor=pointer]:
+                  - /url: https://haw.wikipedia.org/wiki/Ka_papa_kinohi
+              - listitem [ref=f4e1055]:
+                - link "עברית" [ref=f4e1056] [cursor=pointer]:
+                  - /url: https://he.wikipedia.org/wiki/%D7%A2%D7%9E%D7%95%D7%93_%D7%A8%D7%90%D7%A9%D7%99
+              - listitem [ref=f4e1057]:
+                - link "हिन्दी" [ref=f4e1058] [cursor=pointer]:
+                  - /url: https://hi.wikipedia.org/wiki/%E0%A4%AE%E0%A5%81%E0%A4%96%E0%A4%AA%E0%A5%83%E0%A4%B7%E0%A5%8D%E0%A4%A0
+              - listitem [ref=f4e1059]:
+                - link "Fiji Hindi" [ref=f4e1060] [cursor=pointer]:
+                  - /url: https://hif.wikipedia.org/wiki/Pahila_Panna
+              - listitem [ref=f4e1061]:
+                - link "Hrvatski" [ref=f4e1062] [cursor=pointer]:
+                  - /url: https://hr.wikipedia.org/wiki/Glavna_stranica
+              - listitem [ref=f4e1063]:
+                - link "Hornjoserbsce" [ref=f4e1064] [cursor=pointer]:
+                  - /url: https://hsb.wikipedia.org/wiki/H%C5%82owna_strona
+              - listitem [ref=f4e1065]:
+                - link "Kreyòl ayisyen" [ref=f4e1066] [cursor=pointer]:
+                  - /url: https://ht.wikipedia.org/wiki/Paj_Prensipal
+              - listitem [ref=f4e1067]:
+                - link "Magyar" [ref=f4e1068] [cursor=pointer]:
+                  - /url: https://hu.wikipedia.org/wiki/Kezd%C5%91lap
+              - listitem [ref=f4e1069]:
+                - link "Հայերեն" [ref=f4e1070] [cursor=pointer]:
+                  - /url: https://hy.wikipedia.org/wiki/%D4%B3%D5%AC%D5%AD%D5%A1%D5%BE%D5%B8%D6%80_%D5%A7%D5%BB
+              - listitem [ref=f4e1071]:
+                - link "Արեւմտահայերէն" [ref=f4e1072] [cursor=pointer]:
+                  - /url: https://hyw.wikipedia.org/wiki/%D4%B3%D5%AC%D5%AD%D5%A1%D6%82%D5%B8%D6%80_%D4%B7%D5%BB
+              - listitem [ref=f4e1073]:
+                - link "Interlingua" [ref=f4e1074] [cursor=pointer]:
+                  - /url: https://ia.wikipedia.org/wiki/Pagina_principal
+              - listitem [ref=f4e1075]:
+                - link "Jaku Iban" [ref=f4e1076] [cursor=pointer]:
+                  - /url: https://iba.wikipedia.org/wiki/Lambar_Keterubah
+              - listitem [ref=f4e1077]:
+                - link "Bahasa Indonesia" [ref=f4e1078] [cursor=pointer]:
+                  - /url: https://id.wikipedia.org/wiki/Halaman_Utama
+              - listitem [ref=f4e1079]:
+                - link "Interlingue" [ref=f4e1080] [cursor=pointer]:
+                  - /url: https://ie.wikipedia.org/wiki/Principal_p%C3%A1gine
+              - listitem [ref=f4e1081]:
+                - link "Igbo" [ref=f4e1082] [cursor=pointer]:
+                  - /url: https://ig.wikipedia.org/wiki/Ihu_m%CC%80b%E1%BB%A5
+              - listitem [ref=f4e1083]:
+                - link "Igala" [ref=f4e1084] [cursor=pointer]:
+                  - /url: https://igl.wikipedia.org/wiki/Ogb%C3%A1_ogbolo
+              - listitem [ref=f4e1085]:
+                - link "Iñupiatun" [ref=f4e1086] [cursor=pointer]:
+                  - /url: https://ik.wikipedia.org/wiki/Aulla%C4%A1niisaa%C4%A1vik
+              - listitem [ref=f4e1087]:
+                - link "Ilokano" [ref=f4e1088] [cursor=pointer]:
+                  - /url: https://ilo.wikipedia.org/wiki/Umuna_a_Panid
+              - listitem [ref=f4e1089]:
+                - link "ГӀалгӀай" [ref=f4e1090] [cursor=pointer]:
+                  - /url: https://inh.wikipedia.org/wiki/%D0%9A%D0%B5%D1%80%D1%82%D1%82%D0%B5%D1%80%D0%B0_%D0%BE%D0%B0%D0%B3%D3%80%D1%83%D0%B2
+              - listitem [ref=f4e1091]:
+                - link "Ido" [ref=f4e1092] [cursor=pointer]:
+                  - /url: https://io.wikipedia.org/wiki/Frontispico
+              - listitem [ref=f4e1093]:
+                - link "Íslenska" [ref=f4e1094] [cursor=pointer]:
+                  - /url: https://is.wikipedia.org/wiki/Fors%C3%AD%C3%B0a
+              - listitem [ref=f4e1095]:
+                - link "Medžuslovjansky" [ref=f4e1096] [cursor=pointer]:
+                  - /url: https://isv.wikipedia.org/wiki/Glavna_stranica
+              - listitem [ref=f4e1097]:
+                - link "Italiano" [ref=f4e1098] [cursor=pointer]:
+                  - /url: https://it.wikipedia.org/wiki/Pagina_principale
+              - listitem [ref=f4e1099]:
+                - link "ᐃᓄᒃᑎᑐᑦ / inuktitut" [ref=f4e1100] [cursor=pointer]:
+                  - /url: https://iu.wikipedia.org/wiki/%E1%90%8A%E1%92%A5%E1%96%85
+              - listitem [ref=f4e1101]:
+                - link "日本語" [ref=f4e1102] [cursor=pointer]:
+                  - /url: https://ja.wikipedia.org/wiki/%E3%83%A1%E3%82%A4%E3%83%B3%E3%83%9A%E3%83%BC%E3%82%B8
+              - listitem [ref=f4e1103]:
+                - link "Patois" [ref=f4e1104] [cursor=pointer]:
+                  - /url: https://jam.wikipedia.org/wiki/Mien_Piej
+              - listitem [ref=f4e1105]:
+                - link "La .lojban." [ref=f4e1106] [cursor=pointer]:
+                  - /url: https://jbo.wikipedia.org/wiki/uikipedi%27as:ralju
+              - listitem [ref=f4e1107]:
+                - link "Jawa" [ref=f4e1108] [cursor=pointer]:
+                  - /url: https://jv.wikipedia.org/wiki/Wikip%C3%A9dia:Pendhapa
+              - listitem [ref=f4e1109]:
+                - link "ქართული" [ref=f4e1110] [cursor=pointer]:
+                  - /url: https://ka.wikipedia.org/wiki/%E1%83%9B%E1%83%97%E1%83%90%E1%83%95%E1%83%90%E1%83%A0%E1%83%98_%E1%83%92%E1%83%95%E1%83%94%E1%83%A0%E1%83%93%E1%83%98
+              - listitem [ref=f4e1111]:
+                - link "Qaraqalpaqsha" [ref=f4e1112] [cursor=pointer]:
+                  - /url: https://kaa.wikipedia.org/wiki/Bas_bet
+              - listitem [ref=f4e1113]:
+                - link "Taqbaylit" [ref=f4e1114] [cursor=pointer]:
+                  - /url: https://kab.wikipedia.org/wiki/Asebter_agejdan
+              - listitem [ref=f4e1115]:
+                - link "Karai-karai" [ref=f4e1116] [cursor=pointer]:
+                  - /url: https://kai.wikipedia.org/wiki/Sh%C3%A0fi_Maiw%C3%A0a
+              - listitem [ref=f4e1117]:
+                - link "Jju" [ref=f4e1118] [cursor=pointer]:
+                  - /url: https://kaj.wikipedia.org/wiki/A%CC%B1gba%CC%B1dang_Ka%CC%B1zzu
+              - listitem [ref=f4e1119]:
+                - link "Адыгэбзэ" [ref=f4e1120] [cursor=pointer]:
+                  - /url: https://kbd.wikipedia.org/wiki/%D0%9D%D0%B0%D0%BF%D1%8D%D0%BA%D3%80%D1%83%D1%8D%D1%86%D3%80_%D0%BD%D1%8D%D1%85%D1%8A%D1%8B%D1%89%D1%85%D1%8C%D1%8D
+              - listitem [ref=f4e1121]:
+                - link "Kabɩyɛ" [ref=f4e1122] [cursor=pointer]:
+                  - /url: https://kbp.wikipedia.org/wiki/Tal%C9%A9_%C9%96eu
+              - listitem [ref=f4e1123]:
+                - link "Tyap" [ref=f4e1124] [cursor=pointer]:
+                  - /url: https://kcg.wikipedia.org/wiki/A%CC%B1tsak_Wat_Wu
+              - listitem [ref=f4e1125]:
+                - link "Kongo" [ref=f4e1126] [cursor=pointer]:
+                  - /url: https://kg.wikipedia.org/wiki/Muk%C3%A2nda_ya_ngudi
+              - listitem [ref=f4e1127]:
+                - link "Kumoring" [ref=f4e1128] [cursor=pointer]:
+                  - /url: https://kge.wikipedia.org/wiki/Wikipidiya:Garang
+              - listitem [ref=f4e1129]:
+                - link "Gĩkũyũ" [ref=f4e1130] [cursor=pointer]:
+                  - /url: https://ki.wikipedia.org/wiki/Main_Page
+              - listitem [ref=f4e1131]:
+                - link "Қазақша" [ref=f4e1132] [cursor=pointer]:
+                  - /url: https://kk.wikipedia.org/wiki/%D0%91%D0%B0%D1%81%D1%82%D1%8B_%D0%B1%D0%B5%D1%82
+              - listitem [ref=f4e1133]:
+                - link "Kalaallisut" [ref=f4e1134] [cursor=pointer]:
+                  - /url: https://kl.wikipedia.org/wiki/Saqqaa
+              - listitem [ref=f4e1135]:
+                - link "ភាសាខ្មែរ" [ref=f4e1136] [cursor=pointer]:
+                  - /url: https://km.wikipedia.org/wiki/%E1%9E%91%E1%9F%86%E1%9E%96%E1%9F%90%E1%9E%9A%E1%9E%8A%E1%9E%BE%E1%9E%98
+              - listitem [ref=f4e1137]:
+                - link "ಕನ್ನಡ" [ref=f4e1138] [cursor=pointer]:
+                  - /url: https://kn.wikipedia.org/wiki/%E0%B2%AE%E0%B3%81%E0%B2%96%E0%B3%8D%E0%B2%AF_%E0%B2%AA%E0%B3%81%E0%B2%9F
+              - listitem [ref=f4e1139]:
+                - link "Yerwa Kanuri" [ref=f4e1140] [cursor=pointer]:
+                  - /url: https://knc.wikipedia.org/wiki/Wikipedia:Shafi_kura
+              - listitem [ref=f4e1141]:
+                - link "한국어" [ref=f4e1142] [cursor=pointer]:
+                  - /url: https://ko.wikipedia.org/wiki/%EC%9C%84%ED%82%A4%EB%B0%B1%EA%B3%BC:%EB%8C%80%EB%AC%B8
+              - listitem [ref=f4e1143]:
+                - link "Перем коми" [ref=f4e1144] [cursor=pointer]:
+                  - /url: https://koi.wikipedia.org/wiki/%D0%9F%D0%BE%D0%BD%D0%B4%D3%A7%D1%82%D1%87%D0%B0%D0%BD_%D0%BB%D0%B8%D1%81%D1%82%D0%B1%D0%BE%D0%BA
+              - listitem [ref=f4e1145]:
+                - link "Къарачай-малкъар" [ref=f4e1146] [cursor=pointer]:
+                  - /url: https://krc.wikipedia.org/wiki/%D0%91%D0%B0%D1%88_%D0%B1%D0%B5%D1%82
+              - listitem [ref=f4e1147]:
+                - link "کٲشُر" [ref=f4e1148] [cursor=pointer]:
+                  - /url: https://ks.wikipedia.org/wiki/%D8%A7%D9%8E%DB%81%D9%8E%D9%85_%D8%B5%D9%8E%D9%81%DB%81%D9%95
+              - listitem [ref=f4e1149]:
+                - link "Ripoarisch" [ref=f4e1150] [cursor=pointer]:
+                  - /url: https://ksh.wikipedia.org/wiki/Wikipedia:Houpsigk
+              - listitem [ref=f4e1151]:
+                - link "Kurdî" [ref=f4e1152] [cursor=pointer]:
+                  - /url: https://ku.wikipedia.org/wiki/Destp%C3%AAk
+              - listitem [ref=f4e1153]:
+                - link "Kʋsaal" [ref=f4e1154] [cursor=pointer]:
+                  - /url: https://kus.wikipedia.org/wiki/Zug_lakir
+              - listitem [ref=f4e1155]:
+                - link "Коми" [ref=f4e1156] [cursor=pointer]:
+                  - /url: https://kv.wikipedia.org/wiki/%D0%9C%D0%B5%D0%B4%D1%88%D3%A7%D1%80_%D0%BB%D0%B8%D1%81%D1%82_%D0%B1%D0%BE%D0%BA
+              - listitem [ref=f4e1157]:
+                - link "Kernowek" [ref=f4e1158] [cursor=pointer]:
+                  - /url: https://kw.wikipedia.org/wiki/Folen_dre
+              - listitem [ref=f4e1159]:
+                - link "Кыргызча" [ref=f4e1160] [cursor=pointer]:
+                  - /url: https://ky.wikipedia.org/wiki/%D0%91%D0%B0%D1%88%D0%BA%D1%8B_%D0%B1%D0%B0%D1%80%D0%B0%D0%BA
+              - listitem [ref=f4e1161]:
+                - link "Latina" [ref=f4e1162] [cursor=pointer]:
+                  - /url: https://la.wikipedia.org/wiki/Vicipaedia:Pagina_prima
+              - listitem [ref=f4e1163]:
+                - link "Ladino" [ref=f4e1164] [cursor=pointer]:
+                  - /url: https://lad.wikipedia.org/wiki/La_Primera_Oja
+              - listitem [ref=f4e1165]:
+                - link "Lëtzebuergesch" [ref=f4e1166] [cursor=pointer]:
+                  - /url: https://lb.wikipedia.org/wiki/Haapts%C3%A4it
+              - listitem [ref=f4e1167]:
+                - link "Лакку" [ref=f4e1168] [cursor=pointer]:
+                  - /url: https://lbe.wikipedia.org/wiki/%D0%90%D0%B3%D1%8C%D0%B0%D0%BC%D0%BC%D1%83%D1%80_%D0%BB%D0%B0%D0%B6%D0%B8%D0%BD
+              - listitem [ref=f4e1169]:
+                - link "Лезги" [ref=f4e1170] [cursor=pointer]:
+                  - /url: https://lez.wikipedia.org/wiki/%D0%9A%D1%8C%D0%B8%D0%BB%D0%B8%D0%BD_%D1%87%D1%87%D0%B8%D0%BD
+              - listitem [ref=f4e1171]:
+                - link "Lingua Franca Nova" [ref=f4e1172] [cursor=pointer]:
+                  - /url: https://lfn.wikipedia.org/wiki/Paje_xef
+              - listitem [ref=f4e1173]:
+                - link "Luganda" [ref=f4e1174] [cursor=pointer]:
+                  - /url: https://lg.wikipedia.org/wiki/Olupapula_Olusooka
+              - listitem [ref=f4e1175]:
+                - link "Limburgs" [ref=f4e1176] [cursor=pointer]:
+                  - /url: https://li.wikipedia.org/wiki/Veurblaad
+              - listitem [ref=f4e1177]:
+                - link "Ligure" [ref=f4e1178] [cursor=pointer]:
+                  - /url: https://lij.wikipedia.org/wiki/Pagina_prin%C3%A7ip%C3%A2
+              - listitem [ref=f4e1179]:
+                - link "Ladin" [ref=f4e1180] [cursor=pointer]:
+                  - /url: https://lld.wikipedia.org/wiki/Plata_prinzipala
+              - listitem [ref=f4e1181]:
+                - link "Lombard" [ref=f4e1182] [cursor=pointer]:
+                  - /url: https://lmo.wikipedia.org/wiki/Pagina_principala
+              - listitem [ref=f4e1183]:
+                - link "Lingála" [ref=f4e1184] [cursor=pointer]:
+                  - /url: https://ln.wikipedia.org/wiki/Lok%C3%A1s%C3%A1_ya_libos%C3%B3
+              - listitem [ref=f4e1185]:
+                - link "ລາວ" [ref=f4e1186] [cursor=pointer]:
+                  - /url: https://lo.wikipedia.org/wiki/%E0%BB%9C%E0%BB%89%E0%BA%B2%E0%BA%AB%E0%BA%BC%E0%BA%B1%E0%BA%81
+              - listitem [ref=f4e1187]:
+                - link "Lietuvių" [ref=f4e1188] [cursor=pointer]:
+                  - /url: https://lt.wikipedia.org/wiki/Pagrindinis_puslapis
+              - listitem [ref=f4e1189]:
+                - link "Latgaļu" [ref=f4e1190] [cursor=pointer]:
+                  - /url: https://ltg.wikipedia.org/wiki/Suoku_puslopa
+              - listitem [ref=f4e1191]:
+                - link "Latviešu" [ref=f4e1192] [cursor=pointer]:
+                  - /url: https://lv.wikipedia.org/wiki/S%C4%81kumlapa
+              - listitem [ref=f4e1193]:
+                - link "Madhurâ" [ref=f4e1194] [cursor=pointer]:
+                  - /url: https://mad.wikipedia.org/wiki/Tan%C3%A8yan
+              - listitem [ref=f4e1195]:
+                - link "मगही" [ref=f4e1196] [cursor=pointer]:
+                  - /url: https://mag.wikipedia.org/wiki/%E0%A4%AE%E0%A5%81%E0%A4%96%E0%A5%8D%E0%A4%AF%E0%A4%AA%E0%A4%A8%E0%A5%8D%E0%A4%A8%E0%A4%BE
+              - listitem [ref=f4e1197]:
+                - link "मैथिली" [ref=f4e1198] [cursor=pointer]:
+                  - /url: https://mai.wikipedia.org/wiki/%E0%A4%B8%E0%A4%AE%E0%A5%8D%E0%A4%AE%E0%A5%81%E0%A4%96_%E0%A4%AA%E0%A4%A8%E0%A5%8D%E0%A4%A8%E0%A4%BE
+              - listitem [ref=f4e1199]:
+                - link "Basa Banyumasan" [ref=f4e1200] [cursor=pointer]:
+                  - /url: https://map-bms.wikipedia.org/wiki/Kaca_Utama
+              - listitem [ref=f4e1201]:
+                - link "Мокшень" [ref=f4e1202] [cursor=pointer]:
+                  - /url: https://mdf.wikipedia.org/wiki/%D0%9F%D1%80%D1%8F_%D0%BB%D0%BE%D0%BF%D0%B0
+              - listitem [ref=f4e1203]:
+                - link "Malagasy" [ref=f4e1204] [cursor=pointer]:
+                  - /url: https://mg.wikipedia.org/wiki/Wikipedia:Fandraisana
+              - listitem [ref=f4e1205]:
+                - link "Олык марий" [ref=f4e1206] [cursor=pointer]:
+                  - /url: https://mhr.wikipedia.org/wiki/%D0%A2%D3%B1%D2%A5_%D0%BB%D0%B0%D1%88%D1%82%D1%8B%D0%BA
+              - listitem [ref=f4e1207]:
+                - link "Māori" [ref=f4e1208] [cursor=pointer]:
+                  - /url: https://mi.wikipedia.org/wiki/Hau_K%C4%81inga
+              - listitem [ref=f4e1209]:
+                - link "Minangkabau" [ref=f4e1210] [cursor=pointer]:
+                  - /url: https://min.wikipedia.org/wiki/Laman_Utamo
+              - listitem [ref=f4e1211]:
+                - link "Македонски" [ref=f4e1212] [cursor=pointer]:
+                  - /url: https://mk.wikipedia.org/wiki/%D0%93%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0
+              - listitem [ref=f4e1213]:
+                - link "മലയാളം" [ref=f4e1214] [cursor=pointer]:
+                  - /url: https://ml.wikipedia.org/wiki/%E0%B4%AA%E0%B5%8D%E0%B4%B0%E0%B4%A7%E0%B4%BE%E0%B4%A8_%E0%B4%A4%E0%B4%BE%E0%B5%BE
+              - listitem [ref=f4e1215]:
+                - link "Монгол" [ref=f4e1216] [cursor=pointer]:
+                  - /url: https://mn.wikipedia.org/wiki/%D0%9D%D2%AF%D2%AF%D1%80_%D1%85%D1%83%D1%83%D0%B4%D0%B0%D1%81
+              - listitem [ref=f4e1217]:
+                - link "ꯃꯤꯇꯩ ꯂꯣꯟ" [ref=f4e1218] [cursor=pointer]:
+                  - /url: https://mni.wikipedia.org/wiki/%EA%AF%83%EA%AF%94%EA%AF%A8%EA%AF%91%EA%AF%A3%EA%AF%8F%EA%AF%95_%EA%AF%82%EA%AF%83%EA%AF%A5%EA%AF%8F
+              - listitem [ref=f4e1219]:
+                - link "ဘာသာမန်" [ref=f4e1220] [cursor=pointer]:
+                  - /url: https://mnw.wikipedia.org/wiki/%E1%80%99%E1%80%AF%E1%80%80%E1%80%BA%E1%80%9C%E1%80%AD%E1%80%80%E1%80%BA%E1%80%90%E1%80%99%E1%80%BA
+              - listitem [ref=f4e1221]:
+                - link "Moore" [ref=f4e1222] [cursor=pointer]:
+                  - /url: https://mos.wikipedia.org/wiki/Soraogo
+              - listitem [ref=f4e1223]:
+                - link "मराठी" [ref=f4e1224] [cursor=pointer]:
+                  - /url: https://mr.wikipedia.org/wiki/%E0%A4%AE%E0%A5%81%E0%A4%96%E0%A4%AA%E0%A5%83%E0%A4%B7%E0%A5%8D%E0%A4%A0
+              - listitem [ref=f4e1225]:
+                - link "Кырык мары" [ref=f4e1226] [cursor=pointer]:
+                  - /url: https://mrj.wikipedia.org/wiki/%D0%A2%D3%B9%D0%BD%D0%B3_%D3%B9%D0%BB%D3%B9%D1%88%D1%82%D3%93%D1%88
+              - listitem [ref=f4e1227]:
+                - link "Bahasa Melayu" [ref=f4e1228] [cursor=pointer]:
+                  - /url: https://ms.wikipedia.org/wiki/Laman_Utama
+              - listitem [ref=f4e1229]:
+                - link "Malti" [ref=f4e1230] [cursor=pointer]:
+                  - /url: https://mt.wikipedia.org/wiki/Il-Pa%C4%A1na_prin%C4%8Bipali
+              - listitem [ref=f4e1231]:
+                - link "Mirandés" [ref=f4e1232] [cursor=pointer]:
+                  - /url: https://mwl.wikipedia.org/wiki/Biquip%C3%A9dia:P%C3%A1igina_percipal
+              - listitem [ref=f4e1233]:
+                - link "မြန်မာဘာသာ" [ref=f4e1234] [cursor=pointer]:
+                  - /url: https://my.wikipedia.org/wiki/%E1%80%97%E1%80%9F%E1%80%AD%E1%80%AF%E1%80%85%E1%80%AC%E1%80%99%E1%80%BB%E1%80%80%E1%80%BA%E1%80%94%E1%80%BE%E1%80%AC
+              - listitem [ref=f4e1235]:
+                - link "Эрзянь" [ref=f4e1236] [cursor=pointer]:
+                  - /url: https://myv.wikipedia.org/wiki/%D0%9F%D1%80%D1%8F%D0%B2%D1%82%D0%BB%D0%BE%D0%BF%D0%B0
+              - listitem [ref=f4e1237]:
+                - link "مازِرونی" [ref=f4e1238] [cursor=pointer]:
+                  - /url: https://mzn.wikipedia.org/wiki/%DA%AF%D8%AA_%D8%B5%D9%81%D8%AD%D9%87
+              - listitem [ref=f4e1239]:
+                - link "Nāhuatl" [ref=f4e1240] [cursor=pointer]:
+                  - /url: https://nah.wikipedia.org/wiki/Cal%C4%ABxatl
+              - listitem [ref=f4e1241]:
+                - link "Napulitano" [ref=f4e1242] [cursor=pointer]:
+                  - /url: https://nap.wikipedia.org/wiki/Paggena_prencepale
+              - listitem [ref=f4e1243]:
+                - link "Nedersaksies" [ref=f4e1244] [cursor=pointer]:
+                  - /url: https://nds-nl.wikipedia.org/wiki/V%C3%B6%C3%A4rblad
+              - listitem [ref=f4e1245]:
+                - link "Plattdüütsch" [ref=f4e1246] [cursor=pointer]:
+                  - /url: https://nds.wikipedia.org/wiki/Wikipedia:H%C3%B6%C3%B6ftsiet
+              - listitem [ref=f4e1247]:
+                - link "नेपाली" [ref=f4e1248] [cursor=pointer]:
+                  - /url: https://ne.wikipedia.org/wiki/%E0%A4%AE%E0%A5%81%E0%A4%96%E0%A5%8D%E0%A4%AF_%E0%A4%AA%E0%A5%83%E0%A4%B7%E0%A5%8D%E0%A4%A0
+              - listitem [ref=f4e1249]:
+                - link "नेपाल भाषा" [ref=f4e1250] [cursor=pointer]:
+                  - /url: https://new.wikipedia.org/wiki/%E0%A4%AE%E0%A5%82_%E0%A4%AA%E0%A5%8C
+              - listitem [ref=f4e1251]:
+                - link "Li Niha" [ref=f4e1252] [cursor=pointer]:
+                  - /url: https://nia.wikipedia.org/wiki/Wikipedia:Olayama
+              - listitem [ref=f4e1253]:
+                - link "Nederlands" [ref=f4e1254] [cursor=pointer]:
+                  - /url: https://nl.wikipedia.org/wiki/Hoofdpagina
+              - listitem [ref=f4e1255]:
+                - link "Norsk nynorsk" [ref=f4e1256] [cursor=pointer]:
+                  - /url: https://nn.wikipedia.org/wiki/Hovudside
+              - listitem [ref=f4e1257]:
+                - link "Norsk bokmål" [ref=f4e1258] [cursor=pointer]:
+                  - /url: https://no.wikipedia.org/wiki/Forside
+              - listitem [ref=f4e1259]:
+                - link "Novial" [ref=f4e1260] [cursor=pointer]:
+                  - /url: https://nov.wikipedia.org/wiki/Chefi_pagine
+              - listitem [ref=f4e1261]:
+                - link "ߒߞߏ" [ref=f4e1262] [cursor=pointer]:
+                  - /url: https://nqo.wikipedia.org/wiki/%DF%93%DF%8F%DF%AC%DF%9F%DF%8F%DF%B2%DF%AC%DF%98%DF%8A
+              - listitem [ref=f4e1263]:
+                - link "IsiNdebele seSewula" [ref=f4e1264] [cursor=pointer]:
+                  - /url: https://nr.wikipedia.org/wiki/Main_Page
+              - listitem [ref=f4e1265]:
+                - link "Nouormand" [ref=f4e1266] [cursor=pointer]:
+                  - /url: https://nrm.wikipedia.org/wiki/Page_d%C3%A9_garde
+              - listitem [ref=f4e1267]:
+                - link "Sesotho sa Leboa" [ref=f4e1268] [cursor=pointer]:
+                  - /url: https://nso.wikipedia.org/wiki/Letlakala_la_pele
+              - listitem [ref=f4e1269]:
+                - link "Nupe" [ref=f4e1270] [cursor=pointer]:
+                  - /url: https://nup.wikipedia.org/wiki/Kpataki_Kperegi
+              - listitem [ref=f4e1271]:
+                - link "Diné bizaad" [ref=f4e1272] [cursor=pointer]:
+                  - /url: https://nv.wikipedia.org/wiki/%C3%8Diyis%C3%AD%C3%AD_Naaltsoos
+              - listitem [ref=f4e1273]:
+                - link "Chi-Chewa" [ref=f4e1274] [cursor=pointer]:
+                  - /url: https://ny.wikipedia.org/wiki/Tsamba_Lalikulu
+              - listitem [ref=f4e1275]:
+                - link "Occitan" [ref=f4e1276] [cursor=pointer]:
+                  - /url: https://oc.wikipedia.org/wiki/Acu%C3%A8lh
+              - listitem [ref=f4e1277]:
+                - link "Livvinkarjala" [ref=f4e1278] [cursor=pointer]:
+                  - /url: https://olo.wikipedia.org/wiki/Pi%C3%A4sivu
+              - listitem [ref=f4e1279]:
+                - link "Oromoo" [ref=f4e1280] [cursor=pointer]:
+                  - /url: https://om.wikipedia.org/wiki/Fuula_Dura
+              - listitem [ref=f4e1281]:
+                - link "ଓଡ଼ିଆ" [ref=f4e1282] [cursor=pointer]:
+                  - /url: https://or.wikipedia.org/wiki/%E0%AC%AA%E0%AD%8D%E0%AC%B0%E0%AC%A7%E0%AC%BE%E0%AC%A8_%E0%AC%AA%E0%AD%83%E0%AC%B7%E0%AD%8D%E0%AC%A0%E0%AC%BE
+              - listitem [ref=f4e1283]:
+                - link "Ирон" [ref=f4e1284] [cursor=pointer]:
+                  - /url: https://os.wikipedia.org/wiki/%D0%A1%C3%A6%D0%B9%D1%80%D0%B0%D0%B3_%D1%84%D0%B0%D1%80%D1%81
+              - listitem [ref=f4e1285]:
+                - link "ਪੰਜਾਬੀ" [ref=f4e1286] [cursor=pointer]:
+                  - /url: https://pa.wikipedia.org/wiki/%E0%A8%AE%E0%A9%81%E0%A9%B1%E0%A8%96_%E0%A8%B8%E0%A8%AB%E0%A8%BC%E0%A8%BE
+              - listitem [ref=f4e1287]:
+                - link "Pangasinan" [ref=f4e1288] [cursor=pointer]:
+                  - /url: https://pag.wikipedia.org/wiki/Arapan_ya_Bolong
+              - listitem [ref=f4e1289]:
+                - link "Kapampangan" [ref=f4e1290] [cursor=pointer]:
+                  - /url: https://pam.wikipedia.org/wiki/Pun_Bulung
+              - listitem [ref=f4e1291]:
+                - link "Papiamentu" [ref=f4e1292] [cursor=pointer]:
+                  - /url: https://pap.wikipedia.org/wiki/P%C3%A1gina_Prinsipal
+              - listitem [ref=f4e1293]:
+                - link "Picard" [ref=f4e1294] [cursor=pointer]:
+                  - /url: https://pcd.wikipedia.org/wiki/Accueul
+              - listitem [ref=f4e1295]:
+                - link "Naijá" [ref=f4e1296] [cursor=pointer]:
+                  - /url: https://pcm.wikipedia.org/wiki/Main_Pej
+              - listitem [ref=f4e1297]:
+                - link "Deitsch" [ref=f4e1298] [cursor=pointer]:
+                  - /url: https://pdc.wikipedia.org/wiki/Haaptblatt
+              - listitem [ref=f4e1299]:
+                - link "Pälzisch" [ref=f4e1300] [cursor=pointer]:
+                  - /url: https://pfl.wikipedia.org/wiki/Wikipedia:Haubdsaid
+              - listitem [ref=f4e1301]:
+                - link "पालि" [ref=f4e1302] [cursor=pointer]:
+                  - /url: https://pi.wikipedia.org/wiki/%E0%A4%AA%E0%A4%AE%E0%A5%81%E0%A4%96_%E0%A4%AA%E0%A4%A4%E0%A5%8D%E0%A4%A4_Pamukha_patta
+              - listitem [ref=f4e1303]:
+                - link "Polski" [ref=f4e1304] [cursor=pointer]:
+                  - /url: https://pl.wikipedia.org/wiki/Wikipedia:Strona_g%C5%82%C3%B3wna
+              - listitem [ref=f4e1305]:
+                - link "Piemontèis" [ref=f4e1306] [cursor=pointer]:
+                  - /url: https://pms.wikipedia.org/wiki/Intrada
+              - listitem [ref=f4e1307]:
+                - link "پنجابی" [ref=f4e1308] [cursor=pointer]:
+                  - /url: https://pnb.wikipedia.org/wiki/%D9%BE%DB%81%D9%84%D8%A7_%D8%B5%D9%81%DB%81
+              - listitem [ref=f4e1309]:
+                - link "Ποντιακά" [ref=f4e1310] [cursor=pointer]:
+                  - /url: https://pnt.wikipedia.org/wiki/%CE%91%CF%81%CF%87%CE%B9%CE%BA%CF%8C%CE%BD_%CF%83%CE%B5%CE%BB%CE%AF%CE%B4%CE%B1
+              - listitem [ref=f4e1311]:
+                - link "Nawat" [ref=f4e1312] [cursor=pointer]:
+                  - /url: https://ppl.wikipedia.org/wiki/Achtu_Amat
+              - listitem [ref=f4e1313]:
+                - link "پښتو" [ref=f4e1314] [cursor=pointer]:
+                  - /url: https://ps.wikipedia.org/wiki/%D9%84%D9%88%D9%85%DA%93%DB%8C_%D9%85%D8%AE
+              - listitem [ref=f4e1315]:
+                - link "Português" [ref=f4e1316] [cursor=pointer]:
+                  - /url: https://pt.wikipedia.org/wiki/Wikip%C3%A9dia:P%C3%A1gina_principal
+              - listitem [ref=f4e1317]:
+                - link "Pinayuanan" [ref=f4e1318] [cursor=pointer]:
+                  - /url: https://pwn.wikipedia.org/wiki/sitjumaq_na_sapitj
+              - listitem [ref=f4e1319]:
+                - link "Runa Simi" [ref=f4e1320] [cursor=pointer]:
+                  - /url: https://qu.wikipedia.org/wiki/Qhapaq_p%27anqa
+              - listitem [ref=f4e1321]:
+                - link "ရခိုင်" [ref=f4e1322] [cursor=pointer]:
+                  - /url: https://rki.wikipedia.org/wiki/%E1%80%A1%E1%80%93%E1%80%AD%E1%80%80%E1%80%85%E1%80%AC%E1%80%99%E1%80%BB%E1%80%80%E1%80%BA%E1%80%94%E1%80%BE%E1%80%AC
+              - listitem [ref=f4e1323]:
+                - link "Rumantsch" [ref=f4e1324] [cursor=pointer]:
+                  - /url: https://rm.wikipedia.org/wiki/Wikipedia:Pagina_principala
+              - listitem [ref=f4e1325]:
+                - link "Romani čhib" [ref=f4e1326] [cursor=pointer]:
+                  - /url: https://rmy.wikipedia.org/wiki/Sherutni_patrin
+              - listitem [ref=f4e1327]:
+                - link "Ikirundi" [ref=f4e1328] [cursor=pointer]:
+                  - /url: https://rn.wikipedia.org/wiki/Urupapuro_nyamukuru
+              - listitem [ref=f4e1329]:
+                - link "Română" [ref=f4e1330] [cursor=pointer]:
+                  - /url: https://ro.wikipedia.org/wiki/Pagina_principal%C4%83
+              - listitem [ref=f4e1331]:
+                - link "Armãneashti" [ref=f4e1332] [cursor=pointer]:
+                  - /url: https://roa-rup.wikipedia.org/wiki/Prota_fr%C3%A3ndz%C3%A3
+              - listitem [ref=f4e1333]:
+                - link "Tarandíne" [ref=f4e1334] [cursor=pointer]:
+                  - /url: https://roa-tara.wikipedia.org/wiki/Pagene_Prengep%C3%A1le
+              - listitem [ref=f4e1335]:
+                - link "Руски" [ref=f4e1336] [cursor=pointer]:
+                  - /url: https://rsk.wikipedia.org/wiki/%D0%93%D0%BB%D0%B0%D0%B2%D0%BD%D0%B8_%D0%B1%D0%BE%D0%BA
+              - listitem [ref=f4e1337]:
+                - link "Русский" [ref=f4e1338] [cursor=pointer]:
+                  - /url: https://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%B3%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0
+              - listitem [ref=f4e1339]:
+                - link "Русиньскый" [ref=f4e1340] [cursor=pointer]:
+                  - /url: https://rue.wikipedia.org/wiki/%D0%93%D0%BE%D0%BB%D0%BE%D0%B2%D0%BD%D0%B0_%D1%81%D1%82%D0%BE%D1%80%D1%96%D0%BD%D0%BA%D0%B0
+              - listitem [ref=f4e1341]:
+                - link "Ikinyarwanda" [ref=f4e1342] [cursor=pointer]:
+                  - /url: https://rw.wikipedia.org/wiki/Intangiriro
+              - listitem [ref=f4e1343]:
+                - link "संस्कृतम्" [ref=f4e1344] [cursor=pointer]:
+                  - /url: https://sa.wikipedia.org/wiki/%E0%A4%AE%E0%A5%81%E0%A4%96%E0%A5%8D%E0%A4%AF%E0%A4%AA%E0%A5%83%E0%A4%B7%E0%A5%8D%E0%A4%A0%E0%A4%AE%E0%A5%8D
+              - listitem [ref=f4e1345]:
+                - link "Саха тыла" [ref=f4e1346] [cursor=pointer]:
+                  - /url: https://sah.wikipedia.org/wiki/%D0%A1%D2%AF%D1%80%D2%AF%D0%BD_%D1%81%D0%B8%D1%80%D1%8D%D0%B9
+              - listitem [ref=f4e1347]:
+                - link "ᱥᱟᱱᱛᱟᱲᱤ" [ref=f4e1348] [cursor=pointer]:
+                  - /url: https://sat.wikipedia.org/wiki/%E1%B1%A2%E1%B1%A9%E1%B1%AC%E1%B1%A9%E1%B1%9B_%E1%B1%A5%E1%B1%9F%E1%B1%A6%E1%B1%B4%E1%B1%9F
+              - listitem [ref=f4e1349]:
+                - link "Sardu" [ref=f4e1350] [cursor=pointer]:
+                  - /url: https://sc.wikipedia.org/wiki/P%C3%A0gina_printzipale
+              - listitem [ref=f4e1351]:
+                - link "Sicilianu" [ref=f4e1352] [cursor=pointer]:
+                  - /url: https://scn.wikipedia.org/wiki/P%C3%A0ggina_principali
+              - listitem [ref=f4e1353]:
+                - link "Scots" [ref=f4e1354] [cursor=pointer]:
+                  - /url: https://sco.wikipedia.org/wiki/Main_Page
+              - listitem [ref=f4e1355]:
+                - link "سنڌي" [ref=f4e1356] [cursor=pointer]:
+                  - /url: https://sd.wikipedia.org/wiki/%D9%85%D9%8F%DA%A9_%D8%B5%D9%81%D8%AD%D9%88
+              - listitem [ref=f4e1357]:
+                - link "Davvisámegiella" [ref=f4e1358] [cursor=pointer]:
+                  - /url: https://se.wikipedia.org/wiki/Port%C3%A1la:Ovdasiidu
+              - listitem [ref=f4e1359]:
+                - link "Sängö" [ref=f4e1360] [cursor=pointer]:
+                  - /url: https://sg.wikipedia.org/wiki/G%C3%A4_nz%C3%B6n%C3%AE
+              - listitem [ref=f4e1361]:
+                - link "Srpskohrvatski / српскохрватски" [ref=f4e1362] [cursor=pointer]:
+                  - /url: https://sh.wikipedia.org/wiki/Glavna_stranica
+              - listitem [ref=f4e1363]:
+                - link "Taclḥit" [ref=f4e1364] [cursor=pointer]:
+                  - /url: https://shi.wikipedia.org/wiki/Tasna_Tamzwarut
+              - listitem [ref=f4e1365]:
+                - link "တႆး" [ref=f4e1366] [cursor=pointer]:
+                  - /url: https://shn.wikipedia.org/wiki/%E1%81%BC%E1%82%83%E1%82%88%E1%82%81%E1%80%B0%E1%80%9D%E1%80%BA%E1%82%81%E1%82%85%E1%81%B5%E1%80%BA%E1%82%88
+              - listitem [ref=f4e1367]:
+                - link "සිංහල" [ref=f4e1368] [cursor=pointer]:
+                  - /url: https://si.wikipedia.org/wiki/%E0%B6%B8%E0%B7%94%E0%B6%BD%E0%B7%8A_%E0%B6%B4%E0%B7%92%E0%B6%A7%E0%B7%94%E0%B7%80
+              - listitem [ref=f4e1369]:
+                - link "Simple English" [ref=f4e1370] [cursor=pointer]:
+                  - /url: https://simple.wikipedia.org/wiki/Main_Page
+              - listitem [ref=f4e1371]:
+                - link "Slovenčina" [ref=f4e1372] [cursor=pointer]:
+                  - /url: https://sk.wikipedia.org/wiki/Hlavn%C3%A1_str%C3%A1nka
+              - listitem [ref=f4e1373]:
+                - link "سرائیکی" [ref=f4e1374] [cursor=pointer]:
+                  - /url: https://skr.wikipedia.org/wiki/%D9%BE%DB%81%D9%84%D8%A7_%D9%BE%D8%B1%D8%AA
+              - listitem [ref=f4e1375]:
+                - link "Slovenščina" [ref=f4e1376] [cursor=pointer]:
+                  - /url: https://sl.wikipedia.org/wiki/Glavna_stran
+              - listitem [ref=f4e1377]:
+                - link "Gagana Samoa" [ref=f4e1378] [cursor=pointer]:
+                  - /url: https://sm.wikipedia.org/wiki/It%C5%ABlau_Muamua
+              - listitem [ref=f4e1379]:
+                - link "Anarâškielâ" [ref=f4e1380] [cursor=pointer]:
+                  - /url: https://smn.wikipedia.org/wiki/Ovd%C3%A2sij%C4%91o
+              - listitem [ref=f4e1381]:
+                - link "ChiShona" [ref=f4e1382] [cursor=pointer]:
+                  - /url: https://sn.wikipedia.org/wiki/Peji_Rekutanga
+              - listitem [ref=f4e1383]:
+                - link "Soomaaliga" [ref=f4e1384] [cursor=pointer]:
+                  - /url: https://so.wikipedia.org/wiki/Bogga_Hore
+              - listitem [ref=f4e1385]:
+                - link "Shqip" [ref=f4e1386] [cursor=pointer]:
+                  - /url: https://sq.wikipedia.org/wiki/Faqja_kryesore
+              - listitem [ref=f4e1387]:
+                - link "Српски / srpski" [ref=f4e1388] [cursor=pointer]:
+                  - /url: https://sr.wikipedia.org/wiki/%D0%93%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B0
+              - listitem [ref=f4e1389]:
+                - link "Sranantongo" [ref=f4e1390] [cursor=pointer]:
+                  - /url: https://srn.wikipedia.org/wiki/Fesipapira
+              - listitem [ref=f4e1391]:
+                - link "SiSwati" [ref=f4e1392] [cursor=pointer]:
+                  - /url: https://ss.wikipedia.org/wiki/Likhasi_Lelikhulu
+              - listitem [ref=f4e1393]:
+                - link "Sesotho" [ref=f4e1394] [cursor=pointer]:
+                  - /url: https://st.wikipedia.org/wiki/Leqephe_la_pele
+              - listitem [ref=f4e1395]:
+                - link "Seeltersk" [ref=f4e1396] [cursor=pointer]:
+                  - /url: https://stq.wikipedia.org/wiki/Haudsiede
+              - listitem [ref=f4e1397]:
+                - link "Sunda" [ref=f4e1398] [cursor=pointer]:
+                  - /url: https://su.wikipedia.org/wiki/Tepas
+              - listitem [ref=f4e1399]:
+                - link "Svenska" [ref=f4e1400] [cursor=pointer]:
+                  - /url: https://sv.wikipedia.org/wiki/Portal:Huvudsida
+              - listitem [ref=f4e1401]:
+                - link "Kiswahili" [ref=f4e1402] [cursor=pointer]:
+                  - /url: https://sw.wikipedia.org/wiki/Mwanzo
+              - listitem [ref=f4e1403]:
+                - link "ꠍꠤꠟꠐꠤ" [ref=f4e1404] [cursor=pointer]:
+                  - /url: https://syl.wikipedia.org/wiki/%EA%A0%9D%EA%A0%A5%EA%A0%9F_%EA%A0%9A%EA%A0%A3%EA%A0%94%EA%A0%A3
+              - listitem [ref=f4e1405]:
+                - link "Ślůnski" [ref=f4e1406] [cursor=pointer]:
+                  - /url: https://szl.wikipedia.org/wiki/Przodni%C5%8F_zajta
+              - listitem [ref=f4e1407]:
+                - link "Sakizaya" [ref=f4e1408] [cursor=pointer]:
+                  - /url: https://szy.wikipedia.org/wiki/saayaway_a_belih
+              - listitem [ref=f4e1409]:
+                - link "தமிழ்" [ref=f4e1410] [cursor=pointer]:
+                  - /url: https://ta.wikipedia.org/wiki/%E0%AE%AE%E0%AF%81%E0%AE%A4%E0%AE%B1%E0%AF%8D%E0%AE%AA%E0%AE%95%E0%AF%8D%E0%AE%95%E0%AE%AE%E0%AF%8D
+              - listitem [ref=f4e1411]:
+                - link "Tayal" [ref=f4e1412] [cursor=pointer]:
+                  - /url: https://tay.wikipedia.org/wiki/T%E2%80%99ringan_na_zzngayan
+              - listitem [ref=f4e1413]:
+                - link "ತುಳು" [ref=f4e1414] [cursor=pointer]:
+                  - /url: https://tcy.wikipedia.org/wiki/%E0%B2%AE%E0%B3%81%E0%B2%96%E0%B3%8D%E0%B2%AF_%E0%B2%AA%E0%B3%81%E0%B2%9F
+              - listitem [ref=f4e1415]:
+                - link "ᥖᥭᥰ ᥖᥬᥲ ᥑᥨᥒᥰ" [ref=f4e1416] [cursor=pointer]:
+                  - /url: https://tdd.wikipedia.org/wiki/%E1%A5%9E%E1%A5%A8%E1%A5%9D%E1%A5%B4_%E1%A5%98%E1%A5%A3%E1%A5%B2_%E1%A5%96%E1%A5%A5%E1%A5%B0
+              - listitem [ref=f4e1417]:
+                - link "తెలుగు" [ref=f4e1418] [cursor=pointer]:
+                  - /url: https://te.wikipedia.org/wiki/%E0%B0%AE%E0%B1%8A%E0%B0%A6%E0%B0%9F%E0%B0%BF_%E0%B0%AA%E0%B1%87%E0%B0%9C%E0%B1%80
+              - listitem [ref=f4e1419]:
+                - link "Tetun" [ref=f4e1420] [cursor=pointer]:
+                  - /url: https://tet.wikipedia.org/wiki/P%C3%A1jina_Mahuluk
+              - listitem [ref=f4e1421]:
+                - link "Тоҷикӣ" [ref=f4e1422] [cursor=pointer]:
+                  - /url: https://tg.wikipedia.org/wiki/%D0%A1%D0%B0%D2%B3%D0%B8%D1%84%D0%B0%D0%B8_%D0%B0%D1%81%D0%BB%D3%A3
+              - listitem [ref=f4e1423]:
+                - link "ไทย" [ref=f4e1424] [cursor=pointer]:
+                  - /url: https://th.wikipedia.org/wiki/%E0%B8%AB%E0%B8%99%E0%B9%89%E0%B8%B2%E0%B8%AB%E0%B8%A5%E0%B8%B1%E0%B8%81
+              - listitem [ref=f4e1425]:
+                - link "ትግርኛ" [ref=f4e1426] [cursor=pointer]:
+                  - /url: https://ti.wikipedia.org/wiki/%E1%88%98%E1%89%A0%E1%8C%88%E1%88%B2_%E1%8C%88%E1%8C%BD
+              - listitem [ref=f4e1427]:
+                - link "ትግሬ" [ref=f4e1428] [cursor=pointer]:
+                  - /url: https://tig.wikipedia.org/wiki/%E1%8A%A0%E1%8C%8D%E1%8B%B3_%E1%8C%88%E1%8C%BD
+              - listitem [ref=f4e1429]:
+                - link "Türkmençe" [ref=f4e1430] [cursor=pointer]:
+                  - /url: https://tk.wikipedia.org/wiki/Ba%C5%9F_Sahypa
+              - listitem [ref=f4e1431]:
+                - link "Tagalog" [ref=f4e1432] [cursor=pointer]:
+                  - /url: https://tl.wikipedia.org/wiki/Unang_Pahina
+              - listitem [ref=f4e1433]:
+                - link "Tolışi" [ref=f4e1434] [cursor=pointer]:
+                  - /url: https://tly.wikipedia.org/wiki/S%C9%99rlovh%C9%99
+              - listitem [ref=f4e1435]:
+                - link "Setswana" [ref=f4e1436] [cursor=pointer]:
+                  - /url: https://tn.wikipedia.org/wiki/Tsebe_ya_konokono
+              - listitem [ref=f4e1437]:
+                - link "Lea faka-Tonga" [ref=f4e1438] [cursor=pointer]:
+                  - /url: https://to.wikipedia.org/wiki/Peesi_tali_fiefia
+              - listitem [ref=f4e1439]:
+                - link "Toki pona" [ref=f4e1440] [cursor=pointer]:
+                  - /url: https://tok.wikipedia.org/wiki/lipu_open
+              - listitem [ref=f4e1441]:
+                - link "Tok Pisin" [ref=f4e1442] [cursor=pointer]:
+                  - /url: https://tpi.wikipedia.org/wiki/Fran_pes
+              - listitem [ref=f4e1443]:
+                - link "Türkçe" [ref=f4e1444] [cursor=pointer]:
+                  - /url: https://tr.wikipedia.org/wiki/Anasayfa
+              - listitem [ref=f4e1445]:
+                - link "Seediq" [ref=f4e1446] [cursor=pointer]:
+                  - /url: https://trv.wikipedia.org/wiki/Ruwahan_patas
+              - listitem [ref=f4e1447]:
+                - link "Xitsonga" [ref=f4e1448] [cursor=pointer]:
+                  - /url: https://ts.wikipedia.org/wiki/Tlukankulu
+              - listitem [ref=f4e1449]:
+                - link "Татарча / tatarça" [ref=f4e1450] [cursor=pointer]:
+                  - /url: https://tt.wikipedia.org/wiki/%D0%91%D0%B0%D1%88_%D0%B1%D0%B8%D1%82
+              - listitem [ref=f4e1451]:
+                - link "ChiTumbuka" [ref=f4e1452] [cursor=pointer]:
+                  - /url: https://tum.wikipedia.org/wiki/Jani_likulu
+              - listitem [ref=f4e1453]:
+                - link "Twi" [ref=f4e1454] [cursor=pointer]:
+                  - /url: https://tw.wikipedia.org/wiki/Kratafa_Titiriw
+              - listitem [ref=f4e1455]:
+                - link "Reo tahiti" [ref=f4e1456] [cursor=pointer]:
+                  - /url: https://ty.wikipedia.org/wiki/Fa%E2%80%99ari%E2%80%99ira%E2%80%99a
+              - listitem [ref=f4e1457]:
+                - link "Тыва дыл" [ref=f4e1458] [cursor=pointer]:
+                  - /url: https://tyv.wikipedia.org/wiki/%D0%9A%D0%BE%D0%BB_%D0%B0%D1%80%D1%8B%D0%BD
+              - listitem [ref=f4e1459]:
+                - link "Удмурт" [ref=f4e1460] [cursor=pointer]:
+                  - /url: https://udm.wikipedia.org/wiki/%D0%9A%D1%83%D1%82%D1%81%D0%BA%D0%BE%D0%BD_%D0%B1%D0%B0%D0%BC
+              - listitem [ref=f4e1461]:
+                - link "ئۇيغۇرچە / Uyghurche" [ref=f4e1462] [cursor=pointer]:
+                  - /url: https://ug.wikipedia.org/wiki/%D8%A8%D8%A7%D8%B4_%D8%A8%DB%95%D8%AA
+              - listitem [ref=f4e1463]:
+                - link "Українська" [ref=f4e1464] [cursor=pointer]:
+                  - /url: https://uk.wikipedia.org/wiki/%D0%93%D0%BE%D0%BB%D0%BE%D0%B2%D0%BD%D0%B0_%D1%81%D1%82%D0%BE%D1%80%D1%96%D0%BD%D0%BA%D0%B0
+              - listitem [ref=f4e1465]:
+                - link "اردو" [ref=f4e1466] [cursor=pointer]:
+                  - /url: https://ur.wikipedia.org/wiki/%D8%B5%D9%81%D8%AD%DB%82_%D8%A7%D9%88%D9%84
+              - listitem [ref=f4e1467]:
+                - link "Oʻzbekcha / ўзбекча" [ref=f4e1468] [cursor=pointer]:
+                  - /url: https://uz.wikipedia.org/wiki/Bosh_Sahifa
+              - listitem [ref=f4e1469]:
+                - link "Tshivenda" [ref=f4e1470] [cursor=pointer]:
+                  - /url: https://ve.wikipedia.org/wiki/Hayani
+              - listitem [ref=f4e1471]:
+                - link "Vèneto" [ref=f4e1472] [cursor=pointer]:
+                  - /url: https://vec.wikipedia.org/wiki/Wikipedia:Prinsipio
+              - listitem [ref=f4e1473]:
+                - link "Vepsän kel’" [ref=f4e1474] [cursor=pointer]:
+                  - /url: https://vep.wikipedia.org/wiki/P%C3%A4lehtpol%E2%80%99
+              - listitem [ref=f4e1475]:
+                - link "Tiếng Việt" [ref=f4e1476] [cursor=pointer]:
+                  - /url: https://vi.wikipedia.org/wiki/Trang_Ch%C3%ADnh
+              - listitem [ref=f4e1477]:
+                - link "West-Vlams" [ref=f4e1478] [cursor=pointer]:
+                  - /url: https://vls.wikipedia.org/wiki/Voorblad
+              - listitem [ref=f4e1479]:
+                - link "Volapük" [ref=f4e1480] [cursor=pointer]:
+                  - /url: https://vo.wikipedia.org/wiki/Cifapad
+              - listitem [ref=f4e1481]:
+                - link "Walon" [ref=f4e1482] [cursor=pointer]:
+                  - /url: https://wa.wikipedia.org/wiki/Mwaisse_p%C3%A5dje
+              - listitem [ref=f4e1483]:
+                - link "Winaray" [ref=f4e1484] [cursor=pointer]:
+                  - /url: https://war.wikipedia.org/wiki/Syahan_nga_Pakli
+              - listitem [ref=f4e1485]:
+                - link "Wolof" [ref=f4e1486] [cursor=pointer]:
+                  - /url: https://wo.wikipedia.org/wiki/X%C3%ABt_wu_nj%C3%ABkk
+              - listitem [ref=f4e1487]:
+                - link "吴语" [ref=f4e1488] [cursor=pointer]:
+                  - /url: https://wuu.wikipedia.org/wiki/%E5%B0%81%E9%9D%A2
+              - listitem [ref=f4e1489]:
+                - link "Хальмг" [ref=f4e1490] [cursor=pointer]:
+                  - /url: https://xal.wikipedia.org/wiki/%D0%9D%D2%AF%D1%80_%D1%85%D0%B0%D0%BB%D1%85
+              - listitem [ref=f4e1491]:
+                - link "IsiXhosa" [ref=f4e1492] [cursor=pointer]:
+                  - /url: https://xh.wikipedia.org/wiki/Iphepha_Elingundoqo
+              - listitem [ref=f4e1493]:
+                - link "მარგალური" [ref=f4e1494] [cursor=pointer]:
+                  - /url: https://xmf.wikipedia.org/wiki/%E1%83%93%E1%83%A3%E1%83%93%E1%83%AE%E1%83%90%E1%83%A1%E1%83%B7%E1%83%9A%E1%83%90
+              - listitem [ref=f4e1495]:
+                - link "ייִדיש" [ref=f4e1496] [cursor=pointer]:
+                  - /url: https://yi.wikipedia.org/wiki/%D7%94%D7%95%D7%99%D7%A4%D7%98_%D7%96%D7%99%D7%99%D7%98
+              - listitem [ref=f4e1497]:
+                - link "Yorùbá" [ref=f4e1498] [cursor=pointer]:
+                  - /url: https://yo.wikipedia.org/wiki/Oj%C3%BAew%C3%A9_%C3%80k%E1%BB%8D%CC%81k%E1%BB%8D%CC%81
+              - listitem [ref=f4e1499]:
+                - link "Vahcuengh" [ref=f4e1500] [cursor=pointer]:
+                  - /url: https://za.wikipedia.org/wiki/Yiebdaeuz
+              - listitem [ref=f4e1501]:
+                - link "Zeêuws" [ref=f4e1502] [cursor=pointer]:
+                  - /url: https://zea.wikipedia.org/wiki/V%C3%B2blad
+              - listitem [ref=f4e1503]:
+                - link "ⵜⴰⵎⴰⵣⵉⵖⵜ ⵜⴰⵏⴰⵡⴰⵢⵜ" [ref=f4e1504] [cursor=pointer]:
+                  - /url: https://zgh.wikipedia.org/wiki/%E2%B5%9C%E2%B4%B0%E2%B5%99%E2%B5%8F%E2%B4%B0_%E2%B5%8F_%E2%B5%93%E2%B5%99%E2%B5%8F%E2%B5%93%E2%B4%B1%E2%B4%B3
+              - listitem [ref=f4e1505]:
+                - link "文言" [ref=f4e1506] [cursor=pointer]:
+                  - /url: https://zh-classical.wikipedia.org/wiki/%E7%B6%AD%E5%9F%BA%E5%A4%A7%E5%85%B8:%E5%8D%B7%E9%A6%96
+              - listitem [ref=f4e1507]:
+                - link "閩南語 / Bân-lâm-gí" [ref=f4e1508] [cursor=pointer]:
+                  - /url: https://zh-min-nan.wikipedia.org/wiki/Th%C3%A2u-ia%CC%8Dh
+              - listitem [ref=f4e1509]:
+                - link "粵語" [ref=f4e1510] [cursor=pointer]:
+                  - /url: https://zh-yue.wikipedia.org/wiki/%E9%A0%AD%E7%89%88
+              - listitem [ref=f4e1511]:
+                - link "中文" [ref=f4e1512] [cursor=pointer]:
+                  - /url: https://zh.wikipedia.org/wiki/Wikipedia:%E9%A6%96%E9%A1%B5
+              - listitem [ref=f4e1513]:
+                - link "IsiZulu" [ref=f4e1514] [cursor=pointer]:
+                  - /url: https://zu.wikipedia.org/wiki/Ikhasi_Elikhulu
+            - link "Edit links" [ref=f4e1517] [cursor=pointer]:
+              - /url: https://www.wikidata.org/wiki/Special:EntityPage/Q5296#sitelinks-wikipedia
+    - contentinfo [ref=f4e1519]:
+      - list [ref=f4e1520]:
+        - listitem [ref=f4e1521]: This page was last edited on 12 June 2026, at 07:37 (UTC).
+        - listitem [ref=f4e1522]:
+          - text: Page was rendered with
+          - link "Parsoid" [ref=f4e1523] [cursor=pointer]:
+            - /url: https://www.mediawiki.org/wiki/Special:MyLanguage/Parsoid
+          - text: .
+        - listitem [ref=f4e1524]:
+          - text: Text is available under the
+          - link "Creative Commons Attribution-ShareAlike 4.0 License" [ref=f4e1525] [cursor=pointer]:
+            - /url: /wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License
+          - text: ; additional terms may apply. By using this site, you agree to the
+          - link "Terms of Use" [ref=f4e1526] [cursor=pointer]:
+            - /url: https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Terms_of_Use
+          - text: and
+          - link "Privacy Policy" [ref=f4e1527] [cursor=pointer]:
+            - /url: https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Privacy_policy
+          - text: . Wikipedia® is a registered trademark of the
+          - link "Wikimedia Foundation, Inc." [ref=f4e1528] [cursor=pointer]:
+            - /url: https://wikimediafoundation.org/
+          - text: ", a non-profit organization."
+      - list [ref=f4e1529]:
+        - listitem [ref=f4e1530]:
+          - link "Privacy policy" [ref=f4e1531] [cursor=pointer]:
+            - /url: https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Privacy_policy
+        - listitem [ref=f4e1532]:
+          - link "About Wikipedia" [ref=f4e1533] [cursor=pointer]:
+            - /url: /wiki/Wikipedia:About
+        - listitem [ref=f4e1534]:
+          - link "Disclaimers" [ref=f4e1535] [cursor=pointer]:
+            - /url: /wiki/Wikipedia:General_disclaimer
+        - listitem [ref=f4e1536]:
+          - link "Contact Wikipedia" [ref=f4e1537] [cursor=pointer]:
+            - /url: //en.wikipedia.org/wiki/Wikipedia:Contact_us
+        - listitem [ref=f4e1538]:
+          - link "Legal & safety contacts" [ref=f4e1539] [cursor=pointer]:
+            - /url: https://foundation.wikimedia.org/wiki/Special:MyLanguage/Legal:Wikimedia_Foundation_Legal_and_Safety_Contact_Information
+        - listitem [ref=f4e1540]:
+          - link "Code of Conduct" [ref=f4e1541] [cursor=pointer]:
+            - /url: https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Universal_Code_of_Conduct
+        - listitem [ref=f4e1542]:
+          - link "Developers" [ref=f4e1543] [cursor=pointer]:
+            - /url: https://developer.wikimedia.org
+        - listitem [ref=f4e1544]:
+          - link "Statistics" [ref=f4e1545] [cursor=pointer]:
+            - /url: https://stats.wikimedia.org/#/en.wikipedia.org
+        - listitem [ref=f4e1546]:
+          - link "Cookie statement" [ref=f4e1547] [cursor=pointer]:
+            - /url: https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Cookie_statement
+        - listitem [ref=f4e1548]:
+          - link "Mobile view" [ref=f4e1549] [cursor=pointer]:
+            - /url: //en.wikipedia.org/w/index.php?title=Main_Page&mobileaction=toggle_view_mobile
+      - list [ref=f4e1550]:
+        - listitem [ref=f4e1551]:
+          - link [ref=f4e1552] [cursor=pointer]:
+            - /url: https://www.wikimedia.org/
+            - img "Wikimedia Foundation" [ref=f4e1554]
+        - listitem [ref=f4e1555]:
+          - link [ref=f4e1556] [cursor=pointer]:
+            - /url: https://www.mediawiki.org/
+            - img "Powered by MediaWiki" [ref=f4e1558]
+  - generic [ref=f4e1560]:
+    - generic [ref=f4e1561]:
+      - button [ref=f4e1563]: Search
+      - search [ref=f4e1564]:
+        - generic [ref=f4e1567]:
+          - searchbox "Search Wikipedia" [ref=f4e1570]
+          - button "Search" [ref=f4e1571]
+      - generic [ref=f4e1572]: Main Page
+    - generic [ref=f4e1576]:
+      - button [ref=f4e1577]: 349 languages
+      - link [ref=f4e1578] [cursor=pointer]:
+        - /url: "#"
+        - text: Add topic
+  - generic:
+    - list

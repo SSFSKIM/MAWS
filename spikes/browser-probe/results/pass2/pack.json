@@ -1,0 +1,406 @@
+{
+  "electronVite": "5.0.0",
+  "asar": "3.4.1",
+  "electron": "44.4.5",
+  "playwrightCore": "1.63.0",
+  "startedAt": "2026-10-06T16:44:21.345Z",
+  "variants": [
+    {
+      "name": "external-ws-natives-bundled",
+      "dependencies": {
+        "playwright-core": "1.63.0"
+      },
+      "note": "the failure: ws bundled with its natives",
+      "build": {
+        "ms": 784,
+        "status": 0,
+        "extraExternal": [],
+        "stdoutTail": [
+          "vite v7.3.6 building ssr environment for production...",
+          "transforming...",
+          "✓ 42 modules transformed.",
+          "rendering chunks...",
+          "out/main/index.js  134.71 kB",
+          "✓ built in 391ms"
+        ],
+        "stderr": [
+          "(!) renderer and preload config is missing"
+        ],
+        "bundleKB": 132,
+        "requiresLeftInBundle": [
+          "playwright-core"
+        ],
+        "dynamicRequireCalls": 0,
+        "mentionsDirname": 0,
+        "bundlesPlaywrightCore": false
+      },
+      "pack": {
+        "ms": 113,
+        "asarKB": 13300,
+        "unpackedKB": null,
+        "stagedNodeModulesKB": 13138
+      },
+      "run": {
+        "ms": 1162,
+        "status": 1,
+        "signal": null,
+        "stderr": [],
+        "stdout": [],
+        "result": {
+          "steps": [
+            {
+              "name": "ready",
+              "at": 386,
+              "filename": "/private/tmp/maws-e4-0/pack/external-ws-natives-bundled/app.asar/out/main/index.js",
+              "appPath": "/tmp/maws-e4-0/pack/external-ws-natives-bundled/app.asar",
+              "isPackaged": false,
+              "resourcesPath": "/Users/new/Developer/GitHub/MAWS/node_modules/electron/dist/Electron.app/Contents/Resources",
+              "insideAsar": true,
+              "electron": "44.4.5"
+            },
+            {
+              "name": "load playwright-core",
+              "at": 538,
+              "ok": true,
+              "ms": 151,
+              "resolvedAtRunTime": "/private/tmp/maws-e4-0/pack/external-ws-natives-bundled/app.asar/node_modules/playwright-core/index.js",
+              "bufferutilAtRunTime": "not resolvable at run time: Cannot find module 'bufferutil'"
+            },
+            {
+              "name": "window",
+              "at": 991,
+              "ok": true
+            },
+            {
+              "name": "bridge start",
+              "at": 1005,
+              "ok": true,
+              "ms": 13.2
+            }
+          ],
+          "errors": [
+            "uncaught: TypeError: bufferUtil$1.unmask is not a function\n    at bufferUtil.exports.unmask (/private/tmp/maws-e4-0/pack/external-ws-natives-bundled/app.asar/out/main/index.js:163:27)\n    at Receiver.getData (/private/tmp/maws-e4-0/pack/external-ws-natives-bundled/app.asar/out/main/index.js:1220:11)\n    at Receiver.startLoop (/private/tmp/maws-e4-0/pack/external-ws-natives-bundled/app.asar/out/main/index.js:968:18)\n    at Receiver._write (/private/tmp/maws-e4-0/pack/external-ws-natives-bundled/app.asar/out/main/index.js:906:12)\n    at writeOrBuffer (node:internal/streams/writable:574:12)"
+          ]
+        }
+      }
+    },
+    {
+      "name": "bundled",
+      "dependencies": {},
+      "build": {
+        "ms": 5944,
+        "status": 0,
+        "extraExternal": [
+          "kerberos",
+          "bufferutil",
+          "utf-8-validate"
+        ],
+        "stdoutTail": [
+          "vite v7.3.6 building ssr environment for production...",
+          "transforming...",
+          "✓ 78 modules transformed.",
+          "rendering chunks...",
+          "out/main/index.js  6,742.18 kB",
+          "✓ built in 5.58s"
+        ],
+        "stderr": [
+          "(!) renderer and preload config is missing",
+          "\"chromium-bidi/lib/cjs/bidiMapper/BidiMapper\" is imported by \"\u0000chromium-bidi/lib/cjs/bidiMapper/BidiMapper?commonjs-external\", but could not be resolved – treating it as an external dependency.",
+          "\"chromium-bidi/lib/cjs/cdp/CdpConnection\" is imported by \"\u0000chromium-bidi/lib/cjs/cdp/CdpConnection?commonjs-external\", but could not be resolved – treating it as an external dependency.",
+          "../../../../../../Users/new/Developer/GitHub/MAWS/node_modules/playwright-core/lib/coreBundle.js (65669:28): Use of eval in \"../../../../../../Users/new/Developer/GitHub/MAWS/node_modules/playwright-core/lib/coreBundle.js\" is strongly discouraged as it poses security risks and may cause issues with minification.",
+          "../../../../../../Users/new/Developer/GitHub/MAWS/node_modules/playwright-core/lib/coreBundle.js (65676:28): Use of eval in \"../../../../../../Users/new/Developer/GitHub/MAWS/node_modules/playwright-core/lib/coreBundle.js\" is strongly discouraged as it poses security risks and may cause issues with minification."
+        ],
+        "bundleKB": 6584,
+        "requiresLeftInBundle": [
+          "chromium-bidi/lib/cjs/bidiMapper/BidiMapper",
+          "chromium-bidi/lib/cjs/cdp/CdpConnection",
+          "bufferutil",
+          "utf-8-validate",
+          "enquirer",
+          "./custom-prompt",
+          "ajv/dist/runtime/validation_error",
+          "ajv/dist/runtime/uri",
+          "ajv/dist/runtime/ucs2length",
+          "ajv/dist/runtime/equal",
+          "ajv-formats/dist/formats",
+          "kerberos",
+          "playwright",
+          "electron/index.js"
+        ],
+        "dynamicRequireCalls": 2,
+        "mentionsDirname": 9,
+        "bundlesPlaywrightCore": true
+      },
+      "pack": {
+        "ms": 48,
+        "asarKB": 6585,
+        "unpackedKB": null,
+        "stagedNodeModulesKB": null
+      },
+      "run": {
+        "ms": 40013,
+        "status": null,
+        "signal": "SIGKILL",
+        "stderr": [
+          "App threw an error during load",
+          "Error: Cannot find module 'chromium-bidi/lib/cjs/bidiMapper/BidiMapper'",
+          "Require stack:",
+          "- /private/tmp/maws-e4-0/pack/bundled/app.asar/out/main/index.js",
+          "    at node:internal/modules/cjs/loader:1571:15",
+          "    at Module._resolveFilename (node:electron/js2c/browser_init:1:142664)",
+          "    at wrapResolveFilename (node:internal/modules/cjs/loader:1125:27)",
+          "    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1149:10)",
+          "    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1176:12)",
+          "    at Module._load (node:internal/modules/cjs/loader:1348:5)",
+          "    at wrapModuleLoad (node:internal/modules/cjs/loader:268:19)",
+          "    at Module.require (node:internal/modules/cjs/loader:1681:12)",
+          "    at require (node:internal/modules/helpers:157:16)",
+          "    at Object.<anonymous> (/private/tmp/maws-e4-0/pack/bundled/app.asar/out/main/index.js:45:21)"
+        ],
+        "stdout": []
+      }
+    },
+    {
+      "name": "external",
+      "dependencies": {
+        "playwright-core": "1.63.0"
+      },
+      "build": {
+        "ms": 462,
+        "status": 0,
+        "extraExternal": [
+          "bufferutil",
+          "utf-8-validate"
+        ],
+        "stdoutTail": [
+          "vite v7.3.6 building ssr environment for production...",
+          "transforming...",
+          "✓ 38 modules transformed.",
+          "rendering chunks...",
+          "out/main/index.js  133.14 kB",
+          "✓ built in 188ms"
+        ],
+        "stderr": [
+          "(!) renderer and preload config is missing"
+        ],
+        "bundleKB": 130,
+        "requiresLeftInBundle": [
+          "bufferutil",
+          "utf-8-validate",
+          "playwright-core"
+        ],
+        "dynamicRequireCalls": 0,
+        "mentionsDirname": 0,
+        "bundlesPlaywrightCore": false
+      },
+      "pack": {
+        "ms": 90,
+        "asarKB": 13299,
+        "unpackedKB": null,
+        "stagedNodeModulesKB": 13138
+      },
+      "run": {
+        "ms": 1158,
+        "status": 0,
+        "signal": null,
+        "stderr": [],
+        "stdout": [],
+        "result": {
+          "steps": [
+            {
+              "name": "ready",
+              "at": 183,
+              "filename": "/private/tmp/maws-e4-0/pack/external/app.asar/out/main/index.js",
+              "appPath": "/tmp/maws-e4-0/pack/external/app.asar",
+              "isPackaged": false,
+              "resourcesPath": "/Users/new/Developer/GitHub/MAWS/node_modules/electron/dist/Electron.app/Contents/Resources",
+              "insideAsar": true,
+              "electron": "44.4.5"
+            },
+            {
+              "name": "load playwright-core",
+              "at": 307,
+              "ok": true,
+              "ms": 124,
+              "resolvedAtRunTime": "/private/tmp/maws-e4-0/pack/external/app.asar/node_modules/playwright-core/index.js",
+              "bufferutilAtRunTime": "not resolvable at run time: Cannot find module 'bufferutil'"
+            },
+            {
+              "name": "window",
+              "at": 689,
+              "ok": true
+            },
+            {
+              "name": "bridge start",
+              "at": 693,
+              "ok": true,
+              "ms": 4
+            },
+            {
+              "name": "connectOverCDP",
+              "at": 736,
+              "ok": true,
+              "ms": 42.2,
+              "version": "152.0.7977.130"
+            },
+            {
+              "name": "ariaSnapshot",
+              "at": 765,
+              "ok": true,
+              "ms": 29.5,
+              "chars": 87,
+              "text": "- generic [active] [ref=e1]:\n  - button \"Click me\" [ref=e2]\n  - textbox \"Name\" [ref=e3]"
+            },
+            {
+              "name": "click by ref",
+              "at": 802,
+              "ok": true,
+              "ms": 35.1,
+              "textAfter": "clicked"
+            },
+            {
+              "name": "fill",
+              "at": 812,
+              "ok": true,
+              "value": "packed"
+            },
+            {
+              "name": "screenshot",
+              "at": 852,
+              "ok": true,
+              "bytes": 7854
+            },
+            {
+              "name": "evaluate",
+              "at": 854,
+              "ok": true,
+              "title": "packed"
+            }
+          ],
+          "errors": []
+        }
+      }
+    },
+    {
+      "name": "external-unpacked",
+      "dependencies": {
+        "playwright-core": "1.63.0"
+      },
+      "build": {
+        "ms": 477,
+        "status": 0,
+        "extraExternal": [
+          "bufferutil",
+          "utf-8-validate"
+        ],
+        "stdoutTail": [
+          "vite v7.3.6 building ssr environment for production...",
+          "transforming...",
+          "✓ 38 modules transformed.",
+          "rendering chunks...",
+          "out/main/index.js  133.14 kB",
+          "✓ built in 201ms"
+        ],
+        "stderr": [
+          "(!) renderer and preload config is missing"
+        ],
+        "bundleKB": 130,
+        "requiresLeftInBundle": [
+          "bufferutil",
+          "utf-8-validate",
+          "playwright-core"
+        ],
+        "dynamicRequireCalls": 0,
+        "mentionsDirname": 0,
+        "bundlesPlaywrightCore": false
+      },
+      "pack": {
+        "ms": 91,
+        "asarKB": 160,
+        "unpackedKB": 13138,
+        "stagedNodeModulesKB": 13138
+      },
+      "run": {
+        "ms": 849,
+        "status": 0,
+        "signal": null,
+        "stderr": [],
+        "stdout": [],
+        "result": {
+          "steps": [
+            {
+              "name": "ready",
+              "at": 158,
+              "filename": "/private/tmp/maws-e4-0/pack/external-unpacked/app.asar/out/main/index.js",
+              "appPath": "/tmp/maws-e4-0/pack/external-unpacked/app.asar",
+              "isPackaged": false,
+              "resourcesPath": "/Users/new/Developer/GitHub/MAWS/node_modules/electron/dist/Electron.app/Contents/Resources",
+              "insideAsar": true,
+              "electron": "44.4.5"
+            },
+            {
+              "name": "load playwright-core",
+              "at": 287,
+              "ok": true,
+              "ms": 129,
+              "resolvedAtRunTime": "/private/tmp/maws-e4-0/pack/external-unpacked/app.asar/node_modules/playwright-core/index.js",
+              "bufferutilAtRunTime": "not resolvable at run time: Cannot find module 'bufferutil'"
+            },
+            {
+              "name": "window",
+              "at": 657,
+              "ok": true
+            },
+            {
+              "name": "bridge start",
+              "at": 661,
+              "ok": true,
+              "ms": 3.8
+            },
+            {
+              "name": "connectOverCDP",
+              "at": 697,
+              "ok": true,
+              "ms": 36.5,
+              "version": "152.0.7977.130"
+            },
+            {
+              "name": "ariaSnapshot",
+              "at": 721,
+              "ok": true,
+              "ms": 23.1,
+              "chars": 87,
+              "text": "- generic [active] [ref=e1]:\n  - button \"Click me\" [ref=e2]\n  - textbox \"Name\" [ref=e3]"
+            },
+            {
+              "name": "click by ref",
+              "at": 746,
+              "ok": true,
+              "ms": 23.6,
+              "textAfter": "clicked"
+            },
+            {
+              "name": "fill",
+              "at": 752,
+              "ok": true,
+              "value": "packed"
+            },
+            {
+              "name": "screenshot",
+              "at": 781,
+              "ok": true,
+              "bytes": 7854
+            },
+            {
+              "name": "evaluate",
+              "at": 782,
+              "ok": true,
+              "title": "packed"
+            }
+          ],
+          "errors": []
+        }
+      }
+    }
+  ]
+}

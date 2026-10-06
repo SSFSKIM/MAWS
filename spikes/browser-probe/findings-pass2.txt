@@ -1,0 +1,407 @@
+E4-0: Browser probes, pass two. Findings, 2026-10-06.
+Spec: docs/doperpowers/plans/2026-10-05-p1-extension.md §9 E4 (parent pin c7554dcd805476d7c571cee18d753aed8251c752), §3 D,
+§7 A-19 and A-31, §14's E0b entries. A spike: findings only, no product code, no change under src/. Pass one's
+findings.txt, code and results stand untouched; this pass adds pass2/ beside them and one additive hook on cdp/bridge.mjs.
+
+ENVIRONMENT AND METHOD
+  Electron 44.4.5 (MAWS's pin; Chromium 152.0.7977.130, Node 24.21.0), playwright-core 1.63.0, ws 8.22.0, electron-vite
+  5.0.0 and @electron/asar 3.4.1, all from the repository's node_modules (nothing was installed: the probe resolves
+  them through a symlink, `ln -s <repo>/node_modules spikes/browser-probe/node_modules`, which the root ignore
+  pattern `node_modules/` does not cover for a symlink, so it is created to run and removed at hand-back). macOS 26
+  (Darwin 25.6.0), arm64, a 120 Hz display at DPR 2, one-minute load 5 to 11.
+  The probe app is spikes/browser-probe/pass2/main.mjs: a BrowserWindow built like src/main/window.ts (sandboxed
+  renderer, contextIsolation, CSP header on the default session, setWindowOpenHandler deny, will-navigate denied,
+  titleBarStyle hiddenInset, shown with showInactive as MAWS's e2e does) whose renderer (shell.html, a sandboxed
+  preload) reports the browser pane's rect over IPC, and a WebContentsView in partition persist:maws-probe2 added with
+  win.contentView.addChildView and placed on that rect. Three local sites on loopback serve the test pages so that
+  cross-site means a real process swap under Chromium's site isolation: A = http://localhost:17334 (also :17337 as the
+  same-site control), B = http://127.0.0.1:17335, C = http://[::1]:17336. The view's session cancels every request that
+  is not to one of them. The human stand-in is webContents.sendInputEvent (no GUI automation, no real input); the agent
+  is playwright-core over E0b's debugger bridge, which now reports every forwarded command's send and reply time
+  (onCommand). Results are results/pass2/<scenario>.json plus the saved pages, the snapshots, the per-layer screenshot
+  series under shots/, and the Chromium header excerpt that names the modifier bit. Scratch under /tmp/maws-e4-0 and
+  the probe's userData there are deleted at hand-back. No owner data was read; the four saved pages were fetched
+  logged out with curl.
+
+VERDICTS IN ONE LINE EACH
+  (1) human vs synthesised  PARTLY  keys and wheel carry a definitive signal in main (Chromium's kFromDebugger bit on
+                                    input-event's raw `_modifiers`; before-input-event fires only for native keys);
+                                    mouse buttons carry none (Electron's mouse InputEvent has no modifier field), so
+                                    mouse attribution matches input-events against the outstanding Input.dispatch*
+                                    command (type and coordinates) and the race left is a same-pixel press inside a
+                                    1 to 4 ms window; nothing in the page (isTrusted, sourceCapabilities, pointerType,
+                                    screenX) tells them apart.
+  (2) view over renderer     YES, with one blocker found and a workaround measured
+                                    placement follows the renderer's rect within one frame (drag: bounds applied
+                                    0.47 ms median after the rAF callback, 60 of 60 frames; window resize: 3.2 ms),
+                                    setVisible(false) hides in 0.3 ms and a capturePage placeholder costs 5 ms. But a
+                                    child WebContentsView's page is a hidden page on Electron 44.4.5 macOS: 'hidden',
+                                    no requestAnimationFrame, zero frames presented, in every construction order
+                                    (pass one's included), because only BrowserWindow calls WasShown on its own
+                                    contents; the one thing that wakes it, and holds across navigations and process
+                                    swaps, is Emulation.setFocusEmulationEnabled on the tab's debugger session (the
+                                    command in Playwright's attach that masked this in pass one).
+  (3) cross-site navigation  YES    four process swaps, a same-site control and a reload under one attachment: the
+                                    debugger stayed attached, Playwright stayed connected, the main frame id never
+                                    changed, click and snapshot worked after each; re-attach would cost 22 ms warm.
+  (4) OOPIF child sessions   YES    a cross-site iframe is a separate renderer and a child session; the allowlist
+                                    passes it unchanged; click, fill, snapshot refs and screenshots inside it work.
+  (5) snapshot size          YES    GitHub 47,125 chars / 611 refs, Hacker News 49,067 / 560, Wikipedia's main page
+                                    142,864 / 1,401 (YouTube's saved HTML is a JS shell: 0); landmarks cut GitHub to
+                                    8 to 20k; recommend maxChars 24,000 default, line-bounded, with a trailer and a
+                                    `root` that takes a ref or a landmark role.
+  (6) playwright-core packed YES    as a runtime dependency packed into the asar (13 MB, nothing unpacked) the whole
+                                    driver runs from inside app.asar; bundling it into main dies at load on a hoisted
+                                    optional require (chromium-bidi) after `kerberos` is externalised; a bundled ws
+                                    needs `bufferutil` and `utf-8-validate` externalised or its first frame throws.
+  (8) CHIPS sent             YES    a partitioned cookie set through Network.setCookie is sent on the embedded request
+                                    in its partition and nowhere else; Electron's cookies.set accepts partitionKey and
+                                    silently stores the cookie unpartitioned.
+
+[parent-impact] items are marked inline and collected at the end.
+
+======================================================================================================================
+(1) HUMAN AGAINST SYNTHESISED INPUT
+======================================================================================================================
+Scenario (pass2/main.mjs inputScenario; results/pass2/input.json). The view loads A's a.html (a button, a text field).
+The preload (view-preload.cjs, sandboxed) records every pointer, mouse, click, key, beforeinput, input and wheel event
+with isTrusted, sourceCapabilities, pointerType, client and screen coordinates, movement, pressure and timing, and
+reports each to main at once. Main records webContents 'input-event' (with the undocumented raw `_modifiers` integer)
+and 'before-input-event', and the bridge reports every Input.* command's send and reply. Eleven phases: Playwright's
+locator.click, mouse.click, keyboard.press, locator.fill, keyboard.type and mouse.wheel; a raw Input.dispatchMouseEvent
+triple from main on the same debugger session; and the human stand-in through sendInputEvent (mouse without and with
+globalX/globalY, a key, a wheel). All clocks are epoch milliseconds from performance.timeOrigin + performance.now().
+
+What the page sees: nothing. Every event from every source had isTrusted true, sourceCapabilities
+{firesTouchEvents:false} on mouse and key events (null on pointer, input and wheel events), pointerType 'mouse',
+buttons 1 and detail 1 on mousedown, pressure 0.5 on pointerdown for Playwright's clicks and the stand-in alike (a raw
+Input.dispatchMouseEvent without a `force` parameter gives 0; Playwright's carry 0.5, so the agent's clicks do not
+differ there either). screenX minus clientX was 805,78 for Playwright's clicks and for the raw CDP
+triple: the view's screen origin (window 156,33 plus view 649,45). CDP input in this Chromium carries real screen
+coordinates, so the old bot-detection tell (screenX equal to clientX) does not exist here. The naive sendInputEvent
+without globalX/globalY gave screen 0,0 (minus 66,97): a stand-in artifact, fixed by passing the screen point, which
+the probe does in its second mouse phase.
+
+What main sees. 'input-event' fires for CDP-dispatched input exactly as for sendInputEvent: three events for a
+three-command click (mouseMove, mouseDown, mouseUp), two per key press (keyDown, keyUp), five for a wheel (mouseWheel,
+gestureScrollBegin, gestureScrollUpdate, mouseWheel, gestureScrollEnd). Input.insertText (Playwright's fill) produces
+no input-event at all, only DOM beforeinput/input. The mouse InputEvent object has the keys type, clickCount,
+movementX, movementY, button, globalX, globalY, x, y and no modifiers field of any kind; keyboard and wheel events
+carry `modifiers` and the raw `_modifiers`.
+  The signal: Chromium sets WebInputEvent::kFromDebugger = 1 << 23 ("Indication this event was injected by the
+  devtools", third_party/blink/public/common/input/web_input_event.h at 152.0.7977.130, excerpt in
+  results/pass2/web_input_event-modifiers-152.0.7977.130.txt) on every event Input.dispatchKeyEvent and
+  Input.dispatchMouseEvent inject. Observed: `_modifiers` 8388608 (bit 23) on all six CDP keyDown/keyUp events and on
+  both mouseWheel events of the CDP wheel; 0 on sendInputEvent's rawKeyDown, char, keyUp and mouseWheel; 0 on the
+  gestureScroll* events Chromium derives from either wheel. Mouse button events: unobservable, the field is absent.
+  A second key signal: 'before-input-event' fired for the stand-in's keyDown and keyUp and for none of the six CDP
+  key commands (Chromium's PreHandleKeyboardEvent path is the native one). A third, weaker: a CDP keyDown with text
+  arrives as input-event type 'keyDown' (the combined synthetic type); native keys arrive as 'rawKeyDown' then 'char'.
+  The window. Input.dispatch* send-to-reply: median 1.12 ms, max 4.3 ms (n = 13); Playwright's locator.click as a
+  whole 16.9 ms, mouse.click 4.1, keyboard.press 2.9, fill 5.6, wheel 3.1. Every CDP mouse and key input-event fell
+  inside its own command's window with matching type and integer coordinates (click 3/3, 3/3; press 2/2; type 4/4);
+  every stand-in event fell outside every window (0 of 14). Order per press: command sent at 0; input-event +0.03 to
+  +0.2 ms; the DOM event's timestamp the same instant (clock skew under 0.1 ms); the preload's report in main +0.4 to
+  +0.8 ms; the command's reply +1.3 to +4 ms. So both the input-event and the DOM report precede the reply, and a
+  mouse event is attributable at the moment it arrives, not after the action ends. The raw CDP triple issued from main
+  directly (bypassing the bridge hook) matched nothing, as expected: MAWS's own Input.* use must go through the same
+  hook as the tools'.
+
+Verdict: the takeover rule can rely on a signal for keys and wheel and must rely on the window for mouse buttons, and
+the window to use is the command, not the action. Keys and wheel: an input-event whose `_modifiers` has bit 23 is the
+agent's, one without is the human's (double-checked by before-input-event, which only native keys raise). Mouse:
+Electron 44's mouse InputEvent exposes no modifiers, so a mouseDown/mouseUp is the agent's iff an Input.dispatchMouseEvent
+of the matching type (mousePressed/mouseReleased) and the same rounded x,y is outstanding (sent, not replied) and not
+yet consumed by an earlier event; otherwise it is the human's. The race that leaves: a human press at the same pixel
+within the 1 to 4 ms the command is in flight is credited to the agent (its release and the next event are not), and
+nothing else. The coarse "agent action in flight" window (17 ms for a click, longer with actionability waits) is not
+a safe discriminator on its own because a human click during an agent action is exactly the case the rule exists for;
+with per-command matching it needs no separate state. mouseMove is not a trigger (humans move constantly; Playwright
+moves once per click). Nothing in the preload can attribute; its report serves the cursor and hover UI, and the
+attribution lives in main beside the TabDebugger that owns the outstanding-command table.
+[parent-impact] E4's ledger names "the preload's input report" as the control state's source. The report cannot tell
+the two apart; attribution is main's input-event against the TabDebugger's in-flight Input commands (mouse) and the
+kFromDebugger bit (keys, wheel). A precision of §3 D's takeover, not a contradiction. `_modifiers` is undocumented;
+E4c pins a unit test on it against the Electron version and falls back to the window for keys if it ever disappears.
+
+======================================================================================================================
+(2) A WebContentsView LAYERED OVER A BrowserWindow RENDERER
+======================================================================================================================
+Scenario (layerScenario; results/pass2/layer.json; shots/). The shell page lays out a 44 px toolbar, a 240 px
+sidebar, a chat pane and a browser pane split by a handle; shell.js reports the pane's rect with a ResizeObserver
+(window resizes, layout changes) and, during a simulated drag, from inside each requestAnimationFrame callback before
+the frame is presented (60 steps, split 0.42 to 0.20); main rounds the rect and calls view.setBounds on receipt.
+A renderer-drawn sheet sends browser.view.cover; main calls setVisible(false) and later setVisible(true).
+
+Geometry. With titleBarStyle hiddenInset the window's content bounds equal its bounds (1200x800), the shell's
+innerWidth/innerHeight equal the content size, and getBoundingClientRect maps 1:1 onto setBounds coordinates (CSS px
+are DIPs at zoom 1; DPR 2 is the backing scale only). The CSP header installed on the default session reached the
+shell (its inline script was refused) and not the view's partition (its inline script ran), so the browser view keeps
+page CSP intact. ResizeObserver rects are fractional (x 649.195, width 550.805; 20 of 24 resize reports); main rounds
+them, which can leave a sub-pixel seam between the pane's edge and the view; E4a should size the pane on integer px.
+
+Window resize (24 setSize steps, 20 px each way): the renderer's report reached main 3.2 ms median (p95 4.9, max 7.0)
+after setSize, 2.1 ms of it in the renderer-to-main hop; main applied it 0.1 ms later; exactly one report per resize.
+The window's own 'resize' event fires at 1 ms, so a layout the renderer owns costs about 2 ms more than one main
+could compute itself; under one 8.3 ms frame of this display.
+Split drag (60 rAF frames, 8.3 ms apart): report sent 0.1 to 0.3 ms into the callback; renderer-to-main 0.18 ms
+median (max 0.36); bounds applied 0.47 ms median, 0.72 ms max after the callback began; 60 of 60 within one frame.
+The shell's own frame is presented at least one compositor frame after its rAF callback, so the view's new bounds land
+at or before the shell's new pane edge: the mismatch is bounded by one UI-compositor frame and, if visible at all, the
+view leads. A single layout change through the ResizeObserver route (no rAF report) applied in 0.9 ms.
+Screenshot series: per-layer capturePage at four checkpoints (initial, after resize, after drag, after the sheet) is
+in shots/ (the first view capture failed with "Current display surface not available for capture" for 0.8 s after
+load, see the visibility finding). A composited capture of both layers needs Screen Recording; the status on this
+machine for the dev Electron binary was 'granted', yet desktopCapturer.getSources returned empty thumbnails after
+3.0 s each and the app then never returned from app.exit (ScreenCaptureKit teardown); the path was removed and no
+prompt was raised. E4a's e2e should not depend on composited capture; the timing series above is the tearing measure.
+Sheet: cover sent to setVisible(false) applied in 0.27 ms; view.getVisible false; the page kept its state; while
+hidden, capturePage still works (5.2 ms, 1102x1510 at DPR 2) so a frozen placeholder can be taken before or after
+hiding; restore 0.27 ms. While hidden, setInterval(1 ms) ran at 388 ms per tick.
+
+The visibility finding (pass2/visibility.mjs to visibility4.mjs; results/pass2/visibility.json to visibility4.json).
+The child view's page reports document.visibilityState 'hidden', never gets a requestAnimationFrame callback, and
+presents no frames (webContents.beginFrameSubscription counted 0 in 1.5 s while a 100 ms timer rewrote the page's
+text; the window's own renderer in the same window, same test, counted 16 and is 'visible'). It is so from load
+onwards in all seven construction orders tried: BrowserWindow show:false then showInactive() (MAWS's e2e), then
+show(), showInactive() before addChildView, backgroundThrottling:false at construction, BaseWindow show:true (pass
+one's probe), BaseWindow showInactive, BrowserWindow show:true with the view added after ready-to-show; and after
+every restore. Nothing changes it: setBounds, setVisible(false)/(true), webContents.focus(), removeChildView +
+addChildView, showInactive() again, win.focus(), win.blur(), a reload, a second window. On screen that means a page
+that does not update until something forces a frame (a capturePage, a CDP screenshot, a resize; the first capturePage
+after load failed for 0.8 s with "Current display surface not available for capture" because no frame had ever been
+submitted); inferred, since no composited capture was possible. Timers run at hidden-page rates (setInterval(1 ms)
+at 106 to 388 ms per tick).
+  The cause, in Electron 44.4.5's source: shell/browser/api/electron_api_browser_window.cc:278-305, BrowserWindow::
+  Show, ShowInactive and OnWindowShow call web_contents()->WasShown() for the window's own contents (OnWindowHide
+  WasHidden); a child WebContentsView gets no such call (electron_api_web_contents_view.cc has none; the only other
+  WasShown is the <webview> embedder path), and on macOS Chromium's view machinery does not supply it. Electron
+  issue #54626 (October 2026, a re-attached WebContentsView stays hidden on Linux, 44.0.0 through 44.5.1), #44590
+  (a WebContentsView 'hidden' with innerWidth 0 on Apple Silicon) and PR #54311 (setBackgroundThrottling leaving a
+  page's visibility desynchronised) are the same family; none covers this case as such.
+  What wakes it (visibility3, visibility4). Playwright connected through the bridge: 'visible', rAF fires, 11 frames
+  per second; disconnected: hidden again. Of Playwright's attach sequence, replayed one command at a time on a bare
+  webContents.debugger, only `Emulation.setFocusEmulationEnabled {enabled: true}` does it (Page.enable,
+  Runtime.enable, Page.setLifecycleEventsEnabled, Log.enable, Network.enable, Target.setAutoAttach,
+  Page.addScriptToEvaluateOnNewDocument, Page.setInterceptFileChooserDialog change nothing); with it on, the page is
+  'visible' through a same-site navigation, a cross-site process swap (renderer 5 -> 6), a reload, and the cover
+  (under setVisible(false) it stays 'visible' and keeps presenting 11 frames per second with rAF paused); switching it
+  off returns the page to 'hidden' at once, detaching the debugger too. Its cost: document.hasFocus() is true whatever
+  the window's state (the window's own renderer reports false when the window is inactive), so a page cannot see the
+  window lose focus. The other route, webContents.setBackgroundThrottling(false) at run time (Electron's own un-hide,
+  electron_api_web_contents.cc:2861-2878, ShowWithVisibility(kHiddenButPainting)): rAF fires and frames flow but the
+  page stays 'hidden' (document.hidden true, so sites that pause on it pause), and it is lost on the next navigation
+  (rAF false, 0 frames) until toggled again; not a fix. The explanation of pass one: its driver attached Playwright
+  before measuring anything, so every page it touched was awake.
+  Untested: Page.setWebLifecycleState (experimental CDP), an Electron upgrade (no release note names this case), a
+  Windows or Linux run.
+
+Verdict, the cover protocol E4a needs. Placement: the renderer reports the pane's rect from inside the frame that
+moves it (rAF during a drag, ResizeObserver otherwise) as `browser.view.place {x, y, width, height}` in CSS px of the
+window's content area; main rounds to integers and calls setBounds at once; no interpolation, no throttling, no
+main-side layout model is needed (sub-frame latency measured). Wake: the TabDebugger attaches when the tab is created,
+not lazily when a tool first targets it, and sends Emulation.setFocusEmulationEnabled {enabled: true} once; that is
+what makes the view a live page for the human (and the tools ride the same attachment, as E4's contract already
+says). Cover: the renderer sends `browser.view.cover {covered: true}` before it paints a sheet, palette or dialog
+layer; main calls setVisible(false) (0.3 ms) and setFocusEmulationEnabled(false), so the covered page is an honest
+hidden page (no frames, no rAF; sites pause as under a background tab), and the renderer shows a placeholder in the
+pane, ideally the capturePage image main hands it (5 ms) so the sheet's backdrop dims the page rather than a blank;
+on close the renderer sends covered:false, main re-enables focus emulation and calls setVisible(true), and the
+renderer drops the placeholder. Verification: an e2e driven by Playwright cannot see this regression (its own attach
+wakes the page); E4a's check reads document.visibilityState and a frame count through webContents.executeJavaScript
+and beginFrameSubscription from main, with nothing attached, as visibility2.mjs does. E4a also files the Electron
+issue with visibility2.mjs as the reproduction.
+
+======================================================================================================================
+(3) CROSS-SITE NAVIGATION UNDER THE BRIDGE
+======================================================================================================================
+Scenario (crosssiteScenario; results/pass2/crosssite.json). Bridge and Playwright attached on A; six navigations
+without reattaching: page.goto B (cross-site), goBack to A (cross-site), goto A:17337 (same host, other port: same
+site), goto C (cross-site), webContents.loadURL back to A (the chrome's address bar, cross-site), page.reload. After
+each: the renderer process id, Page.getFrameTree's main frame id, the debugger's attachment, Playwright's connection
+and page.url(), evaluate, a click by locator, a snapshot and the Target button's ref.
+
+Result. Renderer process ids 5 -> 6 -> 7 -> 7 -> 8 -> 9 -> 9: a new process on each of the four cross-site
+navigations, none on the same-site one or the reload (site isolation is on in Electron; `localhost`, `127.0.0.1`
+and `[::1]` are three sites). Through all of them: webContents.debugger stayed attached (no 'detach'), the browser
+stayed connected, page.url() matched the destination, evaluate returned the new host, the click worked (29 to 46 ms),
+the snapshot worked (3.5 to 4.9 ms), and the main frame id stayed 66326551783F632B57F4FDEE22DB0117, so the bridge's
+announced targetId (pass one's rule: the real main frame id) remains valid across process swaps. Debugger events per
+swap: Page.frameStartedNavigating, Runtime.executionContextsCleared twice, Page.frameNavigated; no Target.* event,
+no new session. Cross-site goto took 76 to 82 ms against 10 ms same-site (the renderer spawn). Refs renumber per
+document as pass one saw: f1e4, f2e4 ... f6e4 for the same button. 156 commands forwarded, 0 blocked, 0 errors.
+Re-attach, measured although not needed: detach 4 ms; bridge start 0.7 ms, connectOverCDP 4.2 ms, first snapshot
+17.3 ms, 22.2 ms to the first snapshot warm (pass one: about 40 ms cold on first connect).
+
+Verdict: the attachment and Playwright's frame session survive the process swap without any help, because Electron's
+debugger binds to the WebContents (its FrameTreeNode), whose devtools frame id persists across RenderFrameHost swaps,
+and Playwright keys its FrameSession on exactly that id. E4c keeps one bridge per tab across navigations, refreshes
+refs after any navigation (the frame ordinal moves), and reserves re-attach for a renderer crash; a re-attach costs
+about 22 ms warm.
+
+======================================================================================================================
+(4) OOPIF CHILD SESSIONS
+======================================================================================================================
+Scenario (oopifScenario; results/pass2/oopif.json). embed.html on A with an iframe from B, then from A (same-site
+control), then from C. Playwright attached through the bridge with its usual Target.setAutoAttach
+{autoAttach, waitForDebuggerOnStart, flatten} on the page session, which the allowlist forwards.
+
+Result. Cross-site iframes ran in their own renderer (process 10 for B, 11 for C, beside the page's 9); the same-site
+iframe stayed in process 9. For each OOPIF the debugger raised Target.attachedToTarget {type: 'iframe',
+waitingForDebugger: true} on the page session 16 to 18 ms after goto; the bridge admitted the child session id it
+announced, Playwright resumed the child (Runtime.runIfWaitingForDebugger) and enabled its domains: 77 commands per
+child session beside 478 on the page session, 632 forwarded in all, 0 blocked, 0 errors; Target.targetInfoChanged
+followed when the frame's URL resolved; Target.detachedFromTarget arrived when the page navigated away from it. The
+same-site iframe produced no child session. Acting inside the OOPIF: frameLocator click 31 ms (count 1); the
+page-level ariaSnapshot inlines the iframe as `- iframe [ref=f1e6]:` with its subtree under the next frame ordinal
+(`button "Frame button" [ref=f2e4]`, `textbox "Frame field" [ref=f2e8]`); click by that ref 15 to 19 ms (count 2),
+fill by ref ("in the frame"), element screenshots of the iframe (25 KB) and of the button inside it (2.9 KB), and the
+top page's own button afterwards. The same results for the same-site iframe with refs f4eN.
+
+Verdict: the bridge's allowlist, as pass one wrote it, is enough for OOPIFs; nothing in E4c needs to know whether a
+frame is in-process. Refs carry the frame ordinal, so browser_act by ref reaches into iframes without a frame
+argument; the stale-ref error of S2d applies per frame. The session filter still holds: the child ids the bridge
+accepts are only those Chromium announced on the page session.
+
+======================================================================================================================
+(5) SNAPSHOT SIZE
+======================================================================================================================
+Scenario (snapshotScenario; results/pass2/snapshot.json, snapshot-<page>.txt). Four pages saved with curl, logged
+out, served from A with every external request cancelled (so scripts and styles from the sites never load): GitHub's
+and YouTube's front pages as asked, plus Wikipedia's main page and Hacker News's front page because YouTube's HTML is a
+JS shell (418 DOM nodes, an empty body without its scripts: the snapshot is 0 characters). ariaSnapshot({mode:'ai'})
+whole, rooted on each landmark role present, cut at several character caps on a line boundary, and with boxes.
+
+                        chars     lines   refs   est. tokens (chars/4)   ms (median)   chars per ref
+  GitHub front          47,125      805    611        11,800                 31           77
+  Hacker News front     49,067    1,044    560        12,300                 28           88
+  Wikipedia main page  142,864    2,280  1,401        35,700                 49          102
+  YouTube front (shell)      0        1      0             0                  4            -
+  the probe's a.html       448       15     11                                             41
+  Landmarks: GitHub banner 20,258 chars / 245 refs, navigation "Global" 17,489 / 231 (7 navigations), main 16,188 /
+  238, contentinfo 8,235 / 125 (11 to 15 ms each); Wikipedia main 125,007 / 1,274 (the page is its main), banner
+  4,963, contentinfo 3,370, search 208; Hacker News has no landmarks at all (tables: 159 cells, 98 rows).
+  Cut at a cap (line-bounded): GitHub keeps 287 refs (47%) at 24,000 chars and 394 (65%) at 32,000; Hacker News 278
+  (50%) at 24,000; Wikipedia 262 (19%) at 24,000 and 445 (32%) at 48,000. boxes:true grows the text 1.21 to 1.27x.
+
+Verdict and the option. browser_snapshot takes `root` and `maxChars`; the default maxChars is 24,000 characters (about
+6,000 tokens: the two ordinary front pages fit in two snapshots' worth, a sprawling one needs rooting, and a single
+snapshot never approaches the engine's MCP result ceiling of 25,000 tokens). The cut is at a line boundary, never
+inside a node line, followed by a trailer that states what was dropped and how to get it: "… 408 more lines (324
+refs) omitted; call again with root: <ref> for a subtree or raise maxChars". When it truncates, the tool prepends a
+two-level outline of the page (the landmark and section lines with their refs, taken from the same YAML by
+indentation, no extra CDP call) so the agent can pick a root without a second blind snapshot. `root` accepts a ref
+from the previous snapshot or a landmark role (banner, navigation, main, contentinfo, search, complementary, region);
+a rooted snapshot invalidates refs outside its subtree (S2d), which the tool says in its description. maxChars has a
+hard ceiling (64,000) so a model cannot ask for Wikipedia whole. boxes stays off for the agent (comment mode's crop
+reads them separately).
+
+======================================================================================================================
+(6) PLAYWRIGHT-CORE PACKAGED
+======================================================================================================================
+Scenario (pass2/pack/run.mjs, electron.vite.config.mjs, src/main/index.mjs; results/pass2/pack.json). The driver
+(a window with a page, E0b's bridge, connectOverCDP, snapshot, click by ref, fill, screenshot, evaluate) is built with
+the repository's electron-vite 5.0.0 the way MAWS builds main (Vite in library mode, CJS output, the root
+package.json's `dependencies` externalised, everything else bundled), staged with `out/`, package.json and, where
+externalised, a real copy of node_modules/playwright-core (114 files, 13.1 MB), packed with @electron/asar 3.4.1
+(electron-builder's packer) and run as `Electron app.asar`, writing a step log from inside. Four variants.
+
+  external: playwright-core in `dependencies`, packed into the asar. Bundle 130 KB (the app, the bridge, ws); asar
+    13.3 MB; from inside the asar: require('playwright-core') resolves to app.asar/node_modules/playwright-core/
+    index.js and loads in 124 ms; bridge start 4 ms; connectOverCDP 42 ms (Chrome/152.0.7977.130); ariaSnapshot
+    30 ms (87 chars, 3 refs); click by ref 35 ms ("clicked"); fill; screenshot 7,854 bytes; evaluate; clean exit.
+    Nothing was unpacked: playwright-core 1.63 has no native code, its lib/webp_codec.wasm and the bundles read
+    through Electron's asar fs patch, and connectOverCDP spawns nothing.
+  external-unpacked: the same with node_modules/playwright-core left outside the asar (electron-builder's
+    asarUnpack; asar 160 KB plus 13.1 MB unpacked). Identical results (connect 37 ms, snapshot 23 ms, click 24 ms).
+    Unpacking buys nothing.
+  bundled: playwright-core bundled into main (no `dependencies`). Rollup refuses at first on playwright-core's
+    optional dynamic import of `kerberos` (lib/utilsBundle.js); with `kerberos` in rollupOptions.external the build
+    passes in 5.9 s (6.6 MB bundle) with warnings (chromium-bidi/lib/cjs/* unresolved and treated as external; eval
+    in coreBundle.js), and the bundle keeps 14 bare requires it could not resolve (chromium-bidi x2, enquirer,
+    ./custom-prompt, ajv runtime x4, ajv-formats, kerberos, playwright, electron/index.js, bufferutil,
+    utf-8-validate) plus 2 dynamic require calls and 9 uses of __dirname. At load: "App threw an error during load:
+    Cannot find module 'chromium-bidi/lib/cjs/bidiMapper/BidiMapper'" from the bundle's top level (index.js:45):
+    Vite's CommonJS transform hoisted a require that playwright-core keeps inside a function for a driver MAWS never
+    uses; Electron then showed its error dialog and ignored SIGTERM until killed. Externalising that name would
+    expose the next; bundling playwright-core is a dead end, not a configuration.
+  external-ws-natives-bundled: the external variant without the two names below in rollupOptions.external. Loads,
+    starts the bridge, then dies on Playwright's first WebSocket frame: "TypeError: bufferUtil.unmask is not a
+    function" inside the bundled ws. ws feature-detects its optional native accelerators with try { require(
+    'bufferutil') }; the packages are not installed, and Vite replaces a missing optional peer dependency with an
+    empty module (`__viteOptionalPeerDep_bufferutil_ws_true = {}`) instead of a throwing require, so the try
+    succeeds and ws wires its native wrappers to nothing. The same ws runs fine unbundled (pass one, and every run
+    here from the repository tree).
+
+Verdict: ship playwright-core as a runtime dependency, never as part of the main bundle. In package.json it goes under
+`dependencies` (electron-vite externalises it for main, electron-builder packs node_modules/playwright-core into the
+asar as real files, 13 MB, and `require('playwright-core')` in main resolves from the asar); no asarUnpack entry, no
+unpacked directory. The bridge's `ws` can stay bundled (it is a devDependency-shaped import) only with `bufferutil`
+and `utf-8-validate` added to main's rollupOptions.external in electron.vite.config.ts, which restores a throwing
+require and ws's JS fallback; or ws joins `dependencies` and is externalised too. Either way the e2e:packaged run
+exercises connectOverCDP once from the built app, since the dev tree masks both failures. [parent-impact] none for
+§3 D: "playwright-core runs in the main process" holds; the build rule above is E4c's to carry.
+
+======================================================================================================================
+(8) CHIPS SENT
+======================================================================================================================
+Scenario (chipsScenario; results/pass2/chips.json). On about:blank with the view's debugger attached:
+Network.setCookie {name chips_probe, domain 127.0.0.1, secure, SameSite=None, url http://127.0.0.1:17335/,
+partitionKey {topLevelSite "http://localhost", hasCrossSiteAncestor true}} (the shape pass one used for an imported
+CHIPS row), an unpartitioned control plain_probe the same way, and a third through Electron's session.cookies.set
+with a partitionKey field. Then four loads whose B request logs its Cookie header on the server: A embedding B's
+/echo-cookies in an iframe (the partition the cookie was set for), C embedding B (another partition), B top-level
+(the unpartitioned context), A embedding B again.
+
+Result. Both Network.setCookie calls succeeded on http loopback (secure cookies are allowed there; an import's rows
+are https). Network.getAllCookies lists chips_probe with its partitionKey and the other two with none: the cookie
+set through cookies.set with a partitionKey was accepted without error and stored unpartitioned. Sent: A-embeds-B
+chips_probe plain_probe electron_pk_probe (Sec-Fetch-Site cross-site, Sec-Fetch-Dest iframe); C-embeds-B plain_probe
+electron_pk_probe; B-top plain_probe electron_pk_probe; A-embeds-B again all three. session.cookies.get lists
+chips_probe beside the others with no partition field at all.
+
+Verdict: a CHIPS cookie imported through Network.setCookie on the tab's debugger session is sent exactly where Chrome
+would send it (its top-level site, as a cross-site subresource) and nowhere else, so pass one's import route is
+complete end to end. E4b must never route a partitioned row through session.cookies.set: Electron accepts the key and
+drops it, which would turn a partitioned cookie into one sent to every embedding site (a privacy regression over
+Chrome, silent). The import report verifies partitioned rows through Network.getAllCookies on the same session, not
+through cookies.get, which cannot see the partition.
+
+======================================================================================================================
+[parent-impact] COLLECTED
+======================================================================================================================
+  1. §3 D takeover and E4's ledger contract "the preload's input report": attribution of an input to the human or the
+     agent is main's, from webContents 'input-event' against the TabDebugger's in-flight Input.* commands (mouse
+     buttons) and Chromium's kFromDebugger bit, exposed by Electron as the undocumented `_modifiers` (keys, wheel);
+     the preload reports only for the cursor and hover UI. A precision, like A-19's.
+  2. §3 D's view and A-31's cover protocol and lazy attach: on Electron 44.4.5 macOS a page in a child WebContentsView
+     is a hidden page (document.hidden, no rAF, no frames presented) in every construction order, pass one's included,
+     because only BrowserWindow's own contents get WasShown; the measured way to make it live is
+     Emulation.setFocusEmulationEnabled on the tab's debugger session, which holds across navigations and process
+     swaps. So the TabDebugger attaches at tab creation rather than lazily ("started lazily when a browser tool first
+     targets the tab", E0b's recommendation taken into A-31), the cover protocol toggles focus emulation with
+     setVisible, and the page always reports document.hasFocus() true. A precision with a design consequence for
+     E4a and E4c; the alternative (an Electron fix) is upstream and not in any release note found. D-1 pins the
+     engine, not Electron, and no Electron patch is proposed.
+  3. (6) contradicts nothing: playwright-core in main holds, as a `dependencies` entry packed into the asar; the
+     two build rules (playwright-core never bundled; ws's optional natives externalised) are E4c's.
+  4. E4b: session.cookies.set silently drops partitionKey; partitioned rows go through Network.setCookie only and are
+     verified through Network.getAllCookies. A precision of the import route in A-19 and E4b's plan, not a
+     contradiction.
+
+ARTIFACTS
+  spikes/browser-probe/pass2/      main.mjs (the app, six scenarios), run.sh (gate + slot), package.json (no deps)
+    shell.html, shell.css, shell.js, shell-preload.cjs    the MAWS-shaped renderer and its placement protocol
+    view-preload.cjs                                      the view's sandboxed event recorder
+    page/a.html, frame.html, embed.html                   the test pages (served on three sites)
+    visibility.mjs to visibility4.mjs                     the visibility matrices (construction orders; frames and
+                                                          the debugger; Playwright's attach command by command;
+                                                          focus emulation across navigations and the cover)
+    pack/electron.vite.config.mjs, src/main/index.mjs, run.mjs   (6)
+  spikes/browser-probe/cdp/bridge.mjs                    + onCommand (additive; pass one unchanged without it)
+  results/pass2/                   layer.json, input.json, crosssite.json, oopif.json, snapshot.json, chips.json,
+                                   visibility.json to visibility4.json, pack.json; github-front.html,
+                                   youtube-front.html, wikipedia-main.html, hn-front.html (curl, logged out) and
+                                   snapshot-<page>.txt; shots/ (per-layer PNG series);
+                                   web_input_event-modifiers-152.0.7977.130.txt
+  Scratch, deleted at hand-back: /tmp/maws-e4-0 (userData, the pack builds and asars, the fetched sources).
