@@ -275,7 +275,12 @@ void startWithProfileLock(app, () => {
   // reconciles interrupted handoffs once the engine host answers; `session.intent.list` waits for that.
   const sessionService = new SessionService({
     index,
-    host: { dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), ready: () => engineHostSettled(hosts) },
+    host: {
+      dispatch: hosts.dispatch,
+      onEvent: (name, listener) => hosts.onEvent(name, listener),
+      ready: () => engineHostSettled(hosts),
+      onReady: (listener) => hosts.onStreaming('engine-host', listener), // E10: a recovery deferred while the host was unreachable
+    },
     git: createGitRunner(),
     worktrees,
     intents,

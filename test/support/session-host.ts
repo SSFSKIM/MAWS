@@ -3,7 +3,9 @@
 // then plays the statuses a launch reports (`initializing`, then `ready` with the pinned id and the trust answer, or an
 // exit), and answers stop, send, the persisted queue, forget, rewind, rename, the relay and the registry. What survives
 // an app restart (C3's store files and their queues, the registry) is kept apart, so a test can "restart" the app by
-// taking `afterRestart()`, whose process table is empty. Never spawns anything.
+// taking `afterRestart()`, whose process table is empty. E10: `afterRestart({ keep: true })` is a relaunch onto the
+// detached supervisor that kept its rows, and `unavailable` one that main cannot reach yet (every command answers
+// `host_unavailable` until `becomeReady()`). Never spawns anything.
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import type { AppSessionId, SessionId } from '../../src/shared/graph/ids';
@@ -59,14 +61,35 @@ export class FakeEngineHost {
   renameError: string | null = null; // E3: session.renameSession refused (a process that cannot rename)
   launchHangs: boolean | ((spec: LaunchSpec) => boolean) = false; // a crash point: `session.launch` never answers and nothing is reserved
   binaryPath = '/opt/engine/2.1.283';
+  unavailable = false; // E10: every command answers host_unavailable (a supervisor main cannot reach)
+  private readonly readyListeners = new Set<() => void>(); // E10: the session service's, told at becomeReady()
   private readonly listeners = new Map<string, Set<(payload: unknown) => void>>();
   private hostState: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
 
   constructor(readonly disk: HostDisk = new HostDisk()) {}
 
-  // The app restarted: no process survives; the state files, queues and registry do.
-  afterRestart(): FakeEngineHost {
-    return new FakeEngineHost(this.disk);
+  // The app restarted: no process survives; the state files, queues and registry do. E10: with `keep` the supervisor
+  // kept its process table (live and exited rows) and their events; with `unavailable` main cannot reach it yet.
+  afterRestart(opts: { keep?: boolean; unavailable?: boolean } = {}): FakeEngineHost {
+    const next = new FakeEngineHost(this.disk);
+    if (opts.keep) {
+      for (const [id, s] of this.table) next.table.set(id, s);
+      for (const [id, events] of this.events) next.events.set(id, events);
+    }
+    next.unavailable = opts.unavailable ?? false;
+    return next;
+  }
+
+  // E10: the host answers again and streams (main's `ready` line); the session service's listeners run. `reachable:
+  // false` keeps every command failing, as a request that fails right after the transition would.
+  onReady = (listener: () => void): (() => void) => {
+    this.readyListeners.add(listener);
+    return () => this.readyListeners.delete(listener);
+  };
+
+  becomeReady(opts: { reachable?: boolean } = {}): void {
+    this.unavailable = opts.reachable === false;
+    for (const listener of [...this.readyListeners]) listener();
   }
 
   calledWith(name: string): unknown[] {
@@ -96,6 +119,7 @@ export class FakeEngineHost {
   readonly dispatch: HostDispatch = async (owner, name, input) => {
     if (owner !== 'engine-host') throw new Error(`unexpected owner ${owner}`);
     this.calls.push({ name, input });
+    if (this.unavailable) return { ok: false, error: { code: 'host_unavailable', message: 'the engine host is not connected' } };
     try {
       return { ok: true, value: (await this.answer(name, input as Record<string, unknown>)) as never };
     } catch (error) {
