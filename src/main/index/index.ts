@@ -10,6 +10,7 @@ import { ProjectStore } from './projects';
 import { ReplayFixtureStore } from './replay-fixtures';
 import { SessionStore } from './sessions';
 import { SideThreadStore } from './side-threads'; // E3
+import { BrowserHistoryStore } from './browser-history'; // E4a
 
 export class Index {
   readonly sessions: SessionStore;
@@ -18,6 +19,7 @@ export class Index {
   readonly drafts: DraftStore;
   readonly fixtures: ReplayFixtureStore;
   readonly sideThreads: SideThreadStore; // E3
+  readonly browserHistory: BrowserHistoryStore; // E4a
   private readonly db: Db;
   private stamped = 0;
 
@@ -32,6 +34,7 @@ export class Index {
     this.drafts = new DraftStore(this.db);
     this.fixtures = new ReplayFixtureStore(this.db);
     this.sideThreads = new SideThreadStore(this.db); // E3
+    this.browserHistory = new BrowserHistoryStore(this.db); // E4a
   }
 
   // A newer app's database, opened read-only and not used: every store call fails with `index unavailable: <reason>`.
