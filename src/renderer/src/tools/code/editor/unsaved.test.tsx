@@ -116,6 +116,24 @@ describe('unsaved files for the quit guard', () => {
     expect(disk.callsOf('layout.unsavedFiles').at(-1)).toEqual({ paths: [APP, LIB] });
   });
 
+  // Fix wave 1: a save from the merge view sends the hash the merge shows, so Save all saving it would write the owner's
+  // unresolved document over the disk's change; resolving it is the owner's act in that tab.
+  it('never saves a tab in the merge view: a later Save all leaves the disk’s change and answers the conflict again', async () => {
+    const { disk, type } = await openBoth();
+    type(APP, '// app\n');
+    disk.files[APP] = 'const a = 2;\n'; // another writer, unseen by the tab
+    act(() => disk.emit('layout.saveAll', { requestId: 'r1' }));
+    await waitFor(() => expect(disk.callsOf('layout.saveAllDone')).toHaveLength(1));
+    expect(entry(APP)).toMatchObject({ dirty: true, theirs: { view: 'merge' } });
+    const writes = disk.callsOf('files.write').length;
+    act(() => disk.emit('layout.saveAll', { requestId: 'r2' }));
+    await waitFor(() => expect(disk.callsOf('layout.saveAllDone')).toHaveLength(2));
+    expect(disk.callsOf('layout.saveAllDone')[1]).toEqual({ requestId: 'r2', failed: [{ path: APP, message: 'Changed on disk since you opened it' }] });
+    expect(disk.callsOf('files.write')).toHaveLength(writes); // not written
+    expect(disk.files[APP]).toBe('const a = 2;\n'); // the agent's version stays
+    expect(entry(APP)).toMatchObject({ dirty: true, theirs: { view: 'merge' } });
+  });
+
   it('answers a tab whose save was already running as not clean, saving it once', async () => {
     const { disk, type } = await openBoth();
     type(APP, '// app\n');

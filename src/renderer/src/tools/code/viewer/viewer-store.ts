@@ -559,15 +559,19 @@ export function createViewerStore(client: MawsBridge) {
       // E5 (M5): the quit question's Save all. Every dirty tab saves at once (main serialises writes per file); a tab
       // that is still dirty afterwards is answered with its bar's words: a conflict now shows the merge view, an error
       // its message, a save already running its progress, and typing during the save the unsaved mark. A tab gone
-      // meanwhile has nothing left to save.
+      // meanwhile has nothing left to save. A tab already in the merge view is never saved here (fix wave 1): its save
+      // sends the hash the merge shows, so it would write the owner's unresolved document over the disk's change;
+      // resolving it is the owner's act in that tab, and it is answered as the conflict it is.
       async saveAll() {
-        const dirty = [...get().entries.values()].filter((entry) => entry.dirty).map((entry) => entry.tabId);
-        await Promise.all(dirty.map((tabId) => get().save(tabId)));
-        return dirty.flatMap((tabId) => {
+        const dirty = [...get().entries.values()].filter((entry) => entry.dirty);
+        const merging = new Set(dirty.filter((entry) => entry.theirs?.view === 'merge').map((entry) => entry.tabId));
+        await Promise.all(dirty.filter((entry) => !merging.has(entry.tabId)).map((entry) => get().save(entry.tabId)));
+        return dirty.flatMap(({ tabId }) => {
           const entry = get().entries.get(tabId);
           if (!entry?.dirty) return [];
-          const message =
-            entry.saveError !== null
+          const message = merging.has(tabId)
+            ? EDITOR_COPY.conflictOnSave
+            : entry.saveError !== null
               ? EDITOR_COPY.saveFailed(entry.saveError)
               : entry.theirs?.view === 'merge'
                 ? EDITOR_COPY.conflictOnSave
