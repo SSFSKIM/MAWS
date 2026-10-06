@@ -20,7 +20,17 @@ export const PendingAskSchema = z.strictObject({
 export type PendingAsk = z.infer<typeof PendingAskSchema>;
 
 const STEER_TAG = /^\[MAWS ask ([^\]\s]+)\] /;
-const STEER_BLOCK = /\n```json\n([\s\S]*)\n```$/;
+const BLOCK_OPEN = '\n```json\n';
+const BLOCK_CLOSE = '\n```';
+
+// The appended result block alone: the last `json` fence, which must end the text. A question, header, label or answer
+// may carry fences of its own above it; the block's body cannot hold its opener, since JSON escapes every newline.
+function resultBlock(text: string): string | null {
+  if (!text.endsWith(BLOCK_CLOSE)) return null;
+  const end = text.length - BLOCK_CLOSE.length;
+  const start = text.lastIndexOf(BLOCK_OPEN, end);
+  return start === -1 ? null : text.slice(start + BLOCK_OPEN.length, end);
+}
 
 // One answer as the steer's line reads it: the labels (and what was typed under Other), the text in quotes, the paths
 // one per line indented three spaces (so the text starts with a newline), `<name> (<directory>)`, or the two non-answers.
@@ -57,11 +67,11 @@ export function askSteerText(askId: string, questions: readonly AskQuestion[], a
 // untagged message, a block that does not parse as an answered AskResult, or one naming another ask).
 export function parseAskSteer(text: string): { askId: string; result: Extract<AskResult, { status: 'answered' }> } | null {
   const tag = STEER_TAG.exec(text);
-  const block = STEER_BLOCK.exec(text);
-  if (!tag || !block) return null;
+  const block = resultBlock(text);
+  if (!tag || block === null) return null;
   let json: unknown;
   try {
-    json = JSON.parse(block[1]!);
+    json = JSON.parse(block);
   } catch {
     return null;
   }

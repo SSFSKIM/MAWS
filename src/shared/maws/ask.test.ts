@@ -56,6 +56,24 @@ describe('the async answer steer (residue 13)', () => {
     expect(parseAskSteer(text.replace('"status": "answered"', '"status": "asked"'))).toBeNull(); // only an answered result
     expect(parseAskSteer(text.replace('[MAWS ask toolu_9]', '[MAWS ask other]'))).toBeNull(); // the tag and the block agree
   });
+
+  // fix wave: the result block is the last fence alone, whatever fences the questions, headers and labels carry
+  it('round-trips when a question, a header or a label carries a fenced block of its own', () => {
+    const fence = '```json\n{"a": 1}\n```';
+    const fenced: AskQuestion[] = [
+      { id: 'q1', question: `What JSON should we use?\n${fence}`, modality: 'text' },
+      { id: 'q2', question: 'Pick one', header: `Shape ${fence}`, modality: 'choice', options: [{ label: `Use ${fence}` }, { label: 'Plain' }] },
+      { id: 'q3', question: 'Anything?', modality: 'text' },
+    ];
+    const given: AskAnswer[] = [
+      { id: 'q1', question: fenced[0]!.question, status: 'answered', value: `\`\`\`json\n{}\n\`\`\`` },
+      { id: 'q2', question: 'Pick one', status: 'answered', value: [`Use ${fence}`], otherText: '```\nend\n```' },
+      { id: 'q3', question: 'Anything?', status: 'skipped' },
+    ];
+    const text = askSteerText('toolu_f', fenced, given);
+    expect(parseAskSteer(text)).toEqual({ askId: 'toolu_f', result: { status: 'answered', askId: 'toolu_f', answers: given } });
+    expect(parseAskSteer(`${text}\nmore`)).toBeNull(); // the block must end the text
+  });
 });
 
 describe('PendingAsk', () => {
