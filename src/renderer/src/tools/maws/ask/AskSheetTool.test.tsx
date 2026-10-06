@@ -186,6 +186,28 @@ describe('Submit', () => {
     expect(await screen.findByText('No open questions')).toBeTruthy();
   });
 
+  it('Retry waits, as Submit does, while a question is half answered', async () => {
+    await mountWithAsk();
+    fireEvent.click(within(section('q1')).getByRole('radio', { name: 'Green' }));
+    fireEvent.click(submitButton());
+    await fake.reply('maws.ask.answer', { outcome: 'write_failed' });
+    await screen.findByText("Couldn't deliver the answers");
+    fireEvent.click(within(section('q1')).getByRole('radio', { name: 'Other…' }));
+    const retry = screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(true);
+    fireEvent.click(retry);
+    expect(fake.invoked('maws.ask.answer')).toHaveLength(1);
+  });
+
+  it('while one ask’s answers are on their way, no other ask can be submitted', async () => {
+    await mountWithAsk([ASK, { ...ASK, askId: 'toolu_b', title: 'Deploy', questions: [{ id: 'q1', question: 'Ship now?', modality: 'text' }] }]);
+    fireEvent.click(submitButton());
+    fireEvent.click(within(screen.getByRole('navigation', { name: '2 open asks' })).getByRole('button', { name: 'Deploy' }));
+    expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+    await fake.reply('maws.ask.answer', { outcome: 'delivered' });
+    await waitFor(() => expect((submitButton() as HTMLButtonElement).disabled).toBe(false));
+  });
+
   it('not_pending says the ask was answered elsewhere and moves on', async () => {
     await mountWithAsk();
     fireEvent.click(submitButton());
@@ -203,6 +225,18 @@ describe('the asks a session holds', () => {
     await fake.reply('maws.asks.list', { asks: [ASK] });
     expect(await screen.findByRole('heading', { name: 'Setup' })).toBeTruthy();
     expect(submitButton()).toBeTruthy();
+  });
+
+  it('a refused read says so in place of the resting state, and Retry reads again', async () => {
+    mount(undefined);
+    await fake.fail('maws.asks.list', 'engine host unavailable');
+    expect(await screen.findByText("Couldn't read this session's questions")).toBeTruthy();
+    expect(screen.queryByText('No open questions')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(fake.invoked('maws.asks.list')).toHaveLength(2);
+    await fake.reply('maws.asks.list', { asks: [ASK] });
+    expect(await screen.findByRole('heading', { name: 'Setup' })).toBeTruthy();
+    expect(screen.queryByText("Couldn't read this session's questions")).toBeNull();
   });
 
   it('two open asks: a switcher between them, the drafts kept per ask', async () => {

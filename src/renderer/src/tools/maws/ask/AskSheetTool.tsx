@@ -20,7 +20,7 @@ import type { AskSheetParams } from '../actions';
 import { SHEET } from './copy';
 import { canSubmit, EMPTY_DRAFT, skippedCount } from './draft';
 import { AnsweredSection, QuestionSection } from './QuestionSection';
-import { askSheet, dismissAsk, editDraft, ensureLoaded, selectAsk, shownAsk, submitAsk, type AskSheetState as SheetStore, type SheetAsk } from './store';
+import { askSheet, dismissAsk, editDraft, ensureLoaded, loadAsks, selectAsk, shownAsk, submitAsk, type AskSheetState as SheetStore, type SheetAsk } from './store';
 
 export interface AskSheetState {
   appSessionId: AppSessionId | null;
@@ -104,6 +104,7 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
   const projects = useSessions(selectProjectOrder);
   const drafts = state.drafts.get(ask.askId);
   const sending = state.submitting === ask.askId;
+  const busy = state.submitting !== null; // one answer in flight at a time, across the session's asks (store.ts)
   const failed = state.failed?.askId === ask.askId ? state.failed : null;
   const submit = () => void submitAsk(appSessionId, ask.askId, ipc, projects);
 
@@ -123,7 +124,7 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
     );
   }
 
-  const ready = canSubmit(ask.questions, drafts);
+  const ready = canSubmit(ask.questions, drafts); // Submit's rule, Retry's too (submitAsk enforces it)
   const skipped = skippedCount(ask.questions, drafts);
   return (
     <>
@@ -149,13 +150,13 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
             <span className="flex-1" title={failed.detail ?? undefined}>
               {SHEET.failed}
             </span>
-            <CardButton disabled={sending} onClick={submit}>
+            <CardButton disabled={busy || !ready} title={ready ? undefined : SHEET.incomplete} onClick={submit}>
               {SHEET.retry}
             </CardButton>
           </div>
         )}
         <div className="flex justify-end">
-          <CardButton tone="primary" disabled={sending || !ready} title={ready ? undefined : SHEET.incomplete} onClick={submit}>
+          <CardButton tone="primary" disabled={busy || !ready} title={ready ? undefined : SHEET.incomplete} onClick={submit}>
             {sending ? SHEET.submitting : skipped > 0 ? SHEET.submitSkipping(skipped) : SHEET.submit}
           </CardButton>
         </div>
@@ -188,7 +189,7 @@ function Sheet({ appSessionId, ctx }: { appSessionId: AppSessionId; ctx: PanelTo
         <ReadOnly questions={ask.questions} answers={ask.state === 'answered' ? (ask.answers ?? []) : null} />
       </div>
     );
-  } else {
+  } else if (state.readError === null) {
     body = <Centered title={SHEET.rest} detail={SHEET.restDetail} />;
   }
 
@@ -198,6 +199,17 @@ function Sheet({ appSessionId, ctx }: { appSessionId: AppSessionId; ctx: PanelTo
         <p role="status" className="m-0 border-b border-border px-4 py-2 text-ui-sm text-fg-muted">
           {state.notice}
         </p>
+      )}
+      {state.readError !== null && (
+        // the host's table could not be read: "No open questions" would hide a pending ask, so say so and offer a read
+        <div role="alert" className="mx-4 mt-3 flex items-center gap-2 rounded-sm border border-danger px-2.5 py-1.5 text-ui text-danger">
+          <span className="flex-1" title={state.readError}>
+            {SHEET.readFailed}
+          </span>
+          <CardButton disabled={state.reading} onClick={() => void loadAsks(appSessionId, ipc)}>
+            {SHEET.retry}
+          </CardButton>
+        </div>
       )}
       <Switcher appSessionId={appSessionId} asks={held} shown={shown.kind === 'live' ? shown.ask.askId : null} />
       {body}

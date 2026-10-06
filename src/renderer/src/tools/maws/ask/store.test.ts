@@ -15,7 +15,7 @@ import { A, panelOf, probeTool, resetPanelStores } from '../../../test-support/p
 import { useSessions } from '../../../stores/sessions';
 import type { AskRowData } from '../../../transcript';
 import { connectAsks } from './connect';
-import { EMPTY_DRAFT, pickOption, setText } from './draft';
+import { EMPTY_DRAFT, pickOption, setOther, setText } from './draft';
 import { applyAskEvents, askSheet, editDraft, ensureLoaded, resetAskSheets, selectAsk, shownAsk, submitAsk } from './store';
 
 const QUESTIONS: AskQuestion[] = [
@@ -94,11 +94,49 @@ describe('loading the host’s table', () => {
     off();
   });
 
-  it('a refused read leaves the store unloaded, to be read at the next ready', async () => {
+  it('a refused read leaves the store unloaded with the refusal, and the next mount reads again', async () => {
     const fake = fakeClient();
     ensureLoaded(A, fake.client);
+    expect(state().reading).toBe(true);
+    ensureLoaded(A, fake.client); // a read in flight: no second one
+    expect(fake.invoked('maws.asks.list')).toHaveLength(1);
     await fake.fail('maws.asks.list', 'engine host unavailable');
-    expect(state().loaded).toBe(false);
+    expect(state()).toMatchObject({ loaded: false, reading: false, readError: 'engine host unavailable' });
+    ensureLoaded(A, fake.client); // the sheet mounted again
+    expect(fake.invoked('maws.asks.list')).toHaveLength(2);
+    await fake.reply('maws.asks.list', { asks: [pending('a1')] });
+    expect(state()).toMatchObject({ loaded: true, reading: false, readError: null });
+    ensureLoaded(A, fake.client); // loaded: the events keep it current
+    expect(fake.invoked('maws.asks.list')).toHaveLength(2);
+  });
+
+  it('a refused read is still re-read at the next ready', async () => {
+    const fake = fakeClient();
+    const off = connectAsks(fake.client);
+    ensureLoaded(A, fake.client);
+    await fake.fail('maws.asks.list');
+    fake.event('engine.hostState', { state: 'ready', pid: 2, restarts: 1, revision: 3 });
+    expect(fake.invoked('maws.asks.list')).toHaveLength(2);
+    off();
+  });
+
+  it('a cancellation that lands while the first read is out keeps the ask, cancelled, with the snapshot’s questions', async () => {
+    const fake = fakeClient();
+    ensureLoaded(A, fake.client); // an empty store: a restored sheet after a reload
+    applyAskEvents(A, [cancelled('a1')]);
+    await fake.reply('maws.asks.list', { asks: [pending('a1'), pending('a2')] });
+    expect([...state().asks.values()].map((ask) => [ask.askId, ask.state])).toEqual([['a1', 'cancelled'], ['a2', 'pending']]);
+    expect(state().asks.get('a1')?.questions).toEqual(QUESTIONS);
+    applyAskEvents(A, [answered('a2')]);
+    expect(shown()).toMatchObject({ kind: 'live', ask: { askId: 'a1', state: 'cancelled' } });
+  });
+
+  it('an answer that lands while the first read is out keeps the ask out', async () => {
+    const fake = fakeClient();
+    ensureLoaded(A, fake.client);
+    applyAskEvents(A, [answered('a1')]);
+    await fake.reply('maws.asks.list', { asks: [pending('a1')] });
+    expect(state().asks.size).toBe(0);
   });
 });
 
@@ -178,6 +216,28 @@ describe('Submit', () => {
     await fake.reply('maws.ask.answer', { outcome: 'delivered' });
     await retry;
     expect(state().asks.has('a1')).toBe(false);
+  });
+
+  it('Retry after a refusal holds to the same rule as Submit: a half-answered question refuses it', async () => {
+    ready();
+    const fake = fakeClient();
+    const first = submitAsk(A, 'a1', fake.client, []);
+    await fake.reply('maws.ask.answer', { outcome: 'write_failed' });
+    await first;
+    editDraft(A, 'a1', 'q1', (draft) => setOther(QUESTIONS[0]!, draft, '')); // Other chosen, nothing typed
+    await submitAsk(A, 'a1', fake.client, []);
+    expect(fake.invoked('maws.ask.answer')).toHaveLength(1);
+    expect(state()).toMatchObject({ submitting: null, failed: { askId: 'a1', detail: null } });
+  });
+
+  it('one answer in flight at a time across the session’s asks', async () => {
+    ready();
+    const fake = fakeClient();
+    const first = submitAsk(A, 'a1', fake.client, []);
+    await submitAsk(A, 'a2', fake.client, []);
+    expect(fake.invoked('maws.ask.answer')).toHaveLength(1);
+    await fake.reply('maws.ask.answer', { outcome: 'delivered' });
+    await first;
   });
 
   it('a refused command fails the same way, with its message', async () => {

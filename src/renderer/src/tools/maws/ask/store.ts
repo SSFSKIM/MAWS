@@ -1,8 +1,9 @@
 // E1 (M4): the Question sheet's state, one vanilla zustand store per session (E1 execution document, M4's decisions;
 // `ReviewTool`'s per-session store, the budget store's read-at-every-ready). The asks are the host's (G6, X13: pending
-// asks are host memory): read from `maws.asks.list` when a sheet first mounts for the session and again whenever the
-// engine host is back at `ready` (a restarted host lost its table), and followed through the live `maws.ask.*` events,
-// an event about an ask winning over a snapshot still on its way. A cancelled ask stays, marked, so the sheet can say
+// asks are host memory): read from `maws.asks.list` when a sheet mounts for a session not yet read (a refused read is
+// shown and read again at the next mount or Retry) and again whenever the engine host is back at `ready` (a restarted
+// host lost its table), and followed through the live `maws.ask.*` events, an event about an ask winning over a
+// snapshot still on its way. A cancelled ask stays, marked, so the sheet can say
 // the session ended. Drafts live here, not in components, so switching tabs or sessions keeps half-filled answers.
 //
 // What the sheet shows (`shownAsk`): the selected ask when the store holds it; else the ask a capsule handed over
@@ -15,7 +16,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { PendingAsk } from '@shared/maws/ask';
 import type { AskRowData } from '../../../transcript';
 import { SHEET } from './copy';
-import { EMPTY_DRAFT, toAnswers, type Draft, type ProjectRef } from './draft';
+import { canSubmit, EMPTY_DRAFT, toAnswers, type Draft, type ProjectRef } from './draft';
 
 export interface SheetAsk extends PendingAsk {
   state: 'pending' | 'cancelled';
@@ -27,18 +28,24 @@ export interface AskSheetState {
   selected: string | null;
   historical: AskRowData | null; // the read-only ask a capsule handed over
   loaded: boolean; // a `maws.asks.list` answer has been applied
-  submitting: string | null; // the ask whose answers are on their way
+  reading: boolean; // a `maws.asks.list` read is out
+  readError: string | null; // the last read's refusal, until a read succeeds
+  submitting: string | null; // the ask whose answers are on their way; one at a time across the session's asks
   failed: { askId: string; detail: string | null } | null; // the last Submit's refusal, offered for a retry
   notice: string | null;
 }
 
 export type ShownAsk = { kind: 'live'; ask: SheetAsk } | { kind: 'historical'; ask: AskRowData } | { kind: 'rest' };
 
-const initial = (): AskSheetState => ({ asks: new Map(), drafts: new Map(), selected: null, historical: null, loaded: false, submitting: null, failed: null, notice: null });
+const initial = (): AskSheetState => ({ asks: new Map(), drafts: new Map(), selected: null, historical: null, loaded: false, reading: false, readError: null, submitting: null, failed: null, notice: null });
 
 const stores = new Map<AppSessionId, StoreApi<AskSheetState>>();
-// A read in flight per session: its token, and the asks an event touched since it left (their state is the event's).
-const reads = new Map<AppSessionId, { token: symbol; touched: Set<string> }>();
+// A read in flight per session, and the asks an event spoke for since it left, with the last thing the event said: the
+// snapshot never overrides it, and a cancellation of an ask the store did not hold yet takes the snapshot's questions.
+interface Read {
+  touched: Map<string, 'opened' | 'answered' | 'cancelled'>;
+}
+const reads = new Map<AppSessionId, Read>();
 const requested = new Set<AppSessionId>(); // sessions whose sheet asked for the host's table at least once
 
 export function askSheet(appSessionId: AppSessionId): StoreApi<AskSheetState> {
@@ -80,16 +87,17 @@ function without(state: AskSheetState, askId: string): Partial<AskSheetState> {
 // ---- the host's table --------------------------------------------------------------------------------------------------
 
 export async function loadAsks(appSessionId: AppSessionId, client: MawsBridge): Promise<void> {
-  const read = { token: Symbol('maws.asks.list'), touched: new Set<string>() };
+  const read: Read = { touched: new Map() };
   reads.set(appSessionId, read);
+  const store = askSheet(appSessionId);
+  store.setState({ reading: true });
   const result = await client.invoke('maws.asks.list', { appSessionId });
   if (reads.get(appSessionId) !== read) return; // a newer read superseded this one
   reads.delete(appSessionId);
   if (!result.ok) {
-    console.warn(`[maws] maws.asks.list unavailable: ${result.error.message}`);
+    store.setState({ reading: false, readError: result.error.message });
     return;
   }
-  const store = askSheet(appSessionId);
   const state = store.getState();
   const listed = new Map(result.value.asks.map((ask) => [ask.askId, ask]));
   const asks = new Map<string, SheetAsk>();
@@ -98,17 +106,23 @@ export async function loadAsks(appSessionId: AppSessionId, client: MawsBridge): 
   for (const [askId, ask] of state.asks) {
     if (listed.has(askId) || read.touched.has(askId) || ask.state === 'cancelled') asks.set(askId, ask);
   }
+  // what the host listed and the store lacks: pending unless an event spoke for it meanwhile; an answer keeps it out,
+  // a cancellation brings it in cancelled (its questions known only from here)
   for (const [askId, ask] of listed) {
-    if (!asks.has(askId) && !read.touched.has(askId)) asks.set(askId, { ...ask, state: 'pending' });
+    if (asks.has(askId)) continue;
+    const said = read.touched.get(askId);
+    if (said === undefined) asks.set(askId, { ...ask, state: 'pending' });
+    else if (said === 'cancelled') asks.set(askId, { ...ask, state: 'cancelled' });
   }
   const drafts = new Map([...state.drafts].filter(([askId]) => asks.has(askId)));
-  store.setState({ asks, drafts, loaded: true });
+  store.setState({ asks, drafts, loaded: true, reading: false, readError: null });
 }
 
-// The sheet's first mount for the session reads the host's table; later mounts rely on the events and on `reloadAsks`.
+// A sheet's mount: reads the host's table unless it was read or a read is out (a refused read is read again), and
+// registers the session for the re-read at every host `ready`.
 export function ensureLoaded(appSessionId: AppSessionId, client: MawsBridge): void {
-  if (requested.has(appSessionId)) return;
   requested.add(appSessionId);
+  if (askSheet(appSessionId).getState().loaded || reads.has(appSessionId)) return;
   void loadAsks(appSessionId, client);
 }
 
@@ -127,7 +141,7 @@ export function applyAskEvents(appSessionId: AppSessionId, events: readonly Sess
   const read = reads.get(appSessionId);
   const opened: string[] = [];
   for (const event of relevant) {
-    read?.touched.add(event.askId);
+    read?.touched.set(event.askId, event.kind === 'maws.ask.opened' ? 'opened' : event.kind === 'maws.ask.answered' ? 'answered' : 'cancelled');
     const state = store.getState();
     switch (event.kind) {
       case 'maws.ask.opened': {
@@ -184,7 +198,8 @@ export async function submitAsk(appSessionId: AppSessionId, askId: string, clien
   const store = askSheet(appSessionId);
   const state = store.getState();
   const ask = state.asks.get(askId);
-  if (!ask || ask.state !== 'pending' || state.submitting !== null) return;
+  // Submit's own rule, for Retry too: nothing while another answer is out, nothing while a question is half answered
+  if (!ask || ask.state !== 'pending' || state.submitting !== null || !canSubmit(ask.questions, state.drafts.get(askId))) return;
   store.setState({ submitting: askId, failed: null, notice: null });
   const result = await client.invoke('maws.ask.answer', { appSessionId, askId, answers: toAnswers(ask.questions, state.drafts.get(askId), projects) });
   const now = store.getState();

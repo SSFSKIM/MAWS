@@ -32,6 +32,7 @@ export const SHEET = {
   failed: "Couldn't deliver the answers",
   retry: 'Retry',
   answeredElsewhere: 'Already answered elsewhere',
+  readFailed: "Couldn't read this session's questions",
   dismiss: 'Dismiss',
   // read-only
   cancelled: 'This session ended before you answered',
