@@ -78,6 +78,26 @@ describe('renderer ipc client', () => {
     expect(heard).toHaveBeenCalledOnce(); // an answer is not a refusal
   });
 
+  it('answers a refused command as refused even when a refusal listener throws, and still tells the others', async () => {
+    const error = { code: 'host_unavailable', message: 'the engine host is not running' };
+    const { bridge } = fakeBridge({ ok: false, error });
+    const failure = new Error('listener broke');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const heard = vi.fn();
+    const offBroken = onCommandRefused(() => {
+      throw failure;
+    });
+    const off = onCommandRefused(heard);
+    try {
+      await expect(createClient(() => bridge).invoke('session.start', { appSessionId: 'a' as never, message: null, options: {} as never })).resolves.toEqual({ ok: false, error });
+      expect(heard).toHaveBeenCalledExactlyOnceWith('session.start', error);
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('session.start'), failure);
+    } finally {
+      offBroken();
+      off();
+    }
+  });
+
   it('delivers a valid event to the listener', () => {
     const { bridge, deliver } = fakeBridge(null);
     const listener = vi.fn();

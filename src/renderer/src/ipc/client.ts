@@ -26,7 +26,14 @@ export function createClient(bridge: () => MawsBridge): MawsBridge {
         return { ok: false, error: ipcError('invalid_output', message, envelope.error.issues) };
       }
       if (!envelope.data.ok) {
-        for (const listener of refusalListeners) listener(name, envelope.data.error);
+        // A listener's fault is its own: the caller still gets the refusal, and the other listeners still hear it.
+        for (const listener of refusalListeners) {
+          try {
+            listener(name, envelope.data.error);
+          } catch (error) {
+            console.error(`[ipc] a refusal listener failed on ${name}`, error);
+          }
+        }
         return envelope.data;
       }
       return validateCommandOutput(name, envelope.data.value);
