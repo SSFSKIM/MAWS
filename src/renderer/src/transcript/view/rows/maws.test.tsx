@@ -125,8 +125,8 @@ describe('the delivery row', () => {
     expect(view.container.querySelector('[data-delivery-heading]')!.textContent).toBe('Delivered 2 files');
     expect(view.container.querySelector<HTMLElement>('[data-delivery]')!.dataset.urgency).toBe('high');
     const [pdf, script] = [...view.container.querySelectorAll<HTMLElement>('[data-path]')];
-    expect([...pdf!.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Open externally', 'Reveal in Finder']);
-    expect([...script!.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Reveal in Finder']);
+    expect([...pdf!.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['report.pdf', 'Open externally', 'Reveal in Finder']); // E2: the name opens the viewer
+    expect([...script!.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['build.py', 'Reveal in Finder']);
     view.unmount();
 
     const refused = renderRow({ ...row, files: [{ path: 'missing.txt', name: 'missing.txt', id: null }], urgency: 'normal', error: 'send_file: not a file: /repo/missing.txt' }, { storeKey: APP });

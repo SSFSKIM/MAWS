@@ -99,4 +99,10 @@ export const RowSchema = z.discriminatedUnion('kind', [
     urgency: z.enum(['normal', 'high']), error: nullable(z.string()),
   }),
   // E1 end
+  // E2 start
+  z.strictObject({
+    ...base, kind: z.literal('artifact'), toolUseId: z.string(), action: z.enum(['create', 'update']), artifactId: z.string(), title: nullable(z.string()), htmlPath: z.string(),
+    deliverableId: nullable(z.string()), version: nullable(z.number()), error: nullable(z.string()),
+  }),
+  // E2 end
 ]);

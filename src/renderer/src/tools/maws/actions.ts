@@ -41,8 +41,8 @@ export function mawsTranscriptActionsOver(client: MawsBridge): Pick<TranscriptAc
 
 export const mawsTranscriptActions = mawsTranscriptActionsOver(ipc);
 
-// E2 (E2 execution document, Design §4): a row's Open (the artifact row's, a delivered file's name; M5 registers it as
-// `TranscriptActions.openDeliverable`): the Deliverables tool in the row's session on the record, at the row's version
+// E2 (E2 execution document, Design §4): a row's Open (the artifact row's, a delivered file's name; registered as
+// `TranscriptActions.openDeliverable` from App.tsx's E2 block): the Deliverables tool in the row's session on the record, at the row's version
 // when it names one, else the latest. A record that is gone shows the tool's list with the notice (the viewer reads it).
 // Until a build registers the tool, opening does nothing.
 export function openDeliverable(appSessionId: AppSessionId, id: string, version?: number): void {

@@ -38,8 +38,8 @@
         "commands": 0,
         "exploration": 0,
         "files": 3,
-        "mcp": 5,
-        "other": 0,
+        "mcp": 0,
+        "other": 2,
         "skills": 1,
         "web": 0
       },
@@ -50,11 +50,11 @@
       "model": "claude-haiku-4-5-20251001",
       "safeguard": {
         "flagged": 0,
-        "notEvaluated": 9,
+        "notEvaluated": 6,
         "reviewed": 0
       },
       "terminalReason": "completed",
-      "toolCalls": 9,
+      "toolCalls": 6,
       "usage": {
         "cacheCreationInputTokens": 26777,
         "cacheReadInputTokens": 223587,
@@ -63,7 +63,7 @@
         "thinkingTokens": 926
       }
     },
-    "toolCalls": 9,
+    "toolCalls": 6,
     "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707"
   },
   {
@@ -191,60 +191,25 @@
     "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707"
   },
   {
-    "agent": null,
+    "action": "create",
+    "artifactId": "dash",
     "at": "2026-10-06T12:53:13.449Z",
-    "category": "mcp",
-    "classification": {
-      "category": "mcp",
-      "denial": null,
-      "groupable": false,
-      "hidden": false,
-      "humanDecision": true,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {
-        "html_path": "dashboard.html",
-        "id": "dash",
-        "title": "Dashboard"
-      },
-      "kind": "mcp",
-      "result": [
-        {
-          "text": "{\n  \"status\": \"created\",\n  \"id\": \"dash\",\n  \"deliverableId\": \"10edca26-3f45-406b-b141-781c4e54fe4b\",\n  \"version\": 1,\n  \"title\": \"Dashboard\",\n  \"externalReferences\": 0\n}",
-          "type": "text"
-        }
-      ],
-      "server": "maws",
-      "spill": null,
-      "structured": [
-        {
-          "text": "{\n  \"status\": \"created\",\n  \"id\": \"dash\",\n  \"deliverableId\": \"10edca26-3f45-406b-b141-781c4e54fe4b\",\n  \"version\": 1,\n  \"title\": \"Dashboard\",\n  \"externalReferences\": 0\n}",
-          "type": "text"
-        }
-      ],
-      "tool": "artifact_create"
-    },
-    "endedAt": "2026-10-06T12:53:13.546Z",
-    "expanded": true,
-    "id": "cell:toolu_01WzDzsxgQVaHD2wjyyt61Yt",
-    "kind": "cell",
-    "label": "Used maws",
-    "paths": [],
-    "startedAt": "2026-10-06T12:53:13.449Z",
-    "status": "done",
-    "toolName": "mcp__maws__artifact_create",
+    "deliverableId": "10edca26-3f45-406b-b141-781c4e54fe4b",
+    "error": null,
+    "htmlPath": "dashboard.html",
+    "id": "artifact:toolu_01WzDzsxgQVaHD2wjyyt61Yt",
+    "kind": "artifact",
+    "title": "Dashboard",
     "toolUseId": "toolu_01WzDzsxgQVaHD2wjyyt61Yt",
-    "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707"
+    "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707",
+    "version": 1
   },
   {
     "agent": null,
     "at": "2026-10-06T12:53:14.653Z",
-    "category": "mcp",
+    "category": "other",
     "classification": {
-      "category": "mcp",
+      "category": "other",
       "denial": null,
       "groupable": false,
       "hidden": false,
@@ -268,7 +233,7 @@
     "expanded": true,
     "id": "cell:toolu_017TH1WuYWAd1Gmq4QRn3DCV",
     "kind": "cell",
-    "label": "Used maws",
+    "label": "Screenshot of Dashboard v1 (64 × 64)",
     "paths": [],
     "startedAt": "2026-10-06T12:53:14.653Z",
     "status": "done",
@@ -367,59 +332,25 @@
     "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707"
   },
   {
-    "agent": null,
+    "action": "update",
+    "artifactId": "dash",
     "at": "2026-10-06T12:53:22.629Z",
-    "category": "mcp",
-    "classification": {
-      "category": "mcp",
-      "denial": null,
-      "groupable": false,
-      "hidden": false,
-      "humanDecision": true,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {
-        "html_path": "dashboard.html",
-        "id": "dash"
-      },
-      "kind": "mcp",
-      "result": [
-        {
-          "text": "{\n  \"status\": \"updated\",\n  \"id\": \"dash\",\n  \"deliverableId\": \"10edca26-3f45-406b-b141-781c4e54fe4b\",\n  \"version\": 2,\n  \"title\": \"Dashboard\",\n  \"externalReferences\": 0\n}",
-          "type": "text"
-        }
-      ],
-      "server": "maws",
-      "spill": null,
-      "structured": [
-        {
-          "text": "{\n  \"status\": \"updated\",\n  \"id\": \"dash\",\n  \"deliverableId\": \"10edca26-3f45-406b-b141-781c4e54fe4b\",\n  \"version\": 2,\n  \"title\": \"Dashboard\",\n  \"externalReferences\": 0\n}",
-          "type": "text"
-        }
-      ],
-      "tool": "artifact_update"
-    },
-    "endedAt": "2026-10-06T12:53:22.698Z",
-    "expanded": true,
-    "id": "cell:toolu_01DDpRYFhNCCo2pJdJN3gNmg",
-    "kind": "cell",
-    "label": "Used maws",
-    "paths": [],
-    "startedAt": "2026-10-06T12:53:22.629Z",
-    "status": "done",
-    "toolName": "mcp__maws__artifact_update",
+    "deliverableId": "10edca26-3f45-406b-b141-781c4e54fe4b",
+    "error": null,
+    "htmlPath": "dashboard.html",
+    "id": "artifact:toolu_01DDpRYFhNCCo2pJdJN3gNmg",
+    "kind": "artifact",
+    "title": "Dashboard",
     "toolUseId": "toolu_01DDpRYFhNCCo2pJdJN3gNmg",
-    "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707"
+    "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707",
+    "version": 2
   },
   {
     "agent": null,
     "at": "2026-10-06T12:53:23.662Z",
-    "category": "mcp",
+    "category": "other",
     "classification": {
-      "category": "mcp",
+      "category": "other",
       "denial": null,
       "groupable": false,
       "hidden": false,
@@ -451,7 +382,7 @@
     "expanded": true,
     "id": "cell:toolu_01AfHNDtT8yhD7CJ2nfCTUZK",
     "kind": "cell",
-    "label": "Used maws",
+    "label": "Listed 1 artifact",
     "paths": [],
     "startedAt": "2026-10-06T12:53:23.662Z",
     "status": "done",
@@ -460,42 +391,18 @@
     "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707"
   },
   {
-    "agent": null,
+    "action": "update",
+    "artifactId": "nope",
     "at": "2026-10-06T12:53:25.121Z",
-    "category": "mcp",
-    "classification": {
-      "category": "mcp",
-      "denial": null,
-      "groupable": false,
-      "hidden": false,
-      "humanDecision": true,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {
-        "html_path": "dashboard.html",
-        "id": "nope"
-      },
-      "kind": "mcp",
-      "result": "artifact_update: no artifact \"nope\" in this session; use artifact_create",
-      "server": "maws",
-      "spill": null,
-      "structured": "Error: artifact_update: no artifact \"nope\" in this session; use artifact_create",
-      "tool": "artifact_update"
-    },
-    "endedAt": "2026-10-06T12:53:25.226Z",
-    "expanded": true,
-    "id": "cell:toolu_015QRZbTFinGDSrYWvPk7YFv",
-    "kind": "cell",
-    "label": "Used maws",
-    "paths": [],
-    "startedAt": "2026-10-06T12:53:25.121Z",
-    "status": "error",
-    "toolName": "mcp__maws__artifact_update",
+    "deliverableId": null,
+    "error": "artifact_update: no artifact \"nope\" in this session; use artifact_create",
+    "htmlPath": "dashboard.html",
+    "id": "artifact:toolu_015QRZbTFinGDSrYWvPk7YFv",
+    "kind": "artifact",
+    "title": null,
     "toolUseId": "toolu_015QRZbTFinGDSrYWvPk7YFv",
-    "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707"
+    "turnId": "turn:21025d7d-f733-48bb-9a87-6da34b929707",
+    "version": null
   },
   {
     "at": "2026-10-06T12:53:28.601Z",

@@ -22,6 +22,9 @@ export interface TranscriptActions {
   openDelivered(appSessionId: AppSessionId, path: string): Promise<string | null>; // files.openExternal; what to show inline when it was refused, null when opened
   revealDelivered(appSessionId: AppSessionId, path: string): Promise<string | null>; // files.reveal; the same
   // E1 end
+  // E2 start: the artifact row's Open and a delivered file's name (tools/maws/actions.ts, registered from App.tsx's E2 block)
+  openDeliverable(appSessionId: AppSessionId, id: string, version?: number): void; // the Deliverables viewer on the record, at that version
+  // E2 end
 }
 
 export interface RewindInterface {
@@ -35,6 +38,7 @@ export const NO_ACTIONS: TranscriptActions = {
   openSubagent: noop, openFullLog: noop, reviewChanges: noop, openFile: noop, openExternal: noop, editAndResubmit: noop, editPrompt: noop,
   loadSpill: () => Promise.reject(new Error('loadSpill: no adapter supplied')),
   openAsk: noop, openDelivered: () => Promise.resolve(null), revealDelivered: () => Promise.resolve(null), // E1
+  openDeliverable: noop, // E2
 };
 // What a Transcript does for an action its caller did not supply: the two X2 commands C6 can call itself (a spilled
 // result through fs.readSpill, a link through layout.openExternal); the rest belong to C5, C7 and C8 and do nothing.

@@ -9,8 +9,11 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
+import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema } from '@shared/maws/tools'; // E2
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
+import { MAWS_TOOL_USE } from './classify'; // E2
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
+import { firstJsonBlock } from './cells'; // E2
 import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
@@ -106,12 +109,12 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // charter §5.3, the visible transcript stays true to the model's context), a slash command's output and an answered
 // question's receipt (W4, the owner's ruling: what the human answered stays in view; T3's receipts outlive the fold
 // too), what a plugin said in the transcript (R1: its log lines and load issues, as the terminal keeps them), fatal
-// API diagnostics (transient retries remain work), and the `maws` server's capsule and delivery row (E1: what the agent
-// asked and what it delivered stay in view, as an answered question does). The divider folds everything else, so a turn of a local command
+// API diagnostics (transient retries remain work), and the `maws` server's capsule, delivery row and artifact row (E1,
+// E2: what the agent asked, delivered and registered stays in view, as an answered question does). The divider folds everything else, so a turn of a local command
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')));
+  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')));
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
@@ -195,7 +198,8 @@ type Item =
   | { kind: 'request'; toolUseId: ToolUseId }
   | { kind: 'subagents'; group: SubagentGroup }
   | { kind: 'steer'; row: RowOf<'user'> } // a prompt folded into this turn: a persistent row at its delivery position (W1)
-  | { kind: 'ask' | 'delivery'; toolUseId: ToolUseId }; // E1: a `maws` call's row, filled once its result and events are seen
+  | { kind: 'ask' | 'delivery'; toolUseId: ToolUseId } // E1: a `maws` call's row, filled once its result and events are seen
+  | { kind: 'artifact'; toolUseId: ToolUseId }; // E2: the same for an artifact call
 
 interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null; error: string | null /* E1: the engine's refusal */ }
@@ -223,6 +227,21 @@ interface DeliveryRecord {
   error: string | null;
 }
 // E1 end
+// E2 start: what a turn's events say about one `artifact_create` or `artifact_update` call (its artifact row): the call
+// opens it, its result fills the version (the first JSON text block, Decision Log 23), `maws.delivery.artifact` refines
+// it; the disk path has the call and its result alone.
+interface ArtifactRecord {
+  use: Event<'tool.use'>;
+  action: 'create' | 'update';
+  artifactId: string;
+  htmlPath: string;
+  title: string | null; // the call's (an update may carry none), replaced by the result's or the event's
+  deliverableId: string | null;
+  version: number | null;
+  announced: boolean; // `maws.delivery.artifact` said: the result no longer refines
+  error: string | null;
+}
+// E2 end
 
 const isAborted = (reason: string | null) => reason !== null && reason.startsWith('aborted');
 
@@ -250,6 +269,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const pendingRows = new Map<ToolUseId, Pending>();
   const asks = new Map<ToolUseId, AskRecord>(); // E1
   const deliveries = new Map<ToolUseId, DeliveryRecord>(); // E1
+  const artifacts = new Map<ToolUseId, ArtifactRecord>(); // E2
   const retracted = new Set<string>();
   const superseded = new Set<string>();
   const byMarker = new Map<string, LiveBlock>();
@@ -389,6 +409,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           const input = SendFileInputSchema.safeParse(event.input);
           deliveries.set(event.toolUseId, { use: event, input: input.success ? input.data : null, delivered: null, caption: undefined, urgency: null, error: null });
           items.push({ kind: 'delivery', toolUseId: event.toolUseId });
+        } else if (presentation === 'artifact') { // E2
+          artifacts.set(event.toolUseId, artifactOfCall(event));
+          items.push({ kind: 'artifact', toolUseId: event.toolUseId });
         } else {
           pendingRows.set(event.toolUseId, { kind: presentation, use: event, answers: null, outcome: null, feedback: null, requestId: null, error: null });
           items.push({ kind: 'request', toolUseId: event.toolUseId });
@@ -416,6 +439,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (ask) resultOfAsk(ask, event);
         const delivery = deliveries.get(event.toolUseId); // E1
         if (delivery) resultOfDelivery(delivery, event);
+        const artifact = artifacts.get(event.toolUseId); // E2
+        if (artifact) resultOfArtifact(artifact, event);
         break;
       }
       case 'tool.safeguard': {
@@ -568,6 +593,14 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       }
       // E1 end
+      // E2 start: the host's account of an artifact call, routed here by its tool use (reduce.ts)
+      case 'maws.delivery.artifact': {
+        const artifact = event.toolUseId === null ? undefined : artifacts.get(event.toolUseId);
+        if (!artifact) break;
+        Object.assign(artifact, { deliverableId: event.deliverableId, version: event.version, title: event.title, announced: true });
+        break;
+      }
+      // E2 end
       default:
         break;
     }
@@ -606,6 +639,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push({ kind: 'row', row: deliveryRow(deliveries.get(item.toolUseId)!, turn.id) });
         break;
       // E1 end
+      case 'artifact': // E2
+        resolved.push({ kind: 'row', row: artifactRow(artifacts.get(item.toolUseId)!, turn.id) });
+        break;
       case 'subagents': {
         if (item.group.refs.length === 0) break;
         for (const ref of item.group.refs) if (ref.toolUseId && agentIds.has(ref.toolUseId)) ref.agentId = agentIds.get(ref.toolUseId)!;
@@ -622,7 +658,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary. A hook,
   // a notice and what a plugin said (R1) are not the model's work: under MessageDisplay and Stop hooks every final text
   // is followed by hook events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
-  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */]);
+  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */, 'artifact' /* E2 */]);
   const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin')));
   const lastWork = resolved.map(isWork).lastIndexOf(true);
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
@@ -933,6 +969,36 @@ function deliveryRow(delivery: DeliveryRecord, turnId: TurnId): RowOf<'delivery'
   };
 }
 // E1 end
+
+// E2 start: the artifact row from its record. The call's arguments are read as recorded, so a call whose arguments the
+// host refused still names what it tried (its result carries the refusal); the event, when the journal has one,
+// overrides what the result said.
+function artifactOfCall(use: Event<'tool.use'>): ArtifactRecord {
+  const input = record(use.input);
+  return {
+    use, action: use.toolName === MAWS_TOOL_USE.artifact_create ? 'create' : 'update', artifactId: str(input.id), htmlPath: str(input.html_path),
+    title: typeof input.title === 'string' ? input.title : null, deliverableId: null, version: null, announced: false, error: null,
+  };
+}
+
+function resultOfArtifact(artifact: ArtifactRecord, result: Event<'tool.result'>): void {
+  if (result.isError) {
+    artifact.error = toolErrorText(resultText(result.content));
+    return;
+  }
+  if (artifact.announced) return;
+  const parsed = (artifact.action === 'create' ? ArtifactCreateResultSchema : ArtifactUpdateResultSchema).safeParse(firstJsonBlock(result.content));
+  if (parsed.success) Object.assign(artifact, { deliverableId: parsed.data.deliverableId, version: parsed.data.version, title: parsed.data.title });
+}
+
+function artifactRow(artifact: ArtifactRecord, turnId: TurnId): RowOf<'artifact'> {
+  const { use } = artifact;
+  return {
+    id: rowId.artifact(use.toolUseId), turnId, at: use.at, kind: 'artifact', toolUseId: use.toolUseId, action: artifact.action, artifactId: artifact.artifactId,
+    title: artifact.title, htmlPath: artifact.htmlPath, deliverableId: artifact.deliverableId, version: artifact.version, error: artifact.error,
+  };
+}
+// E2 end
 
 function slotRow(event: Event<'permission.requested' | 'question.requested' | 'plan.requested' | 'dialog.requested' | 'elicitation.requested'>, turnId: TurnId | null, toolUseId: ToolUseId | null): RowOf<'request_slot'> {
   const requestKind = event.kind.split('.')[0] as RowOf<'request_slot'>['requestKind'];

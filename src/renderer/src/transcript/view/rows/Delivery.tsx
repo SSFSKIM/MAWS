@@ -3,7 +3,8 @@
 // its name (the full path as its title) and two quiet buttons, Open externally and Reveal in Finder, which go through
 // `files.openExternal` and `files.reveal` with the row's session; a refusal shows inline for a moment. Open externally
 // is offered only for a file `files.openExternal` hands to the OS (`opensExternally`, as the viewer's row does).
-// `urgency: 'high'` takes the accent border. It stays in view when its turn folds (isPersistentRow).
+// `urgency: 'high'` takes the accent border. It stays in view when its turn folds (isPersistentRow). E2 (M5): once the
+// host recorded a file (it has a deliverable id), its name is a button that opens it in the Deliverables viewer.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
@@ -19,6 +20,7 @@ export const REFUSAL_SHOWN_MS = 4_000;
 function FileLine({ file, appSessionId, actionable }: { file: DeliveryRow['files'][number]; appSessionId: AppSessionId | null; actionable: boolean }) {
   const actions = useActions();
   const [problem, setProblem] = useState<{ text: string } | null>(null); // a new object per refusal, so each one is shown its full time
+  const recorded = actionable ? file.id : null; // E2: the deliverable id the name opens; none while pending or refused
   useEffect(() => {
     if (problem === null) return;
     const timer = setTimeout(() => setProblem(null), REFUSAL_SHOWN_MS);
@@ -31,9 +33,16 @@ function FileLine({ file, appSessionId, actionable }: { file: DeliveryRow['files
   };
   return (
     <li className="transcript-delivery-file" data-path={file.path}>
-      <span className="transcript-delivery-name" title={file.path}>
-        {file.name}
-      </span>
+      {recorded !== null ? (
+        // E2: a recorded file's name opens it in the Deliverables viewer
+        <button type="button" className="transcript-delivery-name transcript-delivery-open" title={file.path} disabled={appSessionId === null} onClick={() => appSessionId && actions.openDeliverable(appSessionId, recorded)}>
+          {file.name}
+        </button>
+      ) : (
+        <span className="transcript-delivery-name" title={file.path}>
+          {file.name}
+        </span>
+      )}
       {actionable && (
         <span className="transcript-delivery-actions">
           {opensExternally(file.name) && (

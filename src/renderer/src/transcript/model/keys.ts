@@ -45,6 +45,9 @@ export const rowId = {
   ask: (toolUse: ToolUseId) => row(`ask:${toolUse}`),
   delivery: (toolUse: ToolUseId) => row(`delivery:${toolUse}`),
   // E1 end
+  // E2 start: an artifact call's row, keyed by the tool use
+  artifact: (toolUse: ToolUseId) => row(`artifact:${toolUse}`),
+  // E2 end
 };
 
 export const cellId = {

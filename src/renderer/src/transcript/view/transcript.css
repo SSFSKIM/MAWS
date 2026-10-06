@@ -485,3 +485,16 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-delivery-problem { flex-basis: 100%; color: var(--danger); }
 .transcript-question-refused { margin: 0; padding: 0 12px 8px; color: var(--danger); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
 /* E1 end */
+/* E2 start: the artifact row (a bordered widget like the delivery row) and a delivered file's name as the viewer's
+   button: the name's own colour, underlined on hover. */
+.transcript-artifact { width: fit-content; min-width: 240px; max-width: min(560px, 100%); margin: 4px 0 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); }
+.transcript-artifact-top { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+.transcript-artifact-top strong { min-width: 0; font-weight: 500; color: var(--fg); overflow-wrap: anywhere; }
+.transcript-artifact[data-artifact-state="pending"] .transcript-artifact-top strong { color: var(--fg-muted); }
+.transcript-artifact[data-artifact-state="error"] .transcript-artifact-top strong { color: var(--danger); }
+.transcript-artifact-actions { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
+.transcript-artifact-actions .transcript-quiet-button { margin-top: 0; }
+.transcript-delivery-open { padding: 0; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
+.transcript-delivery-open:hover:not(:disabled) { text-decoration: underline; }
+.transcript-delivery-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+/* E2 end */

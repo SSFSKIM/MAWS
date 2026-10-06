@@ -197,7 +197,6 @@ export function cellLabel(input: CellLabelInput): string {
         case 'EnterPlanMode': return 'Entered plan mode';
         case 'EnterWorktree': return `Entered worktree ${detail ?? ''}`;
         case 'ExitWorktree': return 'Exited worktree';
-        case 'SendUserFile': return `Sent ${detail ?? 'file'}`;
         default: return `Used ${input.toolName}`;
       }
     }
@@ -430,3 +429,34 @@ export const PANE_CELL = {
 // A-17: the engine refused an AskUserQuestion call before any request reached the human (a preview that is not HTML).
 export const questionRefused = (text: string) => `The engine refused this question: ${text}`;
 // E1 end
+
+// ---------------------------------------------------------------------------------------------------------------------
+// E2 start: the artifact tools' row and cells (E2 execution document, Design §9). A row names the artifact by its title,
+// else by the id the agent gave it.
+
+export const ARTIFACT = {
+  created: (name: string, version: number) => `Artifact ${name} · v${version}`,
+  updated: (name: string, version: number) => `Updated artifact ${name} · v${version}`,
+  registering: (name: string) => `Registering artifact ${name}…`,
+  failed: (name: string, error: string) => `Could not register artifact ${name}: ${error}`,
+  open: 'Open',
+} as const;
+
+// The row's one line: its refusal, else Registering until a version is known, else the version it registered.
+export function artifactHeading(row: { action: 'create' | 'update'; artifactId: string; title: string | null; version: number | null; error: string | null }): string {
+  const name = row.title ?? row.artifactId;
+  if (row.error !== null) return ARTIFACT.failed(name, row.error);
+  if (row.version === null) return ARTIFACT.registering(name);
+  return (row.action === 'create' ? ARTIFACT.created : ARTIFACT.updated)(name, row.version);
+}
+
+export const ARTIFACT_CELL = {
+  listing: 'Listing artifacts',
+  listed: (n: number | null) => (n === null ? 'Listed artifacts' : n === 0 ? 'Listed no artifacts' : `Listed ${plural(n, 'artifact')}`),
+  listFailed: (error: string) => `Could not list artifacts: ${error}`,
+  screenshotting: (id: string) => `Taking a screenshot of ${id}`,
+  screenshot: (shot: { title: string; version: number; width: number; height: number } | null, id: string) =>
+    shot === null ? `Screenshot of ${id}` : `Screenshot of ${shot.title} v${shot.version} (${shot.width} × ${shot.height})`,
+  screenshotFailed: (error: string) => `Could not screenshot: ${error}`,
+} as const;
+// E2 end

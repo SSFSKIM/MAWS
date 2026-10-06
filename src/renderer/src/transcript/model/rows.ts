@@ -70,6 +70,11 @@ export type Row = RowBase &
     | { kind: 'ask'; toolUseId: ToolUseId; askId: string; title: string | null; context: string | null; blocking: boolean; questions: AskQuestion[]; state: 'pending' | 'asked' | 'answered' | 'cancelled' | 'error'; answers: AskAnswer[] | null; error: string | null; cancelReason: AskCancelReason | null /* why a cancelled ask was cancelled, when an event said; else null */ }
     | { kind: 'delivery'; toolUseId: ToolUseId; files: { path: string; name: string; id: string | null }[]; caption: string | null; urgency: 'normal' | 'high'; error: string | null }
     // E1 end
+    // E2 start: an `artifact_create` or `artifact_update` call's row (E2 execution document, Design §9): from the call,
+    // filled by its result and refined by `maws.delivery.artifact`; `title` null until a source names it (an update may
+    // carry none), `deliverableId` and `version` null until the version is registered
+    | { kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null }
+    // E2 end
   );
 
 // E1: an ask as its capsule holds it, without the row base: what the Question sheet shows when the capsule reopens it

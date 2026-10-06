@@ -77,6 +77,8 @@ import { registerTranscriptActions as registerMawsTranscriptActions } from './tr
 import { deliverablesTool } from './tools/deliverables/DeliverablesTool';
 import { DeliverableTab } from './tools/deliverables/DeliverableTab';
 import { connectDeliverables } from './tools/deliverables/store';
+import { openDeliverable } from './tools/maws/actions';
+import { registerTranscriptActions as registerDeliverableTranscriptActions } from './transcript';
 // E2 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
@@ -186,13 +188,14 @@ export function App() {
   useEffect(() => connectAsks(), []);
   // E1 end
   // E2 start: the Deliverables tool and its main tab, registered once and never unregistered (C8a's rule above), and
-  // the host's write announcements and main's console attribution into the deliverables store. The transcript's
-  // openDeliverable joins TranscriptActions with M5's rows.
+  // the host's write announcements and main's console attribution into the deliverables store; the transcript's
+  // artifact row and a delivered file's name open the viewer through openDeliverable
   useEffect(() => {
     registerPanelTool(deliverablesTool);
     registerSlot('deliverableTab', DeliverableTab);
   }, []);
   useEffect(() => connectDeliverables(), []);
+  useEffect(() => registerDeliverableTranscriptActions({ openDeliverable }), []);
   // E2 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
