@@ -80,6 +80,10 @@ export const FilesReadOutputSchema = z.strictObject({
   // E5: the whole file's hash when asked (`hash: true`); null when not asked, and for a file past
   // FILES_READ_MAX_LENGTH (a head is never edited).
   hash: HashSchema.nullable(),
+  // E5: with the hash, whether the hashed bytes are valid UTF-8 (main's strict decode of the whole buffer), so the
+  // renderer knows the text it holds re-encodes to the file's bytes exactly; null when not hashed. A byte-length
+  // comparison is no such test: a truncated multi-byte sequence decodes to U+FFFD, which may be as long.
+  utf8: z.boolean().nullable(),
 });
 export type FilesReadOutput = z.infer<typeof FilesReadOutputSchema>;
 

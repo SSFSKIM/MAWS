@@ -178,7 +178,7 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('files.list', { appSessionId: 'a' }).ok).toBe(true);
       expect(validateCommandInput('files.list', { appSessionId: 'a', path: '/r', depth: 2 }).ok).toBe(false);
       expect(validateCommandInput('files.watch', { appSessionId: 'a' }).ok).toBe(false);
-      const out = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain', hash: null };
+      const out = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain', hash: null, utf8: null };
       expect(validateCommandOutput('files.read', out)).toEqual({ ok: true, value: out });
       expect(validateCommandOutput('files.read', { ...out, encoding: 'latin1' }).ok).toBe(false);
       const entry = { name: 'a', path: '/r/a', kind: 'other', size: 0, mtimeMs: 1, target: null };
@@ -190,7 +190,7 @@ describe('ipc schema validates both directions', () => {
     // C8c end
 
     // E5 start: files.write, the hash-checked save, and the hash files.read answers on request.
-    it('carries E5 files.write with the hash pattern and the content cap, and the read hash', () => {
+    it('carries E5 files.write with the hash pattern and the content cap, and the read hash with its UTF-8 validity', () => {
       const hash = 'a'.repeat(64);
       expect(files.FILES_WRITE_MAX_BYTES).toBe(files.FILES_READ_MAX_LENGTH);
       expect(files.HashSchema.safeParse('0123456789abcdef'.repeat(4)).success).toBe(true);
@@ -218,9 +218,12 @@ describe('ipc schema validates both directions', () => {
       expect(read({ hash: true })).toBe(true);
       expect(read({ hash: 'yes' })).toBe(false);
       const out = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain' };
-      expect(validateCommandOutput('files.read', { ...out, hash }).ok).toBe(true);
-      expect(validateCommandOutput('files.read', out).ok).toBe(false); // the field is always answered, null when not hashed
-      expect(validateCommandOutput('files.read', { ...out, hash: 'A'.repeat(64) }).ok).toBe(false);
+      expect(validateCommandOutput('files.read', { ...out, hash, utf8: true }).ok).toBe(true);
+      expect(validateCommandOutput('files.read', { ...out, hash, utf8: false }).ok).toBe(true);
+      expect(validateCommandOutput('files.read', { ...out, utf8: null }).ok).toBe(false); // the fields are always answered, null when not hashed
+      expect(validateCommandOutput('files.read', { ...out, hash: null }).ok).toBe(false);
+      expect(validateCommandOutput('files.read', { ...out, hash, utf8: 'yes' }).ok).toBe(false);
+      expect(validateCommandOutput('files.read', { ...out, hash: 'A'.repeat(64), utf8: true }).ok).toBe(false);
     });
     // E5 end
 

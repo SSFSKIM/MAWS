@@ -1,7 +1,8 @@
 // The editor's registrations (E5 execution document, Interfaces *The close guard and the action*): C5's close guard for
-// `file` tabs, which closes a clean tab at once and asks about a dirty one (Save keeps the tab unless the save answered
-// `ok`: a conflict leaves it showing the disk's version, an error its message), and `file.save` (⌘S, File › Save file),
-// which saves the focused pane's active tab when it is a file tab and does nothing otherwise.
+// `file` tabs, which closes a clean tab at once and asks about a dirty one (Save closes it only when the save answered
+// `ok` and left the entry clean: the sheet closes on submit, so typing during the write stays in the document and keeps
+// the tab, as a conflict keeps it showing the disk's version and an error its message), and `file.save` (⌘S, File ›
+// Save file), which saves the focused pane's active tab when it is a file tab and does nothing otherwise.
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { registerAction, registerCloseGuard } from '../../../keymap/actions-runtime';
 import { useLayout } from '../../../stores/layout';
@@ -16,7 +17,8 @@ async function guardFileClose(ref: TabRef): Promise<boolean> {
   const choice = await askClose(ref.id, basename(ref.path));
   if (choice === 'cancel') return false;
   if (choice === 'discard') return true;
-  return (await useViewer.getState().save(ref.id)) === 'ok';
+  if ((await useViewer.getState().save(ref.id)) !== 'ok') return false;
+  return !useViewer.getState().entries.get(ref.id)?.dirty;
 }
 
 function saveFocusedFile(): void {

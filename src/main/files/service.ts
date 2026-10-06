@@ -27,6 +27,7 @@
 // Its recorded limits: a crash between the truncate and the last write leaves the file truncated (the editor keeps its
 // content and stays dirty until `ok`), and the per-file serialisation covers MAWS's own writers only, so an outside
 // writer between the compare and the write is not caught (containment is guaranteed, not an atomic compare-and-swap).
+import { isUtf8 } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import fs, { type BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
@@ -216,7 +217,8 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     try {
       // A hashed read is one read of the descriptor: the whole file into one buffer, hashed, and every byte answered
       // (the chunk, the sniffed head, the settle step's extra bytes, `bytes` itself) taken from that buffer, so the chunk
-      // is always the hashed file's even when the file changes meanwhile. Past the cap no hash is answered.
+      // is always the hashed file's even when the file changes meanwhile; `utf8` is a strict decode of that same buffer.
+      // Past the cap no hash is answered.
       const whole = hash && Number(stat.size) <= FILES_READ_MAX_LENGTH ? await readWhole(handle, Number(stat.size), FILES_READ_MAX_LENGTH) : null;
       const bytesAt: ByteSource = whole ? async (count, position) => whole.subarray(position, position + count) : (count, position) => readFully(handle, count, position);
       const size = whole ? whole.length : Number(stat.size);
@@ -234,6 +236,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
         truncated: offset + chunk.length < size,
         mime,
         hash: whole ? sha256(whole) : null,
+        utf8: whole ? isUtf8(whole) : null,
       };
     } finally {
       await handle.close();

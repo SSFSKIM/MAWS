@@ -112,6 +112,22 @@ describe('editor registrations', () => {
       expect(tabOpen()).toBe(false);
     });
 
+    it('keeps the tab when typing lands while the guard’s Save writes: the typing stays, dirty against what was saved', async () => {
+      const { disk } = await openApp({ dirty: true });
+      const write = disk.hold('files.write');
+      const closing = requestCloseTab(ID);
+      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(disk.callsOf('files.write')).toHaveLength(1));
+      expect(sheet()).toBeNull(); // the sheet closed on submit; the editor takes typing again
+      act(() => view().dispatch({ changes: { from: view().state.doc.length, insert: '// more\n' }, userEvent: 'input.type' }));
+      await act(async () => write.release());
+      await act(() => closing);
+      expect(tabOpen()).toBe(true);
+      expect(disk.files[APP]).toBe('// mine\nconst a = 1;\n');
+      expect(view().state.doc.toString()).toBe('// mine\nconst a = 1;\n// more\n');
+      expect(entry()).toMatchObject({ text: '// mine\nconst a = 1;\n', saving: false, dirty: true });
+    });
+
     it('keeps the tab when the guard’s Save finds the file changed, now showing the merge view', async () => {
       const { disk } = await openApp({ dirty: true });
       disk.files[APP] = 'const a = 2;\n'; // no event: the save finds it

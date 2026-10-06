@@ -14,13 +14,15 @@
 // No CodeMirror here: this module is in the main chunk. The editor state a CodeView leaves behind is kept opaque in
 // `viewState(tabId)`, beside the scroll offsets, where rendering never reads it.
 //
-// E5 (E5 execution document, Interfaces *The entry's editing fields* and *The editing state machine*): a complete,
-// losslessly decoded code text read with its hash is editable. The entry holds the baseline (`text` with `hash`, what
-// the tab believes is on disk); the document itself is the code view's, read through `viewState(tabId).docOf`. Every
-// read of a load asks for the file's hash, and a load's answer is committed by the state the entry is in when it
-// completes: while clean it replaces the text as before (unless its hash is the baseline's: an own save, a spurious
-// event), while dirty it becomes `theirs` and the document stands. A save writes the document captured at invocation
-// through `files.write` with the baseline's hash (the merge view's `theirs.hash` once the owner has seen theirs).
+// E5 (E5 execution document, Interfaces *The entry's editing fields* and *The editing state machine*): a complete code
+// text read with its hash, whose bytes main found valid UTF-8, is editable. The entry holds the baseline (`text` with
+// `hash`, what the tab believes is on disk); the document itself is the code view's, read through
+// `viewState(tabId).docOf`. Every read of a load asks for the file's hash, and a load's answer is committed by the state
+// the entry is in when it completes: while clean it replaces the text as before (unless its hash is the baseline's: an
+// own save, a spurious event), while dirty it becomes `theirs` and the document stands. A save writes the document
+// captured at invocation through `files.write` with the baseline's hash (the merge view's `theirs.hash` once the owner
+// has seen theirs). A save's answer, and the conflict read it may start, land only on the entry incarnation that issued
+// them.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
@@ -149,10 +151,11 @@ export function lineBreakOf(text: string): '\n' | '\r\n' {
 }
 
 // E5: whether a loaded text is the file's bytes exactly, so writing it back changes nothing the owner did not change: a
-// complete utf8 code (or markdown) text, read with its hash, whose UTF-8 length is the file's size (a lossy decode
-// replaced bytes with U+FFFD and differs). Markdown is edited only in its Source view, the one that shows an editor.
-export const isEditable = (entry: Pick<ViewerEntry, 'kind' | 'complete' | 'encoding' | 'hash' | 'text' | 'bytes'>): boolean =>
-  (entry.kind === 'code' || entry.kind === 'markdown') && entry.complete && entry.encoding === 'utf8' && entry.hash !== null && utf8Length(entry.text) === entry.bytes;
+// complete utf8 code (or markdown) text, read with its hash, whose hashed bytes main's strict decode found valid UTF-8
+// (`utf8`). Not a length comparison: a truncated multi-byte sequence decodes to U+FFFD, which may be just as long, and
+// would be written back as `ef bf bd`. Markdown is edited only in its Source view, the one that shows an editor.
+export const isEditable = (file: Pick<ViewerEntry, 'kind' | 'complete' | 'encoding' | 'hash'> & { utf8: boolean | null }): boolean =>
+  (file.kind === 'code' || file.kind === 'markdown') && file.complete && file.encoding === 'utf8' && file.hash !== null && file.utf8 === true;
 
 // E5: why a code view is read-only, shown as its content's title; null when it is editable or no reason is the owner's
 // to know (an svg's source).
@@ -174,8 +177,9 @@ async function settled<N extends 'files.read' | 'files.write'>(call: Promise<Com
 
 const isNotFound = (message: string) => message.startsWith('not found:');
 
-// What a load read, committed whole at its end (a `change` load) or patched as it goes (an `open` load).
-type LoadedFile = Pick<ViewerEntry, 'kind' | 'mime' | 'encoding' | 'bytes' | 'text' | 'base64' | 'loaded' | 'complete' | 'hash'>;
+// What a load read, committed whole at its end (a `change` load) or patched as it goes (an `open` load). `utf8` (E5) is
+// the read's answer about the hashed bytes, which decides `editable` and is not kept on the entry.
+type LoadedFile = Pick<ViewerEntry, 'kind' | 'mime' | 'encoding' | 'bytes' | 'text' | 'base64' | 'loaded' | 'complete' | 'hash'> & { utf8: boolean | null };
 
 export function createViewerStore(client: MawsBridge) {
   const holds = new Map<string, WatchHold>();
@@ -183,6 +187,10 @@ export function createViewerStore(client: MawsBridge) {
   // removed entry can never match the entry that replaced it.
   const generations = new Map<string, number>();
   let lastGeneration = 0;
+  // E5: each tab's entry incarnation, numbered when the store creates or replaces the entry, from a counter that only
+  // grows: a save's answer (and its conflict read's) lands only on the incarnation that issued the save.
+  const incarnations = new Map<string, number>();
+  let lastIncarnation = 0;
   const mounted = new Map<string, number>();
   const stale = new Set<string>();
   const used = new Map<string, number>();
@@ -203,6 +211,7 @@ export function createViewerStore(client: MawsBridge) {
       holds.get(tabId)?.release();
       holds.delete(tabId);
       generations.delete(tabId);
+      incarnations.delete(tabId);
       stale.delete(tabId);
       used.delete(tabId);
       mounted.delete(tabId);
@@ -260,7 +269,8 @@ export function createViewerStore(client: MawsBridge) {
         if (!settledAlready) patch(tabId, ready);
         return;
       }
-      patch(tabId, { ...ready, ...read, editable: isEditable(read), epoch: entry.epoch + 1, updated: entry.updated + 1 });
+      const { utf8, ...file } = read;
+      patch(tabId, { ...ready, ...file, editable: isEditable({ ...file, utf8 }), epoch: entry.epoch + 1, updated: entry.updated + 1 });
     };
 
     // One load per tab at a time: a newer one (or the entry's removal) makes an older one's answers land nowhere. A
@@ -288,11 +298,12 @@ export function createViewerStore(client: MawsBridge) {
       const kind = kindOf({ name: path, mime: head.mime, bytes: head.bytes, encoding: head.encoding });
       const file = { kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes };
       const opened = { status: 'ready' as const, error: null, removed: false, loadingMore: false, epoch: (get().entries.get(tabId)?.epoch ?? 0) + 1, dirty: false, theirs: null, saveError: null };
-      const commit = (loaded: LoadedFile) => (reason === 'change' ? commitChange(tabId, loaded) : patch(tabId, { ...opened, ...loaded, editable: isEditable(loaded) }));
+      const commit = ({ utf8, ...loaded }: LoadedFile) =>
+        reason === 'change' ? commitChange(tabId, { ...loaded, utf8 }) : patch(tabId, { ...opened, ...loaded, editable: isEditable({ ...loaded, utf8 }) });
       // A markdown file opened at a line is shown as its source, where the line exists.
       const sourceView = kind === 'markdown' && get().entries.get(tabId)?.pendingJump != null ? true : undefined;
 
-      if (kind === 'external') return commit({ ...file, text: '', base64: null, loaded: 0, complete: true, hash: null });
+      if (kind === 'external') return commit({ ...file, text: '', base64: null, loaded: 0, complete: true, hash: null, utf8: null });
       if (kind === 'image') {
         let whole = head;
         if (head.truncated) {
@@ -302,10 +313,11 @@ export function createViewerStore(client: MawsBridge) {
           whole = all.value;
         }
         const utf8 = whole.encoding === 'utf8';
-        return commit({ ...file, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true, hash: null });
+        return commit({ ...file, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true, hash: null, utf8: null });
       }
 
       const hash = kind === 'head' ? null : head.hash;
+      const utf8 = hash === null ? null : head.utf8; // the whole hashed file's, so every chunk of one hash answers the same
       let text = head.content;
       let loaded = head.offset + head.length;
       const wanted = () => kind !== 'head' || loaded < extent;
@@ -323,7 +335,7 @@ export function createViewerStore(client: MawsBridge) {
         more = next.value.truncated && wanted();
         if (reason === 'open') patch(tabId, { text, loaded, complete: !more });
       }
-      commit({ ...file, text, base64: null, loaded, complete: kind !== 'head', hash });
+      commit({ ...file, text, base64: null, loaded, complete: kind !== 'head', hash, utf8 });
     };
 
     const refresh = (tabId: string) => {
@@ -346,20 +358,27 @@ export function createViewerStore(client: MawsBridge) {
     };
 
     // E5: a save's conflict answered with a hash the tab has not seen: the file is read whole (one hashed read within the
-    // editor's caps) and shown as theirs in the merge view; a read answering yet another hash is newer and wins.
-    const conflicted = async (tabId: string, entry: ViewerEntry, hash: string): Promise<void> => {
-      if (entry.theirs?.hash === hash) return patch(tabId, { saving: false, theirs: { ...entry.theirs, view: 'merge' } });
+    // editor's caps) and shown as theirs in the merge view; a read answering yet another hash is newer and wins. The
+    // read lands only on the incarnation that saved (`current`); answers whether it landed.
+    const conflicted = async (tabId: string, entry: ViewerEntry, hash: string, current: () => boolean): Promise<boolean> => {
+      if (entry.theirs?.hash === hash) {
+        patch(tabId, { saving: false, theirs: { ...entry.theirs, view: 'merge' } });
+        return true;
+      }
       const answer = await settled(client.invoke('files.read', { appSessionId: entry.appSessionId, path: entry.path, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true }));
-      if (!get().entries.has(tabId)) return;
-      if (!answer.ok) return patch(tabId, { saving: false, saveError: answer.error.message });
+      if (!current()) return false;
+      if (!answer.ok) {
+        patch(tabId, { saving: false, saveError: answer.error.message });
+        return true;
+      }
       const read = answer.value;
       const file: LoadedFile = {
         kind: kindOf({ name: entry.path, mime: read.mime, bytes: read.bytes, encoding: read.encoding }), mime: read.mime, encoding: read.encoding, bytes: read.bytes,
-        text: read.content, base64: null, loaded: read.length, complete: !read.truncated, hash: read.hash,
+        text: read.content, base64: null, loaded: read.length, complete: !read.truncated, hash: read.hash, utf8: read.utf8,
       };
-      // A file that is no longer a text the editor could take (grown past its cap, binary, a lossy decode) is not offered.
-      if (!isEditable(file)) return patch(tabId, { saving: false, saveError: EDITOR_COPY.conflictOnSave });
-      patch(tabId, { saving: false, theirs: { text: file.text, hash: file.hash!, view: 'merge' } });
+      // A file that is no longer a text the editor could take (grown past its cap, binary, not UTF-8) is not offered.
+      patch(tabId, isEditable(file) ? { saving: false, theirs: { text: file.text, hash: file.hash!, view: 'merge' } } : { saving: false, saveError: EDITOR_COPY.conflictOnSave });
+      return true;
     };
 
     return {
@@ -396,6 +415,7 @@ export function createViewerStore(client: MawsBridge) {
             text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
             hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, baseline: 0,
           };
+          incarnations.set(tabId, ++lastIncarnation);
           set((s) => ({ entries: new Map(s.entries).set(tabId, fresh) }));
           watchThenRead('open');
         } else {
@@ -455,24 +475,25 @@ export function createViewerStore(client: MawsBridge) {
 
       // E5: the document captured now is what is written, and what `text` becomes on `ok`; typing during the save stays
       // dirty against it. From the notice the stale baseline's hash is sent on purpose (an unseen change is never
-      // overwritten: the answer is `conflict`); from the merge view, the hash of what it shows.
+      // overwritten: the answer is `conflict`); from the merge view, the hash of what it shows. The answer lands only on
+      // the entry incarnation that saved: a tab closed meanwhile (and perhaps reopened, a fresh entry loading) is left
+      // alone, and the save answers 'noop', the entry it was for being gone.
       async save(tabId) {
         const entry = get().entries.get(tabId);
         const expectedHash = entry?.theirs?.view === 'merge' ? entry.theirs.hash : (entry?.hash ?? null);
         if (!entry || entry.saving || !unsaved(entry) || expectedHash === null) return 'noop';
         const content = documentOf(tabId);
         if (content === undefined) return 'noop';
+        const incarnation = incarnations.get(tabId);
+        const current = () => incarnations.get(tabId) === incarnation;
         patch(tabId, { saving: true, saveError: null });
         const answer = await settled(client.invoke('files.write', { appSessionId: entry.appSessionId, path: entry.path, content, expectedHash }));
-        const now = get().entries.get(tabId);
+        if (!current()) return 'noop';
         if (!answer.ok) {
           patch(tabId, { saving: false, saveError: answer.error.message });
           return 'error';
         }
-        if (answer.value.status === 'conflict') {
-          if (now) await conflicted(tabId, now, answer.value.hash);
-          return 'conflict';
-        }
+        if (answer.value.status === 'conflict') return (await conflicted(tabId, get().entries.get(tabId)!, answer.value.hash, current)) ? 'conflict' : 'noop';
         supersede(tabId); // a read issued before the write lands nowhere
         moveBaseline(tabId, { text: content, hash: answer.value.hash, saving: false });
         return 'ok';
@@ -512,6 +533,7 @@ export function createViewerStore(client: MawsBridge) {
         for (const hold of holds.values()) hold.release();
         holds.clear();
         generations.clear();
+        incarnations.clear();
         mounted.clear();
         stale.clear();
         used.clear();

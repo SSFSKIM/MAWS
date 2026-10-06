@@ -86,7 +86,7 @@ describe('editor', () => {
     });
 
     it('keeps a head and a lossy decode read-only, each with its reason as the content’s title', async () => {
-      installDisk({ '/r/big.log': { text: 'log line\n', bytes: 5 * MiB }, '/r/latin1.txt': { text: 'caf�\n', bytes: 5 } });
+      installDisk({ '/r/big.log': { text: 'log line\n', bytes: 5 * MiB }, '/r/latin1.txt': { text: 'caf�\n', bytes: 5, utf8: false } });
       const head = render(<FileViewer tab={fileTab('/r/big.log')} />);
       await waitFor(() => expect(document.querySelector('.cm-content')?.getAttribute('title')).toBe('Read-only: the file is larger than the editor’s cap'));
       expect(entry('/r/big.log').editable).toBe(false);
@@ -94,6 +94,15 @@ describe('editor', () => {
       render(<FileViewer tab={fileTab('/r/latin1.txt')} />);
       await waitFor(() => expect(document.querySelector('.cm-content')?.getAttribute('title')).toBe('Read-only: the file is not UTF-8'));
       expect(entry('/r/latin1.txt')).toMatchObject({ editable: false, complete: true });
+      expect(view().state.facet(EditorView.editable)).toBe(false);
+    });
+
+    it('keeps a text read-only when main says its bytes are not UTF-8, even when the decode is as long as the file', async () => {
+      // `a f0 9f 92 \n`: the truncated sequence decodes to U+FFFD, three bytes as the three it replaced
+      installDisk({ '/r/cut.txt': { text: 'a\uFFFD\n', bytes: 5, utf8: false } });
+      render(<FileViewer tab={fileTab('/r/cut.txt')} />);
+      await waitFor(() => expect(document.querySelector('.cm-content')?.getAttribute('title')).toBe('Read-only: the file is not UTF-8'));
+      expect(entry('/r/cut.txt')).toMatchObject({ editable: false, complete: true, bytes: 5 });
       expect(view().state.facet(EditorView.editable)).toBe(false);
     });
 
@@ -338,7 +347,14 @@ describe('editor', () => {
       await waitFor(() => expect(entry().dirty).toBe(true));
       disk.files[APP] = 'const a = 2;\n';
       disk.calls.splice(0);
+      const read = disk.hold('files.read');
       shown.rerender(<FileViewer tab={fileTab(APP, B)} />);
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(1));
+      await settle();
+      // while the new session's read is pending: the document and the baseline stand
+      expect(entry()).toMatchObject({ appSessionId: B, text: 'const a = 1;\n', hash: fakeHash('const a = 1;\n'), dirty: true, theirs: null });
+      expect(doc()).toBe('// mine\nconst a = 1;\n');
+      await act(async () => read.release());
       await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
       expect(disk.calls.filter((call) => call.name !== 'files.unwatch').map((call) => [call.name, call.input.appSessionId])).toEqual([
         ['files.watch', B],
@@ -346,6 +362,67 @@ describe('editor', () => {
       ]);
       expect(entry()).toMatchObject({ appSessionId: B, text: 'const a = 1;\n', dirty: true, theirs: { text: 'const a = 2;\n', view: 'notice' } });
       expect(doc()).toBe('// mine\nconst a = 1;\n');
+    });
+
+    // A dirty tab saving, discarded (its entry goes with the tab) and the same path reopened while the old write's answer
+    // is pending: the old answer belongs to the entry that is gone, and lands nowhere on the fresh one, whichever of the
+    // two answers arrives first.
+    for (const order of ['the old write first', 'the new read first'] as const) {
+      it(`lands nowhere a save’s answer for a discarded entry when the path is reopened (${order})`, async () => {
+        const { disk, shown } = await open({ [APP]: 'const a = 1;\n' });
+        type('// mine\n');
+        await waitFor(() => expect(entry().dirty).toBe(true));
+        const write = disk.hold('files.write');
+        let saved!: Promise<string>;
+        act(() => void (saved = useViewer.getState().save(`file:${APP}`)));
+        await waitFor(() => expect(disk.callsOf('files.write')).toHaveLength(1));
+        expect(disk.files[APP]).toBe('// mine\nconst a = 1;\n'); // the fake disk writes when the call arrives
+        shown.unmount();
+        act(() => useLayout.getState().closeTab(`file:${APP}`)); // Don't save: the entry goes with the tab
+        expect(useViewer.getState().entries.has(`file:${APP}`)).toBe(false);
+
+        const read = disk.hold('files.read');
+        openFile(A, APP);
+        render(<FileViewer tab={fileTab(APP)} />);
+        await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(2));
+        expect(entry()).toMatchObject({ status: 'loading', saving: false, dirty: false });
+        if (order === 'the old write first') {
+          await act(async () => write.release());
+          const answered = await act(() => saved);
+          expect(entry()).toMatchObject({ status: 'loading', text: '', hash: null, baseline: 0, saving: false });
+          expect(answered).toBe('noop'); // landed nowhere: the entry it was for is gone
+          await act(async () => read.release());
+        } else {
+          await act(async () => read.release());
+          await waitFor(() => expect(entry().status).toBe('ready'));
+          await act(async () => write.release());
+          await act(() => saved);
+        }
+        await waitFor(() => expect(entry().editable).toBe(true));
+        expect(entry()).toMatchObject({ status: 'ready', text: '// mine\nconst a = 1;\n', hash: fakeHash('// mine\nconst a = 1;\n'), baseline: 0, saving: false, dirty: false, theirs: null });
+        await waitFor(() => expect(doc()).toBe('// mine\nconst a = 1;\n'));
+        expect(await saved).toBe('noop');
+      });
+    }
+
+    it('lands nowhere a conflict read for a discarded entry when the path is reopened', async () => {
+      const { disk, shown } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      await waitFor(() => expect(entry().dirty).toBe(true));
+      disk.files[APP] = 'const a = 3;\n'; // no event: the save conflicts and reads the file whole
+      const conflictRead = disk.hold('files.read');
+      let saved!: Promise<string>;
+      act(() => void (saved = useViewer.getState().save(`file:${APP}`)));
+      await waitFor(() => expect(disk.callsOf('files.read').at(-1)?.length).toBe(FILES_READ_MAX_LENGTH));
+      shown.unmount();
+      act(() => useLayout.getState().closeTab(`file:${APP}`));
+      openFile(A, APP);
+      render(<FileViewer tab={fileTab(APP)} />);
+      await waitFor(() => expect(entry()?.editable).toBe(true));
+      await act(async () => conflictRead.release());
+      const answered = await act(() => saved);
+      expect(entry()).toMatchObject({ text: 'const a = 3;\n', saving: false, dirty: false, theirs: null, saveError: null });
+      expect(answered).toBe('noop');
     });
   });
 });

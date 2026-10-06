@@ -9,8 +9,9 @@ import { deferred, fail, installFakeMain, ok } from './code';
 import { utf8Length } from '../tools/code/viewer/viewer-store';
 
 // A file on the fake disk: its text, and its size when the test wants it to differ from the text's UTF-8 length (a
-// lossy decode, a file past a cap).
-export type DiskFile = string | { text: string; bytes: number };
+// file past a cap), and `utf8: false` for bytes that are not valid UTF-8 (the decoded text a lossy one; main's strict
+// decode answers false). A plain string is valid UTF-8.
+export type DiskFile = string | { text: string; bytes: number; utf8?: boolean };
 
 // A stand-in for SHA-256: 64 lowercase hex characters, a function of the text alone.
 export function fakeHash(text: string): string {
@@ -28,7 +29,7 @@ export function installDisk(files: Record<string, DiskFile>) {
   const held = new Map<CommandName, ReturnType<typeof deferred<void>>[]>();
   const textOf = (path: string) => {
     const file = files[path];
-    return file === undefined ? undefined : typeof file === 'string' ? { text: file, bytes: utf8Length(file) } : file;
+    return file === undefined ? undefined : typeof file === 'string' ? { text: file, bytes: utf8Length(file), utf8: true } : { utf8: true, ...file };
   };
 
   const answer = (name: CommandName, input: Record<string, unknown>) => {
@@ -43,6 +44,7 @@ export function installDisk(files: Record<string, DiskFile>) {
       return ok({
         encoding: 'utf8', content: file.text.slice(offset, end), bytes: file.bytes, offset, length: end - offset, truncated: end < file.bytes, mime: mimeOf(path),
         hash: input.hash === true ? fakeHash(file.text) : null,
+        utf8: input.hash === true ? file.utf8 : null,
       });
     }
     if (name === 'files.write') {

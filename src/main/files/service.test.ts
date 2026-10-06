@@ -484,7 +484,7 @@ describe('files service listing and reading', () => {
     write(inRoot('ten.txt'), '0123456789');
     const files = service();
     expect(await files.read({ appSessionId: A, path: inRoot('ten.txt'), offset: 2, length: 3 })).toEqual({
-      encoding: 'utf8', content: '234', bytes: 10, offset: 2, length: 3, truncated: true, mime: 'text/plain', hash: null,
+      encoding: 'utf8', content: '234', bytes: 10, offset: 2, length: 3, truncated: true, mime: 'text/plain', hash: null, utf8: null,
     });
     expect(await files.read({ appSessionId: A, path: inRoot('ten.txt'), offset: 7 })).toMatchObject({ content: '789', length: 3, truncated: false });
     expect(await files.read({ appSessionId: A, path: inRoot('ten.txt'), offset: 10 })).toMatchObject({ content: '', length: 0, truncated: false, offset: 10 });
@@ -536,7 +536,7 @@ describe('files service listing and reading', () => {
     write(inRoot('label.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><text>Ünïcødé</text></svg>');
     const files = service();
     expect(await files.read({ appSessionId: A, path: inRoot('dot.png') })).toEqual({
-      encoding: 'base64', content: png.toString('base64'), bytes: png.length, offset: 0, length: png.length, truncated: false, mime: 'image/png', hash: null,
+      encoding: 'base64', content: png.toString('base64'), bytes: png.length, offset: 0, length: png.length, truncated: false, mime: 'image/png', hash: null, utf8: null,
     });
     expect(await files.read({ appSessionId: A, path: inRoot('data.bin') })).toMatchObject({ encoding: 'base64', bytes: 12, mime: 'application/octet-stream' });
     expect(await files.read({ appSessionId: A, path: inRoot('label.svg') })).toMatchObject({ encoding: 'utf8', mime: 'image/svg+xml', content: expect.stringContaining('Ünïcødé') });
@@ -906,7 +906,7 @@ describe('files service write', () => {
       expect((await files.read({ appSessionId: A, path: file() })).hash).toBeNull();
       expect((await files.read({ appSessionId: A, path: file(), hash: false })).hash).toBeNull();
       expect(await files.read({ appSessionId: A, path: file(), hash: true })).toEqual({
-        encoding: 'utf8', content: ORIGINAL, bytes: ORIGINAL.length, offset: 0, length: ORIGINAL.length, truncated: false, mime: 'text/x-typescript', hash: sha(ORIGINAL),
+        encoding: 'utf8', content: ORIGINAL, bytes: ORIGINAL.length, offset: 0, length: ORIGINAL.length, truncated: false, mime: 'text/x-typescript', hash: sha(ORIGINAL), utf8: true,
       });
       // a chunk answers the whole file's hash, not its own
       expect(await files.read({ appSessionId: A, path: file(), offset: 7, length: 5, hash: true })).toMatchObject({ content: 'const', hash: sha(ORIGINAL) });
@@ -919,7 +919,24 @@ describe('files service write', () => {
       write(inRoot('past.log'), Buffer.concat([atCap, Buffer.from('b')]));
       const files = service();
       expect(await files.read({ appSessionId: A, path: inRoot('cap.log'), hash: true })).toMatchObject({ hash: sha(atCap), bytes: FILES_READ_MAX_LENGTH });
-      expect(await files.read({ appSessionId: A, path: inRoot('past.log'), hash: true })).toMatchObject({ hash: null, bytes: FILES_READ_MAX_LENGTH + 1, length: MiB, truncated: true });
+      expect(await files.read({ appSessionId: A, path: inRoot('past.log'), hash: true })).toMatchObject({ hash: null, utf8: null, bytes: FILES_READ_MAX_LENGTH + 1, length: MiB, truncated: true });
+    });
+
+    it('answers whether the hashed bytes are valid UTF-8, a truncated multi-byte sequence included; null when not hashed', async () => {
+      // `f0 9f 92` is a 4-byte sequence cut short: a lenient decode gives U+FFFD, also 3 bytes, so a byte-length comparison
+      // would pass it, and a save would write `ef bf bd` over the original bytes.
+      const truncated = Buffer.from([0x61, 0xf0, 0x9f, 0x92, 0x0a]);
+      const valid = Buffer.from('café € 💡\n', 'utf8');
+      write(inRoot('cut.txt'), truncated);
+      write(inRoot('multi.txt'), valid);
+      const files = service();
+      const cut = await files.read({ appSessionId: A, path: inRoot('cut.txt'), hash: true });
+      expect(cut).toMatchObject({ encoding: 'utf8', bytes: truncated.length, hash: sha(truncated), utf8: false });
+      expect(Buffer.byteLength(cut.content, 'utf8')).toBe(truncated.length); // the length test the flag replaces
+      expect(await files.read({ appSessionId: A, path: inRoot('multi.txt'), hash: true })).toMatchObject({ content: valid.toString('utf8'), hash: sha(valid), utf8: true });
+      // a chunk answers the whole file's validity, not its own
+      expect(await files.read({ appSessionId: A, path: inRoot('cut.txt'), offset: 0, length: 1, hash: true })).toMatchObject({ content: 'a', utf8: false });
+      expect((await files.read({ appSessionId: A, path: inRoot('multi.txt') })).utf8).toBeNull();
     });
 
     it('answers one hash for every chunk of an unchanged file, and each chunk’s bytes are its own hash’s file when it changes between reads', async () => {
@@ -954,7 +971,7 @@ describe('files service write', () => {
         for (const [offset, length] of [[0, 3], [2, 3], [2, 1], [0, 100], [50, 3]]) {
           const plain = await files.read({ appSessionId: A, path: inRoot(name), offset, length });
           const hashed = await files.read({ appSessionId: A, path: inRoot(name), offset, length, hash: true });
-          expect(hashed, `${name} ${offset} ${length}`).toEqual({ ...plain, hash: sha(Buffer.from(text, 'utf8')) });
+          expect(hashed, `${name} ${offset} ${length}`).toEqual({ ...plain, hash: sha(Buffer.from(text, 'utf8')), utf8: true });
         }
       }
     });
