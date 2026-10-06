@@ -245,6 +245,7 @@ function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) =>
         return Promise.resolve(null);
       },
       // E1 end
+      openSideThread: (_parent, child) => say(`openSideThread ${child}`), // E3
       loadSpill: (spill) => {
         say(`loadSpill ${spill.path}`);
         return Promise.resolve(`(the harness has no spill content for ${spill.path})`);

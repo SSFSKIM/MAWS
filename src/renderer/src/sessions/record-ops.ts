@@ -6,6 +6,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { ForeignHolder, SessionRecord } from '@shared/graph/session';
 import type { DeleteOutcome } from '@shared/ipc/schema/session';
 import type { FirstMessage, ForkTarget } from '@shared/sessions/intent';
+import type { StartOutcome } from '@shared/sessions/setup';
 import type { ResubmitProvider } from '../composer/resubmit-seam';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
@@ -85,19 +86,27 @@ export async function forkSession(
 ): Promise<{ ok: true; appSessionId: AppSessionId } | { ok: false; error: string }> {
   const result = await ipc.invoke('session.fork', { appSessionId, target, message: first.message, rewindTo: first.rewindTo });
   if (!result.ok) return { ok: false, error: result.error.message };
-  const outcome = result.value;
+  const adopted = await adoptFork(appSessionId, result.value, first.message);
+  if (adopted.ok) useLayout.getState().openTab({ kind: 'session', appSessionId: adopted.appSessionId });
+  return adopted;
+}
+
+// A fork's start outcome, taken up by the window that asked for it (`session.fork`, and E3's `side.thread.open`, which
+// answers the same): its setup's answer and phases followed, a trust or relay card docked holding `message` (which the
+// card's Cancel hands back), its intent read, and the unstarted session known until its record arrives, so its pane
+// draws the setup. Any other outcome is the refusal in words. Where the fork is shown is the caller's.
+export async function adoptFork(source: AppSessionId, outcome: StartOutcome, message: FirstMessage | null): Promise<{ ok: true; appSessionId: AppSessionId } | { ok: false; error: string }> {
   const fork = outcome.appSessionId as AppSessionId;
   useSetup.getState().follow(fork); // this window started it: its answer and phases tell its tab what runs
   // a fork into a directory that needs trust, or with the relay down, opens with its card waiting (holding the message
   // its continuation sends, which its Cancel hands back)
-  if (outcome.status === 'needs_trust') useSetup.getState().dock(fork, { kind: 'trust', trust: outcome.trust, message: first.message });
-  if (outcome.status === 'relay_unreachable') useSetup.getState().dock(fork, { kind: 'relay', health: outcome.health, message: first.message });
+  if (outcome.status === 'needs_trust') useSetup.getState().dock(fork, { kind: 'trust', trust: outcome.trust, message });
+  if (outcome.status === 'relay_unreachable') useSetup.getState().dock(fork, { kind: 'relay', health: outcome.health, message });
   if (outcome.status === 'starting' || outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') {
     // the tab renders from the fork's intent, which may still be on its way as an event
     const intent = await ipc.invoke('session.intent.get', { appSessionId: fork });
     if (intent.ok && intent.value !== null) useSetup.getState().setIntent(intent.value);
-    useSessions.getState().addUnstarted(fork, { projectId: useSessions.getState().records.get(appSessionId)?.projectId ?? null, createdAt: new Date().toISOString() });
-    useLayout.getState().openTab({ kind: 'session', appSessionId: fork });
+    useSessions.getState().addUnstarted(fork, { projectId: useSessions.getState().records.get(source)?.projectId ?? null, createdAt: new Date().toISOString() });
     return { ok: true, appSessionId: fork };
   }
   const error =

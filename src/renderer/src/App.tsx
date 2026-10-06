@@ -73,6 +73,10 @@ import { connectAsks } from './tools/maws/ask/connect';
 import { connectPaneShows } from './tools/maws/panes/connect';
 import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
 // E1 end
+// E3 start
+import { CommentComposerHost } from './side/CommentComposer';
+import { connectSide, registerSidePane } from './side/register';
+// E3 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -180,6 +184,13 @@ export function App() {
   }, []);
   useEffect(() => connectAsks(), []);
   // E1 end
+  // E3 start: side threads (E3 execution document, M3): the Side pane, registered once and never unregistered (C8a's
+  // rule above); the comment composer in E5's seam and the transcript's summary-row Open
+  useEffect(() => {
+    registerSidePane();
+  }, []);
+  useEffect(() => connectSide(), []);
+  // E3 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
@@ -209,6 +220,9 @@ export function App() {
       {/* E5 start: the editor's close sheet (registerEditor's guard, registered by C8c's registerCodeTools) */}
       <EditorDialogs />
       {/* E5 end */}
+      {/* E3 start: the comment composer's sheet, opened through E5's seam */}
+      <CommentComposerHost />
+      {/* E3 end */}
     </QueryClientProvider>
   );
 }

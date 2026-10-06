@@ -6,6 +6,7 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { connectVisibility } from './visibility';
+import { hideSideChild, showSideChild, useSidePane } from '../side/store'; // E3
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -30,6 +31,7 @@ beforeEach(() => {
 afterEach(() => {
   stop();
   vi.restoreAllMocks();
+  useSidePane.setState({ panes: new Map() }); // E3
 });
 
 describe('session visibility', () => {
@@ -90,5 +92,25 @@ describe('session visibility', () => {
     expect(sent()).toEqual([]);
     useSessions.getState().applyChanged({ record: record('app-new'), cause: 'live', revision: 5 } as never);
     expect(sent()).toEqual([{ appSessionId: NEW, visible: true }]);
+  });
+
+  // E3: a side thread the Side pane draws counts as on screen while the panel is open beside its visible parent
+  it('counts the side pane’s child while the panel is open and its parent shown; not when the panel collapses or the pane stops', () => {
+    const CHILD = 'app-child' as AppSessionId;
+    useSessions.setState({ records: new Map([[A, record('app-a')], [B, record('app-b')], [CHILD, record('app-child')]]) });
+    useLayout.getState().setPanel({ collapsed: false });
+    useLayout.getState().openSession(A);
+    showSideChild(A, CHILD);
+    expect(sent()).toEqual([
+      { appSessionId: A, visible: true },
+      { appSessionId: CHILD, visible: true },
+    ]);
+    useLayout.getState().setPanel({ collapsed: true });
+    expect(sent().slice(2)).toEqual([{ appSessionId: CHILD, visible: false }]);
+    useLayout.getState().setPanel({ collapsed: false });
+    expect(sent().slice(3)).toEqual([{ appSessionId: CHILD, visible: true }]);
+    showSideChild(B, CHILD); // B's pane draws it, but B is not shown: nothing changes
+    hideSideChild(A, CHILD);
+    expect(sent().slice(4)).toEqual([{ appSessionId: CHILD, visible: false }]);
   });
 });
