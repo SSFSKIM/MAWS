@@ -103,3 +103,34 @@ Unrun on this head: e2e:c7, build:app, the packaged checks, the packaged e2e.
 Paused here at the controller's request (a second stale-caret fix lands first; the whole sequence reruns on its head).
 Unrun on 7d0442ac: build:app, the packaged checks, the packaged e2e.
 
+---- The acceptance sequence on e196298e (code tree 26b2fc53: the second stale-caret fix; plus C7's W2 pin) ----
+
+== typecheck   2026-10-06 00:03 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> typecheck
+   start: eligible: load 18.87 after 30s · slot slot.2 acquired at 00:03:12 load { 18.87 17.34 31.67 }
+   tail: $ tsc --noEmit -p tsconfig.node.json … && tsc … tsconfig.web.json … && tsc … tsconfig.e2e.json …   (no diagnostics)
+
+== lint   2026-10-06 00:04 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> lint
+   start: eligible: load 15.88 after 60s · slot slot.1 acquired at 00:04:52 load { 15.88 17.42 30.16 }
+   tail: $ eslint .   (no findings)
+
+== unit suite   2026-10-06 00:05 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> test --maxWorkers=4
+   start: eligible: load 14.84 after 0s · slot slot.1 acquired at 00:05:15 load { 14.84 17.08 29.74 }
+   tail:
+      Test Files  458 passed | 1 skipped (459)
+           Tests  6053 passed | 1 skipped (6054)
+     Type Errors  no errors
+        Duration  116.07s
+
+== e2e:voice   2026-10-06 00:07 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && MAWS_E9_SHOTS=docs/doperpowers/evidence/p1-e9 /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:voice
+   start: eligible: load 16.36 after 0s · slot slot.1 acquired at 00:07:17 load { 16.36 17.29 28.11 }
+   tail: 14 passed (25.6s), 1 skipped (the packaged case); every case in e2e-voice.txt; screenshots refreshed
+
+== e2e:c7   2026-10-06 00:08 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:c7
+   start: eligible: load 17.16 after 0s · slot slot.1 acquired at 00:08:09 load { 17.16 17.11 27.41 }
+   tail: 29 passed (1.0m); every case in e2e-c7.txt
+

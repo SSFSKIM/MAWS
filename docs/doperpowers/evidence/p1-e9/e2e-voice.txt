@@ -1,143 +1,23 @@
-E9 M5 e2e:voice transcripts: pnpm --dir <W> e2e:voice with MAWS_E9_SHOTS=docs/doperpowers/evidence/p1-e9, through the slot.
+E9 M5 e2e:voice, the acceptance run on e196298e (code tree 26b2fc53, the second stale-caret fix, plus the C7 pin):
+/tmp/maws-review/waitload20.sh && MAWS_E9_SHOTS=docs/doperpowers/evidence/p1-e9 /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:voice
+The build step (MAWS_HARNESS=1 electron-vite build) ran first; the one skipped case is the packaged one, run in packaged-e2e.txt.
+Earlier runs on 082a69e8 and 47dfa1b2 (two failures, a stale caret and test timing) are recorded in gates.txt.
 
-===== run 1 (082a69e8) =====
-slot slot.1 acquired at 23:37:28 load { 17.40 24.24 114.95 }
-  ✓   1 e2e/voice.spec.ts:167:1 › a hold shows Listening…, draws the partials greyed in place, settles the final on release, and ⌘Z removes it whole (3.3s)
-  ✘   2 e2e/voice.spec.ts:199:1 › dictation lands at a mid-paragraph caret with a leading space, and after a selection without replacing it (1.1s)
-  ✓   3 e2e/voice.spec.ts:228:1 › a release before the recognizer started cancels at once: no text, the control idle, nothing heard later (1.9s)
-  ✓   4 e2e/voice.spec.ts:250:1 › letting go of ⌥ first ends the hold, and the still-held Space types nothing (1.1s)
-  ✓   5 e2e/voice.spec.ts:273:1 › typing inside the greyed words keeps them and the letter, and ends the capture; the next partial changes nothing (5.8s)
-  ✘   6 e2e/voice.spec.ts:298:1 › the toolbar microphone toggles: a click starts listening, a second settles the final; a click while asking cancels (6.0s)
-  ✓   7 e2e/voice.spec.ts:337:1 › Enter while finishing sends the greyed words as they stand, and the late final changes nothing (1.5s)
-  ✓   8 e2e/voice.spec.ts:366:1 › with two composers the words land in the focused pane's only (1.2s)
-  ✓   9 e2e/voice.spec.ts:382:1 › a card docked over the composer refuses the hold with a notice and no start (1.2s)
-  ✓  10 e2e/voice.spec.ts:399:1 › the window losing focus mid-hold cancels and removes the interim words (1.4s)
-  ✓  11 e2e/voice.spec.ts:421:1 › a denied microphone shows the notice whose button records the pane and opens nothing (1.5s)
-  ✓  12 e2e/voice.spec.ts:440:1 › a missing helper refuses the hold with the path it looked at (3.0s)
-  ✓  13 e2e/voice.spec.ts:454:1 › a partial arriving after the final leaves the settled text unchanged (1.5s)
-  ✓  14 e2e/voice.spec.ts:482:1 › Settings › Voice reads the status from main and writes the language to settings version 9 (1.4s)
-  -  15 e2e/voice.spec.ts:504:1 › packaged: the bundled helper answers voice.status from Contents/Resources and voice.start is refused under the harness
-    - Expected  - 1
-    - alpha hello world beta
-      - Expect "toHaveText" getByRole('region', { name: 'pane 0' }).getByRole('textbox', { name: 'Message', exact: true }).locator('.text-fg-muted') with timeout 5000ms
-      - waiting for getByRole('region', { name: 'pane 0' }).getByRole('textbox', { name: 'Message', exact: true }).locator('.text-fg-muted')
-          - unexpected value "hello world"
-  2 failed
-  1 skipped
-  12 passed (33.2s)
-  1) e2e/voice.spec.ts:199:1 › dictation lands at a mid-paragraph caret with a leading space, and after a selection without replacing it 
-
-    Error: expect(received).toBe(expected) // Object.is equality
-
-    - Expected  - 1
-    + Received  + 1
-
-    - alpha hello world beta
-    + alpha be hello worldta
-      gamma
-
-      208 |   await holdDown(page);
-      209 |   await expect(interimIn(page, 0)).toHaveText('hello world');
-    > 210 |   expect(await linesOf(page, 0)).toBe('alpha hello world beta\ngamma');
-          |                                  ^
-      211 |   await holdUp(page);
-      212 |   await expect(interimIn(page, 0)).toHaveCount(0);
-      213 |   await expect.poll(() => linesOf(page, 0)).toBe('alpha Hello world. beta\ngamma');
-        at /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a73ed40e0ec0b7d29/e2e/voice.spec.ts:210:34
-
-
-
-  2) e2e/voice.spec.ts:298:1 › the toolbar microphone toggles: a click starts listening, a second settles the final; a click while asking cancels 
-
-    Error: expect(locator).toHaveText(expected) failed
-
-    Locator:  getByRole('region', { name: 'pane 0' }).getByRole('textbox', { name: 'Message', exact: true }).locator('.text-fg-muted')
-    Expected: "hello"
-    Received: "hello world"
-    Timeout:  5000ms
-
-    Call log:
-      - Expect "toHaveText" getByRole('region', { name: 'pane 0' }).getByRole('textbox', { name: 'Message', exact: true }).locator('.text-fg-muted') with timeout 5000ms
-      - waiting for getByRole('region', { name: 'pane 0' }).getByRole('textbox', { name: 'Message', exact: true }).locator('.text-fg-muted')
-        9 × locator resolved to <span class="text-fg-muted">hello world</span>
-          - unexpected value "hello world"
-
-
-      307 |   await expect(statusIn(page, 0)).toHaveText('Listening…');
-      308 |   await expect(mic).toHaveAttribute('aria-pressed', 'true');
-    > 309 |   await expect(interimIn(page, 0)).toHaveText('hello');
-          |                                    ^
-      310 |   await expect(interimIn(page, 0)).toHaveText('hello world');
-      311 |   await expect(messageIn(page, 0)).toBeFocused(); // the words go to the caret; the button does not take focus
-      312 |   await mic.click();
-        at /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a73ed40e0ec0b7d29/e2e/voice.spec.ts:309:36
-
-
-
-  2 failed
-
-===== run 2 (test-side fixes: the caret is placed from the document start with ArrowRight; the click case asserts only its one partial) =====
-slot slot.1 acquired at 23:39:09 load { 16.50 22.50 104.24 }
-  ✓   1 e2e/voice.spec.ts:167:1 › a hold shows Listening…, draws the partials greyed in place, settles the final on release, and ⌘Z removes it whole (2.6s)
-  ✘   2 e2e/voice.spec.ts:199:1 › dictation lands at a mid-paragraph caret with a leading space, and after a selection without replacing it (987ms)
-  ✓   3 e2e/voice.spec.ts:229:1 › a release before the recognizer started cancels at once: no text, the control idle, nothing heard later (1.9s)
-  ✓   4 e2e/voice.spec.ts:251:1 › letting go of ⌥ first ends the hold, and the still-held Space types nothing (956ms)
-  ✓   5 e2e/voice.spec.ts:274:1 › typing inside the greyed words keeps them and the letter, and ends the capture; the next partial changes nothing (5.8s)
-  ✓   6 e2e/voice.spec.ts:299:1 › the toolbar microphone toggles: a click starts listening, a second settles the final; a click while asking cancels (2.0s)
-  ✓   7 e2e/voice.spec.ts:337:1 › Enter while finishing sends the greyed words as they stand, and the late final changes nothing (1.4s)
-  ✓   8 e2e/voice.spec.ts:366:1 › with two composers the words land in the focused pane's only (1.2s)
-  ✓   9 e2e/voice.spec.ts:382:1 › a card docked over the composer refuses the hold with a notice and no start (965ms)
-  ✓  10 e2e/voice.spec.ts:399:1 › the window losing focus mid-hold cancels and removes the interim words (1.2s)
-  ✓  11 e2e/voice.spec.ts:421:1 › a denied microphone shows the notice whose button records the pane and opens nothing (1.0s)
-  ✓  12 e2e/voice.spec.ts:440:1 › a missing helper refuses the hold with the path it looked at (923ms)
-  ✓  13 e2e/voice.spec.ts:454:1 › a partial arriving after the final leaves the settled text unchanged (1.3s)
-  ✓  14 e2e/voice.spec.ts:482:1 › Settings › Voice reads the status from main and writes the language to settings version 9 (1.1s)
-  -  15 e2e/voice.spec.ts:504:1 › packaged: the bundled helper answers voice.status from Contents/Resources and voice.start is refused under the harness
-    - Expected  - 1
-    - alpha hello world beta
-  1 failed
-  1 skipped
-  13 passed (24.2s)
-  1) e2e/voice.spec.ts:199:1 › dictation lands at a mid-paragraph caret with a leading space, and after a selection without replacing it 
-
-    Error: expect(received).toBe(expected) // Object.is equality
-
-    - Expected  - 1
-    + Received  + 1
-
-    - alpha hello world beta
-    + alph hello worlda beta
-      gamma
-
-      209 |   await holdDown(page);
-      210 |   await expect(interimIn(page, 0)).toHaveText('hello world');
-    > 211 |   expect(await linesOf(page, 0)).toBe('alpha hello world beta\ngamma');
-          |                                  ^
-      212 |   await holdUp(page);
-      213 |   await expect(interimIn(page, 0)).toHaveCount(0);
-      214 |   await expect.poll(() => linesOf(page, 0)).toBe('alpha Hello world. beta\ngamma');
-        at /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a73ed40e0ec0b7d29/e2e/voice.spec.ts:211:34
-
-
-
-  1 failed
-
-===== run 3 (47dfa1b2: the stale-caret fix 7d0442ac and its fold), the acceptance run =====
-slot slot.1 acquired at 23:51:07 load { 18.97 16.08 52.78 }
-  ✓   1 e2e/voice.spec.ts:167:1 › a hold shows Listening…, draws the partials greyed in place, settles the final on release, and ⌘Z removes it whole (3.2s)
+slot slot.1 acquired at 00:07:17 load { 16.36 17.29 28.11 }
+  ✓   1 e2e/voice.spec.ts:167:1 › a hold shows Listening…, draws the partials greyed in place, settles the final on release, and ⌘Z removes it whole (3.1s)
   ✓   2 e2e/voice.spec.ts:199:1 › dictation lands at a mid-paragraph caret with a leading space, and after a selection without replacing it (1.3s)
   ✓   3 e2e/voice.spec.ts:229:1 › a release before the recognizer started cancels at once: no text, the control idle, nothing heard later (1.8s)
   ✓   4 e2e/voice.spec.ts:251:1 › letting go of ⌥ first ends the hold, and the still-held Space types nothing (1.1s)
   ✓   5 e2e/voice.spec.ts:274:1 › typing inside the greyed words keeps them and the letter, and ends the capture; the next partial changes nothing (5.8s)
-  ✓   6 e2e/voice.spec.ts:299:1 › the toolbar microphone toggles: a click starts listening, a second settles the final; a click while asking cancels (2.1s)
-  ✓   7 e2e/voice.spec.ts:337:1 › Enter while finishing sends the greyed words as they stand, and the late final changes nothing (1.5s)
-  ✓   8 e2e/voice.spec.ts:366:1 › with two composers the words land in the focused pane's only (1.1s)
-  ✓   9 e2e/voice.spec.ts:382:1 › a card docked over the composer refuses the hold with a notice and no start (1.1s)
-  ✓  10 e2e/voice.spec.ts:399:1 › the window losing focus mid-hold cancels and removes the interim words (1.2s)
-  ✓  11 e2e/voice.spec.ts:421:1 › a denied microphone shows the notice whose button records the pane and opens nothing (1.1s)
-  ✓  12 e2e/voice.spec.ts:440:1 › a missing helper refuses the hold with the path it looked at (1.0s)
+  ✓   6 e2e/voice.spec.ts:299:1 › the toolbar microphone toggles: a click starts listening, a second settles the final; a click while asking cancels (2.0s)
+  ✓   7 e2e/voice.spec.ts:337:1 › Enter while finishing sends the greyed words as they stand, and the late final changes nothing (1.4s)
+  ✓   8 e2e/voice.spec.ts:366:1 › with two composers the words land in the focused pane's only (1.0s)
+  ✓   9 e2e/voice.spec.ts:382:1 › a card docked over the composer refuses the hold with a notice and no start (923ms)
+  ✓  10 e2e/voice.spec.ts:399:1 › the window losing focus mid-hold cancels and removes the interim words (1.1s)
+  ✓  11 e2e/voice.spec.ts:421:1 › a denied microphone shows the notice whose button records the pane and opens nothing (1.6s)
+  ✓  12 e2e/voice.spec.ts:440:1 › a missing helper refuses the hold with the path it looked at (1.6s)
   ✓  13 e2e/voice.spec.ts:454:1 › a partial arriving after the final leaves the settled text unchanged (1.3s)
   ✓  14 e2e/voice.spec.ts:482:1 › Settings › Voice reads the status from main and writes the language to settings version 9 (1.2s)
   -  15 e2e/voice.spec.ts:504:1 › packaged: the bundled helper answers voice.status from Contents/Resources and voice.start is refused under the harness
   1 skipped
-  14 passed (25.2s)
+  14 passed (25.6s)
