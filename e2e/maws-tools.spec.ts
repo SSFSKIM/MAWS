@@ -141,6 +141,9 @@ async function scene(opts: { titles: string[]; repo?: string }, body: (s: Scene)
     };
     await body(s);
     expect(maws.consoleErrors()).toEqual([]);
+    // every replay followed its recording: a mismatch ends a replay early, which a case's own waits can miss (`idle`
+    // also holds after an exit)
+    for (const id of ids) expect(metaEvents(journalOf(maws.userData, id)), `the journal of ${id}`).not.toContain('replay_mismatch');
   } finally {
     await maws.cleanup();
     rmSync(root, { recursive: true, force: true });
@@ -572,6 +575,5 @@ test('the SDK MCP round trip: the app answers the engine’s handshake with the 
     expect(mcpResultOf(rows, echo!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true });
     const [init] = ofKind(await s.events(id), 'session.init');
     expect(init!.mcpServers).toContainEqual({ name: 'maws', status: 'connected', source: 'sdk' });
-    expect(metaEvents(rows)).not.toContain('replay_mismatch');
   });
 });
