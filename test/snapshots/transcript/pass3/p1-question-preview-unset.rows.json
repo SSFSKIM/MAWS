@@ -1,0 +1,75 @@
+[
+  {
+    "at": "2026-10-06T03:29:40.919Z",
+    "id": "time:turn:c146eba4-d772-4e89-b70b-2cb57ae476a4",
+    "kind": "time",
+    "label": "Oct 6, 2026 3:29 AM",
+    "turnId": "turn:c146eba4-d772-4e89-b70b-2cb57ae476a4"
+  },
+  {
+    "at": "2026-10-06T03:29:40.919Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:c146eba4-d772-4e89-b70b-2cb57ae476a4",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "c146eba4-d772-4e89-b70b-2cb57ae476a4",
+    "placeholders": [],
+    "steer": false,
+    "text": "Call the AskUserQuestion tool exactly once with one question \"Which layout?\" (header \"Layout\", multiSelect false) and two options. Option 1: label \"A\", description \"Plain\", and a preview field whose value is exactly: Layout A in plain text. Option 2: label \"B\", description \"Markup\", and a preview field whose value is exactly: <pre style=\"margin:0\">Layout B</pre>. If the tool returns an error, do not call it again: reply with exactly the error text. Otherwise reply with exactly the chosen label.",
+    "turnId": "turn:c146eba4-d772-4e89-b70b-2cb57ae476a4"
+  },
+  {
+    "answers": {
+      "Which layout?": "A"
+    },
+    "at": "2026-10-06T03:29:43.167Z",
+    "id": "question:toolu_011D9F4aKrdYccNPzsgCJUzA",
+    "kind": "question",
+    "questions": [
+      {
+        "header": "Layout",
+        "multiSelect": false,
+        "options": [
+          {
+            "description": "Plain",
+            "label": "A",
+            "preview": "Layout A in plain text"
+          },
+          {
+            "description": "Markup",
+            "label": "B",
+            "preview": "<pre style=\"margin:0\">Layout B</pre>"
+          }
+        ],
+        "question": "Which layout?"
+      }
+    ],
+    "toolUseId": "toolu_011D9F4aKrdYccNPzsgCJUzA",
+    "turnId": "turn:c146eba4-d772-4e89-b70b-2cb57ae476a4"
+  },
+  {
+    "at": "2026-10-06T03:29:44.295Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfkGvHi6LNiFvRz73Cb3L:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "A",
+    "messageUuid": "3dd28c27-f93f-481c-97de-7ccc3f6c139d",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:c146eba4-d772-4e89-b70b-2cb57ae476a4"
+  },
+  {
+    "at": "2026-10-06T03:29:44.596Z",
+    "attempt": null,
+    "id": "error:replay:journal:97:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

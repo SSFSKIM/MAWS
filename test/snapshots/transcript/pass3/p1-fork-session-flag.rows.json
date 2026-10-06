@@ -1,0 +1,46 @@
+[
+  {
+    "at": "2026-10-06T03:29:39.489Z",
+    "id": "time:turn:6152496d-a62e-46dc-a1b0-aa2e7f4c41a9",
+    "kind": "time",
+    "label": "Oct 6, 2026 3:29 AM",
+    "turnId": "turn:6152496d-a62e-46dc-a1b0-aa2e7f4c41a9"
+  },
+  {
+    "at": "2026-10-06T03:29:39.489Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:6152496d-a62e-46dc-a1b0-aa2e7f4c41a9",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "6152496d-a62e-46dc-a1b0-aa2e7f4c41a9",
+    "placeholders": [],
+    "steer": false,
+    "text": "What word did I ask you to remember? Reply with just that word.",
+    "turnId": "turn:6152496d-a62e-46dc-a1b0-aa2e7f4c41a9"
+  },
+  {
+    "at": "2026-10-06T03:29:40.485Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfkGv1iBPwVCfMgEzu4pA:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "ZEBRA",
+    "messageUuid": "04d2f397-ac03-4111-9b27-833a0ad66ffa",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:6152496d-a62e-46dc-a1b0-aa2e7f4c41a9"
+  },
+  {
+    "at": "2026-10-06T03:29:40.730Z",
+    "attempt": null,
+    "id": "error:replay:journal:38:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]
