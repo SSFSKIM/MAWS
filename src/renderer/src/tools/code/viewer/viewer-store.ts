@@ -112,7 +112,14 @@ export interface ViewerStore {
   compare(tabId: string): void; // the notice becomes the merge view
   setDirty(tabId: string, dirty: boolean): void; // the code view's report
   setSaveError(tabId: string, message: string | null): void;
+  saveAll(): Promise<UnsavedFailure[]>; // M5: every dirty tab saved at once; the ones not clean afterwards
   // E5 end
+}
+
+// E5 (M5): a tab the quit question's Save all left unsaved, with what its bar says about it.
+export interface UnsavedFailure {
+  path: string;
+  message: string;
 }
 
 const views = new Map<string, ViewState>();
@@ -549,6 +556,28 @@ export function createViewerStore(client: MawsBridge) {
         if (entry && entry.saveError !== message) patch(tabId, { saveError: message });
       },
 
+      // E5 (M5): the quit question's Save all. Every dirty tab saves at once (main serialises writes per file); a tab
+      // that is still dirty afterwards is answered with its bar's words: a conflict now shows the merge view, an error
+      // its message, a save already running its progress, and typing during the save the unsaved mark. A tab gone
+      // meanwhile has nothing left to save.
+      async saveAll() {
+        const dirty = [...get().entries.values()].filter((entry) => entry.dirty).map((entry) => entry.tabId);
+        await Promise.all(dirty.map((tabId) => get().save(tabId)));
+        return dirty.flatMap((tabId) => {
+          const entry = get().entries.get(tabId);
+          if (!entry?.dirty) return [];
+          const message =
+            entry.saveError !== null
+              ? EDITOR_COPY.saveFailed(entry.saveError)
+              : entry.theirs?.view === 'merge'
+                ? EDITOR_COPY.conflictOnSave
+                : entry.saving
+                  ? EDITOR_COPY.saving
+                  : EDITOR_COPY.unsaved;
+          return [{ path: entry.path, message }];
+        });
+      },
+
       reset() {
         for (const hold of holds.values()) hold.release();
         holds.clear();
@@ -567,3 +596,30 @@ export function createViewerStore(client: MawsBridge) {
 }
 
 export const useViewer = createViewerStore(ipc);
+
+// E5 (M5): the paths of the tabs with unsaved edits, once each, sorted.
+export const unsavedPaths = (entries: ReadonlyMap<string, ViewerEntry>): string[] =>
+  [...new Set([...entries.values()].filter((entry) => entry.dirty).map((entry) => entry.path))].sort();
+
+// E5 (M5): the window's whole dirty set to main for the quit guard (`layout.unsavedFiles`), sent whenever it changes
+// (a tab turning dirty or clean, a dirty tab's entry gone) and never otherwise; synchronously from the store's write, so
+// a save's push leaves before anything the caller sends after it. Main starts each page from an empty set, and a
+// disconnect leaves it empty again, since nothing reports the window's edits after it.
+export function pushUnsavedFiles(client: MawsBridge = ipc, store: ReturnType<typeof createViewerStore> = useViewer): () => void {
+  let sent: string[] = [];
+  const send = (paths: string[]) => {
+    if (paths.length === sent.length && paths.every((path, i) => path === sent[i])) return;
+    sent = paths;
+    void client.invoke('layout.unsavedFiles', { paths }).then((result) => {
+      if (!result.ok) console.warn('[editor] could not tell main the unsaved files', result.error);
+    });
+  };
+  send(unsavedPaths(store.getState().entries));
+  const off = store.subscribe((state, previous) => {
+    if (state.entries !== previous.entries) send(unsavedPaths(state.entries));
+  });
+  return () => {
+    off();
+    send([]);
+  };
+}

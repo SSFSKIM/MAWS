@@ -118,4 +118,6 @@ export const EDITOR_COPY = {
   readOnly: { head: 'Read-only: the file is larger than the editor’s cap', encoding: 'Read-only: the file is not UTF-8', loading: 'Read-only until the file has loaded' },
   comment: (line: number) => `Comment on line ${line}`,
   anchorTitle: (label: string) => `Comment on ${label}`, anchorBody: 'The comment composer arrives with side threads (E3). This anchor will open it:', close: 'Close',
+  // M5: the quit-when-idle banner's part (the quit question's own words are main's, in quit-guard.ts)
+  unsavedFilesPart: (n: number) => `${n} unsaved ${n === 1 ? 'file' : 'files'}`,
 } as const;

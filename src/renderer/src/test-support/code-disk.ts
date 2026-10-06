@@ -34,6 +34,7 @@ export function installDisk(files: Record<string, DiskFile>) {
 
   const answer = (name: CommandName, input: Record<string, unknown>) => {
     if (name === 'files.watch' || name === 'files.unwatch') return ok();
+    if (name === 'layout.unsavedFiles' || name === 'layout.saveAllDone') return ok(); // M5: the quit guard's, recorded only
     const path = input.path as string;
     const file = textOf(path);
     if (name === 'files.read') {

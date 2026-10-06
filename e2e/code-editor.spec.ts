@@ -361,4 +361,71 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       }
     });
   });
+
+  // M5 (the owner's ruling of 2026-10-06): the quit question names the unsaved files and offers Save all, Quit anyway
+  // and Cancel, answered here through MAWS_E2E_QUIT_ANSWER (no native dialog), the quit made as C12's e2e makes it.
+  test('quitting with a dirty tab under MAWS_E2E_QUIT_ANSWER=cancel keeps the app and the dirty tab', async () => {
+    await withProduct(async (p) => {
+      const original = read(p, APP);
+      const viewer = await openEditor(p, APP);
+      await typeAtTop(p, viewer, TYPED);
+      const lines = guardLines(p.maws);
+      await answerQuitWith(p.maws, 'cancel');
+      try {
+        await quit(p.maws);
+        await expect.poll(lines, { message: 'the question named the unsaved file and was cancelled' }).toContainEqual(expect.stringMatching(/^quit-guard: 1 unsaved file(, .+)?, auto-answered cancel$/));
+        expect(p.maws.app.process().exitCode, 'the app is still running').toBeNull();
+        await expectDirtyTab(p.page, 'app.ts', true);
+        await expect(viewer).toHaveAttribute('data-dirty', 'true');
+        expect(read(p, APP), 'nothing was saved').toBe(original);
+      } finally {
+        await answerQuitWith(p.maws, null); // the teardown's quit answers as by default (Quit anyway)
+      }
+    });
+  });
+
+  test('quitting with a dirty tab under MAWS_E2E_QUIT_ANSWER=save_all saves the file to disk and the app exits', async () => {
+    await withProduct(async (p) => {
+      const original = read(p, APP);
+      const viewer = await openEditor(p, APP);
+      await typeAtTop(p, viewer, TYPED);
+      const lines = guardLines(p.maws);
+      await answerQuitWith(p.maws, 'save_all');
+      const child = p.maws.app.process();
+      const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      await quit(p.maws);
+      await exitWithin(exited, 20_000, lines);
+      expect(lines()).toContainEqual(expect.stringMatching(/^quit-guard: 1 unsaved file(, .+)?, auto-answered save_all$/));
+      expect(read(p, APP), 'Save all wrote the document').toBe(`${TYPED}\n${original}`);
+    });
+  });
 });
+
+// ---- M5: the quit, as e2e/c12-quit.spec.ts drives it -----------------------------------------------------------------------
+
+// The guard's stderr lines from now on (`quit-guard: …`, `quit-report: …`).
+function guardLines(maws: Product['maws']): () => string[] {
+  let text = '';
+  maws.app.process().stderr?.on('data', (chunk) => (text += String(chunk)));
+  return () => text.split('\n').filter((line) => line.startsWith('quit-guard:') || line.startsWith('quit-report:'));
+}
+
+const quit = (maws: Product['maws']) => maws.app.evaluate(({ app }) => app.quit());
+
+// The answer the guard gives under MAWS_E2E; null restores the default (Quit, Quit anyway).
+const answerQuitWith = (maws: Product['maws'], answer: 'cancel' | 'save_all' | null) =>
+  maws.app.evaluate((_electron, a) => {
+    if (a === null) delete process.env.MAWS_E2E_QUIT_ANSWER;
+    else process.env.MAWS_E2E_QUIT_ANSWER = a;
+  }, answer);
+
+// The app's exit, bounded so a quit that never comes fails here with the guard's own lines instead of the test timeout.
+async function exitWithin(exited: Promise<void>, ms: number, lines: () => string[]): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`MAWS did not quit within ${ms} ms; the guard said: ${JSON.stringify(lines())}`)), ms)));
+  try {
+    await Promise.race([exited, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}

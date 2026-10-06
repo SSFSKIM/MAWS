@@ -19,6 +19,9 @@ import { queryClient } from './query';
 import { useFiles } from '../tools/code/files/store';
 import { useViewer } from '../tools/code/viewer/viewer-store';
 // C8c end
+// E5 start
+import { pushUnsavedFiles } from '../tools/code/viewer/viewer-store';
+// E5 end
 // C8b start
 import { agentWorkClient, type AgentWorkClient } from '../tools/agents/client';
 // C8b end
@@ -183,10 +186,28 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
 // main's `files.changed` into the Files tool's listings and watches, then into the file viewer's tabs (in that order,
 // so an `invalidated` directory is being re-watched before the viewer waits on it).
 export function connectCodeEvents(client: MawsBridge = ipc): () => void {
-  return client.on('files.changed', (event) => {
+  const offFiles = client.on('files.changed', (event) => {
     useFiles.getState().applyChanged(event);
     useViewer.getState().applyChanged(event);
   });
+  // E5 start (M5): the quit guard's unsaved files. The window's dirty file tabs go to main on every change of the set,
+  // and main's Save all saves them and is answered with those left unsaved (after the saves' own pushes).
+  const offUnsaved = pushUnsavedFiles(client);
+  const offSaveAll = client.on('layout.saveAll', ({ requestId }) =>
+    void useViewer
+      .getState()
+      .saveAll()
+      .then((failed) => client.invoke('layout.saveAllDone', { requestId, failed }))
+      .then((result) => {
+        if (!result.ok) console.warn('[editor] could not answer Save all', result.error);
+      }),
+  );
+  return () => {
+    offFiles();
+    offUnsaved();
+    offSaveAll();
+  };
+  // E5 end
 }
 // C8c end
 // C8b start: the agent tools' one pushed fact outside their stores (C8b execution document, Repository map). A task
