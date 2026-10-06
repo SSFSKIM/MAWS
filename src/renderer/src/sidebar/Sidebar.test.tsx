@@ -864,7 +864,7 @@ describe('the sidebar’s lineage nesting', () => {
   });
 
   it('a thread of a thread carries its real depth in aria-level, indented as its parent is', () => {
-    fillStores({ ...nine, sessions: [...nine.sessions, child('side-1', 'x.ts:42', 'side-thread', 1), child('side-2', 'Nested thread', 'side-thread', 2, 'side-1')] });
+    fillStores({ ...nine, sessions: [...nine.sessions, child('side-1', 'x.ts:42', 'side-thread', 1), child('side-2', 'Nested thread', 'side-thread', 2, 'side-1' as AppSessionId)] });
     expand('proj-maws');
     render(<Sidebar />);
     expect(row('x.ts:42').getAttribute('aria-level')).toBe('3');
