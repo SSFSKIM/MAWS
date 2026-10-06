@@ -69,9 +69,9 @@ Index (`src/main/index/migrations.ts`, `PRAGMA user_version`): versions 1 to 3 t
 | `side.*` (open thread, send to main, side question) | E3 | reserved |
 | `browser.*` | E4 | reserved |
 | `files.write {appSessionId, path, content, expectedHash}` → `{status:'ok'|'conflict', hash}`; `files.read` gains `hash: true` and answers `hash` and `utf8` as required output fields (siblings faking `files.read` must answer them); keymap action `file.save` (⌘S, File › Save file); the X10 seam `registerCommentComposer`/`openCommentComposer` and `FileLineAnchor` in `src/renderer/src/tools/code/anchor/anchor.ts`, which E3 registers its composer into (E3 may move the type under `src/shared/`) | E5 | named 2026-10-06 (interim hand-back) |
-| `scm.*` (stage, unstage, discard, commit, push, pr, prState) | E6 | reserved |
+| `scm.status`, `scm.stage`, `scm.unstage`, `scm.discard`, `scm.commit`, `scm.push.plan`, `scm.push`, `scm.pr.plan`, `scm.pr.create`, `scm.remote.cancel`, `scm.remote.last`, `scm.pr.state` (+ `scm.pr.diff` only if E3 has landed at its M5); event `scm.remote.output` with `seq`; `scm.changed` released (C4's `git.changed` carries every change); `git.diff` scope enum gains `'untracked'` (X2 additive); `GitCommandError` gains `exitCode` and `stdout`; `gitEnv` mode `'read'|'checkout'|'mutate'`; `PARENT_SESSION_VARIABLES` moves to `src/shared/host/session-variables.ts`; `e2e/support/launch.ts` gains `prepare`; `package.json` gains `e2e:scm`; `PrLineAnchor` beside E5's `FileLineAnchor`; tool id `source-control`, `ScmParams { target? }` | E6 | named 2026-10-06 (author's document) |
 | `tasks.edit` (a steer through the session, P-11) | E7 | reserved |
-| `plugins.env`, `plugins.list`, `plugins.available`, `plugins.install`, `plugins.update`, `plugins.uninstall`, `plugins.enable`, `plugins.disable`, `plugins.cancel`; events `plugins.operation`, `plugins.changed`; `marketplaces.list`, `marketplaces.add`, `marketplaces.update`, `marketplaces.remove`; `session.reloadSkills` beside `session.reloadPlugins` | E8 | named 2026-10-05 (interim hand-back) |
+| `plugins.env`, `plugins.list`, `plugins.available`, `plugins.install`, `plugins.update`, `plugins.uninstall`, `plugins.enable`, `plugins.disable`, `plugins.cancel`; events `plugins.operation`, `plugins.changed`; `marketplaces.list`, `marketplaces.add`, `marketplaces.update`, `marketplaces.remove`; `session.reloadSkills` beside `session.reloadPlugins` | E8 | landed 2026-10-06 (0eb56c11) |
 | `voice.status`, `voice.start`, `voice.stop`, `voice.cancel`, `voice.openPrivacySettings`; event `voice.event` (main-owned) | E9 | landed 2026-10-06 (75b352d2) |
 | `host.*` (supervisor connect, status, stop all) | E10 | reserved |
 
@@ -82,6 +82,7 @@ Files more than one child touches: `src/shared/graph/events.ts`, `src/shared/ipc
 ## 7. Record
 
 - 2026-10-05: opened at wave one's dispatch with the reservations above; E9 holds settings version 9 provisionally.
+- 2026-10-06: E8 landed; E6's execution document merged with its names (§5); no settings version for E6.
 - 2026-10-06 (E1 interim): X9's three tools, events and IPC as built (§1, §2, §5); `files.reveal` joins `files.*`; the fallback sentence opens each description (A-18 corrected §1's earlier "ends with"); the installed engine moved to 2.1.291 during E1.
 - 2026-10-06 (E5 interim): E5 names `files.write`, the `files.read` extension, `file.save` and the X10 seam (§5); adds devDependencies `@codemirror/commands` 6.11.1 and `@codemirror/merge` 6.12.2 (exact); tokens `--code-conflict-*`. E3's author reads the seam before designing the comment composer.
 - 2026-10-06: E9 landed with the names below as recorded; `package.json` gains `build:helper`, `e2e:voice`, and `build:app` chained behind `build:helper`; `electron-builder.yml` gains the E9 block (extraResources, extendInfo, entitlements); `build/entitlements.mac.plist` added.
