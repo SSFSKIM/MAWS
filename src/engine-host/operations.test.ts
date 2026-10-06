@@ -70,10 +70,10 @@ describe('x2 deadlines fit the bridge', () => {
       await vi.advanceTimersByTimeAsync(1); // the completion's macrotask
       expect(events).toEqual([{ appSessionId: APP, opId, command: 'session.sideQuestion', late: false, outcome: { ok: false, error: { code: 'timeout', message: 'side_question unanswered after 120 s', engineCode: null } } }]);
       await vi.advanceTimersByTimeAsync(20_000);
-      respond('side_question', { text: 'because' });
+      respond('side_question', { response: 'because', synthetic: false });
       await vi.advanceTimersByTimeAsync(1);
       expect(events).toHaveLength(2);
-      expect(events[1]).toEqual({ appSessionId: APP, opId, command: 'session.sideQuestion', late: true, outcome: { ok: true, value: { text: 'because' } } });
+      expect(events[1]).toEqual({ appSessionId: APP, opId, command: 'session.sideQuestion', late: true, outcome: { ok: true, value: { response: 'because', synthetic: false } } });
     });
 
     it('a late error and an answer after the late table add nothing', async () => {

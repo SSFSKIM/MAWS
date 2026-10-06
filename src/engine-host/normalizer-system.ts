@@ -199,6 +199,9 @@ export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemM
     case 'peer_message_hold':
     case 'elicitation_complete':
     case 'local_command_output': // untyped by C1 (parses as UnknownSystemFrame); the table lists it as none
+    // E3: a side question's `started` (or `api_retry`) progress (pass3/p1-side-question-session seq 91; SPEC 45
+    // §45.14.4); the operation's receipt already says it is pending, and its answer completes it
+    case 'control_request_progress':
       return none;
     case 'init':
       throw new Error('system/init is mapped by the Normalizer (it touches turn state)');
