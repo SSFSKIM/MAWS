@@ -510,6 +510,9 @@ Every e2e run is under `MAWS_E2E=1` with its own `userData` and an empty `CLAUDE
 - Decision: the `SideQuestion*` edit is made inside C3's block in `control.ts` with a dated comment, as E8's D-14 did.
   Rationale: the spec's G4/G5 mandate the fix; the block's "never edit inside" rule has the D-14 precedent and is listed in the hand-back for the ledger's §6 record.
   Date/Author: 2026-10-06, the E3 author.
+- Decision: refresh pass at execution start; parent re-pinned to git blob `1023793f7feceb755097783df87dbde938dd6e7f` (master 3339e13e; the delta from `fc64e611…` is record-keeping plus A-25 and A-26, which accept E1's and this document's residue). E1 landed at f3202d3e: its blocks exist where Grounding says (`events.ts` E1 blocks at the head and end of `EVENT_KINDS` and the union, `control.ts` E1 block at the end, `session.ts` E1 blocks, `App.tsx` E1 blocks, `queue.steer`'s `preface`); E3's blocks append after them. E6's `PrLineAnchor` is not on master, so M1 does nothing for it beyond the optional `side`/`prNumber` fields. E7 is executing in parallel in `events.ts`, `classify.ts`, `rows.ts`, `reduce.ts`, `App.tsx`: every E3 change there is a delimited `// E3 start … // E3 end` block.
+  Rationale: the document was authored before E1 landed; the consumed names were reconciled against master before M0.
+  Date/Author: 2026-10-06, the E3 executor.
 
 ## Deferred
 
