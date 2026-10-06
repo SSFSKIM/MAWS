@@ -4,6 +4,7 @@
 // document, a disabled editor and unmount.
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { undoDepth } from '@tiptap/pm/history';
+import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import type { Editor as TiptapEditor } from '@tiptap/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -352,6 +353,7 @@ describe('editor dictation replaces interim text and settles the final', () => {
       const { handle, editor, content } = await mount(PASTED, 1);
       moveDOMSelection(content.querySelector('[data-pasted]')!.firstChild!, 2);
       const sink = handle.current!.beginDictation(() => {})!;
+      expect(editor.state.selection).toBeInstanceOf(NodeSelection);
       expect([editor.state.selection.from, editor.state.selection.to]).toEqual([CHIP, CHIP + 1]);
       act(() => sink.final('now'));
       expect(chips(editor)).toBe('see [chip] now ok');
@@ -372,6 +374,17 @@ describe('editor dictation replaces interim text and settles the final', () => {
       expect(selection(editor)).toEqual({ anchor: CHIP, head: CHIP });
       act(() => sink.final('now'));
       expect(chips(editor)).toBe('see now[chip] ok');
+    });
+
+    it('a caret at the very end of a chip’s label is a text caret after it, and the words go after it', async () => {
+      const { handle, editor, content } = await mount(PASTED, 1);
+      const label = content.querySelector('[data-pasted]')!.firstChild!;
+      moveDOMSelection(label, label.nodeValue!.length);
+      const sink = handle.current!.beginDictation(() => {})!;
+      expect(editor.state.selection).toBeInstanceOf(TextSelection);
+      expect(selection(editor)).toEqual({ anchor: CHIP + 1, head: CHIP + 1 });
+      act(() => sink.final('now'));
+      expect(chips(editor)).toBe('see [chip] now ok');
     });
 
     it('a caret on the editor root between two paragraphs puts the words at the end of the first', async () => {
