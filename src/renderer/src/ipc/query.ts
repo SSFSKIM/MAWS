@@ -52,6 +52,10 @@ export const QUERY_COMMANDS = [
   // C11 end
   'settings.userEngineDefaults', // W3: what an unstarted tab's model chip and the mode seed show
   'voice.status', // E9: the dictation helper, its permissions and locales (Settings › Voice; never prompts)
+  // E6 start: the Source control tool's trust, remotes and gh state, and the PR state the tool and the push-state row share
+  'scm.status',
+  'scm.pr.state',
+  // E6 end
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
 

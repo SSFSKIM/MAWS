@@ -34,9 +34,12 @@ import { SETTINGS_DEFAULTS_V9 } from '../settings/defaults';
 // E9 start
 import * as voice from './schema/voice';
 // E9 end
+// E6 start
+import * as scm from './schema/scm';
+// E6 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -144,6 +147,13 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('git.log', { directory: '/r', limit: 500 }).ok).toBe(true);
     });
     // end C4
+
+    // E6 start: git.diff's untracked scope (the service requires its path and refuses a base)
+    it('accepts the E6 untracked scope on git.diff', () => {
+      expect(validateCommandInput('git.diff', { directory: '/r', scope: 'untracked', path: 'new.txt' }).ok).toBe(true);
+      expect(validateCommandInput('git.diff', { directory: '/r', scope: 'untracked', path: 'new.txt', context: 0 }).ok).toBe(true);
+    });
+    // E6 end
 
     // C10 start: the worktree service's git.worktree.* entries (C10 execution document, Interfaces "Worktrees"), owner main.
     it('carries the C10 git.worktree.* entries, every command owned by main, with the cleanup ladder’s refusals', () => {
@@ -559,10 +569,10 @@ describe('ipc schema validates both directions', () => {
     it('adds its six commands under existing namespaces with their owners, and no namespace or event', () => {
       const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'layout.captureChords': 'main', 'engine.configure': 'engine-host' } as const;
       // Every C11 command sits under a namespace that existed before C11 (C8c's `files`, E8's `plugins` and
-      // `marketplaces`, E9's `voice` and E1's `maws` are the ones added since).
+      // `marketplaces`, E9's `voice`, E1's `maws` and E6's `scm` are the ones added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws']);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm']);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -855,4 +865,99 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E1 end
+  // E6 start: source control (E6 execution document, Interfaces "X2 `scm.*`")
+  describe('E6 entries', () => {
+    const appSessionId = 'a1111111-1111-4111-8111-111111111111';
+    const token = '3f2b8c1e-6d4a-4f7b-9a1e-2c5d8e7f6a90';
+    const status = {
+      repoRoot: '/r', gitDir: '/r/.git', commonDir: '/r/.git', isWorktree: false, branch: 'main', head: 'abc', upstream: 'origin/main',
+      remoteUrl: null, ahead: 0, behind: 0, dirty: false, files: [], stashCount: 0, checkedAt: '2026-10-06T00:00:00.000Z',
+    };
+    const plan = {
+      token, kind: 'push', cwd: '/r', program: '/usr/bin/git', argv: ['push', '--progress', 'origin', 'refs/heads/main:refs/heads/main'], remote: 'origin',
+      remoteUrl: 'https://github.com/o/r', pushUrls: ['https://github.com/o/r'], repository: null, branch: 'main', head: 'abc', upstream: 'origin/main', expiresAt: '2026-10-06T00:05:00.000Z',
+    };
+
+    it('carries the E6 scm.* entries: twelve commands and one event, every command owned by main and bridged', () => {
+      expect(Object.keys(scm.commands)).toEqual([
+        'scm.status', 'scm.stage', 'scm.unstage', 'scm.discard', 'scm.commit', 'scm.push.plan', 'scm.push', 'scm.pr.plan', 'scm.pr.create',
+        'scm.remote.cancel', 'scm.remote.last', 'scm.pr.state',
+      ]);
+      for (const spec of Object.values(scm.commands)) expect(spec.owner).toBe('main');
+      expect(Object.keys(scm.events)).toEqual(['scm.remote.output']);
+      expect([...NAMES.scm.commands]).toEqual(Object.keys(scm.commands));
+      expect([...NAMES.scm.events]).toEqual(['scm.remote.output']);
+    });
+
+    it('scm.status takes a session, never a directory, and answers trust, remotes and the gh state', () => {
+      const answer = { directory: '/r', repository: true, trusted: true, trustKey: '/r', remotes: [{ name: 'origin', url: null }], defaultRemote: 'origin', defaultBase: 'main', gh: { state: 'missing' }, checkedAt: 'now' };
+      expect(validateCommandInput('scm.status', { appSessionId }).ok).toBe(true);
+      expect(validateCommandInput('scm.status', { appSessionId, directory: '/r' }).ok).toBe(false);
+      expect(validateCommandOutput('scm.status', answer)).toEqual({ ok: true, value: answer });
+      expect(validateCommandOutput('scm.status', { ...answer, gh: { state: 'ready', path: '/bin/gh', version: 'gh version 2.97.0' } }).ok).toBe(true);
+      expect(validateCommandOutput('scm.status', { ...answer, gh: { state: 'unauthenticated', path: '/bin/gh', version: null, detail: 'not logged in' } }).ok).toBe(true);
+      expect(validateCommandOutput('scm.status', { ...answer, gh: { state: 'ready', path: '/bin/gh' } }).ok).toBe(false);
+    });
+
+    it('the local mutations take bounded paths, entries and a message, and answer a status or a refusal', () => {
+      expect(validateCommandInput('scm.stage', { appSessionId, paths: ['src/app.ts'] }).ok).toBe(true);
+      expect(validateCommandInput('scm.stage', { appSessionId, paths: [] }).ok).toBe(false);
+      expect(validateCommandInput('scm.stage', { appSessionId, paths: [''] }).ok).toBe(false);
+      expect(validateCommandInput('scm.stage', { appSessionId, paths: ['x'.repeat(4097)] }).ok).toBe(false);
+      expect(validateCommandInput('scm.unstage', { appSessionId, paths: Array.from({ length: 1001 }, (_, i) => `f${i}`) }).ok).toBe(false);
+      expect(validateCommandInput('scm.discard', { appSessionId, entries: [{ path: 'a', group: 'unstaged' }, { path: 'u/', group: 'untracked' }] }).ok).toBe(true);
+      expect(validateCommandInput('scm.discard', { appSessionId, entries: [{ path: 'a', group: 'staged' }] }).ok).toBe(false);
+      expect(validateCommandInput('scm.commit', { appSessionId, message: 'From the panel', noVerify: false }).ok).toBe(true);
+      expect(validateCommandInput('scm.commit', { appSessionId, message: '', noVerify: false }).ok).toBe(false);
+      expect(validateCommandInput('scm.commit', { appSessionId, message: 'x' }).ok).toBe(false);
+      const ok = { ok: true, status, output: '' };
+      expect(validateCommandOutput('scm.stage', ok)).toEqual({ ok: true, value: ok });
+      expect(validateCommandOutput('scm.commit', { ...ok, commit: { sha: 'abc', subject: 'From the panel' } }).ok).toBe(true);
+      for (const refused of scm.ScmRefusalCodeSchema.options) {
+        expect(validateCommandOutput('scm.discard', { refused, detail: '', output: '' }).ok, refused).toBe(true);
+      }
+      expect(validateCommandOutput('scm.discard', { refused: 'forced', detail: '', output: '' }).ok).toBe(false);
+      expect(validateCommandOutput('scm.stage', { ok: false, status, output: '' }).ok).toBe(false);
+    });
+
+    it('plans and runs carry one-shot tokens, and the output event its sequence number', () => {
+      expect(validateCommandInput('scm.push.plan', { appSessionId }).ok).toBe(true);
+      expect(validateCommandInput('scm.push.plan', { appSessionId, remote: '' }).ok).toBe(false);
+      expect(validateCommandInput('scm.pr.plan', { appSessionId, title: 'Panel PR', body: '', base: 'main', draft: false }).ok).toBe(true);
+      expect(validateCommandInput('scm.pr.plan', { appSessionId, title: '', body: '', base: 'main', draft: false }).ok).toBe(false);
+      expect(validateCommandOutput('scm.push.plan', plan).ok).toBe(true);
+      expect(validateCommandOutput('scm.pr.plan', { ...plan, kind: 'pr', program: '/bin/gh', repository: 'o/r' }).ok).toBe(true);
+      expect(validateCommandOutput('scm.push.plan', { refused: 'behind', detail: 'Pull in a terminal first', output: '' }).ok).toBe(true);
+      for (const name of ['scm.push', 'scm.pr.create', 'scm.remote.cancel'] as const) {
+        expect(validateCommandInput(name, { appSessionId, token }).ok, name).toBe(true);
+        expect(validateCommandInput(name, { appSessionId, token: 'not-a-uuid' }).ok, name).toBe(false);
+      }
+      expect(validateCommandOutput('scm.push', { started: true, token }).ok).toBe(true);
+      expect(validateCommandOutput('scm.push', { refused: 'plan_expired', detail: '', output: '' }).ok).toBe(true);
+      expect(validateCommandOutput('scm.remote.cancel', undefined).ok).toBe(true);
+      const last = { token, kind: 'push', plan, running: false, exitCode: 0, signal: null, output: 'done', truncated: false, seq: 3, startedAt: 'then' };
+      expect(validateCommandOutput('scm.remote.last', last)).toEqual({ ok: true, value: last });
+      expect(validateCommandOutput('scm.remote.last', null).ok).toBe(true);
+      expect(validateEventPayload('scm.remote.output', { appSessionId, token, seq: 1, kind: 'stdout', text: 'x' }).ok).toBe(true);
+      expect(validateEventPayload('scm.remote.output', { appSessionId, token, seq: 2, kind: 'stderr', text: '', truncated: true }).ok).toBe(true);
+      expect(validateEventPayload('scm.remote.output', { appSessionId, token, seq: 3, kind: 'exit', exitCode: null, signal: 'SIGTERM' }).ok).toBe(true);
+      expect(validateEventPayload('scm.remote.output', { appSessionId, token, seq: 0, kind: 'stdout', text: 'x' }).ok).toBe(false);
+      expect(validateEventPayload('scm.remote.output', { appSessionId, token, seq: 1, kind: 'progress', text: 'x' }).ok).toBe(false);
+    });
+
+    it('scm.pr.state answers the PR and its checks, or why there is none', () => {
+      const pr = {
+        number: 7, url: 'https://github.com/o/r/pull/7', title: 'Panel PR', state: 'OPEN', isDraft: false, reviewDecision: null, baseRefName: 'main', headRefName: 'feature',
+        mergeStateStatus: 'CLEAN', checks: { summary: 'pending', items: [{ name: 'ci', bucket: 'pending', state: 'IN_PROGRESS', link: null, workflow: 'CI' }] },
+      };
+      const answer = { checkedAt: 'now', branch: 'feature', gh: { state: 'missing' }, pr, error: null };
+      expect(validateCommandInput('scm.pr.state', { appSessionId, refresh: true }).ok).toBe(true);
+      expect(validateCommandInput('scm.pr.state', { appSessionId }).ok).toBe(false);
+      expect(validateCommandOutput('scm.pr.state', answer)).toEqual({ ok: true, value: answer });
+      expect(validateCommandOutput('scm.pr.state', { ...answer, pr: null, error: 'untrusted' }).ok).toBe(true);
+      expect(validateCommandOutput('scm.pr.state', { ...answer, pr: { ...pr, state: 'DRAFT' } }).ok).toBe(false);
+      expect(validateCommandOutput('scm.pr.state', { ...answer, pr: { ...pr, checks: { summary: 'pending', items: [{ ...pr.checks.items[0], bucket: 'queued' }] } } }).ok).toBe(false);
+    });
+  });
+  // E6 end
 });

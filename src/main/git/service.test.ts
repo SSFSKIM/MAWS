@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
-import { statSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GitStatusSchema } from '@shared/ipc/schema/git';
+import { GitStatusSchema, type GitChanged } from '@shared/ipc/schema/git';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { GitTimeoutError, NotARepositoryError, type ExecFileFn } from './runner';
 import { GitService, withoutUserInfo } from './service';
@@ -262,5 +263,173 @@ describe('git invocation is read-only', () => {
     const service = new GitService({ execFile: hung });
     await expect(service.status(repo.root)).rejects.toThrow(GitTimeoutError);
     await expect(service.status(repo.root)).rejects.toThrow(`git rev-parse timed out after 10 s in ${repo.root}`);
+  });
+});
+
+// E6 (Design §7): what `git add` would stage for an untracked file, confined by the fresh status's own listing.
+describe('git.diff untracked scope', () => {
+  let repo: GitFixture;
+  let service: GitService;
+  let spawn: ReturnType<typeof vi.fn<ExecFileFn>>;
+  let outside: string;
+  beforeEach(async () => {
+    repo = await GitFixture.create();
+    spawn = vi.fn(execFile as unknown as ExecFileFn);
+    service = new GitService({ env: repo.serviceEnv(), execFile: spawn });
+    outside = realpathSync(mkdtempSync(join(tmpdir(), 'maws-git-outside-')));
+  });
+  afterEach(() => {
+    service.dispose();
+    repo.dispose();
+    rmSync(outside, { recursive: true, force: true });
+  });
+  const noIndexCalls = () => spawn.mock.calls.filter(([, args]) => args.includes('--no-index'));
+
+  it('answers a listed file as an all-added patch from the top level, its counts from the patch', async () => {
+    await repo.write('src/kept.ts', 'kept\n'); // tracked, so status lists src/new.ts itself rather than `src/`
+    await repo.git('add', 'src/kept.ts');
+    await repo.git('commit', '-q', '-m', 'src');
+    await repo.write('src/new.ts', 'one\ntwo\n');
+    const diff = await service.diff({ directory: repo.path('src'), scope: 'untracked', path: 'src/new.ts' });
+    expect(noIndexCalls().map(([, args]) => args)).toEqual([
+      ['-C', repo.root, '-c', 'diff.autoRefreshIndex=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-index', '--src-prefix=a/', '--dst-prefix=b/', '-U3', '--', '/dev/null', 'src/new.ts'],
+    ]);
+    // The shape C8c's splitPatch reads as one `added` file: the git header, then `new file mode` before the first hunk.
+    const lines = diff.patch.split('\n');
+    expect(lines.slice(0, 5)).toEqual(['diff --git a/src/new.ts b/src/new.ts', 'new file mode 100644', expect.stringMatching(/^index 0+\.\.[0-9a-f]+$/), '--- /dev/null', '+++ b/src/new.ts']);
+    expect(lines.slice(5)).toEqual(['@@ -0,0 +1,2 @@', '+one', '+two', '']);
+    expect(diff.files).toEqual([{ path: 'src/new.ts', oldPath: null, insertions: 2, deletions: 0, binary: false }]);
+    expect((await service.diff({ directory: repo.root, scope: 'untracked', path: 'src/new.ts', context: 0 })).patch).toContain('@@ -0,0 +1,2 @@');
+  });
+
+  it('reads an empty listed file (git exits 1 for it too) as added with nothing inserted, and a binary file as binary', async () => {
+    await repo.write('empty.txt', '');
+    const empty = await service.diff({ directory: repo.root, scope: 'untracked', path: 'empty.txt' });
+    expect(empty.patch.split('\n').slice(0, 2)).toEqual(['diff --git a/empty.txt b/empty.txt', 'new file mode 100644']);
+    expect(empty.patch).not.toContain('@@');
+    expect(empty.files).toEqual([{ path: 'empty.txt', oldPath: null, insertions: 0, deletions: 0, binary: false }]);
+    await repo.write('logo.bin', 'a\0b');
+    const binary = await service.diff({ directory: repo.root, scope: 'untracked', path: 'logo.bin' });
+    expect(binary.patch).toContain('Binary files /dev/null and b/logo.bin differ');
+    expect(binary.files).toEqual([{ path: 'logo.bin', oldPath: null, insertions: 0, deletions: 0, binary: true }]);
+  });
+
+  it('diffs an untracked symlink to a file as git shows one, its target path and never the target content', async () => {
+    writeFileSync(join(outside, 'secret'), 'outside secret\n');
+    symlinkSync(join(outside, 'secret'), repo.path('link'));
+    const diff = await service.diff({ directory: repo.root, scope: 'untracked', path: 'link' });
+    expect(diff.patch).toContain('new file mode 120000');
+    expect(diff.patch).toContain(`+${join(outside, 'secret')}`);
+    expect(diff.patch).not.toContain('outside secret');
+    expect(diff.files).toEqual([{ path: 'link', oldPath: null, insertions: 1, deletions: 0, binary: false }]);
+  });
+
+  it('refuses whatever the status does not list as an untracked file, and a listed symlink to a directory, before running any diff', async () => {
+    writeFileSync(join(outside, 'secret'), 'outside secret\n');
+    writeFileSync(join(outside, 'null'), 'outside null\n'); // what `--no-index -- /dev/null escape` would read
+    symlinkSync(outside, repo.path('escape'));
+    await repo.write('udir/x.txt', 'inner\n');
+    await repo.write('.gitignore', 'ignored.log\n');
+    await repo.write('ignored.log', 'ignored\n');
+    expect((await service.status(repo.root)).files.filter((f) => f.untracked).map((f) => f.path)).toEqual(['.gitignore', 'escape', 'udir/']);
+    for (const path of ['escape', 'udir/', 'udir', 'udir/x.txt', 'escape/secret', 'escape/null', '.git/config', 'ignored.log', 'README.md', 'missing.txt', '../outside', `${outside}/secret`]) {
+      await expect(service.diff({ directory: repo.root, scope: 'untracked', path }), path).rejects.toThrow(`not an untracked file: ${path}`);
+    }
+    expect(noIndexCalls()).toEqual([]);
+  });
+
+  it('reads names git quotes or tab-ends in its header as the requested path', async () => {
+    for (const [path, content] of [['naïve file.txt', 'x\n'], ['sp ace.txt', 'y\n'], ['e mpty.txt', ''], ['q"uote.txt', 'z\n']] as const) {
+      await repo.write(path, content);
+      const diff = await service.diff({ directory: repo.root, scope: 'untracked', path });
+      expect(diff.files, path).toEqual([{ path, oldPath: null, insertions: content === '' ? 0 : 1, deletions: 0, binary: false }]);
+    }
+  });
+
+  it.each<{ settings: [string, string][] }>([
+    { settings: [['diff.mnemonicPrefix', 'true']] },
+    { settings: [['diff.noprefix', 'true']] },
+    { settings: [['diff.srcPrefix', 'old:'], ['diff.dstPrefix', 'new:']] },
+  ])('answers whatever prefixes the configuration asks for ($settings)', async ({ settings }) => {
+    for (const [key, value] of settings) await repo.git('config', key, value);
+    await repo.write('new.txt', 'one\n');
+    const diff = await service.diff({ directory: repo.root, scope: 'untracked', path: 'new.txt' });
+    expect(diff.patch.split('\n')[0]).toBe('diff --git a/new.txt b/new.txt');
+    expect(diff.files).toEqual([{ path: 'new.txt', oldPath: null, insertions: 1, deletions: 0, binary: false }]);
+  });
+
+  it('refuses an answer about another path: the entry became a symlink to a directory between the checks and the diff', async () => {
+    writeFileSync(join(outside, 'null'), 'outside null\n');
+    await repo.write('brief.txt', 'here\n');
+    const swapping: ExecFileFn = (file, args, options, callback) => {
+      if (args.includes('--no-index')) {
+        rmSync(repo.path('brief.txt'));
+        symlinkSync(outside, repo.path('brief.txt'));
+      }
+      return (execFile as unknown as ExecFileFn)(file, args, options, callback);
+    };
+    const racing = new GitService({ env: repo.serviceEnv(), execFile: swapping });
+    try {
+      await expect(racing.diff({ directory: repo.root, scope: 'untracked', path: 'brief.txt' })).rejects.toThrow('not an untracked file: brief.txt');
+    } finally {
+      racing.dispose();
+    }
+  });
+
+  it('refuses a listed file that is gone when the diff runs rather than answering an empty patch', async () => {
+    await repo.write('brief.txt', 'here\n');
+    const vanishing: ExecFileFn = (file, args, options, callback) => {
+      if (args.includes('--no-index')) rmSync(repo.path('brief.txt'));
+      return (execFile as unknown as ExecFileFn)(file, args, options, callback);
+    };
+    const racing = new GitService({ env: repo.serviceEnv(), execFile: vanishing });
+    try {
+      await expect(racing.diff({ directory: repo.root, scope: 'untracked', path: 'brief.txt' })).rejects.toThrow('not an untracked file: brief.txt');
+    } finally {
+      racing.dispose();
+    }
+  });
+
+  it('needs a path and refuses a base', async () => {
+    await expect(service.diff({ directory: repo.root, scope: 'untracked' })).rejects.toThrow('the untracked scope needs a path');
+    await expect(service.diff({ directory: repo.root, scope: 'untracked', path: 'a.txt', base: 'main' })).rejects.toThrow("base applies to scope 'all' only");
+  });
+});
+
+// E6 (Design §1): after a mutation, main asks the watcher to re-read the checkout's root at once.
+describe('git service refreshes a watched root on demand', () => {
+  let repo: GitFixture;
+  let service: GitService;
+  let events: GitChanged[];
+  beforeEach(async () => {
+    repo = await GitFixture.create();
+    events = [];
+    // Watches that never deliver an event: whatever is emitted after the settle pass came from the refresh.
+    service = new GitService({ env: repo.serviceEnv(), emit: (e) => events.push(e), watch: () => ({ close: () => {}, on: () => {} }) });
+  });
+  afterEach(() => {
+    service.dispose();
+    repo.dispose();
+  });
+
+  it('re-reads the root of a directory inside it and emits the moved status; an unwatched repository is left alone', async () => {
+    await repo.write('sub/a.txt', 'a\n');
+    await service.watch(repo.root);
+    await new Promise((resolve) => setTimeout(resolve, 400)); // past the settle pass
+    expect(events.map((e) => e.reason)).toEqual(['initial']);
+    await repo.git('add', 'sub/a.txt');
+    service.refresh(repo.path('sub'));
+    await vi.waitFor(() => expect(events).toHaveLength(2), { timeout: 3000 });
+    expect(events[1].status.files).toEqual([{ path: 'sub/a.txt', oldPath: null, index: 'A', worktree: '.', untracked: false }]);
+
+    const other = await GitFixture.create();
+    try {
+      service.refresh(other.root);
+      service.refresh(tmpdir()); // not a repository: nothing to refresh, nothing thrown
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(events).toHaveLength(2);
+    } finally {
+      other.dispose();
+    }
   });
 });

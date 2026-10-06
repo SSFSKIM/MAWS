@@ -1,12 +1,13 @@
 // The summary card over seeded stores (C8a execution document, M2): the sessions and layout stores seeded directly, a
 // fake bridge standing in for main (git.*, layout.get/set, fs.workflows), and C6's transcript store attached to the
 // session's key as the session tab would attach it.
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CommandName } from '@shared/ipc/schema';
 import type { GitDiff, GitStatus } from '@shared/ipc/schema/git';
+import type { ScmGhState, ScmPrState, ScmStatus } from '@shared/ipc/schema/scm';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { digest, record, status as engineStatus } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
@@ -28,13 +29,18 @@ const GIT: GitStatus = {
   ],
 };
 const DIFF: GitDiff = { patch: '', files: [{ path: 'a.ts', oldPath: null, insertions: 3, deletions: 1, binary: false }] };
+// E6 (a C8a test amended by E6): the push-state row's PR line reads E6's `scm.status` and `scm.pr.state`; here gh answers
+// that the branch has no PR.
+const GH: ScmGhState = { state: 'ready', path: '/bin/gh', version: 'gh version 2.97.0' };
+const SCM: ScmStatus = { directory: DIR, repository: true, trusted: true, trustKey: DIR, remotes: [{ name: 'origin', url: 'git@github.com:o/maws.git' }], defaultRemote: 'origin', defaultBase: 'main', gh: GH, checkedAt: '2026-09-29T10:00:00.000Z' };
+const PR_STATE: ScmPrState = { checkedAt: '2026-09-29T10:00:01.000Z', branch: 'main', gh: GH, pr: null, error: null };
 const RUN = { runId: 'run-1', snapshot: null, journal: [] };
 
 let fake: FakeClient;
 const offs: (() => void)[] = [];
 
 function bridge(over: Partial<Record<CommandName, unknown>> = {}) {
-  fake = fakeClient({ 'git.watch': GIT, 'git.diff': DIFF, 'git.unwatch': undefined, 'layout.get': { value: null }, 'layout.set': undefined, 'layout.openExternal': undefined, 'fs.workflows': { runs: [RUN, RUN] }, 'session.reloadPlugins': { opId: 'op-1' }, 'session.reloadSkills': { opId: 'op-2' }, ...over });
+  fake = fakeClient({ 'git.watch': GIT, 'git.diff': DIFF, 'git.unwatch': undefined, 'layout.get': { value: null }, 'layout.set': undefined, 'layout.openExternal': undefined, 'fs.workflows': { runs: [RUN, RUN] }, 'session.reloadPlugins': { opId: 'op-1' }, 'session.reloadSkills': { opId: 'op-2' }, 'scm.status': SCM, 'scm.pr.state': PR_STATE, ...over });
   window.maws = fake.client;
 }
 
@@ -103,6 +109,7 @@ describe('summary card', () => {
     expect(within(env).getByTestId('change-line').textContent).toBe('+3 −1 across 2 files · 1 untracked');
     const push = section('Push state');
     expect(within(push).getByText('1 ahead of origin/main')).toBeTruthy();
+    await waitFor(() => expect(within(push).getByTestId('pr-line').textContent).toBe('No PR for main')); // E6: the row's second line, once main's two reads answer
     await user.click(within(push).getByRole('button', { name: 'Open on GitHub' }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://github.com/o/maws/tree/main' }]);
   });
