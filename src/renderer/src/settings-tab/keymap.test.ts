@@ -109,3 +109,12 @@ it('checks every generated candidate digit when rebinding Select tab 1–9', () 
   expect(captureChord(event, 'tab.select', { 'attention.next': 'Cmd+Shift+5' })).toEqual({ kind: 'refused', message: 'Already bound to Next Needs-you · unbind it first' });
   expect(captureChord(event, 'tab.select', { 'attention.next': null })).toEqual({ kind: 'chord', chord: 'Cmd+Shift+1' });
 });
+
+// E9 start: Option+Space reports a no-break space as its key; the capture reads Space by its code (Design §5)
+it('reads Space by its code, and refuses a bare Space for the app-wide hold to dictate', () => {
+  expect(acceleratorOf(key('Space', ' ', { altKey: true }))).toBe('Alt+Space');
+  expect(acceleratorOf(key('Space', '\u00a0', { altKey: true }))).toBe('Alt+Space');
+  expect(captureChord(key('Space', ' '), 'composer.dictate', {})).toEqual({ kind: 'refused', message: 'An app-wide shortcut needs ⌘, ⌃ or ⌥' });
+  expect(captureChord(key('Space', '\u00a0', { altKey: true }), 'composer.dictate', {})).toEqual({ kind: 'chord', chord: 'Alt+Space' });
+});
+// E9 end

@@ -2,10 +2,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ActionId } from '@shared/keymap/actions';
+import type { ActionId, KeymapOverrides } from '@shared/keymap/actions';
 import { useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
-import { connectKeys } from './dispatcher';
+import { connectKeys, releaseHold } from './dispatcher';
 import { useKeyChord } from './useKeyChord';
 import { currentSet } from '../stores/layout-model';
 
@@ -274,3 +274,128 @@ it('does not let a persisted bare app-wide shortcut swallow text or stop work', 
   expect(stop).not.toHaveBeenCalled();
   expect((input as HTMLInputElement).value).toBe('sessions');
 });
+
+// E9 start: a hold action runs on the accepted keydown and is released when any part of its chord is let go, or when the
+// window loses the keyboard; the physical key stays swallowed until its own keyup (E9 execution document, Design §5).
+describe('dispatcher holds and releases a hold action', () => {
+  let keymap: KeymapOverrides;
+  const run = vi.fn();
+  const release = vi.fn();
+  function Hold() {
+    useKeyChord('composer.dictate', run, { onRelease: release });
+    return null;
+  }
+  const down = (init: KeyboardEventInit) => {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    document.body.dispatchEvent(event);
+    return event;
+  };
+  const up = (init: KeyboardEventInit) => void document.body.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, ...init }));
+  const altSpace = { code: 'Space', key: ' ', altKey: true };
+  const hideDocument = () => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    try {
+      document.dispatchEvent(new Event('visibilitychange'));
+    } finally {
+      delete (document as { visibilityState?: unknown }).visibilityState;
+    }
+  };
+
+  beforeEach(() => {
+    cleanup();
+    run.mockClear();
+    release.mockClear();
+    keymap = {};
+    disconnect();
+    disconnect = connectKeys(window, () => keymap);
+    render(<Hold />);
+  });
+
+  it('runs once for a down and its repeats, and releases on the key’s keyup', () => {
+    expect(down(altSpace).defaultPrevented).toBe(true);
+    expect(down({ ...altSpace, repeat: true }).defaultPrevented).toBe(true);
+    expect(down({ ...altSpace, repeat: true }).defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledOnce();
+    expect(release).not.toHaveBeenCalled();
+    up(altSpace);
+    expect(release.mock.calls).toEqual([['keyup']]);
+  });
+
+  it('releases on Alt’s keyup, keeps swallowing Space repeats until Space’s own keyup, then lets Space through', () => {
+    down(altSpace);
+    up({ code: 'AltLeft', key: 'Alt' });
+    expect(release.mock.calls).toEqual([['keyup']]);
+    expect(down({ code: 'Space', key: ' ', repeat: true }).defaultPrevented).toBe(true);
+    expect(down({ code: 'Space', key: ' ', repeat: true }).defaultPrevented).toBe(true);
+    up({ code: 'Space', key: ' ' });
+    expect(release).toHaveBeenCalledOnce(); // once, however many parts of the chord are let go
+    expect(down({ code: 'Space', key: ' ' }).defaultPrevented).toBe(false);
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it('releases a ⌘ override on Meta’s keyup (Chromium drops the letter’s keyup while ⌘ is held)', () => {
+    keymap = { 'composer.dictate': 'Cmd+D' };
+    expect(down({ code: 'KeyD', key: 'd', metaKey: true }).defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledOnce();
+    up({ code: 'MetaLeft', key: 'Meta' });
+    expect(release.mock.calls).toEqual([['keyup']]);
+  });
+
+  it('does not release on an unrelated key’s keyup, and lets another key’s down through while held', () => {
+    down(altSpace);
+    up({ code: 'KeyA', key: 'å', altKey: true });
+    up({ code: 'ShiftLeft', key: 'Shift', altKey: true }); // a modifier the chord does not require
+    expect(release).not.toHaveBeenCalled();
+    expect(down({ code: 'KeyA', key: 'å', altKey: true }).defaultPrevented).toBe(false);
+  });
+
+  it('releases with lost on blur and on a hidden document, and clears the latch', () => {
+    down(altSpace);
+    window.dispatchEvent(new Event('blur'));
+    expect(release.mock.calls).toEqual([['lost']]);
+    expect(down({ code: 'Space', key: ' ' }).defaultPrevented).toBe(false); // no longer swallowed
+
+    release.mockClear();
+    down(altSpace);
+    hideDocument();
+    expect(release.mock.calls).toEqual([['lost']]);
+    expect(down({ code: 'Space', key: ' ' }).defaultPrevented).toBe(false);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not release with lost after the hold already ended on a keyup', () => {
+    down(altSpace);
+    up({ code: 'AltLeft', key: 'Alt' });
+    window.dispatchEvent(new Event('blur'));
+    expect(release.mock.calls).toEqual([['keyup']]);
+  });
+
+  it('still releases after the keymap changed between down and up', () => {
+    down(altSpace);
+    keymap = { 'composer.dictate': 'Cmd+D' };
+    up(altSpace);
+    expect(release.mock.calls).toEqual([['keyup']]);
+  });
+
+  it('releaseHold releases the latched binding once', () => {
+    down(altSpace);
+    releaseHold('lost');
+    releaseHold('lost');
+    expect(release.mock.calls).toEqual([['lost']]);
+  });
+
+  it('useKeyChord’s cleanup releases a latched binding with lost', () => {
+    down(altSpace);
+    cleanup();
+    expect(release.mock.calls).toEqual([['lost']]);
+    expect(down({ code: 'Space', key: ' ' }).defaultPrevented).toBe(false);
+  });
+
+  it('connectKeys’s disposer clears the latch', () => {
+    down(altSpace);
+    disconnect();
+    disconnect = connectKeys(window, () => keymap);
+    expect(down({ code: 'Space', key: ' ' }).defaultPrevented).toBe(false);
+  });
+});
+// E9 end

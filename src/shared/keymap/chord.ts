@@ -8,8 +8,9 @@ export interface Chord {
   ctrl: boolean;
   alt: boolean;
   shift: boolean;
-  // A `KeyboardEvent.code` for letters, digits and punctuation ('KeyJ', 'Digit1', 'Backslash'), a `KeyboardEvent.key`
-  // for named keys ('Tab', 'Enter', 'Escape'), so a chord matches the physical key whatever the keyboard layout types.
+  // A `KeyboardEvent.code` for letters, digits, punctuation and Space ('KeyJ', 'Digit1', 'Backslash', 'Space'), a
+  // `KeyboardEvent.key` for the other named keys ('Tab', 'Enter', 'Escape'), so a chord matches the physical key
+  // whatever the keyboard layout types.
   key: string;
 }
 
@@ -26,9 +27,12 @@ const PUNCTUATION: Record<string, string> = {
   '\\': 'Backslash', '/': 'Slash', ',': 'Comma', '.': 'Period', ';': 'Semicolon', "'": 'Quote',
   '[': 'BracketLeft', ']': 'BracketRight', '-': 'Minus', '=': 'Equal', '`': 'Backquote',
 };
+// Named keys matched by KeyboardEvent.code (E9, Design §5): Chromium on macOS reports Option+Space's `key` as the
+// no-break space it would type, so Space is the physical key.
+const PHYSICAL: Record<string, string> = { Space: 'Space' };
 // Accelerator token → KeyboardEvent.key.
 const NAMED: Record<string, string> = {
-  Tab: 'Tab', Enter: 'Enter', Return: 'Enter', Escape: 'Escape', Esc: 'Escape', Space: ' ',
+  Tab: 'Tab', Enter: 'Enter', Return: 'Enter', Escape: 'Escape', Esc: 'Escape',
   Backspace: 'Backspace', Delete: 'Delete', Up: 'ArrowUp', Down: 'ArrowDown', Left: 'ArrowLeft', Right: 'ArrowRight',
   Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
 };
@@ -39,14 +43,14 @@ const alternatives = (tokens: string[]) => tokens.map(escape).join('|');
 
 export const CHORD_PATTERN = new RegExp(
   `^(?:(?:${alternatives(Object.keys(MODIFIERS))})\\+)*` +
-    `(?:[A-Z0-9]|F(?:[1-9]|1[0-9]|2[0-4])|${alternatives(Object.keys(PUNCTUATION))}|${alternatives(Object.keys(NAMED))})$`,
+    `(?:[A-Z0-9]|F(?:[1-9]|1[0-9]|2[0-4])|${alternatives(Object.keys(PUNCTUATION))}|${alternatives(Object.keys(PHYSICAL))}|${alternatives(Object.keys(NAMED))})$`,
 );
 
 function keyOf(token: string): string | null {
   if (/^[A-Z]$/.test(token)) return `Key${token}`;
   if (/^[0-9]$/.test(token)) return `Digit${token}`;
   if (FUNCTION_KEY.test(token)) return token;
-  return PUNCTUATION[token] ?? NAMED[token] ?? null;
+  return PUNCTUATION[token] ?? PHYSICAL[token] ?? NAMED[token] ?? null;
 }
 
 export function parseChord(accelerator: string): Chord {

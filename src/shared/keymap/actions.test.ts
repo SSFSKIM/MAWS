@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACTION_IDS, ACTIONS, effectiveChord } from './actions';
+import { ACTION_IDS, ACTIONS, effectiveChord, type ActionSpec } from './actions';
 import { parseChord } from './chord';
 
 const specs = Object.entries(ACTIONS);
@@ -63,4 +63,11 @@ describe('keymap: chords unique and single-sink', () => {
     expect(ACTIONS['gateway.openClaudeUsage']).toEqual({ title: 'Open ClaudeUsage', chord: null, sink: 'renderer', menu: null, scope: 'app' });
   });
   // C11 end
+
+  // E9 start: the hold action (E9 execution document, Interfaces "Keymap")
+  it('carries composer.dictate: an app-scoped hold at ⌥Space, out of the menu', () => {
+    expect(ACTIONS['composer.dictate']).toEqual({ title: 'Hold to dictate', chord: 'Alt+Space', sink: 'renderer', menu: null, scope: 'app', hold: true });
+    for (const [id, spec] of specs) if (id !== 'composer.dictate') expect((spec as ActionSpec).hold, id).toBeUndefined();
+  });
+  // E9 end
 });
