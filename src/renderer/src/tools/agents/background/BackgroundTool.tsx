@@ -6,7 +6,7 @@
 // an immutable snapshot the body reads through useSyncExternalStore, plus the store watch for the session it shows.
 // E7 (Design §2): its view is the list or one run's widget, as Subagents' is its lists or a drill-in (Back is a state
 // change; the host sees one tab); a card's title or chevron, the transcript's workflow ref and `open({ view: 'run' })`
-// open the widget.
+// open the widget. Its Scheduled section (Design §7) lists the session's cron jobs after Monitors.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
@@ -22,6 +22,7 @@ import { AGENT_TOOL_IDS } from '../tool-ids';
 import { BackgroundSummary } from './BackgroundSummary';
 import { Group, type BackgroundSection } from './Group';
 import { RunWidget } from './RunWidget'; // E7
+import { ScheduledSection } from './ScheduledRows'; // E7
 import { TaskChecklist } from './TaskChecklist';
 import { MonitorRow, ShellRow } from './TaskRows';
 import { WorkflowCard } from './WorkflowCard';
@@ -39,7 +40,7 @@ export interface BackgroundParams {
 }
 
 export type { BackgroundSection } from './Group';
-const ALL_SECTIONS: readonly BackgroundSection[] = ['workflows', 'shells', 'monitors', 'tasks'];
+const ALL_SECTIONS: readonly BackgroundSection[] = ['workflows', 'shells', 'monitors', 'tasks', /* E7 */ 'scheduled'];
 
 // E7: the list, or one run's widget (`taskId` the id it was opened on; `phase` the owner's pick, null following the run).
 export type BackgroundView = { kind: 'list' } | { kind: 'run'; taskId: string; phase: PhaseSelection | null };
@@ -273,6 +274,8 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
           ))}
         </Group>
       )}
+      {/* E7: the session's scheduled jobs, after Monitors (Decision Log 10) */}
+      <ScheduledSection appSessionId={appSessionId} session={ctx.session} live={live} visible={ctx.visible} expanded={expanded.has('scheduled')} onToggle={handle.toggle} />
       <TaskChecklist
         status={ctx.status}
         session={ctx.session}

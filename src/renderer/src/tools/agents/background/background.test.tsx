@@ -26,6 +26,15 @@ import { SLOW_TICK_MS } from '../subagents/shared';
 import { subagentsTool, type SubagentsParams } from '../subagents/SubagentsTool';
 import { BackgroundSummary } from './BackgroundSummary';
 import { backgroundTool, type BackgroundHandle, type BackgroundParams } from './BackgroundTool';
+// E7 start: the Scheduled section
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { nextCronMatch, parseCron, RECURRING_MAX_AGE_MS } from '@shared/engine/cron';
+import { useTranscriptStore } from '../../../transcript';
+import { cellId } from '../../../transcript/model/keys';
+import { flush } from '../fake-work-client';
+import { formatIn } from '../model/elapsed';
+// E7 end
 
 vi.mock('../log/LogTool', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../log/LogTool')>();
@@ -532,7 +541,7 @@ describe('background work', () => {
   it('createState with no params opens every section expanded and nothing selected; open({ taskId }) selects the card', async () => {
     const { handle } = await mount({ events: upTo(workflow, 82) });
     expect(handle.snapshot()).toMatchObject({ selected: null });
-    expect([...handle.snapshot().expanded].sort()).toEqual(['monitors', 'shells', 'tasks', 'workflows']);
+    expect([...handle.snapshot().expanded].sort()).toEqual(['monitors', /* E7 */ 'scheduled', 'shells', 'tasks', 'workflows']);
     fireEvent.click(within(section('workflows')!).getByRole('button', { name: 'Workflows · 1' }));
     expect(document.querySelector('[data-workflow="wayue3on6"]')).toBeNull();
     act(() => backgroundTool.open!(handle, { taskId: 'wayue3on6' }));
@@ -682,5 +691,134 @@ describe('task checklist', () => {
     expect(within(checklist()).getByRole('heading', { name: 'Tasks · 2/4' })).toBeTruthy();
     fireEvent.click(within(checklist()).getByRole('button', { name: 'Open the Tasks panel' }));
     expect(openTool).toHaveBeenCalledWith('tasks', { appSessionId: A, params: { appSessionId: A } });
+  });
+});
+
+// E7 (Design §7, G5): the Scheduled section over M0's recorded e7-cron run (the transcript's CronCreate and CronDelete
+// pairs, attached to the transcript store as the session's own) and its durable file (e7-cron-durable) on the fake
+// agent-work client's disk at the record's project root. Every time a cron names is the machine's local time, so each
+// next run is computed through nextCronMatch and the clock is set from the recorded calls' times.
+describe('scheduled jobs', () => {
+  const CRON = replayed('pass3', 'e7-cron');
+  const DURABLE = readFileSync(join(__dirname, '../../../../../../spikes/protocol-probe/fixtures/pass3/e7-cron-durable/scheduled_tasks.json'), 'utf8');
+  const CREATOR = '5e8ddabd-603d-4ffb-9edd-d937c627f55d'; // the durable record's createdBySessionId
+  const ROOT = '/work/A'; // the record's directory
+  const FILE = `${ROOT}/.claude/scheduled_tasks.json`;
+  const callOf = (prompt: string) => CRON.find((e) => e.kind === 'tool.use' && e.toolName === 'CronCreate' && (e.input as { prompt?: string }).prompt === prompt) as Extract<SessionEvent, { kind: 'tool.use' }>;
+  const ONE_SHOT = callOf('E7 one-shot');
+  const next = (cron: string, from: number) => nextCronMatch(parseCron(cron)!, from)!;
+  const TIME = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+
+  const scheduled = () =>
+    Array.from(section('scheduled')?.querySelectorAll<HTMLElement>('[data-scheduled]') ?? []).map((row) => ({
+      id: row.dataset.scheduled,
+      schedule: row.querySelector('[data-part="schedule"]')?.textContent,
+      kind: row.querySelector('[data-part="kind"]')?.textContent,
+      prompt: row.querySelector('[data-part="prompt"]')?.textContent,
+      when: row.querySelector('[data-part="when"]')?.textContent,
+      link: row.querySelector('button')?.textContent ?? null,
+    }));
+  const attachTranscript = (events: SessionEvent[]) => act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }));
+  const withDurable = () => {
+    fake.dirs.add(`${ROOT}/.claude`);
+    fake.files.set(FILE, DURABLE);
+  };
+
+  afterEach(() => {
+    for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
+  });
+
+  it('lists the durable job first, then the session-only jobs of the transcript, each with its next run, expiry and creating turn', async () => {
+    const now = Date.parse(ONE_SHOT.at) + 1; // the first launch: the recurring tick and the one-shot made, nothing fired
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+    withDurable();
+    await attachTranscript(CRON.filter((e) => (e.seq ?? 0) <= 166));
+    await mount({ engineSessionId: CREATOR });
+    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled · 3'));
+    // after Monitors, before Tasks (Decision Log 10)
+    expect(Array.from(document.querySelectorAll<HTMLElement>('section[data-section]')).map((s) => s.dataset.section)).toEqual(['scheduled', 'tasks']);
+    const rows = scheduled();
+    expect(rows.map(({ id, schedule, kind, prompt, link }) => ({ id, schedule, kind, prompt, link }))).toEqual([
+      { id: '598b1690', schedule: '0 9 * * 1', kind: 'recurring · durable · this session', prompt: 'E7 durable weekly', link: null }, // made after this point of the transcript
+      { id: '481abb0a', schedule: 'Every 2 minutes', kind: 'recurring · session-only', prompt: 'E7 cron tick', link: 'Open creating turn' },
+      { id: '8d1a2582', schedule: '15 4 6 10 *', kind: 'one-shot · session-only', prompt: 'E7 one-shot', link: 'Open creating turn' },
+    ]);
+    const tick = next('*/2 * * * *', now);
+    expect(rows[1]!.when).toBe(`Next ≈ ${TIME.format(tick)} (${formatIn(tick - now)}) · Expires ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(Date.parse(callOf('E7 cron tick').at) + RECURRING_MAX_AGE_MS)}`);
+    const fire = next('15 4 6 10 *', Date.parse(ONE_SHOT.at));
+    expect(rows[2]!.when).toContain(`(${formatIn(fire - now)})`); // a one-shot: its one fire, no expiry
+    expect(rows[2]!.when).not.toContain('Expires');
+    expect(rows[0]!.when).toContain(TIME.format(next('0 9 * * 1', now)));
+    expect(section('scheduled')!.querySelector('[data-part="when"] [title]')?.getAttribute('title')).toBe(
+      'The engine fires recurring jobs up to half a period late (30 min at most) and one-shots on :00 or :30 up to 90 s early',
+    );
+    // Open creating turn jumps the transcript to the call's cell
+    fireEvent.click(within(document.querySelector<HTMLElement>('[data-scheduled="481abb0a"]')!).getByRole('button', { name: 'Open creating turn' }));
+    expect(useTranscriptStore.getState().entries[A]!.jump?.focus).toBe(cellId.tool(callOf('E7 cron tick').toolUseId));
+  });
+
+  it('follows the transcript: a delete removes its job, a durable create links its file row, another session’s durable job says so', async () => {
+    const created = Date.parse(callOf('E7 nightly').at);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(created + 60_000);
+    withDurable();
+    // the one-shot left out: whether it has fired by now depends on the machine's zone (scheduled.test.ts pins it)
+    await attachTranscript(CRON.filter((e) => !('toolUseId' in e) || e.toolUseId !== ONE_SHOT.toolUseId));
+    await mount();
+    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled · 2'));
+    expect(scheduled().map(({ id, schedule, kind, link }) => ({ id, schedule, kind, link }))).toEqual([
+      { id: '598b1690', schedule: 'Every Monday at 9:00 AM', kind: 'recurring · durable · another session', link: 'Open creating turn' },
+      { id: '1040f3a5', schedule: 'Every day at 3:00 AM', kind: 'recurring · session-only', link: 'Open creating turn' },
+    ]);
+  });
+
+  it('a session not running here lists its session-only jobs greyed as resuming with the session, and its durable ones as the file says', async () => {
+    const now = Date.parse(ONE_SHOT.at) + 1;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+    withDurable();
+    await attachTranscript(CRON.filter((e) => (e.seq ?? 0) <= 166));
+    await mount({ status: null });
+    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled · 3'));
+    const rows = scheduled();
+    expect(rows.map((r) => [r.id, r.when])).toEqual([
+      ['598b1690', expect.stringMatching(/^Next ≈ /)],
+      ['481abb0a', expect.stringMatching(/^Resumes with the session · Expires /)],
+      ['8d1a2582', 'Resumes with the session'],
+    ]);
+    expect(document.querySelector('[data-scheduled="481abb0a"]')!.className).toContain('text-fg-faint');
+    expect(document.querySelector('[data-scheduled="598b1690"]')!.className).not.toContain('text-fg-faint');
+  });
+
+  it('keeps the transcript’s rows and says why when the durable file cannot be read; a change to it is read again', async () => {
+    const now = Date.parse(ONE_SHOT.at) + 1;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+    fake.dirs.add(`${ROOT}/.claude`);
+    fake.files.set(FILE, '{"tasks": [');
+    await attachTranscript(CRON.filter((e) => (e.seq ?? 0) <= 166));
+    await mount();
+    await waitFor(() => expect(section('scheduled')!.querySelector(':scope > p')?.textContent).toMatch(/^Scheduled jobs unavailable: /));
+    expect(scheduled().map((r) => r.id)).toEqual(['481abb0a', '8d1a2582']);
+    fake.files.set(FILE, DURABLE);
+    await act(async () => {
+      fake.filesChanged({ appSessionId: A, path: FILE, kind: 'changed' });
+      await flush();
+    });
+    expect(scheduled().map((r) => r.id)).toEqual(['598b1690', '481abb0a', '8d1a2582']);
+    expect(section('scheduled')!.querySelector(':scope > p')).toBeNull();
+  });
+
+  it('shows no section without jobs, and none after the transcript deleted its only one', async () => {
+    await mount();
+    expect(fake.fileCalls).toContain(`read ${FILE}`);
+    expect(section('scheduled')).toBeNull();
+    unmountAll();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse(CRON.find((e) => e.kind === 'tool.result' && e.toolUseId === callOf('E7 cron tick').toolUseId)!.at));
+    await attachTranscript(CRON.filter((e) => (e.seq ?? 0) <= 338 && (!('toolUseId' in e) || e.toolUseId !== ONE_SHOT.toolUseId)));
+    await mount();
+    expect(section('scheduled')).toBeNull(); // 481abb0a made, then cancelled (seq 335)
   });
 });

@@ -2,7 +2,7 @@
 // pattern, reimplemented because C8a's is under `panel/summary/` and not exported), with an optional muted suffix.
 import type { ReactNode } from 'react';
 
-export type BackgroundSection = 'workflows' | 'shells' | 'monitors' | 'tasks';
+export type BackgroundSection = 'workflows' | 'shells' | 'monitors' | 'tasks' | /* E7 */ 'scheduled';
 
 // `suffix` renders muted beside the heading's toggle (the checklist's `session list`). E7: `action` sits at the heading's
 // right end, sticky with it (the Tasks heading's `Open`), outside the `h3` so the heading's accessible name stays its

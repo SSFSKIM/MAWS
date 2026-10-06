@@ -153,6 +153,26 @@ export const TASKS_COPY = {
 } as const;
 // E7 end
 
+// E7 start: Background work's Scheduled section (E7 execution document, Design §7): one row per job the engine holds for
+// the session, its schedule in the create result's words (else the cron), its kind and store, the prompt's first line,
+// its next run with the engine's jitter named in the tooltip (SPEC 22 §22.7), its expiry, and a link to its creating call.
+export const SCHEDULED_COPY = {
+  heading: (n: number) => `Scheduled · ${n}`,
+  recurring: 'recurring',
+  oneShot: 'one-shot',
+  store: { 'durable-this': 'durable · this session', 'durable-other': 'durable · another session', session: 'session-only' },
+  next: (time: string, relative: string) => `Next ≈ ${time} (${relative})`,
+  nextUnknown: 'next run unknown', // a cron MAWS's parser refuses
+  jitter: 'The engine fires recurring jobs up to half a period late (30 min at most) and one-shots on :00 or :30 up to 90 s early',
+  expires: (date: string) => `Expires ${date}`,
+  expired: (date: string) => `Expired ${date}`, // a durable job past seven days: the engine deletes it after its next fire
+  lastRan: (ago: string) => `Last ran ${ago}`, // a durable job's `lastFiredAt`
+  dormant: 'Resumes with the session', // a session-only job of a session not running here (the engine resurrects it on resume)
+  openTurn: 'Open creating turn',
+  unavailable: (message: string) => `Scheduled jobs unavailable: ${message}`,
+} as const;
+// E7 end
+
 export const LOG_COPY = {
   title: 'Log',
   loadMore: 'Load more',

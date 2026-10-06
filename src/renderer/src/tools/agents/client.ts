@@ -3,12 +3,14 @@
 // spills with their change events), its command half (the relay's steer, Stop) and its wire half (`session.events` and
 // `session.eventBatch`, the only wire inputs of the task-graph store and the relay store). The product uses the
 // validated bridge; the `#panel` harness and the tests install a fake with `setAgentWorkClient`. C6's `ipcSource` is
-// not behind this seam: the drill-in mounts it as it is (K2).
+// not behind this seam: the drill-in mounts it as it is (K2). E7: its files half reads and watches a session's project
+// files through X2 `files.*` (the durable cron file, Design §7), never writing one.
 import type { AgentId, AppSessionId, MessageUuid, TaskId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CommandName, CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { FsReadSpillInput, FsReadSpillOutput, SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import type { EventsSnapshot } from '@shared/ipc/schema/session';
+import type { FilesChanged, FilesReadInput, FilesReadOutput } from '@shared/ipc/schema/files'; // E7
 import type { PersistedTask } from '@shared/wire/store';
 import { ipc } from '../../ipc/client';
 
@@ -26,6 +28,13 @@ export interface AgentWorkClient {
   onSubagentsChanged(listener: (payload: EventPayload<'fs.subagentsChanged'>) => void): () => void;
   onWorkflowChanged(listener: (payload: EventPayload<'fs.workflowChanged'>) => void): () => void;
   onTasksChanged(listener: (payload: EventPayload<'fs.tasksChanged'>) => void): () => void;
+  // E7 start: a session's own files (confined by main to its directories); a refusal or a missing file throws main's
+  // message (`not found: <path>` for a missing one)
+  readFile(input: FilesReadInput): Promise<FilesReadOutput>;
+  watchDir(appSessionId: AppSessionId, path: string): Promise<void>;
+  unwatchDir(appSessionId: AppSessionId, path: string): Promise<void>;
+  onFilesChanged(listener: (payload: FilesChanged) => void): () => void;
+  // E7 end
 }
 
 const valueOf = <N extends CommandName>(result: CommandResult<N>) => {
@@ -48,6 +57,12 @@ export function createAgentWorkClient(bridge: MawsBridge): AgentWorkClient {
     onSubagentsChanged: (listener) => bridge.on('fs.subagentsChanged', listener),
     onWorkflowChanged: (listener) => bridge.on('fs.workflowChanged', listener),
     onTasksChanged: (listener) => bridge.on('fs.tasksChanged', listener),
+    // E7 start
+    readFile: async (input) => valueOf(await bridge.invoke('files.read', input)),
+    watchDir: async (appSessionId, path) => valueOf(await bridge.invoke('files.watch', { appSessionId, path })),
+    unwatchDir: async (appSessionId, path) => valueOf(await bridge.invoke('files.unwatch', { appSessionId, path })),
+    onFilesChanged: (listener) => bridge.on('files.changed', listener),
+    // E7 end
   };
 }
 

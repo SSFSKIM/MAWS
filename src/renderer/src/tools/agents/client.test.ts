@@ -54,6 +54,25 @@ describe('agent-work client', () => {
     expect(seen).toEqual([{ listId: 'l' }, 'A']);
   });
 
+  // E7 (Design §7): the project's durable cron file, read with its hash and watched by its directory, never written.
+  it('reads a session file with files.read, watches and unwatches a directory, and passes files.changed through', async () => {
+    const read = { encoding: 'utf8', content: '{}', bytes: 2, offset: 0, length: 2, truncated: false, mime: 'application/json', hash: 'a'.repeat(64), utf8: true };
+    const fake = fakeClient({ 'files.read': read, 'files.watch': undefined, 'files.unwatch': undefined });
+    const client = createAgentWorkClient(fake.client);
+    expect(await client.readFile({ appSessionId: A, path: '/r/.claude/scheduled_tasks.json', hash: true })).toEqual(read);
+    await client.watchDir(A, '/r/.claude');
+    await client.unwatchDir(A, '/r/.claude');
+    expect(fake.invoked('files.read')).toEqual([{ appSessionId: 'A', path: '/r/.claude/scheduled_tasks.json', hash: true }]);
+    expect(fake.invoked('files.watch')).toEqual([{ appSessionId: 'A', path: '/r/.claude' }]);
+    expect(fake.invoked('files.unwatch')).toEqual([{ appSessionId: 'A', path: '/r/.claude' }]);
+    const seen: unknown[] = [];
+    const off = client.onFilesChanged((p) => seen.push(p));
+    fake.event('files.changed', { appSessionId: 'A', path: '/r/.claude/scheduled_tasks.json', kind: 'changed' });
+    off();
+    fake.event('files.changed', { appSessionId: 'A', path: '/r/x', kind: 'changed' });
+    expect(seen).toEqual([{ appSessionId: 'A', path: '/r/.claude/scheduled_tasks.json', kind: 'changed' }]);
+  });
+
   it('is replaceable by the harness and the tests, and null restores the bridge’s', () => {
     const product = agentWorkClient();
     expect(agentWorkClient()).toBe(product);

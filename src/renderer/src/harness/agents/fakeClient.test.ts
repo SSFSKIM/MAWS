@@ -91,6 +91,24 @@ describe('agents harness fake client', () => {
     expect(seen).toEqual(['subagents A a1,a2', 'subagents A a1,a2,w1', 'workflow A wf_1', 'tasks sess-1']);
   });
 
+  // E7 (Design §7): the durable cron file, answered as main answers files.read with `hash: true` (E5's rule).
+  it('serves fakeFs files to files.read with their hash and utf8 for its session, watches any directory, and announces a file as files.changed', async () => {
+    const fake = createFakeAgentWorkClient({ session: A });
+    const seen: string[] = [];
+    fake.client.onFilesChanged(({ appSessionId, path, kind }) => seen.push(`${appSessionId} ${path} ${kind}`));
+    const path = '/repo/.claude/scheduled_tasks.json';
+    await expect(fake.client.readFile({ appSessionId: A, path, hash: true })).rejects.toThrow(`not found: ${path}`);
+    fake.fakeFs({ files: { [path]: '{"tasks":[]}' } });
+    const read = await fake.client.readFile({ appSessionId: A, path, hash: true });
+    expect(read).toMatchObject({ encoding: 'utf8', content: '{"tasks":[]}', bytes: 12, offset: 0, length: 12, truncated: false, utf8: true });
+    expect(read.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect((await fake.client.readFile({ appSessionId: A, path })).hash).toBeNull();
+    await expect(fake.client.readFile({ appSessionId: B, path, hash: true })).rejects.toThrow(`not found: ${path}`);
+    await expect(fake.client.watchDir(A, '/repo/.claude')).resolves.toBeUndefined();
+    await expect(fake.client.unwatchDir(A, '/repo/.claude')).resolves.toBeUndefined();
+    expect(seen).toEqual([`A ${path} changed`]);
+  });
+
   it('records steers and stops, answering a stop as answerStop set it (ok by default)', async () => {
     const fake = createFakeAgentWorkClient({ session: A });
     const { messageUuid } = await fake.client.steer(A, 'Relay to agent x …', 'next');
