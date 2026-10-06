@@ -106,7 +106,13 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
       if (dropped++ === 0) console.error(`[host] dropping events until a client is ready (first: ${name})`);
       return false;
     }
-    return port.postMessage({ t: 'evt', name, payload: checked.value } satisfies HostMessage) !== false;
+    if (port.postMessage({ t: 'evt', name, payload: checked.value } satisfies HostMessage) !== false) return true;
+    // E10: a port that wrote nothing is closing, closed or stalled, and never writes again: the client is gone (the
+    // caller's detach follows at the close), so hasClient() after a false tells a gone client from a refused payload
+    ready = false;
+    console.error(`[host] the client stopped taking events (at ${name}); dropping until a client is ready`);
+    dropped += 1;
+    return false;
   };
 
   const hasClient = () => port !== null && ready; // E10

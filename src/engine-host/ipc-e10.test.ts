@@ -7,7 +7,7 @@ import { chmodSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
@@ -124,6 +124,30 @@ describe('the engine host’s connect burst (E10)', () => {
     host.hooks[0]!(); // a second connect: the state again, no event twice
     expect(host.emitted.filter((e) => e.name === 'session.eventBatch')).toEqual([]);
     expect(host.emitted.filter((e) => e.name === 'session.status')).toHaveLength(2);
+    await host.ipc.table.shutdown({ graceMs: 0 });
+  });
+
+  // Task 2.1's review: one row whose republish throws must not cost the others, the budget or the plugin events
+  it('a row whose republish throws is logged and skipped; the rest of the burst still goes', async () => {
+    const lines: string[] = [];
+    const host = engineHost({ log: (line) => void lines.push(line) });
+    for (const id of ['app-throw-a', 'app-throw-b']) {
+      await host.call('session.launch', { spec: spec(id) });
+      await until(() => host.statuses(id).some((s) => s.process === 'ready'), `${id} ready`);
+    }
+    const [a] = host.ipc.table.list();
+    vi.spyOn(a!, 'catalog').mockImplementation(() => {
+      throw new Error('boom');
+    });
+    host.emitted.length = 0;
+    host.hooks[0]!();
+    const rowOf = (e: Emitted) => (e.payload as { appSessionId?: string }).appSessionId ?? '-';
+    expect(host.emitted.map((e) => `${rowOf(e)} ${e.name}`)).toEqual([
+      'app-throw-b session.status', 'app-throw-b session.queue', 'app-throw-b session.brokerItems', 'app-throw-b session.catalogChanged',
+      '- engine.budget', '- plugins.changed',
+    ]);
+    expect(lines).toContainEqual(expect.stringContaining('the connect burst skipped app-throw-a: boom'));
+    await host.ipc.table.shutdown({ graceMs: 0 });
   });
 
   it('ends with the latest event of each running plugin operation', async () => {

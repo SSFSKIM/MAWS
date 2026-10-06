@@ -40,7 +40,11 @@ export interface SessionStreamOptions {
   ringSize?: number;
   batchMs?: number;
   exitedRingSize?: number; // C12: the ring once the launch has exited (EXITED_RING)
-  log?: (line: string) => void; // E10: the burst's tail_gap line
+  log?: (line: string) => void; // E10: the burst's tail_gap line, a refused batch
+  // E10: whether a client is still connected after an emit answered false: the runtime answers false for an invalid
+  // payload too, and a batch refused while the client is there can never be delivered, so it is skipped (absent: false
+  // means the client is gone)
+  hasClient?: () => boolean;
 }
 
 // E10: what a connect burst republishes for the row, read from its EngineSession (the stream keeps no copy): the queue
@@ -205,15 +209,25 @@ export class SessionStream {
     const start = intact ? cursor.index + 1 : 0;
     for (let i = start; i < this.ring.length; i += BATCH_MAX) {
       const batch = this.ring.slice(i, i + BATCH_MAX);
-      if (!this.opts.emit('session.eventBatch', { appSessionId: this.opts.appSessionId, events: batch })) return;
+      if (!this.send(batch)) return;
       this.deliveredTo = { index: i + batch.length - 1, id: batch.at(-1)!.id };
     }
   }
 
-  // A live batch: written, its last event becomes the cursor. The batch was the front of `pending`, which is the ring's
-  // tail, so the event sits just before what is still pending (unless one `events` call outgrew the ring).
+  // True when the batch is done with: written, or refused while the client stays connected (logged; it can never be
+  // delivered, so the cursor moves past it). False when the client is gone, so the batch stays undelivered.
+  private send(events: SessionEvent[]): boolean {
+    if (this.opts.emit('session.eventBatch', { appSessionId: this.opts.appSessionId, events })) return true;
+    if (!this.opts.hasClient?.()) return false;
+    this.opts.log?.(`refused a batch of ${events.length} (${events[0]!.id} .. ${events.at(-1)!.id}) of ${this.opts.appSessionId}: an invalid event; the stream goes on after it`);
+    return true;
+  }
+
+  // A live batch: written (or refused with the client there), its last event becomes the cursor. The batch was the front
+  // of `pending`, which is the ring's tail, so the event sits just before what is still pending (unless one `events`
+  // call outgrew the ring).
   private emitBatch(events: SessionEvent[]): void {
-    if (!this.opts.emit('session.eventBatch', { appSessionId: this.opts.appSessionId, events })) return;
+    if (!this.send(events)) return;
     const last = events.at(-1)!;
     const expected = this.ring.length - 1 - this.pending.length;
     const index = this.ring[expected] === last ? expected : this.ring.lastIndexOf(last);

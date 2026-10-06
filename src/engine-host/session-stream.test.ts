@@ -256,11 +256,12 @@ describe('the delivered cursor and the connect burst (E10)', () => {
 
   function client() {
     const emitted: Emitted[] = [];
-    const state = { connected: true, writesLeft: Infinity };
+    const state = { connected: true, writesLeft: Infinity, refuse: null as ((events: SessionEvent[]) => boolean) | null };
     const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => {
       const checked = validateEventPayload(name, payload);
       if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
       if (!state.connected || state.writesLeft <= 0) return false;
+      if (name === 'session.eventBatch' && state.refuse?.((payload as { events: SessionEvent[] }).events)) return false; // the runtime's refusal of an invalid payload
       state.writesLeft -= 1;
       emitted.push({ name, payload });
       return true;
@@ -270,7 +271,7 @@ describe('the delivered cursor and the connect burst (E10)', () => {
     return { emitted, emit, state, batches, delivered };
   }
 
-  function stream(emit: ReturnType<typeof client>['emit'], extra: { ringSize?: number; log?: (line: string) => void } = {}) {
+  function stream(emit: ReturnType<typeof client>['emit'], extra: { ringSize?: number; log?: (line: string) => void; hasClient?: () => boolean } = {}) {
     return new SessionStream({ appSessionId: APP, launchId: 'L', sessionId: null, journalPath: join(dir, 'L.jsonl'), emit, ...extra });
   }
 
@@ -381,7 +382,7 @@ describe('the delivered cursor and the connect burst (E10)', () => {
 
   it('a client lost during the burst keeps the cursor at the last batch written; the next ready sends the rest', () => {
     const fake = client();
-    const s = stream(fake.emit);
+    const s = stream(fake.emit, { hasClient: () => fake.state.connected && fake.state.writesLeft > 0 });
     fake.state.connected = false;
     s.events(rows(1, 1_200));
     s.flush();
@@ -394,6 +395,38 @@ describe('the delivered cursor and the connect burst (E10)', () => {
     s.republish(STATE);
     expect(fake.batches().map((b) => b.length)).toEqual([500, 500, 200]);
     expect(fake.delivered()).toEqual(rows(1, 1_200).map((e) => e.id));
+  });
+
+  // Task 2.1's review: the runtime answers false for an invalid payload as well as for a client gone; a refused batch
+  // with the client still there is skipped, or one bad event would strand the rest of the row's tail at every connect
+  it('a batch refused while the client stays connected is skipped with a log line, and the rest of the tail still goes', () => {
+    const fake = client();
+    const lines: string[] = [];
+    const s = stream(fake.emit, { log: (line) => lines.push(line), hasClient: () => fake.state.connected });
+    fake.state.connected = false;
+    s.events(rows(1, 1_200));
+    s.flush();
+    fake.state.connected = true;
+    fake.state.refuse = (events) => events.some((e) => e.id === `${APP}:L:700:0`);
+    s.republish(STATE);
+    expect(fake.batches().map((b) => b.length)).toEqual([500, 200]); // 501..1000 refused
+    expect(fake.delivered()).toEqual([...rows(1, 500), ...rows(1_001, 200)].map((e) => e.id));
+    expect(lines).toEqual([expect.stringContaining(`refused a batch of 500 (${APP}:L:501:0 .. ${APP}:L:1000:0)`)]);
+    expect(s.delivered).toEqual({ index: 1_199, id: `${APP}:L:1200:0` });
+    s.republish(STATE);
+    expect(fake.batches()).toHaveLength(2); // nothing resent
+  });
+
+  it('a live batch refused while the client stays connected moves the cursor past it, so no burst resends it', () => {
+    const fake = client();
+    const s = stream(fake.emit, { log: () => {}, hasClient: () => fake.state.connected });
+    fake.state.refuse = (events) => events.some((e) => e.id === `${APP}:L:2:0`);
+    s.events(rows(1, 3));
+    s.flush();
+    expect(s.delivered).toEqual({ index: 2, id: `${APP}:L:3:0` });
+    fake.state.refuse = null;
+    s.republish(STATE);
+    expect(fake.batches()).toEqual([]);
   });
 });
 // E10 end

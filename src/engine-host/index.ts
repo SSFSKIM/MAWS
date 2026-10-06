@@ -46,7 +46,7 @@ const register: HostRegister = (on, emit, client) => {
   ipc = registerEngineIpc(on, emit, {
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
     diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
-    onConnect: client.onConnect, // E10: the connect burst
+    onConnect: client.onConnect, hasClient: client.hasClient, // E10: the connect burst; a refused batch told from a client gone
   });
   ({ table } = ipc);
   table.startSampling();

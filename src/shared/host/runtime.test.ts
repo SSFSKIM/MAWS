@@ -299,6 +299,30 @@ describe('host runtime client hooks', () => {
     expect(fake.posted).toHaveLength(1);
   });
 
+  // E10 Task 2.3: a false from emit is told apart by hasClient: a port that wrote nothing is a client gone for good (a
+  // socket port never recovers), while an invalid payload leaves the client connected
+  it('a port that wrote nothing ends the client; an invalid payload does not', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fake = fakePort();
+    let writable = true;
+    const port: HostPort = { ...fake.port, postMessage: (message) => (writable ? void fake.posted.push(message) : false) };
+    let emit!: HostEmit;
+    const runtime = createHostRuntime((on, e) => {
+      on('engine.ping', async () => PING);
+      emit = e;
+    });
+    runtime.serve(port);
+    runtime.setReady();
+    expect(emit('session.brokerItems', { appSessionId: 'app-1', items: 'not a list' } as never)).toBe(false);
+    expect(runtime.hasClient()).toBe(true);
+    writable = false;
+    expect(emit('session.brokerItems', ITEMS)).toBe(false);
+    expect(runtime.hasClient()).toBe(false);
+    writable = true;
+    expect(emit('session.brokerItems', ITEMS)).toBe(false); // nothing more goes to that port
+    expect(fake.posted).toEqual([]);
+  });
+
   it('the engine host refuses to emit an event outside HOST_EVENTS', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const fake = fakePort();
