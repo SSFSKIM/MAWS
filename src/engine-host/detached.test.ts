@@ -6,9 +6,15 @@ import type { HostEmit } from '@shared/host/runtime';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { connectLines, type LineClient } from '../../test/support/socket-lines';
-import { START_EXIT_HELD, startSupervisor, type DetachedOptions, type RunningSupervisor } from './detached';
+import { START_EXIT_ABORTED, START_EXIT_HELD, startSupervisor, type DetachedOptions, type RunningSupervisor } from './detached';
 import { readLive, writeLive } from './live-ledger';
 import { buildIdOf, procStartOf, readLock } from './supervisor-files';
+
+// procStartOf stays the real one unless a case makes one `ps` fail
+vi.mock('./supervisor-files', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./supervisor-files')>();
+  return { ...actual, procStartOf: vi.fn(actual.procStartOf) };
+});
 
 const until = (check: () => boolean, timeout = 3_000) => vi.waitFor(() => expect(check()).toBe(true), { timeout, interval: 5 });
 
@@ -46,7 +52,7 @@ function harness(over: Partial<DetachedOptions> = {}) {
     shutdown,
     ...over,
   };
-  const start = async () => {
+  const start = async (aborted?: () => boolean) => {
     const supervisor = await startSupervisor(
       'test',
       (on, e) => {
@@ -54,7 +60,7 @@ function harness(over: Partial<DetachedOptions> = {}) {
         emit = e;
       },
       options,
-      { exit },
+      { exit, aborted },
     );
     if (supervisor) running.push(supervisor);
     return supervisor;
@@ -154,6 +160,34 @@ describe('the detached entry', () => {
     expect(host.exit).toHaveBeenCalledWith(0);
     expect(readLock(dir)?.pid).toBe(999_998);
     expect(readLive(dir)?.owner).toEqual(successor);
+  });
+
+  it('a clean exit removes its lock even when the one `ps` at its start failed (the owner is read back from the lock)', async () => {
+    vi.mocked(procStartOf).mockReturnValueOnce(null); // the lock is written with procStart ''
+    const host = harness();
+    const supervisor = (await host.start())!;
+    expect(readLock(dir)?.procStart).toBe('');
+    await supervisor.stop('exit');
+    expect(host.exit).toHaveBeenCalledWith(0);
+    expect(existsSync(join(dir, 'host.lock'))).toBe(false);
+  });
+
+  it('a start aborted by a signal after the lock removes the lock and its temporary and exits non-zero', async () => {
+    const host = harness();
+    expect(await host.start(() => true)).toBeNull();
+    expect(host.exit).toHaveBeenCalledExactlyOnceWith(START_EXIT_ABORTED);
+    expect(readdirSync(dir)).toEqual([]);
+    expect(host.lines.some((line) => line.includes('start aborted'))).toBe(true);
+  });
+
+  it('a start aborted by a signal during listen closes the socket and removes the lock', async () => {
+    const host = harness();
+    let checks = 0;
+    expect(await host.start(() => checks++ > 0)).toBeNull(); // not after the lock, then after listen
+    expect(host.exit).toHaveBeenCalledExactlyOnceWith(START_EXIT_ABORTED);
+    expect(existsSync(join(dir, 'host.lock'))).toBe(false);
+    await until(() => !existsSync(join(dir, 'host.sock')));
+    expect(host.shutdown).not.toHaveBeenCalled(); // nothing was served, so nothing to stop
   });
 
   it('a fatal exit stops the sessions but keeps the lock and the ledger for the successor’s staleness check', async () => {

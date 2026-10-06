@@ -42,7 +42,11 @@ export interface RunningSupervisor {
 
 export interface SupervisorProcess {
   exit(code: number): void;
+  aborted?(): boolean; // a SIGTERM arrived while the start was under way
 }
+
+// The exit code of a start a SIGTERM aborted (128 + SIGTERM): its lock, if it took one, is already removed.
+export const START_EXIT_ABORTED = 143;
 
 export const EXIT_GRACE_MS = 3_000; // the exit order's ladder grace for every live row
 const EXIT_SHUTDOWN_BOUND_MS = 10_000; // past this the exit order goes on without the ladder's answer
@@ -61,12 +65,16 @@ export function runDetached(hostVersion: string, register: HostRegister, opts: D
   process.on('uncaughtException', fatal);
   // A stray rejection is logged, not fatal: a supervisor holding sessions outlives a bug in one of them.
   process.on('unhandledRejection', (reason) => opts.log(`unhandled rejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`));
+  // A SIGTERM during the start does not exit past takeLock's cleanup: the start sees it at its next step and aborts.
+  let abortRequested = false;
+  proc.aborted = () => abortRequested;
   process.on('SIGTERM', () => {
     if (supervisor) void supervisor.stop('signal');
-    else proc.exit(0);
+    else abortRequested = true;
   });
   startSupervisor(hostVersion, register, opts, proc).then((started) => {
     supervisor = started;
+    if (started && abortRequested) void started.stop('signal'); // the signal landed between listen and this line
   }, fatal);
 }
 
@@ -75,7 +83,6 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
   const { dir, log } = opts;
   const pid = process.pid;
   privateDirectory(dir);
-  const owner: Owner = { pid, procStart: procStartOf(pid) ?? '' };
   const buildId = buildIdOf(opts.modulePath);
   const socketPath = socketPathFor(dir, dirname(dir), tmpdir());
   log(`supervisor ${hostVersion} pid ${pid} build ${buildId} starting in ${dir}`);
@@ -86,7 +93,22 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
     proc.exit(START_EXIT_HELD);
     return null;
   }
-  const startedAt = readLock(dir)?.startedAt ?? new Date().toISOString();
+  // The owner and start time as the lock recorded them, so the exit order's ownership check compares like with like
+  // even if a later `ps` of this process fails.
+  const written = readLock(dir);
+  const owner: Owner = { pid, procStart: written?.pid === pid ? written.procStart : '' };
+  const startedAt = written?.startedAt ?? new Date().toISOString();
+  const lockNamesMe = (): boolean => {
+    const lock = readLock(dir);
+    return lock !== null && lock.pid === owner.pid && lock.procStart === owner.procStart;
+  };
+  const abortStart = (stage: string): null => {
+    log(`start aborted by a signal ${stage}; exiting ${START_EXIT_ABORTED}`);
+    if (lockNamesMe()) unlinkQuietly(join(dir, SUPERVISOR_FILES.lock));
+    proc.exit(START_EXIT_ABORTED);
+    return null;
+  };
+  if (proc.aborted?.()) return abortStart('after taking the lock');
   const token = writeToken(dir);
   if (dirname(socketPath) !== dir) privateDirectory(dirname(socketPath));
   try {
@@ -131,11 +153,6 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
     }, opts.idleExitMs);
   }
 
-  function lockNamesMe(): boolean {
-    const lock = readLock(dir);
-    return lock !== null && lock.pid === owner.pid && lock.procStart === owner.procStart;
-  }
-
   function stop(reason: ExitReason, code: 0 | 1 = 0): Promise<void> {
     stopping ??= (async () => {
       log(`exiting (${reason})`);
@@ -165,6 +182,11 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
     log(`cannot listen on ${socketPath}: ${error instanceof Error ? error.message : String(error)}`);
     await stop('fatal', 1);
     return null;
+  }
+  server.on('error', (error) => log(`server error: ${error.message}`)); // an accept failure must not become fatal
+  if (proc.aborted?.()) {
+    server.close(); // unlinks the socket file
+    return abortStart('while it started listening');
   }
   fs.chmodSync(socketPath, 0o600);
   log(`listening on ${socketPath}`);
