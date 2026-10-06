@@ -85,6 +85,24 @@ describe('permission broker states and the approvals-lost rule', () => {
     }
   });
 
+  // E1 M5: only a tools/call naming the tool use confirms; any other SDK MCP message, or a call without the tool use in
+  // its _meta, proves nothing about the allow
+  it('an mcp_message that is not a tools/call, or a tools/call without _meta["claudecode/toolUseId"], leaves a delivered permission delivered', async () => {
+    const mcp = (message: Record<string, unknown>) => ({ type: 'control_request', request_id: 'm1', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 2, ...message } } });
+    const frames = {
+      list: mcp({ method: 'tools/list', params: { _meta: { 'claudecode/toolUseId': 'toolu_list' } } }),
+      bare: mcp({ method: 'tools/call', params: { name: 'ask', arguments: {} } }),
+      other: mcp({ method: 'tools/call', params: { name: 'ask', arguments: {}, _meta: { progressToken: 2 } } }),
+    };
+    for (const [id, frame] of Object.entries(frames)) {
+      const { broker } = setup();
+      broker.accept(canUseTool(id));
+      expect(await broker.answer(rid(id), { kind: 'permission', decision: 'allow', scope: 'once' })).toBe('delivered');
+      broker.observe(frame);
+      expect(broker.item(rid(id))?.attention.state, id).toBe('delivered');
+    }
+  });
+
   it('a confirming frame is ignored while the answer has not flushed: only a delivered item confirms (the session orders frames after the flush)', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
