@@ -10,7 +10,8 @@ import { rootsOf } from '../files/allowlist';
 import { readScreenshotBlock } from './screenshot';
 
 export function withoutScreenshot(anchor: Anchor): Anchor {
-  const { screenshot: _ignored, ...rest } = anchor;
+  const rest = { ...anchor };
+  delete rest.screenshot;
   return rest;
 }
 
