@@ -12,6 +12,9 @@ import { resetDictationStore, useDictationStore } from './store';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
+// An event as a test writes it, the capture id optional (the current one by default); distributed over the kinds, since
+// `Omit` of the union would keep only the fields every kind shares.
+type EventWithoutId = VoiceEvent extends infer E ? (E extends VoiceEvent ? Omit<E, 'captureId'> & { captureId?: string } : never) : never;
 
 function harness(options: { refuse?: boolean } = {}) {
   const invoked: [CommandName, unknown][] = [];
@@ -80,7 +83,7 @@ function harness(options: { refuse?: boolean } = {}) {
     await settle();
   };
   const captureId = () => (invoked.find(([name]) => name === 'voice.start')![1] as { captureId: string }).captureId;
-  const event = (e: Omit<VoiceEvent, 'captureId'> & { captureId?: string }) => controller.onEvent({ captureId: captureId(), ...e } as VoiceEvent);
+  const event = (e: EventWithoutId) => controller.onEvent({ captureId: captureId(), ...e } as VoiceEvent);
   const sent = (name: CommandName) => invoked.filter(([n]) => n === name).map(([, input]) => input);
   return { controller, invoked, sink, ended, begins, timers, advance, answer, fail, captureId, event, sent };
 }
