@@ -3,8 +3,10 @@
 // added there adds its name here.
 export const commands = [
   'maws.asks.list', 'maws.ask.answer', 'maws.pane.answer',
+  'maws.artifact.captured', // E2
 ] as const;
 
 export const events = [
   'maws.pane.show',
+  'maws.artifact.capture', // E2
 ] as const;

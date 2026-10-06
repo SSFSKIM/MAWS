@@ -23,3 +23,7 @@ export const ASK_SHEET_TOOL_ID = 'ask-sheet';
 
 // How long the host waits for a window to answer a `show_pane` before the call answers an error (residue 3).
 export const PANE_ANSWER_MS = 8_000;
+
+// E2 (Design §7): how long the host waits for main to answer an `artifact_screenshot` capture before the call answers
+// an error; main's own guard (20 s, two captures at once) keeps its answer inside it.
+export const CAPTURE_ANSWER_MS = 45_000;

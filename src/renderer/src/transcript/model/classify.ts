@@ -8,7 +8,13 @@ import type { ToolCategory, ToolClassification } from './rows';
 export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery';
 
 // E1 start: the names the engine gives the `maws` server's tools (X9), as tool uses carry them
-export const MAWS_TOOL_USE: Record<MawsToolName, string> = { send_file: `mcp__${MAWS_SERVER_NAME}__send_file`, ask: `mcp__${MAWS_SERVER_NAME}__ask`, show_pane: `mcp__${MAWS_SERVER_NAME}__show_pane` };
+export const MAWS_TOOL_USE: Record<MawsToolName, string> = {
+  send_file: `mcp__${MAWS_SERVER_NAME}__send_file`, ask: `mcp__${MAWS_SERVER_NAME}__ask`, show_pane: `mcp__${MAWS_SERVER_NAME}__show_pane`,
+  // E2 start: the artifact tools (their rows and cells land with E2's transcript milestone)
+  artifact_create: `mcp__${MAWS_SERVER_NAME}__artifact_create`, artifact_update: `mcp__${MAWS_SERVER_NAME}__artifact_update`,
+  artifact_list: `mcp__${MAWS_SERVER_NAME}__artifact_list`, artifact_screenshot: `mcp__${MAWS_SERVER_NAME}__artifact_screenshot`,
+  // E2 end
+};
 // E1 end
 
 const ROW_KIND_TOOLS: Record<string, Presentation> = {

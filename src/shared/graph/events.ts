@@ -97,6 +97,9 @@ export const EVENT_KINDS = [
   // E1 start: the maws tool server (P1 X9): an ask's life, a delivered file, a pane shown for the model
   'maws.ask.opened', 'maws.ask.answered', 'maws.ask.cancelled', 'maws.delivery.file', 'maws.pane.shown',
   // E1 end
+  // E2 start: an artifact version the maws server registered (P1 X9 `artifact_create`, `artifact_update`)
+  'maws.delivery.artifact',
+  // E2 end
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -261,6 +264,11 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('maws.delivery.file', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, deliverables: z.array(DeliveredFileSchema), caption: nullableString(), urgency: z.enum(['normal', 'high']) }),
   event('maws.pane.shown', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, pane: PaneSchema, target: nullableString(), opened: ShowPaneOpenedSchema.nullable(), error: nullableString() }),
   // E1 end
+  // E2 start (E2 execution document, Interfaces "X1", Design §9): mapped from an admitted `artifact_create` or
+  // `artifact_update` call and its answer when the answer parses (E1 residue 1's rule); a refusal yields none. `artifactId`
+  // is the agent's short name, `deliverableId` the record's uuid.
+  event('maws.delivery.artifact', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, action: z.enum(['create', 'update']), artifactId: z.string(), deliverableId: z.string(), version: z.number().int(), title: z.string() }),
+  // E2 end
 ]);
 
 export type SessionEvent = z.infer<typeof SessionEventSchema>;

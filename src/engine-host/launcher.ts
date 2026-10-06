@@ -99,7 +99,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
         statefulMcpServers: () => deps.table.statefulMcpServers,
         reconnectTrigger: deps.table.takeReleased(spec.appSessionId) ? 'process_exit' : 'user',
         // C12 end
-        deliverables: new FileDeliverableStore(deps.userData), // E1: `send_file`'s records under <userData>/deliverables
+        deliverables: (onWritten) => new FileDeliverableStore(deps.userData, { onWritten }), // E1: the maws tools' records under <userData>/deliverables; E2: announced
       });
       deps.wire(session, plan, spec);
       return session;

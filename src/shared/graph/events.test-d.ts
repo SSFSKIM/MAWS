@@ -2,7 +2,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { SafeguardVerdict } from './enums';
 import type { EventBase, EventKind, EventPayload, SessionEvent } from './events';
-import type { ToolUseId } from './ids';
+import type { RequestId, ToolUseId } from './ids';
 // E1 start
 import type { Pane } from '../maws/panes';
 import type { AskAnswer, AskQuestion, ShowPaneOpened } from '../maws/tools';
@@ -45,4 +45,14 @@ describe('session events are EventBase & EventPayload', () => {
     expectTypeOf<Extract<SessionEvent, { kind: 'maws.delivery.file' }>['toolUseId']>().toEqualTypeOf<ToolUseId | null>();
   });
   // E1 end
+
+  // E2 start
+  it('maws.delivery.artifact carries the action, the version and the branded correlators', () => {
+    type Artifact = Extract<SessionEvent, { kind: 'maws.delivery.artifact' }>;
+    expectTypeOf<Artifact['action']>().toEqualTypeOf<'create' | 'update'>();
+    expectTypeOf<Artifact['toolUseId']>().toEqualTypeOf<ToolUseId | null>();
+    expectTypeOf<Artifact['requestId']>().toEqualTypeOf<RequestId>();
+    expectTypeOf<Artifact['version']>().toEqualTypeOf<number>();
+  });
+  // E2 end
 });
