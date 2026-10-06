@@ -39,13 +39,16 @@ export function encryptCookieValue(key, hostKey, value) {
   return encrypt(key, Buffer.concat([hostHash(hostKey), Buffer.from(value, 'utf8')]));
 }
 
-// Returns { value, hashed }: hashed is true when the 32-byte SHA-256(host_key) prefix was present and matched
-// (version >= 24 stores); false when the plaintext is the bare value (older stores).
-export function decryptCookieValue(key, hostKey, blob) {
+// Returns { value, hashed }: hashed is true when the 32-byte SHA-256(host_key) prefix was present and matched.
+// Stores at version 24 or later always carry the prefix, so callers pass requireHostHash for them and a mismatch is a
+// failed decrypt (wrong key, or a value that merely survived CBC padding); only older stores may yield a bare value.
+export function decryptCookieValue(key, hostKey, blob, { requireHostHash = false } = {}) {
   const plain = decrypt(key, blob);
   if (plain.length >= 32 && plain.subarray(0, 32).equals(hostHash(hostKey))) return { value: plain.subarray(32).toString('utf8'), hashed: true };
+  if (requireHostHash) throw new Error('cookie plaintext lacks the SHA-256(host_key) prefix the store version requires');
   return { value: plain.toString('utf8'), hashed: false };
 }
+export const COOKIE_HOST_HASH_FROM_VERSION = 24;
 
 export function encryptPassword(key, password) {
   return encrypt(key, Buffer.from(password, 'utf8'));

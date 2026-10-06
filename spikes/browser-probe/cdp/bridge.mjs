@@ -4,14 +4,27 @@
 // answers the browser-level methods itself, announces the one page as an attached target under a synthetic session id,
 // and forwards everything carrying that session id to webContents.debugger.sendCommand. Child sessions (OOPIFs,
 // workers) that the page's own Target.setAutoAttach produces pass through with their real session ids.
+//
+// The boundary is enforced, not assumed: Electron's debugger client is a trusted CDP client, so the page session's own
+// Target domain can enumerate and attach to every target in the process (verified in main.mjs cdpBridgeScenario). The
+// bridge therefore (1) forwards only session ids it announced itself or that the debugger announced through an
+// auto-attach event, (2) allows on those sessions only the Target methods auto-attach needs (setAutoAttach,
+// detachFromTarget, getTargetInfo without a targetId) and no Browser.* or Storage.* method, and (3) accepts WebSocket
+// upgrades only on a per-bridge random token path. Origin is not checked (a product bridge would also pin it).
 import { createServer } from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
+
+const SESSION_TARGET_ALLOW = new Set(['Target.setAutoAttach', 'Target.detachFromTarget', 'Target.getTargetInfo']);
 
 export async function startDebuggerBridge(webContents, { host = '127.0.0.1', port = 0, log = () => {} } = {}) {
   const dbg = webContents.debugger;
   const PAGE_SESSION = 'maws-bridge-page-1';
+  const token = randomBytes(16).toString('hex');
+  const wsPath = `/devtools/browser/${token}`;
   const sockets = new Set();
-  const stats = { forwarded: 0, browserLevel: 0, events: 0, errors: 0, unknownBrowserMethods: new Set() };
+  const knownSessions = new Set([PAGE_SESSION]);
+  const stats = { forwarded: 0, browserLevel: 0, events: 0, errors: 0, blocked: [], rejectedUpgrades: 0, unknownBrowserMethods: new Set() };
   const verbose = process.env.PROBE_BRIDGE_LOG === '1';
 
   if (!dbg.isAttached()) dbg.attach('1.3');
@@ -28,8 +41,10 @@ export async function startDebuggerBridge(webContents, { host = '127.0.0.1', por
 
   dbg.on('message', (_event, method, params, sessionId) => {
     stats.events++;
+    if (method === 'Target.attachedToTarget' && params?.sessionId) knownSessions.add(params.sessionId);
+    if (method === 'Target.detachedFromTarget' && params?.sessionId) knownSessions.delete(params.sessionId);
     // Electron reports the root session as '' (or undefined); map it to our synthetic id.
-    if (verbose) log(`bridge < event ${method} ${sessionId ?? ""} ${JSON.stringify(params).slice(0, 200)}`);
+    if (verbose) log(`bridge < event ${method} ${sessionId ?? ''} ${JSON.stringify(params).slice(0, 200)}`);
     broadcast({ method, params, sessionId: sessionId ? sessionId : PAGE_SESSION });
   });
   dbg.on('detach', (_event, reason) => {
@@ -46,12 +61,30 @@ export async function startDebuggerBridge(webContents, { host = '127.0.0.1', por
     browserContextId: 'maws-bridge-context',
   });
 
+  function sessionCommandAllowed(method, params) {
+    const domain = method.split('.')[0];
+    if (domain === 'Browser' || domain === 'Storage' || domain === 'SystemInfo' || domain === 'Tethering') return false;
+    if (domain === 'Target') {
+      if (!SESSION_TARGET_ALLOW.has(method)) return false;
+      if (method === 'Target.getTargetInfo' && params.targetId && params.targetId !== targetId) return false;
+    }
+    return true;
+  }
+
   async function handle(ws, msg) {
     const { id, method, params = {}, sessionId } = msg;
     const reply = (result) => ws.send(JSON.stringify({ id, result, ...(sessionId ? { sessionId } : {}) }));
     const fail = (code, message) => { stats.errors++; ws.send(JSON.stringify({ id, error: { code, message }, ...(sessionId ? { sessionId } : {}) })); };
 
     if (sessionId) {
+      if (!knownSessions.has(sessionId)) {
+        stats.blocked.push(`${method} on unknown session`);
+        return fail(-32001, `unknown session ${sessionId}: the MAWS bridge forwards only sessions it announced`);
+      }
+      if (!sessionCommandAllowed(method, params)) {
+        stats.blocked.push(method);
+        return fail(-32601, `${method} is not available through the MAWS debugger bridge (one view, owned by the app)`);
+      }
       stats.forwarded++;
       const electronSession = sessionId === PAGE_SESSION ? undefined : sessionId;
       try {
@@ -83,6 +116,7 @@ export async function startDebuggerBridge(webContents, { host = '127.0.0.1', por
       case 'Target.getTargetInfo':
         return reply({ targetInfo: targetInfo() });
       case 'Target.attachToTarget':
+        if (params.targetId && params.targetId !== targetId) return fail(-32602, `no target ${params.targetId} behind this bridge`);
         reply({ sessionId: PAGE_SESSION });
         broadcast({ method: 'Target.attachedToTarget', params: { sessionId: PAGE_SESSION, targetInfo: targetInfo(), waitingForDebugger: false } });
         return;
@@ -108,6 +142,8 @@ export async function startDebuggerBridge(webContents, { host = '127.0.0.1', por
       case 'Target.closeTarget':
       case 'Target.createBrowserContext':
       case 'Target.disposeBrowserContext':
+      case 'Target.attachToBrowserTarget':
+      case 'Target.exposeDevToolsProtocol':
         return fail(-32601, `${method} is not available through the MAWS debugger bridge (one view, owned by the app)`);
       default:
         stats.unknownBrowserMethods.add(method);
@@ -116,17 +152,18 @@ export async function startDebuggerBridge(webContents, { host = '127.0.0.1', por
     }
   }
 
-  const http = createServer((req, res) => {
-    if (req.url?.startsWith('/json/version')) {
-      const address = http.address();
-      res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ Browser: `Chrome/${process.versions.chrome}`, 'Protocol-Version': '1.3', 'User-Agent': webContents.getUserAgent(), 'V8-Version': process.versions.v8, webSocketDebuggerUrl: `ws://${host}:${address.port}/devtools/browser/maws-bridge` }));
+  // No /json/version: it would publish the token. Clients get the ws URL from the bridge's owner.
+  const http = createServer((_req, res) => { res.statusCode = 404; res.end(); });
+  const wss = new WebSocketServer({ noServer: true });
+  http.on('upgrade', (req, socket, head) => {
+    if (req.url !== wsPath) {
+      stats.rejectedUpgrades++;
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      socket.destroy();
       return;
     }
-    res.statusCode = 404;
-    res.end();
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });
-  const wss = new WebSocketServer({ server: http });
   wss.on('connection', (ws) => {
     sockets.add(ws);
     ws.on('message', (data) => {
@@ -140,7 +177,8 @@ export async function startDebuggerBridge(webContents, { host = '127.0.0.1', por
   const address = http.address();
   return {
     httpUrl: `http://${host}:${address.port}`,
-    wsUrl: `ws://${host}:${address.port}/devtools/browser/maws-bridge`,
+    wsUrl: `ws://${host}:${address.port}${wsPath}`,
+    pageSessionId: PAGE_SESSION,
     stats,
     close: async () => {
       for (const s of sockets) s.terminate();

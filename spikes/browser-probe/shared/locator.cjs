@@ -2,8 +2,10 @@
 // sides can compare. Plain CommonJS with no dependencies, so the preload can require it and the driver can evaluate
 // its source in the page.
 
+// CSS.escape handles leading digits (`#\31 23` for id "123"); the fallback is for a context without the CSS global.
 function cssEscape(s) {
-  return String(s).replace(/([^\w-])/g, '\\$1');
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(String(s));
+  return String(s).replace(/^(\d)/, '\\3$1 ').replace(/([^\w-])/g, '\\$1');
 }
 
 // A CSS selector that is unique in the document: the nearest ancestor-or-self with an id, then nth-of-type steps.

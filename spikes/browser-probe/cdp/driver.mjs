@@ -163,7 +163,7 @@ export async function runDriver({ browser, page, pageUrl, cssPathSource, log, se
 
   // (e) the human's pick -> the agent's ref, and back
   out.pick = [];
-  for (const target of [{ role: 'button', name: 'Increment' }, { role: 'button', name: 'Act' }, { role: 'textbox', name: 'Name' }]) {
+  for (const target of [{ role: 'button', name: 'Increment' }, { role: 'button', name: 'Act' }, { role: 'textbox', name: 'Name' }, { role: 'link', name: 'local link' }]) {
     // A fresh page-level snapshot per target: the previous target's rooted snapshot may have invalidated page refs.
     rows = parseSnapshot(await page.ariaSnapshot({ mode: 'ai' }));
     const ref = refOf(rows, target.role, target.name);

@@ -12,7 +12,7 @@ import { performance } from 'node:perf_hooks';
 import { startDebuggerBridge } from './cdp/bridge.mjs';
 import { findProbePage, inventory, runDriver } from './cdp/driver.mjs';
 import { buildSyntheticProfile, SYNTHETIC_LOGINS } from './import/synthetic.mjs';
-import { deriveKey } from './import/crypto.mjs';
+import { decryptCookieValue, deriveKey } from './import/crypto.mjs';
 import { readCookieRows, readHistory, readLocalStateProfiles, readLogins, toElectronCookie } from './import/stores.mjs';
 
 const require = createRequire(import.meta.url);
@@ -30,6 +30,7 @@ const PARTITION = 'persist:maws-probe';
 const SCRATCH_CHROME = process.env.PROBE_CHROME_COPY ?? '/tmp/maws-e0b-chrome/Default';
 const SYNTH_DIR = process.env.PROBE_SYNTH_DIR ?? '/tmp/maws-e0b-synth';
 const useRemotePort = scenario === 'cdp-port' || scenario === 'all';
+const withShell = useRemotePort || scenario === 'cdp-bridge';
 if (useRemotePort) app.commandLine.appendSwitch('remote-debugging-port', String(CDP_PORT));
 
 const log = (...a) => console.log('[probe]', ...a);
@@ -198,6 +199,43 @@ async function cdpBridgeScenario() {
   out.driver = await runDriver({ browser, page, pageUrl: PAGE_URL, cssPathSource, log, sendInputEvent: altClickVia(wc) });
   out.ipcPicks = picks.length;
   out.newPage = await browser.contexts()[0].newPage().then(() => 'unexpectedly ok', (e) => `error: ${e.message.split('\n')[0]}`);
+
+  // The boundary. First what the page session itself can reach (Electron's debugger is a trusted CDP client), then
+  // what a client of the bridge can do with the same methods.
+  out.boundary = {};
+  const seen = await wc.debugger.sendCommand('Target.getTargets');
+  out.boundary.pageSessionSeesTargets = seen.targetInfos.map((t) => ({ type: t.type, url: t.url.slice(0, 60) }));
+  const ownFrameId = (await wc.debugger.sendCommand('Page.getFrameTree')).frameTree.frame.id;
+  const other = seen.targetInfos.find((t) => t.type === 'page' && t.targetId !== ownFrameId);
+  if (other) {
+    try {
+      const att = await wc.debugger.sendCommand('Target.attachToTarget', { targetId: other.targetId, flatten: true });
+      const ev = await wc.debugger.sendCommand('Runtime.evaluate', { expression: 'document.title', returnByValue: true }, att.sessionId);
+      out.boundary.pageSessionCanAttachToOtherTarget = { title: ev.result.value };
+      await wc.debugger.sendCommand('Target.detachFromTarget', { sessionId: att.sessionId });
+    } catch (e) {
+      out.boundary.pageSessionCanAttachToOtherTarget = `error: ${e.message}`;
+    }
+  }
+  const { WebSocket: WS } = require('ws');
+  const rawCall = (url, msg) => new Promise((resolve) => {
+    const sock = new WS(url);
+    const done = (v) => { try { sock.close(); } catch { /* closed */ } resolve(v); };
+    sock.on('open', () => sock.send(JSON.stringify({ id: 1, ...msg })));
+    sock.on('message', (d) => { const m = JSON.parse(d.toString()); if (m.id === 1) done(m.error ? `error: ${m.error.message}` : `ok: ${JSON.stringify(m.result).slice(0, 120)}`); });
+    sock.on('error', (e) => done(`socket error: ${e.message}`));
+    sock.on('unexpected-response', (_req, res) => done(`upgrade rejected: HTTP ${res.statusCode}`));
+    setTimeout(() => done('timeout'), 3000);
+  });
+  out.boundary.viaBridge = {
+    getTargetsOnPageSession: await rawCall(bridge.wsUrl, { method: 'Target.getTargets', sessionId: bridge.pageSessionId }),
+    attachToOtherOnPageSession: other ? await rawCall(bridge.wsUrl, { method: 'Target.attachToTarget', params: { targetId: other.targetId, flatten: true }, sessionId: bridge.pageSessionId }) : 'no other target',
+    attachToOtherBrowserLevel: other ? await rawCall(bridge.wsUrl, { method: 'Target.attachToTarget', params: { targetId: other.targetId, flatten: true } }) : 'no other target',
+    commandOnUnknownSession: await rawCall(bridge.wsUrl, { method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: 'ABCDEF0123456789' }),
+    storageGetCookiesOnPageSession: await rawCall(bridge.wsUrl, { method: 'Storage.getCookies', sessionId: bridge.pageSessionId }),
+    evaluateOnPageSessionStillWorks: await rawCall(bridge.wsUrl, { method: 'Runtime.evaluate', params: { expression: 'document.title', returnByValue: true }, sessionId: bridge.pageSessionId }),
+    wrongPathUpgrade: await rawCall(bridge.wsUrl.replace(/[0-9a-f]{32}$/, 'not-the-token'), { method: 'Browser.getVersion' }),
+  };
   out.debuggerBeside = {};
   try {
     wc.debugger.attach('1.3');
@@ -242,7 +280,7 @@ async function importScenario() {
   const cookieResult = { storeVersion: cookieRows.version, rows: cookieRows.rows.length, set: 0, skipped: [], errors: [], hashedPrefix: 0 };
   const t0 = now();
   for (const row of cookieRows.rows) {
-    const mapped = toElectronCookie(row, key);
+    const mapped = toElectronCookie(row, key, cookieRows.version);
     if (mapped.skipped) { cookieResult.skipped.push(`${row.host_key}/${row.name}: ${mapped.skipped}`); continue; }
     if (mapped.hashed) cookieResult.hashedPrefix++;
     try { await ses.cookies.set(mapped.details); cookieResult.set++; } catch (e) { cookieResult.errors.push(`${row.host_key}/${row.name}: ${e.message}`); }
@@ -252,8 +290,44 @@ async function importScenario() {
   await wc.loadURL(`http://localhost:${HTTP_PORT}/echo-cookies`);
   const echoed = JSON.parse(await wc.executeJavaScript('document.body.innerText'));
   cookieResult.sentOnRequest = { names: (echoed.cookie ?? '').split(';').map((s) => s.trim().split('=')[0]).filter(Boolean), httpOnlyIncluded: /probe_session=/.test(echoed.cookie ?? ''), valueMatches: /probe_session=synthetic-session-token-1/.test(echoed.cookie ?? '') };
+  // document.cookie on the cookies' own host (localhost), before leaving it
+  const documentCookie = await wc.executeJavaScript('document.cookie');
+  cookieResult.documentCookieOnLocalhost = { names: documentCookie.split(';').map((s) => s.trim().split('=')[0]).filter(Boolean), seesNonHttpOnly: /probe_pref=/.test(documentCookie), hidesHttpOnly: !/probe_session=/.test(documentCookie) };
   await wc.loadURL(PAGE_URL);
-  cookieResult.documentCookieSeesOnlyNonHttpOnly = await wc.executeJavaScript('document.cookie');
+  // the wrong key against the cookie store: every row must fail, none may yield a value
+  const wrong = deriveKey('not-the-password');
+  cookieResult.wrongKey = { attempted: 0, failed: 0, decrypted: 0, failures: {} };
+  for (const row of cookieRows.rows) {
+    cookieResult.wrongKey.attempted++;
+    try {
+      decryptCookieValue(wrong, row.host_key, Buffer.from(row.encrypted_value), { requireHostHash: cookieRows.version >= 24 });
+      cookieResult.wrongKey.decrypted++;
+    } catch (e) {
+      cookieResult.wrongKey.failed++;
+      const kind = /prefix/.test(e.message) ? 'host hash mismatch' : /bad decrypt|padding/i.test(e.message) ? 'bad padding' : e.message;
+      cookieResult.wrongKey.failures[kind] = (cookieResult.wrongKey.failures[kind] ?? 0) + 1;
+    }
+  }
+  // the partitioned (CHIPS) cookie through CDP Network.setCookie with a partitionKey, which session.cookies.set lacks
+  const chips = cookieRows.rows.find((r) => r.top_frame_site_key);
+  cookieResult.chipsViaCdp = {};
+  try {
+    wc.debugger.attach('1.3');
+    const d = decryptCookieValue(key, chips.host_key, Buffer.from(chips.encrypted_value), { requireHostHash: true });
+    const bare = chips.host_key.replace(/^\./, '');
+    const partitionKey = { topLevelSite: chips.top_frame_site_key, hasCrossSiteAncestor: Boolean(chips.has_cross_site_ancestor) };
+    const set = await wc.debugger.sendCommand('Network.setCookie', { name: chips.name, value: d.value, domain: bare, path: chips.path, secure: true, httpOnly: Boolean(chips.is_httponly), sameSite: 'None', url: `https://${bare}${chips.path}`, partitionKey });
+    cookieResult.chipsViaCdp.networkSetCookie = set;
+    // Network.getAllCookies reads the page's own partition (Storage.getCookies on a page session read the default
+    // context and saw nothing of persist:maws-probe).
+    const all = await wc.debugger.sendCommand('Network.getAllCookies');
+    cookieResult.chipsViaCdp.networkGetAllCookies = (all.cookies ?? []).map((c) => ({ name: c.name, domain: c.domain, partitionKey: c.partitionKey ?? null, partitionKeyOpaque: c.partitionKeyOpaque ?? null }));
+    cookieResult.chipsViaCdp.electronCookiesGetSees = (await ses.cookies.get({ name: chips.name })).map((c) => ({ domain: c.domain, name: c.name }));
+    wc.debugger.detach();
+  } catch (e) {
+    cookieResult.chipsViaCdp.error = e.message;
+    try { wc.debugger.detach(); } catch { /* not attached */ }
+  }
   out.cookies = cookieResult;
 
   // logins: decrypt with the right key, then with a wrong key
@@ -367,7 +441,7 @@ async function extensionsScenario() {
 
 async function main() {
   await startServer();
-  const ses = makeWindow({ withShell: useRemotePort });
+  const ses = makeWindow({ withShell });
   results.partitionPath = ses.storagePath;
   await view.webContents.loadURL(PAGE_URL);
   if (scenario === 'cdp-pipe') { log('hosting for an external driver (launch-pipe.mjs)'); return; }

@@ -2,7 +2,7 @@
 // session.cookies.set details. Nothing here prints a value: callers receive counts, shapes and decrypted rows they
 // are responsible for keeping inside the partition.
 import { DatabaseSync } from 'node:sqlite';
-import { chromeTimeToUnixSeconds, decryptCookieValue, decryptPassword } from './crypto.mjs';
+import { COOKIE_HOST_HASH_FROM_VERSION, chromeTimeToUnixSeconds, decryptCookieValue, decryptPassword } from './crypto.mjs';
 
 function openReadOnly(path) {
   return new DatabaseSync(path, { readOnly: true });
@@ -64,13 +64,13 @@ export function readCookieRows(path) {
 const SAMESITE = { [-1]: 'unspecified', 0: 'no_restriction', 1: 'lax', 2: 'strict' };
 
 // Chrome row -> Electron cookies.set details. Returns { details } or { skipped: reason }.
-export function toElectronCookie(row, key) {
+export function toElectronCookie(row, key, storeVersion = COOKIE_HOST_HASH_FROM_VERSION) {
   if (row.top_frame_site_key) return { skipped: 'partitioned (CHIPS) cookie: Electron cookies.set has no partition key' };
   if (row.samesite === 0 && !row.is_secure) return { skipped: 'SameSite=None without Secure: Chromium rejects it on set (EXCLUDE_SAMESITE_NONE_INSECURE)' };
   let value = row.value;
   let hashed = null;
   if (row.encrypted_value && row.encrypted_value.length) {
-    const d = decryptCookieValue(key, row.host_key, Buffer.from(row.encrypted_value));
+    const d = decryptCookieValue(key, row.host_key, Buffer.from(row.encrypted_value), { requireHostHash: storeVersion >= COOKIE_HOST_HASH_FROM_VERSION });
     value = d.value;
     hashed = d.hashed;
   }

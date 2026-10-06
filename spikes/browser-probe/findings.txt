@@ -17,19 +17,23 @@ ENVIRONMENT AND METHOD
   The copies and the probe's partition are deleted at hand-back.
 
 VERDICTS IN ONE LINE EACH
-  S2a attach  YES   connectOverCDP works over a --remote-debugging-port and over a webContents.debugger bridge
-                    (one page, no port); --remote-debugging-pipe works raw but Playwright cannot consume it directly.
+  S2a attach  YES   connectOverCDP works over a --remote-debugging-port and over a webContents.debugger bridge (one
+                    page announced; the one-view boundary is enforced by an allowlist and a token, verified, because
+                    the debugger session itself is a trusted client that can reach every target); the raw
+                    --remote-debugging-pipe works but Playwright cannot consume it directly.
   S2b act     YES   ariaSnapshot({mode:'ai'}) gives refs; click/fill/select/check by aria-ref=, read-only evaluate,
                     page and element screenshots all work on the view.
   S2c cost    YES   attach 37-46 ms cold (6-10 ms warm); click 16-17 ms, fill 2.6 ms, evaluate 0.7 ms, snapshot
                     2.5 ms, screenshot 50-58 ms median; idle CPU 0% attached; +22 MB renderer working set.
   S2d refs    PARTLY refs survive DOM mutation and repeated page snapshots (element-bound, monotonic), not a reload
                     (new frame ordinal, "Invalid frame"), and a rooted snapshot drops refs outside its subtree.
-  S2e pick    YES   the human's alt-click maps to the agent's ref 3/3 (and back to the same CSS selector 3/3), through
-                    {css, role, name}; the ref itself must not be the stored anchor.
+  S2e pick    YES   the human's alt-click maps to the agent's ref 4/4 (and back to the same CSS selector 4/4, one with
+                    a digit-leading id), through {css, role, name}; the ref itself must not be the stored anchor.
   S1a history YES   plain SQLite (urls v70), 17,554 rows read in 185 ms; Electron has no history store, MAWS keeps one.
-  S1b cookies YES   decrypt (PBKDF2/AES-128-CBC, v10, SHA-256 host prefix at store v24) -> session.cookies.set ->
-                    sent on a request, proved end to end on synthetic data; CHIPS and SameSite=None+insecure skipped.
+  S1b cookies YES   decrypt (PBKDF2/AES-128-CBC, v10, SHA-256 host prefix required at store v24) ->
+                    session.cookies.set -> sent on a request, proved end to end on synthetic data; a partitioned
+                    (CHIPS) cookie imports through CDP Network.setCookie with its partition key; SameSite=None
+                    without Secure is rejected by Chromium and skipped with a reason.
   S1c logins  PARTLY decrypt proved end to end; Electron has no consumer; a consumer is a child of its own; recommend
                     holding passwords out of P1.
   S1d exts    PARTLY session.extensions.loadExtension loads every one of the owner's 21 unpacked MV3 directories; 13
@@ -59,22 +63,37 @@ S2 (a) Attaching playwright-core's connectOverCDP. YES, both routes; the bridge 
     kept working during and after main's detach. No conflict observed.
     DevTools beside Playwright: openDevTools succeeded, Playwright kept working.
 
-  Route 2, webContents.debugger bridged to a browser-level endpoint (cdp/bridge.mjs, 150 lines).
+  Route 2, webContents.debugger bridged to a browser-level endpoint (cdp/bridge.mjs, about 190 lines).
     The debugger is a page session; Playwright needs a browser target. The bridge answers exactly five browser-level
     methods itself (Browser.getVersion, Target.setAutoAttach, Browser.setDownloadBehavior, Target.getTargetInfo,
     Target.activateTarget; stats.unknownBrowserMethods stayed empty), announces the one view as an attached target
     under a synthetic session id, and forwards every session-scoped command to webContents.debugger.sendCommand(method,
     params, sessionId) with debugger events broadcast back. Child sessions (OOPIFs, workers) from the page's own
     Target.setAutoAttach pass through with their real ids (declared, not exercised: the test page has no iframe).
-    Bridge start 1.5-11.6 ms; attach 37-46 ms cold (6 ms when Playwright is already warm); disconnect 1.5-4.5 ms.
-    Traffic for the whole driver: 654-656 forwarded commands, 212-226 events, 5 browser-level calls, 2 forwarded errors
-    (`Runtime.callFunctionOn: Could not find object with given id`, Playwright's post-navigation cleanup, harmless).
+    Bridge start 0.9-11.6 ms; attach 36.5-46 ms cold (6 ms when Playwright is already warm); disconnect 1.5-4.5 ms.
+    Traffic for the whole driver plus the boundary test: 717 forwarded commands, 242 events, 6 browser-level calls,
+    7 errors of which 5 are the boundary test's own blocked calls and 2 are `Runtime.callFunctionOn: Could not find
+    object with given id` (Playwright's post-navigation cleanup, harmless).
     One rule learned the hard way: the announced targetId must be the view's real main-frame id (Page.getFrameTree
     frame.id). In CDP a page target's id is its main frame's id and Playwright keys its FrameSession on that equality;
     with an invented id page.url() stayed "" and evaluate waited forever for an execution context.
-    What it exposes: one page. inventory = 1 context, 1 page, the view's URL. browserContext.newPage() fails with the
-    bridge's own error (Target.createTarget is not available: tabs are MAWS's to create). No port, no stderr line, a
-    WebSocket on 127.0.0.1 with an ephemeral port and an unguessable path (add a token in the product).
+    What it announces: one page. inventory = 1 context, 1 page, the view's URL. browserContext.newPage() fails with
+    the bridge's own error (Target.createTarget is not available: tabs are MAWS's to create).
+    What it must enforce, because announcing is not isolating: Electron's webContents.debugger is a trusted CDP client,
+    so the page session's own Target domain reaches the whole process. Verified from main on the same session:
+    Target.getTargets listed 2 page targets (the view and the shell stand-in) and Target.attachToTarget + Runtime.evaluate
+    on the stand-in returned its title ("MAWS shell stand-in"). A bridge that forwarded Target.* unfiltered would hand a
+    client the same renderer exposure as the remote-debugging port. The bridge therefore forwards only session ids it
+    announced itself or that the debugger announced through an auto-attach event, allows on them only
+    Target.setAutoAttach, Target.detachFromTarget and Target.getTargetInfo (own target), and no Browser.*, Storage.*,
+    SystemInfo.* or Tethering.* method. Verified through a raw WebSocket client: Target.getTargets on the page session
+    -> blocked; Target.attachToTarget to the stand-in on the page session -> blocked; the same at browser level -> "no
+    target ... behind this bridge"; Runtime.evaluate on an invented session id -> "unknown session"; Storage.getCookies
+    -> blocked; Runtime.evaluate on the page session still works; the upgrade on a wrong path -> HTTP 404. Playwright's
+    full driver ran unchanged under the allowlist (717 commands forwarded, 4 blocked, all four the probe's own).
+    Endpoint: no port flag, no stderr line, no /json/version (it would publish the token); a WebSocket on 127.0.0.1 at
+    an ephemeral port whose path carries a 128-bit random token handed only to the bridge's owner. Origin is not
+    checked in the probe; a product bridge pins it as well.
     Debugger beside the bridge: the debugger IS the transport. A second webContents.debugger.attach() throws
     "Debugger is already attached to the target"; but main can call webContents.debugger.sendCommand on the shared
     session while Playwright is connected (Runtime.evaluate returned the title and Playwright kept working), so MAWS's
@@ -95,11 +114,11 @@ S2 (a) Attaching playwright-core's connectOverCDP. YES, both routes; the bridge 
     after a reload (the frame prefix appears once a second document exists).
 
   What E4's cut should take: the bridge, one per browser view, started lazily when a browser tool first targets the
-  tab (the attach is ~40 ms, the bridge itself ~2-12 ms), closed when the tab closes. playwright-core runs in the
-  main process (where the views live). Never ship --remote-debugging-port in the product: it exposes MAWS's own
-  renderer and every other view to any local process. MAWS's own CDP needs go through the same webContents.debugger
-  attachment, not a second one. The pipe route is the e2e harness's business (MAWS's e2e already uses Playwright's
-  Electron launcher).
+  tab (the attach is ~40 ms, the bridge itself ~1-12 ms), closed when the tab closes; its session allowlist, Target
+  filter and token path are part of it, plus an Origin check. playwright-core runs in the main process (where the
+  views live). Never ship --remote-debugging-port in the product: it exposes MAWS's own renderer and every other view
+  to any local process. MAWS's own CDP needs go through the same webContents.debugger attachment, not a second one.
+  The pipe route is the e2e harness's business (MAWS's e2e already uses Playwright's Electron launcher).
   Open: OOPIF child sessions through the bridge (declared, untested); more than one connected client per bridge
   (the WebSocket server accepts several; Playwright's semantics for shared pages were not tested); a token on the
   bridge URL.
@@ -120,7 +139,7 @@ S2 (b) Snapshot with refs, click and fill by ref, read-only evaluate, screenshot
 
 S2 (c) Attach time and per-action latency. Medians over the full run, cold machine load 13-19.
                         port          bridge
-    attach (cold/warm)  45.7 / 10.4   37.2-45.9 / 6.0 ms   (+ bridge start 1.5-11.6 ms)
+    attach (cold/warm)  46-50 / 10-12 36.5-45.9 / 6.0-6.4 ms   (+ bridge start 0.9-11.6 ms)
     first snapshot      30.5          20.1 ms   (installs the injected script; later snapshots 2.2-3.7 ms)
     snapshot (repeat)   2.6           2.5 ms    (p95 3.4-3.7)
     click by ref        17.0          16.4 ms   (p95 62.8 / 18.8; the port run had one 63 ms outlier)
@@ -160,11 +179,13 @@ S2 (e) Mapping the human's pick to the agent's ref, or to a locator both agree o
     cssPath (nearest unique id, then tag:nth-of-type steps), a11yPath (role "name" chain with a basic implicit-role
     table), role, name, rect. It reports over IPC to main (6-9 ms end to end, picks counted 3 and 6) and through a
     contextBridge getter for an external driver.
-    Three targets, both routes: button "Increment" (#increment), button "Act" inside an id-less list
-    (body > main > section:nth-of-type(2) > ul > li:nth-of-type(2) > button), textbox "Name" (#name).
-      human css -> agent ref: page.locator(css).ariaSnapshot({mode:'ai'}) first line's ref == the page-level ref  3/3 (1-2 ms)
-      agent ref -> human css: locator('aria-ref=<ref>').evaluate(cssPath) == the preload's css                       3/3
-      role and name agree                                                                                          3/3
+    Four targets, both routes: button "Increment" (#increment), button "Act" inside an id-less list
+    (body > main > section:nth-of-type(2) > ul > li:nth-of-type(2) > button), textbox "Name" (#name), and link "local
+    link" inside a paragraph whose id is the digit "7" (`#\37  > a`, through CSS.escape; a naive escape makes `#7`,
+    which querySelectorAll rejects and the pick would have thrown).
+      human css -> agent ref: page.locator(css).ariaSnapshot({mode:'ai'}) first line's ref == the page-level ref  4/4 (1-2 ms)
+      agent ref -> human css: locator('aria-ref=<ref>').evaluate(cssPath) == the preload's css                       4/4
+      role and name agree                                                                                          4/4
     The a11y paths do not agree textually: Playwright's chain is `generic > main > region > generic > button
     "Increment"` (it emits `generic` nodes and omits the region's aria-labelledby name), the preload's is `main >
     region "A form" > button "Increment"`. The a11y path is a human label, not the key.
@@ -217,31 +238,45 @@ S1 (b) Cookies. YES, proved end to end on a synthetic store; the real key gates 
     16-space IV; value = "v10" + ciphertext; at store version 24 (this profile; recent Chrome 13x) the plaintext is
     SHA-256(host_key) (32 bytes) + value, so a decrypt verifies the domain hash and strips it (hashedPrefix 3 of 3);
     older stores hold the bare value and decryptCookieValue accepts both.
-    Synthetic store (import/synthetic.mjs, the real CREATE TABLE statements): 5 rows -> 3 set, 2 skipped with a
-    reason: the CHIPS cookie (Electron's cookies.set has no partition key) and a SameSite=None cookie without Secure
-    (Chromium rejects it on set: EXCLUDE_SAMESITE_NONE_INSECURE). session.cookies.set took 0.8 ms for 3; the jar
-    showed hostOnly/domain, httpOnly, secure, sameSite (lax, unspecified, strict) and expiration as mapped; a request
-    to http://localhost:17333/echo-cookies carried `probe_session` (httpOnly) and `probe_pref` with the right value;
-    document.cookie saw only the non-httpOnly one. Mapping (stores.mjs toElectronCookie): url =
-    scheme://host_key-without-dot + path (https when is_secure or source_scheme 2), domain = host_key only when it
-    starts with '.', sameSite -1/0/1/2 -> unspecified/no_restriction/lax/strict, expirationDate from expires_utc when
-    has_expires. A wrong key fails cleanly (bad padding), 0 of 2 decrypted, no garbage accepted.
-    The real key, one command and one prompt:
+    The decoder takes the store version: at 24 and later the SHA-256(host_key) prefix is required and a mismatch is a
+    failed decrypt (a wrong key that happened to survive CBC padding cannot fall through as a bare value); only older
+    stores may yield a bare value.
+    Synthetic store (import/synthetic.mjs, the real CREATE TABLE statements): 5 rows -> 3 set through
+    session.cookies.set, 2 skipped by that path with a reason: the CHIPS cookie (cookies.set has no partition key) and a
+    SameSite=None cookie without Secure (Chromium rejects it on set: EXCLUDE_SAMESITE_NONE_INSECURE). cookies.set took
+    0.8 ms for 3; the jar showed hostOnly/domain, httpOnly, secure, sameSite (lax, unspecified, strict) and expiration
+    as mapped; a request to http://localhost:17333/echo-cookies carried `probe_session` (httpOnly) and `probe_pref`
+    with the right value; document.cookie read on that localhost page listed `probe_pref` and not `probe_session`.
+    Mapping (stores.mjs toElectronCookie): url = scheme://host_key-without-dot + path (https when is_secure or
+    source_scheme 2), domain = host_key only when it starts with '.', sameSite -1/0/1/2 ->
+    unspecified/no_restriction/lax/strict, expirationDate from expires_utc when has_expires.
+    A wrong key against the cookie store: 5 of 5 rows failed at decrypt (OpenSSL BAD_DECRYPT, the padding check), 0
+    decrypted; the host-hash requirement stands behind that as the second guard. Against the login store: 0 of 2.
+    The CHIPS cookie through CDP instead: webContents.debugger Network.setCookie with partitionKey {topLevelSite:
+    "https://example.test", hasCrossSiteAncestor: true} returned success, and Network.getAllCookies on the page session
+    listed it with that partitionKey beside the three unpartitioned cookies (Electron's cookies.get lists it too, without
+    partition data; Storage.getCookies on the page session reads the default context and saw none of the partition).
+    So partitioned cookies import through the debugger session the browser tools already hold; cookies.set is only
+    the path for unpartitioned ones.
+    The real key, expected shape (not observed: the probe never ran `security` and never fetched the real key):
       security find-generic-password -s "Chrome Safe Storage" -a "Chrome" -w
-    macOS shows: `security wants to use your confidential information stored in "Chrome Safe Storage" in your
-    keychain.` with Deny / Allow / Always Allow. MAWS runs it once per import, keeps the password in memory for the
-    duration of the import only, and tells the user before the prompt appears what it is for and to click Allow (not
-    Always Allow, which would grant the `security` binary standing access). Electron has no Keychain read API for
-    arbitrary items (safeStorage is MAWS's own item, "<app> Safe Storage"), so the child process is the way.
+    macOS's standard Keychain consent for a generic password reads along the lines of `security wants to use your
+    confidential information stored in "Chrome Safe Storage" in your keychain` with Deny / Allow / Always Allow;
+    whether it appears at all depends on the item's access list (a prior "Always Allow" for `security` suppresses it).
+    E4 verifies the exact text and count on the owner's machine before the consent sheet binds. MAWS would run it once
+    per import, keep the password in memory for the import only, and tell the user beforehand what it is for and to
+    click Allow (not Always Allow, which grants the `security` binary standing access). Electron has no Keychain read
+    API for arbitrary items (safeStorage is MAWS's own item, "<app> Safe Storage"), so a child process is the way.
     [parent-impact] §3 D reads "copies cookies and history from its on-disk stores, decrypts saved passwords with
     Chrome's Safe Storage key after one Keychain consent": on this profile every cookie value is encrypted with that
     same key (`value` is empty for all 5,112 rows), so the Keychain consent gates the cookies category too, not only
     passwords. History and extensions need no key.
-    What E4 should take: the decrypt and mapping as written here; a per-cookie skip list in the import report
-    ("N cookies, K skipped: partitioned, M skipped: rejected"); the partition is per imported profile
-    (session.fromPartition('persist:chrome-<profile dir>')); expired rows dropped before set.
-    Open: 1,005 of 5,112 real cookies are partitioned and will not import until Electron exposes partition keys;
-    the real Cookies file may be under Default/Network/ on other machines.
+    What E4 should take: the decrypt (with the version-gated hash requirement) and mapping as written here;
+    unpartitioned cookies through cookies.set, partitioned ones through Network.setCookie on the view's debugger
+    session; a per-cookie skip list in the import report ("N cookies, M skipped: rejected by Chromium"); the partition
+    is per imported profile (session.fromPartition('persist:chrome-<profile dir>')); expired rows dropped before set.
+    Open: whether a CHIPS cookie set through Network.setCookie is sent on a matching embedded request was not tested
+    (storage with the partition key was); the real Cookies file may be under Default/Network/ on other machines.
 
 S1 (c) Login Data. PARTLY: decrypt yes, consumer no.
     Decrypt: same key, no hash prefix; the synthetic store's 2 credentials decrypted and matched, the blocklist row
@@ -296,11 +331,14 @@ S1 (d) Extensions. PARTLY: MV3 core loads and runs; much of the API surface does
     partially. results/extensions-stderr-digest.txt has the per-id digest.
     What E4 should take: "loads" is not "works". The import report lists each extension as loaded / background
     running / background failed on chrome.<api> / errors, from session.serviceWorkers state and the main-process
-    console lines, and the consent sheet names the unsupported permissions per extension before the import (the
-    manifest is enough: any of the 21 absent namespaces predicts the failure). Codex's allowUnverifiedExtensions
-    confirmation (codex-extensions.txt §1) has its MAWS equivalent here. Extensions with content scripts and storage
-    only (clippers, formatters, Playwright Extension) are the realistic win; anything needing a toolbar, side panel,
-    context menu, cookies, webNavigation or native messaging is not.
+    console lines after an actual load into the partition. The manifest predicts warnings, not failures: before the
+    import the consent sheet can list each extension's unsupported permissions as compatibility warnings, but whether
+    a background runs is only known by running it (the probe's own extension declares cookies, contextMenus and
+    webNavigation, and its worker runs because every call is guarded; the eight failures above are runtime facts of
+    those versions). Codex's allowUnverifiedExtensions confirmation (codex-extensions.txt §1) has its MAWS equivalent
+    here. Extensions with content scripts and storage only (clippers, formatters, Playwright Extension) are the
+    realistic win; anything needing a toolbar, side panel, context menu, cookies, webNavigation or native messaging
+    is not.
     Open: whether Electron's extension storage survives removeExtension + reload (not tested); CSP and host
     permission prompts for content scripts on arbitrary sites (not tested); loading from the Chrome directory in place
     is never done, the directory is copied into the partition's own extensions folder first.
@@ -309,11 +347,11 @@ S1 (e) The consent surface per category, and what the import must never do.
     One sheet, one profile picked from Local State (name and gaia_name shown, nothing else), four categories each
     with its own checkbox and its own line of consequence:
       History:     "17,554 pages. Read from a copy; needs no password. Shown in the address bar's suggestions."
-      Cookies:     "5,112 cookies (1,005 partitioned cookies cannot be imported). macOS will ask once to read Chrome's
-                    Safe Storage password; click Allow. Nothing is written back to Chrome."
+      Cookies:     "5,112 cookies. macOS will ask once to read Chrome's Safe Storage password; click Allow. Nothing is
+                    written back to Chrome." (the prompt's exact text and count are E4's to verify, see S1b)
       Passwords:   disabled in P1: "needs MAWS's autofill, not yet built" (the count can still be shown: 228).
-      Extensions:  "21 extensions; 8 will not run in MAWS (lists them with the API they need); the others run with the
-                    listed gaps" and the unverified-files confirmation.
+      Extensions:  "21 extensions; each listed with the permissions MAWS does not support (warnings from the manifest)"
+                    and the unverified-files confirmation; which backgrounds actually run is reported after the load.
     Then the report row: "N cookies, M history entries, K extensions, J skipped: <reasons>" and a "Remove imported
     profile" action that drops the partition and the imported history rows.
     Never: log or display a cookie value, password or history URL during the import (counts and reasons only; the
@@ -329,11 +367,13 @@ S1 (e) The consent surface per category, and what the import must never do.
 WHAT E4'S CUT SHOULD TAKE, IN ONE PLACE
 ======================================================================================================================
   View and import child: WebContentsView per tab in a per-profile persistent partition; the copy-and-import pipeline
-    (History -> MAWS history table; Cookies -> cookies.set with the skip list; Extensions -> loadExtension per boot with
-    the per-extension report); the Keychain prompt once, for cookies; passwords held; the consent sheet above.
+    (History -> MAWS history table; Cookies -> cookies.set, partitioned ones through Network.setCookie on the view's
+    debugger, with the skip list; Extensions -> loadExtension per boot with the per-extension report); the Keychain
+    prompt once, for cookies; passwords held; the consent sheet above.
   Comment mode child: the shared locator module (css, role, name, box) in the preload and in the tools; the anchor
     stores the locator and the page URL, never a bare ref; the overlay crops from `boxes: true` or capturePage.
-  Browser tools child: one debugger bridge per tab, playwright-core in main, lazy attach (~40 ms), kept attached while
+  Browser tools child: one debugger bridge per tab (session allowlist, Target/Browser/Storage filter, token path,
+    Origin check), playwright-core in main, lazy attach (~40 ms), kept attached while
     the agent holds the tab; browser_snapshot = ariaSnapshot({mode:'ai'}); browser_act by aria-ref with a stale-ref
     error that names the ref; browser_eval read-only by policy; browser_screenshot by page or ref; new tabs through
     browser_tabs, never Target.createTarget; the human's takeover rides the same attachment (Input events are not
@@ -346,8 +386,10 @@ WHAT E4'S CUT SHOULD TAKE, IN ONE PLACE
      fork's compiled password manager and autofill. Recommend the cut holds passwords out of P1 and the design says so,
      rather than a per-child fallback.
   3. §3 D "playwright-core connected to the view's debugger, or the CDP protocol directly": both hold; the finding is
-     that the debugger route needs the small browser-level bridge (five methods, real frame id as target id) and that
-     the remote-debugging port must not ship. Not a contradiction; a precision.
+     that the debugger route needs the small browser-level bridge (five methods, real frame id as target id), that the
+     bridge must filter Target/Browser/Storage methods and unknown sessions because the debugger session is a trusted
+     client that reaches every target in the process, and that the remote-debugging port must not ship. Not a
+     contradiction; a precision.
 
 ARTIFACTS
   spikes/browser-probe/           package.json (electron 44.4.5, playwright-core 1.63.0, ws 8.22.0), pnpm-workspace.yaml
