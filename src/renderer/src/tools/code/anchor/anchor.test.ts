@@ -43,16 +43,16 @@ describe('pr-line anchor', () => {
   it('shows a control character in the path as U+FFFD in the label only', () => {
     const path = 'odd\nname\t.ts';
     const anchor = prLineAnchor({ prUrl: PR, prNumber: 7, path, line: 2, side: 'new' });
-    expect(anchor.label).toBe('odd�name�.ts:2 · PR #7');
+    expect(anchor.label).toBe('odd\uFFFDname\uFFFD.ts:2 · PR #7');
     expect(anchor.path).toBe(path);
   });
 
   it('elides a long path from its start so the label fits 200 characters and keeps the basename, line and PR number', () => {
     const path = `${'deep/'.repeat(60)}file.ts`;
-    const anchor = prLineAnchor({ prUrl: PR, prNumber: 1234, path, line: 9876, side: 'new' });
+    const anchor = prLineAnchor({ prUrl: PR, prNumber: 42, path, line: 9876, side: 'new' });
     expect(anchor.label).toHaveLength(200);
     expect(anchor.label.startsWith('…')).toBe(true);
-    expect(anchor.label.endsWith('/deep/file.ts:9876 · PR #1234')).toBe(true);
+    expect(anchor.label.endsWith('/deep/file.ts:9876 · PR #42')).toBe(true);
     expect(anchor.path).toBe(path);
     expect(anchor.locator).toBe(`${PR}/files#diff-${sha256Hex(path)}R9876`);
   });
