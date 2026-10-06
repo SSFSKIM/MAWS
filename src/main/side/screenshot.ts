@@ -3,7 +3,8 @@
 // allowed root (`<userData>/`, where E2's and E4's captures live, or the parent session's own directories, by E5's
 // containment check), be a regular file of at most 5 MiB (the API's per-image bound), and is typed by its magic bytes,
 // never by its name. Every refusal names its reason, which the composer's sheet shows.
-import { open, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, realpath } from 'node:fs/promises';
 import type { ContentBlock } from '@shared/graph/events';
 import { MAX_SEND_IMAGE_BYTES } from '@shared/engine/session-state-store';
 import { under } from '../files/allowlist';
@@ -20,10 +21,13 @@ export async function readScreenshotBlock(path: string, roots: readonly string[]
   if (real === null) throw new ScreenshotRefused('not found');
   const allowed = await Promise.all(roots.map((root) => realpath(root).catch(() => null)));
   if (!allowed.some((root) => root !== null && under(root, real))) throw new ScreenshotRefused('not under an allowed root');
-  const handle = await open(real, 'r').catch(() => null);
+  const handle = await open(real, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => null);
   if (handle === null) throw new ScreenshotRefused('not found');
   try {
     const stat = await handle.stat();
+    // the checked path still names the opened file: nothing swapped a component of it between the check and the open
+    const now = await lstat(real).catch(() => null);
+    if (now === null || now.dev !== stat.dev || now.ino !== stat.ino || (await realpath(path).catch(() => null)) !== real) throw new ScreenshotRefused('changed while it was read');
     if (!stat.isFile()) throw new ScreenshotRefused('not a regular file');
     if (stat.size > MAX_SEND_IMAGE_BYTES) throw new ScreenshotRefused('larger than 5 MiB');
     const bytes = await handle.readFile();
