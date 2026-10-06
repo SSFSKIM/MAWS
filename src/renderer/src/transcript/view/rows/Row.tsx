@@ -11,6 +11,8 @@ import type { Row } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { inWorkArea } from '../motion';
 import { AgentMessageRow } from './AgentMessage';
+import { AskCapsule } from './AskCapsule'; // E1
+import { DeliveryRowView } from './Delivery'; // E1
 import { FoldedAssistantProbes, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
@@ -43,6 +45,10 @@ function body(row: Row) {
     case 'request_slot': return <RequestSlotRow row={row} />;
     case 'boundary': return <BoundaryRow row={row} />;
     case 'error': return <ErrorRow row={row} />;
+    // E1 start
+    case 'ask': return <AskCapsule row={row} />;
+    case 'delivery': return <DeliveryRowView row={row} />;
+    // E1 end
   }
 }
 

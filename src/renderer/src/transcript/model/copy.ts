@@ -391,6 +391,7 @@ export const ASK = {
   open: 'Open',
   viewAnswers: 'View answers',
   notAnswered: 'Not answered',
+  decideForMe: 'Decide for me',
 } as const;
 
 // One answer as the answered capsule's line reads it: the labels (and what was typed under Other), the text, the paths,
@@ -398,7 +399,7 @@ export const ASK = {
 export function askAnswerCopy(answer: AskAnswer | undefined): string {
   if (answer === undefined) return ASK.notAnswered;
   if (answer.status === 'skipped') return QUESTION.skipped;
-  if (answer.status === 'decide_for_me') return 'Decide for me';
+  if (answer.status === 'decide_for_me') return ASK.decideForMe;
   const values = answer.value === undefined ? [] : Array.isArray(answer.value) ? answer.value : [answer.value];
   const value = answer.name !== undefined ? `${answer.name} (${values.join(', ')})` : values.join(', ');
   return [value, answer.otherText !== undefined ? `Other: ${answer.otherText}` : ''].filter((part) => part !== '').join(' · ');
