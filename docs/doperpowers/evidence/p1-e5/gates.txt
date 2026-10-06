@@ -52,3 +52,24 @@ pnpm -C $W exec vitest run src/main/sessions/pause-take-over.pty.test.ts
 
 pnpm -C $W e2e:code   (head b1d468e7, one-minute load 12, through waitload20.sh && with-slot.sh)
   33 passed (1.2m)   [code-tools.spec.ts 25 + code-editor.spec.ts 8; exit 0; log /tmp/maws-review/e5-e2e.log]
+
+== Gates after M5 (the E5 executor), 2026-10-06, head 5584d5d3 (source 96686bdd, E5 M5: the renderer pushes its dirty tabs and answers Save all), through waitload20.sh && with-slot.sh, one-minute load 14 to 15 ==
+
+pnpm -C $W typecheck
+  exit 0
+
+pnpm -C $W lint
+  exit 0
+
+pnpm -C $W test --maxWorkers=4
+  Test Files  3 failed | 457 passed | 1 skipped (461)
+       Tests  6 failed | 6048 passed | 1 skipped (6055)
+  five failures: src/main/lifecycle.test.ts (2) and src/main/sessions/main-wiring.test.ts (3), whose vi.mock of ./lifecycle/quit-guard lacks M5's new
+  export trackUnsavedFiles (a test gap M5's fix wave closes); one failure: src/renderer/src/tools/code/viewer/viewer.test.tsx 'drops a Load more answer
+  whose text a re-read replaced while it was in flight' timed out at 5 s under the full-suite load; re-run alone:
+pnpm -C $W exec vitest run --project renderer --project renderer-compiled src/renderer/src/tools/code/viewer/viewer.test.tsx
+  Test Files  2 passed (2)
+       Tests  62 passed (62)
+
+pnpm -C $W e2e:code
+  35 passed (1.4m)   [code-tools.spec.ts 25 + code-editor.spec.ts 10, the two quit cases included; exit 0]
