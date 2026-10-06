@@ -5,7 +5,7 @@
 import { IndexAttentionStore, type AttentionStore } from './attention';
 import { openDb, type Db } from './db';
 import { DraftStore } from './drafts';
-import { MIGRATIONS } from './migrations';
+import { MIGRATIONS, REPAIRS } from './migrations';
 import { ProjectStore } from './projects';
 import { ReplayFixtureStore } from './replay-fixtures';
 import { SessionStore } from './sessions';
@@ -20,7 +20,7 @@ export class Index {
   private stamped = 0;
 
   constructor(path: string) {
-    this.db = openDb(path, MIGRATIONS);
+    this.db = openDb(path, MIGRATIONS, REPAIRS);
     // One revision per committed change, stamped as each change is announced after its commit (never inside a
     // transaction that may still roll back), so revisions are distinct and in commit order.
     const stamp = () => ++this.stamped;

@@ -4,8 +4,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { summary, tempDir } from '../../../test/support/index-fixture';
+import { openDb } from './db';
 import { Index } from './index';
-import { MIGRATIONS } from './migrations';
+import { MIGRATIONS, REPAIRS } from './migrations';
 
 describe('the index opens, migrates and refuses what it cannot own', () => {
   let dir: ReturnType<typeof tempDir>;
@@ -42,7 +43,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     expect(index.applied).toEqual([1, 2, 3]);
     expect(MIGRATIONS).toHaveLength(3);
     expect(inspect(path)).toEqual({ version: 3, tables: ['attention_items', 'drafts', 'projects', 'replay_fixtures', 'sessions'], mode: 'wal' });
-    // v1 is unshipped, so the removal mark (whole-branch review) is part of it rather than a v2.
+    // The removal mark was amended into v1 (see the repair cases below for databases created before that).
     const db = new DatabaseSync(path, { readOnly: true });
     try {
       const columns = (db.prepare('PRAGMA table_info(sessions)').all() as { name: string; type: string; notnull: number }[]).map((c) => [c.name, c.type, c.notnull]);
@@ -138,6 +139,112 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const second = open(path);
     expect(second.applied).toEqual([]);
     expect(second.sessions.get(record.appId)).toMatchObject({ appId: record.appId, pinned: true });
+  });
+
+  // `sessions.removed_at` was amended into the released v1 entry; a database created before that is at version 3 without
+  // it, and every discovery update of an existing record failed with `no such column: removed_at`.
+  describe('the schema repair (a released entry amended after some database applied it)', () => {
+    afterEach(() => vi.restoreAllMocks());
+    const sessionColumns = (path: string) => {
+      const db = new DatabaseSync(path, { readOnly: true });
+      try {
+        return (db.prepare('PRAGMA table_info(sessions)').all() as { name: string; type: string; notnull: number }[]).map((c) => [c.name, c.type, c.notnull]);
+      } finally {
+        db.close();
+      }
+    };
+    // v1 as first released (before `removed_at`), then v2 and v3, at user_version 3: the owner's database.
+    const preAmendment = (path: string, rows: { appId: string; sessionId: string; archived: number }[] = []) => {
+      const v1 = MIGRATIONS[0].sql.replace('summary TEXT, removed_at TEXT,', 'summary TEXT,');
+      expect(v1).not.toBe(MIGRATIONS[0].sql);
+      const raw = new DatabaseSync(path);
+      raw.exec(v1);
+      raw.exec(MIGRATIONS[1].sql);
+      raw.exec(MIGRATIONS[2].sql);
+      raw.exec('PRAGMA user_version = 3');
+      const insert = raw.prepare("INSERT INTO sessions (app_id, engine_session_id, directory, archived, created_at, updated_at) VALUES (?, ?, '/w', ?, 't', 't')");
+      for (const row of rows) insert.run(row.appId, row.sessionId, row.archived);
+      raw.close();
+    };
+
+    it('a pre-amendment database at user_version 3 gains sessions.removed_at on open, and discovery updates its existing records', () => {
+      const path = join(dir.path, 'index.sqlite');
+      const live = summary();
+      const ownerArchived = summary();
+      preAmendment(path, [
+        { appId: 'live', sessionId: live.sessionId, archived: 0 },
+        { appId: 'owner-archived', sessionId: ownerArchived.sessionId, archived: 1 },
+      ]);
+      expect(sessionColumns(path).map(([name]) => name)).not.toContain('removed_at');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const index = open(path);
+      expect(index.applied).toEqual([]);
+      expect(inspect(path).version).toBe(3);
+      expect(sessionColumns(path)).toContainEqual(['removed_at', 'TEXT', 0]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('sessions.removed_at'));
+
+      const updated = index.sessions.upsertFromSummary({ ...live, lastRecordAt: '2026-09-28T11:00:00.000Z' });
+      expect(updated).toMatchObject({ created: false, record: { appId: 'live', archived: false } });
+      // a repaired row's mark is null, so the owner's own archive is not taken for the removal's and stays
+      expect(index.sessions.upsertFromSummary(ownerArchived).record).toMatchObject({ appId: 'owner-archived', archived: true });
+      // and the column carries the removal mark from now on: removed, then back, lifts the removal's archive
+      index.sessions.markTranscriptRemoved(live.sessionId);
+      expect(index.sessions.upsertFromSummary(live).record).toMatchObject({ appId: 'live', archived: false });
+    });
+
+    it('a fresh database, created with the column, is unchanged by the repair on this open or the next', () => {
+      const path = join(dir.path, 'index.sqlite');
+      const reference = join(dir.path, 'reference.sqlite');
+      const raw = new DatabaseSync(reference);
+      for (const migration of MIGRATIONS) raw.exec(migration.sql);
+      raw.close();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      open(path).close();
+      opened.pop();
+      expect(sessionColumns(path)).toEqual(sessionColumns(reference));
+      expect(open(path).applied).toEqual([]);
+      expect(sessionColumns(path)).toEqual(sessionColumns(reference));
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('the repair is idempotent: a second open of the repaired database adds nothing and logs nothing', () => {
+      const path = join(dir.path, 'index.sqlite');
+      preAmendment(path);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      open(path).close();
+      opened.pop();
+      const repaired = sessionColumns(path);
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      open(path);
+      expect(sessionColumns(path)).toEqual(repaired);
+      expect(repaired.filter(([name]) => name === 'removed_at')).toHaveLength(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    // A later entry is written against the amended history, so the repair comes first; and it shares the opening
+    // transaction, so a pending entry that fails leaves the database as found.
+    it('runs before the pending migrations, inside their transaction', () => {
+      const path = join(dir.path, 'index.sqlite');
+      preAmendment(path);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const failing = [...MIGRATIONS, { version: 4, sql: 'CREATE TABLE later (x); SELECT * FROM no_such_table;' }];
+      expect(() => openDb(path, failing, REPAIRS)).toThrow(/no_such_table/);
+      expect(sessionColumns(path).map(([name]) => name)).not.toContain('removed_at');
+      expect(inspect(path)).toMatchObject({ version: 3, tables: ['attention_items', 'drafts', 'projects', 'replay_fixtures', 'sessions'] });
+
+      const later = [...MIGRATIONS, { version: 4, sql: 'CREATE INDEX sessions_removed ON sessions(removed_at);' }];
+      const db = openDb(path, later, REPAIRS);
+      try {
+        expect(db.applied).toEqual([4]);
+        expect(db.get<{ n: number }>("SELECT count(*) AS n FROM sqlite_master WHERE name = 'sessions_removed'")).toEqual({ n: 1 });
+      } finally {
+        db.close();
+      }
+    });
   });
 
   it('a database at a user_version newer than the app knows opens read-only and is unavailable: nothing reads or writes a schema it does not know', () => {
