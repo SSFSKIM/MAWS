@@ -12,6 +12,7 @@
 import { create } from 'zustand';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
 import type { ListModelsResponse } from '@shared/wire/control';
+import type { DictationSink } from '../composer/editor/controller'; // E9
 
 export interface Prefill {
   text: string; // the row's text with `[Pasted text #n +L lines]` placeholders in place
@@ -49,6 +50,9 @@ export interface FocusTarget {
     fill(text: string, mode: 'replace' | 'append' | 'insert'): boolean;
     suggest(text: string): boolean;
   };
+  // E9: a dictation's words at the editor's caret (composer/dictation/); null while a card covers the box, the editor is
+  // read-only or a submission is in flight. `onEnded` fires once when the composer ends the sink itself.
+  dictation?: { begin(onEnded: () => void): DictationSink | null };
 }
 
 // Where edit-and-resubmit stands (C7 execution document, "Edit-and-resubmit and the fork seam"); M4b drives it from
