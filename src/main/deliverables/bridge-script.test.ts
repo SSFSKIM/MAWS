@@ -36,15 +36,17 @@ function page(html: string) {
   new Function('window', 'document', 'Element', BRIDGE_SCRIPT)(win, win.document, win.Element);
 }
 const fromParent = (data: unknown, source: unknown = parent) => win.dispatchEvent(new win.MessageEvent('message', { data, source: source as never }));
-const overlay = () => win.document.querySelector('[data-maws-pick-overlay]') as unknown as { style: { display: string; pointerEvents: string } } | null;
+const overlay = () =>
+  win.document.querySelector('[data-maws-pick-overlay]') as unknown as { localName: string; style: { getPropertyValue(name: string): string; getPropertyPriority(name: string): string } } | null;
 const hover = (target: DomElement) => target.dispatchEvent(new win.MouseEvent('mousemove', { bubbles: true }));
 const click = (target: DomElement) => target.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
 const escape = () => win.document.body.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
 const pickOn = () => fromParent({ type: 'maws:pick', on: true });
 
 describe('the bridge script (E2 Design §10)', () => {
-  it('is inline-safe: no closing script tag in it', () => {
-    expect(BRIDGE_SCRIPT).not.toMatch(/<\/script/i);
+  // one line, so an artifact's own console errors keep the line numbers of the agent's file (the script goes ahead of them)
+  it('is one inline-safe line: no newline, no closing script tag, no comment opener', () => {
+    expect(BRIDGE_SCRIPT).not.toMatch(/\n|\r|<\/script|<!--/i);
   });
 
   it('does nothing until the parent turns picking on: no overlay, clicks reach the page', () => {
@@ -67,8 +69,12 @@ describe('the bridge script (E2 Design §10)', () => {
     pickOn();
     hover(target);
     expect(overlay()).not.toBeNull();
-    expect(overlay()!.style.display).toBe('block');
-    expect(overlay()!.style.pointerEvents).toBe('none');
+    // its own element name and important inline styles, so the page's CSS can neither hide it nor animate it
+    expect(overlay()!.localName).toBe('maws-pick-overlay');
+    for (const [name, value] of [['display', 'block'], ['pointer-events', 'none'], ['position', 'fixed'], ['transition', 'none']]) {
+      expect(overlay()!.style.getPropertyValue(name), name).toBe(value);
+      expect(overlay()!.style.getPropertyPriority(name), name).toBe('important');
+    }
     expect(target.getAttribute('style')).toBeNull(); // the element's own styles are never touched
     click(target);
     expect(own).not.toHaveBeenCalled();
@@ -127,6 +133,20 @@ describe('the bridge script (E2 Design §10)', () => {
     escape(); // picking is off: the key is the page's again
     expect(own).toHaveBeenCalledTimes(1);
     expect(posted).toHaveLength(1);
+  });
+
+  it('re-places the overlay when the window resizes', () => {
+    page('<p>x</p>');
+    pickOn();
+    const p = $('p');
+    hover(p);
+    let box = { left: 10, top: 20, width: 30, height: 40 };
+    (p as unknown as { getBoundingClientRect(): unknown }).getBoundingClientRect = () => ({ ...box, right: 0, bottom: 0, x: box.left, y: box.top });
+    win.dispatchEvent(new win.Event('resize'));
+    expect(['left', 'top', 'width', 'height'].map((name) => overlay()!.style.getPropertyValue(name))).toEqual(['10px', '20px', '30px', '40px']);
+    box = { left: 1, top: 2, width: 3, height: 4 };
+    win.dispatchEvent(new win.Event('resize'));
+    expect(overlay()!.style.getPropertyValue('width')).toBe('3px');
   });
 
   it('turns off on maws:pick { on: false } without posting anything', () => {

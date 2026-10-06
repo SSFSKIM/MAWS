@@ -529,6 +529,42 @@ describe('comment mode on an artifact element', () => {
     expect(opened).toEqual([]);
   });
 
+  it('leaves an Escape that something else answered, or that ends a composition, to that', async () => {
+    await mount({ target: ART.id });
+    fireEvent.click(button('Comment')!);
+    const answered = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    answered.preventDefault();
+    act(() => void window.dispatchEvent(answered));
+    act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true })));
+    expect(hint()).not.toBeNull();
+  });
+
+  it('asks the frame to pick again after it loads, so a Comment pressed before the page loaded reaches it', async () => {
+    await mount({ target: ART.id });
+    const { sent } = spyFrame();
+    fireEvent.click(button('Comment')!);
+    act(() => void frame()!.dispatchEvent(new Event('load')));
+    expect(sent).toEqual([{ type: 'maws:pick', on: true }, { type: 'maws:pick', on: true }]);
+  });
+
+  it('Reload ends picking (a new frame), and a version whose file goes missing ends it with its frame', async () => {
+    await mount({ target: ART.id });
+    fireEvent.click(button('Comment')!);
+    fireEvent.click(button('Reload')!);
+    await settle();
+    expect(hint()).toBeNull();
+    expect(button('Comment')!.getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(button('Comment')!);
+    expect(hint()).not.toBeNull();
+    present.set(ART.id, [true, false]);
+    await act(async () => main.emit('deliverables.changed', { appSessionId: A, id: ART.id, change: 'updated' }));
+    await settle();
+    expect(document.querySelector('[data-missing]')).not.toBeNull();
+    expect(hint()).toBeNull();
+    expect(button('Comment')).toBeNull();
+  });
+
   it('a version switch ends picking, and Comment then picks on the version shown', async () => {
     await mount({ target: ART.id });
     fireEvent.click(button('Comment')!);

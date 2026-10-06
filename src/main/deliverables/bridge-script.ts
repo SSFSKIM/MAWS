@@ -4,9 +4,11 @@
 // page's cooperation happens here. A delivered HTML file never carries it.
 //
 // The element picker for comment mode: it listens to `message` events from `window.parent` alone; `{ type: 'maws:pick',
-// on: true | false }` turns picking on or off. While on, an overlay of its own follows the element under the pointer
-// (placed from `getBoundingClientRect`, the element's styles never touched), and the pointer's presses and clicks are
-// swallowed in the capture phase on `window` (registered before the page's own scripts run, so first); a click posts
+// on: true | false }` turns picking on or off. While on, an overlay of its own follows the element under the pointer: a
+// `maws-pick-overlay` element whose inline styles are all `!important` (no transition), so the page's CSS neither hides
+// nor animates it, placed from `getBoundingClientRect` and again on scroll and resize, the element's styles never
+// touched. The pointer's presses and clicks are swallowed in the capture phase on `window` (registered before the
+// page's own scripts run, so first); a click posts
 // `{ type: 'maws:picked', selector, label, text, rect }` to the parent and ends picking (one pick per Comment), Escape
 // posts `{ type: 'maws:pick-cancelled' }`. `targetOrigin` is `'*'`: the frame cannot know the app's origin, and the
 // message says nothing the parent did not ask for. `selector` is the element's id when it is unique, else a
@@ -18,7 +20,10 @@
 // listen to, so the script does nothing there.
 //
 // A plain string, not a stringified function: a bundler's helpers (esbuild's `__name`) would not exist in the page.
-export const BRIDGE_SCRIPT = String.raw`(function () {
+// Served as one line: it goes ahead of the artifact's own scripts, so a line of its own would move every line number
+// Chromium reports for the page's console errors away from the agent's file. The source below is written so that
+// joining its lines changes nothing (no `//` comments, every statement ended by its semicolon).
+const SOURCE = String.raw`(function () {
   'use strict';
   var host = window.parent;
   if (!host || host === window) return;
@@ -72,28 +77,35 @@ export const BRIDGE_SCRIPT = String.raw`(function () {
     return text.replace(/\s+/g, ' ').trim().slice(0, 200);
   }
 
+  function set(name, value) { overlay.style.setProperty(name, value, 'important'); }
+
   function place(el) {
     shown = el;
     if (!overlay) {
-      overlay = document.createElement('div');
+      overlay = document.createElement('maws-pick-overlay');
       overlay.setAttribute('data-maws-pick-overlay', '');
-      var style = overlay.style;
-      style.position = 'fixed';
-      style.pointerEvents = 'none';
-      style.zIndex = '2147483647';
-      style.boxSizing = 'border-box';
-      style.margin = '0';
-      style.border = '2px solid #2f6feb';
-      style.borderRadius = '2px';
-      style.background = 'rgba(47, 111, 235, 0.12)';
+      set('position', 'fixed');
+      set('pointer-events', 'none');
+      set('z-index', '2147483647');
+      set('box-sizing', 'border-box');
+      set('margin', '0');
+      set('padding', '0');
+      set('border', '2px solid #2f6feb');
+      set('border-radius', '2px');
+      set('background', 'rgba(47, 111, 235, 0.12)');
+      set('transition', 'none');
+      set('animation', 'none');
+      set('transform', 'none');
+      set('opacity', '1');
+      set('visibility', 'visible');
       document.documentElement.appendChild(overlay);
     }
     var r = el.getBoundingClientRect();
-    overlay.style.left = r.left + 'px';
-    overlay.style.top = r.top + 'px';
-    overlay.style.width = r.width + 'px';
-    overlay.style.height = r.height + 'px';
-    overlay.style.display = 'block';
+    set('left', r.left + 'px');
+    set('top', r.top + 'px');
+    set('width', r.width + 'px');
+    set('height', r.height + 'px');
+    set('display', 'block');
   }
 
   function stop() {
@@ -120,12 +132,12 @@ export const BRIDGE_SCRIPT = String.raw`(function () {
   }, true);
 
   window.addEventListener('mouseout', function (event) {
-    if (picking && !event.relatedTarget && overlay) { overlay.style.display = 'none'; shown = null; }
+    if (picking && !event.relatedTarget && overlay) { set('display', 'none'); shown = null; }
   }, true);
 
-  window.addEventListener('scroll', function () {
-    if (picking && shown) place(shown);
-  }, true);
+  function follow() { if (picking && shown) place(shown); }
+  window.addEventListener('scroll', follow, true);
+  window.addEventListener('resize', follow);
 
   ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'auxclick', 'dblclick', 'contextmenu'].forEach(function (type) {
     window.addEventListener(type, function (event) { if (picking) swallow(event); }, true);
@@ -149,3 +161,7 @@ export const BRIDGE_SCRIPT = String.raw`(function () {
     post({ type: 'maws:pick-cancelled' });
   }, true);
 })();`;
+
+export const BRIDGE_SCRIPT = SOURCE.split('\n')
+  .map((line) => line.trim())
+  .join(' ');

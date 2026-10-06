@@ -159,6 +159,16 @@ describe('the maws-deliverable: handler (E2 Design §3): one recorded file per U
     expect(text.indexOf(MARKER)).toBeLessThan(text.indexOf('own()')); // before the artifact's own scripts
     expect(response.headers.get('content-length')).toBe(String(Buffer.byteLength(text)));
   });
+
+  it('adds no line to an artifact’s HTML, so the page’s console errors keep the line numbers of the agent’s file', async () => {
+    const source = '<!doctype html>\n<html>\n<head>\n<title>t</title>\n</head>\n<body>\n<script>\nthrow new Error("x")\n</script>\n</body>\n</html>\n';
+    await artifact([source]);
+    const text = await (await get(deliverableUrl(A, ART, 1))).text();
+    expect(occurrences(text, MARKER)).toBe(1);
+    expect(occurrences(text, '\n')).toBe(occurrences(source, '\n'));
+    expect(text.indexOf('throw')).toBeGreaterThan(text.indexOf(MARKER));
+    expect(text.split('\n').indexOf('throw new Error("x")')).toBe(source.split('\n').indexOf('throw new Error("x")'));
+  });
 });
 
 describe('insertBridgeScript (E2 Design §3, §10)', () => {

@@ -151,12 +151,13 @@ function Shown({ record, shown, present, checked, reloads, mode, onBack, onVersi
   // the frame picking is asked of, by what keys it: another version or a Reload is another frame, which is not picking
   const frame = `${record.appSessionId}/${record.id}/${shown}#${reloads}`;
   const [pickingIn, setPickingIn] = useState<string | null>(null);
-  const picking = pickingIn === frame;
   const commentable = record.kind === 'artifact' && body === 'html' && checked && present;
+  const picking = commentable && pickingIn === frame; // a version whose file went missing has no frame to pick in
   useEffect(() => {
     if (!picking) return;
+    // an Escape something else already answered (a sheet, a menu) or one that ends an input method's composition is not ours
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setPickingIn(null);
+      if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing) setPickingIn(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
