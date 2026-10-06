@@ -88,7 +88,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { createHostSupervisor, type HostSupervisor } from './supervisor';
+import { createHostSupervisor, RESYNC_BOUND_MS, type HostSupervisor } from './supervisor';
 
 const HOSTS = {
   'engine-host': { modulePath: '/out/main/engine-host.js', serviceName: 'maws-engine-host' },
@@ -261,6 +261,92 @@ describe('host supervisor', () => {
     expect(hostEmit('pty.exit', exit as never)).toBe(true);
     await flush();
     expect(emit).toHaveBeenCalledWith('pty.exit', exit);
+  });
+
+  // E10: a host with a resync (the engine host) is told ready once main has pulled what it needs (X13)
+  describe('the resync and the ready line', () => {
+    const BROKER = { appSessionId: 'app-1', items: [] } as never;
+
+    function serveEngine(pid: number) {
+      const engine = latest('maws-engine-host');
+      let hostEmit!: HostEmit;
+      serve(engine, (on, e) => {
+        on('engine.ping', async () => PING(pid));
+        hostEmit = e;
+      });
+      engine.spawn(pid);
+      return { engine, emit: (...args: Parameters<HostEmit>) => hostEmit(...args) };
+    }
+
+    it('says ready only after the resync, which dispatches to the ready host; the pty host is told at hello', async () => {
+      let release!: () => void;
+      const seen: unknown[] = [];
+      supervisor.setResync('engine-host', async (dispatch) => {
+        seen.push(await dispatch('engine-host', 'engine.ping', undefined));
+        await new Promise<void>((resolve) => (release = resolve));
+      });
+      void supervisor.start();
+      let ptyEmit!: HostEmit;
+      serve(latest('maws-pty-host'), (on, e) => {
+        on('pty.ping', async () => PING(202));
+        ptyEmit = e;
+      });
+      latest('maws-pty-host').spawn(202);
+      const engine = serveEngine(101);
+      await flush();
+      expect(seen).toEqual([{ ok: true, value: PING(101) }]);
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(false); // no event before the ready line
+      expect(ptyEmit('pty.exit', { ptyId: 'p1', exitCode: 0, signal: null } as never)).toBe(true);
+      release();
+      await flush();
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(true);
+      await flush();
+      expect(emit).toHaveBeenCalledWith('session.brokerItems', BROKER);
+    });
+
+    it('runs the resync again at every relaunch', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const resync = vi.fn(async () => {});
+      supervisor.setResync('engine-host', resync);
+      await startReady(101);
+      expect(resync).toHaveBeenCalledOnce();
+      latest('maws-engine-host').exit(137);
+      await vi.advanceTimersByTimeAsync(500);
+      const next = serveEngine(303);
+      await flush();
+      expect(resync).toHaveBeenCalledTimes(2);
+      expect(next.emit('session.brokerItems', BROKER)).toBe(true);
+    });
+
+    it('says ready without the resync past RESYNC_BOUND_MS, and after a resync that failed', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      supervisor.setResync('engine-host', () => new Promise<void>(() => {}));
+      void supervisor.start();
+      latest('maws-pty-host').spawn(202);
+      const engine = serveEngine(101);
+      await vi.advanceTimersByTimeAsync(RESYNC_BOUND_MS - 1);
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(engine.emit('session.brokerItems', BROKER)).toBe(true);
+      expect(log.mock.calls.flat().join(' ')).toContain('resync took longer');
+
+      supervisor.setResync('engine-host', async () => {
+        throw new Error('the resync broke');
+      });
+      engine.engine.exit(1);
+      await vi.advanceTimersByTimeAsync(500);
+      const next = serveEngine(303);
+      await flush();
+      expect(next.emit('session.brokerItems', BROKER)).toBe(true);
+      expect(log.mock.calls.flat().join(' ')).toContain('resync failed');
+    });
+  });
+
+  it('fails a request made before start() at once, as before (requests are held only once the hosts are starting)', async () => {
+    await expect(supervisor.dispatch('engine-host', 'engine.ping', undefined)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'host_unavailable' },
+    });
   });
 
   // C3 start: main-side subscription to validated host events (wave-2 ledger (b); C3's attention service, C4's index)
