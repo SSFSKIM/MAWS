@@ -5,8 +5,9 @@
 // sibling's tool with the model's target). A pane whose tool this build has not registered is answered with the host's
 // own "not available" text, so the model reads the same words whichever side refused. A window that does not know the
 // session leaves it to the one that does; two windows that both know it both open it, and the host keeps the first
-// answer. A tool that opens a tab per call (the Terminal) shows the session's existing tab rather than a new one: the
-// model asks the human to look there, not for another shell.
+// answer. The Terminal (a tool that opens a tab per call, and takes no target) shows the session's existing tab rather
+// than a new one: the model asks the human to look there, not for another shell. Every other pane goes through
+// `addTool` with its params, so a target always reaches its tool.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { tabId } from '@shared/ipc/schema/layout';
@@ -28,9 +29,9 @@ function paramsOf(pane: Exclude<Pane, 'file'>, target: string | null): Record<st
   return target !== null ? { target } : {};
 }
 
-// The session's tab of a tool that opens a tab per call, selected (the session brought on screen first, as `addTool`'s
-// activation does); null when it has none.
-function selectExisting(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId): string | null {
+// The session's Terminal tab, selected (the session brought on screen first, as `addTool`'s activation does); null when
+// it has none.
+function selectTerminal(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId): string | null {
   const layout = useLayout.getState();
   const existing = layout.panelBySession.get(appSessionId)?.tabs.find((tab) => tab.toolId === tool.id);
   if (!existing) return null;
@@ -49,7 +50,7 @@ export function showPane({ appSessionId, pane, target, line }: MawsPaneShow): Ma
   }
   const tool = panelHost.tools().find((candidate) => candidate.id === where.toolId);
   if (!tool) return { ok: false, error: TOOL_ERRORS.paneUnavailable(pane) };
-  const opened = (tool.multiInstance ? selectExisting(tool, appSessionId) : null) ?? panelHost.addTool(tool.id, { appSessionId, params: paramsOf(pane, target), activate: true });
+  const opened = (pane === 'terminal' ? selectTerminal(tool, appSessionId) : null) ?? panelHost.addTool(tool.id, { appSessionId, params: paramsOf(pane, target), activate: true });
   return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
 }
 

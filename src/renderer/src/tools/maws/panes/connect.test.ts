@@ -75,6 +75,17 @@ describe('the pane bridge, window side (E1)', () => {
     expect(probe.created.map((init) => init.params)).toEqual([{ target: 'https://example.com' }]);
   });
 
+  it('a multi-instance sibling tool shown twice with distinct targets receives both (only the Terminal reuses its tab)', async () => {
+    const { tool, probe } = probeTool('browser', { title: 'Browser', multiInstance: true });
+    registerPanelTool(tool);
+    show(fake, { pane: 'browser', target: 'https://a.example' });
+    show(fake, { pane: 'browser', target: 'https://b.example', requestId: 'r2' });
+    await settle();
+    expect(probe.created.map((init) => init.params)).toEqual([{ target: 'https://a.example' }, { target: 'https://b.example' }]);
+    const tabs = panelOf(A)!.tabs.map((tab) => tab.id);
+    expect(fake.invoked('maws.pane.answer').map((answer) => (answer as { result: { opened: { tabId: string } } }).result.opened.tabId)).toEqual(tabs);
+  });
+
   it('a session this window does not know: nothing opened, no answer', async () => {
     const { tool } = probeTool('terminal', { title: 'Terminal' });
     registerPanelTool(tool);
