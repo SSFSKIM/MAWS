@@ -1,0 +1,910 @@
+TAP version 13
+# Subtest: init.jsonl is ordered, complete NDJSON with correlated RPC replies
+ok 1 - init.jsonl is ordered, complete NDJSON with correlated RPC replies
+  ---
+  duration_ms: 2.055375
+  type: 'test'
+  ...
+# Subtest: permission-roundtrip.jsonl is ordered, complete NDJSON with correlated RPC replies
+ok 2 - permission-roundtrip.jsonl is ordered, complete NDJSON with correlated RPC replies
+  ---
+  duration_ms: 1.670083
+  type: 'test'
+  ...
+# Subtest: question-roundtrip.jsonl is ordered, complete NDJSON with correlated RPC replies
+ok 3 - question-roundtrip.jsonl is ordered, complete NDJSON with correlated RPC replies
+  ---
+  duration_ms: 1.046875
+  type: 'test'
+  ...
+# Subtest: queue-and-interrupt.jsonl is ordered, complete NDJSON with correlated RPC replies
+ok 4 - queue-and-interrupt.jsonl is ordered, complete NDJSON with correlated RPC replies
+  ---
+  duration_ms: 1.353541
+  type: 'test'
+  ...
+# Subtest: reads.jsonl is ordered, complete NDJSON with correlated RPC replies
+ok 5 - reads.jsonl is ordered, complete NDJSON with correlated RPC replies
+  ---
+  duration_ms: 0.890667
+  type: 'test'
+  ...
+# Subtest: resume-fork-cli.jsonl is ordered, complete NDJSON with correlated RPC replies
+ok 6 - resume-fork-cli.jsonl is ordered, complete NDJSON with correlated RPC replies
+  ---
+  duration_ms: 0.35325
+  type: 'test'
+  ...
+# Subtest: resume-fork-no-replay.jsonl is ordered, complete NDJSON with correlated RPC replies
+ok 7 - resume-fork-no-replay.jsonl is ordered, complete NDJSON with correlated RPC replies
+  ---
+  duration_ms: 0.396708
+  type: 'test'
+  ...
+# Subtest: resume-fork-replay.jsonl is ordered, complete NDJSON with correlated RPC replies
+ok 8 - resume-fork-replay.jsonl is ordered, complete NDJSON with correlated RPC replies
+  ---
+  duration_ms: 0.715875
+  type: 'test'
+  ...
+# Subtest: resume-fork-start.jsonl is ordered, complete NDJSON with correlated RPC replies
+ok 9 - resume-fork-start.jsonl is ordered, complete NDJSON with correlated RPC replies
+  ---
+  duration_ms: 1.69975
+  type: 'test'
+  ...
+# Subtest: subagent.jsonl is ordered, complete NDJSON with correlated RPC replies
+ok 10 - subagent.jsonl is ordered, complete NDJSON with correlated RPC replies
+  ---
+  duration_ms: 2.288375
+  type: 'test'
+  ...
+# Subtest: child records preserve ancestry without claiming child token streams
+ok 11 - child records preserve ancestry without claiming child token streams
+  ---
+  duration_ms: 1.36475
+  type: 'test'
+  ...
+# Subtest: interruption cancels queued UUID and a later turn succeeds
+ok 12 - interruption cancels queued UUID and a later turn succeeds
+  ---
+  duration_ms: 1.009583
+  type: 'test'
+  ...
+# Subtest: CLI fork uses a new session while preserving context
+ok 13 - CLI fork uses a new session while preserving context
+  ---
+  duration_ms: 1.3885
+  type: 'test'
+  ...
+# Subtest: pass2/auto-classifier.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 14 - pass2/auto-classifier.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.072
+  type: 'test'
+  ...
+# Subtest: pass2/auto-haiku.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 15 - pass2/auto-haiku.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.240125
+  type: 'test'
+  ...
+# Subtest: pass2/auto-routed.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 16 - pass2/auto-routed.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.092084
+  type: 'test'
+  ...
+# Subtest: pass2/auto-unrouted.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 17 - pass2/auto-unrouted.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.380875
+  type: 'test'
+  ...
+# Subtest: pass2/bash-context-alone.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 18 - pass2/bash-context-alone.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.235542
+  type: 'test'
+  ...
+# Subtest: pass2/bash-context-echoed.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 19 - pass2/bash-context-echoed.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.273708
+  type: 'test'
+  ...
+# Subtest: pass2/dialogs.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 20 - pass2/dialogs.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.34575
+  type: 'test'
+  ...
+# Subtest: pass2/grant-askrule-resume.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 21 - pass2/grant-askrule-resume.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.297667
+  type: 'test'
+  ...
+# Subtest: pass2/grant-askrule-start.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 22 - pass2/grant-askrule-start.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.57475
+  type: 'test'
+  ...
+# Subtest: pass2/grant-reapply-resume.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 23 - pass2/grant-reapply-resume.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.283958
+  type: 'test'
+  ...
+# Subtest: pass2/grant-reapply-start.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 24 - pass2/grant-reapply-start.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.352
+  type: 'test'
+  ...
+# Subtest: pass2/hooks.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 25 - pass2/hooks.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.329834
+  type: 'test'
+  ...
+# Subtest: pass2/per-task-stop-off.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 26 - pass2/per-task-stop-off.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.675875
+  type: 'test'
+  ...
+# Subtest: pass2/per-task-stop-on.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 27 - pass2/per-task-stop-on.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.416666
+  type: 'test'
+  ...
+# Subtest: pass2/per-task-stop-workflow-off.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 28 - pass2/per-task-stop-workflow-off.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.504959
+  type: 'test'
+  ...
+# Subtest: pass2/per-task-stop-workflow-on.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 29 - pass2/per-task-stop-workflow-on.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.787167
+  type: 'test'
+  ...
+# Subtest: pass2/prewarm.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 30 - pass2/prewarm.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.811625
+  type: 'test'
+  ...
+# Subtest: pass2/real-settings-idle-1.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 31 - pass2/real-settings-idle-1.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.414959
+  type: 'test'
+  ...
+# Subtest: pass2/real-settings-idle-2.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 32 - pass2/real-settings-idle-2.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.2325
+  type: 'test'
+  ...
+# Subtest: pass2/real-settings-idle-3.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 33 - pass2/real-settings-idle-3.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.22475
+  type: 'test'
+  ...
+# Subtest: pass2/real-settings.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 34 - pass2/real-settings.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.678375
+  type: 'test'
+  ...
+# Subtest: pass2/resume-live-bg.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 35 - pass2/resume-live-bg.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.204541
+  type: 'test'
+  ...
+# Subtest: pass2/resume-live-holder.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 36 - pass2/resume-live-holder.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.309041
+  type: 'test'
+  ...
+# Subtest: pass2/resume-live-second.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 37 - pass2/resume-live-second.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.217541
+  type: 'test'
+  ...
+# Subtest: pass2/rewind.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 38 - pass2/rewind.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.37525
+  type: 'test'
+  ...
+# Subtest: pass2/routing-flag-override.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 39 - pass2/routing-flag-override.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.218167
+  type: 'test'
+  ...
+# Subtest: pass2/routing-user-settings.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 40 - pass2/routing-user-settings.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.221959
+  type: 'test'
+  ...
+# Subtest: pass2/trust-attested.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 41 - pass2/trust-attested.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.171584
+  type: 'test'
+  ...
+# Subtest: pass2/trust-no-attestation.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 42 - pass2/trust-no-attestation.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.303916
+  type: 'test'
+  ...
+# Subtest: pass2/workflow.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 43 - pass2/workflow.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.012458
+  type: 'test'
+  ...
+# Subtest: pass2 auto mode routed: effective mode, rule escalation, server verdicts on the stream, refusal code, fork unsupported
+ok 44 - pass2 auto mode routed: effective mode, rule escalation, server verdicts on the stream, refusal code, fork unsupported
+  ---
+  duration_ms: 0.999792
+  type: 'test'
+  ...
+# Subtest: pass2 unrouted: expired login blocks turns, usage has no windows, fork unsupported
+ok 45 - pass2 unrouted: expired login blocks turns, usage has no windows, fork unsupported
+  ---
+  duration_ms: 0.433167
+  type: 'test'
+  ...
+# Subtest: pass2 workflow progress carries phases and agents, and the run completes
+ok 46 - pass2 workflow progress carries phases and agents, and the run completes
+  ---
+  duration_ms: 0.521875
+  type: 'test'
+  ...
+# Subtest: pass2 rewind refuses a stale target, then truncates the live context
+ok 47 - pass2 rewind refuses a stale target, then truncates the live context
+  ---
+  duration_ms: 0.383042
+  type: 'test'
+  ...
+# Subtest: pass2 hooks: host callback round trip without lifecycle frames; command hook with lifecycle frames
+ok 48 - pass2 hooks: host callback round trip without lifecycle frames; command hook with lifecycle frames
+  ---
+  duration_ms: 0.3375
+  type: 'test'
+  ...
+# Subtest: pass2 MCP elicitation reaches the host and the accepted content reaches the tool
+ok 49 - pass2 MCP elicitation reaches the host and the accepted content reaches the tool
+  ---
+  duration_ms: 0.351958
+  type: 'test'
+  ...
+# Subtest: pass2 perTaskStopAffordance decides whether interrupt kills a background workflow
+ok 50 - pass2 perTaskStopAffordance decides whether interrupt kills a background workflow
+  ---
+  duration_ms: 2.134833
+  type: 'test'
+  ...
+# Subtest: pass2 trust: project rules load only after attestation or set_cwd with trust
+ok 51 - pass2 trust: project rules load only after attestation or set_cwd with trust
+  ---
+  duration_ms: 0.587917
+  type: 'test'
+  ...
+# Subtest: pass2 grants: flag-settings re-application suppresses the prompt after resume; an ask rule outranks any allow rule
+ok 52 - pass2 grants: flag-settings re-application suppresses the prompt after resume; an ask rule outranks any allow rule
+  ---
+  duration_ms: 1.042875
+  type: 'test'
+  ...
+# Subtest: pass2 resume while live: a print-mode holder is not guarded, a --bg holder is
+ok 53 - pass2 resume while live: a print-mode holder is not guarded, a --bg holder is
+  ---
+  duration_ms: 0.486584
+  type: 'test'
+  ...
+# Subtest: pass2 bash_command output reaches the model only through the echoed non-querying user frame
+ok 54 - pass2 bash_command output reaches the model only through the echoed non-querying user frame
+  ---
+  duration_ms: 0.638666
+  type: 'test'
+  ...
+# Subtest: pass2 prewarm: claim_session binds a parked spare to a cwd and the first turn runs
+ok 55 - pass2 prewarm: claim_session binds a parked spare to a cwd and the first turn runs
+  ---
+  duration_ms: 0.426542
+  type: 'test'
+  ...
+# Subtest: pass2 routing: user settings env routes an unrouted process; empty flag-settings env values unroute it; haiku cannot hold auto
+ok 56 - pass2 routing: user settings env routes an unrouted process; empty flag-settings env values unroute it; haiku cannot hold auto
+  ---
+  duration_ms: 0.511833
+  type: 'test'
+  ...
+# Subtest: pass3/bg-daemon-binary.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 57 - pass3/bg-daemon-binary.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.425042
+  type: 'test'
+  ...
+# Subtest: pass3/compact.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 58 - pass3/compact.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 2.03175
+  type: 'test'
+  ...
+# Subtest: pass3/context-full.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 59 - pass3/context-full.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 6.000959
+  type: 'test'
+  ...
+# Subtest: pass3/context-sample.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 60 - pass3/context-sample.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.493584
+  type: 'test'
+  ...
+# Subtest: pass3/e8-plugins-reload-settle.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 61 - pass3/e8-plugins-reload-settle.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 2.653208
+  type: 'test'
+  ...
+# Subtest: pass3/e8-plugins-reload.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 62 - pass3/e8-plugins-reload.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 2.337791
+  type: 'test'
+  ...
+# Subtest: pass3/end-session-archive.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 63 - pass3/end-session-archive.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.3975
+  type: 'test'
+  ...
+# Subtest: pass3/engine-turn-release.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 64 - pass3/engine-turn-release.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.473541
+  type: 'test'
+  ...
+# Subtest: pass3/fork-pinned-id-fork.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 65 - pass3/fork-pinned-id-fork.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.384375
+  type: 'test'
+  ...
+# Subtest: pass3/fork-pinned-id-start.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 66 - pass3/fork-pinned-id-start.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.358917
+  type: 'test'
+  ...
+# Subtest: pass3/fork-worktree-fork.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 67 - pass3/fork-worktree-fork.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.442041
+  type: 'test'
+  ...
+# Subtest: pass3/fork-worktree-resume-in-b.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 68 - pass3/fork-worktree-resume-in-b.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.316917
+  type: 'test'
+  ...
+# Subtest: pass3/fork-worktree-start.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 69 - pass3/fork-worktree-start.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.523125
+  type: 'test'
+  ...
+# Subtest: pass3/home-trust-session-only.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 70 - pass3/home-trust-session-only.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.26725
+  type: 'test'
+  ...
+# Subtest: pass3/home-trust-unattested.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 71 - pass3/home-trust-unattested.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.225834
+  type: 'test'
+  ...
+# Subtest: pass3/hooks-blocking.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 72 - pass3/hooks-blocking.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.45625
+  type: 'test'
+  ...
+# Subtest: pass3/hooks-flipped.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 73 - pass3/hooks-flipped.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 2.061083
+  type: 'test'
+  ...
+# Subtest: pass3/interrupt-text.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 74 - pass3/interrupt-text.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.88725
+  type: 'test'
+  ...
+# Subtest: pass3/launch-env-fork.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 75 - pass3/launch-env-fork.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.329167
+  type: 'test'
+  ...
+# Subtest: pass3/launch-env-state-events-unset.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 76 - pass3/launch-env-state-events-unset.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.435916
+  type: 'test'
+  ...
+# Subtest: pass3/launch-env-state-events.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 77 - pass3/launch-env-state-events.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.406042
+  type: 'test'
+  ...
+# Subtest: pass3/launch-env-terminal.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 78 - pass3/launch-env-terminal.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.178541
+  type: 'test'
+  ...
+# Subtest: pass3/launch-env-todo.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 79 - pass3/launch-env-todo.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.081959
+  type: 'test'
+  ...
+# Subtest: pass3/launch-env-unset.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 80 - pass3/launch-env-unset.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.911875
+  type: 'test'
+  ...
+# Subtest: pass3/mods-attach.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 81 - pass3/mods-attach.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.464666
+  type: 'test'
+  ...
+# Subtest: pass3/mods-consent.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 82 - pass3/mods-consent.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.427334
+  type: 'test'
+  ...
+# Subtest: pass3/mods-gate-off.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 83 - pass3/mods-gate-off.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.364333
+  type: 'test'
+  ...
+# Subtest: pass3/mods-gate-served-off.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 84 - pass3/mods-gate-served-off.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.325
+  type: 'test'
+  ...
+# Subtest: pass3/mods-gate-unset.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 85 - pass3/mods-gate-unset.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.334
+  type: 'test'
+  ...
+# Subtest: pass3/mods-pushes.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 86 - pass3/mods-pushes.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.312916
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-copy.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 87 - pass3/mods-surface-copy.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.417625
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-invalidate.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 88 - pass3/mods-surface-invalidate.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.45875
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-panes.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 89 - pass3/mods-surface-panes.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.931125
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-press-input-select.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 90 - pass3/mods-surface-press-input-select.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.835
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-prompt-access.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 91 - pass3/mods-surface-prompt-access.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.475292
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-render-sites.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 92 - pass3/mods-surface-render-sites.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.746959
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-sitting-2-1-287.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 93 - pass3/mods-surface-sitting-2-1-287.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.282167
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-sitting-headers.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 94 - pass3/mods-surface-sitting-headers.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.7
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-sitting.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 95 - pass3/mods-surface-sitting.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.330834
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-transcript-ask-user-question.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 96 - pass3/mods-surface-transcript-ask-user-question.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.584625
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-transcript-assistant-message.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 97 - pass3/mods-surface-transcript-assistant-message.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.329917
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-transcript-command-output.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 98 - pass3/mods-surface-transcript-command-output.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.31425
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-transcript-to-human.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 99 - pass3/mods-surface-transcript-to-human.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.09875
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-transcript-tool-group.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 100 - pass3/mods-surface-transcript-tool-group.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.415208
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-transcript-tool-result.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 101 - pass3/mods-surface-transcript-tool-result.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.335334
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-transcript-tool-use.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 102 - pass3/mods-surface-transcript-tool-use.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.334375
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-transcript-unhooked.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 103 - pass3/mods-surface-transcript-unhooked.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.319125
+  type: 'test'
+  ...
+# Subtest: pass3/mods-surface-transcript-user-message.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 104 - pass3/mods-surface-transcript-user-message.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.326791
+  type: 'test'
+  ...
+# Subtest: pass3/nested-agents.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 105 - pass3/nested-agents.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.119292
+  type: 'test'
+  ...
+# Subtest: pass3/p1-fork-session-flag.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 106 - pass3/p1-fork-session-flag.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.863958
+  type: 'test'
+  ...
+# Subtest: pass3/p1-fork-start.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 107 - pass3/p1-fork-start.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.487208
+  type: 'test'
+  ...
+# Subtest: pass3/p1-maws-artifacts.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 108 - pass3/p1-maws-artifacts.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 2.556916
+  type: 'test'
+  ...
+# Subtest: pass3/p1-maws-ask-async.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 109 - pass3/p1-maws-ask-async.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.97475
+  type: 'test'
+  ...
+# Subtest: pass3/p1-maws-ask-blocking.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 110 - pass3/p1-maws-ask-blocking.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.283875
+  type: 'test'
+  ...
+# Subtest: pass3/p1-maws-send-file.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 111 - pass3/p1-maws-send-file.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.180541
+  type: 'test'
+  ...
+# Subtest: pass3/p1-maws-show-pane.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 112 - pass3/p1-maws-show-pane.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.494666
+  type: 'test'
+  ...
+# Subtest: pass3/p1-question-preview-html.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 113 - pass3/p1-question-preview-html.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.712583
+  type: 'test'
+  ...
+# Subtest: pass3/p1-question-preview-unset.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 114 - pass3/p1-question-preview-unset.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.64525
+  type: 'test'
+  ...
+# Subtest: pass3/p1-sdk-mcp-image.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 115 - pass3/p1-sdk-mcp-image.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.85575
+  type: 'test'
+  ...
+# Subtest: pass3/p1-sdk-mcp-roundtrip.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 116 - pass3/p1-sdk-mcp-roundtrip.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 2.274292
+  type: 'test'
+  ...
+# Subtest: pass3/p1-side-question-session.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 117 - pass3/p1-side-question-session.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.789916
+  type: 'test'
+  ...
+# Subtest: pass3/p1-side-thread-live-fork.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 118 - pass3/p1-side-thread-live-fork.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.825208
+  type: 'test'
+  ...
+# Subtest: pass3/p1-side-thread-live-resume.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 119 - pass3/p1-side-thread-live-resume.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 2.18675
+  type: 'test'
+  ...
+# Subtest: pass3/p1-side-thread-live.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 120 - pass3/p1-side-thread-live.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 2.329916
+  type: 'test'
+  ...
+# Subtest: pass3/plan-outcomes.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 121 - pass3/plan-outcomes.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 2.841041
+  type: 'test'
+  ...
+# Subtest: pass3/question-deny.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 122 - pass3/question-deny.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.938208
+  type: 'test'
+  ...
+# Subtest: pass3/read-only-permission.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 123 - pass3/read-only-permission.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.690542
+  type: 'test'
+  ...
+# Subtest: pass3/relay-to-child.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 124 - pass3/relay-to-child.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 3.527208
+  type: 'test'
+  ...
+# Subtest: pass3/rewind-files.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 125 - pass3/rewind-files.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.258666
+  type: 'test'
+  ...
+# Subtest: pass3/steer-next-cancelled.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 126 - pass3/steer-next-cancelled.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.885125
+  type: 'test'
+  ...
+# Subtest: pass3/steer-next-disk-live.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 127 - pass3/steer-next-disk-live.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.281292
+  type: 'test'
+  ...
+# Subtest: pass3/steer-next-interrupted.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 128 - pass3/steer-next-interrupted.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.702958
+  type: 'test'
+  ...
+# Subtest: pass3/steer-next-then-now.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 129 - pass3/steer-next-then-now.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.636583
+  type: 'test'
+  ...
+# Subtest: pass3/steer-next.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 130 - pass3/steer-next.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.108708
+  type: 'test'
+  ...
+# Subtest: pass3/steer-now-unheld.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 131 - pass3/steer-now-unheld.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.993084
+  type: 'test'
+  ...
+# Subtest: pass3/steer-now.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 132 - pass3/steer-now.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.74625
+  type: 'test'
+  ...
+# Subtest: pass3/stop-task.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 133 - pass3/stop-task.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.56025
+  type: 'test'
+  ...
+# Subtest: pass3/trust-bootstrap-recorded.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 134 - pass3/trust-bootstrap-recorded.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.220375
+  type: 'test'
+  ...
+# Subtest: pass3/trust-exact-key.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 135 - pass3/trust-exact-key.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.215875
+  type: 'test'
+  ...
+# Subtest: pass3/w3-auto-fallback.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 136 - pass3/w3-auto-fallback.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.218708
+  type: 'test'
+  ...
+# Subtest: pass3/w4-question-none.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 137 - pass3/w4-question-none.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.14025
+  type: 'test'
+  ...
+# Subtest: pass3/w4-question-partial.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 138 - pass3/w4-question-partial.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 1.085875
+  type: 'test'
+  ...
+# Subtest: pass3/w7-collision.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 139 - pass3/w7-collision.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.160875
+  type: 'test'
+  ...
+# Subtest: pass3/w7-take-over.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 140 - pass3/w7-take-over.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.075708
+  type: 'test'
+  ...
+# Subtest: pass3/workspace-diff-branch.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 141 - pass3/workspace-diff-branch.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.264125
+  type: 'test'
+  ...
+# Subtest: pass3/workspace-diff-dirty.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+ok 142 - pass3/workspace-diff-dirty.jsonl is ordered NDJSON with correlated replies, provenance and no secrets
+  ---
+  duration_ms: 0.34075
+  type: 'test'
+  ...
+# Subtest: pass3 relay-to-child: the parent SendMessages the child by id, the child receives it, and the held Bash defers the busy case
+ok 143 - pass3 relay-to-child: the parent SendMessages the child by id, the child receives it, and the held Bash defers the busy case
+  ---
+  duration_ms: 2.340625
+  type: 'test'
+  ...
+# Subtest: pass3 nested-agents: the grandchild starts on the parent wire at depth 2 and its sidecar names the child as parent
+ok 144 - pass3 nested-agents: the grandchild starts on the parent wire at depth 2 and its sidecar names the child as parent
+  ---
+  duration_ms: 0.93275
+  type: 'test'
+  ...
+# Subtest: pass3 stop-task: each stop emits the snapshot without the task, killed, then stopped, all after the request and before the stop_task response
+ok 145 - pass3 stop-task: each stop emits the snapshot without the task, killed, then stopped, all after the request and before the stop_task response
+  ---
+  duration_ms: 1.042459
+  type: 'test'
+  ...
+# Subtest: pass3 nested-agents-sidecars carry no secrets
+ok 146 - pass3 nested-agents-sidecars carry no secrets
+  ---
+  duration_ms: 1.468417
+  type: 'test'
+  ...
+# Subtest: pass3 bg-daemon-binary: the daemon runs the pin only when the pin is not under the versions directory
+ok 147 - pass3 bg-daemon-binary: the daemon runs the pin only when the pin is not under the versions directory
+  ---
+  duration_ms: 0.261417
+  type: 'test'
+  ...
+# Subtest: pass3 w7-collision: both writers register, neither is refused, the transcript forks, and a resume loses the other branch
+ok 148 - pass3 w7-collision: both writers register, neither is refused, the transcript forks, and a resume loses the other branch
+  ---
+  duration_ms: 1.2135
+  type: 'test'
+  ...
+# Subtest: pass3 w7-take-over: SIGTERM ends an interactive holder, the registry clears, and the resume continues its branch
+ok 149 - pass3 w7-take-over: SIGTERM ends an interactive holder, the registry clears, and the resume continues its branch
+  ---
+  duration_ms: 0.154625
+  type: 'test'
+  ...
+# Subtest: pass3 p1-side-thread-live: the fork starts mid-turn and recalls, the image steer folds in and is kept on disk, the thread resumes by its id
+ok 150 - pass3 p1-side-thread-live: the fork starts mid-turn and recalls, the image steer folds in and is kept on disk, the thread resumes by its id
+  ---
+  duration_ms: 3.403167
+  type: 'test'
+  ...
+1..150
+# tests 150
+# suites 0
+# pass 150
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 217.206791

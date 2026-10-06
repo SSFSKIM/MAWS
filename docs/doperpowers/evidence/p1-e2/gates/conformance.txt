@@ -1,0 +1,12 @@
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v5.0.2 /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1
+
+
+ Test Files  5 passed (5)
+      Tests  211 passed (211)
+Type Errors  no errors
+   Start at  10:02:13
+   Duration  1.11s (transform 51%, tests 30%, import 19%)
+
