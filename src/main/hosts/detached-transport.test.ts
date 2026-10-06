@@ -521,3 +521,141 @@ describe('the detached transport: another build or wire (M1: the seam for §6)',
   });
 });
 
+
+// E10 Task 2.3b: what main asks of the supervisor (Stop all, Restart now, the quit's stop-all), told apart from a crash.
+describe('the detached transport: deliberate stops, restarts and the quit', () => {
+  // A supervisor whose host.stopAll answers, then exits as the real one does (the answer first, then the exit order).
+  async function startStoppable(options: Partial<FakeSupervisorOptions> = {}) {
+    const asked: number[] = [];
+    const self: FakeSupervisor = await startFake({
+      ...options,
+      register: (on) => {
+        on('host.stopAll', async ({ graceMs }) => {
+          asked.push(graceMs);
+          setImmediate(() => void self.die());
+          return { stopped: 1, forced: 0 };
+        });
+      },
+    });
+    return { fake: self, asked };
+  }
+
+  it('Stop all (restart with stopSessions): host.stopAll, then a fresh supervisor once the old pid is dead, with no crash count', async () => {
+    const { fake, asked } = await startStoppable({ counts: { liveSessions: 2, rows: 2 } });
+    await supervisor.start();
+    await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toEqual({ ok: true, value: undefined });
+    expect(asked).toEqual([5_000]);
+    await until(() => state().state === 'ready' && state().pid !== fake.pid);
+    expect(state()).toMatchObject({ pid: candidates[0].pid, restarts: 0 });
+    expect(stateNames()).toEqual(['ready', 'restarting', 'ready']);
+    expect(supervisor.facts('engine-host')).toMatchObject({ transport: 'detached', reason: null, lastExit: null });
+    expect(errors.mock.calls.flat().join(' ')).not.toContain('unexpectedly');
+  });
+
+  it('Restart now without stopSessions: exit now, then a fresh supervisor, with no crash count', async () => {
+    const fake = await startFake();
+    await supervisor.start();
+    await expect(supervisor.restartSupervisor({ stopSessions: false })).resolves.toEqual({ ok: true, value: undefined });
+    await until(() => state().state === 'ready' && state().pid !== fake.pid);
+    expect(fake.exits).toEqual(['now']);
+    expect(state()).toMatchObject({ pid: candidates[0].pid, restarts: 0 });
+    expect(supervisor.facts('engine-host').lastExit).toBeNull();
+  });
+
+  it('a stop-all the supervisor refuses is answered with its error, and the close that may follow is a crash again', async () => {
+    const self: FakeSupervisor = await startFake({ register: (on) => on('host.stopAll', async () => Promise.reject(new Error('the ladder failed'))) });
+    await supervisor.start();
+    await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
+    await self.die({ keepLock: true });
+    await until(() => state().state === 'ready' && state().pid !== self.pid);
+    expect(state().restarts).toBe(1);
+    expect(supervisor.facts('engine-host').lastExit).toMatchObject({ code: null, signal: null });
+  });
+
+  it('a crash records the last exit: the code and signal of a supervisor this run spawned, the time', async () => {
+    await supervisor.start(); // spawned by this run
+    const first = candidates[0];
+    first.exit(null, 'SIGKILL');
+    await fakes[0].die({ keepLock: true });
+    await until(() => state().state === 'ready' && state().pid !== first.pid);
+    const { lastExit } = supervisor.facts('engine-host');
+    expect(lastExit).toMatchObject({ code: null, signal: 'SIGKILL' });
+    expect(Date.parse(lastExit!.at)).toBeGreaterThan(0);
+  });
+
+  it('stopAllForQuit: host.stopAll, and the close that follows spawns nothing; the pid stays for the quit’s kill rung', async () => {
+    const { fake, asked } = await startStoppable();
+    await supervisor.start();
+    await supervisor.stopAllForQuit(4_000);
+    expect(asked).toEqual([4_000]);
+    await until(() => !processes.alive.has(fake.pid));
+    await sleep(BACKOFF[2] + TIMING.pidPollMs * 5);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
+    expect(stateNames()).toEqual(['ready']);
+    await expect(ping()).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('stopAllForQuit with no supervisor served (restarting after a crash) stops the transport: nothing spawns, held requests fail', async () => {
+    const fake = await startFake();
+    await supervisor.start();
+    onSpawn = () => {}; // a successor would never answer; none may be started at all
+    await fake.die({ keepLock: true });
+    await until(() => state().state === 'restarting');
+    const held = ping();
+    await supervisor.stopAllForQuit(5_000);
+    await expect(held).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    await sleep(BACKOFF[2] + TIMING.pidPollMs * 5);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('a held lock: the reason says so; restart kills the holder after its start time is checked, then starts afresh', async () => {
+    const holder = processes.newPid();
+    await startFake({ pid: holder }).then((fake) => fake.die({ keepLock: true }));
+    processes.alive.set(holder, `start-${holder}`); // alive, never answering
+    await supervisor.start();
+    expect(state().state).toBe('crashed');
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'held_lock', lastExit: null });
+    await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toEqual({ ok: true, value: undefined });
+    expect(processes.kills).toEqual([[holder, 'SIGTERM']]);
+    await until(() => state().state === 'ready');
+    expect(state()).toMatchObject({ pid: candidates[0].pid });
+    expect(supervisor.facts('engine-host').reason).toBeNull();
+  });
+
+  it('killHeldSupervisor leaves a pid whose start time no longer matches the lock’s (a reused pid)', async () => {
+    const holder = processes.newPid();
+    await startFake({ pid: holder }).then((fake) => fake.die({ keepLock: true }));
+    processes.alive.set(holder, 'another process');
+    await expect(supervisor.killHeldSupervisor()).resolves.toBe(false);
+    expect(processes.kills).toEqual([]);
+  });
+
+  it('a holder that ignores SIGTERM is killed with SIGKILL past the grace', async () => {
+    const holder = processes.newPid();
+    await startFake({ pid: holder }).then((fake) => fake.die({ keepLock: true }));
+    processes.alive.set(holder, `start-${holder}`);
+    processes.onKill = (pid, signal) => void (signal === 'SIGKILL' && processes.alive.delete(pid));
+    await expect(supervisor.killHeldSupervisor()).resolves.toBe(true);
+    expect(processes.kills).toEqual([[holder, 'SIGTERM'], [holder, 'SIGKILL']]);
+    expect(processes.alive.has(holder)).toBe(false);
+  });
+
+  it('an incompatible supervisor with sessions live: the reason is incompatible, and what it refused', async () => {
+    await startFake({ wire: 'other-wire', counts: { liveSessions: 2, rows: 2 } });
+    await supervisor.start();
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'wire' });
+  });
+
+  it('`refuse replaced` is crashed with no reason the schema names', async () => {
+    const fake = await startFake();
+    await supervisor.start();
+    const other = await connectLines(profile.socketPath);
+    other.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: fake.token, buildId: buildIdOf(profile.modulePath), wire: wireFingerprint(), appPid: 1 });
+    await until(() => state().state === 'crashed');
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: null, lastExit: null });
+    other.socket.destroy();
+  });
+});

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { createHostRuntime, type HostEmit, type HostPort } from '@shared/host/runtime';
+import { createHostRuntime, HostCommandError, type HostEmit, type HostPort } from '@shared/host/runtime';
 
 // Electron is faked. A fork returns a child that spawns when the test says so; a MessageChannelMain is a pair of
 // ports delivering to each other on a microtask, like the real ones. The real host runtime serves the port a child
@@ -646,6 +646,96 @@ describe('host supervisor', () => {
     expect(electron.forks).toHaveLength(2);
     await expect(supervisor.dispatch('pty-host', 'pty.ping', undefined)).resolves.toMatchObject({
       error: { code: 'host_unavailable' },
+    });
+  });
+
+  // E10 Task 2.3b: host.restart and the quit's stop-all for a utility engine host
+  describe('a utility engine host restarted or stopped for the quit', () => {
+    // A host whose admission closes for good at its stop-all, as the real one's does (ProcessTable.shuttingDown): a ping
+    // stands for a launch.
+    function serveLatching(child: InstanceType<typeof electron.FakeChild>, pid: number, stops: unknown[] = []) {
+      let latched = false;
+      serve(child, (on) => {
+        on('engine.ping', async () => {
+          if (latched) throw new HostCommandError({ code: 'internal', message: 'engine host is shutting down' });
+          return PING(pid);
+        });
+        on('host.stopAll', async (input) => {
+          stops.push(input);
+          latched = true;
+          return { stopped: 1, forced: 0 };
+        });
+        on('engine.shutdown', async (input) => {
+          stops.push(input);
+          latched = true;
+          return { stopped: 1, forced: 0 };
+        });
+      });
+    }
+
+    it('host.restart stops the sessions, kills the host and forks one that can launch, with no crash count', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      void supervisor.start();
+      const first = latest('maws-engine-host');
+      const stops: unknown[] = [];
+      serveLatching(first, 101, stops);
+      first.spawn(101);
+      serve(latest('maws-pty-host'), () => {});
+      latest('maws-pty-host').spawn(202);
+      await flush();
+      const states: string[] = [];
+      supervisor.onState('engine-host', (s) => void states.push(s.state));
+
+      await expect(supervisor.restartSupervisor({ stopSessions: false })).resolves.toEqual({ ok: true, value: undefined });
+      expect(stops).toEqual([{ graceMs: 5_000 }]); // a utility host's sessions end with it either way
+      await flush();
+      expect(first.killed).toBe(true);
+      const next = latest('maws-engine-host');
+      expect(next).not.toBe(first);
+      serveLatching(next, 303);
+      next.spawn(303);
+      await flush();
+      await expect(supervisor.dispatch('engine-host', 'engine.ping', undefined)).resolves.toEqual({ ok: true, value: PING(303) });
+      expect(supervisor.snapshot('engine-host')).toMatchObject({ state: 'ready', pid: 303, restarts: 0 });
+      expect(states).toEqual(['restarting', 'ready']);
+      expect(supervisor.facts('engine-host')).toEqual({ transport: 'utility', reason: null, refused: null, lastExit: null });
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining('unexpectedly'));
+    });
+
+    it('a request made while it restarts is held for the new host; a stop-all the old host refuses does not stop the restart', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await startReady(101); // a host that knows no host.stopAll
+      await supervisor.restartSupervisor({ stopSessions: true });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('restarting it anyway'), expect.objectContaining({ message: expect.stringContaining('host.stopAll') }));
+      const reply = supervisor.dispatch('engine-host', 'engine.ping', undefined);
+      await flush();
+      const next = latest('maws-engine-host');
+      serve(next, (on) => on('engine.ping', async () => PING(303)));
+      next.spawn(303);
+      await expect(reply).resolves.toEqual({ ok: true, value: PING(303) });
+    });
+
+    it('a crashed host is forked afresh at once, its crash window cleared', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { engine } = await startReady(101);
+      engine.exit(137);
+      expect(supervisor.snapshot('engine-host').state).toBe('crashed');
+      expect(supervisor.facts('engine-host').lastExit).toMatchObject({ code: 137, signal: null });
+      await supervisor.restartSupervisor({ stopSessions: true });
+      expect(forksOf('maws-engine-host')).toHaveLength(2); // at once, not after the backoff
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(forksOf('maws-engine-host')).toHaveLength(2); // the backoff's own restart was cancelled
+    });
+
+    it('stopAllForQuit sends engine.shutdown with the grace, as the quit did before', async () => {
+      void supervisor.start();
+      const engine = latest('maws-engine-host');
+      const stops: unknown[] = [];
+      serveLatching(engine, 101, stops);
+      engine.spawn(101);
+      await flush();
+      await supervisor.stopAllForQuit(5_000);
+      expect(stops).toEqual([{ graceMs: 5_000 }]);
     });
   });
 

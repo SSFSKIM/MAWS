@@ -9,6 +9,8 @@
 // connection closes for a reason main did not ask for, then `lost` with what the close was once the welcomed pid has
 // been looked at again; `exited` when a candidate died before any hello succeeded (C1's ladder); `failed` when the
 // attempt gave up (`crashed`); `waiting` when an incompatible supervisor still runs sessions (it retries by itself).
+// E10 Task 2.3b: what main asks of a supervisor beside `exit` (a stop-all whose close is deliberate, the quit after which
+// nothing reconnects, the kill of a holder that never answers).
 import { spawn as spawnProcess, type SpawnOptions } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
@@ -112,12 +114,23 @@ export interface DetachedEvents {
   lost(loss: DetachedLoss): void;
   exited(exit: ExitInfo): void;
   failed(reason: DetachedFailure, message: string): void;
-  waiting(liveSessions: number): void;
+  waiting(liveSessions: number, refused: 'wire' | 'protocol'): void;
 }
 
 export interface DetachedTransport {
   launch(): void; // a fresh attempt (after a deliberate close, once the welcomed pid is gone)
   exit(when: ClientExit['when']): boolean; // asks the served supervisor to exit; its close is then deliberate
+  // E10 start
+  // Main is about to send the served supervisor a command after which it exits (`host.stopAll`): its close is then
+  // deliberate. The undo is for a command that failed. Null when nothing is served.
+  expectExit(): (() => void) | null;
+  // The quit: from here nothing reconnects or spawns. A served connection stays open for the quit's stop-all and its
+  // close ends the transport; with none served the transport stops at once (false).
+  quit(): boolean;
+  // The process the lock names, alive with the lock's start time and not the one served: SIGTERM, SIGKILL past the
+  // grace; resolves once it is gone or the start budget is spent (true), false when the lock names no such process.
+  killHeld(): Promise<boolean>;
+  // E10 end
   stop(): void; // terminal: the socket closed with no `exit` sent; the supervisor keeps serving; nothing restarts
 }
 
@@ -144,6 +157,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   const sameProcess = (proc: Proc) => isSameProcess(proc, processes);
 
   let stopped = false;
+  let quitting = false; // E10 Task 2.3b: the quit asked; the served connection's close is terminal
   let generation = 0; // the current attempt; a callback of an older one does nothing
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const attemptSockets = new Set<Socket>();
@@ -170,7 +184,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   }
 
   function launch(): void {
-    if (stopped) return;
+    if (stopped || quitting) return;
     cancelAttempt();
     const gen = generation;
     const current = () => gen === generation && !stopped;
@@ -313,7 +327,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       if (waitingFor !== refuse.liveSessions) {
         waitingFor = refuse.liveSessions;
         log(`supervisor ${holder ? `pid ${holder.pid} ` : ''}is incompatible (${refuse.reason}) and runs ${refuse.liveSessions} sessions; waiting`);
-        events.waiting(refuse.liveSessions);
+        events.waiting(refuse.liveSessions, refuse.reason);
       }
       after(timing.waitRetryMs, launch);
     }
@@ -447,6 +461,10 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     if (served !== connection) return;
     served = null;
     if (stopped) return;
+    if (quitting) {
+      stopped = true; // the quit's stop-all ended the supervisor, or it closed first: either way nothing follows
+      return events.disconnected();
+    }
     if (connection.replaced) {
       log(`another client replaced this app at supervisor pid ${connection.proc.pid}`);
       return events.lost('replaced');
@@ -468,6 +486,25 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       log(`supervisor pid ${connection.proc.pid} is gone`);
       events.lost({ crash: exit ?? { code: null, signal: null } });
     });
+  }
+
+  // E10 Task 2.3b: polls until the process is gone or `ms` has passed; whether it is gone.
+  async function goneWithin(proc: Proc, ms: number): Promise<boolean> {
+    const until = Date.now() + ms;
+    while (sameProcess(proc)) {
+      if (Date.now() >= until) return false;
+      await new Promise((resolve) => setTimeout(resolve, timing.pidPollMs));
+    }
+    return true;
+  }
+
+  function signal(pid: number, name: NodeJS.Signals): boolean {
+    try {
+      kill(pid, name);
+      return true;
+    } catch {
+      return false; // already gone
+    }
   }
 
   function stopCandidate(proc: Proc): void {
@@ -499,6 +536,37 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       log(`asked supervisor pid ${served.proc.pid} to exit ${when}`);
       return true;
     },
+    // E10 start
+    expectExit() {
+      const connection = served;
+      if (!connection || stopped) return null;
+      const before = connection.exitAsked;
+      connection.exitAsked = 'now';
+      log(`supervisor pid ${connection.proc.pid} is asked to stop all and exit`);
+      return () => {
+        if (connection.exitAsked === 'now') connection.exitAsked = before;
+      };
+    },
+    quit() {
+      if (stopped) return false;
+      quitting = true;
+      cancelAttempt();
+      if (served) return true;
+      stopped = true;
+      return false;
+    },
+    async killHeld() {
+      if (stopped || quitting) return false;
+      const lock = readLock(join(options.userData(), 'supervisor'));
+      if (!lock || !sameProcess(lock) || (served && served.proc.pid === lock.pid)) return false;
+      const proc: Proc = { pid: lock.pid, procStart: lock.procStart };
+      log(`stopping the supervisor that holds the lock and does not answer (pid ${proc.pid})`);
+      if (!signal(proc.pid, 'SIGTERM') || (await goneWithin(proc, timing.killGraceMs))) return true;
+      if (sameProcess(proc)) signal(proc.pid, 'SIGKILL'); // checked again: the pid is not reused meanwhile
+      if (!(await goneWithin(proc, timing.startTimeoutMs))) log(`supervisor pid ${proc.pid} is still running after SIGKILL`);
+      return true;
+    },
+    // E10 end
     stop() {
       if (stopped) return;
       stopped = true;

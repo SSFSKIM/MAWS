@@ -11,6 +11,7 @@ import { app, MessageChannelMain, utilityProcess, type UtilityProcess } from 'el
 import { ipcError } from '@shared/ipc/errors';
 import { HostToMainSchema, type HostMessage, type HostResponse } from '@shared/ipc/host-protocol';
 import type { CommandName, CommandResult, EventName, EventPayload, HostState, PtyId } from '@shared/ipc/schema';
+import type { HostStatus } from '@shared/ipc/schema/host'; // E10
 import { isEventName, validateCommandOutput } from '@shared/ipc/validate';
 import type { HostDispatch, HostOwner } from '../ipc/router';
 // E10 start
@@ -41,6 +42,15 @@ export interface HostSupervisorOptions {
 export type ResyncCancel = 'transition' | 'bound';
 export type HostResync = (dispatch: HostDispatch, signal: AbortSignal) => Promise<void>;
 
+// E10 Task 2.3b: what main knows of a host beyond its HostState, for `host.status` (status.ts). They change only with a
+// transition, so `onState` announces them.
+export interface HostFacts {
+  transport: 'utility' | 'detached';
+  reason: HostStatus['reason']; // why `crashed`, when main knows: an incompatible supervisor runs sessions, or a held lock
+  refused: 'wire' | 'protocol' | null; // while `incompatible`: what the supervisor's refusal named
+  lastExit: { code: number | null; signal: string | null; at: string } | null; // the last unexpected exit this app run
+}
+
 export interface HostSupervisor {
   start(): Promise<void>; // idempotent: forks once; resolves when each host's first launch is ready or has given up
   // terminal: kills a utility host (E10: closes a detached engine host's socket with no exit, so its supervisor keeps
@@ -63,6 +73,17 @@ export interface HostSupervisor {
   // Asks a detached engine host's supervisor to exit now, or when it holds nothing live; the close that follows is
   // deliberate (no crash count, a fresh start once it is gone). False when the engine host is not detached and served.
   exitSupervisor(when: 'now' | 'idle'): boolean;
+  facts(owner: HostOwner): HostFacts;
+  // Settings' Stop all and the banners' Restart now (`host.restart`), for the engine host. Detached: `host.stopAll`
+  // (stopSessions) or `exit now`, then a fresh supervisor once the old pid is dead, with no crash count; a supervisor
+  // that holds the lock and never answers is killed first. Utility: the host's sessions stopped, then it is killed and
+  // forked afresh (never engine.shutdown on a host that stays: its admission would stay closed).
+  restartSupervisor(options: { stopSessions: boolean }): Promise<CommandResult<'host.restart'>>;
+  killHeldSupervisor(): Promise<boolean>; // the lock's process, after a start-time check; false when there is none
+  // The quit's stop-all, awaited and bounded by the caller. Detached: from here nothing reconnects or spawns, then
+  // `host.stopAll` (the supervisor exits after answering); the HostState keeps its pid for the quit's kill rung.
+  // Utility: engine.shutdown, as before.
+  stopAllForQuit(graceMs: number): Promise<void>;
   // E10 end
 }
 
@@ -74,6 +95,8 @@ export const CRASH_LIMIT = 3;
 export const CRASH_WINDOW_MS = 60_000;
 // E10: past this the `ready` line goes without the resync's answer (the resync logs what it left undone).
 export const RESYNC_BOUND_MS = 30_000;
+// E10: the grace host.restart's stop-all gives each session (the quit's, as the quit guard asks it)
+export const STOP_ALL_GRACE_MS = 5_000;
 
 interface Pending {
   name: CommandName;
@@ -109,6 +132,10 @@ interface Host {
   streaming: boolean; // told `ready` on the current connection
   streamingListeners: Set<() => void>;
   transport: DetachedTransport | null; // a detached host's; null for a utility host
+  reason: HostFacts['reason'];
+  refused: HostFacts['refused'];
+  lastExit: HostFacts['lastExit'];
+  quitting: boolean; // stopAllForQuit was asked: nothing restarts, nothing more is held
   // E10 end
 }
 
@@ -132,6 +159,10 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       streaming: false,
       streamingListeners: new Set(),
       transport: null,
+      reason: null,
+      refused: null,
+      lastExit: null,
+      quitting: false,
     };
     // E10: a detached host's transport, reporting into the same state, ladder and requests as a utility host's
     if (host.spec.transport === 'detached') {
@@ -159,6 +190,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
   function transition(host: Host, next: Omit<HostState, 'revision'>): void {
     cancelResync(host, 'transition'); // E10: the connection it pulled through is gone (or replaced)
     host.streaming = false; // E10
+    if (next.state !== 'crashed') [host.reason, host.refused] = [null, null]; // E10: a reason is a crashed host's
     host.state = { ...next, revision: host.state.revision + 1 };
     if (next.state === 'crashed') failHeld(host, 'is crashed'); // E10: a held request fails only on crashed or stop()
     for (const listener of host.listeners) listener(host.state);
@@ -289,8 +321,9 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
 
   // An unexpected exit, counted in the crash window: at the limit (three within 60 s) the host stays crashed for good;
   // else the wait before the next start, by the restarts so far.
-  function recordExit(host: Host): { limit: boolean; delay: number } {
+  function recordExit(host: Host, exit: Omit<NonNullable<HostFacts['lastExit']>, 'at'>): { limit: boolean; delay: number } {
     const now = Date.now();
+    host.lastExit = { ...exit, at: new Date(now).toISOString() };
     host.exits = [...host.exits.filter((at) => now - at < CRASH_WINDOW_MS), now];
     const limit = host.exits.length >= CRASH_LIMIT;
     if (limit) console.error(`[hosts] ${host.owner} exited ${host.exits.length} times within ${CRASH_WINDOW_MS / 1000} s; not restarting`);
@@ -315,7 +348,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     // Between the exit and the next attempt the host is `restarting`, so requests are held for the successor.
     const unexpected = (exit: ExitInfo) => {
       console.error(`[hosts] ${host.owner} exited unexpectedly (${exit.signal ?? `code ${exit.code}`})`);
-      const { limit, delay } = recordExit(host);
+      const { limit, delay } = recordExit(host, exit);
       if (limit) {
         transition(host, { state: 'crashed', pid: host.state.pid, restarts: host.state.restarts });
         host.settleFirstLaunch();
@@ -324,10 +357,12 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts + 1 });
       relaunch(delay);
     };
-    const crashed = (why: string) => {
+    const crashed = (why: string, reason: HostFacts['reason'] = null, refused: HostFacts['refused'] = null) => {
       console.error(`[hosts] ${host.owner} ${why}`);
       detach(host, 'is unreachable');
-      if (host.state.state !== 'crashed') transition(host, { state: 'crashed', pid: host.state.pid, restarts: host.state.restarts });
+      const changed = host.reason !== reason || host.refused !== refused;
+      [host.reason, host.refused] = [reason, refused];
+      if (host.state.state !== 'crashed' || changed) transition(host, { state: 'crashed', pid: host.state.pid, restarts: host.state.restarts });
       host.settleFirstLaunch();
     };
     return {
@@ -341,7 +376,9 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
         sayReady(host, link);
       },
       disconnected() {
-        if (!stopped) disconnected();
+        if (stopped) return;
+        if (host.quitting) return detach(host, 'stopped for the quit'); // the state keeps its pid for the quit's kill rung
+        disconnected();
       },
       lost(loss) {
         if (stopped) return;
@@ -355,10 +392,10 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
         if (!stopped) unexpected(exit);
       },
       failed(reason, message) {
-        if (!stopped) crashed(`could not be reached${reason === 'held_lock' ? ' (held_lock)' : ''}: ${message}`);
+        if (!stopped) crashed(`could not be reached${reason === 'held_lock' ? ' (held_lock)' : ''}: ${message}`, reason === 'held_lock' ? 'held_lock' : null);
       },
-      waiting(liveSessions) {
-        if (!stopped) crashed(`has an incompatible supervisor running ${liveSessions} sessions; waiting for it`);
+      waiting(liveSessions, refused) {
+        if (!stopped) crashed(`has an incompatible supervisor running ${liveSessions} sessions; waiting for it`, 'incompatible', refused);
       },
     };
   }
@@ -371,7 +408,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     for (const ptyId of host.ptys) emit('pty.exit', { ptyId: ptyId as PtyId, exitCode: null, signal: null });
     host.ptys.clear();
 
-    const { limit, delay } = recordExit(host);
+    const { limit, delay } = recordExit(host, { code, signal: null });
     transition(host, { state: 'crashed', pid: host.state.pid, restarts: host.state.restarts });
     if (limit) {
       host.settleFirstLaunch();
@@ -426,10 +463,59 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     pending.resolve(output);
   }
 
+  // E10 start: host.restart and the quit's stop-all (Task 2.3b)
+  const restarted: CommandResult<'host.restart'> = { ok: true, value: undefined };
+  const notRestartable = (host: Host, why: string): CommandResult<'host.restart'> => ({ ok: false, error: ipcError('host_unavailable', `${host.owner} ${why}; it cannot be restarted`) });
+
+  async function restartDetached(host: Host, transport: DetachedTransport, stopSessions: boolean): Promise<CommandResult<'host.restart'>> {
+    if (host.state.state === 'ready' && host.port) {
+      if (!stopSessions) return transport.exit('now') ? restarted : notRestartable(host, 'could not be asked to exit');
+      const undo = transport.expectExit(); // its close after the answer is deliberate
+      const result = await dispatch(host.owner, 'host.stopAll', { graceMs: STOP_ALL_GRACE_MS });
+      if (result.ok) return restarted;
+      undo?.();
+      return { ok: false, error: result.error };
+    }
+    if (host.state.state !== 'crashed') return restarted; // starting or restarting: the attempt under way reaches the newest
+    // Task 2.4 asks the incompatible supervisor to exit on its refused connection; until then it is waited for
+    if (host.reason === 'incompatible') return notRestartable(host, 'waits for an incompatible supervisor');
+    if (host.reason === 'held_lock') await transport.killHeld();
+    if (stopped || host.quitting) return notRestartable(host, 'is stopping with the app');
+    host.exits = []; // asked for: the crash window starts afresh
+    transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
+    transport.launch();
+    return restarted;
+  }
+
+  // A utility host's sessions end with it whichever way it is restarted, so they are stopped within the grace first.
+  async function restartUtility(host: Host): Promise<CommandResult<'host.restart'>> {
+    if (host.state.state === 'ready' && host.port) {
+      const result = await dispatch(host.owner, 'host.stopAll', { graceMs: STOP_ALL_GRACE_MS });
+      if (!result.ok) console.warn(`[hosts] ${host.owner}'s stop-all before its restart failed; restarting it anyway`, result.error);
+    }
+    if (stopped) return notRestartable(host, 'was stopped');
+    if (host.restartTimer) clearTimeout(host.restartTimer);
+    host.restartTimer = null;
+    host.exits = [];
+    const child = host.child;
+    detach(host, 'was restarted'); // the old child is no longer the host's: its exit is not a crash
+    transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
+    if (!child) {
+      launch(host);
+      return restarted;
+    }
+    child.on('exit', () => {
+      if (!stopped) launch(host);
+    });
+    child.kill();
+    return restarted;
+  }
+  // E10 end
+
   const dispatch: HostDispatch = (owner, name, input) => {
     const host = hosts[owner];
     // E10: once started, a request made while the host starts or restarts is held and sent when it is ready
-    const holds = started !== null && !stopped && (host.state.state === 'starting' || host.state.state === 'restarting');
+    const holds = started !== null && !stopped && !host.quitting && (host.state.state === 'starting' || host.state.state === 'restarting');
     if (!host.port && !holds) {
       return Promise.resolve({ ok: false, error: ipcError('host_unavailable', `${owner} is ${host.state.state}; cannot answer ${name}`) });
     }
@@ -505,6 +591,33 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     streaming: (owner) => hosts[owner].streaming,
     exitSupervisor(when) {
       return hosts['engine-host']?.transport?.exit(when) ?? false;
+    },
+    facts(owner) {
+      const host = hosts[owner];
+      return { transport: host.transport ? 'detached' : 'utility', reason: host.reason, refused: host.refused, lastExit: host.lastExit };
+    },
+    restartSupervisor({ stopSessions }) {
+      const host = hosts['engine-host'];
+      if (stopped || host.quitting) return Promise.resolve(notRestartable(host, 'is stopping with the app'));
+      return host.transport ? restartDetached(host, host.transport, stopSessions) : restartUtility(host);
+    },
+    killHeldSupervisor() {
+      return hosts['engine-host']?.transport?.killHeld() ?? Promise.resolve(false);
+    },
+    async stopAllForQuit(graceMs) {
+      const host = hosts['engine-host'];
+      if (stopped) return;
+      if (!host.transport) {
+        const result = await dispatch(host.owner, 'engine.shutdown', { graceMs });
+        if (!result.ok && result.error.code !== 'unknown_command' && result.error.code !== 'host_unavailable') console.warn('[hosts] engine.shutdown for the quit failed', result.error);
+        return;
+      }
+      host.quitting = true;
+      if (host.restartTimer) clearTimeout(host.restartTimer);
+      host.restartTimer = null;
+      if (!host.transport.quit()) return failHeld(host, 'is stopped for the quit'); // nothing served: nothing to stop
+      const result = await dispatch(host.owner, 'host.stopAll', { graceMs });
+      if (!result.ok && result.error.code !== 'host_unavailable') console.warn('[hosts] host.stopAll for the quit failed', result.error);
     },
     // E10 end
   };
