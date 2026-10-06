@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { appInitialize } from '@shared/engine/initialize';
+import { MAWS_SERVER_NAME } from '@shared/maws/tools'; // E1
 import { loadJournal } from '../../test/support/fixtures';
 import { appReplayHandshake } from './replay-handshake';
 import { replayEngine } from './replay-transport';
@@ -37,4 +38,13 @@ it.each(['trust', 'capabilities', 'hooks'])('an app handshake projection does no
   const next = await transport.frames[Symbol.asyncIterator]().next();
   expect(next.value.error.kind).toBe('replay_mismatch');
   await expect(write).rejects.toThrow('replay mismatch');
+});
+
+// E1: the app declares its `maws` server at every launch; an older recording's own list never stands in for it
+it("declares the maws server and replaces a recording's own sdkMcpServers", () => {
+  expect(appInitialize().sdkMcpServers).toEqual([MAWS_SERVER_NAME]);
+  const isInit = (row: JournalRow) => row.direction === 'out' && (row.frame as { request?: { subtype?: string } }).request?.subtype === 'initialize';
+  const requestOf = (rows: JournalRow[]) => (rows.find(isInit)!.frame as { request: Record<string, unknown> }).request;
+  const rows = loadJournal('pass3', 'p1-sdk-mcp-roundtrip').map((row) => (isInit(row) ? { ...row, frame: { ...(row.frame as object), request: { ...requestOf([row]), sdkMcpServers: ['maws', 'recorded-only'] } } } : row));
+  expect(requestOf(appReplayHandshake(rows, null))).toEqual({ subtype: 'initialize', ...appInitialize() });
 });

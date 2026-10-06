@@ -10,10 +10,9 @@ import { replayFixture, type ConformanceRun } from './harness';
 // A `system` subtype or frame type the fixtures may carry without an X1 mapping. Empty: every fixture frame maps to
 // an event or to a "none" row of the table, and a new subtype in a future recording fails here, never silently.
 // (R0 admitted the remote-surface pushes here on 2026-10-01; R1 maps them to `plugin.*`.)
-// E0a (P1 spec §9, spikes/protocol-probe/findings-pass3-p1-extension.txt) admits two frames the way R0 did, until E1
-// maps the SDK MCP round trip and E3 the side question's progress frame:
+// E0a (P1 spec §9, spikes/protocol-probe/findings-pass3-p1-extension.txt) admitted two frames the way R0 did; E1 maps
+// the SDK MCP round trip (`control_request/mcp_message`), and E3 will map the side question's progress frame:
 const UNKNOWN_ALLOWLIST: ReadonlySet<string> = new Set([
-  'control_request/mcp_message', // pass3/p1-sdk-mcp-roundtrip: the engine's JSON-RPC frames for the host's `maws` server (E1 maps them)
   'system/control_request_progress', // pass3/p1-side-question-session: `{request_id, status: 'started'}` ahead of a side_question answer (E3 maps it)
 ]);
 
@@ -620,7 +619,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'boundary.compaction', // W1: pass3/compact seq 43
       'plugin.log', 'plugin.status', 'plugin.toast', 'plugin.invalidate', // R1: pass3/mods-* (no fixture carries a plugin load error or warning)
       'plugin.panes', 'plugin.scroll', 'plugin.focus', 'plugin.ask', // R2: pass3/mods-surface-*
-      'frame.unknown', // E0a: the two allowlisted frames above (pass3/p1-sdk-mcp-roundtrip, pass3/p1-side-question-session) until E1 and E3 map them
+      'frame.unknown', // E0a: the allowlisted frame above (pass3/p1-side-question-session) until E3 maps it (E1 mapped pass3/p1-sdk-mcp-roundtrip's)
     ].sort());
     void kinds;
   });
@@ -783,5 +782,18 @@ describe('normaliser: transcript surface recordings (R3)', () => {
     }
     expect(ofKind(events, 'turn.started')).toEqual([]);
     expect(ofKind(events, 'user.message')).toEqual([]);
+  });
+});
+
+// E1 (E1 execution document, M1): the SDK MCP round trip maps. The handshake and the tool list are protocol (no event),
+// another server's traffic is not unknown, and the probe's `echo_file` is no X9 tool, so it yields no `maws.*` event.
+describe('normaliser: the maws server traffic (E1, pass3/p1-sdk-mcp-roundtrip)', () => {
+  it('maps every mcp_message without an unknown frame or an event of its own', async () => {
+    const { events, rows } = await run('pass3', 'p1-sdk-mcp-roundtrip');
+    const mcp = rows.filter((r) => r.direction === 'in' && (r.frame as { request?: { subtype?: string } }).request?.subtype === 'mcp_message');
+    expect(mcp.length).toBeGreaterThan(10); // the handshakes of maws and maws2, the re-lists and three calls
+    expect(ofKind(events, 'frame.unknown')).toEqual([]);
+    expect(events.filter((e) => e.kind.startsWith('maws.'))).toEqual([]);
+    expect(events.filter((e) => mcp.some((r) => r.seq === e.seq))).toEqual([]);
   });
 });

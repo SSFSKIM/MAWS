@@ -1,0 +1,71 @@
+// The `ask` tool's shared shapes beside the X9 schemas (E1 execution document, Interfaces "X9", residues 12 and 13): an
+// ask as the host holds it until answered (`PendingAsk`, which `maws.asks.list` answers), and the steer an async ask's
+// answers travel in. The steer is a `priority: 'next'` user message whose text opens with `[MAWS ask <askId>]` and
+// carries the AskResult in a fenced JSON block, so a session read from the engine's transcript (no host journal) still
+// finds the answers (`parseAskSteer`).
+import * as z from 'zod';
+import { RequestIdSchema, ToolUseIdSchema } from '../graph/ids';
+import { askQuestionId, AskQuestionSchema, AskResultSchema, type AskAnswer, type AskQuestion, type AskResult } from './tools';
+
+export const PendingAskSchema = z.strictObject({
+  askId: z.string(),
+  toolUseId: ToolUseIdSchema.nullable(),
+  requestId: RequestIdSchema,
+  blocking: z.boolean(),
+  title: z.string().nullable(),
+  context: z.string().nullable(),
+  questions: z.array(AskQuestionSchema),
+  openedAt: z.string(),
+});
+export type PendingAsk = z.infer<typeof PendingAskSchema>;
+
+const STEER_TAG = /^\[MAWS ask ([^\]\s]+)\] /;
+const STEER_BLOCK = /\n```json\n([\s\S]*)\n```$/;
+
+// One answer as the steer's line reads it: the labels (and what was typed under Other), the text in quotes, the paths
+// one per line indented three spaces (so the text starts with a newline), `<name> (<directory>)`, or the two non-answers.
+function answerText(question: AskQuestion, answer: AskAnswer | undefined): string {
+  if (answer === undefined || answer.status === 'skipped') return 'skipped';
+  if (answer.status === 'decide_for_me') return 'decide for me';
+  const values = answer.value === undefined ? [] : Array.isArray(answer.value) ? answer.value : [answer.value];
+  switch (question.modality) {
+    case 'choice':
+      return [values.join(', '), answer.otherText !== undefined ? `Other: ${JSON.stringify(answer.otherText)}` : ''].filter((part) => part !== '').join('; ');
+    case 'text':
+      return JSON.stringify(values.join('\n'));
+    case 'file':
+    case 'folder':
+      return values.map((path) => `\n   ${path}`).join('');
+    case 'repository':
+      return answer.name !== undefined ? `${answer.name} (${values.join(', ')})` : values.join(', ');
+  }
+}
+
+// The text of the steer that delivers an async ask's answers: one line per question in the asked order, `<header, else
+// the question> — <answer>`, then the AskResult of status `answered` as a fenced JSON block.
+export function askSteerText(askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]): string {
+  const byId = new Map(answers.map((answer) => [answer.id, answer]));
+  const lines = questions.map((question, index) => {
+    const text = answerText(question, byId.get(askQuestionId(question, index)));
+    return `${index + 1}. ${question.header ?? question.question} —${text.startsWith('\n') ? '' : ' '}${text}`;
+  });
+  const result: AskResult = { status: 'answered', askId, answers: [...answers] };
+  return [`[MAWS ask ${askId}] The user answered the questions you asked:`, ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
+}
+
+// The steer recognised back from a user message's text: its ask id and answered result, or null for any other text (an
+// untagged message, a block that does not parse as an answered AskResult, or one naming another ask).
+export function parseAskSteer(text: string): { askId: string; result: Extract<AskResult, { status: 'answered' }> } | null {
+  const tag = STEER_TAG.exec(text);
+  const block = STEER_BLOCK.exec(text);
+  if (!tag || !block) return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(block[1]!);
+  } catch {
+    return null;
+  }
+  const parsed = AskResultSchema.safeParse(json);
+  if (!parsed.success || parsed.data.status !== 'answered' || parsed.data.askId !== tag[1]) return null;
+  return { askId: tag[1]!, result: parsed.data };
+}

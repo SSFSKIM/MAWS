@@ -20,7 +20,8 @@
 // catches a standing swap, or forwards outside filenames if it was restored; a swap between a batch's confirmation and
 // its per-name `lstat` classifies that batch's kinds from outside metadata. `openExternal` is path-checked immediately
 // before `shell.openPath`, with no descriptor guarantee, and hands the OS only a regular, non-executable file of a document
-// or media kind (`opensExternally`, an allowlist).
+// or media kind (`opensExternally`, an allowlist). E1: `reveal` takes the same pre-check and any regular file, since
+// showing a file in Finder runs nothing.
 import fs, { type BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, normalize, sep } from 'node:path';
@@ -36,6 +37,7 @@ import {
   type FilesOpenExternalOutput,
   type FilesReadInput,
   type FilesReadOutput,
+  type FilesRevealOutput, // E1
 } from '@shared/ipc/schema/files';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { fileMime, isTextMime } from './mime';
@@ -53,7 +55,8 @@ export interface FilesServiceOptions {
   hooks?: BoundaryHooks;
   emit?: (payload: FilesChanged) => void; // files.changed
   openPath?: (path: string) => Promise<string>; // Electron's shell.openPath: '' on success, else the error text
-  env?: NodeJS.ProcessEnv; // MAWS_E2E and MAWS_E2E_OPEN_LOG, the e2e's openExternal seam
+  showItemInFolder?: (path: string) => void; // E1: Electron's shell.showItemInFolder, which reports nothing
+  env?: NodeJS.ProcessEnv; // MAWS_E2E and MAWS_E2E_OPEN_LOG, the e2e's openExternal (and E1's reveal) seam
 }
 
 export interface FilesService {
@@ -62,6 +65,7 @@ export interface FilesService {
   watch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
   openExternal(appSessionId: AppSessionId, path: string): Promise<FilesOpenExternalOutput>;
+  reveal(appSessionId: AppSessionId, path: string): Promise<FilesRevealOutput>; // E1
   release(owner: number): void; // everything a window holds, when it closes or navigates
   watching(): string[];
   dispose(): void;
@@ -97,7 +101,7 @@ interface Confirmed {
   roots: string[];
 }
 
-export function createFilesService({ records, hooks, emit = () => {}, openPath, env = process.env }: FilesServiceOptions): FilesService {
+export function createFilesService({ records, hooks, emit = () => {}, openPath, showItemInFolder, env = process.env }: FilesServiceOptions): FilesService {
   const at = async (point: BoundaryPoint, path: string) => {
     await hooks?.at?.(point, path);
   };
@@ -263,6 +267,26 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     return message === '' ? { opened: true, message: null } : { opened: false, message };
   }
 
+  // E1 start: Reveal in Finder for a delivered file. A refusal is an answer (`revealed: false` and why), not a thrown error.
+  async function reveal(appSessionId: AppSessionId, path: string): Promise<FilesRevealOutput> {
+    let real0: string;
+    try {
+      ({ real0 } = await precheck(appSessionId, path));
+      const target = await fs.promises.lstat(real0).catch(() => null);
+      if (!target?.isFile()) throw new Error(`not a file: ${path}`);
+    } catch (error) {
+      return { revealed: false, message: error instanceof Error ? error.message : String(error) };
+    }
+    if (env.MAWS_E2E === '1' && env.MAWS_E2E_OPEN_LOG) {
+      await fs.promises.appendFile(env.MAWS_E2E_OPEN_LOG, `reveal ${real0}\n`);
+      return { revealed: true, message: null };
+    }
+    if (!showItemInFolder) throw new Error('files.reveal has no Finder');
+    showItemInFolder(real0);
+    return { revealed: true, message: null };
+  }
+  // E1 end
+
   return {
     list,
     read,
@@ -277,6 +301,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
       watches.unwatch({ owner, appSessionId, path }, real);
     },
     openExternal,
+    reveal, // E1
     release: (owner) => {
       releases.set(owner, (releases.get(owner) ?? 0) + 1);
       watches.release(owner);

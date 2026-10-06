@@ -46,12 +46,12 @@ describe('main answers files.* through the router', () => {
     vi.restoreAllMocks();
   });
 
-  async function install(openPath = vi.fn<(path: string) => Promise<string>>(async () => '')) {
+  async function install(openPath = vi.fn<(path: string) => Promise<string>>(async () => ''), showItemInFolder = vi.fn<(path: string) => void>()) {
     const { registerFilesHandlers } = await import('./register');
     const { installRouter } = await import('../ipc/router');
     const records = new Map<string, AllowlistRecord>([['A', { directory: join(root, 'repo'), additionalDirectories: [], worktree: null }]]);
     const emit = vi.fn();
-    const files = registerFilesHandlers({ record: (id) => records.get(id) ?? null }, { emit, openPath, env: {} });
+    const files = registerFilesHandlers({ record: (id) => records.get(id) ?? null }, { emit, openPath, showItemInFolder, env: {} });
     dispose = () => files.dispose();
     installRouter({ appUrl: APP_URL });
     return { files, emit, openPath, epochs: files.epochs };
@@ -120,6 +120,16 @@ describe('main answers files.* through the router', () => {
     });
     expect(await invoke('files.openExternal', { appSessionId: 'A', path: '/etc/hosts' })).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
     expect(openPath).toHaveBeenCalledTimes(1);
+  });
+
+  // E1: Reveal in Finder for a delivered file; a refusal is an answer, not an error
+  it('reveals a file in the roots through shell.showItemInFolder and answers a refusal with its message', async () => {
+    const showItemInFolder = vi.fn<(path: string) => void>();
+    await install(undefined, showItemInFolder);
+    expect(await invoke('files.reveal', { appSessionId: 'A', path: join(root, 'repo', 'src', 'a.ts') })).toEqual({ ok: true, value: { revealed: true, message: null } });
+    expect(showItemInFolder).toHaveBeenCalledWith(join(root, 'repo', 'src', 'a.ts'));
+    expect(await invoke('files.reveal', { appSessionId: 'A', path: '/etc/hosts' })).toEqual({ ok: true, value: { revealed: false, message: OUT } });
+    expect(showItemInFolder).toHaveBeenCalledTimes(1);
   });
 
   it('forgets a closed window: its epoch is pruned on destroyed', async () => {

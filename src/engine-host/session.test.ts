@@ -104,6 +104,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     expect(shape(journal)).toEqual(['meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'out:control_request/get_context_usage', 'in:control_response']); // the ready read for `ctx` (debt wave 3)
     expect(transport.requestsOf('initialize')[0]!.request).toEqual({
       subtype: 'initialize', supportedDialogKinds: ['auto_mode_server_fallback', 'refusal_fallback_prompt'], perTaskStopAffordance: true, workspaceTrust: { accepted: true, directory: '/tmp/maws-session' },
+      sdkMcpServers: ['maws'], // E1
     });
     expect(journal.rows[3]!.frame).toEqual({ event: 'initialize', current_permission_mode: 'auto', session_state: 'idle', hooks_applied: null, workspace_trust_recorded: null });
     expect(journal.rows[6]!.frame).toEqual({ event: 'status_check', baseUrl: RELAY_URL, autoModeServer: 'enabled', verified: 'routed' });

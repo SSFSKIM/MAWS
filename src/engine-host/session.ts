@@ -42,6 +42,13 @@ import { isPermissionMode, SessionStatusTracker, type Catalog } from './session-
 import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionSurface } from './surface'; // R2
+// E1 start
+import type { MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
+import { MemoryDeliverableStore, type DeliverableWriter } from './deliverables/store';
+import { PaneBridge, type PaneShowRequest } from './tool-server/panes';
+import { MawsToolServer } from './tool-server/server';
+import { mawsTools } from './tool-server/tools';
+// E1 end
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
 
 export { HostHookRegistry } from './host-hooks';
@@ -87,6 +94,7 @@ export interface EngineSessionOptions {
   reconnectTrigger?: 'user' | 'process_exit';
   // C12 end
   sessionStartHookMs?: (plan: LaunchPlan) => Promise<number>; // debt wave 6: the hooks' bound; read from the settings by default
+  deliverables?: DeliverableWriter; // E1: where `send_file` records deliveries (the launcher's FileDeliverableStore; in memory by default)
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -102,6 +110,7 @@ interface Listeners {
   exited: (summary: ExitSummary) => void;
   catalog: (catalog: Catalog) => void; // C7: the whole catalogue, whenever its revision moved
   models: (models: unknown[]) => void; // C10: the initialize response's model list, for the catalogue cache
+  paneShow: (request: PaneShowRequest & { appSessionId: LaunchSpec['appSessionId'] }) => void; // E1: `show_pane` asks the windows (maws.pane.show)
 }
 
 type ProcessState = EngineSessionStatus['process'];
@@ -124,9 +133,12 @@ export class EngineSession {
   private readonly clearAndImplement: ClearAndImplementSequence;
   private readonly compat = new EngineCompatWatch(); // W13: one notice per session process
   readonly surface: SessionSurface; // R2: the remote surface MAWS attaches as
+  // E1: the `maws` MCP server the engine handshakes over `mcp_message`, and the bridge `show_pane` opens panes through
+  readonly toolServer: MawsToolServer;
+  private readonly panes: PaneBridge;
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */ };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
@@ -179,6 +191,18 @@ export class EngineSession {
     this.lastUsedAt = this.launchedAt; // C12
     this.tracker = new SessionStatusTracker(opts.spec, () => this.touch());
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
+    // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
+    this.panes = new PaneBridge({ show: (request) => this.emit('paneShow', { appSessionId: opts.spec.appSessionId, ...request }) });
+    this.toolServer = new MawsToolServer({
+      tools: mawsTools({ deliverables: opts.deliverables ?? new MemoryDeliverableStore(), bridge: this.panes }),
+      respond: (requestId, response) => this.respond(requestId, response),
+      cwd: () => this.tracker.engineCwd ?? this.spec.cwd,
+      appSessionId: opts.spec.appSessionId,
+      version: opts.appVersion ?? 'unknown',
+      log: this.log,
+      onChange: () => this.touch(),
+    });
+    // E1 end
     this.normalizer = new Normalizer({ appSessionId: opts.spec.appSessionId, launchId: opts.plan.launchId, sessionId: opts.plan.sessionId, warn: (w) => this.pendingWarnings.push(w) });
     this.broker = new PermissionBroker({
       appSessionId: opts.spec.appSessionId,
@@ -327,6 +351,11 @@ export class EngineSession {
 
   private readonly respond = (requestId: RequestId, response: unknown): Promise<void> => (this.client ? this.client.respond(requestId, response) : Promise.reject(new Error('no engine process')));
 
+  // E1: a window's answer to a `show_pane` (`maws.pane.answer`); the first one wins.
+  answerPane(requestId: RequestId, result: MawsPaneAnswerResult): 'delivered' | 'not_pending' {
+    return this.panes.answer(requestId, result);
+  }
+
   // Ends the process through the termination ladder; `graceMs` (the end_session wait) is capped at 3 s. Before the
   // process is spawned there is nothing to ladder: the reason is recorded, `run()` sees it and ends the session with no
   // process (a stop before `start()` ends it at once), and the answer is that exit (whole-branch review).
@@ -446,7 +475,7 @@ export class EngineSession {
       bin: this.plan.bin, // W13: the spawn row's
       fastMode: tracked.fastMode, plugins: tracked.plugins, pluginErrors: tracked.pluginErrors, pluginWarnings: tracked.pluginWarnings,
       backgroundTasks: tracked.backgroundTasks, grants: [...this.grants.allow], mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages,
-      pendingRequests: this.broker.live + (this.client?.pending ?? 0), queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
+      pendingRequests: this.broker.live + (this.client?.pending ?? 0) + this.toolServer.inFlight /* E1 */, queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
       keepAlive: [], busy: this.busy, lastUsedAt: this.lastUsedAt, // C12: keepAlive from the hard reasons below
       memory: tracked.memory,
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
@@ -530,6 +559,7 @@ export class EngineSession {
     const client = new ControlClient(transport, { row: (direction, frame) => this.record(direction, frame) }, this.plan.launchId, { warn: this.log, writer });
     this.client = client;
     client.onInbound((req) => this.inbound(req));
+    client.onInboundCancel((requestId) => this.toolServer.cancel(requestId)); // E1: the engine withdrew a tool call
     // A late read applied nothing, and a host-issued one (the gateway and context reads) showed no error to anyone: only a
     // late mutation gets the notice (debt wave 3 review).
     client.onLateResponse((late) => {
@@ -788,6 +818,11 @@ export class EngineSession {
       case 'ui_prompt_suggest':
         this.surface.accept(req, this.respond);
         return;
+      // E1 start: the `maws` server's JSON-RPC traffic (the server answers another server's name itself)
+      case 'mcp_message':
+        this.toolServer.accept(req);
+        return;
+      // E1 end
       default:
         this.log(`inbound ${req.request.subtype} request ${req.request_id} is not handled; answering an error`);
         this.client?.respondError(req.request_id as RequestId, `MAWS does not handle ${req.request.subtype}`).catch((error: unknown) => this.log(`error answer not written: ${messageOf(error)}`));
@@ -962,6 +997,9 @@ export class EngineSession {
     if (!this.handshakeDone && !this.initFailed && this.stopReason === null) this.writeInitFailed('the process exited before answering initialize', 'exited');
     const reason: ExitReason = this.stopReason ?? (this.initFailed ? 'crash' : exit.code === 0 && exit.signal === null ? 'unknown' : 'crash');
     const { lost } = this.broker.processExited();
+    // E1: every tool call in flight is aborted (no pipe takes its answer) and every pane request settles
+    this.toolServer.processExited();
+    this.panes.processExited();
     this.client?.close('the process exited');
     this.clearAndImplement.processExited();
     this.bashMode.processExited();

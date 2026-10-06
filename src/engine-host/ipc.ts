@@ -42,6 +42,9 @@ import { renderAnswerOf, rosterOf } from './surface-wire'; // R2
 // C4 start
 import type { SessionEvent } from '@shared/graph/events';
 // C4 end
+// E1 start
+import type { commands as MawsCommands } from '@shared/ipc/schema/maws';
+// E1 end
 // C10 start
 import type { ModelCatalogue } from '@shared/sessions/models';
 import { catalogueKey, ModelsCache, modelsKey } from './models-cache';
@@ -76,6 +79,11 @@ export const R2_DEADLINE_SHAPES: Record<R2Command, DeadlineShape> = {
   'session.ui.scroll': 'bounded', 'session.ui.panes': 'bounded', 'session.ui.paneShow': 'bounded', 'session.ui.paneFocus': 'bounded', 'session.ui.close': 'bounded',
   'session.ui.promptEdit': 'bounded', 'session.ui.answer': 'immediate',
 };
+
+// E1: the `maws` tool server's commands (P1 ledger §5), each immediate: answered from the host's table or at the
+// answer's flushed write
+type MawsCommand = keyof typeof MawsCommands;
+export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.asks.list': 'immediate', 'maws.ask.answer': 'immediate', 'maws.pane.answer': 'immediate' };
 
 // The longest wait before a live launch spawns: its three checks run in parallel, each under its own bound (W13: the
 // binary probe's covers a PATH lookup that waits for the capture before `--version`).
@@ -173,6 +181,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       session.on('catalog', (catalog) => stream.catalog(catalog)); // C7: session.catalogChanged
       modelKeys.set(spec.appSessionId, catalogueKey(plan.engineVersion, plan.gateway, { env: plan.env, cwd: plan.cwd, flagEnv: plan.flagSettings.env })); // C10; never rejects
       session.on('models', (list) => updateModels(spec.appSessionId, list)); // C10
+      session.on('paneShow', (request) => emit('maws.pane.show', request)); // E1: relayed to every window
     },
   });
 
@@ -603,6 +612,14 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     }
   });
   // R2 end
+
+  // E1 start: the `maws` tool server's commands. The pending-ask table is E1 M2's: until then a session holds no ask,
+  // so the list is empty and an answer finds nothing pending.
+  const handleMaws = <N extends MawsCommand>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
+  handleMaws('maws.asks.list', async () => ({ asks: [] }));
+  handleMaws('maws.ask.answer', async () => ({ outcome: 'not_pending' }));
+  handleMaws('maws.pane.answer', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerPane(requestId as RequestId, result) ?? 'not_pending' }));
+  // E1 end
 
   return { table };
 }

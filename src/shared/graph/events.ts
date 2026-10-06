@@ -16,6 +16,10 @@ import {
   ToolUseIdSchema,
 } from './ids';
 import { PaneRosterSchema, PromptFillModeSchema, SURFACE_ASKS } from '../engine/surface'; // R2
+// E1 start
+import { PaneSchema } from '../maws/panes';
+import { AskAnswerSchema, AskQuestionSchema, DeliveredFileSchema, ShowPaneOpenedSchema } from '../maws/tools';
+// E1 end
 
 // An API content block, unknown keys kept.
 export const ContentBlockSchema = z.looseObject({ type: z.string() });
@@ -90,6 +94,9 @@ export const EVENT_KINDS = [
   'plugin.panes', 'plugin.scroll', 'plugin.focus', 'plugin.ask',
   // retention of the unknown
   'frame.unknown',
+  // E1 start: the maws tool server (P1 X9): an ask's life, a delivered file, a pane shown for the model
+  'maws.ask.opened', 'maws.ask.answered', 'maws.ask.cancelled', 'maws.delivery.file', 'maws.pane.shown',
+  // E1 end
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -243,6 +250,15 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('plugin.focus', { component: z.string(), instanceId: z.string(), plugin: z.string(), key: z.string() }),
   event('plugin.ask', { requestId: RequestIdSchema, ask: z.enum(SURFACE_ASKS), plugin: nullableString(), text: nullableString(), mode: PromptFillModeSchema.nullable() }),
   event('frame.unknown', { frameType: z.string(), subtype: nullableString() }),
+  // E1 start (E1 execution document, Interfaces "X1 events", residue 1): mapped from the `maws` server's `tools/call`
+  // rows and the host's answers, an async answer and a cancellation from the host's meta rows. `askId` is the call's
+  // tool-use id (else its control request id); a call whose arguments its schema refuses yields none of these.
+  event('maws.ask.opened', { askId: z.string(), toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, blocking: z.boolean(), title: nullableString(), context: nullableString(), questions: z.array(AskQuestionSchema) }),
+  event('maws.ask.answered', { askId: z.string(), toolUseId: ToolUseIdSchema.nullable(), answers: z.array(AskAnswerSchema), delivery: z.enum(['result', 'steer']) }),
+  event('maws.ask.cancelled', { askId: z.string(), toolUseId: ToolUseIdSchema.nullable(), reason: z.enum(['exit', 'withdrawn']) }),
+  event('maws.delivery.file', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, deliverables: z.array(DeliveredFileSchema), caption: nullableString(), urgency: z.enum(['normal', 'high']) }),
+  event('maws.pane.shown', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, pane: PaneSchema, target: nullableString(), opened: ShowPaneOpenedSchema.nullable(), error: nullableString() }),
+  // E1 end
 ]);
 
 export type SessionEvent = z.infer<typeof SessionEventSchema>;

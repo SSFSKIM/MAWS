@@ -8,17 +8,32 @@ import type { EventPayload, Question } from '@shared/graph/events';
 import { QuestionSchema } from '@shared/graph/events';
 import type { AgentId, ParentToolUseId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { CanUseToolRequestSchema, ElicitationRequestSchema, HookCallbackRequestSchema, RequestUserDialogRequestSchema, UiCopyRequestSchema, UiPromptFillRequestSchema, UiPromptReadRequestSchema, UiPromptSuggestRequestSchema } from '@shared/wire/control';
+// E1 start
+import { McpMessageRequestSchema } from '@shared/wire/control';
+import { isMawsToolName, MAWS_SERVER_NAME, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
+// E1 end
 import type { ControlRequestFrame, ControlResponseFrame } from '@shared/wire/frames';
 import { compact, stringOrNull, type Attribution, type EventSink } from './normalizer-support';
 
 // One inbound request awaiting our answer, kept so the answer (whose envelope carries no subtype) resolves to the right kind.
-export type InboundKind = 'permission' | 'question' | 'plan' | 'hook' | 'elicitation' | 'dialog';
+export type InboundKind = 'permission' | 'question' | 'plan' | 'hook' | 'elicitation' | 'dialog' | 'mcp' /* E1 */;
 export interface InboundEntry {
   kind: InboundKind;
   toolUseId: ToolUseId | null;
   callbackId: string | null;
   parentToolUseId: ParentToolUseId | null;
   agentId: AgentId | null;
+  mcp: McpCall | null; // E1: a `tools/call` of the `maws` server (kind 'mcp'), else null
+}
+// E1: one call of the `maws` server, remembered by its raw name and arguments (as the wire carried them) until the host's
+// answer; `admitted` whether the arguments parse with the tool's input schema, decided once at the call (residue 1:
+// a refused call yields no `maws.*` event, so the host and the normaliser agree on the same calls). `askId` is M2's.
+export interface McpCall {
+  tool: string;
+  askId: string | null;
+  toolUseId: ToolUseId | null;
+  args: unknown;
+  admitted: boolean;
 }
 export type InboundTable = Map<RequestId, InboundEntry>;
 
@@ -29,8 +44,8 @@ export const CLEAR_AND_IMPLEMENT_MESSAGE = 'Plan approved; MAWS is clearing cont
 export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFrame, out: EventSink, attribution: Attribution): void {
   const requestId = frame.request_id as RequestId;
   const request = frame.request;
-  const remember = (entry: Omit<InboundEntry, 'parentToolUseId' | 'agentId'>, agentId: AgentId | null = attribution.agentId) =>
-    inbound.set(requestId, { ...entry, parentToolUseId: attribution.parentToolUseId, agentId });
+  const remember = (entry: Omit<InboundEntry, 'parentToolUseId' | 'agentId' | 'mcp'> & { mcp?: McpCall }, agentId: AgentId | null = attribution.agentId) =>
+    inbound.set(requestId, { ...entry, mcp: entry.mcp ?? null, parentToolUseId: attribution.parentToolUseId, agentId });
   switch (request.subtype) {
     case 'can_use_tool': {
       const req = CanUseToolRequestSchema.parse(request) as z.infer<typeof CanUseToolRequestSchema> & Record<string, unknown>;
@@ -105,6 +120,21 @@ export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFr
       out.emit({ kind: 'plugin.ask', requestId, ask: 'prompt_suggest', plugin: null, text: req.text, mode: null }, attribution);
       return;
     }
+    // E1 start: the engine's JSON-RPC traffic for the `maws` server. Only a `tools/call` is remembered (its answer
+    // makes the event); the handshake (`initialize`, `notifications/*`, `ping`, `tools/list`) and another server's
+    // messages make nothing: they are not unknown, they are protocol
+    case 'mcp_message': {
+      const req = McpMessageRequestSchema.parse(request);
+      const message = (req.message ?? {}) as { id?: unknown; method?: unknown; params?: unknown };
+      if (req.server_name !== MAWS_SERVER_NAME || message.method !== 'tools/call' || message.id === undefined) return;
+      const params = (typeof message.params === 'object' && message.params !== null ? message.params : {}) as { name?: unknown; arguments?: unknown; _meta?: Record<string, unknown> };
+      const tool = typeof params.name === 'string' ? params.name : '';
+      const correlator = params._meta?.['claudecode/toolUseId'];
+      const toolUseId = typeof correlator === 'string' ? (correlator as ToolUseId) : null;
+      remember({ kind: 'mcp', toolUseId, callbackId: null, mcp: { tool, askId: null, toolUseId, args: params.arguments, admitted: isMawsToolName(tool) && parseToolArguments(tool, params.arguments).ok } });
+      return;
+    }
+    // E1 end
     default:
       out.emit({ kind: 'frame.unknown', frameType: 'control_request', subtype: request.subtype }, attribution);
   }
@@ -147,8 +177,47 @@ export function mapOutboundResponse(inbound: InboundTable, frame: ControlRespons
     case 'dialog':
       out.emit({ kind: 'dialog.resolved', requestId, behavior: payload.behavior === 'completed' ? 'completed' : 'cancelled', result: payload.result ?? null }, attribution);
       return;
+    case 'mcp': // E1
+      if (envelope.subtype === 'success') mapMawsAnswer(requestId, entry.mcp!, payload.mcp_response, out, attribution);
+      return;
   }
 }
+
+// E1 start: the host's answer to a `tools/call` of the `maws` server, for an admitted call only: `maws.delivery.file`
+// for a `send_file` whose result reads `delivered`, `maws.pane.shown` for a `show_pane` (what opened, or the error text
+// of a pane this build lacks or a window that never answered). Anything else (another tool, a result that parses as
+// neither) is visible as the call's `tool.result` alone.
+function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: EventSink, attribution: Attribution): void {
+  if (!call.admitted) return;
+  const result = (rpc as { result?: { content?: unknown; isError?: unknown } } | null | undefined)?.result;
+  if (!result || !Array.isArray(result.content)) return;
+  const text = (result.content as { type?: unknown; text?: unknown }[]).find((block) => block?.type === 'text' && typeof block.text === 'string')?.text as string | undefined;
+  if (text === undefined) return;
+  const isError = result.isError === true;
+  const json = isError ? null : parseJson(text);
+  if (call.tool === 'send_file') {
+    const parsed = SendFileResultSchema.safeParse(json);
+    const args = parseToolArguments('send_file', call.args);
+    if (!parsed.success || !args.ok) return;
+    out.emit({ kind: 'maws.delivery.file', toolUseId: call.toolUseId, requestId, deliverables: parsed.data.deliverables, caption: args.data.caption ?? null, urgency: args.data.urgency ?? 'normal' }, attribution);
+    return;
+  }
+  if (call.tool === 'show_pane') {
+    const args = parseToolArguments('show_pane', call.args);
+    const parsed = ShowPaneResultSchema.safeParse(json);
+    if (!args.ok || (!isError && !parsed.success)) return;
+    out.emit({ kind: 'maws.pane.shown', toolUseId: call.toolUseId, requestId, pane: args.data.pane, target: args.data.target ?? null, opened: parsed.success ? parsed.data.opened : null, error: isError ? text : null }, attribution);
+  }
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+// E1 end
 
 // The engine withdrew one of its requests (none observed in the fixtures; SPEC 45).
 export function mapInboundCancel(inbound: InboundTable, requestId: RequestId, out: EventSink): void {
@@ -165,6 +234,8 @@ export function mapInboundCancel(inbound: InboundTable, requestId: RequestId, ou
       return;
     case 'elicitation':
       out.emit({ kind: 'elicitation.resolved', requestId, action: 'cancel', content: null }, attribution);
+      return;
+    case 'mcp': // E1: a withdrawn tool call is never answered; its tool.result (if the engine writes one) says the rest
       return;
     default: // question, plan, hook: X1 has no withdrawn form; the request scope error says why the card went away
       out.emit({ kind: 'error.raised', scope: 'request', message: `${entry.kind} request withdrawn by the engine`, code: 'abort', toolUseId: entry.toolUseId, taskId: null, requestId }, attribution);

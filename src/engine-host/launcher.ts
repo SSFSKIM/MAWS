@@ -25,6 +25,7 @@ import { buildLaunch, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './l
 import type { ProcessTable } from './process-table';
 import { replayEngine } from './replay-transport';
 import { EngineSession } from './session';
+import { FileDeliverableStore } from './deliverables/store'; // E1
 import type { EngineTransport } from './transport';
 
 export const REPLAY_PRELUDE = 'test/fixtures/engine/replay-handshake.jsonl'; // relative to the launcher's cwd
@@ -98,6 +99,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
         statefulMcpServers: () => deps.table.statefulMcpServers,
         reconnectTrigger: deps.table.takeReleased(spec.appSessionId) ? 'process_exit' : 'user',
         // C12 end
+        deliverables: new FileDeliverableStore(deps.userData), // E1: `send_file`'s records under <userData>/deliverables
       });
       deps.wire(session, plan, spec);
       return session;

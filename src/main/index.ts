@@ -221,6 +221,7 @@ void startWithProfileLock(app, () => {
   const filesService = registerFilesHandlers(sessions.model, {
     emit: (payload) => void emit('files.changed', payload),
     openPath: (path) => shell.openPath(path),
+    showItemInFolder: (path) => shell.showItemInFolder(path), // E1: files.reveal
   });
   app.on('will-quit', () => filesService.dispose());
   // C8c end
