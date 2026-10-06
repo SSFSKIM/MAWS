@@ -1,6 +1,7 @@
 // The strings that are decisions (C6 execution document, "Copy"). Every user-visible string of the presentation
 // model lives here so it can be reviewed in one place; the count semantics are what §5.3 binds.
 import type { DenialKind } from '@shared/graph/enums';
+import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { TOOL_CATEGORIES, type SubagentStatus, type ToolCategory } from './rows';
 import { MCP_TOOL } from './classify';
 import { duration } from './time';
@@ -379,3 +380,46 @@ export const RECEIPT = {
   state: { applied: 'Changes applied', undoing: 'Undoing…', undone: 'Changes undone', reapplying: 'Reapplying…' },
   failed: (action: 'Undo' | 'Reapply', reason: string) => `${action} failed · ${reason}`,
 } as const;
+
+// ---------------------------------------------------------------------------------------------------------------------
+// E1 start: the `maws` server's rows and cells (E1 execution document, M3's decisions), and the question row's refusal
+
+export const ASK = {
+  title: 'Questions', // the capsule's heading when the ask has no title
+  count: (n: number) => `Asked ${plural(n, 'question')}`,
+  state: { pending: 'Waiting for you', asked: 'Asked, answer when ready', answered: 'Answered', cancelled: 'Cancelled, the session ended' },
+  open: 'Open',
+  viewAnswers: 'View answers',
+  notAnswered: 'Not answered',
+} as const;
+
+// One answer as the answered capsule's line reads it: the labels (and what was typed under Other), the text, the paths,
+// `<name> (<directory>)` for a repository, or the two non-answers.
+export function askAnswerCopy(answer: AskAnswer | undefined): string {
+  if (answer === undefined) return ASK.notAnswered;
+  if (answer.status === 'skipped') return QUESTION.skipped;
+  if (answer.status === 'decide_for_me') return 'Decide for me';
+  const values = answer.value === undefined ? [] : Array.isArray(answer.value) ? answer.value : [answer.value];
+  const value = answer.name !== undefined ? `${answer.name} (${values.join(', ')})` : values.join(', ');
+  return [value, answer.otherText !== undefined ? `Other: ${answer.otherText}` : ''].filter((part) => part !== '').join(' · ');
+}
+
+const deliveredSubject = (files: readonly { name: string }[]) => (files.length === 1 ? files[0]!.name : plural(files.length, 'file'));
+export const DELIVERY = {
+  delivered: (files: readonly { name: string }[]) => `Delivered ${deliveredSubject(files)}`,
+  delivering: (files: readonly { name: string }[]) => `Delivering ${deliveredSubject(files)}`,
+  failed: (files: readonly { name: string }[]) => `Could not deliver ${deliveredSubject(files)}`,
+  openExternally: 'Open externally',
+  reveal: 'Reveal in Finder',
+} as const;
+
+// A `show_pane` cell's line: what opened (a panel tool's title, a file's name), or why nothing did.
+export const PANE_CELL = {
+  opening: (pane: string) => `Opening the ${pane} pane`,
+  opened: (name: string) => `Opened ${name}`,
+  failed: (error: string) => `Could not open pane: ${error}`,
+} as const;
+
+// A-17: the engine refused an AskUserQuestion call before any request reached the human (a preview that is not HTML).
+export const questionRefused = (text: string) => `The engine refused this question: ${text}`;
+// E1 end

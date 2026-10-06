@@ -4,6 +4,7 @@
 import * as z from 'zod';
 import { DENIAL_KINDS, PLAN_OUTCOMES, SAFEGUARD_VERDICTS } from '@shared/graph/enums';
 import { ContentBlockSchema, QuestionSchema, TokenUsageSchema } from '@shared/graph/events';
+import { AskAnswerSchema, AskQuestionSchema } from '@shared/maws/tools'; // E1
 import { TOOL_CATEGORIES } from './rows';
 
 const nullable = <T extends z.ZodType>(schema: T) => schema.nullable();
@@ -75,7 +76,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('agent_message'), direction: z.enum(['to_child', 'from_child', 'between']), from: nullable(SubagentRefSchema), to: nullable(SubagentRefSchema), text: z.string() }),
   z.strictObject({ ...base, kind: z.literal('thinking'), messageUuid: nullable(z.string()), text: z.string(), live: z.boolean(), durationMs: nullable(z.number()) }),
   z.strictObject({ ...base, kind: z.literal('plan'), toolUseId: z.string(), plan: z.string(), outcome: nullable(z.enum(PLAN_OUTCOMES)), feedback: nullable(z.string()) }),
-  z.strictObject({ ...base, kind: z.literal('question'), toolUseId: z.string(), questions: z.array(QuestionSchema), answers: nullable(z.record(z.string(), z.string())) }),
+  z.strictObject({ ...base, kind: z.literal('question'), toolUseId: z.string(), questions: z.array(QuestionSchema), answers: nullable(z.record(z.string(), z.string())), error: nullable(z.string()) /* E1 */ }),
   z.strictObject({
     ...base, kind: z.literal('request_slot'), requestId: z.string(), toolUseId: nullable(z.string()), requestKind: z.enum(['permission', 'question', 'plan', 'dialog', 'elicitation']), toolName: nullable(z.string()), requestedAt: z.string(),
   }),
@@ -87,4 +88,14 @@ export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('boundary'), boundaryKind: z.enum(['compaction', 'reset', 'retraction', 'rewind']), text: z.string(), secondary: z.string().optional(), detail: nullable(z.string()), hiddenRows: z.number(), revealed: z.boolean() }),
   z.strictObject({ ...base, kind: z.literal('bash'), command: z.string(), stdout: z.string(), stderr: z.string(), exitCode: nullable(z.number()), cwd: nullable(z.string()) }),
   z.strictObject({ ...base, kind: z.literal('local_command'), messageUuid: nullable(z.string()), text: z.string() }),
+  // E1 start
+  z.strictObject({
+    ...base, kind: z.literal('ask'), toolUseId: z.string(), askId: z.string(), title: nullable(z.string()), context: nullable(z.string()), blocking: z.boolean(), questions: z.array(AskQuestionSchema),
+    state: z.enum(['pending', 'asked', 'answered', 'cancelled', 'error']), answers: nullable(z.array(AskAnswerSchema)), error: nullable(z.string()),
+  }),
+  z.strictObject({
+    ...base, kind: z.literal('delivery'), toolUseId: z.string(), files: z.array(z.strictObject({ path: z.string(), name: z.string(), id: nullable(z.string()) })), caption: nullable(z.string()),
+    urgency: z.enum(['normal', 'high']), error: nullable(z.string()),
+  }),
+  // E1 end
 ]);

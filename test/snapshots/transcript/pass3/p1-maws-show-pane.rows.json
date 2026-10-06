@@ -1,0 +1,262 @@
+[
+  {
+    "at": "2026-10-06T06:35:48.334Z",
+    "id": "time:turn:2c7ef609-c2de-423f-a626-bc9ab37d3f8d",
+    "kind": "time",
+    "label": "Oct 6, 2026 6:35 AM",
+    "turnId": "turn:2c7ef609-c2de-423f-a626-bc9ab37d3f8d"
+  },
+  {
+    "at": "2026-10-06T06:35:48.334Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:2c7ef609-c2de-423f-a626-bc9ab37d3f8d",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "2c7ef609-c2de-423f-a626-bc9ab37d3f8d",
+    "placeholders": [],
+    "steer": false,
+    "text": "Call the maws show_pane tool three times: first with pane \"terminal\", then with pane \"deliverable\" and target \"none\", then with pane \"nope\". Reply with one line per call: the pane name and the result status or error text.",
+    "turnId": "turn:2c7ef609-c2de-423f-a626-bc9ab37d3f8d"
+  },
+  {
+    "at": "2026-10-06T06:35:48.334Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T06:35:54.128Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:2c7ef609-c2de-423f-a626-bc9ab37d3f8d",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-06T06:35:48.375Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 3,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.02223855,
+      "denials": [],
+      "durationMs": 5757,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 4,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 4,
+      "usage": {
+        "cacheCreationInputTokens": 10495,
+        "cacheReadInputTokens": 57308,
+        "inputTokens": 28,
+        "outputTokens": 465,
+        "thinkingTokens": 196
+      }
+    },
+    "toolCalls": 4,
+    "turnId": "turn:2c7ef609-c2de-423f-a626-bc9ab37d3f8d"
+  },
+  {
+    "agent": null,
+    "at": "2026-10-06T06:35:50.425Z",
+    "category": "skills",
+    "classification": {
+      "category": "skills",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "input": {
+        "query": "select:mcp__maws__show_pane"
+      },
+      "isError": false,
+      "kind": "generic",
+      "result": [
+        {
+          "tool_name": "mcp__maws__show_pane",
+          "type": "tool_reference"
+        }
+      ],
+      "spill": null,
+      "structured": {
+        "matches": [
+          "mcp__maws__show_pane"
+        ],
+        "query": "select:mcp__maws__show_pane",
+        "total_deferred_tools": 20
+      },
+      "truncated": null
+    },
+    "endedAt": "2026-10-06T06:35:50.430Z",
+    "expanded": true,
+    "id": "cell:toolu_01Baa6AM2gDbtAx7U6QVC7Um",
+    "kind": "cell",
+    "label": "Loaded 1 tool",
+    "paths": [],
+    "startedAt": "2026-10-06T06:35:50.425Z",
+    "status": "done",
+    "toolName": "ToolSearch",
+    "toolUseId": "toolu_01Baa6AM2gDbtAx7U6QVC7Um",
+    "turnId": "turn:2c7ef609-c2de-423f-a626-bc9ab37d3f8d"
+  },
+  {
+    "agent": null,
+    "at": "2026-10-06T06:35:51.980Z",
+    "category": "other",
+    "classification": {
+      "category": "other",
+      "denial": null,
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": true,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "input": {
+        "pane": "terminal"
+      },
+      "kind": "mcp",
+      "result": [
+        {
+          "text": "{\n  \"status\": \"shown\",\n  \"pane\": \"terminal\",\n  \"opened\": {\n    \"kind\": \"panel-tool\",\n    \"toolId\": \"terminal\",\n    \"tabId\": \"terminal:live\",\n    \"title\": \"Terminal\"\n  }\n}",
+          "type": "text"
+        }
+      ],
+      "server": "maws",
+      "spill": null,
+      "structured": [
+        {
+          "text": "{\n  \"status\": \"shown\",\n  \"pane\": \"terminal\",\n  \"opened\": {\n    \"kind\": \"panel-tool\",\n    \"toolId\": \"terminal\",\n    \"tabId\": \"terminal:live\",\n    \"title\": \"Terminal\"\n  }\n}",
+          "type": "text"
+        }
+      ],
+      "tool": "show_pane"
+    },
+    "endedAt": "2026-10-06T06:35:52.088Z",
+    "expanded": true,
+    "id": "cell:toolu_01Bq1fFgNnsDC54gQa76T9DM",
+    "kind": "cell",
+    "label": "Opened Terminal",
+    "paths": [],
+    "startedAt": "2026-10-06T06:35:51.980Z",
+    "status": "done",
+    "toolName": "mcp__maws__show_pane",
+    "toolUseId": "toolu_01Bq1fFgNnsDC54gQa76T9DM",
+    "turnId": "turn:2c7ef609-c2de-423f-a626-bc9ab37d3f8d"
+  },
+  {
+    "agent": null,
+    "at": "2026-10-06T06:35:52.302Z",
+    "category": "other",
+    "classification": {
+      "category": "other",
+      "denial": null,
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": true,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "input": {
+        "pane": "deliverable",
+        "target": "none"
+      },
+      "kind": "mcp",
+      "result": "show_pane: the deliverable pane is not available in this build of MAWS",
+      "server": "maws",
+      "spill": null,
+      "structured": "Error: show_pane: the deliverable pane is not available in this build of MAWS",
+      "tool": "show_pane"
+    },
+    "endedAt": "2026-10-06T06:35:52.373Z",
+    "expanded": true,
+    "id": "cell:toolu_011tjVkjRYe5y6qM6vAeY94r",
+    "kind": "cell",
+    "label": "Could not open pane: the deliverable pane is not available in this build of MAWS",
+    "paths": [],
+    "startedAt": "2026-10-06T06:35:52.302Z",
+    "status": "error",
+    "toolName": "mcp__maws__show_pane",
+    "toolUseId": "toolu_011tjVkjRYe5y6qM6vAeY94r",
+    "turnId": "turn:2c7ef609-c2de-423f-a626-bc9ab37d3f8d"
+  },
+  {
+    "agent": null,
+    "at": "2026-10-06T06:35:52.595Z",
+    "category": "other",
+    "classification": {
+      "category": "other",
+      "denial": null,
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": true,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "input": {
+        "pane": "nope"
+      },
+      "kind": "mcp",
+      "result": "show_pane: unknown pane \"nope\"; known panes: diff, file, terminal, tasks, deliverable, browser, source-control",
+      "server": "maws",
+      "spill": null,
+      "structured": "Error: show_pane: unknown pane \"nope\"; known panes: diff, file, terminal, tasks, deliverable, browser, source-control",
+      "tool": "show_pane"
+    },
+    "endedAt": "2026-10-06T06:35:52.670Z",
+    "expanded": true,
+    "id": "cell:toolu_016gNabPoB6kAGY4a5JKfoT7",
+    "kind": "cell",
+    "label": "Could not open pane: unknown pane \"nope\"; known panes: diff, file, terminal, tasks, deliverable, browser, source-control",
+    "paths": [],
+    "startedAt": "2026-10-06T06:35:52.595Z",
+    "status": "error",
+    "toolName": "mcp__maws__show_pane",
+    "toolUseId": "toolu_016gNabPoB6kAGY4a5JKfoT7",
+    "turnId": "turn:2c7ef609-c2de-423f-a626-bc9ab37d3f8d"
+  },
+  {
+    "at": "2026-10-06T06:35:53.748Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfkX7dNyLRu9BtqBUU6G7:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "terminal: shown\ndeliverable: not available in this build of MAWS\nnope: unknown pane \"nope\"",
+    "messageUuid": "fa5ff22f-7098-4b97-97b0-fde1981ea06e",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:2c7ef609-c2de-423f-a626-bc9ab37d3f8d"
+  },
+  {
+    "at": "2026-10-06T06:35:57.507Z",
+    "attempt": null,
+    "id": "error:replay:journal:144:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (stop)",
+    "turnId": null
+  }
+]
