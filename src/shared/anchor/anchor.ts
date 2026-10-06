@@ -8,7 +8,8 @@ import * as z from 'zod';
 export const ANCHOR_KINDS = ['browser-element', 'artifact-element', 'file-line', 'pr-line', 'none'] as const;
 export type AnchorKind = (typeof ANCHOR_KINDS)[number];
 
-export const AnchorScreenshotSchema = z.strictObject({ path: z.string(), width: z.number().int().positive(), height: z.number().int().positive() });
+// `path` carries the anchor's path cap: it is the one path main opens (E3 M1's review)
+export const AnchorScreenshotSchema = z.strictObject({ path: z.string().max(1000), width: z.number().int().positive(), height: z.number().int().positive() });
 export type AnchorScreenshot = z.infer<typeof AnchorScreenshotSchema>;
 
 // eslint-disable-next-line no-control-regex -- matching control characters is the point

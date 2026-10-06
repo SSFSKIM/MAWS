@@ -1,6 +1,6 @@
 // X10's schema: E5's file-line anchor and E6's pr-line shape are members; the security caps and the one-line rule hold.
 import { describe, expect, it } from 'vitest';
-import { AnchorSchema, type Anchor, type FileLineAnchor } from './anchor';
+import { AnchorSchema, AnchorScreenshotSchema, type Anchor, type FileLineAnchor } from './anchor';
 
 const fileLine: FileLineAnchor = { kind: 'file-line', locator: '/r/src/app.ts#L7', label: 'app.ts:7', path: '/r/src/app.ts', line: 7 }; // E5's fileLineAnchor('/r/src/app.ts', 7)
 
@@ -32,5 +32,8 @@ describe('AnchorSchema (X10)', () => {
     expect(AnchorSchema.safeParse({ ...fileLine, pageUrl: 'x'.repeat(2001) }).success).toBe(false);
     expect(AnchorSchema.safeParse({ ...fileLine, path: 'x'.repeat(1001) }).success).toBe(false);
     expect(AnchorSchema.safeParse({ ...fileLine, line: 0 }).success).toBe(false);
+    // the screenshot's path is the one path main opens: the anchor's path cap (M1's review)
+    expect(AnchorScreenshotSchema.safeParse({ path: `/${'x'.repeat(999)}`, width: 1, height: 1 }).success).toBe(true);
+    expect(AnchorScreenshotSchema.safeParse({ path: `/${'x'.repeat(1000)}`, width: 1, height: 1 }).success).toBe(false);
   });
 });

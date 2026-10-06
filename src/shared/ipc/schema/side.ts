@@ -12,7 +12,9 @@ import { SideExchangeSchema } from '../../side/question';
 import type { CommandSpec } from './common';
 
 const CommentTextSchema = z.string().max(20_000);
-export const SideAnsweredExchangeSchema = z.strictObject({ question: CommentTextSchema, response: z.string() });
+// `response` is the engine's answer, capped as the renderer's every text is (M1's review); fifty of them can still exceed
+// the 1 MiB send bound, so `side.thread.open` checks the built promotion against it before it launches anything
+export const SideAnsweredExchangeSchema = z.strictObject({ question: CommentTextSchema, response: z.string().max(100_000) });
 export type SideAnsweredExchange = z.infer<typeof SideAnsweredExchangeSchema>;
 
 // What a side thread opens from: a comment on an anchor (the composer's Side thread), or the answered `/btw`

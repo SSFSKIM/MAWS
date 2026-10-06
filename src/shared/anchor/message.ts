@@ -38,6 +38,8 @@ function leadParts(anchor: Anchor): string[] {
 
 // `Comment on "<label>" (<parts>):`, or `Comment:` for the anchorless kind; with a screenshot the final colon becomes
 // `. A screenshot of it is attached:`. The label is always quoted, so it is never read as part of the sentence.
+// A persisted-format contract: the engine's transcripts keep these leads, and `parseAnchoredText` strips one only when it
+// equals the lead this function writes now, so a change of wording leaves every older transcript's lead as text.
 export function anchorLead(anchor: Anchor, screenshot: boolean): string {
   const parts = leadParts(anchor);
   const lead = anchor.kind === 'none' ? 'Comment:' : `Comment on "${anchor.label}"${parts.length > 0 ? ` (${parts.join(', ')})` : ''}:`;
@@ -94,9 +96,10 @@ function parseTag(line: string): Anchor | null {
 const isBlank = (line: string) => line.trim() === '';
 
 // The anchor of a message MAWS wrote, else null. The last non-empty line must be the exact tag; the first line is
-// stripped only when it equals the lead regenerated from that anchor (with or without the screenshot sentence), and
-// the paragraph before the tag only when it is the preamble, which is what says the destination was a side thread.
-// A lead that does not match stays in the text, and the destination is then unknown (null): a `/btw` promotion.
+// stripped only when it equals the lead regenerated from that anchor (with or without the screenshot sentence), and,
+// independently, the paragraph before the tag only when it is the preamble, which is what says the destination was a
+// side thread. A lead that does not match stays in the text; without the preamble the destination is then unknown
+// (null): a `/btw` promotion.
 export function parseAnchoredText(text: string): { anchor: Anchor; text: string; destination: Destination | null } | null {
   const lines = text.split('\n');
   while (lines.length > 0 && isBlank(lines.at(-1)!)) lines.pop();
@@ -105,10 +108,10 @@ export function parseAnchoredText(text: string): { anchor: Anchor; text: string;
   const anchor = parseTag(tagLine);
   if (anchor === null) return null;
   const leads = [anchorLead(anchor, false), anchorLead(anchor, true)];
-  if (lines.length === 0 || !leads.includes(lines[0]!)) return { anchor, text: lines.join('\n').trim(), destination: null };
-  lines.shift();
+  const led = lines.length > 0 && leads.includes(lines[0]!);
+  if (led) lines.shift();
   while (lines.length > 0 && isBlank(lines.at(-1)!)) lines.pop();
   const thread = lines.at(-1) === SIDE_THREAD_PREAMBLE && (lines.length === 1 || isBlank(lines.at(-2)!));
   if (thread) lines.pop();
-  return { anchor, text: lines.join('\n').trim(), destination: thread ? 'thread' : 'main' };
+  return { anchor, text: lines.join('\n').trim(), destination: thread ? 'thread' : led ? 'main' : null };
 }

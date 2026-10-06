@@ -88,6 +88,19 @@ describe('the anchored message (X10)', () => {
     });
   });
 
+  // M1's review: the preamble is checked on its own, so a thread's prompt whose lead an older wording wrote still reads
+  // as a thread's (the lead stays as text), and its comment is not shown with the preamble glued to it
+  it('strips the preamble on its own exact match when the lead does not match, and reads the destination as a thread', () => {
+    const tag = anchorTag(fileLine);
+    expect(parseAnchoredText(`Comment about src/x.ts:42:\nhello\n\n${SIDE_THREAD_PREAMBLE}\n\n${tag}`)).toEqual({
+      anchor: fileLine,
+      text: 'Comment about src/x.ts:42:\nhello',
+      destination: 'thread',
+    });
+    // a preamble that is not its own paragraph stays text
+    expect(parseAnchoredText(`Comment about src/x.ts:42:\nhello ${SIDE_THREAD_PREAMBLE}\n\n${tag}`)?.destination).toBeNull();
+  });
+
   it('writes the promotion of side questions as a thread’s first prompt, parsed as an anchorless comment', () => {
     const exchanges = [
       { question: 'What word did I ask you to remember?', response: 'ZEBRA' },
