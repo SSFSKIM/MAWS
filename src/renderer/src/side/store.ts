@@ -23,9 +23,12 @@ interface SidePane {
   view: SideView | null;
   shownChild: AppSessionId | null; // the child whose transcript the pane draws while the pane is on screen
   exchanges: readonly SideExchange[] | null; // the side questions, oldest first; null until first listed
+  // a side thread's own: its side questions open under its thread view in the pane that hosts it (a `/btw` typed in
+  // the thread's composer answers there, never in the thread's own panel off screen)
+  inlineQuestions: boolean;
 }
 
-const EMPTY: SidePane = { view: null, shownChild: null, exchanges: null };
+const EMPTY: SidePane = { view: null, shownChild: null, exchanges: null, inlineQuestions: false };
 
 export const useSidePane = create<{ panes: ReadonlyMap<AppSessionId, SidePane> }>()(() => ({ panes: new Map() }));
 
@@ -35,7 +38,7 @@ function patch(parent: AppSessionId, change: Partial<SidePane>): void {
   useSidePane.setState(({ panes }) => {
     const before = panes.get(parent) ?? EMPTY;
     const next = { ...before, ...change };
-    if (next.view === before.view && next.shownChild === before.shownChild && next.exchanges === before.exchanges) return { panes };
+    if ((Object.keys(next) as (keyof SidePane)[]).every((key) => next[key] === before[key])) return { panes };
     return { panes: new Map(panes).set(parent, next) };
   });
 }
@@ -48,6 +51,12 @@ export const showSideChild = (parent: AppSessionId, child: AppSessionId): void =
 export function hideSideChild(parent: AppSessionId, child: AppSessionId): void {
   if (sidePaneOf(useSidePane.getState(), parent).shownChild === child) patch(parent, { shownChild: null });
 }
+
+// A thread drawn on screen in its parent's pane now (its composer is the pane's).
+export const hostedInSidePane = (child: AppSessionId, state = useSidePane.getState()): boolean => [...sideChildrenShown(state).values()].includes(child);
+
+// The thread's side questions under its thread view, open or closed.
+export const setInlineQuestions = (child: AppSessionId, open: boolean): void => patch(child, { inlineQuestions: open });
 
 // Every parent whose pane shows a child now, with that child.
 export function sideChildrenShown(state = useSidePane.getState()): ReadonlyMap<AppSessionId, AppSessionId> {

@@ -59,12 +59,24 @@ describe('a side thread whose setup waits on a card', () => {
   });
 
   it('a promotion’s card docks the promotion message', async () => {
-    useSidePane.setState({ panes: new Map([[A, { view: { kind: 'btw' }, shownChild: null, exchanges: [answered('Word?', 'ZEBRA')] }]]) });
+    useSidePane.setState({ panes: new Map([[A, { view: { kind: 'btw' }, shownChild: null, inlineQuestions: false, exchanges: [answered('Word?', 'ZEBRA')] }]]) });
     fake = needsTrust();
     window.maws = fake.client;
     await expect(promoteSide(A, 'Now fix it.')).resolves.toEqual({ ok: true });
     const display = promotionMessage([{ question: 'Word?', response: 'ZEBRA' }], 'Now fix it.');
     expect(useSetup.getState().cards.get(CHILD)).toMatchObject({ kind: 'trust', message: { content: display, display } });
+  });
+});
+
+describe('a promotion from a thread’s questions under its thread view', () => {
+  it('opens the new thread in that thread’s own panel, inactive, and says where; the hosting pane keeps its thread', async () => {
+    useSidePane.setState({ panes: new Map([[B, { view: null, shownChild: null, inlineQuestions: true, exchanges: [answered('Word?', 'ZEBRA')] }]]) });
+    fake = fakeClient({ 'side.thread.open': { status: 'starting', appSessionId: CHILD }, 'session.intent.get': null });
+    window.maws = fake.client;
+    await expect(promoteSide(B, null)).resolves.toEqual({ ok: true });
+    expect(sidePaneOf(useSidePane.getState(), B).view).toEqual({ kind: 'thread', childAppSessionId: CHILD });
+    expect(panelOf(B)!.activeTabId).not.toBe(sideTab(B)!.id);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual([expect.stringMatching(/^Side thread opened in the panel of /)]);
   });
 });
 

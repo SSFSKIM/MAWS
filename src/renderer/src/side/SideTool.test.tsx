@@ -24,7 +24,7 @@ import { useSessions } from '../stores/sessions';
 import { A, B, panelOf, resetPanelStores } from '../test-support/panel';
 import { openSideThread, revealNewThread, SIDE_TOOL_ID } from './actions';
 import { registerSidePane } from './register';
-import { resetSideQuestions, setSideView, sideChildrenShown, sidePaneOf, useSidePane } from './store';
+import { resetSideQuestions, setInlineQuestions, setSideView, sideChildrenShown, sidePaneOf, useSidePane } from './store';
 import { sideThreadsOf, sideTool } from './SideTool';
 import { promotionQuestionOf } from './ThreadView';
 
@@ -187,6 +187,27 @@ describe('the Side pane’s question view', () => {
     expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'What word?' }]);
     expect((screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement).value).toBe('');
     expect(screen.getByText('What word?')).toBeTruthy(); // pending at once
+  });
+
+  // the architect's ruling (b): a thread's own side questions answer under its thread view, in the pane hosting it
+  it('a thread’s side questions show under its thread view; the header’s toggle hides and shows them', async () => {
+    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'));
+    listing([exchange({})]);
+    act(() => openSideThread(A, ONE));
+    mount();
+    expect(screen.queryByRole('button', { name: 'Side questions' })).toBeNull(); // none asked, none open
+    act(() => setInlineQuestions(ONE, true));
+    await screen.findByText('ZEBRA');
+    expect(document.querySelector(`[data-side-thread-view="${ONE}"] [data-side-btw-view="${ONE}"]`)).not.toBeNull();
+    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: ONE }]);
+    expect(shown()).toBe(A); // the main view stays
+    const toggle = screen.getByRole('button', { name: 'Side questions' });
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    await userEvent.click(toggle);
+    expect(document.querySelector(`[data-side-btw-view="${ONE}"]`)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Side questions' }).getAttribute('aria-pressed')).toBe('false'); // still offered: it has exchanges
+    await userEvent.click(screen.getByRole('button', { name: 'Side questions' }));
+    expect(document.querySelector(`[data-side-btw-view="${ONE}"]`)).not.toBeNull();
   });
 
   it('a promoted thread’s header shows its opening question, read from the thread’s first prompt', () => {

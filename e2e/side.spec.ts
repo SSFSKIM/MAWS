@@ -254,9 +254,13 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
-  test('2. Side thread: a fork of the parent opens in the Side pane on the line, answers there, sums itself up in the parent and nests under it in the sidebar; the main conversation receives nothing', async () => {
+  test('2. Side thread: a fork of the parent opens in the Side pane on the line, answers there, sums itself up in the parent and nests under it in the sidebar; the main conversation receives nothing; a /btw typed in it answers under it', async () => {
     test.setTimeout(120_000);
-    const c = await begin((cwd, dir) => [parentJournal(cwd).write(dir, 'parent'), threadJournal(CHILD, cwd, 'app.ts:3', [CHILD_REPLY, CHILD_REPLY_2]).write(dir, 'thread')]);
+    const c = await begin((cwd, dir) => {
+      const thread = threadJournal(CHILD, cwd, 'app.ts:3', [CHILD_REPLY, CHILD_REPLY_2]);
+      thread.sideQuestions(SIDE_QUESTION_ROWS);
+      return [parentJournal(cwd).write(dir, 'parent'), thread.write(dir, 'thread')];
+    });
     const { page, maws, repo, parent } = c;
     const { child, pane } = await openThreadFromGutter(c);
 
@@ -303,6 +307,22 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(mainRegion(page).locator('[data-side-thread]'), 'one row per thread').toHaveCount(1);
     expect(writtenUsers(maws, child)).toHaveLength(2);
     expect(writtenUsers(maws, parent)).toHaveLength(1);
+
+    // a /btw typed in the thread's composer answers under the thread, in this pane: no panel of its own, no toast, the
+    // main view kept (the architect's ruling)
+    await threadPane.getByRole('textbox', { name: 'Message' }).click();
+    await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
+    await page.keyboard.press('Enter');
+    const inline = threadPane.locator(`[data-side-btw-view="${child}"]`);
+    await expect(inline.locator('[data-side-exchange="answered"]').first()).toContainText('ZEBRA', { timeout: 20_000 });
+    await expect(threadPane.getByRole('button', { name: 'Side questions' })).toHaveAttribute('aria-pressed', 'true');
+    expect(writtenControls(maws, child, 'side_question').map((r) => r.frame.request)).toEqual([{ subtype: 'side_question', question: SIDE_QUESTION }]);
+    expect(writtenControls(maws, parent, 'side_question')).toEqual([]);
+    expect(writtenUsers(maws, child), 'no user frame for the question').toHaveLength(2);
+    await expect(page.getByText('Side question asked in the panel of', { exact: false })).toHaveCount(0);
+    await expect(mainRegion(page).locator(`[data-side-thread="${child}"]`), 'the main view still shows the parent').toBeVisible();
+    await threadPane.getByRole('button', { name: 'Side questions' }).click();
+    await expect(inline).toHaveCount(0);
 
     // the sidebar lists the thread under its parent, a level in, marked ↳
     await expect.poll(() => projectRows(page, parent)).toEqual([{ id: parent, level: '2' }, { id: child, level: '3' }]);

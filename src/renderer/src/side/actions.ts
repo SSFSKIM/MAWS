@@ -64,14 +64,16 @@ export function revealSideQuestions(parent: AppSessionId): void {
 const threadMessage = (text: string): FirstMessage => ({ content: text, display: text });
 
 // "Continue as a side thread": the answered exchanges (and what the person typed beside them) open a side thread of the
-// parent, adopted as C10's fork is, and the pane turns to it.
+// parent, adopted as C10's fork is, and the parent's pane turns to it: on screen from the parent's question view, and
+// from a thread's questions under its thread view (the parent there is the thread, not the shown session) waiting in
+// the thread's own panel, with a toast saying where.
 export async function promoteSide(parent: AppSessionId, text: string | null, client: MawsBridge = ipc): Promise<{ ok: true } | { ok: false; error: string }> {
   const exchanges = promotable(sidePaneOf(useSidePane.getState(), parent).exchanges ?? []);
   const result = await client.invoke('side.thread.open', { appSessionId: parent, from: { kind: 'btw', exchanges, text } });
   if (!result.ok) return { ok: false, error: result.error.message };
   const adopted = await adoptFork(parent, result.value, threadMessage(promotionMessage(exchanges, text)));
   if (!adopted.ok) return adopted;
-  setSideView(parent, { kind: 'thread', childAppSessionId: adopted.appSessionId });
+  revealNewThread(parent, adopted.appSessionId);
   return { ok: true };
 }
 

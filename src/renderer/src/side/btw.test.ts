@@ -16,7 +16,7 @@ import { A, B, panelOf, resetPanelStores } from '../test-support/panel';
 import { promoteSide, SIDE_TOOL_ID } from './actions';
 import { applyBtw } from './btw';
 import { registerSidePane } from './register';
-import { askSide, clearSide, onSideOperation, refreshSide, resetSideQuestions, retrySide, sidePaneOf, useSidePane } from './store';
+import { askSide, clearSide, onSideOperation, refreshSide, resetSideQuestions, retrySide, showSideChild, sidePaneOf, useSidePane } from './store';
 
 let fake: FakeClient;
 
@@ -64,12 +64,27 @@ describe('the btw widget’s typed apply', () => {
     expect(exchanges()).toEqual([expect.objectContaining({ id: 'local:1', question: 'What word did I ask you to remember?', state: 'pending' })]);
   });
 
-  it('asked from a session that is not the shown one (a side thread’s own composer): its panel takes it inactive, a toast says where', async () => {
+  it('asked from a session that is not the shown one and no pane draws: its panel takes it inactive, a toast says where', async () => {
     withProcess(B, 'ready');
     await act(async () => void applyBtw(B, 'why?'));
     const side = panelOf(B)!.tabs.find((t) => t.toolId === SIDE_TOOL_ID)!;
     expect(panelOf(B)!.activeTabId).not.toBe(side.id);
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual([expect.stringMatching(/^Side question asked in the panel of /)]);
+  });
+});
+
+// The architect's ruling (b): a side thread's own composer, drawn in its parent's pane, asks under the thread
+describe('a `/btw` typed in a side thread drawn in its parent’s pane', () => {
+  it('answers under the thread in that pane: no panel of its own, no toast, the main view kept', async () => {
+    withProcess(B, 'ready');
+    showSideChild(A, B);
+    await act(async () => void applyBtw(B, 'why?'));
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: B, question: 'why?' }]);
+    expect(sidePaneOf(useSidePane.getState(), B).inlineQuestions).toBe(true);
+    expect(sidePaneOf(useSidePane.getState(), B).view).toBeNull();
+    expect(panelOf(B)?.tabs.some((t) => t.toolId === SIDE_TOOL_ID) ?? false).toBe(false);
+    expect(useNotices.getState().notices).toEqual([]);
+    expect(sidePaneOf(useSidePane.getState(), B).exchanges).toEqual([expect.objectContaining({ question: 'why?', state: 'pending' })]);
   });
 });
 
@@ -85,7 +100,7 @@ describe('the side-question store', () => {
   });
 
   it('a completion answers the entry; a synthetic one is flagged; a failure fails it with the engine’s message', async () => {
-    useSidePane.setState({ panes: new Map([[A, { view: null, shownChild: null, exchanges: [entry({ id: 'op-1' }), entry({ id: 'op-2', question: 'Q2?' }), entry({ id: 'op-3', question: 'Q3?' })] }]]) });
+    useSidePane.setState({ panes: new Map([[A, { view: null, shownChild: null, inlineQuestions: false, exchanges: [entry({ id: 'op-1' }), entry({ id: 'op-2', question: 'Q2?' }), entry({ id: 'op-3', question: 'Q3?' })] }]]) });
     onSideOperation(completion('op-1', answered('ZEBRA')));
     onSideOperation(completion('op-2', answered('I can only answer from the conversation.', true)));
     onSideOperation(completion('op-3', { ok: false, error: { code: 'engine_error', message: 'Side question cancelled', engineCode: null } }));
@@ -107,7 +122,7 @@ describe('the side-question store', () => {
   it('a completion for an entry not listed yet lists again; one for a session never listed, or another command, is ignored', async () => {
     onSideOperation(completion('op-9', answered('x')));
     expect(fake.invoked('side.question.list')).toEqual([]);
-    useSidePane.setState({ panes: new Map([[A, { view: null, shownChild: null, exchanges: [] }]]) });
+    useSidePane.setState({ panes: new Map([[A, { view: null, shownChild: null, inlineQuestions: false, exchanges: [] }]]) });
     onSideOperation({ ...completion('op-9', answered('x')), command: 'session.generateTitle' });
     expect(fake.invoked('side.question.list')).toEqual([]);
     onSideOperation(completion('op-9', answered('x')));
@@ -126,7 +141,7 @@ describe('the side-question store', () => {
   });
 
   it('Retry on a host entry that failed asks again and draws the new question in its place', async () => {
-    useSidePane.setState({ panes: new Map([[A, { view: null, shownChild: null, exchanges: [entry({ state: 'failed', error: 'boom' })] }]]) });
+    useSidePane.setState({ panes: new Map([[A, { view: null, shownChild: null, inlineQuestions: false, exchanges: [entry({ state: 'failed', error: 'boom' })] }]]) });
     const retry = retrySide(A, exchanges()![0]);
     expect(exchanges()!.map((e) => e.id)).toEqual(['local:1']); // the new question stands in for the failed one at once
     await fake.reply('session.sideQuestion', { opId: 'op-2' });
@@ -156,7 +171,7 @@ describe('the side-question store', () => {
   it('"Continue as a side thread" opens a thread from the answered exchanges and the text typed beside them, and the pane turns to it', async () => {
     const CHILD = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
     useSidePane.setState({
-      panes: new Map([[A, { view: { kind: 'btw' }, shownChild: null, exchanges: [entry({ state: 'answered', response: 'ZEBRA', question: 'Word?' }), entry({ id: 'op-2', state: 'failed', error: 'x' }), entry({ id: 'op-3', state: 'pending' }), entry({ id: 'op-4', state: 'answered', response: null })] }]]),
+      panes: new Map([[A, { view: { kind: 'btw' }, shownChild: null, inlineQuestions: false, exchanges: [entry({ state: 'answered', response: 'ZEBRA', question: 'Word?' }), entry({ id: 'op-2', state: 'failed', error: 'x' }), entry({ id: 'op-3', state: 'pending' }), entry({ id: 'op-4', state: 'answered', response: null })] }]]),
     });
     fake = fakeClient({ 'side.thread.open': { status: 'starting', appSessionId: CHILD }, 'session.intent.get': null });
     window.maws = fake.client;

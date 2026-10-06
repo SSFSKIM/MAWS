@@ -5,7 +5,10 @@
 // tab shows the thread (Open as tab), the pane says so with Go to tab instead, and closing that tab brings it back.
 // While the pane draws the thread on screen it is published as shown, so the thread's unread mark clears as a main
 // tab's would. A thread continued from side questions has no anchor to name: its header shows the opening question,
-// read from the thread's own first prompt (the promotion message, whose tag parses to the `none` anchor `btw`).
+// read from the thread's own first prompt (the promotion message, whose tag parses to the `none` anchor `btw`). A `/btw`
+// typed in the thread's composer answers under the thread, in this pane (the architect's ruling): the thread's own
+// question view (`BtwView`, keyed by the thread) opens beneath it, and the header's toggle hides and shows it while the
+// thread has side questions.
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
@@ -16,8 +19,9 @@ import { isOpen } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../transcript';
 import type { Row } from '../transcript/model/rows';
+import { BtwView } from './BtwView';
 import { SIDE_COPY } from './copy';
-import { hideSideChild, showSideChild } from './store';
+import { hideSideChild, setInlineQuestions, showSideChild, sidePaneOf, useSidePane } from './store';
 
 const COPY = SIDE_COPY.pane;
 
@@ -38,6 +42,8 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
   const childTab = tabId({ kind: 'session', appSessionId: child });
   const inMain = useLayout((s) => isOpen(s.main, childTab));
   const drawn = visible && !inMain;
+  const questionsOpen = useSidePane((s) => sidePaneOf(s, child).inlineQuestions);
+  const asked = useSidePane((s) => (sidePaneOf(s, child).exchanges?.length ?? 0) > 0);
 
   useEffect(() => {
     if (!drawn) return;
@@ -73,6 +79,18 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
             </p>
           )}
         </div>
+        {!inMain && (questionsOpen || asked) && (
+          <button
+            type="button"
+            aria-pressed={questionsOpen}
+            title={COPY.questionsTitle}
+            aria-label={COPY.questionsTitle}
+            className={`${QUIET} font-mono text-ui-sm aria-pressed:bg-bg-active aria-pressed:text-fg`}
+            onClick={() => setInlineQuestions(child, !questionsOpen)}
+          >
+            {COPY.questions}
+          </button>
+        )}
         {!inMain && (
           <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => useLayout.getState().openTab({ kind: 'session', appSessionId: child })}>
             {COPY.openAsTab}
@@ -87,9 +105,16 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
           </button>
         </div>
       ) : (
-        <div className="min-h-0 flex-1">
-          <SessionPane appSessionId={child} paneIndex={1} />
-        </div>
+        <>
+          <div className="min-h-0 flex-1">
+            <SessionPane appSessionId={child} paneIndex={1} />
+          </div>
+          {questionsOpen && (
+            <div className="flex h-[45%] min-h-[180px] shrink-0 flex-col border-t border-border">
+              <BtwView parent={child} />
+            </div>
+          )}
+        </>
       )}
     </div>
   );
