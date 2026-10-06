@@ -17,7 +17,7 @@ To see it working: `pnpm dev`, open a session, open a file from Files, hover a l
 - [x] (2026-10-06 12:45Z) M1 — Shared shapes (X10, X11, the `side.*` namespace, the `side.thread.*` events), the `side_question` wire fix and the host's side-question log. Landed 5a08e41d..3d398ce5; full suite 6,682 passed through the slot, typecheck and lint clean; task review (Opus) approved, no Critical or Important findings.
 - [x] (2026-10-06 14:30Z) M2 — Main: index migration 4, lineage from the intent and from the disk, the side-thread rows as app-synthesised events, `side.thread.open` and `side.sendToMain`. Landed de430700..8da99dd4, fix a50c5dfd..b1ffc2be. The task review (Opus) found one Important issue: a summary stored before migration 4 made a `/clear` rebind throw. That and five Minors were fixed, and round 2 approved.
 - [x] (2026-10-06 16:20Z) M3 — Renderer: the comment composer in E5's seam, the Side pane hosting a thread, the anchored prompt row and the side-thread row. Landed 18f9cc07..fc66313b; full suite 6,757 passed, typecheck and lint clean (closing M2's deferred typecheck); task review (Opus) approved, no Critical or Important findings.
-- [ ] M4 — Renderer: `/btw` (the `btw` slash widget, the pane's question view, promotion) and the sidebar's nesting.
+- [x] (2026-10-06 18:00Z) M4 — Renderer: `/btw` (the `btw` slash widget, the pane's question view, promotion) and the sidebar's nesting. Landed 8262c918..e7b97062. Full suite 6,795 passed; typecheck clean at e7b97062. Task review (Opus) approved, no Critical or Important findings; its minors go to the final fix wave or the tracker.
 - [ ] M5 — End to end (`pnpm e2e:side`), the `code` and `c7` groups re-run, the gates, the evidence, the hand-back.
 
 ## Terms
@@ -581,6 +581,18 @@ Every e2e run is under `MAWS_E2E=1` with its own `userData` and an empty `CLAUDE
     - Orphans read "↳ fork of <parent>" or "↳ side thread of <parent>".
   - **For M5.** `e2e/widgets.spec.ts`'s `NAMES` lacks `btw` and must gain it.
   Rationale: task 5's report; each serves Design §7's rule that a `/btw` draft never reaches the main conversation, and §6's sidebar.
+  Date/Author: 2026-10-06, the E3 executor.
+
+- Decision (M4's review): four minors are fixed in the final fix wave:
+  - The promotion clips each exchange to the schema caps with `…`, so a long pasted question no longer makes every promotion fail.
+  - `promotionQuestionOf` takes the last promotion prompt (`findLast`), so a thread promoted inside a promoted thread names its own question after a disk read.
+  - The sidebar's `aria-level` carries the real depth; only the visual indent is capped.
+  - The composer's two `/btw` refusal strings move to the composer's own copy, so C7 does not import E3's copy.
+
+  Two minors go to the tracker: the module-only `retried` set (a reload re-shows retried failures), and a render test of the promoted header's store selector.
+
+  One design gap is left as built and put to the owner: a `/btw` typed in a side thread's own composer, inside the parent's pane, follows the panel rule. It answers in the child's own panel, off screen, and a toast says where.
+  Rationale: M4's task review; the gap needs a product call on where a child's side questions belong, and the panel rule as written is honoured meanwhile.
   Date/Author: 2026-10-06, the E3 executor.
 
 ## Deferred
