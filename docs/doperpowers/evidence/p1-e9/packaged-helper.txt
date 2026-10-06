@@ -1,8 +1,8 @@
-E9 M5 packaged-helper checks on the build:app output of e196298e (unsigned build; 2026-10-06 00:12 KST). The probe is
+E9 M5 packaged-helper checks on the build:app output of 3869830a (unsigned build; 2026-10-06 00:38 KST). The probe is
 the helper non-prompting self-report; no start command is ever sent. Run from a shell it reports the terminal TCC states.
 
 $ ls -l dist/mac-arm64/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper
--rwxr-xr-x@ 1 new  staff  144272 10월  6 00:10 dist/mac-arm64/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper
+-rwxr-xr-x@ 1 new  staff  144272 10월  6 00:37 dist/mac-arm64/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper
 
 $ codesign -dv dist/mac-arm64/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper
 Executable=/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a73ed40e0ec0b7d29/dist/mac-arm64/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper

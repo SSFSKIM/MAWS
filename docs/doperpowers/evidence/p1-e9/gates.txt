@@ -172,3 +172,53 @@ All gates of Acceptance items 1 to 5 have run green on e196298e.
      settings v8 → v9 adds voice and keeps every earlier version (4) · chord Space matches on code (2) ·
      dispatcher holds and releases a hold action (10) · editor dictation replaces interim text and settles the final (27) ·
      dictation controller state machine (29) · settings view lists Voice (9) · ipc schema validates both directions (77)
+
+---- The final sequence on 3869830a (the final code tree: the whole-branch review's fix wave 77f72029, 94bd0874, 3869830a) ----
+Every heavy command ran as /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> <script>.
+
+== typecheck   2026-10-06 00:31 KST   (exit 0)
+   start: eligible: load 12.06 after 0s · slot slot.2 acquired at 00:31:09 load { 12.06 10.54 15.17 }
+   tail: $ tsc --noEmit -p tsconfig.node.json … ; tsc … tsconfig.web.json … ; tsc … tsconfig.e2e.json …   (no diagnostics)
+
+== lint   2026-10-06 00:31 KST   (exit 0)
+   start: eligible: load 10.73 after 0s · slot slot.2 acquired at 00:31:45 load { 10.73 10.37 14.92 }
+   tail: $ eslint .   (no findings)
+
+== unit suite (test --maxWorkers=4)   2026-10-06 00:32 KST   (exit 0)
+   start: eligible: load 15.69 after 0s · slot slot.2 acquired at 00:32:12 load { 15.69 11.53 15.20 }
+   tail:
+      Test Files  458 passed | 1 skipped (459)
+           Tests  6061 passed | 1 skipped (6062)
+     Type Errors  no errors
+        Duration  135.79s
+
+== e2e:voice (MAWS_E9_SHOTS=docs/doperpowers/evidence/p1-e9)   2026-10-06 00:34 KST   (exit 0)
+   start: eligible: load 18.08 after 30s · slot slot.2 acquired at 00:34:59 load { 18.08 14.60 15.80 }
+   tail: 14 passed (26.7s), 1 skipped (the packaged case); every case in e2e-voice.txt; screenshots refreshed
+
+== e2e:c7   2026-10-06 00:35 KST   (exit 0)
+   start: eligible: load 19.45 after 0s · slot slot.2 acquired at 00:35:53 load { 19.45 15.63 16.11 }
+   tail: 29 passed (1.0m); every case in e2e-c7.txt
+
+== build:app   2026-10-06 00:37 KST   (exit 0; unsigned)
+   start: eligible: load 12.88 after 0s · slot slot.2 acquired at 00:37:18 load { 12.88 14.56 15.66 }
+   tail:
+     ✓ built in 20.25s
+     • packaging       platform=darwin arch=arm64 electron=44.4.5 appOutDir=dist/mac-arm64
+     • skipped macOS code signing  reason=identity explicitly is set to null
+
+== packaged checks   2026-10-06 00:38 KST   (light, outside the slot; full transcript in packaged-helper.txt)
+   ls -l: -rwxr-xr-x 144272 bytes, Contents/Resources/voice-helper/maws-voice-helper
+   codesign -dv: CodeDirectory v=20400 size=1226 flags=0x20002(adhoc,linker-signed) · Signature=adhoc
+   plutil: NSMicrophoneUsageDescription and NSSpeechRecognitionUsageDescription carry MAWS's two reasons
+   probe: {"type":"ready","protocol":1} then {"type":"probe","locales":[63 entries],"systemLocale":"ko-KR",…}
+
+== packaged e2e   2026-10-06 00:38 KST   (exit 0)
+   command: MAWS_E2E_EXECUTABLE=dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS with the slot: pnpm --dir <W> e2e e2e/voice.spec.ts
+   start: eligible: load 14.04 after 0s · slot slot.1 acquired at 00:38:45 load { 12.05 14.03 15.36 }
+   tail:
+     ✓  15 e2e/voice.spec.ts:504:1 › packaged: the bundled helper answers voice.status from Contents/Resources and voice.start is refused under the harness (2.0s)
+     14 skipped
+     1 passed (2.4s)
+
+All gates of Acceptance items 1 to 5 have run green on 3869830a, the final code tree.
