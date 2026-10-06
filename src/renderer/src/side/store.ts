@@ -12,6 +12,7 @@ import { create } from 'zustand';
 import type { OperationEvent } from '@shared/engine/operations';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { SIDE_ANSWER_CAP, SIDE_QUESTION_CAP } from '@shared/ipc/schema/side';
 import type { SideExchange } from '@shared/side/question';
 import type { SideQuestionResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
@@ -147,9 +148,20 @@ export function onSideOperation(event: OperationEvent, client: MawsBridge = ipc)
   patch(parent, { exchanges: exchanges.map((e) => (e === entry ? settled : e)) });
 }
 
-// The answered exchanges a promotion carries (the most recent fifty, the command's bound).
+// `text` within `cap` UTF-16 units: whole, or cut with `…` as its last unit (never between a surrogate pair's halves).
+function clip(text: string, cap: number): string {
+  if (text.length <= cap) return text;
+  let end = cap - 1;
+  if (/[\uD800-\uDBFF]/.test(text[end - 1]!)) end -= 1;
+  return `${text.slice(0, end)}…`;
+}
+
+// The answered exchanges a promotion carries (the most recent fifty, the command's bound), each clipped to the command's
+// caps, so a long pasted question or answer shortens its own exchange rather than refusing the promotion.
 export const promotable = (exchanges: readonly SideExchange[]): { question: string; response: string }[] =>
-  exchanges.flatMap((e) => (e.state === 'answered' && e.response !== null ? [{ question: e.question, response: e.response }] : [])).slice(-50);
+  exchanges
+    .flatMap((e) => (e.state === 'answered' && e.response !== null ? [{ question: clip(e.question, SIDE_QUESTION_CAP), response: clip(e.response, SIDE_ANSWER_CAP) }] : []))
+    .slice(-50);
 
 // Tests: the module's own bookkeeping back to empty.
 export function resetSideQuestions(): void {

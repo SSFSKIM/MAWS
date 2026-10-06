@@ -11,10 +11,13 @@ import { StartOutcomeSchema } from '../../sessions/setup';
 import { SideExchangeSchema } from '../../side/question';
 import type { CommandSpec } from './common';
 
-const CommentTextSchema = z.string().max(20_000);
+// The caps, exported so a promotion clips its exchanges to them rather than being refused whole
+export const SIDE_QUESTION_CAP = 20_000;
+export const SIDE_ANSWER_CAP = 100_000;
+const CommentTextSchema = z.string().max(SIDE_QUESTION_CAP);
 // `response` is the engine's answer, capped as the renderer's every text is (M1's review); fifty of them can still exceed
 // the 1 MiB send bound, so `side.thread.open` checks the built promotion against it before it launches anything
-export const SideAnsweredExchangeSchema = z.strictObject({ question: CommentTextSchema, response: z.string().max(100_000) });
+export const SideAnsweredExchangeSchema = z.strictObject({ question: CommentTextSchema, response: z.string().max(SIDE_ANSWER_CAP) });
 export type SideAnsweredExchange = z.infer<typeof SideAnsweredExchangeSchema>;
 
 // What a side thread opens from: a comment on an anchor (the composer's Side thread), or the answered `/btw`

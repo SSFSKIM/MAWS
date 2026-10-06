@@ -67,6 +67,7 @@ export const SIDE_COPY = {
     failed: (text: string | null, turns: number) => `ended with an error${turnsSuffix(turns)}${text ? `: ${text}` : ''}`,
     lead: 'Side thread on',
     open: 'Open',
+    openElsewhere: (parentTitle: string) => `Side thread is in the panel of ${parentTitle}`,
   },
   // A sidebar row's lineage: nested under its parent the row says nothing more than the anchor's label (when the title is
   // not that already); a thread or fork whose parent is not listed above it says whose it is; the hover card always does.

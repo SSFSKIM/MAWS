@@ -1,12 +1,15 @@
 // What opens the Side pane and what the comment composer sends (E3 execution document, Design §1, §6, §7, §8 and §9).
 // The pane never switches the main view (the panel rule): a thread opened from the composer, or the question view a
 // `/btw` opens, is shown at once only when its session is the one the window shows, and otherwise added to that
-// session's panel without activation, with a toast saying where it is; a summary row's Open activates it (the person
-// clicked in the parent's transcript, so the parent is shown). Main owns the sends: `side.thread.open` forks the parent
-// with the anchored first message (or the promoted side questions), `side.sendToMain` steers or sends it the comment.
+// session's panel without activation, with a toast saying where it is; a summary row's Open follows the same rule (the
+// transcript it sits in may be a thread's own, drawn in its parent's pane). Main owns the sends: `side.thread.open`
+// forks the parent with the anchored first message (or the promoted side questions), `side.sendToMain` steers or sends
+// it the comment.
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
+import { anchoredMessage, promotionMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import type { FirstMessage } from '@shared/sessions/intent';
 import { ipc } from '../ipc/client';
 import { panelHost, usePanelHost } from '../panel/host';
 import { adoptFork, titleOf } from '../sessions/record-ops';
@@ -31,11 +34,6 @@ function openPane(parent: AppSessionId, view: SideView, activate: boolean): void
   panelHost.addTool<SideParams>(SIDE_TOOL_ID, { appSessionId: parent, params: { view }, activate });
 }
 
-// The transcript's summary row: the thread in its parent's pane, on screen.
-export function openSideThread(parent: AppSessionId, child: AppSessionId): void {
-  openPane(parent, { kind: 'thread', childAppSessionId: child }, true);
-}
-
 // The parent's pane on `view`, on screen when the parent is shown; otherwise waiting in the parent's panel, with a toast
 // saying where (`elsewhere`, given the parent's title).
 function revealPane(parent: AppSessionId, view: SideView, elsewhere: (parentTitle: string) => string): void {
@@ -44,16 +42,26 @@ function revealPane(parent: AppSessionId, view: SideView, elsewhere: (parentTitl
   if (!shown) toast({ level: 'info', text: elsewhere(titleOf(parent)), actions: [], dismissible: true });
 }
 
+// The transcript's summary row: the thread in its parent's pane.
+export function openSideThread(parent: AppSessionId, child: AppSessionId): void {
+  revealPane(parent, { kind: 'thread', childAppSessionId: child }, SIDE_COPY.row.openElsewhere);
+}
+
 // A thread the composer just opened.
 export function revealNewThread(parent: AppSessionId, child: AppSessionId): void {
   revealPane(parent, { kind: 'thread', childAppSessionId: child }, SIDE_COPY.composer.openedElsewhere);
 }
 
 // The question view, where a `/btw` just asked shows its answer (typed in a composer whose session is not the shown one,
-// a side thread's own in the pane among them, it waits in that session's panel).
+// it waits in that session's panel; a side thread's own in its parent's pane answers under the thread instead, btw.ts).
 export function revealSideQuestions(parent: AppSessionId): void {
   revealPane(parent, { kind: 'btw' }, SIDE_COPY.btw.askedElsewhere);
 }
+
+// The first message `side.thread.open` has main send the thread, as its intent retains it (`display`, the text whole),
+// for C10's card to hand back to the editor if the setup is declined, as `forkSession` docks its own. Main builds the
+// same text from the same input; the screenshot's image block is main's alone, and a prefill could not take it back.
+const threadMessage = (text: string): FirstMessage => ({ content: text, display: text });
 
 // "Continue as a side thread": the answered exchanges (and what the person typed beside them) open a side thread of the
 // parent, adopted as C10's fork is, and the pane turns to it.
@@ -61,7 +69,7 @@ export async function promoteSide(parent: AppSessionId, text: string | null, cli
   const exchanges = promotable(sidePaneOf(useSidePane.getState(), parent).exchanges ?? []);
   const result = await client.invoke('side.thread.open', { appSessionId: parent, from: { kind: 'btw', exchanges, text } });
   if (!result.ok) return { ok: false, error: result.error.message };
-  const adopted = await adoptFork(parent, result.value, null);
+  const adopted = await adoptFork(parent, result.value, threadMessage(promotionMessage(exchanges, text)));
   if (!adopted.ok) return adopted;
   setSideView(parent, { kind: 'thread', childAppSessionId: adopted.appSessionId });
   return { ok: true };
@@ -91,7 +99,7 @@ export async function sendComment(destination: CommentDestination, input: Commen
   }
   const result = await client.invoke('side.thread.open', { appSessionId: parent, from: { kind: 'comment', anchor, text, screenshot } });
   if (!result.ok) return { ok: false, error: result.error.message };
-  const adopted = await adoptFork(parent, result.value, null);
+  const adopted = await adoptFork(parent, result.value, threadMessage(anchoredMessage({ anchor, text, destination: 'thread', screenshot: screenshot !== null })));
   if (!adopted.ok) return adopted;
   revealNewThread(parent, adopted.appSessionId);
   return { ok: true };
