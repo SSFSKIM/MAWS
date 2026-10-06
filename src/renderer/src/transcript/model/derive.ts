@@ -240,6 +240,7 @@ interface ArtifactRecord {
   version: number | null;
   announced: boolean; // `maws.delivery.artifact` said: the result no longer refines
   error: string | null;
+  answered: boolean; // the call's result is in
 }
 // E2 end
 
@@ -977,11 +978,12 @@ function artifactOfCall(use: Event<'tool.use'>): ArtifactRecord {
   const input = record(use.input);
   return {
     use, action: use.toolName === MAWS_TOOL_USE.artifact_create ? 'create' : 'update', artifactId: str(input.id), htmlPath: str(input.html_path),
-    title: typeof input.title === 'string' ? input.title : null, deliverableId: null, version: null, announced: false, error: null,
+    title: typeof input.title === 'string' ? input.title : null, deliverableId: null, version: null, announced: false, error: null, answered: false,
   };
 }
 
 function resultOfArtifact(artifact: ArtifactRecord, result: Event<'tool.result'>): void {
+  artifact.answered = true;
   if (result.isError) {
     artifact.error = toolErrorText(resultText(result.content));
     return;
@@ -996,6 +998,7 @@ function artifactRow(artifact: ArtifactRecord, turnId: TurnId): RowOf<'artifact'
   return {
     id: rowId.artifact(use.toolUseId), turnId, at: use.at, kind: 'artifact', toolUseId: use.toolUseId, action: artifact.action, artifactId: artifact.artifactId,
     title: artifact.title, htmlPath: artifact.htmlPath, deliverableId: artifact.deliverableId, version: artifact.version, error: artifact.error,
+    answered: artifact.answered,
   };
 }
 // E2 end

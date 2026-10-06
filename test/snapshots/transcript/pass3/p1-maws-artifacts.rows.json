@@ -192,6 +192,7 @@
   },
   {
     "action": "create",
+    "answered": true,
     "artifactId": "dash",
     "at": "2026-10-06T12:53:13.449Z",
     "deliverableId": "10edca26-3f45-406b-b141-781c4e54fe4b",
@@ -333,6 +334,7 @@
   },
   {
     "action": "update",
+    "answered": true,
     "artifactId": "dash",
     "at": "2026-10-06T12:53:22.629Z",
     "deliverableId": "10edca26-3f45-406b-b141-781c4e54fe4b",
@@ -392,6 +394,7 @@
   },
   {
     "action": "update",
+    "answered": true,
     "artifactId": "nope",
     "at": "2026-10-06T12:53:25.121Z",
     "deliverableId": null,

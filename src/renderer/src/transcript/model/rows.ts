@@ -72,8 +72,9 @@ export type Row = RowBase &
     // E1 end
     // E2 start: an `artifact_create` or `artifact_update` call's row (E2 execution document, Design §9): from the call,
     // filled by its result and refined by `maws.delivery.artifact`; `title` null until a source names it (an update may
-    // carry none), `deliverableId` and `version` null until the version is registered
-    | { kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null }
+    // carry none), `deliverableId` and `version` null until the version is registered; `answered` once the call's result
+    // is in (a result that does not parse leaves the version null on an answered row)
+    | { kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean }
     // E2 end
   );
 

@@ -35,10 +35,10 @@ describe('the artifact row', () => {
     const [pending] = ofKind(expandedRows(b.events), 'artifact');
     expect(pending).toEqual({
       id: rowId.artifact(tool('toolu_c')), turnId: 'turn:u1', at: pending.at, kind: 'artifact', toolUseId: 'toolu_c', action: 'create', artifactId: 'dash', title: 'Dashboard',
-      htmlPath: 'dashboard.html', deliverableId: null, version: null, error: null,
+      htmlPath: 'dashboard.html', deliverableId: null, version: null, error: null, answered: false,
     });
     b.result('toolu_c', created());
-    expect(ofKind(expandedRows(b.events), 'artifact')[0]).toMatchObject({ deliverableId: DELIVERABLE, version: 1, title: 'Dashboard', error: null });
+    expect(ofKind(expandedRows(b.events), 'artifact')[0]).toMatchObject({ deliverableId: DELIVERABLE, version: 1, title: 'Dashboard', error: null, answered: true });
   });
 
   it('an update with no title takes the result’s; a renaming update the new title; the event wins over the result', () => {
@@ -57,16 +57,18 @@ describe('the artifact row', () => {
     expect(ofKind(expandedRows(renamed.events), 'artifact')[0]).toMatchObject({ title: 'Sales, Q3', deliverableId: DELIVERABLE, version: 3 });
   });
 
-  it('a refused call reads its error, and a result that is not the tool’s JSON leaves the row pending', () => {
+  it('a refused call reads its error, a result that is not the tool’s JSON answers the row without a version, and a call with no result is unanswered', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('toolu_n', UPDATE, { id: 'nope', html_path: 'dashboard.html' });
     b.result('toolu_n', 'artifact_update: no artifact "nope" in this session; use artifact_create', { isError: true });
     b.toolUse('toolu_x', CREATE, { id: 'x', html_path: 'x.html', title: 'X' });
     b.result('toolu_x', 'something else');
-    expect(ofKind(expandedRows(b.events), 'artifact').map((row) => [row.artifactId, row.deliverableId, row.version, row.error])).toEqual([
-      ['nope', null, null, 'artifact_update: no artifact "nope" in this session; use artifact_create'],
-      ['x', null, null, null],
+    b.toolUse('toolu_w', CREATE, { id: 'w', html_path: 'w.html', title: 'W' });
+    expect(ofKind(expandedRows(b.events), 'artifact').map((row) => [row.artifactId, row.deliverableId, row.version, row.error, row.answered])).toEqual([
+      ['nope', null, null, 'artifact_update: no artifact "nope" in this session; use artifact_create', true],
+      ['x', null, null, null, true],
+      ['w', null, null, null, false],
     ]);
   });
 

@@ -435,18 +435,23 @@ export const questionRefused = (text: string) => `The engine refused this questi
 // else by the id the agent gave it.
 
 export const ARTIFACT = {
-  created: (name: string, version: number) => `Artifact ${name} · v${version}`,
-  updated: (name: string, version: number) => `Updated artifact ${name} · v${version}`,
+  created: (name: string, version: number | null) => (version === null ? `Artifact ${name}` : `Artifact ${name} · v${version}`),
+  updated: (name: string, version: number | null) => (version === null ? `Updated artifact ${name}` : `Updated artifact ${name} · v${version}`),
   registering: (name: string) => `Registering artifact ${name}…`,
   failed: (name: string, error: string) => `Could not register artifact ${name}: ${error}`,
   open: 'Open',
 } as const;
 
-// The row's one line: its refusal, else Registering until a version is known, else the version it registered.
-export function artifactHeading(row: { action: 'create' | 'update'; artifactId: string; title: string | null; version: number | null; error: string | null }): string {
+// The host's refusal is written for the model: the tool's own prefix and, last, which tool to call instead. The human
+// reads the reason alone, as the artifact cells show theirs.
+const refusalForHuman = (error: string) => error.replace(/^artifact_(create|update): /, '').replace(/; use artifact_(create|update)$/, '');
+
+// The row's one line: its refusal, else Registering until the result is in, else the version it registered (without a
+// version when the result named none).
+export function artifactHeading(row: { action: 'create' | 'update'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean }): string {
   const name = row.title ?? row.artifactId;
-  if (row.error !== null) return ARTIFACT.failed(name, row.error);
-  if (row.version === null) return ARTIFACT.registering(name);
+  if (row.error !== null) return ARTIFACT.failed(name, refusalForHuman(row.error));
+  if (row.version === null && !row.answered) return ARTIFACT.registering(name);
   return (row.action === 'create' ? ARTIFACT.created : ARTIFACT.updated)(name, row.version);
 }
 
