@@ -11,7 +11,7 @@
 //   MAWS_HARNESS=1 electron-vite build && MAWS_E1_LIVE=1 pnpm exec playwright test e2e/maws-tools-live.spec.ts
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -151,13 +151,15 @@ async function begin(s: Sitting, label: string, id: string, prompt: string): Pro
   await expect(s.pane.locator(`[data-composer="${id}"]`)).toBeVisible();
   const spec = { ...launchDefaults(id as AppSessionId, s.scratch.repo), model: 'haiku', permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: 0.5 };
   expect(value(await invoke(s.page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
+  // booked as soon as the host holds it (its journal is named at the reservation), so a launch that fails before the
+  // prompt is still stopped and booked by the sitting's `finally`
+  const session: Session = { label, id, journalPath: (await statusOf(s, id)).journalPath, allowed: [], ended: false };
+  begun.push(session);
   await expect.poll(async () => (await statusOf(s, id)).process, { timeout: 120_000 }).toBe('ready');
   const message = s.pane.getByRole('textbox', { name: 'Message', exact: true });
   await message.click();
   await s.page.keyboard.insertText(prompt);
   await s.page.keyboard.press('Enter');
-  const session: Session = { label, id, journalPath: (await statusOf(s, id)).journalPath, allowed: [], ended: false };
-  begun.push(session);
   return session;
 }
 
@@ -259,6 +261,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
   const costs: { label: string; costUsd: number }[] = [];
 
   let sitting: Sitting | null = null;
+  let afterRun: { keys: number; digest: string }; // the A-15 read once the app closed
   const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_E2E_OPEN_LOG: openLog } });
   try {
     const { page } = maws;
@@ -425,10 +428,10 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
     const total = costs.reduce((sum, c) => sum + c.costUsd, 0);
     note(`spend: ${costs.map((c) => `${c.label} ${c.costUsd.toFixed(4)}`).join('; ')}; total US$${total.toFixed(4)}`);
     await maws.cleanup();
-    const after = a15();
-    note(`the app closed (every engine process it launched was stopped first; cleanup closes the app or fails); A-15 after the run: ${after.keys} keys, sha1 ${after.digest} (${after.digest === before.digest ? 'identical' : 'CHANGED'})`);
+    afterRun = a15();
+    note(`the app closed (every engine process it launched was stopped first; cleanup closes the app or fails); A-15 after the run: ${afterRun.keys} keys, sha1 ${afterRun.digest} (${afterRun.digest === before.digest ? 'identical' : 'CHANGED'})`);
     note(`scratch kept for inspection: ${sc.root} (journals under journals/)`);
-    appendFileSync(EVIDENCE_FILE, '');
   }
+  expect(afterRun.digest, 'the A-15 delta after the run: no scratch project in the owner file').toBe(before.digest);
   expect(readdirSync(join(sc.root, 'journals'))).toHaveLength(4);
 });
