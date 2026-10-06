@@ -447,14 +447,17 @@ describe('replay pacing (MAWS_E2E_REPLAY_ROW_MS)', () => {
     expect(await it.next()).toMatchObject({ done: true });
   });
 
-  it('a kill during the wait ends the stream without playing the row', async () => {
+  it('a kill during the wait ends the stream at once, without playing the row', async () => {
     vi.useFakeTimers();
     const transport = replayEngine(journal, { prelude, rowDelayMs: 1_000 });
     const it = transport.frames[Symbol.asyncIterator]();
-    const next = it.next();
+    let first: IteratorResult<TransportItem> | null = null;
+    void it.next().then((r) => (first = r));
+    await vi.advanceTimersByTimeAsync(10); // the iterator is in the row's wait
     transport.kill('SIGTERM');
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(await next).toMatchObject({ done: true });
+    await vi.advanceTimersByTimeAsync(0); // no time passes: the kill wakes the wait
+    expect(first).toMatchObject({ done: true });
+    expect(vi.getTimerCount()).toBe(0); // the wait's timer is cleared
     expect(await transport.exited).toEqual({ code: null, signal: 'SIGTERM' });
   });
 

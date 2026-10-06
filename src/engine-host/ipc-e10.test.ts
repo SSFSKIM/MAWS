@@ -218,15 +218,15 @@ describe('the supervisor’s clocks over the engine host (E10)', () => {
 // E10 (Design 12): `replayRowMs` (MAWS_E2E_REPLAY_ROW_MS under MAWS_E2E=1, read by the entry) paces a `spec.replay` launch.
 describe('a paced replay launch (E10)', () => {
   it('holds each `in` row for the pace, so the turn the fixture recorded has not ended while its first rows wait', async () => {
-    const paced = engineHost({ replayRowMs: 2_000 });
+    const paced = engineHost({ replayRowMs: 60_000 }); // the stop below ends its wait at once
     const plain = engineHost();
     for (const [host, id] of [[paced, 'app-paced'], [plain, 'app-plain']] as const) {
       await host.call('session.launch', { spec: spec(id) });
       await until(() => host.statuses(id).some((s) => s.process === 'ready'), `${id} ready`); // the handshake is the prelude's, unpaced
       await host.call('session.send', { appSessionId: id as AppSessionId, content: 'Reply with exactly OK' });
     }
+    // the paced turn was sent first, so unpaced it would have ended before the plain one launched and played its turn
     await until(() => plain.events('app-plain').some((e) => e.kind === 'turn.ended'), 'the unpaced turn');
-    await new Promise((r) => setTimeout(r, 300));
     expect(paced.events('app-paced').some((e) => e.kind === 'turn.ended')).toBe(false);
     await paced.call('session.stop', { appSessionId: 'app-paced' as AppSessionId, reason: 'stop' });
     await plain.call('session.stop', { appSessionId: 'app-plain' as AppSessionId, reason: 'stop' });

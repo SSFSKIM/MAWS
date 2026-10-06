@@ -135,6 +135,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
   let wake: (() => void) | null = null; // the frames iterator waiting for a write or a kill
   let held: JournalRow | null = null; // the `out` row `onHold` was last told about
   let paced = -1; // E10: the index of the `in` row whose delay has run
+  let endPacing: (() => void) | null = null; // E10: ends a row's wait early (a kill), never a write
   let resolveExited!: (v: { code: number | null; signal: NodeJS.Signals | null }) => void;
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
 
@@ -160,6 +161,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
     for (const w of waiters.splice(0)) w.reject(new TransportClosed('the replay ended'));
     resolveExited(exit);
     wake?.();
+    endPacing?.();
   };
 
   // Skips the meta rows the replay never delivers (spawn, provenance, the probe's notes) and stderr rows (pushed on
@@ -254,7 +256,14 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
             if (row.direction === 'in') {
               if (opts.rowDelayMs && paced !== cursor) {
                 paced = cursor;
-                await new Promise((r) => setTimeout(r, opts.rowDelayMs));
+                await new Promise<void>((resolve) => {
+                  const timer = setTimeout(resolve, opts.rowDelayMs);
+                  endPacing = () => {
+                    clearTimeout(timer);
+                    resolve();
+                  };
+                });
+                endPacing = null;
                 continue; // the replay may have ended meanwhile, or an injected answer may go first
               }
               cursor += 1;
