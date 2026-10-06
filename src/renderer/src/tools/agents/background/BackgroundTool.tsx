@@ -175,7 +175,7 @@ function BackgroundBody({ state, ctx }: { state: BackgroundHandle; ctx: PanelToo
   const own = snapshot.appSessionId === appSessionId;
   if (own && snapshot.view.kind === 'run') {
     const { stopErrors } = snapshot;
-    return <RunWidget key={appSessionId} appSessionId={appSessionId} handle={state} runId={snapshot.view.taskId} phase={snapshot.view.phase} stopError={(taskId) => stopErrors.get(taskId) ?? null} ctx={ctx} />;
+    return <RunWidget key={appSessionId} appSessionId={appSessionId} handle={state} openedOn={snapshot.view.taskId} phase={snapshot.view.phase} stopError={(taskId) => stopErrors.get(taskId) ?? null} ctx={ctx} />;
   }
   return <ListView key={appSessionId} appSessionId={appSessionId} handle={state} snapshot={snapshot} own={own} ctx={ctx} />;
 }
@@ -199,7 +199,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const stopErrors = own ? snapshot.stopErrors : new Map<string, string>();
 
   const expanded = snapshot.expanded;
-  // A running task's elapsed (and a running workflow's agent times) tick once a second; an ended shell's or monitor's
+  // A running task's elapsed (a running workflow's on its card's line) ticks once a second; an ended shell's or monitor's
   // `<ago>` on the slow tick. Neither ticks while its section is collapsed or the tool hidden.
   const shown = [...(expanded.has('workflows') ? flows : []), ...(expanded.has('shells') ? shellNodes : []), ...(expanded.has('monitors') ? monitorNodes : [])];
   const fast = useTicker(ctx.visible && shown.some((n) => n.status === 'running' && (n.kind === 'workflow' || elapsedOf(n, 0)?.live === true)));

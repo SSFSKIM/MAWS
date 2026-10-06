@@ -4,7 +4,7 @@
 // or `Queued` and a state mark) and the selected phase's agents on the right (glyph, label, model, state, time, tokens),
 // stacked below 360 px of width. A row with an agent id opens its transcript in the Subagents drill-in; one without is
 // inert. The same model draws a live run (each `workflow.progress`) and one from disk (each `fs.workflowChanged` read).
-import { useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import type { PanelToolContext } from '../../../panel/tool';
@@ -25,16 +25,16 @@ const EMPTY_GRAPH = emptyGraph();
 interface Props {
   appSessionId: AppSessionId;
   handle: BackgroundHandle;
-  runId: string; // the id the view was opened on: the node's task id, or a run id a later read folds into a task id
+  openedOn: string; // the id the view was opened on: the node's task id, or a run id a later read folds into a task id
   phase: PhaseSelection | null; // null: the default, following the run
   stopError: (taskId: TaskId) => string | null;
   ctx: PanelToolContext;
 }
 
-export function RunWidget({ appSessionId, handle, runId, phase, stopError, ctx }: Props) {
+export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ctx }: Props) {
   const graph = useTaskGraph((s) => s.entries.get(appSessionId)?.graph ?? EMPTY_GRAPH);
   const runs = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.runs ?? null);
-  const taskId = resolveRun(graph, [runId]);
+  const taskId = resolveRun(graph, [openedOn]);
   const node = taskId === null ? undefined : graph.tasks.get(taskId);
   const now = useTicker(ctx.visible && node?.status === 'running');
   const back = (
@@ -86,19 +86,19 @@ export function RunWidget({ appSessionId, handle, runId, phase, stopError, ctx }
   );
 }
 
-const optionId = (selection: PhaseSelection) => `run-phase-${selection}`;
-
 // The phase column: a listbox whose ↑/↓ move the selection (`All phases` first), each option a click target too.
 function PhaseList({ phases, selection, running, onSelect }: { phases: RunPhase[]; selection: PhaseSelection; running: boolean; onSelect: (selection: PhaseSelection) => void }) {
   const order: PhaseSelection[] = ['all', ...phases.map((p) => p.index)];
   const list = useRef<HTMLDivElement>(null);
+  const base = useId(); // option ids unique per widget, for `aria-activedescendant`
+  const optionId = (option: PhaseSelection) => `${base}phase-${option}`;
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     e.preventDefault();
     const at = Math.max(0, order.indexOf(selection));
     const next = order[Math.min(order.length - 1, Math.max(0, at + (e.key === 'ArrowDown' ? 1 : -1)))];
     onSelect(next);
-    list.current?.querySelector(`#${optionId(next)}`)?.scrollIntoView?.({ block: 'nearest' });
+    list.current?.querySelector(`[data-phase-option="${next}"]`)?.scrollIntoView?.({ block: 'nearest' });
   };
   return (
     <div
@@ -110,10 +110,11 @@ function PhaseList({ phases, selection, running, onSelect }: { phases: RunPhase[
       onKeyDown={onKeyDown}
       className="flex shrink-0 flex-col border-b border-border py-1 outline-accent focus-visible:outline-2 @min-[360px]:w-2/5 @min-[360px]:max-w-60 @min-[360px]:border-r @min-[360px]:border-b-0"
     >
-      <PhaseOption selection="all" selected={selection === 'all'} title={BACKGROUND_COPY.allPhases} count="" mark={null} onSelect={onSelect} />
+      <PhaseOption id={optionId('all')} selection="all" selected={selection === 'all'} title={BACKGROUND_COPY.allPhases} count="" mark={null} onSelect={onSelect} />
       {phases.map((phase) => (
         <PhaseOption
           key={phase.index}
+          id={optionId(phase.index)}
           selection={phase.index}
           selected={selection === phase.index}
           state={phase.state}
@@ -128,11 +129,11 @@ function PhaseList({ phases, selection, running, onSelect }: { phases: RunPhase[
 }
 
 function PhaseOption({
-  selection, selected, state, title, count, mark, onSelect,
-}: { selection: PhaseSelection; selected: boolean; state?: RunPhase['state']; title: string; count: string; mark: ReactNode; onSelect: (selection: PhaseSelection) => void }) {
+  id, selection, selected, state, title, count, mark, onSelect,
+}: { id: string; selection: PhaseSelection; selected: boolean; state?: RunPhase['state']; title: string; count: string; mark: ReactNode; onSelect: (selection: PhaseSelection) => void }) {
   return (
     <div
-      id={optionId(selection)}
+      id={id}
       role="option"
       aria-selected={selected}
       data-phase-option={selection}

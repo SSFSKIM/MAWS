@@ -239,7 +239,7 @@ describe('background work', () => {
     const list = within(widget()!).getByRole('listbox', { name: 'Phases' });
     fireEvent.keyDown(list, { key: 'ArrowDown' });
     expect(options()[1]).toBe('*Solve|1/1');
-    expect(list.getAttribute('aria-activedescendant')).toBe('run-phase-1');
+    expect(list.getAttribute('aria-activedescendant')).toBe(within(widget()!).getByRole('option', { name: /Solve/ }).id);
     fireEvent.keyDown(list, { key: 'ArrowUp' });
     fireEvent.keyDown(list, { key: 'ArrowUp' }); // stays at the first
     expect(options()[0]).toBe('*All phases|');
