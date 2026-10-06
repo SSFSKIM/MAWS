@@ -1,0 +1,373 @@
+Protocol probe, pass 3: the P1 engine probes (E0a)
+===================================================
+
+Child E0a of the P1 composite spec (docs/doperpowers/plans/2026-10-05-p1-extension.md, §9 E0a; the questions of §4 S3
+and S4; parent pin, the spec's blob, f11ae359af82c86831f052140683ed620dd25500). A spike: findings and fixtures, no
+product code. Recorded 2026-10-05 (local evening; the fixtures' timestamps are UTC, 2026-10-06 02:58 to 03:09).
+
+Engine. The installed Claude Code, the realpath of ~/.local/bin/claude at run time:
+/Users/new/.local/share/claude/versions/2.1.290, `--version` 2.1.290. The brief said 2.1.289; the installer moved the
+link to 2.1.290 at 18:07 today (2.1.289 is still under versions/). Every fixture's provenance row and every system/init
+(`claude_code_version`) name 2.1.290; the engine is unmodified (D-1). The spec library read for citations is the
+2.1.287 one (~/claude-code-bundle/2.1.287/SPEC, cli.pretty.js); where it and the wire differ, the wire is the answer
+and the difference is called out.
+
+Launch. MAWS's line (src/engine-host/launch.ts ENGINE_FLAGS: -p, stream-json both ways, --verbose,
+--permission-prompt-tool stdio, --include-partial-messages, --forward-subagent-text, --replay-user-messages,
+--include-hook-events, --setting-sources user,project,local; no --strict-mcp-config; `--settings
+{"dialogExpiry":"never"}`), MAWS's environment constants (buildEnvironment: CLAUDE_CODE_ENTRYPOINT=sdk-ts,
+CLAUDE_CODE_FORK_SUBAGENT=true, CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=1, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1,
+TERM=dumb, DISABLE_AUTOUPDATER=1) and MAWS's initialize payload (src/shared/engine/initialize.ts plus the workspace
+trust attestation for the cwd), routed through ClaudeUsage's relay (ANTHROPIC_BASE_URL=http://127.0.0.1:8641,
+ANTHROPIC_AUTH_TOKEN=claudeusage-local-gateway, ENABLE_TOOL_SEARCH=true; GET /api/hello answered 200 before every
+launch). Model haiku (claude-haiku-4-5-20251001), default permission mode, a pinned --session-id. Probe guards MAWS
+does not pass: --max-budget-usd 0.30 and --debug-file. Every run had its own scratch root under /tmp (a CLAUDE_CONFIG_DIR
+holding settings.json `{}` and a .claude.json trusting the cwd, a seeded git repository, the debug log), built from an
+emptied environment, deleted afterwards; the owner's ~/.claude and ~/.claude.json were never written. Every process
+was stopped through `end_session {reason:"stop"}` and exited 0.
+
+Owner-file delta (spec A-15). Before the first live run,
+  python3 -c "import json;d=json.load(open('$HOME/.claude.json'));print(sorted(k for k in d.get('projects',{}) if k.startswith('/tmp') or k.startswith('/private/tmp')))"
+printed 24 keys (listed in the appendix; sha1 prefix 95564b4c8f0f of the newline-joined list). Every fixture carries
+an `owner_file_check` meta row before the spawn and after the exit: count 24, digest 95564b4c8f0f, `same: true`, in
+all six fixtures and in the four discarded first takes. Nothing of E0a's reached the owner's file.
+
+Spend. The result frames' `total_cost_usd`, summed over every live session including the four first takes that were
+re-recorded after a scenario fix: US$0.29 (fork start+flag 0.031 twice, SDK MCP 0.039 twice, side question 0.026 then
+0.036, question preview 0.052 then 0.038). Side questions may not be counted in a result's total (they run outside the
+turn); the relay's ledger is the authority.
+
+Fixtures (spikes/protocol-probe/fixtures/pass3/) and scenarios (spikes/protocol-probe/scenarios/pass3/, run with
+`node run-pass3.mjs <name>` from spikes/protocol-probe):
+  p1-sdk-mcp-roundtrip.jsonl          p1-sdk-mcp.mjs            Q1
+  p1-fork-start.jsonl                 p1-fork.mjs               Q2 (the control request on a live session)
+  p1-fork-session-flag.jsonl          p1-fork.mjs               Q2 (the --fork-session launch, for comparison)
+  p1-side-question-session.jsonl      p1-side-question.mjs      Q3
+  p1-question-preview-unset.jsonl     p1-question-preview.mjs   Q4 (MAWS's launch as it is)
+  p1-question-preview-html.jsonl      p1-question-preview.mjs   Q4 (CLAUDE_CODE_QUESTION_PREVIEW_FORMAT=html)
+  p1-common.mjs holds the shared launch (the relay gate, the owner-file delta, the scratch run, the summaries).
+Each provenance row: charter docs/charter.md, child E0a, pin f11ae359…, document (the P1 spec), engine path and
+version, model, the question. Seqs below are the fixture's `seq` column.
+
+
+Q1. The SDK MCP round trip (spec §4 S3; SPEC 45 §45.21)
+--------------------------------------------------------
+
+Answer: yes. A server named in `initialize.sdkMcpServers` is handshaken by the engine over `mcp_message` before the
+initialize answer returns, its tool is in system/init.tools as `mcp__maws__echo_file`, the model calls it, the result
+reaches the model as ordinary tool_result content, a client-sent `notifications/tools/list_changed` makes the engine
+re-list, and `mcp_set_servers` adds a second SDK server mid-session, with one trap: it is authoritative.
+
+Fixture p1-sdk-mcp-roundtrip.jsonl (session ef3cd43b-fafc-4a6d-b127-70e6c9c22e24; US$0.039, three haiku turns).
+
+1. Registration and handshake. The initialize request (seq 4) is MAWS's payload plus `sdkMcpServers: ["maws"]`. Before
+   its answer, the engine drives the MCP handshake as the client, each JSON-RPC message wrapped in a control_request
+   `{subtype:"mcp_message", server_name:"maws", message}`:
+   - seq 5: `{jsonrpc:"2.0", id:0, method:"initialize", params:{protocolVersion:"2025-11-25", capabilities:{},
+     clientInfo:{name:"claude-code", title:"Claude Code", description, websiteUrl, version:"2.1.290"}}}`. The host answers
+     the control request with `{mcp_response: <the JSON-RPC response>}` (seq 6: result protocolVersion 2025-11-25,
+     capabilities {tools:{listChanged:true}}, serverInfo). The engine echoes the host's control_response back on stdout
+     (seq 9; the known echo, pass 3's integrity rule).
+   - seq 7: the initialize answer, with no `sdk_mcp_manifests_parked` (none were sent) and `capabilities:
+     ["ui_surface_v1"]`.
+   - seq 10: `{jsonrpc:"2.0", method:"notifications/initialized"}` (no id). The host answers as the official SDK does
+     (S287 chunk-j0381q8k.js:591107): `{mcp_response:{jsonrpc:"2.0", result:{}, id:0}}` (seq 11).
+   - seq 13: `{jsonrpc:"2.0", id:1, method:"tools/list"}`; the host returns the tool list (seq 14; name, description,
+     inputSchema).
+   The protocol version the engine offers is the one SPEC 45 §45.21.3 names (`Ide`, 2025-11-25). The engine sent no
+   `sdkMcpServerManifests`-related frame and parked nothing; the control-channel handshake is the path for a host that
+   sends names only.
+
+2. The tool list. The first turn's system/init (seq 21) lists `mcp__maws__echo_file` after the built-in tools and
+   `mcp_servers: [{name:"maws", status:"connected", source:"sdk"}]`; its capabilities include
+   `sdk_mcp_tools_list_changed` and `sdk_mcp_manifests`. system/init is emitted at the start of every turn (seqs 21, 111,
+   224), each time with the tool list as it then stands (one, two, then three MCP tools: the `initToolsPerFrame` note at
+   seq 292).
+
+3. The call, as the host and the model see it. Under MAWS's launch (ENABLE_TOOL_SEARCH=true) the MCP tool is a deferred
+   tool: the model first calls `ToolSearch {query:"select:mcp__maws__echo_file", max_results:1}` (seq 44) and receives a
+   `tool_reference` block (seq 46), then calls `mcp__maws__echo_file {path:"probe.txt"}` (seq 61). `get_context_usage`
+   confirms it (seq 105: `mcpTools: [{name, serverName:"maws", tokens, isLoaded}]`, the newly added tool `isLoaded:
+   false`, and a category "MCP tools (deferred)"). The permission request (seq 63) is an ordinary can_use_tool:
+   `{tool_name:"mcp__maws__echo_file", mcp_server:{name:"maws", source:"sdk"}, display_name:"Echo File", input:{path},
+   permission_suggestions:[{type:"addRules", rules:[{toolName:"mcp__maws__echo_file"}], behavior:"allow",
+   destination:"localSettings"}], tool_use_id}`; the probe allowed it (seq 65). Then the engine sends the call (seq 71):
+   `{jsonrpc:"2.0", id:2, method:"tools/call", params:{name:"echo_file", arguments:{path:"probe.txt"},
+   _meta:{"claudecode/toolUseId":"toolu_01EThq…", progressToken:2}}}`; the host answers (seq 72)
+   `{mcp_response:{jsonrpc:"2.0", id:2, result:{content:[{type:"text", text:"MCP_ECHO_7731\n"}]}}}`; the model sees the
+   tool_result user frame (seq 74): `content:[{type:"text", text:"MCP_ECHO_7731\n"}]`, `tool_use_result` the same array,
+   no `tool_result_meta`; its reply is the file's text. `_meta["claudecode/toolUseId"]` correlates the MCP call with the
+   transcript's tool_use id without relying on order.
+
+4. The tool list changes mid-session, two ways.
+   - The host's own notification (the `sdk_mcp_tools_list_changed` capability): after adding a tool to the running
+     server the probe sent `control_request {subtype:"mcp_message", server_name:"maws", message:{jsonrpc:"2.0",
+     method:"notifications/tools/list_changed"}}` (seq 96). The engine acknowledged with an empty success (seq 99:
+     `{subtype:"success", request_id}` with no `response` key, as SPEC 45 §45.21 says) and re-listed at once (seq 101,
+     `tools/list` id 3). `get_context_usage` then showed both tools (seq 105), the next turn's system/init listed both
+     (seq 111), and the model called the new one (seq 151 tool_use, 153 can_use_tool, 161 tools/call, 164 result "QUIET").
+     No other frame announces the change: no system subtype, no commands_changed.
+   - `mcp_set_servers`. `{servers:{maws2:{type:"sdk", name:"maws2"}}}` (seq 180) answered (seq 183) `{added:["maws2"],
+     removed:["maws"], errors:{}}`: the request is authoritative for the SDK lane (S287 cli.pretty.js:995966, `jp(servers,
+     {authoritative:true, caller:"mcp_set_servers"})`), so the map is the whole set and an omitted server is removed.
+     Re-sending both (seq 185) answered `{added:["maws"], removed:[], errors:{}}` (seq 188) and the engine handshook both
+     servers again (maws2: initialize seq 186, initialized 191, tools/list 194 after the first request; then maws2
+     initialize 197 and maws initialize 199, initialized 202 and 205, tools/list 208 and 211 after the second; the
+     already-registered maws2 was re-initialised too). `mcp_status` (seq 216) then listed both with `status:"connected",
+     scope:"dynamic", source:"sdk", serverInfo, tools:[{name, annotations:{}}]`; the third turn's system/init (seq 224)
+     listed all three tools and the model called `mcp__maws2__shout` (seq 264; can_use_tool 266 with mcp_server
+     {name:"maws2", source:"sdk"}; tools/call 274; result "hello!!!" at 277).
+
+5. The session JSONL (seq 299, `jsonl_mcp_records`: 81 records, the matching ones in full). The call is recorded like any
+   tool: an assistant record whose message content is the tool_use block `{type:"tool_use", id, name:"mcp__maws__echo_file",
+   input, caller:{type:"direct"}}` (keys: apiBlockIndex, cwd, entrypoint, gitBranch, isSidechain, message, parentUuid,
+   perTurnEffort, requestId, sessionId, timestamp, type, userType, uuid, version), then a user record with the tool_result
+   block and `toolUseResult: [{type:"text", text:"MCP_ECHO_7731\n"}]`, `sourceToolAssistantUUID` naming the assistant
+   record, `promptId`. The ToolSearch step is recorded the same way (its `toolUseResult: {matches, query,
+   total_deferred_tools}`). The file's key set also carries `attributionMcpServer` and `attributionMcpTool` (SPEC 11, the
+   attribution fields of a query that ran after an MCP tool). Nothing in the transcript names the server as an SDK one:
+   the "sdk" source lives only in system/init.mcp_servers, can_use_tool.mcp_server and mcp_status.
+
+6. `claim_session` (not exercised). Its request carries `sdk_mcp_servers?` and its answer `sdk_mcp_settled` (SPEC 45
+   control table, line 4286), so a prewarmed spare could be bound with the server set at claim time; P-8 keeps the spare
+   out of this phase.
+
+What MAWS must implement (E1). Declare `sdkMcpServers: ["maws"]` in the initialize request and answer every
+`control_request/mcp_message` for `server_name === "maws"` with `{mcp_response}` before and after the initialize answer
+(the handshake interleaves with it); answer a notification with `{jsonrpc:"2.0", result:{}, id:0}`; serve initialize
+(echo the offered protocolVersion, advertise `tools:{listChanged:true}`), ping, tools/list and tools/call, and answer
+unknown methods with a JSON-RPC error. A JSON-RPC request from the engine has no timeout (SPEC 45 §45.21.1), so a blocking
+`ask` can wait for the human; the engine still shows the turn as running. Correlate a tools/call with the transcript
+through `params._meta["claudecode/toolUseId"]`. Treat can_use_tool for `mcp__maws__*` as any MCP permission
+(`mcp_server.source === "sdk"` identifies ours). To add a tool at runtime send `notifications/tools/list_changed`
+client→CLI and expect a tools/list; to add a server mid-session send `mcp_set_servers` with the complete SDK server map
+(every server MAWS hosts), not the delta. Expect the model to ToolSearch our tools first: each tool's description must
+carry the words the model will search for (the fallback text of D-12 belongs in the description, which is what
+ToolSearch indexes). The normaliser must map `control_request/mcp_message` (today `frame.unknown`, allowlisted in the
+conformance suite until E1 maps it).
+
+Open points. The timeout on a notification or response frame from the engine is 70 s (SPEC 45 §45.21.1); the probe
+answered within milliseconds, so the expiry path is unrecorded. A tools/call error (JSON-RPC `error` or `isError:
+true`) was not exercised. Whether a server MAWS removes with `mcp_set_servers` leaves its tools callable until the next
+turn was not exercised (the removal here was immediately undone). The re-handshake of an already registered server on an
+authoritative set is a cost E1 should keep in mind (two handshakes per set).
+
+
+Q2. `fork_conversation` against the `--fork-session` launch (spec §4 S4, §3 C; SPEC 45 control table, SPEC 36 §10.6)
+----------------------------------------------------------------------------------------------------------------------
+
+Answer: no. On 2.1.290 under MAWS's launch `fork_conversation` never forks: every well-typed request is answered in a
+success envelope with `{forked:false, error:"unsupported", reason:"unsupported"}`, no child session starts and no new
+transcript appears. The engine's own fork requires a Remote Control bridge or an `--sdk-url` hosted session and, even
+there, spawns a background process. `--fork-session` (C10's path) remains the one fork MAWS has; it is a new launch, it
+copies the history under the new id, and its JSONL carries no lineage field.
+
+Fixture p1-fork-start.jsonl (session 09bfa533-4f81-4fb9-866b-048966c2d474, pinned X; US$0.014) and
+p1-fork-session-flag.jsonl (session df5c0848-0649-44b3-97fe-b3540f7d766b, pinned Y, `--resume X --fork-session
+--session-id Y`; US$0.017).
+
+1. Shapes on the wire. After one turn ("Remember the word ZEBRA", result seq 28), four requests:
+   - seq 29 `{subtype:"fork_conversation", title:"MAWS E0a fork"}` → seq 32 success `{forked:false, error:"unsupported",
+     reason:"unsupported"}`.
+   - seq 33 `{…, target_message_uuid:"76a7a792-…" (the prompt's uuid), title}` → seq 34 the same answer.
+   - seq 35 `{…, title:5}` → seq 36 error envelope `"fork_conversation: title must be a string"` (type validation runs
+     before the capability check; `target_message_uuid` is validated the same way, SPEC 36 §10.6).
+   - seq 37 `{subtype:"fork_conversation"}` → seq 38 the same unsupported answer.
+   The project directory held the same two entries before and after (seq 40: `X.jsonl`, `memory`), and the only system
+   frame in the window was the idle `session_state_changed` (seq 31). The same request on the forked session answers the
+   same (p1-fork-session-flag seq 33 → 34).
+   SPEC 45's table gives the success shape `forked`, `sessionId`, `targetMessageUuid?`, `prefillText?` when true and
+   `error` when false; the wire adds `reason`. S287's headless handler (cli.pretty.js:995571 → `Qv`, :991992-992005)
+   returns unsupported unless `--sdk-url` resolves a fork target and the first-party provider and egress checks pass; the
+   REPL-bridge stub of SPEC 36 §10.6 answers `reason:"requires_remote_control_server"`, which the headless path does not
+   use (the wire says `"unsupported"`, as pass 2 recorded on 2.1.283). The implementation behind a supported fork
+   (cli.pretty.js:514725-514810, `bZe`) creates a cloud session, uploads the history and calls `spawnBackgroundFork(…,
+   "remote_fork", …)`: a new process, not an in-process child.
+
+2. The `--fork-session` launch, for comparison. system/init.session_id is the pin Y (seq 11); the fork recalls ZEBRA
+   (seq 27, note 30). After exit, `Y.jsonl` holds 33 records (seq 39, `fork_jsonl`; seq 40 `jsonl_snapshot` has them in
+   full): session-level records first (`ai-title`, `mode`, `atis-latch`, `file-history-snapshot`, two
+   `queue-operation`), then the parent's history re-written under `sessionId: Y` with the parent's record uuids and
+   parentUuid chain intact (15 of the child's uuids are the parent's; the first user record's `parentUuid` is null), then
+   the fork's own turn. No record of the child carries `forkedFrom`, `forkedFromSessionId` or `parentSessionId`; the
+   parent's file is unchanged (size and mtime). This matches SPEC 35 §35.16.6 ("no bulk copy of the parent file and no
+   pointer record"; the loaded messages are re-written as the new session proceeds) and §35's producer table:
+   `forkedFrom` has exactly one producer, the `/branch` command.
+
+3. Which can start a side thread "at the current point" with the parent's context. Neither in-process. `--fork-session`
+   does: a new process resumed from the parent's transcript as it stands on disk, with the parent's cwd and
+   permissions (C10), then its own turns; it takes the parent's history up to the last record written, which is "the
+   current point" once the parent's turn has flushed. A fork taken while the parent is mid-turn gets the history up to
+   the last flushed record (unverified here; W7 recorded the engine's branch-on-collision behaviour). The engine's
+   `fork_conversation` would not serve MAWS even if it were supported: it forks into a cloud-hosted background session.
+
+What MAWS must implement (E3). Side threads use C10's `--fork-session` launch (spec A-4 resolves to the flag). Lineage
+must come from the launch intent, persisted by MAWS (X11's `lineage` from `intent.ts`), because the disk carries no
+parent pointer.
+
+[parent-impact] X11 says lineage is "filled from the launch intent and, on the disk path, from the JSONL's `forkedFrom`
+with `kind: 'fork'`", and §8 says `session.started.forked` comes from `forkedFrom` on the disk path
+(src/engine-host/fs/backfill.ts:95). On 2.1.290 a `--fork-session` child writes no `forkedFrom`; only a `/branch` fork
+does. The disk path can detect a fork only by the parent's uuids reappearing under another sessionId in the same project
+directory (15 shared uuids here), or not at all. X11's disk-path clause should be re-worded to that or dropped; the
+launch intent is the one reliable source.
+
+Open points. `fork_conversation` under a `--sdk-url` hosted session was not probed (MAWS does not launch one). The
+`forkedFrom`-bearing `/branch` fork is a terminal command MAWS does not issue.
+
+
+Q3. `side_question`, the `/btw` path (spec §3 C, §4 S4; SPEC 45 §45.22.11, SPEC 11 §11.9.2 and §11.11.6)
+---------------------------------------------------------------------------------------------------------
+
+Answer: yes. `{subtype:"side_question", question, history?}` answers `{response, synthetic}` whole, not streamed, after
+one `system/control_request_progress {status:"started"}`; it runs beside a turn without blocking it (answered while a
+20 s Bash tool was running); and it leaves no record in the session JSONL.
+
+Fixture p1-side-question-session.jsonl (session 823017bb-4d92-482e-bc26-1c7030070306; US$0.036 as the results count
+it).
+
+1. Idle. After the planting turn (result seq 141), seq 143 `{subtype:"side_question", question:"What word did I ask
+   you to remember? Answer with just the word."}` → seq 146 `{type:"system", subtype:"control_request_progress",
+   request_id, status:"started", uuid, session_id}` → seq 147 success `{response:"ZEBRA", synthetic:false}`, 2.1 s. The
+   frames between request and answer (seqs 144 to 146) are the previous prompt's `command_lifecycle completed`, the idle
+   `session_state_changed` and the progress frame: no assistant frame, no stream_event, no result. The answer arrives
+   whole in the control_response. The question was answered from the shared conversation (the word planted by the main
+   turn), as SPEC 11 §11.11.6 describes (the side question's prompt is the conversation plus the §11.9.2 reminder).
+2. `history`. seq 150 `{…, question:"Repeat that word in lowercase letters, nothing else.", history:[{question,
+   response}]}` → seq 152 `{response:"zebra", synthetic:false}`: the bridge's documented shape (an array of {question,
+   response} strings, cli.pretty.js:139355) is accepted by the headless handler too, which destructures `{question,
+   history}` without validating (cli.pretty.js:996573). The `/btw` thread history is the host's to keep and resend; the
+   engine keeps none across requests.
+3. Mid-turn. A prompt asking for `sleep 20; echo SLEPT_OK` (seq 154); the assistant's Bash tool_use (seq 184) ran with
+   no can_use_tool (sleep and echo pass the engine's safe-command analysis, SPEC 25). 1.5 s later, seq 189 side_question
+   → seq 190 progress → seq 191 `{response:"ZEBRA", synthetic:false}` (1.3 s), then the Bash tool_result (seq 194,
+   `SLEPT_OK`, about 20 s after the tool_use), the assistant's text (seq 204) and the turn's result (seq 208, success,
+   num_turns 2). The side question answered 3 frames before the tool result and the main turn finished unaffected: the
+   answer is concurrent, not queued behind the turn. SPEC 45 §45.22.11's other outcomes, "Session is shutting down" and
+   "Side question cancelled" (error envelopes), and the `api_retry` progress status (§45.14.4) were not provoked.
+4. Records. The session JSONL (seq 217; 52 records) holds no record of any of the three side questions: no text of
+   theirs, no `querySource` or `forkOrigin` key on any record (both sets are `[null]`), as SPEC 11 §11.11.6 says
+   (`skipTranscript: true`, `skipCacheWrite: true`). `forkOrigin: "btw"` is the terminal's `/btw`-as-fork path
+   (`spawnForkFromDirective(…, "btw")`), not the control request's; `querySource: "side_question"` is in-memory only.
+   The answer shape carries `synthetic` (true when the engine substituted the text: a model that tried to call a tool,
+   an API error, a cut-off; §11.11.6 step 4) and may carry `refusal_fallback {original_model, fallback_model, content}`
+   (the SDK wrapper, cli.pretty.js:591405-591406); `response` is null when there was no answer.
+
+What MAWS must implement (E3). `/btw` sends `side_question {question, history}` with the pane's own exchange history;
+the pane draws the answer when the control_response arrives (no deltas to render; a spinner from the `started` progress
+frame), shows `synthetic` answers as the engine's notices, and keeps the main transcript untouched (there is no row to
+draw from the JSONL and none should be synthesised there). The typed schema in src/shared/wire/control.ts is wrong:
+`SideQuestionResponseSchema` expects `{text}`; the wire is `{response: string|null, synthetic?: boolean,
+refusal_fallback?: {original_model, fallback_model, content}}`, and `SideQuestionRequest` should gain `history?:
+{question, response}[]`. Until E3 corrects it, the conformance suite lists the three side_question requests of this
+fixture as expected `invalid_response` failures. Map `system/control_request_progress` (allowlisted as unknown today).
+Promoting a side question to a side thread (§3 C) means a `--fork-session` launch plus a first prompt carrying the
+side exchange; nothing in the engine links the two.
+
+Open points. Whether a side question's tokens count in the main result's `total_cost_usd` (the result's total rose
+from 0.0217 after the planting turn to 0.0363 after the Bash turn; the two idle side questions in between are not
+separable in that figure). The 600 s client timeout the engine's own bridge applies to side questions
+(cli.pretty.js:468261) is not a wire fact; the host chooses its own. Cancellation (`control_cancel_request` for the
+request_id) was not exercised.
+
+
+Q4. An AskUserQuestion preview-format declaration (spec §9 E0a; SPEC 21 §12.4 "Preview section")
+---------------------------------------------------------------------------------------------------
+
+Answer: no declaration exists in the handshake or in any control request; the one client knob is the environment
+variable CLAUDE_CODE_QUESTION_PREVIEW_FORMAT (`markdown` or `html`) at launch, and under MAWS's launch (an `sdk-*`
+entrypoint) no format is in effect unless MAWS sets it. Setting `html` makes the engine validate every preview before
+the permission request and tells the model what a preview is.
+
+Where the format lives in the engine. 2.1.287 (cli.pretty.js:868048-868052): at startup, `CLAUDE_CODE_QUESTION_PREVIEW_FORMAT`
+is honoured when it is exactly `markdown` or `html`; otherwise the format defaults to `markdown` for client types other
+than `sdk-*`, `claude-desktop`, `local-agent`, `remote` and the vscode case, and is left unset for those. The setter
+(`replaceQuestionPreviewFormat`, :375779, called through `Wsr`, :377744) has no other caller: no initialize field, no
+control request. The TypeScript SDK's `askUserQuestion.previewFormat` option is exactly this variable
+(cli.pretty.js:592010-592011). The installed binaries carry the same key (`strings` of versions/2.1.289 and
+versions/2.1.290 both contain `CLAUDE_CODE_QUESTION_PREVIEW_FORMAT`). The initialize request schema (SPEC 45 control
+table) has no preview field. The format decides the tool's description text (SPEC 21 §12.4: the "Preview section",
+markdown or HTML wording, appended only when a format is configured) and, for `html`, input validation (§12.4's
+`validateInput` table).
+
+Fixtures p1-question-preview-unset.jsonl (session 3de1e5cd-3db0-477e-bd17-ce0529fa85ae; US$0.018) and
+p1-question-preview-html.jsonl (session 87dd8e69-743d-44b3-8f68-4722ed24e0fc; US$0.019). The same prompt in both: one
+AskUserQuestion with two options, option A's preview plain text ("Layout A in plain text"), option B's an HTML fragment
+(`<pre style="margin:0">Layout B</pre>`); on an error, reply with the error text, else the chosen label.
+
+1. The handshake. In both arms the initialize answer (seq 6) and system/init (seq 87 / 93) contain no key or string
+   mentioning "preview" (the `handshake_preview_scan` rows list every path that would; `mentions: []`).
+2. Unset (MAWS's launch as it is). The model called the tool with both previews (seq 62); can_use_tool arrived with
+   them intact (seq 64: `input.questions[0].options[].preview`); the probe answered `{behavior:"allow",
+   updatedInput:{…input, answers:{"Which layout?":"A"}}}` (seq 67); the tool_result (seq 72) reads `Your questions have
+   been answered: "Which layout?"="A". You can now continue with these answers in mind.`; the model replied `A`. With
+   no format in effect the engine neither validates nor describes previews; the model used the field because the prompt
+   named it (the schema always has `preview`), and MAWS's card would get whatever text the model wrote, markdown or
+   HTML.
+3. `CLAUDE_CODE_QUESTION_PREVIEW_FORMAT=html`. The same tool_use (seq 62) was refused before any permission request: the
+   tool_result (seq 64, `is_error: true`) is `<tool_use_error>Option "A" in question "Which layout?": preview must contain
+   HTML (previewFormat is set to "html"). Wrap content in a tag like <div> or <pre>.</tool_use_error>` (the §12.4 table's
+   third rule, verbatim), no can_use_tool reached the host, and the model echoed the error (result seq 92, success). The
+   other two rules (`preview must be an HTML fragment, not a full document…`, `preview must not contain <script> or
+   <style> tags…`) were not provoked.
+
+What MAWS must implement (E1 or wherever the question card is owned). Decide the preview format per launch and set
+`CLAUDE_CODE_QUESTION_PREVIEW_FORMAT` in buildEnvironment: `html` if the card renders fragments in its sandboxed frame
+(request-card/variants/Question.tsx already does, §8), since that also gives the model the HTML wording and the engine's
+validation; `markdown` if the card renders markdown. Leaving it unset keeps the model uninformed about previews and
+delivers unvalidated text. Nothing on the wire tells the host which format is in effect; MAWS knows because it set it.
+
+Open points. The `markdown` arm is identical on the wire to unset except for the model's tool description (not visible),
+so it was not recorded. `CLAUDE_CODE_QUESTION_EXTENDED` and `CLAUDE_CODE_QUESTION_OPTIONAL_DESCRIPTIONS` (the same startup
+block, honoured only for the terminal and remote client types, cli.pretty.js:868054-868057) were not probed.
+
+
+Conformance-suite admission
+---------------------------
+
+- spikes/protocol-probe/fixtures.test.mjs: the pass-3 provenance check accepts a P1 child id (`/^[CE]\d+[a-z]?$/`);
+  all 138 node:test cases pass with the six fixtures in.
+- src/engine-host/conformance/fixtures.test.ts: the six journals join the pass-3 list; `control_request/mcp_message`
+  and `system/control_request_progress` are allowlisted as unknown (the way R0 admitted the mods pushes until R1 mapped
+  them), `control_request_progress` joins the system-subtype census and `frame.unknown` the kind census;
+  `pass3/p1-side-question-session` expects three `side_question` `invalid_response` failures (the `{text}` schema) and
+  `pass3/p1-fork-start` one `fork_conversation` failure (the bad-typed request, refused with an error envelope and no
+  error code). No product code changes.
+
+
+Not settled
+-----------
+
+- The spec's §3 A says the engine adds SDK servers "at initialize and through mcp_set_servers" and asks whether the
+  latter suffices mid-session: it does, with the whole-map rule above, and the client→CLI `notifications/tools/list_changed`
+  is the cheaper way to add tools to a server MAWS already hosts.
+- Both probes of forks and side questions ran one engine process each; a side question during a subagent's run, or a
+  `--fork-session` of a parent still mid-turn, were not recorded.
+
+
+Appendix: the owner-file check (24 keys, before the first live run and after every run)
+---------------------------------------------------------------------------------------
+/private/tmp
+/private/tmp/b2-ws
+/private/tmp/bench-browser
+/private/tmp/bgt2
+/private/tmp/bgtest
+/private/tmp/cc-capture
+/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad
+/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe
+/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest
+/private/tmp/claude-plugin-smoke-15
+/private/tmp/fold-live
+/private/tmp/fold-smoke
+/private/tmp/hooktest
+/private/tmp/maws-accept
+/private/tmp/maws-harness/a
+/private/tmp/md-test
+/private/tmp/oc-ws-b
+/private/tmp/sminos-probe
+/private/tmp/th-pad.Nnz1
+/private/tmp/th-pad.WI9D
+/private/tmp/th-test
+/private/tmp/th-tools.Ozkz
+/private/tmp/th-tools.VY2Y
+/private/tmp/wr-test
