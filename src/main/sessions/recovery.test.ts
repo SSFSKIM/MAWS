@@ -427,17 +427,59 @@ describe('recovery with kept sessions (E10)', () => {
       handedOff(pin);
     });
 
-    it('a re-run leaves what commands touched meanwhile: a trust card start and a patched intent are not read as a quit', async () => {
+    const DRAFT = { draft: { doc: { type: 'doc' }, attachments: [], updatedAt: '2026-10-06T00:00:00.000Z' } };
+
+    it('a re-run does not read a trust card start made meanwhile as a quit; an interrupted start with only its draft patched still gets its card', async () => {
       await h.restart({ keep: true, unavailable: true });
       const card = (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.dir('untrusted') } })).appSessionId;
       expect(await h.service.startSession(card, { message: MESSAGE, options: {} })).toMatchObject({ status: 'needs_trust' });
-      await h.service.patch(interrupted, { draft: { doc: { type: 'doc' }, attachments: [], updatedAt: '2026-10-06T00:00:00.000Z' } });
+      await h.service.patch(interrupted, DRAFT);
       h.host.becomeReady();
       await h.service.listIntents();
       handedOff(pin); // what the deferring boot left is still recovered
       expect(intentFile(h, card)).toMatchObject({ message: MESSAGE, progress: { lastFailure: null } });
-      expect(intentFile(h, interrupted)).toMatchObject({ message: MESSAGE, progress: { lastFailure: null } });
+      expect(intentFile(h, interrupted)).toMatchObject({ message: MESSAGE, progress: { lastFailure: { message: 'MAWS quit before the session started' } } });
       expect(h.host.calledWith('session.forget')).toEqual([{ appSessionId: deadBootstrap }]); // the noted bootstrap too
+    });
+
+    // the kept session must be handed off whatever touched its intent, or a later start's rollback stops and removes it
+    const keptAfterStart = async () => {
+      handedOff(pin);
+      await h.service.startSession(id, { message: null, options: {} });
+      expect(h.host.calledWith('session.stop')).toEqual([]);
+      expect(h.index.sessions.get(id)).toMatchObject({ appId: id, engineSessionId: pin });
+      expect(h.host.table.get(id)!.process).toBe('ready');
+    };
+
+    it.each([
+      ['patched', () => h.service.patch(id, DRAFT)],
+      ['renamed', () => h.service.rename(id, 'Kept')],
+    ])('a kept intent %s while recovery waits is handed off when the host returns', async (_, touch) => {
+      await h.restart({ keep: true, unavailable: true });
+      h.host.table.set(id, { ...h.host.table.get(id)!, process: 'ready' });
+      await touch().catch(() => {}); // a rename fails while the host is unreachable; its lock still touched the id
+      h.host.becomeReady();
+      await h.service.listIntents();
+      await keptAfterStart();
+    });
+
+    it('a kept intent locked by a command during the re-run stays owed: settled after it, and reconciled before a start', async () => {
+      let reads = 0;
+      // reads: the boot's (refused), the re-run's, then the follow-up's (refused: the host is unreachable again)
+      await h.restart({ keep: true, unavailable: true, onCall: (name) => name === 'engine.sessions' && (reads += 1) === 3 && (h.host.unavailable = true) });
+      h.host.table.set(id, { ...h.host.table.get(id)!, process: 'ready' });
+      h.host.becomeReady();
+      const patched = h.service.patch(id, DRAFT); // holds the lock while it waits for the re-run
+      await h.service.listIntents();
+      await patched;
+      await h.until(() => reads === 3 && intentFile(h, id)?.progress.lastFailure != null); // the follow-up ran after the patch
+      expect(h.index.sessions.get(id)).toMatchObject({ appId: id, engineSessionId: pin }); // not settled while unreadable
+      h.host.unavailable = false;
+      await h.service.startSession(id, { message: null, options: {} }); // reconciles it first: handed off, never set up
+      expect(intentFile(h, id)).toBeNull();
+      expect(h.host.calledWith('session.stop')).toEqual([]);
+      expect(h.index.sessions.get(id)).toMatchObject({ appId: id, engineSessionId: pin });
+      expect(h.host.table.get(id)!.process).toBe('ready');
     });
 
     it('a streaming during the boot’s table read reads it again rather than waiting for the next one', async () => {
