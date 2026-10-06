@@ -108,3 +108,21 @@ pnpm -C $W test --maxWorkers=4
   Type Errors  no errors
 
 (the e2e attempts at 64103c95 are recorded above: first 34/35 with a startup timing failure, the retry 35/35)
+
+== Final source head c5fbdb63 (E5 branch fix wave 1: the close guard never saves a merge-view tab, a replaced document keeps the cursor, change loads hash only editable kinds), 2026-10-06, through waitload20.sh && with-slot.sh, one-minute load 15 ==
+
+pnpm -C $W typecheck
+  exit 0
+
+pnpm -C $W lint
+  exit 0
+
+pnpm -C $W test --maxWorkers=4
+  Test Files  460 passed | 1 skipped (461)
+       Tests  6069 passed | 1 skipped (6070)
+  Type Errors  no errors
+
+pnpm -C $W e2e:code   (source head c5fbdb63, one-minute load 17, through waitload20.sh && with-slot.sh)
+  35 passed (1.4m)   [code-tools.spec.ts 25 + code-editor.spec.ts 10; exit 0; first attempt]
+
+E5 closes on these gates: every acceptance item of docs/doperpowers/plans/2026-10-05-e5-editor.md observed; the whole-branch review converged at round two.
