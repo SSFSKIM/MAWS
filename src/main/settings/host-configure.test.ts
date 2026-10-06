@@ -2,15 +2,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandResult, HostState, Settings } from '@shared/ipc/schema';
 import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
-import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
 import { DEFAULT_IDLE_EXIT_MS, idleExitMsOf, startHostConfigure, type HostConfigureDeps } from './host-configure';
 
 const host = (state: HostState['state']): HostState => ({ state, pid: state === 'ready' ? 1 : null, restarts: 0, revision: 0 });
 
 // Settings version 10 (M3) adds `supervisor`; until then the push reads it when present and defaults otherwise.
-const withIdle = (idleExitMinutes: number | null): Settings => ({ ...SETTINGS_DEFAULTS_V9, supervisor: { idleExitMinutes, keepRunningDefault: true } }) as Settings;
+const withIdle = (idleExitMinutes: number | null): Settings => ({ ...SETTINGS_DEFAULTS_V10, supervisor: { idleExitMinutes, keepRunningDefault: true } }) as Settings;
 
-function harness(initial: HostState['state'], env: Record<string, string | undefined> = {}, settings: Settings = SETTINGS_DEFAULTS_V9) {
+function harness(initial: HostState['state'], env: Record<string, string | undefined> = {}, settings: Settings = SETTINGS_DEFAULTS_V10) {
   let current = host(initial);
   let now = settings;
   const settingsListeners = new Set<(s: Settings) => void>();
@@ -44,7 +44,7 @@ describe('the idle time main pushes', () => {
   it('is the setting in minutes, null for never, and 10 minutes while settings carry no supervisor section', () => {
     expect(idleExitMsOf(withIdle(3), {})).toBe(180_000);
     expect(idleExitMsOf(withIdle(null), {})).toBeNull();
-    expect(idleExitMsOf(SETTINGS_DEFAULTS_V9, {})).toBe(DEFAULT_IDLE_EXIT_MS);
+    expect(idleExitMsOf(SETTINGS_DEFAULTS_V10, {})).toBe(DEFAULT_IDLE_EXIT_MS);
     expect(DEFAULT_IDLE_EXIT_MS).toBe(600_000);
   });
 

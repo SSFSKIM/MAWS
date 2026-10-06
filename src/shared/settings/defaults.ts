@@ -6,7 +6,7 @@ import * as z from 'zod';
 import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
 import { ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
-export const SETTINGS_DEFAULTS_V9: Settings = {
+export const SETTINGS_DEFAULTS_V10: Settings = {
   version: 9, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
@@ -63,7 +63,7 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 });
 // C12 end
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V9);
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V10);
 
 // E9: v8 → v9, the voice section with the system locale
 const fromV8 = (v8: SettingsV8): Settings => ({ ...v8, version: 9, voice: defaults().voice });
