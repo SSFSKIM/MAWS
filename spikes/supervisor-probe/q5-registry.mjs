@@ -19,7 +19,7 @@ const checks = [
   ['parent dead: the engine reparented to launchd (PPID 1) within the first 100 ms sample', orphan?.ppid === 1],
   ['parent dead: the row is unchanged in pid, session, entrypoint', orphan?.registry?.pid === before.engine.pid && orphan?.registry?.sessionId === before.registry?.sessionId && orphan?.registry?.entrypoint === 'sdk-ts'],
   ['the row has no field naming a parent', !before.registry.keys.some((k) => /parent|ppid/i.test(k))],
-  ['the row is unlinked by the engine at its exit (not before)', q1.afterKill.registryGoneMs !== null && q1.afterKill.registryGoneMs <= q1.afterKill.engineGoneMs],
+  ['the row was gone no later than the engine vanished from ps (it outlived the parent, per the parent-dead check, and did not outlive the engine)', q1.afterKill.registryGoneMs !== null && q1.afterKill.registryGoneMs <= q1.afterKill.engineGoneMs],
 ];
 const result = {
   question: 'Q5', source: 'results/q1-parent-killed.json', engine: q1.engine,

@@ -5,8 +5,10 @@
 //      and stops at its own MAWS_USER_DATA check; a second, instrumented run records every module the chunk required
 //      and where each resolved (zod from app.asar/node_modules);
 //   3. a one-line script `require`s zod from app.asar/node_modules;
-//   4. a detached child spawned with argv0 'maws-supervisor': what `ps -o command=` and `ps -c` show, and whether
-//      `lsappinfo list` has an entry for its pid (any MAWS line there is checked against the pid);
+//   4. a detached child spawned with argv0 'maws-supervisor': what `ps -o command=` and `ps -c` show (both follow
+//      argv0 on macOS), what `top -l 1 -stats pid,command` shows (top reads the kernel's process name, as Activity
+//      Monitor does), and whether `lsappinfo list` has an entry for its pid (any MAWS line there is checked against
+//      the pid); the same ps and top readings for a child of the repository's dev Electron binary;
 //   5. `electron-fuses read --app` on the bundle (the RunAsNode fuse).
 //   node spikes/supervisor-probe/q3-electron-as-node.mjs /path/to/MAWS.app
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -45,21 +47,32 @@ result.chunkTraced = { status: traced.status, ...JSON.parse(traced.stdout.trim()
 const zod = asNode(['-e', `const r=require.resolve('zod',{paths:[${JSON.stringify(asar)}]});const z=require(r);console.log(JSON.stringify({resolved:r,object:typeof z.object,toJSONSchema:typeof z.toJSONSchema}))`]);
 result.zodOneLine = { status: zod.status, ...JSON.parse(zod.stdout.trim()) };
 
-// 4. argv0, ps and lsappinfo for a detached child of the packaged binary
+// 4. argv0, ps, top and lsappinfo for a detached child of the packaged binary (and ps and top for the dev binary)
+// `ps -o command=` and, on macOS, `ps -c -o command=` both follow argv[0]; `top` reads the kernel's process name
+// (libproc proc_name, the executable's name), which is also what Activity Monitor's Process Name shows
+const names = (pid) => ({
+  psCommand: execFileSync('ps', ['-o', 'pid=,ppid=,pgid=,stat=,command=', '-p', String(pid)], { encoding: 'utf8' }).trim(),
+  psComm: execFileSync('ps', ['-c', '-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).trim(),
+  top: execFileSync('top', ['-l', '1', '-pid', String(pid), '-stats', 'pid,command'], { encoding: 'utf8' }).split('\n').map((l) => l.trim()).filter((l) => l.startsWith(String(pid) + ' ')),
+});
+const devElectron = join(repo, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+const devChild = spawn(devElectron, ['-e', 'setTimeout(()=>{},8000)'], { detached: true, stdio: 'ignore', env: nodeEnv(), argv0: 'maws-supervisor' });
+devChild.unref();
 const child = spawn(bin, ['-e', 'setTimeout(()=>{},8000)'], { detached: true, stdio: 'ignore', env: nodeEnv(), argv0: 'maws-supervisor' });
 child.unref();
 await delay(2_000);
-const psCommand = execFileSync('ps', ['-o', 'pid=,ppid=,pgid=,stat=,command=', '-p', String(child.pid)], { encoding: 'utf8' }).trim();
-// `ps -o command=` shows argv; `ps -c -o command=` shows the kernel's p_comm (the executable's name), which is what
-// tools that read the process name rather than its argv (Activity Monitor's Process Name among them) display
-const psComm = execFileSync('ps', ['-c', '-o', 'command=', '-p', String(child.pid)], { encoding: 'utf8' }).trim();
+const { psCommand, psComm, top } = names(child.pid);
+result.devElectronChild = { binary: devElectron, pid: devChild.pid, ...names(devChild.pid) };
+try { process.kill(devChild.pid, 'SIGKILL'); } catch {}
 const listing = execFileSync('lsappinfo', ['list'], { encoding: 'utf8' });
 const entries = listing.split(/\n(?=\s*\d+\) )/);
 const mawsEntries = entries.filter((e) => /maws/i.test(e)).map((e) => ({ name: (e.match(/"([^"]+)"/) ?? [])[1] ?? null, pid: Number((e.match(/pid = (\d+)/) ?? [])[1] ?? NaN) }));
-result.lsappinfo = { childPid: child.pid, psCommand, psComm, entryForChildPid: entries.some((e) => new RegExp(`pid = ${child.pid}\\b`).test(e)), mawsEntries, totalEntries: entries.length };
+result.lsappinfo = { childPid: child.pid, psCommand, psComm, top, entryForChildPid: entries.some((e) => new RegExp(`pid = ${child.pid}\\b`).test(e)), mawsEntries, totalEntries: entries.length };
 try { process.kill(child.pid, 'SIGKILL'); } catch {}
 await delay(200);
-result.lsappinfo.childKilled = (() => { try { process.kill(child.pid, 0); return false; } catch { return true; } })();
+const gone = (pid) => { try { process.kill(pid, 0); return false; } catch { return true; } };
+result.lsappinfo.childKilled = gone(child.pid);
+result.devElectronChild.killed = gone(devChild.pid);
 
 // 5. the fuses
 result.fuses = execFileSync(join(repo, 'node_modules/.bin/electron-fuses'), ['read', '--app', appPath], { encoding: 'utf8' }).split('\n').map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').trim()).filter(Boolean);

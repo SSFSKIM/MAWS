@@ -91,10 +91,23 @@
   "object": "function",
   "toJSONSchema": "function"
  },
- "lsappinfo": {
-  "childPid": 2475,
-  "psCommand": "2475  2201  2475 Ss   maws-supervisor -e setTimeout(()=>{},8000)",
+ "devElectronChild": {
+  "binary": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+  "pid": 36276,
+  "psCommand": "36276 36269 36276 Ss   maws-supervisor -e setTimeout(()=>{},8000)",
   "psComm": "maws-supervisor",
+  "top": [
+   "36276  Electron"
+  ],
+  "killed": true
+ },
+ "lsappinfo": {
+  "childPid": 36277,
+  "psCommand": "36277 36269 36277 Ss   maws-supervisor -e setTimeout(()=>{},8000)",
+  "psComm": "maws-supervisor",
+  "top": [
+   "36277  MAWS"
+  ],
   "entryForChildPid": false,
   "mawsEntries": [
    {

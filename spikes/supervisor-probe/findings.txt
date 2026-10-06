@@ -2,7 +2,7 @@ E10 M0 — supervisor probes: findings
 =====================================
 
 Execution document: docs/doperpowers/plans/2026-10-06-e10-supervisor.md (M0; §Design 1 is what these test).
-Parent: docs/doperpowers/plans/2026-10-05-p1-extension.md §3 I, §9 E10. Run 2026-10-06 (10:48-10:58 local) on this Mac
+Parent: docs/doperpowers/plans/2026-10-05-p1-extension.md §3 I, §9 E10. Run 2026-10-06 (10:48-10:58 local; Q3 re-run at 11:09 for the kernel-name check) on this Mac
 (macOS 26 / Darwin 25.6.0, arm64), in the worktree agent-a452e5ed4f062b383.
 
 Runtimes: plain Node v22.23.2 (PATH); Electron 44.4.5 as Node v24.21.0 (W/node_modules/electron, ELECTRON_RUN_AS_NODE=1);
@@ -41,7 +41,7 @@ sleep 20 && echo q1-done; then reply: finished". 2.1.291 ran `sleep` and `echo` 
 `sleep 20` showed under the engine in ps, the probe waited 1 s and SIGKILLed the wrapper, then sampled every 100 ms.
 
 Timeline (ms after the SIGKILL; results/q1-parent-killed.json):
-  -3830  engine spawned (pid 74108, PPID = wrapper 74097, PGID 74108, STAT Ss: its own session and group)
+  -3794  engine spawned (pid 74108, PPID = wrapper 74097, PGID 74108, STAT Ss: its own session and group)
      -0  tool running: /bin/zsh -c ... (pid 74988, PGID 74988: the Bash tool's shell has its own process group)
          -> sleep 20 (pid 74996, PGID 74988)
     102  engine alive, PPID 1 (reparented to launchd), registry row present, sleep running
@@ -68,12 +68,15 @@ is_error false), and the final assistant text "finished" comes after it, followe
 such a launch would stop at the host's death; the engine's transcript does not.
 
 Why this makes the sweep load-bearing:
-  - EOF is noticed only when the engine next reads for input, i.e. after the turn ends. A turn can run for minutes or
+  - Inferred from the timeline, not traced in the engine's code: EOF takes effect only when the engine next waits for
+    input, i.e. after the turn ends. A turn can run for minutes or
     hours (an agentic task, a long build, subagents), and until it ends the orphan keeps running tools in the owner's
     repository and keeps spending, with no host to show or stop it.
-  - Not probed (it would need a second paid run): a tool that needs permission after the host died. The engine would
-    send can_use_tool into a dead pipe, and no answer can ever come. Unless the engine times such a request out, the
-    process would wait there indefinitely. The sweep is the only thing that ends that case.
+  - Not probed (it would need more paid runs): any control request the engine sends after the host died. That covers
+    can_use_tool for a tool that needs permission, mcp_message to the `maws` SDK server (MAWS declares it at every
+    launch; this probe's launch omitted --mcp-config and declared no SDK server), hook callbacks, elicitation and
+    request_user_dialog. Each goes into a dead pipe, and no answer can ever come. Unless the engine times such a
+    request out, the process would wait there indefinitely. The sweep is the only thing that ends those cases.
   - Hygiene still holds where the design expected it: an idle engine (no turn) exits with code 0 within ~0.1-0.25 s of
     its pipes closing and unlinks its registry row, so after a supervisor crash only rows that were mid-turn linger.
 Consequences for M2 (§Design 1 "The orphan ledger and sweep"):
@@ -83,6 +86,12 @@ Consequences for M2 (§Design 1 "The orphan ledger and sweep"):
     is the right one. A SIGKILL fallback may leave tool processes orphaned, and M2 should test that case or record it.
   - The registry row carries the engine's `procStart` (see Q5). The sweep and the live-ledger code can check against
     the same notion of process identity the engine itself records.
+  - The sweep runs only when a successor supervisor starts. If the app has crashed for good (C1's ladder ended in
+    `crashed`), or no app is open, no successor starts, and nothing sweeps: the orphans run until their turns end, or
+    indefinitely in the waiting cases above.
+  - Between a supervisor's crash and the successor's sweep, an orphan's live registry row (entrypoint sdk-ts, its pid
+    no longer in any process table) reads as foreign-live under C4's holder rule and D-12. A resume of that session in
+    this window is refused as held elsewhere, until the sweep or the turn's end removes the row.
 
 
 Q2 — Detach survival
@@ -96,22 +105,24 @@ argv0: 'maws-supervisor' }); child.unref(). In the Electron cases, process.execP
 ELECTRON_RUN_AS_NODE=1. The Electron half is q2-electron-main.cjs, run as Electron's main with a scratch
 --user-data-dir (also set through app.setPath('userData')).
 results/q2.json:
-  A. Node parent (pid 18553, its own group), child 18565. Before: child PPID 18553, PGID 18565, STAT Ss. kill(-18553,
-     SIGKILL). After 522 ms: parent gone; child alive, PPID 1, PGID 18565, STAT Ss. The child's line reached host.log
+  A. Node parent (pid 35256, its own group), child 35258. Before: child PPID 35256, PGID 35258, STAT Ss. kill(-35256,
+     SIGKILL). After 510 ms: parent gone; child alive, PPID 1, PGID 35258, STAT Ss. The child's line reached host.log
      through the inherited log fd.
-  B. Electron app (pid 18690) spawns child 18735, then app.quit(). The app exited with code 0 314 ms later (a group kill
-     afterwards found nothing: ESRCH). Child before: PPID 18690, PGID 18735, Rs. After: alive, PPID 1, PGID 18735, Ss.
+  B. Electron app (pid 35449) spawns child 35504, then app.quit(). The app exited with code 0 315 ms later (a group kill
+     afterwards found nothing: ESRCH). Child before: PPID 35449, PGID 35504, Rs. After: alive, PPID 1, PGID 35504, Ss.
      The child ran as Electron 44.4.5 / Node v24.21.0.
-  C. Electron app (pid 18909) spawns child 18963 and holds. kill(-18909, SIGKILL): the app died by SIGKILL. Child
-     after: alive, PPID 1, PGID 18963, Ss.
-  In every case `ps -o command=` shows "maws-supervisor <script> --child ...", so argv0 replaces argv[0] in ps.
+  C. Electron app (pid 35715) spawns child 35731 and holds. kill(-35715, SIGKILL): the app died by SIGKILL 514 ms
+     later. Child before: PPID 35715, PGID 35731, Rs. After: alive, PPID 1, PGID 35731, Ss.
+  In every case `ps -o command=` shows "maws-supervisor <script> --child ...", so argv0 replaces argv[0] in ps (the
+  kernel's process name does not change; see Q3).
 
 
 Q3 — Electron as Node (the packaged app)
 ----------------------------------------
 VERDICT: confirmed. The packaged binary in Node mode loads the engine-host chunk straight from inside app.asar, resolves
 zod from app.asar/node_modules, and stops at its own MAWS_USER_DATA check. A detached child with argv0
-'maws-supervisor' shows as maws-supervisor in ps and has no LaunchServices entry. The RunAsNode fuse is Enabled.
+'maws-supervisor' shows as maws-supervisor in ps (which follows argv) but keeps the executable's name as its kernel
+process name: "MAWS" packaged, "Electron" in dev. It has no LaunchServices entry. The RunAsNode fuse is Enabled.
 
 results/q3.json:
   - The engine-host chunk is app.asar/out/main/index-BochXOs7.js, the only one of {index-BCu401m2.js, index-BochXOs7.js,
@@ -120,18 +131,30 @@ results/q3.json:
   - ELECTRON_RUN_AS_NODE=1 MAWS <asar>/out/main/index-BochXOs7.js with no MAWS_USER_DATA: exit 1, stderr
     "Error: the engine host needs MAWS_USER_DATA (main forwards app.getPath("userData"))" at
     .../app.asar/out/main/index-BochXOs7.js:13052. The bundle loaded and failed at its own check, nowhere earlier.
-  - The instrumented load of the same chunk (a Module._load hook) saw the chunk itself require 12 modules: `zod`, resolved
-    to .../MAWS.app/Contents/Resources/app.asar/node_modules/zod/index.cjs, and 11 node: builtins. Nothing else, and
-    nothing from `electron`. 246 requires in total, zod's internals included.
+  - The instrumented load of the same chunk (a Module._load hook) saw the chunk itself require 12 modules at top level: `zod`,
+    resolved to .../MAWS.app/Contents/Resources/app.asar/node_modules/zod/index.cjs, and 11 node: builtins. No other
+    top-level require, and none of `electron`. 246 requires in total, zod's internals included. The hook covers only the
+    chunk's own top-level requires that ran before its MAWS_USER_DATA throw, not lazy requires inside functions.
   - One-line script: require.resolve('zod', {paths: [asar]}) -> .../app.asar/node_modules/zod/index.cjs; typeof
     z.object === 'function', typeof z.toJSONSchema === 'function'.
-  - A detached child of the packaged binary in Node mode, argv0 'maws-supervisor' (pid 2475 in the final run):
-    `ps -o command=` -> "maws-supervisor -e setTimeout(()=>{},8000)", and `ps -c -o command=` -> "maws-supervisor".
-    `lsappinfo list` (121 entries) has no entry with its pid. The only MAWS entries are the owner's running packaged app
+  - A detached child of the packaged binary in Node mode, argv0 'maws-supervisor' (pid 36277 in the final run):
+      ps -o pid=,ppid=,pgid=,stat=,command= -p 36277  ->  "36277 36269 36277 Ss   maws-supervisor -e setTimeout(()=>{},8000)"
+      ps -c -o command= -p 36277                      ->  "maws-supervisor"
+      top -l 1 -pid 36277 -stats pid,command          ->  "36277  MAWS"
+    and the same for a child of the dev binary (W/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron,
+    ELECTRON_RUN_AS_NODE=1, argv0 'maws-supervisor', pid 36276):
+      ps -o ... command=  ->  "36276 36269 36276 Ss   maws-supervisor -e setTimeout(()=>{},8000)"
+      ps -c -o command=   ->  "maws-supervisor"
+      top -l 1 -pid 36276 -stats pid,command  ->  "36276  Electron"
+    On macOS `ps -c` follows argv[0] too, so it is not evidence of the kernel's name. top reads the kernel's process name
+    (libproc proc_name, set from the executable at exec), and argv0 does not change it. Consequence: Activity Monitor,
+    which also lists the kernel name, will very likely show the supervisor as "MAWS" in the packaged app and "Electron"
+    in dev, not as maws-supervisor. This is an inference: Activity Monitor itself was not opened, since that needs the
+    GUI. `ps`, `pgrep -f` and anything else that reads argv do see maws-supervisor. Both children were killed afterwards
+    (confirmed by kill -0).
+    `lsappinfo list` (121 entries) has no entry with the packaged child's pid. The only MAWS entries are the owner's running packaged app
     (pid 44903) and its system services (ThemeWidgetControlViewService(MAWS), the autofill service, Open and Save Panel
-    Service(MAWS)), none of them ours. The child was killed afterwards (confirmed by kill -0).
-    Not checked: what Activity Monitor's Process Name column shows. That needs the GUI, and this run uses no GUI
-    automation.
+    Service(MAWS)), none of them ours.
   - W/node_modules/.bin/electron-fuses read --app MAWS.app: "RunAsNode is Enabled". Also
     EnableNodeOptionsEnvironmentVariable is Enabled (so a NODE_OPTIONS in main's environment reaches the supervisor,
     since §Design 1 passes main's process.env), EnableEmbeddedAsarIntegrityValidation is Disabled, and OnlyLoadAppFromAsar
@@ -172,8 +195,8 @@ Shares Q1's live run (results/q5.json, from results/q1-parent-killed.json), with
   - row keys: cwd, entrypoint, kind, messagingSocketPath, name, nameSince, nameSource, peerFeatures, peerProtocol, pid,
     pidDomain, procStart, sessionId, startedAt, status, statusUpdatedAt, updatedAt, version. None of them names a
     parent. Note `procStart` and `messagingSocketPath`.
-  - the row is unlinked by the engine at its own exit (21736 ms, just before the process vanished at 21894 ms), not when
-    its parent dies.
+  - the row was gone no later than the engine vanished from ps (21736 ms vs 21894 ms after the kill), and it was still
+    present in every recorded sample (31) from the parent's death until then, so the engine removed it on its own way out.
   (The `cwdIsScratch: false` in the Q1/Q5 JSON came from a check that only matched a /tmp/ prefix, while the scratch cwd
   is realpath'd to /private/tmp/...; the script has since been fixed. The field carries no evidence either way.)
 
@@ -208,7 +231,7 @@ Every process these probes started was killed, and every scratch directory was r
   - Each script records the pids it starts and SIGKILLs the survivors at the end (and also on a thrown error, through
     process.on('exit')). Its results file records `cleanup.stillAlive: []` and `scratchRemoved: true`: Q1 (wrapper,
     engine, the Bash tool's zsh and sleep), Q2 (the Node parent and child, both Electron apps and their children), Q3
-    (its detached child, confirmed killed with kill -0). Q4 removes its socket directories (`dirRemoved: true`).
+    (its two detached children, packaged and dev, both confirmed killed with kill -0). Q4 removes its socket directories (`dirRemoved: true`).
   - One stray: the first Q2 attempt crashed on a temporal-dead-zone error after spawning its Node parent and child (pids
     15580 and 15583). Both were found with `pgrep -fl "q2-detach|maws-supervisor"`, killed with `pkill -9 -f`, rechecked
     (no match), and their scratch directory under $TMPDIR was removed. The script was then fixed.

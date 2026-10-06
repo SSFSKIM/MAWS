@@ -85,7 +85,7 @@
    "ok": true
   },
   {
-   "label": "the row is unlinked by the engine at its exit (not before)",
+   "label": "the row was gone no later than the engine vanished from ps (it outlived the parent, per the parent-dead check, and did not outlive the engine)",
    "ok": true
   }
  ],
