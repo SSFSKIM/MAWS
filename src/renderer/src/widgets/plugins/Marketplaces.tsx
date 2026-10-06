@@ -101,7 +101,7 @@ export function MarketplacesSection({ cwd }: { cwd: string }) {
             </Rows>
           ))}
         {gone.map((key) => (
-          <Gone key={key} opKey={key} name={key.slice('marketplace:'.length)} attribute="data-marketplace-result" />
+          <Gone key={key} opKey={key} name={key.slice('marketplace:'.length)} data={{ 'data-marketplace-result': key.slice('marketplace:'.length) }} />
         ))}
         <AddMarketplace />
       </Group>

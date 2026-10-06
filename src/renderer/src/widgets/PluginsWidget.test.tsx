@@ -18,6 +18,7 @@ const ROOT = join(__dirname, '../../../..');
 const ID = 'app-7412a115' as AppSessionId;
 const HOME = '/tmp/e8-scratch/claude-config';
 const BINARY = '/Users/me/.local/share/claude/versions/2.1.290';
+const GLOBAL = '/Users/me/.claude.json'; // beside ~/.claude when no CLAUDE_CONFIG_DIR: used verbatim, never derived from HOME
 const SHA = 'e'.repeat(64);
 let backend: WidgetBackend;
 let cwd: string;
@@ -34,7 +35,7 @@ const plugin = (id: string, over: Partial<InstalledPlugin> = {}): InstalledPlugi
 function standIn() {
   installed = [plugin('e8-probe@e8-scratch')];
   opSeq = 0;
-  backend.script('plugins.env', () => ({ binary: BINARY, configHome: HOME }));
+  backend.script('plugins.env', () => ({ binary: BINARY, configHome: HOME, globalConfig: GLOBAL }));
   backend.script('plugins.list', () => ({ plugins: installed }));
   backend.script('marketplaces.list', () => ({ marketplaces: [{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8-scratch/market', installLocation: '/tmp/e8-scratch/market' }] }));
   backend.script('plugins.available', () => ({
@@ -206,7 +207,7 @@ describe('plugins widget: management', () => {
     expect(argvShown()).toEqual(commandLine('install', { plugin: 'e8-other@e8-scratch', scope: 'user' }));
     expect(within(sheet()).getByText('2.1.290 plugin install e8-other@e8-scratch --scope user --json')).toBeTruthy();
     expect(within(sheet()).getByText(`${HOME}/settings.json`)).toBeTruthy();
-    expect(within(sheet()).getByText(`and keeps its own records in ${HOME}/.claude.json`)).toBeTruthy();
+    expect(within(sheet()).getByText(`and keeps its own records in ${GLOBAL}`)).toBeTruthy();
     expect(within(sheet()).getByText('Reloads plugins in 1 running session')).toBeTruthy();
     fireEvent.click(within(sheet()).getByRole('radio', { name: 'Project' }));
     expect(argvShown()).toEqual(commandLine('install', { plugin: 'e8-other@e8-scratch', scope: 'project' }));
@@ -339,5 +340,82 @@ describe('plugins widget: management', () => {
     await waitFor(() => expect(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Stop' })).toBeTruthy());
     fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(invoked('plugins.cancel')).toEqual([{ opId: 'pop-1' }]));
+  });
+});
+
+// M2 review: the sheet never confirms against a guessed engine; one id at two scopes is two rows; a change during an
+// in-flight listing is read again after it.
+describe('plugins widget: review fixes', () => {
+  const deferred = <T,>() => {
+    let resolve: (value: T) => void = () => {};
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  };
+
+  it('while plugins.env is pending the sheet says Resolving the engine… and cannot be confirmed', async () => {
+    backend.script('plugins.env', () => new Promise(() => {})); // never answers
+    await ready();
+    expect(document.querySelector('footer')!.textContent).not.toContain('<config home>');
+    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
+    expect(within(sheet()).getByText('Resolving the engine…')).toBeTruthy();
+    expect(sheet().querySelector('[data-plugins-argv]')).toBeNull(); // no command against a guessed binary
+    const confirm = within(sheet()).getByRole('button', { name: 'Update' });
+    expect(confirm).toHaveProperty('disabled', true);
+    fireEvent.submit(confirm.closest('form')!);
+    expect(invoked('plugins.update')).toEqual([]);
+  });
+
+  it('when plugins.env fails the sheet shows the refusal and never enables', async () => {
+    backend.script('plugins.env', () => {
+      throw new WidgetBackendError({ code: 'internal', message: 'engine binary missing at /nope/claude' });
+    });
+    await ready();
+    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(within(sheet()).getByRole('alert').textContent).toBe('engine binary missing at /nope/claude'));
+    const confirm = within(sheet()).getByRole('button', { name: 'Update' });
+    expect(confirm).toHaveProperty('disabled', true);
+    fireEvent.submit(confirm.closest('form')!);
+    expect(invoked('plugins.update')).toEqual([]);
+  });
+
+  it('one id installed at two scopes is two rows: an action busies only its own, and removing one leaves the other', async () => {
+    installed = [plugin('e8-probe@e8-scratch'), plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: cwd })];
+    await ready();
+    const rows = () => [...section('installed').querySelectorAll<HTMLElement>('[data-plugin-row="e8-probe@e8-scratch"]')];
+    const at = (scope: string) => section('installed').querySelector<HTMLElement>(`[data-plugin-row="e8-probe@e8-scratch"][data-plugin-scope="${scope}"]`)!;
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    fireEvent.click(within(at('project')).getByRole('button', { name: 'Uninstall…' }));
+    expect(argvShown()).toEqual(['plugin', 'uninstall', 'e8-probe@e8-scratch', '--scope', 'project', '--json']);
+    fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Uninstall' }));
+    await waitFor(() => expect(within(at('project')).getByRole('status').textContent).toBe('Working…'));
+    expect(within(at('project')).getByRole('button', { name: 'Update' })).toHaveProperty('disabled', true);
+    expect(within(at('user')).getByRole('button', { name: 'Update' })).toHaveProperty('disabled', false);
+    expect(within(at('user')).queryByRole('status')).toBeNull();
+    installed = [plugin('e8-probe@e8-scratch')];
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(at('user')).toBeTruthy();
+    expect(within(at('user')).queryByRole('status')).toBeNull(); // the user-scope row holds no word of the removal
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'uninstall', phase: 'done', outcome: { ok: true, result: { message: 'Successfully uninstalled plugin: e8-probe (scope: project)' } }, reload: { sessions: [] } })));
+    const gone = section('installed').querySelector<HTMLElement>('[data-plugin-result="e8-probe@e8-scratch"]')!;
+    expect(gone.getAttribute('data-plugin-scope')).toBe('project');
+    expect(within(gone).getByRole('status').textContent).toBe('Successfully uninstalled plugin: e8-probe (scope: project) · No running session to reload');
+    expect(within(at('user')).queryByRole('status')).toBeNull();
+  });
+
+  it('a change that arrives while a listing is in flight is read again once that listing settles', async () => {
+    await ready();
+    const toggle = () => within(row('e8-probe@e8-scratch')).getByRole('switch', { name: 'Enabled: e8-probe@e8-scratch' });
+    const stale = deferred<{ plugins: InstalledPlugin[] }>();
+    let reads = 1;
+    backend.script('plugins.list', () => (++reads === 2 ? stale.promise : { plugins: installed }));
+    act(() => emit('plugins.changed', {})); // a first change: read 2 starts and hangs
+    await waitFor(() => expect(invoked('plugins.list')).toHaveLength(2));
+    installed = [plugin('e8-probe@e8-scratch', { enabled: false })];
+    act(() => emit('plugins.changed', {})); // a second change while read 2 is in flight
+    act(() => stale.resolve({ plugins: [plugin('e8-probe@e8-scratch')] })); // read 2 answers the state before the change
+    await waitFor(() => expect(invoked('plugins.list')).toHaveLength(3));
+    await waitFor(() => expect(toggle().getAttribute('aria-checked')).toBe('false'));
   });
 });

@@ -13,7 +13,7 @@ import { useSessions } from '../stores/sessions';
 import { PLUGINS, pluginsFoot, WIDGET_TITLE } from './copy';
 import { Group, Mono, Row, Rows } from './parts';
 import { AvailableSection } from './plugins/Available';
-import type { ManageEnv } from './plugins/ConfirmSheet';
+import type { EngineResolution, ManageEnv } from './plugins/ConfirmSheet';
 import { InstalledSection } from './plugins/Installed';
 import { ManageProvider, useManageState } from './plugins/manage';
 import { MarketplacesSection } from './plugins/Marketplaces';
@@ -70,8 +70,6 @@ const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): num
   return n;
 };
 
-const NO_HOME = '<config home>';
-
 export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
   // the CLI's cwd: the launch's directory (which the host compares for project and local scope), else the record's
@@ -81,13 +79,14 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
   const installed = usePluginsRead('plugins.list', cwd);
   const reloads = useReloads(appSessionId);
   const ready = status?.process === 'ready';
-  const configHome = env?.configHome ?? NO_HOME;
-  const manageEnv: ManageEnv = { cwd: cwd ?? '', binary: env?.binary ?? null, configHome, readySessions };
+  // the binary and the paths are the host's answer, never a guess: until it comes the sheet confirms nothing (M2 review)
+  const engine: EngineResolution = env.data ? { state: 'ready', env: env.data } : env.state === 'error' ? { state: 'error', error: env.error ?? '' } : { state: 'loading' };
+  const manageEnv: ManageEnv = { cwd: cwd ?? '', engine, readySessions };
   const { manage, sheet } = useManageState(manageEnv, ready ? reloads.reloadMods : null);
   const plugins = installed.data?.plugins ?? [];
   return (
     <ManageProvider value={manage}>
-      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" foot={pluginsFoot(configHome)} state={installed.state} error={installed.error} close={close}>
+      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" foot={pluginsFoot(env.data ?? null)} state={installed.state} error={installed.error} close={close}>
         {ready && (
           <div className="mb-2">
             <ReloadControls reloads={reloads} />

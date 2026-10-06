@@ -1,6 +1,8 @@
 // Installed (E8 execution document, M2): one row per `claude plugin list --json` entry — `name@marketplace`, its version,
 // `scope · enabled|disabled · marketplace`, the enable switch (its position always the last read's), Update and
-// Uninstall…; each change asks first. A plugin the change took out of the list keeps its result beneath the rows.
+// Uninstall…; each change asks first. A plugin the change took out of the list keeps its result beneath the rows. One
+// id may be installed at several scopes (the user's, a project's, a local one), so a row is an installation: id, scope
+// and project path (M2 review); `data-plugin-row` names the id and `data-plugin-scope` the scope.
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { PLUGINS_SCOPES, type PluginsAction, type PluginsScope } from '@shared/plugins/cli';
 import { PLUGIN_MANAGEMENT as W } from '../copy';
@@ -8,20 +10,29 @@ import { Group, Row, Rows, TextButton } from '../parts';
 import { Gone, OperationLine, Switch, useManage } from './manage';
 import { requestFor } from './present';
 
-const installedKey = (id: string) => `installed:${id}`;
+type Installation = Pick<InstalledPlugin, 'id' | 'scope' | 'projectPath'>;
+
+const PREFIX = 'installed:';
+// The installation's identity: the React key, the operation key and the listed set's member.
+const installedKey = (p: Installation) => `${PREFIX}${JSON.stringify([p.id, p.scope, p.projectPath])}`;
+const installationOf = (key: string): Installation => {
+  const [id, scope, projectPath] = JSON.parse(key.slice(PREFIX.length)) as [string, string, string | null];
+  return { id, scope, projectPath };
+};
 
 // The row's own scope where the CLI takes it (a plugin installed for the project is changed for the project); a
 // pseudo-scope the CLI lists (session, synced) falls back to user.
-const scopeOfRow = (scope: string): PluginsScope => (PLUGINS_SCOPES as readonly string[]).includes(scope) ? (scope as PluginsScope) : 'user';
+const scopeOfRow = (scope: string): PluginsScope => ((PLUGINS_SCOPES as readonly string[]).includes(scope) ? (scope as PluginsScope) : 'user');
 
 function InstalledRow({ plugin }: { plugin: InstalledPlugin }) {
   const { ops, ask } = useManage();
-  const key = installedKey(plugin.id);
+  const key = installedKey(plugin);
   const busy = ops.entries.get(key)?.state.phase === 'working';
   const asking = (action: Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>) => ask(key, requestFor(action, { plugin: plugin.id, scope: scopeOfRow(plugin.scope) }, null));
   return (
     <Row
       data-plugin-row={plugin.id}
+      data-plugin-scope={plugin.scope}
       main={plugin.id}
       note={plugin.version ?? undefined}
       detail={
@@ -55,8 +66,8 @@ function InstalledRow({ plugin }: { plugin: InstalledPlugin }) {
 
 export function InstalledSection({ plugins }: { plugins: readonly InstalledPlugin[] }) {
   const { ops } = useManage();
-  const listed = new Set(plugins.map((p) => installedKey(p.id)));
-  const gone = [...ops.entries.keys()].filter((key) => key.startsWith('installed:') && !listed.has(key));
+  const listed = new Set(plugins.map(installedKey));
+  const gone = [...ops.entries.keys()].filter((key) => key.startsWith(PREFIX) && !listed.has(key));
   return (
     <div data-plugins-section="installed">
       <Group label={W.installed} count={plugins.length}>
@@ -65,13 +76,14 @@ export function InstalledSection({ plugins }: { plugins: readonly InstalledPlugi
         ) : (
           <Rows label={W.installedList}>
             {plugins.map((plugin) => (
-              <InstalledRow key={plugin.id} plugin={plugin} />
+              <InstalledRow key={installedKey(plugin)} plugin={plugin} />
             ))}
           </Rows>
         )}
-        {gone.map((key) => (
-          <Gone key={key} opKey={key} name={key.slice('installed:'.length)} attribute="data-plugin-result" />
-        ))}
+        {gone.map((key) => {
+          const { id, scope } = installationOf(key);
+          return <Gone key={key} opKey={key} name={id} data={{ 'data-plugin-result': id, 'data-plugin-scope': scope }} />;
+        })}
       </Group>
     </div>
   );

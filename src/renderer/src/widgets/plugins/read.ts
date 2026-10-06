@@ -1,10 +1,11 @@
 // The plugin CLI's reads (E8 execution document, M2): `plugins.list`, `marketplaces.list` and `plugins.available` are
 // not session reads (the CLI needs no engine process), so they are keyed by the directory the CLI runs in and issued
-// whether or not the session runs; `plugins.changed` (emitted when any mutation's CLI ends) reads them again. Each runs
+// whether or not the session runs; `plugins.changed` (emitted when any mutation's CLI ends) reads them again (after a
+// listing already in flight, whose answer may predate the change). Each runs
 // the engine's CLI, which refreshes its own catalogue cache (D-12), so none refetches on focus, and a harness mounting
 // widgets passively (`WidgetReadPolicyContext`) issues none.
-import { useQuery } from '@tanstack/react-query';
-import { useContext, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useContext, useEffect, useRef } from 'react';
 import type { CommandOutput } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { IpcCommandError } from '../../ipc/query';
@@ -25,10 +26,16 @@ async function invokeRead<N extends PluginsRead | 'plugins.env'>(command: N, inp
   return result.value as CommandOutput<N>;
 }
 
-// `enabled: false` holds the read (Available until its section is first opened).
+const resultOf = <T,>(data: T | undefined, failed: IpcCommandError | null, isError: boolean): PluginsReadResult<T> => {
+  const error = data !== undefined && failed ? `${errorWords(failed)} · ${FRAME.lastValue}` : errorWords(failed);
+  return { state: data !== undefined ? 'ready' : isError ? 'error' : 'loading', data, error };
+};
+
+// `enabled: false` holds the read (Available while its section is closed).
 export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | null, enabled = true): PluginsReadResult<CommandOutput<N>> {
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
   const on = active && enabled && cwd !== null;
+  const client = useQueryClient();
   const query = useQuery<CommandOutput<N>, IpcCommandError>({
     queryKey: ['maws', command, { cwd }],
     queryFn: () => invokeRead(command, { cwd: cwd! } as never),
@@ -36,18 +43,29 @@ export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | 
     staleTime: READ_STALE_MS,
     refetchOnWindowFocus: false,
   });
-  const { refetch } = query;
+  const { refetch, isFetching } = query;
+  // A change during a listing in flight: that listing may have read the state before the change, so one more read
+  // follows it rather than joining it (M2 review); changes meanwhile coalesce into that one read.
+  const owed = useRef(false);
   useEffect(() => {
     if (!on) return;
-    return ipc.on('plugins.changed', () => void refetch({ cancelRefetch: false }));
-  }, [on, refetch]);
-  const error = query.data !== undefined && query.error ? `${errorWords(query.error)} · ${FRAME.lastValue}` : errorWords(query.error);
-  return { state: query.data !== undefined ? 'ready' : query.isError ? 'error' : 'loading', data: query.data, error };
+    return ipc.on('plugins.changed', () => {
+      if (client.isFetching({ queryKey: ['maws', command, { cwd }] }) > 0) owed.current = true;
+      else void refetch();
+    });
+  }, [on, client, command, cwd, refetch]);
+  useEffect(() => {
+    if (isFetching || !owed.current || !on) return;
+    owed.current = false;
+    void refetch();
+  }, [isFetching, on, refetch]);
+  return resultOf(query.data, query.error, query.isError);
 }
 
-// The binary the CLI runs (the launcher's probe; null when it fails) and the config home it writes, for the sheet and
-// the foot. Neither moves while the app runs, so it is read once.
-export function usePluginsEnv(): CommandOutput<'plugins.env'> | null {
+// The binary the CLI runs (the launcher's probe; null when it fails), the config home it writes and the engine's global
+// config file, for the sheet and the foot; none moves while the app runs, so it is read once. Its state is the sheet's:
+// nothing is confirmed while it is pending or after it failed (M2 review).
+export function usePluginsEnv(): PluginsReadResult<CommandOutput<'plugins.env'>> {
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
   const query = useQuery<CommandOutput<'plugins.env'>, IpcCommandError>({
     queryKey: ['maws', 'plugins.env', {}],
@@ -56,5 +74,5 @@ export function usePluginsEnv(): CommandOutput<'plugins.env'> | null {
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
-  return query.data ?? null;
+  return resultOf(query.data, query.error, query.isError);
 }

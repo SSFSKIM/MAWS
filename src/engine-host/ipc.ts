@@ -655,7 +655,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // an operation beside `session.reloadPlugins`.
   on('plugins.env', async () => {
     const [check, env] = await Promise.all([binaryProbe(), captureEnv()]);
-    return { binary: check.ok ? check.path : null, configHome: env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), '.claude') };
+    const home = env.HOME || homedir();
+    // the engine's global config sits inside an override, else beside `~/.claude` (SPEC 03 §16.1; M2 review)
+    const globalConfig = env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, '.claude.json') : join(home, '.claude.json');
+    return { binary: check.ok ? check.path : null, configHome: env.CLAUDE_CONFIG_DIR || join(home, '.claude'), globalConfig };
   });
   on('plugins.list', async ({ cwd }) => ({ plugins: listing(await plugins.read(READ_LINES.installed, cwd), installedOf) }));
   on('plugins.available', async ({ cwd }) => ({ plugins: listing(await plugins.read(READ_LINES.available, cwd), availableOf) }));

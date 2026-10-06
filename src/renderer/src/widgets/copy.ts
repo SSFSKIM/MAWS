@@ -45,7 +45,7 @@ export const WIDGET_FOOT: Record<FramedWidgetName, WidgetFoot> = {
   permissions: { readWith: 'list_permission_rules', editedWhere: 'Sets the mode with `set_permission_mode` for this session only · rules are edited in their settings files; session grants come from approval cards' },
   usage: { readWith: 'get_usage', editedWhere: 'Windows come from ClaudeUsage; the engine reports none through the relay' },
   config: { readWith: 'get_settings and get_memory_dialog', editedWhere: "Settings are edited in their files or the terminal's `/config`; MAWS's own settings are in the Settings tab" },
-  plugins: pluginsFoot('<config home>'), // E8: the widget words it with the config home `plugins.env` answers
+  plugins: pluginsFoot(null), // E8: the widget words it with the paths `plugins.env` answers, once it has
   mcp: {
     readWith: 'mcp_status',
     editedWhere: 'Servers are configured in `.mcp.json` and settings · Reconnect is for this session · Enable and disable: recorded by the engine for this project in `~/.claude.json`',
@@ -164,11 +164,15 @@ export const CONFIG = {
 export const PLUGINS = { lastReported: `${NOT_RUNNING} · the plugins it last reported`, none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded in this session', loadedList: 'Loaded plugins' };
 
 // E8: the `/plugins` widget's foot. Every change runs the engine's CLI after a sheet; a listing writes no configuration
-// but refreshes the engine's own catalogue cache (E8 D-12), and the CLI keeps its own records in `.claude.json`.
-export function pluginsFoot(home: string): WidgetFoot {
+// but refreshes the engine's own catalogue cache (E8 D-12), and the CLI keeps its own records in its global config file
+// (`plugins.env`'s `globalConfig`, verbatim). Until `plugins.env` answers, the foot names no path.
+export function pluginsFoot(paths: { configHome: string; globalConfig: string } | null): WidgetFoot {
+  const readWith = 'claude plugin list --json · marketplace list --json · system/init';
+  if (paths === null) return { readWith, editedWhere: "Every change runs the engine's CLI after you confirm it · the files it writes are named once the engine is resolved" };
+  const home = paths.configHome;
   return {
-    readWith: 'claude plugin list --json · marketplace list --json · system/init',
-    editedWhere: `Every change runs the engine's CLI after you confirm it; the engine writes \`${home}/settings.json\` and \`${home}/plugins\` and keeps its own records in \`${home}/.claude.json\` · listing refreshes the engine's own catalogue cache under \`${home}/plugins\``,
+    readWith,
+    editedWhere: `Every change runs the engine's CLI after you confirm it; the engine writes \`${home}/settings.json\` and \`${home}/plugins\` and keeps its own records in \`${paths.globalConfig}\` · listing refreshes the engine's own catalogue cache under \`${home}/plugins\``,
   };
 }
 
@@ -430,7 +434,8 @@ export const PLUGIN_MANAGEMENT = {
   scopeName: { user: 'User', project: 'Project', local: 'Local' } as const,
   inProject: (path: string) => `In ${path}`,
   writes: "The engine's CLI writes:",
-  records: (home: string) => `and keeps its own records in ${home}/.claude.json`,
+  records: (globalConfig: string) => `and keeps its own records in ${globalConfig}`, // `plugins.env`'s path, verbatim
+  resolving: 'Resolving the engine…',
   reloadsIn: (n: number) => `Reloads plugins in ${n} running ${n === 1 ? 'session' : 'sessions'}`,
   noSessionToReload: 'No running session to reload',
   nothingToReload: 'Nothing to reload: an added marketplace loads no plugin',

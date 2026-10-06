@@ -79,7 +79,7 @@ const plugin = { ...cwd, plugin: PluginsArgumentSchema, scope: PluginsScopeSchem
 
 export const commands = {
   // reads
-  'plugins.env': host(z.strictObject({}), z.strictObject({ binary: z.string().nullable(), configHome: z.string() })),
+  'plugins.env': host(z.strictObject({}), z.strictObject({ binary: z.string().nullable(), configHome: z.string(), globalConfig: z.string() /* the engine's global config file: <CLAUDE_CONFIG_DIR>/.claude.json, else ~/.claude.json */ })),
   'plugins.list': host(z.strictObject(cwd), z.strictObject({ plugins: z.array(InstalledPluginSchema) })),
   'plugins.available': host(z.strictObject(cwd), z.strictObject({ plugins: z.array(AvailablePluginSchema) })),
   // operations, completing on plugins.operation

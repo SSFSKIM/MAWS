@@ -6,7 +6,7 @@ import { commandLine, PLUGINS_ACTIONS, PLUGINS_SCOPES, writesOf, type PluginsAct
 import { ConfirmSheet, type ManageEnv } from './ConfirmSheet';
 import { requestFor, SCOPED, type PluginsRequest } from './present';
 
-const ENV: ManageEnv = { cwd: '/work/app', binary: '/opt/claude/2.1.290', configHome: '/tmp/home', readySessions: 2 };
+const ENV: ManageEnv = { cwd: '/work/app', engine: { state: 'ready', env: { binary: '/opt/claude/2.1.290', configHome: '/tmp/home', globalConfig: '/Users/me/.claude.json' } }, readySessions: 2 };
 
 const requestOf = (action: PluginsAction): PluginsRequest => {
   switch (action) {

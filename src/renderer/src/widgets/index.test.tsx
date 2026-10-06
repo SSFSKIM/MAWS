@@ -34,7 +34,7 @@ describe('every widget renders its fixture response', () => {
     const scenario = loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'));
     backend = createWidgetBackend({ root: ROOT, statuses: scenario.engine });
     // E8: `/plugins` reads the engine's plugin CLI through the host, which the fixture backend does not stand in for;
-    // empty lists let its frame open (`plugins.env` unanswered: the foot keeps its `<config home>` words)
+    // empty lists let its frame open (`plugins.env` unanswered: the foot names no path, as `WIDGET_FOOT.plugins`)
     backend.script('plugins.list', () => ({ plugins: [] }));
     backend.script('marketplaces.list', () => ({ marketplaces: [] }));
     window.maws = backend.bridge();

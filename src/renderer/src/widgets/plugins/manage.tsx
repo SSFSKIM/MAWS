@@ -78,9 +78,9 @@ export function OperationLine({ opKey, label }: { opKey: string; label?: string 
 }
 
 // The result of a change whose row has left the list (an uninstall, a removed marketplace), under its name.
-export function Gone({ opKey, name, attribute }: { opKey: string; name: string; attribute: `data-${string}` }) {
+export function Gone({ opKey, name, data }: { opKey: string; name: string; data: { [attribute: `data-${string}`]: string } }) {
   return (
-    <div {...{ [attribute]: name }} className="flex min-w-0 items-baseline gap-2 border-t border-border py-1 text-ui-sm">
+    <div {...data} className="flex min-w-0 items-baseline gap-2 border-t border-border py-1 text-ui-sm">
       <span className="shrink-0">{name}</span>
       <OperationLine opKey={opKey} />
     </div>
