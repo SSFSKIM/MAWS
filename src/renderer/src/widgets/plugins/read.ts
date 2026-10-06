@@ -63,9 +63,10 @@ export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | 
 }
 
 // The binary the CLI runs (the launcher's probe; null when it fails), the config home it writes and the engine's global
-// config file, for the sheet and the foot; none moves while the app runs, so it is read once. Its state is the sheet's:
-// nothing is confirmed while it is pending or after it failed (M2 review).
-export function usePluginsEnv(): PluginsReadResult<CommandOutput<'plugins.env'>> {
+// config file, for the sheet and the foot; an answer naming a binary does not move while the app runs, so it is read
+// once. Its state is the sheet's: nothing is confirmed while it is pending, after it failed, or while it names no binary
+// (M2 review); `refetch` reads it again for a sheet opened then (the engine installed, or chosen in Settings › Engine).
+export function usePluginsEnv(): PluginsReadResult<CommandOutput<'plugins.env'>> & { refetch(): void } {
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
   const query = useQuery<CommandOutput<'plugins.env'>, IpcCommandError>({
     queryKey: ['maws', 'plugins.env', {}],
@@ -74,5 +75,6 @@ export function usePluginsEnv(): PluginsReadResult<CommandOutput<'plugins.env'>>
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
-  return resultOf(query.data, query.error, query.isError);
+  const { refetch } = query;
+  return { ...resultOf(query.data, query.error, query.isError), refetch: () => void refetch() };
 }

@@ -12,10 +12,11 @@ import { CHOICE, DANGER, PRIMARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../copy';
 import { argvOf, commandWords, DESTRUCTIVE, SCOPED, scopeOf, targetOf, thenWords, writesWords, type PluginsRequest } from './present';
 
-// `plugins.env`'s answer: the binary (the probe's real path; null when it failed), the config home the CLI writes and
-// the engine's global config file (inside a `CLAUDE_CONFIG_DIR`, else `~/.claude.json` beside `~/.claude`).
+// A resolved `plugins.env` answer: the binary (the probe's real path; an answer without one is unresolved), the config
+// home the CLI writes and the engine's global config file (inside a `CLAUDE_CONFIG_DIR`, else `~/.claude.json` beside
+// `~/.claude`).
 export interface EngineEnv {
-  binary: string | null;
+  binary: string;
   configHome: string;
   globalConfig: string;
 }
@@ -63,7 +64,7 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
           </div>
         )}
         {engine ? (
-          <code data-plugins-argv={JSON.stringify(argv)} title={engine.binary ?? undefined} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
+          <code data-plugins-argv={JSON.stringify(argv)} title={engine.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
             {commandWords(engine.binary, argv)}
           </code>
         ) : env.engine.state === 'error' ? (

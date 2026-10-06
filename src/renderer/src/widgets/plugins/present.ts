@@ -28,8 +28,9 @@ export const argvOf = (request: PluginsRequest): string[] => commandLine(request
 // A shell-safe word as-is; anything else single-quoted, so a path with a space reads as one argument.
 const word = (arg: string): string => (/^[\w@%+=:,./~-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`);
 
-// The sheet's mono line: the binary's basename (the probe's real path is in the tooltip) and the argument list.
-export const commandWords = (binary: string | null, argv: readonly string[]): string => [binary === null ? 'claude' : binary.slice(binary.lastIndexOf('/') + 1), ...argv].map(word).join(' ');
+// The sheet's mono line: the resolved binary's basename (its real path is in the tooltip) and the argument list. There
+// is no default name: a sheet whose binary is unresolved shows no command at all.
+export const commandWords = (binary: string, argv: readonly string[]): string => [binary.slice(binary.lastIndexOf('/') + 1), ...argv].map(word).join(' ');
 
 // A path typed into "Add marketplace" is a directory source (read in place); any other source is left unknown, so the
 // sheet announces the clone directory too (the manifest is a superset, M1's decision 4).

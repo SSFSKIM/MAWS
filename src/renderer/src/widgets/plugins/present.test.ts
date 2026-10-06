@@ -35,7 +35,7 @@ describe('the sheet’s command and writes', () => {
       }
     const install = requestFor('install', { plugin: 'e8-probe@e8-scratch', scope: 'project' }, null);
     expect(commandWords('/Users/me/.local/share/claude/versions/2.1.290', argvOf(install))).toBe('2.1.290 plugin install e8-probe@e8-scratch --scope project --json');
-    expect(commandWords(null, ['plugin', 'marketplace', 'add', '/Users/me/My Market', '--json'])).toBe("claude plugin marketplace add '/Users/me/My Market' --json");
+    expect(commandWords('/opt/bin/claude', ['plugin', 'marketplace', 'add', '/Users/me/My Market', '--json'])).toBe("claude plugin marketplace add '/Users/me/My Market' --json");
   });
 
   it('names writesOf()’s files under the config home or the project, the known segments filled', () => {

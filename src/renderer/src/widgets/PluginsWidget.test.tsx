@@ -35,7 +35,7 @@ const plugin = (id: string, over: Partial<InstalledPlugin> = {}): InstalledPlugi
 function standIn() {
   installed = [plugin('e8-probe@e8-scratch')];
   opSeq = 0;
-  backend.script('plugins.env', () => ({ binary: BINARY, configHome: HOME, globalConfig: GLOBAL }));
+  backend.script('plugins.env', () => ({ binary: BINARY, binaryError: null, configHome: HOME, globalConfig: GLOBAL }));
   backend.script('plugins.list', () => ({ plugins: installed }));
   backend.script('marketplaces.list', () => ({ marketplaces: [{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8-scratch/market', installLocation: '/tmp/e8-scratch/market' }] }));
   backend.script('plugins.available', () => ({
@@ -376,6 +376,31 @@ describe('plugins widget: review fixes', () => {
     expect(confirm).toHaveProperty('disabled', true);
     fireEvent.submit(confirm.closest('form')!);
     expect(invoked('plugins.update')).toEqual([]);
+  });
+
+  it('an answer with no binary is unresolved: the probe’s refusal, no command, no submit; the sheet’s opening reads again and recovers', async () => {
+    const REFUSAL = "Claude Code is not installed: nothing at /Users/me/.local/bin/claude and no claude on your login shell's PATH. Install it, or choose a binary in Settings › Engine.";
+    const recovered = deferred<unknown>();
+    let reads = 0;
+    backend.script('plugins.env', () => (++reads === 1 ? { binary: null, binaryError: REFUSAL, configHome: HOME, globalConfig: GLOBAL } : recovered.promise));
+    await ready();
+    await waitFor(() => expect(invoked('plugins.env')).toHaveLength(1));
+    expect(document.querySelector('footer')!.textContent).not.toContain(HOME); // the foot names nothing it did not resolve
+    fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Update' }));
+    expect(within(sheet()).getByRole('alert').textContent).toBe(REFUSAL);
+    expect(sheet().querySelector('[data-plugins-argv]')).toBeNull();
+    expect(within(sheet()).queryByRole('list', { name: "The engine's CLI writes:" })).toBeNull();
+    const confirm = within(sheet()).getByRole('button', { name: 'Update' });
+    expect(confirm).toHaveProperty('disabled', true);
+    fireEvent.submit(confirm.closest('form')!);
+    expect(invoked('plugins.update')).toEqual([]);
+    // opening the sheet read the environment again; the owner installed the engine meanwhile
+    await waitFor(() => expect(invoked('plugins.env')).toHaveLength(2));
+    act(() => recovered.resolve({ binary: BINARY, binaryError: null, configHome: HOME, globalConfig: GLOBAL }));
+    await waitFor(() => expect(argvShown()).toEqual(['plugin', 'update', 'e8-probe@e8-scratch', '--scope', 'user', '--json']));
+    expect(within(sheet()).getByText('2.1.290 plugin update e8-probe@e8-scratch --scope user --json')).toBeTruthy();
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(invoked('plugins.update')).toEqual([{ cwd, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
   });
 
   it('one id installed at two scopes is two rows: an action busies only its own, and removing one leaves the other', async () => {

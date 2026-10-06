@@ -8,16 +8,17 @@
 // installed-plugins read.
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { CommandOutput } from '@shared/ipc/schema';
 import { NOT_RUNNING } from '../statusline/mode-menu';
 import { useSessions } from '../stores/sessions';
-import { PLUGINS, pluginsFoot, WIDGET_TITLE } from './copy';
+import { PLUGIN_MANAGEMENT, PLUGINS, pluginsFoot, WIDGET_TITLE } from './copy';
 import { Group, Mono, Row, Rows } from './parts';
 import { AvailableSection } from './plugins/Available';
 import type { EngineResolution, ManageEnv } from './plugins/ConfirmSheet';
 import { InstalledSection } from './plugins/Installed';
 import { ManageProvider, useManageState } from './plugins/manage';
 import { MarketplacesSection } from './plugins/Marketplaces';
-import { usePluginsEnv, usePluginsRead } from './plugins/read';
+import { usePluginsEnv, usePluginsRead, type PluginsReadResult } from './plugins/read';
 import { ReloadControls, useReloads } from './plugins/reload';
 import { WidgetFrame } from './WidgetFrame';
 
@@ -70,6 +71,16 @@ const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): num
   return n;
 };
 
+// `plugins.env`'s read as the sheet takes it: resolved only by an answer that names a binary; an answer without one is
+// the probe's refusal in its own words (`binaryError`), and a failed read is the read's refusal.
+function resolutionOf(env: PluginsReadResult<CommandOutput<'plugins.env'>>): EngineResolution {
+  if (env.data) {
+    const { binary, binaryError, configHome, globalConfig } = env.data;
+    return binary !== null ? { state: 'ready', env: { binary, configHome, globalConfig } } : { state: 'error', error: binaryError ?? PLUGIN_MANAGEMENT.unresolved };
+  }
+  return env.state === 'error' ? { state: 'error', error: env.error ?? PLUGIN_MANAGEMENT.unresolved } : { state: 'loading' };
+}
+
 export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
   // the CLI's cwd: the launch's directory (which the host compares for project and local scope), else the record's
@@ -79,14 +90,15 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
   const installed = usePluginsRead('plugins.list', cwd);
   const reloads = useReloads(appSessionId);
   const ready = status?.process === 'ready';
-  // the binary and the paths are the host's answer, never a guess: until it comes the sheet confirms nothing (M2 review)
-  const engine: EngineResolution = env.data ? { state: 'ready', env: env.data } : env.state === 'error' ? { state: 'error', error: env.error ?? '' } : { state: 'loading' };
+  // the binary and the paths are the host's answer, never a guess: until it names a binary the sheet confirms nothing,
+  // and a sheet opened meanwhile reads it again (M2 review)
+  const engine = resolutionOf(env);
   const manageEnv: ManageEnv = { cwd: cwd ?? '', engine, readySessions };
-  const { manage, sheet } = useManageState(manageEnv, ready ? reloads.reloadMods : null);
+  const { manage, sheet } = useManageState(manageEnv, ready ? reloads.reloadMods : null, engine.state === 'error' ? env.refetch : null);
   const plugins = installed.data?.plugins ?? [];
   return (
     <ManageProvider value={manage}>
-      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" foot={pluginsFoot(env.data ?? null)} state={installed.state} error={installed.error} close={close}>
+      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" foot={pluginsFoot(engine.state === 'ready' ? engine.env : null)} state={installed.state} error={installed.error} close={close}>
         {ready && (
           <div className="mb-2">
             <ReloadControls reloads={reloads} />

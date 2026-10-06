@@ -32,10 +32,18 @@ export const ManageProvider = ({ value, children }: { value: Manage; children: R
 type Asking = { key: string; request: PluginsRequest; declared: Declared | null };
 
 // The widget's management state and the sheet to draw beside its frame.
-export function useManageState(env: ManageEnv, reloadMods: (() => void) | null): { manage: Manage; sheet: ReactNode } {
+// `resolveEngine`: reads `plugins.env` again, passed while it is unresolved, so a sheet opened after the owner installed
+// the engine or chose one in Settings › Engine recovers without reopening the widget.
+export function useManageState(env: ManageEnv, reloadMods: (() => void) | null, resolveEngine: (() => void) | null): { manage: Manage; sheet: ReactNode } {
   const ops = usePluginOperations();
   const [asking, setAsking] = useState<Asking | null>(null);
-  const ask = useCallback((key: string, request: PluginsRequest) => setAsking({ key, request, declared: null }), []);
+  const ask = useCallback(
+    (key: string, request: PluginsRequest) => {
+      resolveEngine?.();
+      setAsking({ key, request, declared: null });
+    },
+    [resolveEngine],
+  );
   const { run } = ops;
   const confirm = useCallback(
     async (key: string, request: PluginsRequest) => {

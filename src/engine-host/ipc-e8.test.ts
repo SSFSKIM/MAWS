@@ -102,10 +102,10 @@ const statusOf = (host: ReturnType<typeof engineHost>, id: AppSessionId): Engine
 describe('E8 reads', () => {
   it('plugins.env names the engine binary, the config home the CLI writes and its global config file', async () => {
     // under CLAUDE_CONFIG_DIR the global config lives inside the override
-    expect(await engineHost().call('plugins.env', {})).toEqual({ binary: join(fake, 'claude'), configHome: join(root, 'config'), globalConfig: join(root, 'config', '.claude.json') });
-    // without it, `~/.claude.json` sits beside `~/.claude`, not inside it
+    expect(await engineHost().call('plugins.env', {})).toEqual({ binary: join(fake, 'claude'), binaryError: null, configHome: join(root, 'config'), globalConfig: join(root, 'config', '.claude.json') });
+    // without it, `~/.claude.json` sits beside `~/.claude`, not inside it; a failed probe answers its refusal
     const home = engineHost({ captureEnv: async () => ({ HOME: '/Users/x' }), binaryProbe: async () => ({ path: '', testedVersion: TESTED_ENGINE_VERSION, version: null, ok: false, error: 'not installed' }) });
-    expect(await home.call('plugins.env', {})).toEqual({ binary: null, configHome: '/Users/x/.claude', globalConfig: '/Users/x/.claude.json' });
+    expect(await home.call('plugins.env', {})).toEqual({ binary: null, binaryError: 'not installed', configHome: '/Users/x/.claude', globalConfig: '/Users/x/.claude.json' });
   });
 
   it('answers the three listings reduced, each from its own argv in the asked directory', async () => {

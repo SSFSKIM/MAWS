@@ -436,6 +436,7 @@ export const PLUGIN_MANAGEMENT = {
   writes: "The engine's CLI writes:",
   records: (globalConfig: string) => `and keeps its own records in ${globalConfig}`, // `plugins.env`'s path, verbatim
   resolving: 'Resolving the engine…',
+  unresolved: 'The engine could not be resolved; choose a binary in Settings › Engine', // a refusal that came with no words
   reloadsIn: (n: number) => `Reloads plugins in ${n} running ${n === 1 ? 'session' : 'sessions'}`,
   noSessionToReload: 'No running session to reload',
   nothingToReload: 'Nothing to reload: an added marketplace loads no plugin',
