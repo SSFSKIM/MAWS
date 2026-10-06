@@ -217,8 +217,10 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       const index = open(path);
-      expect(index.applied).toEqual([]);
-      expect(inspect(path).version).toBe(3);
+      // E3's migration 4 (and any later entry) is pending on a version-3 database and applies after the repair
+      const pending = MIGRATIONS.filter((m) => m.version > 3).map((m) => m.version);
+      expect(index.applied).toEqual(pending);
+      expect(inspect(path).version).toBe(MIGRATIONS[MIGRATIONS.length - 1].version);
       expect(sessionColumns(path)).toContainEqual(['removed_at', 'TEXT', 0]);
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('sessions.removed_at'));
@@ -269,15 +271,17 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const path = join(dir.path, 'index.sqlite');
       preAmendment(path);
       vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const failing = [...MIGRATIONS, { version: 4, sql: 'CREATE TABLE later (x); SELECT * FROM no_such_table;' }];
+      const next = MIGRATIONS[MIGRATIONS.length - 1].version + 1; // past every released entry (E3 took 4)
+      const pending = MIGRATIONS.filter((m) => m.version > 3).map((m) => m.version);
+      const failing = [...MIGRATIONS, { version: next, sql: 'CREATE TABLE later (x); SELECT * FROM no_such_table;' }];
       expect(() => openDb(path, failing, REPAIRS)).toThrow(/no_such_table/);
       expect(sessionColumns(path).map(([name]) => name)).not.toContain('removed_at');
       expect(inspect(path)).toMatchObject({ version: 3, tables: ['attention_items', 'drafts', 'projects', 'replay_fixtures', 'sessions'] });
 
-      const later = [...MIGRATIONS, { version: 4, sql: 'CREATE INDEX sessions_removed ON sessions(removed_at);' }];
+      const later = [...MIGRATIONS, { version: next, sql: 'CREATE INDEX sessions_removed ON sessions(removed_at);' }];
       const db = openDb(path, later, REPAIRS);
       try {
-        expect(db.applied).toEqual([4]);
+        expect(db.applied).toEqual([...pending, next]);
         expect(db.get<{ n: number }>("SELECT count(*) AS n FROM sqlite_master WHERE name = 'sessions_removed'")).toEqual({ n: 1 });
       } finally {
         db.close();
