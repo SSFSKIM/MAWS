@@ -534,6 +534,10 @@ The executor replaces these lines with what actually ran and what it printed.
   Rationale: the executor's report (task 2); each is local to the socket layer or the entry and keeps the Interfaces' signatures (additive members only).
   Date/Author: 2026-10-06, the E10 controller.
 
+- Decision: the detached entry gains exit code `START_EXIT_ABORTED = 143` (a SIGTERM during the start removes the lock it took and exits 143), beside 0, 1 and 3; main's transport reads it as "any other code before a hello succeeded" (§Design 1's table: an unexpected exit). `HostPort.postMessage` may answer `boolean | void` (`false` when the socket port is closing, closed or stalled past its cap), so `HostEmit`'s `true` means the bytes reached a live socket, which Task 2.1's delivered cursor relies on. `EngineIpc.shutdown(graceMs)` is the one body of `engine.shutdown`, reused by the exit order and by M2's `host.stopAll`.
+  Rationale: Tasks 1.1–1.2 review fixes (fdfe35cd..730dcd5e); additive to Interfaces.
+  Date/Author: 2026-10-06, the E10 controller.
+
 Residue decisions (the design above carries each with its reason; the architect folded them as A-29, which accepts every one and rules the three that were marked ★ (10, 11, 21) and the `[parent-impact]` items, overturnable by the owner):
 
 1. The supervisor is the engine-host bundle itself, run by the Electron binary as Node (`process.execPath`, `ELECTRON_RUN_AS_NODE=1`) in dev and packaged alike; the `runAsNode` fuse must stay enabled and M4 guards it. Rejected: a bundled Node, a second Electron instance, a separate supervisor entry.
