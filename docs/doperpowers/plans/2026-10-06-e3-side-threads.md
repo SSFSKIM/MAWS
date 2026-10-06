@@ -615,6 +615,13 @@ Every e2e run is under `MAWS_E2E=1` with its own `userData` and an empty `CLAUDE
   Rationale: the architect's message after M5.
   Date/Author: 2026-10-06, the E3 executor.
 
+- Decision (the whole-branch review, `doperpowers:reviewer-high` on Opus, verdict "correct", three findings, all verified and fixed in the final wave):
+  - [P2] Migration 4 nulled the size and the mtime of every engine row. `bindings()` reports a row with a null size as bare, so it goes to `fs.bind` and never into `fs.scan`'s `known`, and a transcript deleted while MAWS was closed before the first upgraded launch would never be marked removed. Migration 4 now perturbs `transcript_mtime_ms` to `-1` instead. The row stays in `known`, fails `matchesKnown`, is re-summarised, and is still checked for removal. This revises Interfaces' migration SQL and Design §4's "nulls `transcript_size`/`transcript_mtime_ms`".
+  - [P3] A side thread whose setup card is declined (needs trust, or the relay is unreachable) lost its comment, because `adoptFork` was given a null docked message. It is now given the intent's message, as C10's `forkSession` does.
+  - [P3] The summary row's Open activated the pane unconditionally. Inside a thread hosted in the Side pane, that switched the main view, against the panel rule. It now reveals the pane with `activate: shownSession() === parent`, as Design §6 says.
+  Rationale: the review's evidence (`source.ts:219-221`, `fs/service.ts:622-624`, `setup-actions.ts:125-128`, `panel/host.ts:256`).
+  Date/Author: 2026-10-06, the E3 executor.
+
 ## Deferred
 
 - A fork detected by a mid-file uuid (a parent compacted before the fork), a root pushed past the head window by a large `file-history-snapshot`, and a first message record over 64 KiB (a pasted image in the first prompt; the `uuid` key follows `message`): not detected by the disk rule; listed as roots. A whole-file scan on demand is a later child.
