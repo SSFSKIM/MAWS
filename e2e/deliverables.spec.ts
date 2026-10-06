@@ -277,7 +277,7 @@ const PDF_VIEWER = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/';
 
 // A self-contained page: a full-height block of one colour holding `text`, and `extra` before `</body>`.
 const pageOf = (text: string, background: string, extra = '') =>
-  `<!doctype html><html><head><meta charset="utf-8"><title>${text}</title></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:${background};color:#fff;font:600 32px system-ui"><h1 id="heading">${text}</h1>${extra}</body></html>`;
+  `<!doctype html><html><head><meta charset="utf-8"><title>${text}</title></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:${background};color:#fff;font:600 28px system-ui"><h1 id="heading" style="margin:0;font-size:inherit">${text}</h1>${extra}</body></html>`;
 
 // The window rect of an element, and what main paints there: how many near-black pixels, and the centre of the widest
 // run of columns holding them, in window coordinates (the PDF page's black square, which is its link; the viewer's
@@ -406,8 +406,8 @@ const DASHBOARD_V1 = [
   '<!doctype html>',
   '<html>',
   '<head><meta charset="utf-8"><title>Dashboard</title></head>',
-  '<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#d32f2f;color:#fff;font:600 40px system-ui">',
-  '<h1 id="heading">HELLO_E2 v1</h1>',
+  '<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#d32f2f;color:#fff;font:600 28px system-ui">',
+  '<h1 id="heading" style="margin:0;font-size:inherit">HELLO_E2 v1</h1>',
   "<script>throw new Error('E2_BOOM')</script>",
   '</body>',
   '</html>',
@@ -486,10 +486,6 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
       const artifactRows = s.pane.locator('section.transcript-artifact');
       await expect(artifactRows.locator('[data-artifact-heading]')).toHaveText(['Artifact Dashboard · v1', 'Updated artifact Dashboard · v2', 'Could not register artifact nope: no artifact "nope" in this session']);
       await expect(artifactRows.nth(2).getByRole('button', { name: 'Open' })).toHaveCount(0);
-      // the cells, from the engine's recorded tool_result (the recording's synthetic 64-pixel answer)
-      await unfoldWork(s.pane);
-      await expect(s.pane.getByText('Listed 1 artifact', { exact: true })).toBeVisible();
-      await expect(s.pane.getByText('Screenshot of Dashboard v1 (64 × 64)', { exact: true })).toBeVisible();
 
       // v1 from its row: the viewer in the panel draws it, the frame throws once, and the chip counts it on the row and in
       // the viewer, once however many captures ran (the capture's console went into its result alone, Design §8)
@@ -505,7 +501,7 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
       await expect(artifactRows.nth(1).locator('[data-console-chip]')).toHaveCount(0);
       await s.page.waitForTimeout(1_000);
       await expect(viewer.locator('[data-console-chip]')).toHaveText('1 console error');
-      await v1Row.scrollIntoViewIfNeeded();
+      await artifactRows.nth(2).scrollIntoViewIfNeeded();
       await shoot(s, 'artifact-row');
 
       // the popover names the agent's own line
@@ -521,6 +517,11 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
       await shoot(s, 'console', openPopover);
       await s.page.keyboard.press('Escape');
       await expect(entry).toHaveCount(0);
+
+      // the cells, from the engine's recorded tool_result (the recording's synthetic 64-pixel answer)
+      await unfoldWork(s.pane);
+      await expect(s.pane.getByText('Listed 1 artifact', { exact: true })).toBeVisible();
+      await expect(s.pane.getByText('Screenshot of Dashboard v1 (64 × 64)', { exact: true })).toBeVisible();
     });
   } finally {
     if (!existed) rmSync(repo, { recursive: true, force: true });
@@ -687,6 +688,7 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     const page = await frameAt(s.page, deliverableUrl(id, html.id, 1));
     await expect(page.locator('#marker')).toHaveText('SCRIPT_RAN');
     await expect(viewer.locator('[data-console-chip]')).toBeVisible();
+    await shoot(s, 'viewer-html');
     await viewer.locator('[data-console-chip]').click();
     await expect(s.page.locator('[data-console-entry]').filter({ hasText: 'E2_FETCH_FAILED' })).toHaveCount(1);
     await expect(s.page.locator('[data-console-entry]').filter({ hasText: 'E2_FETCH_REACHED' })).toHaveCount(0);
@@ -696,7 +698,6 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     const ice = await page.evaluate(() => document.body.dataset.ice!);
     console.log(`[e2-files] ICE candidate types in the frame: ${JSON.stringify(ice)}`);
     expect(ice).not.toContain('srflx');
-    await shoot(s, 'viewer-html');
     // a download link saves nothing: the frame's sandbox (no allow-downloads) refuses it before any download starts
     await page.locator('#save').click();
     await s.page.waitForTimeout(1_500);
