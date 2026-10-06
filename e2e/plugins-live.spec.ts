@@ -19,8 +19,8 @@ import type { PluginsAction, PluginsScope } from '@shared/plugins/cli';
 import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws } from './support/launch';
-import { auditOf, manifestOf, type Manifest, type Tree } from '../test/support/plugins-audit';
-import { pluginsLiveSkipReason, pluginsScratch, type PluginsScratch } from './support/plugins-live';
+import { auditOf, manifestOf, untilQuiet, type Manifest, type Tree } from '../test/support/plugins-audit';
+import { pluginsLiveSkipReason, pluginsScratch, trackPluginReads, type PluginReads, type PluginsScratch } from './support/plugins-live';
 import { newChatIn } from './support/sidebar';
 
 const skip = pluginsLiveSkipReason();
@@ -37,6 +37,8 @@ const NETWORK_REFUSAL = /could not resolve host|unable to access|failed to conne
 const NOT_FOUND = 'Plugin "nope" not found in marketplace "e8-scratch". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`. · not_found';
 
 let scratch: PluginsScratch;
+let reads: PluginReads; // the plugins.* and marketplaces.* invokes main answers (trackPluginReads)
+const QUIET_MS = 1_500; // a window closes this long after the last CLI read settled, with none in flight
 test.beforeAll(() => {
   scratch = pluginsScratch();
 });
@@ -75,9 +77,13 @@ async function openWidget(page: Page, name: string): Promise<Locator> {
 // ---- the G4 audit (test/support/plugins-audit.ts) ----------------------------------------------------------------
 
 // The trees around one CLI action set side by side: every changed path with its verdict in live-run.txt; a configuration
-// write outside the manifest (any, for a listing) or a path nobody recognises fails the step.
-async function audited(page: Page, before: Tree, manifest: Manifest | null, what: string): Promise<void> {
-  await page.waitForTimeout(1_000); // the CLI has exited; let a straggling writer land before the after-tree is read
+// write outside the manifest (any, for a listing) or a path nobody recognises fails the step. The window closes only once
+// no CLI read is in flight and none settled for QUIET_MS (a refetch behind cached data, or the rereads a
+// `plugins.changed` triggers, has finished); the reads that settled inside it are logged.
+async function audited(before: Tree, startedAt: number, manifest: Manifest | null, what: string): Promise<void> {
+  await untilQuiet(reads, { quietMs: QUIET_MS, timeoutMs: 180_000 });
+  const settled = await reads.settledSince(startedAt);
+  scratch.log(`CLI reads settled in this window: ${settled.length === 0 ? 'none' : settled.map((r) => `${r.name} ${r.ms} ms${r.ok ? '' : ' (failed)'}`).join(' · ')}`);
   const audit = auditOf(before, scratch.tree(), manifest);
   scratch.log(manifest ? `manifest: ${manifest.paths.join(' · ')}` : `${what}: a listing (D-12: the catalogue caches and .claude.json bookkeeping only)`);
   scratch.log(audit.lines.length > 0 ? `delta:\n${audit.lines.join('\n')}` : 'delta: none');
@@ -92,17 +98,19 @@ async function audited(page: Page, before: Tree, manifest: Manifest | null, what
   expect(audit.unclassified, `${what}: paths the audit could not classify`).toEqual([]);
 }
 // A listing the widget runs (its opening reads, the Available section's expansion), audited as one.
-async function listing<T>(page: Page, what: string, run: () => Promise<T>): Promise<T> {
+async function listing<T>(what: string, run: () => Promise<T>): Promise<T> {
   scratch.log(`--- listing: ${what}`);
+  await untilQuiet(reads, { quietMs: QUIET_MS, timeoutMs: 180_000 }); // the baseline after any earlier read has landed
+  const startedAt = Date.now();
   const before = scratch.tree();
   const result = await run();
-  await audited(page, before, null, what);
+  await audited(before, startedAt, null, what);
   return result;
 }
 
 // `/plugins` opened, its two CLI reads (`plugin list`, `marketplace list`) answered and audited.
 async function openPlugins(page: Page): Promise<Locator> {
-  return listing(page, 'opening /plugins (plugin list --json, plugin marketplace list --json)', async () => {
+  return listing('opening /plugins (plugin list --json, plugin marketplace list --json)', async () => {
     const w = await openWidget(page, 'plugins');
     await expect(w.locator('[data-plugins-section="installed"]')).toBeVisible({ timeout: 30_000 });
     await expect(w.locator('[data-plugins-section="installed"]')).not.toContainText('Reading', { timeout: 30_000 });
@@ -137,7 +145,7 @@ async function openAvailableGroup(w: Locator, marketplace: string): Promise<Loca
   const section = w.locator('[data-plugins-section="available"]');
   const group = section.locator('details details').filter({ has: w.page().locator('summary', { hasText: new RegExp(`^${marketplace} · \\d+ plugins?$`) }) });
   if ((await section.locator('details').first().getAttribute('open')) === null) {
-    await listing(w.page(), 'expanding Available (plugin list --json --available)', async () => {
+    await listing('expanding Available (plugin list --json --available)', async () => {
       await section.locator('summary').first().click();
       await expect(group).toHaveCount(1, { timeout: 120_000 }); // the catalogue read lists the built-in directory too
     });
@@ -152,6 +160,7 @@ async function openAvailableGroup(w: Locator, marketplace: string): Promise<Loca
 test('E8 live: marketplaces and plugins managed from /plugins and the panel through the engine’s CLI, reflected in the running session', async () => {
   const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
   const { page } = maws;
+  reads = await trackPluginReads(maws.app); // before the page issues any CLI read
   const failures: string[] = [];
   let n = 0;
   const shot = (name: string) => page.screenshot({ path: join(scratch.root, `live-${name}.png`) }).catch(() => undefined);
@@ -177,6 +186,8 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
   // and the config home's delta beside the action's manifest.
   const action = async (spec: { name: string; action: PluginsAction; scope: PluginsScope; source: string | null; fill: Record<string, string>; sheet: string; submit: string; acknowledge?: boolean; line: () => Locator; timeout?: number }, open: () => Promise<void>) => {
     scratch.log(`--- ${spec.action}: ${spec.name}`);
+    await untilQuiet(reads, { quietMs: QUIET_MS, timeoutMs: 180_000 }); // the baseline after any earlier read has landed
+    const startedAt = Date.now();
     const before = scratch.tree();
     await open();
     const sheet = sheetOf(page, spec.sheet);
@@ -195,7 +206,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     scratch.log(`row: ${result.text.replaceAll('\n', ' ⏎ ')}${result.failed ? '   [drawn as a failure]' : ''}`);
     scratch.observe(spec.name, { argv, writes, then, row: result });
     scratch.log(`(writesOf ${spec.action}, ${spec.scope}, ${spec.source ?? 'null'})`);
-    await audited(page, before, manifestOf(spec.action, spec.scope, spec.source, spec.fill), spec.name);
+    await audited(before, startedAt, manifestOf(spec.action, spec.scope, spec.source, spec.fill), spec.name);
     return result;
   };
 

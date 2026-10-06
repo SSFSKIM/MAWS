@@ -7,7 +7,8 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readTree, type Tree } from '../../test/support/plugins-audit';
+import type { ElectronApplication } from '@playwright/test';
+import { readTree, type InvokeTracker, type Tree } from '../../test/support/plugins-audit';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin';
 import { isolatedGitEnv } from '../../test/support/git-env';
 
@@ -86,3 +87,50 @@ export function pluginsScratch(): PluginsScratch {
   return { root, config, market, repo, setPluginVersion, offerNope, tree: () => readTree(config, repo), log, observe };
 }
 
+
+// ---- the CLI reads in flight --------------------------------------------------------------------------------------
+
+export interface PluginReads extends InvokeTracker {
+  settledSince(at: number): Promise<{ name: string; ms: number; ok: boolean }[]>; // the reads that settled since `at`
+}
+
+type ReadLog = { inflight: number; lastSettledAt: number; settled: { name: string; at: number; ms: number; ok: boolean }[] };
+
+// Counts the `plugins.*` and `marketplaces.*` invokes main is answering. The page cannot do it: the preload's bridge is
+// frozen and read-only under contextIsolation (`window.maws` and its `invoke` are non-writable). So main's invoke
+// handlers for those channels (`maws:cmd:<name>`, one each, src/main/ipc/router.ts) are wrapped where Electron keeps
+// them (`ipcMain._invokeHandlers`, whose entry resolves once the reply is sent). Call it before the page issues any.
+export async function trackPluginReads(app: ElectronApplication): Promise<PluginReads> {
+  const wrapped = await app.evaluate(({ ipcMain }) => {
+    const handlers = (ipcMain as unknown as { _invokeHandlers?: Map<string, (event: unknown, ...args: unknown[]) => Promise<unknown>> })._invokeHandlers;
+    if (!handlers) throw new Error('ipcMain keeps no _invokeHandlers map: the read tracker cannot wrap main’s handlers');
+    const log: ReadLog = { inflight: 0, lastSettledAt: 0, settled: [] };
+    (globalThis as unknown as { __e8Reads: ReadLog }).__e8Reads = log;
+    const channels = [...handlers.keys()].filter((key) => key.startsWith('maws:cmd:plugins.') || key.startsWith('maws:cmd:marketplaces.'));
+    for (const channel of channels) {
+      const handler = handlers.get(channel)!;
+      handlers.set(channel, async (event, ...args) => {
+        const started = Date.now();
+        log.inflight += 1;
+        let ok = false;
+        try {
+          const result = await handler(event, ...args);
+          ok = true;
+          return result;
+        } finally {
+          log.inflight -= 1;
+          log.lastSettledAt = Date.now();
+          log.settled.push({ name: channel.slice('maws:cmd:'.length), at: log.lastSettledAt, ms: log.lastSettledAt - started, ok });
+        }
+      });
+    }
+    return channels.length;
+  });
+  if (wrapped === 0) throw new Error('no plugins.* or marketplaces.* invoke handler to wrap');
+  const read = () => app.evaluate(() => (globalThis as unknown as { __e8Reads: ReadLog }).__e8Reads);
+  return {
+    inflight: async () => (await read()).inflight,
+    lastSettledAt: async () => (await read()).lastSettledAt,
+    settledSince: async (at) => (await read()).settled.filter((s) => s.at >= at).map(({ name, ms, ok }) => ({ name, ms, ok })),
+  };
+}
