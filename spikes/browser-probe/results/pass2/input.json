@@ -1,0 +1,2522 @@
+{
+  "meta": {
+    "scenario": "input,crosssite",
+    "electron": "44.4.5",
+    "chrome": "152.0.7977.130",
+    "node": "24.21.0",
+    "playwrightCore": "1.63.0",
+    "platform": "darwin arm64 25.6.0",
+    "startedAt": "2026-10-06T17:11:42.788Z",
+    "loadavg": [
+      5.4,
+      7.8,
+      9.8
+    ],
+    "userData": "/tmp/maws-e4-0/userData",
+    "origins": {
+      "A": "http://localhost:17334",
+      "A2": "http://localhost:17337",
+      "B": "http://127.0.0.1:17335",
+      "C": "http://[::1]:17336"
+    },
+    "front": true,
+    "windowIsVisibleApi": true
+  },
+  "input": {
+    "target": {
+      "cx": 66,
+      "cy": 97,
+      "viewBounds": {
+        "x": 649,
+        "y": 45,
+        "width": 551,
+        "height": 755
+      },
+      "contentBounds": {
+        "x": 156,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "screenPointOfTarget": {
+        "x": 871,
+        "y": 175
+      },
+      "pageScreenOffset": {
+        "screenX": 156,
+        "screenY": 33,
+        "outerWidth": 1200,
+        "innerWidth": 551,
+        "outerHeight": 800,
+        "innerHeight": 755,
+        "dpr": 2
+      }
+    },
+    "countAfter": "5",
+    "fieldValue": "filledbcd",
+    "inputEventKeys": [
+      "type",
+      "clickCount",
+      "movementX",
+      "movementY",
+      "button",
+      "globalX",
+      "globalY",
+      "x",
+      "y"
+    ],
+    "phases": [
+      {
+        "label": "playwright locator.click",
+        "actionMs": 20.6,
+        "error": null,
+        "commands": [
+          {
+            "method": "Input.dispatchMouseEvent",
+            "type": "mouseMoved",
+            "x": 66.23,
+            "y": 97,
+            "sendRel": 13.85,
+            "replyRel": 14.7,
+            "durationMs": 0.85
+          },
+          {
+            "method": "Input.dispatchMouseEvent",
+            "type": "mousePressed",
+            "x": 66.23,
+            "y": 97,
+            "sendRel": 14.03,
+            "replyRel": 18.5,
+            "durationMs": 4.47
+          },
+          {
+            "method": "Input.dispatchMouseEvent",
+            "type": "mouseReleased",
+            "x": 66.23,
+            "y": 97,
+            "sendRel": 14.09,
+            "replyRel": 18.89,
+            "durationMs": 4.8
+          }
+        ],
+        "inputEvents": [
+          {
+            "type": "mouseMove",
+            "at": 13.99,
+            "x": 66.2300033569336,
+            "y": 97,
+            "globalX": 871.22998046875,
+            "globalY": 175,
+            "button": "none",
+            "clickCount": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchMouseEvent"
+          },
+          {
+            "type": "mouseDown",
+            "at": 14.07,
+            "x": 66.2300033569336,
+            "y": 97,
+            "globalX": 871.22998046875,
+            "globalY": 175,
+            "button": "left",
+            "clickCount": 1,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchMouseEvent"
+          },
+          {
+            "type": "mouseUp",
+            "at": 14.11,
+            "x": 66.2300033569336,
+            "y": 97,
+            "globalX": 871.22998046875,
+            "globalY": 175,
+            "button": "left",
+            "clickCount": 1,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchMouseEvent"
+          }
+        ],
+        "beforeInputEvents": [],
+        "domEvents": [
+          {
+            "type": "pointerdown",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0.5,
+            "clientX": 66.2300033569336,
+            "clientY": 97,
+            "screenX": 871.22998046875,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 804.9999771118164,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 1,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 14.13,
+            "seenRel": 14.83,
+            "recvInMainRel": 14.84
+          },
+          {
+            "type": "mousedown",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 1,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 14.13,
+            "seenRel": 15.03,
+            "recvInMainRel": 14.96
+          },
+          {
+            "type": "pointerup",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0,
+            "clientX": 66.2300033569336,
+            "clientY": 97,
+            "screenX": 871.22998046875,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 804.9999771118164,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 14.23,
+            "seenRel": 18.53,
+            "recvInMainRel": 18.85
+          },
+          {
+            "type": "mouseup",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 14.23,
+            "seenRel": 18.63,
+            "recvInMainRel": 18.93
+          },
+          {
+            "type": "click",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 14.23,
+            "seenRel": 18.63,
+            "recvInMainRel": 19.23
+          }
+        ]
+      },
+      {
+        "label": "playwright mouse.click",
+        "actionMs": 1.7,
+        "error": null,
+        "commands": [
+          {
+            "method": "Input.dispatchMouseEvent",
+            "type": "mouseMoved",
+            "x": 66,
+            "y": 97,
+            "sendRel": 0.42,
+            "replyRel": 0.83,
+            "durationMs": 0.42
+          },
+          {
+            "method": "Input.dispatchMouseEvent",
+            "type": "mousePressed",
+            "x": 66,
+            "y": 97,
+            "sendRel": 0.53,
+            "replyRel": 1.19,
+            "durationMs": 0.66
+          },
+          {
+            "method": "Input.dispatchMouseEvent",
+            "type": "mouseReleased",
+            "x": 66,
+            "y": 97,
+            "sendRel": 0.57,
+            "replyRel": 1.54,
+            "durationMs": 0.97
+          }
+        ],
+        "inputEvents": [
+          {
+            "type": "mouseMove",
+            "at": 0.5,
+            "x": 66,
+            "y": 97,
+            "globalX": 871,
+            "globalY": 175,
+            "button": "none",
+            "clickCount": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchMouseEvent"
+          },
+          {
+            "type": "mouseDown",
+            "at": 0.55,
+            "x": 66,
+            "y": 97,
+            "globalX": 871,
+            "globalY": 175,
+            "button": "left",
+            "clickCount": 1,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchMouseEvent"
+          },
+          {
+            "type": "mouseUp",
+            "at": 0.59,
+            "x": 66,
+            "y": 97,
+            "globalX": 871,
+            "globalY": 175,
+            "button": "left",
+            "clickCount": 1,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchMouseEvent"
+          }
+        ],
+        "beforeInputEvents": [],
+        "domEvents": [
+          {
+            "type": "pointerdown",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0.5,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 1,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.68,
+            "seenRel": 0.98,
+            "recvInMainRel": 0.93
+          },
+          {
+            "type": "mousedown",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 1,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.68,
+            "seenRel": 0.98,
+            "recvInMainRel": 1.01
+          },
+          {
+            "type": "pointerup",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.78,
+            "seenRel": 1.28,
+            "recvInMainRel": 1.35
+          },
+          {
+            "type": "mouseup",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.78,
+            "seenRel": 1.28,
+            "recvInMainRel": 1.38
+          },
+          {
+            "type": "click",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.78,
+            "seenRel": 1.28,
+            "recvInMainRel": 1.41
+          }
+        ]
+      },
+      {
+        "label": "raw CDP Input.dispatchMouseEvent from main (same debugger session)",
+        "actionMs": 1.5,
+        "error": null,
+        "commands": [],
+        "inputEvents": [
+          {
+            "type": "mouseMove",
+            "at": 0.14,
+            "x": 66,
+            "y": 97,
+            "globalX": 871,
+            "globalY": 175,
+            "button": "left",
+            "clickCount": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "mouseDown",
+            "at": 0.61,
+            "x": 66,
+            "y": 97,
+            "globalX": 871,
+            "globalY": 175,
+            "button": "left",
+            "clickCount": 1,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "mouseUp",
+            "at": 1.12,
+            "x": 66,
+            "y": 97,
+            "globalX": 871,
+            "globalY": 175,
+            "button": "left",
+            "clickCount": 1,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          }
+        ],
+        "beforeInputEvents": [],
+        "domEvents": [
+          {
+            "type": "pointerdown",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 1,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.77,
+            "seenRel": 0.77,
+            "recvInMainRel": 0.82
+          },
+          {
+            "type": "mousedown",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 1,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.77,
+            "seenRel": 0.97,
+            "recvInMainRel": 0.85
+          },
+          {
+            "type": "pointerup",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 1.17,
+            "seenRel": 1.27,
+            "recvInMainRel": 1.25
+          },
+          {
+            "type": "mouseup",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 1.17,
+            "seenRel": 1.37,
+            "recvInMainRel": 1.27
+          },
+          {
+            "type": "click",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 1.17,
+            "seenRel": 1.37,
+            "recvInMainRel": 1.3
+          }
+        ]
+      },
+      {
+        "label": "sendInputEvent mouse, no global coords (human stand-in, naive)",
+        "actionMs": 0.1,
+        "error": null,
+        "commands": [],
+        "inputEvents": [
+          {
+            "type": "mouseMove",
+            "at": 0.08,
+            "x": 66,
+            "y": 97,
+            "globalX": 0,
+            "globalY": 0,
+            "button": "left",
+            "clickCount": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "mouseDown",
+            "at": 0.12,
+            "x": 66,
+            "y": 97,
+            "globalX": 0,
+            "globalY": 0,
+            "button": "left",
+            "clickCount": 1,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "mouseUp",
+            "at": 0.13,
+            "x": 66,
+            "y": 97,
+            "globalX": 0,
+            "globalY": 0,
+            "button": "left",
+            "clickCount": 1,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          }
+        ],
+        "beforeInputEvents": [],
+        "domEvents": [
+          {
+            "type": "pointerdown",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0.5,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 0,
+            "screenY": 0,
+            "screenMinusClient": {
+              "x": -66,
+              "y": -97
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 1,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.26,
+            "seenRel": 0.46,
+            "recvInMainRel": 0.43
+          },
+          {
+            "type": "mousedown",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 0,
+            "screenY": 0,
+            "screenMinusClient": {
+              "x": -66,
+              "y": -97
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 1,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.26,
+            "seenRel": 0.46,
+            "recvInMainRel": 0.45
+          },
+          {
+            "type": "pointerup",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 0,
+            "screenY": 0,
+            "screenMinusClient": {
+              "x": -66,
+              "y": -97
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.26,
+            "seenRel": 0.86,
+            "recvInMainRel": 0.71
+          },
+          {
+            "type": "mouseup",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 0,
+            "screenY": 0,
+            "screenMinusClient": {
+              "x": -66,
+              "y": -97
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.26,
+            "seenRel": 0.86,
+            "recvInMainRel": 0.72
+          },
+          {
+            "type": "click",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 0,
+            "screenY": 0,
+            "screenMinusClient": {
+              "x": -66,
+              "y": -97
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.26,
+            "seenRel": 0.86,
+            "recvInMainRel": 0.73
+          }
+        ]
+      },
+      {
+        "label": "sendInputEvent mouse, globalX/Y = screen point (human stand-in)",
+        "actionMs": 0.2,
+        "error": null,
+        "commands": [],
+        "inputEvents": [
+          {
+            "type": "mouseMove",
+            "at": 0.11,
+            "x": 66,
+            "y": 97,
+            "globalX": 871,
+            "globalY": 175,
+            "button": "left",
+            "clickCount": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "mouseDown",
+            "at": 0.14,
+            "x": 66,
+            "y": 97,
+            "globalX": 871,
+            "globalY": 175,
+            "button": "left",
+            "clickCount": 1,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "mouseUp",
+            "at": 0.15,
+            "x": 66,
+            "y": 97,
+            "globalX": 871,
+            "globalY": 175,
+            "button": "left",
+            "clickCount": 1,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          }
+        ],
+        "beforeInputEvents": [],
+        "domEvents": [
+          {
+            "type": "pointerdown",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0.5,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 1,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.26,
+            "seenRel": 0.56,
+            "recvInMainRel": 0.46
+          },
+          {
+            "type": "mousedown",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 1,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.26,
+            "seenRel": 0.56,
+            "recvInMainRel": 0.49
+          },
+          {
+            "type": "pointerup",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.26,
+            "seenRel": 0.86,
+            "recvInMainRel": 0.76
+          },
+          {
+            "type": "mouseup",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.26,
+            "seenRel": 0.86,
+            "recvInMainRel": 0.78
+          },
+          {
+            "type": "click",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": "mouse",
+            "pointerId": 1,
+            "pressure": 0,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 871,
+            "screenY": 175,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 1,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.26,
+            "seenRel": 0.86,
+            "recvInMainRel": 0.8
+          }
+        ]
+      },
+      {
+        "label": "playwright keyboard.press a",
+        "actionMs": 4.6,
+        "error": null,
+        "commands": [
+          {
+            "method": "Input.dispatchKeyEvent",
+            "type": "keyDown",
+            "key": "a",
+            "text": "a",
+            "sendRel": 0.64,
+            "replyRel": 2.43,
+            "durationMs": 1.79
+          },
+          {
+            "method": "Input.dispatchKeyEvent",
+            "type": "keyUp",
+            "key": "a",
+            "sendRel": 3.23,
+            "replyRel": 3.81,
+            "durationMs": 0.59
+          }
+        ],
+        "inputEvents": [
+          {
+            "type": "keyDown",
+            "at": 1.07,
+            "modifiers": [],
+            "_modifiers": 8388608,
+            "bits": [
+              23
+            ],
+            "unmappedBits": [
+              23
+            ],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchKeyEvent"
+          },
+          {
+            "type": "keyUp",
+            "at": 3.3,
+            "modifiers": [],
+            "_modifiers": 8388608,
+            "bits": [
+              23
+            ],
+            "unmappedBits": [
+              23
+            ],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchKeyEvent"
+          }
+        ],
+        "beforeInputEvents": [],
+        "domEvents": [
+          {
+            "type": "keydown",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "a",
+            "code": "KeyA",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.83,
+            "seenRel": 1.33,
+            "recvInMainRel": 1.38
+          },
+          {
+            "type": "keypress",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "a",
+            "code": "KeyA",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.83,
+            "seenRel": 1.73,
+            "recvInMainRel": 1.66
+          },
+          {
+            "type": "beforeinput",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": "insertText",
+            "data": "a",
+            "atEpochRel": 1.93,
+            "seenRel": 1.93,
+            "recvInMainRel": 1.88
+          },
+          {
+            "type": "input",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": "insertText",
+            "data": "a",
+            "atEpochRel": 2.13,
+            "seenRel": 2.23,
+            "recvInMainRel": 2.22
+          },
+          {
+            "type": "keyup",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "a",
+            "code": "KeyA",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 3.43,
+            "seenRel": 3.63,
+            "recvInMainRel": 3.92
+          }
+        ]
+      },
+      {
+        "label": "playwright locator.fill",
+        "actionMs": 5.5,
+        "error": null,
+        "commands": [
+          {
+            "method": "Input.insertText",
+            "text": "filled",
+            "sendRel": 3.57,
+            "replyRel": 4.89,
+            "durationMs": 1.33
+          }
+        ],
+        "inputEvents": [],
+        "beforeInputEvents": [],
+        "domEvents": [
+          {
+            "type": "beforeinput",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": "insertText",
+            "data": "filled",
+            "atEpochRel": 4.14,
+            "seenRel": 4.24,
+            "recvInMainRel": 4.14
+          },
+          {
+            "type": "input",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": "insertText",
+            "data": "filled",
+            "atEpochRel": 4.64,
+            "seenRel": 4.74,
+            "recvInMainRel": 4.68
+          }
+        ]
+      },
+      {
+        "label": "playwright keyboard.type bc",
+        "actionMs": 3.9,
+        "error": null,
+        "commands": [
+          {
+            "method": "Input.dispatchKeyEvent",
+            "type": "keyDown",
+            "key": "b",
+            "text": "b",
+            "sendRel": 0.36,
+            "replyRel": 1.39,
+            "durationMs": 1.02
+          },
+          {
+            "method": "Input.dispatchKeyEvent",
+            "type": "keyUp",
+            "key": "b",
+            "sendRel": 1.59,
+            "replyRel": 1.97,
+            "durationMs": 0.38
+          },
+          {
+            "method": "Input.dispatchKeyEvent",
+            "type": "keyDown",
+            "key": "c",
+            "text": "c",
+            "sendRel": 2.2,
+            "replyRel": 3.19,
+            "durationMs": 0.99
+          },
+          {
+            "method": "Input.dispatchKeyEvent",
+            "type": "keyUp",
+            "key": "c",
+            "sendRel": 3.47,
+            "replyRel": 3.65,
+            "durationMs": 0.18
+          }
+        ],
+        "inputEvents": [
+          {
+            "type": "keyDown",
+            "at": 0.44,
+            "modifiers": [],
+            "_modifiers": 8388608,
+            "bits": [
+              23
+            ],
+            "unmappedBits": [
+              23
+            ],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchKeyEvent"
+          },
+          {
+            "type": "keyUp",
+            "at": 1.64,
+            "modifiers": [],
+            "_modifiers": 8388608,
+            "bits": [
+              23
+            ],
+            "unmappedBits": [
+              23
+            ],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchKeyEvent"
+          },
+          {
+            "type": "keyDown",
+            "at": 2.25,
+            "modifiers": [],
+            "_modifiers": 8388608,
+            "bits": [
+              23
+            ],
+            "unmappedBits": [
+              23
+            ],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchKeyEvent"
+          },
+          {
+            "type": "keyUp",
+            "at": 3.52,
+            "modifiers": [],
+            "_modifiers": 8388608,
+            "bits": [
+              23
+            ],
+            "unmappedBits": [
+              23
+            ],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": true,
+            "windowMethod": "Input.dispatchKeyEvent"
+          }
+        ],
+        "beforeInputEvents": [],
+        "domEvents": [
+          {
+            "type": "keydown",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "b",
+            "code": "KeyB",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.5,
+            "seenRel": 0.7,
+            "recvInMainRel": 0.66
+          },
+          {
+            "type": "keypress",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "b",
+            "code": "KeyB",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.5,
+            "seenRel": 0.8,
+            "recvInMainRel": 0.73
+          },
+          {
+            "type": "beforeinput",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": "insertText",
+            "data": "b",
+            "atEpochRel": 1,
+            "seenRel": 1,
+            "recvInMainRel": 0.99
+          },
+          {
+            "type": "input",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": "insertText",
+            "data": "b",
+            "atEpochRel": 1.2,
+            "seenRel": 1.2,
+            "recvInMainRel": 1.21
+          },
+          {
+            "type": "keyup",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "b",
+            "code": "KeyB",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 1.8,
+            "seenRel": 2,
+            "recvInMainRel": 2.04
+          },
+          {
+            "type": "keydown",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "c",
+            "code": "KeyC",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 2.4,
+            "seenRel": 2.6,
+            "recvInMainRel": 2.58
+          },
+          {
+            "type": "keypress",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "c",
+            "code": "KeyC",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 2.4,
+            "seenRel": 2.6,
+            "recvInMainRel": 2.62
+          },
+          {
+            "type": "beforeinput",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": "insertText",
+            "data": "c",
+            "atEpochRel": 2.9,
+            "seenRel": 2.9,
+            "recvInMainRel": 2.8
+          },
+          {
+            "type": "input",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": "insertText",
+            "data": "c",
+            "atEpochRel": 3,
+            "seenRel": 3,
+            "recvInMainRel": 2.96
+          },
+          {
+            "type": "keyup",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "c",
+            "code": "KeyC",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 3.7,
+            "seenRel": 3.7,
+            "recvInMainRel": 3.72
+          }
+        ]
+      },
+      {
+        "label": "sendInputEvent key d (human stand-in)",
+        "actionMs": 0.2,
+        "error": null,
+        "commands": [],
+        "inputEvents": [
+          {
+            "type": "rawKeyDown",
+            "at": 0.12,
+            "modifiers": [],
+            "_modifiers": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "char",
+            "at": 0.15,
+            "modifiers": [],
+            "_modifiers": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "keyUp",
+            "at": 0.16,
+            "modifiers": [],
+            "_modifiers": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          }
+        ],
+        "beforeInputEvents": [
+          {
+            "at": 0.1,
+            "type": "keyDown",
+            "key": "d",
+            "code": "KeyD",
+            "modifiers": [],
+            "isAutoRepeat": false
+          },
+          {
+            "at": 0.16,
+            "type": "keyUp",
+            "key": "d",
+            "code": "KeyD",
+            "modifiers": [],
+            "isAutoRepeat": false
+          }
+        ],
+        "domEvents": [
+          {
+            "type": "keydown",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "d",
+            "code": "KeyD",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.18,
+            "seenRel": 0.38,
+            "recvInMainRel": 0.39
+          },
+          {
+            "type": "keypress",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "d",
+            "code": "KeyD",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.28,
+            "seenRel": 0.48,
+            "recvInMainRel": 0.42
+          },
+          {
+            "type": "beforeinput",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": "insertText",
+            "data": "d",
+            "atEpochRel": 0.68,
+            "seenRel": 0.68,
+            "recvInMainRel": 0.64
+          },
+          {
+            "type": "input",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": "insertText",
+            "data": "d",
+            "atEpochRel": 0.78,
+            "seenRel": 0.78,
+            "recvInMainRel": 0.82
+          },
+          {
+            "type": "keyup",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": {
+              "firesTouchEvents": false
+            },
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": null,
+            "clientY": null,
+            "screenX": null,
+            "screenY": null,
+            "screenMinusClient": null,
+            "movementX": null,
+            "button": null,
+            "buttons": null,
+            "detail": 0,
+            "key": "d",
+            "code": "KeyD",
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.28,
+            "seenRel": 1.08,
+            "recvInMainRel": 0.99
+          }
+        ]
+      },
+      {
+        "label": "playwright mouse.wheel",
+        "actionMs": 1.4,
+        "error": null,
+        "commands": [
+          {
+            "method": "Input.dispatchMouseEvent",
+            "type": "mouseWheel",
+            "x": 132.14,
+            "y": 143,
+            "sendRel": 0.38,
+            "replyRel": 1.08,
+            "durationMs": 0.69
+          }
+        ],
+        "inputEvents": [
+          {
+            "type": "mouseWheel",
+            "at": 0.92,
+            "modifiers": [],
+            "_modifiers": 8388608,
+            "bits": [
+              23
+            ],
+            "unmappedBits": [
+              23
+            ],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": false,
+            "windowMethod": "Input.dispatchMouseEvent"
+          },
+          {
+            "type": "gestureScrollBegin",
+            "at": 1.07,
+            "modifiers": [],
+            "_modifiers": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": true,
+            "insideMatchingWindow": false,
+            "windowMethod": "Input.dispatchMouseEvent"
+          },
+          {
+            "type": "gestureScrollUpdate",
+            "at": 1.2,
+            "modifiers": [],
+            "_modifiers": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "mouseWheel",
+            "at": 1.2,
+            "modifiers": [],
+            "_modifiers": 8388608,
+            "bits": [
+              23
+            ],
+            "unmappedBits": [
+              23
+            ],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "gestureScrollEnd",
+            "at": 1.22,
+            "modifiers": [],
+            "_modifiers": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          }
+        ],
+        "beforeInputEvents": [],
+        "domEvents": [
+          {
+            "type": "wheel",
+            "target": "input#field",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 132,
+            "clientY": 143,
+            "screenX": 937,
+            "screenY": 221,
+            "screenMinusClient": {
+              "x": 805,
+              "y": 78
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.51,
+            "seenRel": 12.21,
+            "recvInMainRel": 12.33
+          }
+        ]
+      },
+      {
+        "label": "sendInputEvent mouseWheel (human stand-in)",
+        "actionMs": 0.1,
+        "error": null,
+        "commands": [],
+        "inputEvents": [
+          {
+            "type": "mouseWheel",
+            "at": 0.07,
+            "modifiers": [],
+            "_modifiers": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "gestureScrollBegin",
+            "at": 0.19,
+            "modifiers": [],
+            "_modifiers": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "gestureScrollUpdate",
+            "at": 0.23,
+            "modifiers": [],
+            "_modifiers": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "mouseWheel",
+            "at": 0.24,
+            "modifiers": [],
+            "_modifiers": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          },
+          {
+            "type": "gestureScrollEnd",
+            "at": 0.25,
+            "modifiers": [],
+            "_modifiers": 0,
+            "bits": [],
+            "unmappedBits": [],
+            "insideAnyWindow": false,
+            "insideMatchingWindow": false,
+            "windowMethod": null
+          }
+        ],
+        "beforeInputEvents": [],
+        "domEvents": [
+          {
+            "type": "wheel",
+            "target": "button#target",
+            "isTrusted": true,
+            "sourceCapabilities": null,
+            "pointerType": null,
+            "pointerId": null,
+            "pressure": null,
+            "clientX": 66,
+            "clientY": 97,
+            "screenX": 0,
+            "screenY": 0,
+            "screenMinusClient": {
+              "x": -66,
+              "y": -97
+            },
+            "movementX": 0,
+            "button": 0,
+            "buttons": 0,
+            "detail": 0,
+            "key": null,
+            "code": null,
+            "inputType": null,
+            "data": null,
+            "atEpochRel": 0.09,
+            "seenRel": 0.49,
+            "recvInMainRel": 0.5
+          }
+        ]
+      }
+    ],
+    "analysis": {
+      "inputEventFiresForCdpInput": [
+        {
+          "label": "playwright locator.click",
+          "inputCommands": 3,
+          "inputEvents": 3
+        },
+        {
+          "label": "playwright mouse.click",
+          "inputCommands": 3,
+          "inputEvents": 3
+        },
+        {
+          "label": "playwright keyboard.press a",
+          "inputCommands": 2,
+          "inputEvents": 2
+        },
+        {
+          "label": "playwright keyboard.type bc",
+          "inputCommands": 4,
+          "inputEvents": 4
+        },
+        {
+          "label": "playwright mouse.wheel",
+          "inputCommands": 1,
+          "inputEvents": 5
+        }
+      ],
+      "inputEventFiresForSendInputEvent": [
+        {
+          "label": "sendInputEvent mouse, no global coords (human stand-in, naive)",
+          "inputEvents": 3,
+          "types": [
+            "mouseMove",
+            "mouseDown",
+            "mouseUp"
+          ]
+        },
+        {
+          "label": "sendInputEvent mouse, globalX/Y = screen point (human stand-in)",
+          "inputEvents": 3,
+          "types": [
+            "mouseMove",
+            "mouseDown",
+            "mouseUp"
+          ]
+        },
+        {
+          "label": "sendInputEvent key d (human stand-in)",
+          "inputEvents": 3,
+          "types": [
+            "rawKeyDown",
+            "char",
+            "keyUp"
+          ]
+        },
+        {
+          "label": "sendInputEvent mouseWheel (human stand-in)",
+          "inputEvents": 5,
+          "types": [
+            "mouseWheel",
+            "gestureScrollBegin",
+            "gestureScrollUpdate",
+            "mouseWheel",
+            "gestureScrollEnd"
+          ]
+        }
+      ],
+      "rawModifierBitsSeen": {
+        "synthesised": [
+          23
+        ],
+        "humanStandIn": [],
+        "candidateSignalBits": [
+          23
+        ],
+        "eventsCarryingModifiers": {
+          "synthesised": 8,
+          "humanStandIn": 5
+        },
+        "note": "a bit set on every CDP-dispatched key or wheel event and on no sendInputEvent one; Chromium 152 names bit 23 kFromDebugger (results/pass2/web_input_event-modifiers-152.0.7977.130.txt)"
+      },
+      "insideWindow": [
+        {
+          "label": "playwright locator.click",
+          "events": 3,
+          "insideAny": 3,
+          "insideMatching": 3
+        },
+        {
+          "label": "playwright mouse.click",
+          "events": 3,
+          "insideAny": 3,
+          "insideMatching": 3
+        },
+        {
+          "label": "raw CDP Input.dispatchMouseEvent from main (same debugger session)",
+          "events": 3,
+          "insideAny": 0,
+          "insideMatching": 0
+        },
+        {
+          "label": "playwright keyboard.press a",
+          "events": 2,
+          "insideAny": 2,
+          "insideMatching": 2
+        },
+        {
+          "label": "playwright locator.fill",
+          "events": 0,
+          "insideAny": 0,
+          "insideMatching": 0
+        },
+        {
+          "label": "playwright keyboard.type bc",
+          "events": 4,
+          "insideAny": 4,
+          "insideMatching": 4
+        },
+        {
+          "label": "playwright mouse.wheel",
+          "events": 5,
+          "insideAny": 2,
+          "insideMatching": 0
+        }
+      ],
+      "humanInsideWindow": [
+        {
+          "label": "sendInputEvent mouse, no global coords (human stand-in, naive)",
+          "events": 3,
+          "insideAny": 0
+        },
+        {
+          "label": "sendInputEvent mouse, globalX/Y = screen point (human stand-in)",
+          "events": 3,
+          "insideAny": 0
+        },
+        {
+          "label": "sendInputEvent key d (human stand-in)",
+          "events": 3,
+          "insideAny": 0
+        },
+        {
+          "label": "sendInputEvent mouseWheel (human stand-in)",
+          "events": 5,
+          "insideAny": 0
+        }
+      ],
+      "commandWindowMs": {
+        "n": 13,
+        "min": 0.18,
+        "median": 0.85,
+        "p95": 4.8,
+        "max": 4.8
+      },
+      "actionWindowMs": {
+        "playwright locator.click": 20.6,
+        "playwright mouse.click": 1.7,
+        "raw CDP Input.dispatchMouseEvent from main (same debugger session)": 1.5,
+        "sendInputEvent mouse, no global coords (human stand-in, naive)": 0.1,
+        "sendInputEvent mouse, globalX/Y = screen point (human stand-in)": 0.2,
+        "playwright keyboard.press a": 4.6,
+        "playwright locator.fill": 5.5,
+        "playwright keyboard.type bc": 3.9,
+        "sendInputEvent key d (human stand-in)": 0.2,
+        "playwright mouse.wheel": 1.4,
+        "sendInputEvent mouseWheel (human stand-in)": 0.1
+      },
+      "domTrust": {
+        "playwright locator.click": {
+          "isTrusted": [
+            true
+          ],
+          "sourceCapabilities": [
+            "null",
+            "{\"firesTouchEvents\":false}"
+          ],
+          "pointerType": [
+            "mouse"
+          ],
+          "screenMinusClient": [
+            "804.9999771118164,78",
+            "805,78"
+          ]
+        },
+        "playwright mouse.click": {
+          "isTrusted": [
+            true
+          ],
+          "sourceCapabilities": [
+            "null",
+            "{\"firesTouchEvents\":false}"
+          ],
+          "pointerType": [
+            "mouse"
+          ],
+          "screenMinusClient": [
+            "805,78"
+          ]
+        },
+        "raw CDP Input.dispatchMouseEvent from main (same debugger session)": {
+          "isTrusted": [
+            true
+          ],
+          "sourceCapabilities": [
+            "null",
+            "{\"firesTouchEvents\":false}"
+          ],
+          "pointerType": [
+            "mouse"
+          ],
+          "screenMinusClient": [
+            "805,78"
+          ]
+        },
+        "sendInputEvent mouse, no global coords (human stand-in, naive)": {
+          "isTrusted": [
+            true
+          ],
+          "sourceCapabilities": [
+            "null",
+            "{\"firesTouchEvents\":false}"
+          ],
+          "pointerType": [
+            "mouse"
+          ],
+          "screenMinusClient": [
+            "-66,-97"
+          ]
+        },
+        "sendInputEvent mouse, globalX/Y = screen point (human stand-in)": {
+          "isTrusted": [
+            true
+          ],
+          "sourceCapabilities": [
+            "null",
+            "{\"firesTouchEvents\":false}"
+          ],
+          "pointerType": [
+            "mouse"
+          ],
+          "screenMinusClient": [
+            "805,78"
+          ]
+        },
+        "playwright keyboard.press a": {
+          "isTrusted": [
+            true
+          ],
+          "sourceCapabilities": [
+            "{\"firesTouchEvents\":false}",
+            "null"
+          ],
+          "pointerType": [],
+          "screenMinusClient": []
+        },
+        "playwright locator.fill": {
+          "isTrusted": [
+            true
+          ],
+          "sourceCapabilities": [
+            "null"
+          ],
+          "pointerType": [],
+          "screenMinusClient": []
+        },
+        "playwright keyboard.type bc": {
+          "isTrusted": [
+            true
+          ],
+          "sourceCapabilities": [
+            "{\"firesTouchEvents\":false}",
+            "null"
+          ],
+          "pointerType": [],
+          "screenMinusClient": []
+        },
+        "sendInputEvent key d (human stand-in)": {
+          "isTrusted": [
+            true
+          ],
+          "sourceCapabilities": [
+            "{\"firesTouchEvents\":false}",
+            "null"
+          ],
+          "pointerType": [],
+          "screenMinusClient": []
+        },
+        "playwright mouse.wheel": {
+          "isTrusted": [
+            true
+          ],
+          "sourceCapabilities": [
+            "null"
+          ],
+          "pointerType": [],
+          "screenMinusClient": [
+            "805,78"
+          ]
+        },
+        "sendInputEvent mouseWheel (human stand-in)": {
+          "isTrusted": [
+            true
+          ],
+          "sourceCapabilities": [
+            "null"
+          ],
+          "pointerType": [],
+          "screenMinusClient": [
+            "-66,-97"
+          ]
+        }
+      },
+      "ordering": [
+        {
+          "label": "playwright locator.click",
+          "commandSend": 14.03,
+          "inputEvent": 14.07,
+          "domEvent": 14.13,
+          "domReportInMain": 14.96,
+          "commandReply": 18.5,
+          "inputEventBeforeReply": true,
+          "domReportBeforeReply": true
+        },
+        {
+          "label": "playwright mouse.click",
+          "commandSend": 0.53,
+          "inputEvent": 0.55,
+          "domEvent": 0.68,
+          "domReportInMain": 1.01,
+          "commandReply": 1.19,
+          "inputEventBeforeReply": true,
+          "domReportBeforeReply": true
+        },
+        {
+          "label": "playwright keyboard.press a",
+          "commandSend": 0.64,
+          "inputEvent": 1.07,
+          "domEvent": 0.83,
+          "domReportInMain": 1.38,
+          "commandReply": 2.43,
+          "inputEventBeforeReply": true,
+          "domReportBeforeReply": true
+        },
+        {
+          "label": "playwright keyboard.type bc",
+          "commandSend": 0.36,
+          "inputEvent": 0.44,
+          "domEvent": 0.5,
+          "domReportInMain": 0.66,
+          "commandReply": 1.39,
+          "inputEventBeforeReply": true,
+          "domReportBeforeReply": true
+        },
+        {
+          "label": "playwright mouse.wheel",
+          "note": "no press pair"
+        }
+      ]
+    },
+    "totalMs": 3956
+  }
+}

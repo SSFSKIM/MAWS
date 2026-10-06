@@ -1,0 +1,83 @@
+{
+  "electron": "44.4.5",
+  "chrome": "152.0.7977.130",
+  "steps": [
+    {
+      "label": "the window's own renderer (baseline)",
+      "visibility": "visible",
+      "rafFiresWithin1s": true,
+      "framesPresentedIn1500ms": 16,
+      "timerTicksSoFar": 20
+    },
+    {
+      "label": "child view after load, nothing attached",
+      "visibility": "hidden",
+      "rafFiresWithin1s": false,
+      "framesPresentedIn1500ms": 0,
+      "timerTicksSoFar": 5
+    },
+    {
+      "label": "child view with webContents.debugger attached and Page.enable",
+      "visibility": "hidden",
+      "rafFiresWithin1s": false,
+      "framesPresentedIn1500ms": 0,
+      "timerTicksSoFar": 8
+    },
+    {
+      "label": "child view after debugger detach",
+      "visibility": "hidden",
+      "rafFiresWithin1s": false,
+      "framesPresentedIn1500ms": 0,
+      "timerTicksSoFar": 11
+    },
+    {
+      "label": "child view after setBackgroundThrottling(false)",
+      "visibility": "hidden",
+      "rafFiresWithin1s": true,
+      "framesPresentedIn1500ms": 16,
+      "timerTicksSoFar": 30
+    },
+    {
+      "label": "child view after setBackgroundThrottling(true) again",
+      "visibility": "hidden",
+      "rafFiresWithin1s": true,
+      "framesPresentedIn1500ms": 3,
+      "timerTicksSoFar": 32
+    },
+    {
+      "label": "child view after a reload, nothing attached",
+      "visibility": "hidden",
+      "rafFiresWithin1s": false,
+      "framesPresentedIn1500ms": 0,
+      "timerTicksSoFar": 3
+    },
+    {
+      "label": "child view after setVisible(false)",
+      "visibility": "hidden",
+      "rafFiresWithin1s": false,
+      "framesPresentedIn1500ms": 0,
+      "timerTicksSoFar": 6
+    },
+    {
+      "label": "child view after setVisible(true)",
+      "visibility": "hidden",
+      "rafFiresWithin1s": false,
+      "framesPresentedIn1500ms": 0,
+      "timerTicksSoFar": 9
+    },
+    {
+      "label": "a second BrowserWindow, show:true, its own renderer",
+      "visibility": "visible",
+      "rafFiresWithin1s": true,
+      "framesPresentedIn1500ms": 16,
+      "timerTicksSoFar": 20
+    },
+    {
+      "label": "child view in the first window, after the second window opened",
+      "visibility": "hidden",
+      "rafFiresWithin1s": false,
+      "framesPresentedIn1500ms": 0,
+      "timerTicksSoFar": 14
+    }
+  ]
+}

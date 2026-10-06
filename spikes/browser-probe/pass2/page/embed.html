@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>embedding page</title>
+<style>body { font: 14px system-ui; margin: 24px; } iframe { width: 480px; height: 200px; border: 2px solid #36c; }</style>
+</head>
+<body>
+<h1 id="origin"></h1>
+<p><button id="top-btn">Top button</button> <span>top count: <b id="top-count">0</b></span></p>
+<!-- the frame's src is filled from the query string: ?frame=<url> -->
+<iframe id="f" title="embedded"></iframe>
+<script>
+  document.getElementById('origin').textContent = `top at ${location.origin}`;
+  const c = document.getElementById('top-count');
+  document.getElementById('top-btn').addEventListener('click', () => { c.textContent = String(Number(c.textContent) + 1); });
+  const src = new URLSearchParams(location.search).get('frame');
+  if (src) document.getElementById('f').src = src;
+</script>
+</body>
+</html>

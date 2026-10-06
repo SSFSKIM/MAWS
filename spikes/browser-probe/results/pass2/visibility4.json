@@ -1,0 +1,116 @@
+{
+  "electron": "44.4.5",
+  "chrome": "152.0.7977.130",
+  "steps": [
+    {
+      "label": "nothing attached, on A",
+      "visibility": "hidden",
+      "hasFocus": false,
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000,
+      "processId": 5,
+      "url": "http://localhost:17344/"
+    },
+    {
+      "label": "the window's own renderer (hasFocus baseline)",
+      "visibility": "visible",
+      "hasFocus": false,
+      "rafFires": true,
+      "framesPresented": 1,
+      "inMs": 300,
+      "processId": 4,
+      "url": "data:text/html,<title>shell</title>shell"
+    },
+    {
+      "label": "debugger attached + Emulation.setFocusEmulationEnabled(true), on A",
+      "visibility": "visible",
+      "hasFocus": true,
+      "rafFires": true,
+      "framesPresented": 11,
+      "inMs": 1000,
+      "processId": 5,
+      "url": "http://localhost:17344/"
+    },
+    {
+      "label": "after a same-site navigation (A -> A?second)",
+      "visibility": "visible",
+      "hasFocus": true,
+      "rafFires": true,
+      "framesPresented": 11,
+      "inMs": 1000,
+      "processId": 5,
+      "url": "http://localhost:17344/?second"
+    },
+    {
+      "label": "after a cross-site navigation (A -> B, process swap)",
+      "visibility": "visible",
+      "hasFocus": true,
+      "rafFires": true,
+      "framesPresented": 11,
+      "inMs": 1000,
+      "processId": 6,
+      "url": "http://127.0.0.1:17345/"
+    },
+    {
+      "label": "after a reload on B",
+      "visibility": "visible",
+      "hasFocus": true,
+      "rafFires": true,
+      "framesPresented": 11,
+      "inMs": 1000,
+      "processId": 6,
+      "url": "http://127.0.0.1:17345/"
+    },
+    {
+      "label": "cover: setVisible(false)",
+      "visibility": "visible",
+      "hasFocus": true,
+      "rafFires": false,
+      "framesPresented": 11,
+      "inMs": 1000,
+      "processId": 6,
+      "url": "http://127.0.0.1:17345/"
+    },
+    {
+      "label": "cover lifted: setVisible(true)",
+      "visibility": "visible",
+      "hasFocus": true,
+      "rafFires": true,
+      "framesPresented": 10,
+      "inMs": 1000,
+      "processId": 6,
+      "url": "http://127.0.0.1:17345/"
+    },
+    {
+      "label": "focus emulation switched off, debugger still attached",
+      "visibility": "hidden",
+      "hasFocus": false,
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 1000,
+      "processId": 6,
+      "url": "http://127.0.0.1:17345/"
+    },
+    {
+      "label": "focus emulation on again",
+      "visibility": "visible",
+      "hasFocus": true,
+      "rafFires": true,
+      "framesPresented": 11,
+      "inMs": 1000,
+      "processId": 6,
+      "url": "http://127.0.0.1:17345/"
+    },
+    {
+      "label": "debugger detached",
+      "visibility": "hidden",
+      "hasFocus": false,
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 1000,
+      "processId": 6,
+      "url": "http://127.0.0.1:17345/"
+    }
+  ]
+}

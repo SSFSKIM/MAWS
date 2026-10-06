@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>embedded frame</title>
+<style>body { font: 14px system-ui; margin: 12px; background: #eef4ff; }</style>
+</head>
+<body>
+<h2 id="frame-origin"></h2>
+<p><button id="fbtn">Frame button</button> <span>frame count: <b id="fcount">0</b></span></p>
+<p><label>Frame field <input id="ffield" type="text" autocomplete="off"></label></p>
+<script>
+  document.getElementById('frame-origin').textContent = `frame at ${location.origin}`;
+  const c = document.getElementById('fcount');
+  document.getElementById('fbtn').addEventListener('click', () => { c.textContent = String(Number(c.textContent) + 1); });
+</script>
+</body>
+</html>

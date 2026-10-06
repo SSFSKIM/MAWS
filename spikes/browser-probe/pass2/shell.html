@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MAWS shell stand-in (pass two)</title>
+<link rel="stylesheet" href="shell.css">
+<!-- If the default session's CSP header (installed by main, as MAWS's window.ts does) applies to this file: URL, this
+     inline script is refused and `inlineRan` stays unset. The probe reads the flag. -->
+<script>window.inlineRan = true;</script>
+</head>
+<body>
+<div id="toolbar">MAWS shell stand-in · toolbar (title bar, 44 px)</div>
+<div id="row">
+  <nav id="sidebar">sidebar 240 px</nav>
+  <main id="main">
+    <section id="chat">chat pane (the renderer's own content)</section>
+    <div id="handle" title="split"></div>
+    <section id="pane"><div id="pane-label">browser pane: the WebContentsView is placed on this rect</div></section>
+  </main>
+</div>
+<div id="sheet" hidden><div id="sheet-card">A renderer-drawn sheet (E3's comment composer stand-in). The view must be hidden while this is open.</div></div>
+<script src="shell.js"></script>
+</body>
+</html>

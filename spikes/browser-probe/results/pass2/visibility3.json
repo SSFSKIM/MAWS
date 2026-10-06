@@ -1,0 +1,133 @@
+{
+  "electron": "44.4.5",
+  "chrome": "152.0.7977.130",
+  "steps": [
+    {
+      "label": "child view, nothing attached",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000
+    },
+    {
+      "label": "A: Playwright connected through the bridge",
+      "visibility": "visible",
+      "rafFires": true,
+      "framesPresented": 11,
+      "inMs": 1000,
+      "clickMs": 33
+    },
+    {
+      "label": "A: after Playwright disconnected and the bridge closed (debugger detached)",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 1000
+    },
+    {
+      "label": "B: after Page.enable",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 600
+    },
+    {
+      "label": "B: after Runtime.enable",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 600
+    },
+    {
+      "label": "B: after Page.setLifecycleEventsEnabled",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 600
+    },
+    {
+      "label": "B: after Log.enable",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 600
+    },
+    {
+      "label": "B: after Network.enable",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 600
+    },
+    {
+      "label": "B: after Target.setAutoAttach",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 600
+    },
+    {
+      "label": "B: after Page.addScriptToEvaluateOnNewDocument",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 600
+    },
+    {
+      "label": "B: after Page.setInterceptFileChooserDialog",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 600
+    },
+    {
+      "label": "B: after Emulation.setFocusEmulationEnabled",
+      "visibility": "visible",
+      "rafFires": true,
+      "framesPresented": 7,
+      "inMs": 600
+    },
+    {
+      "label": "B: after debugger detach",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 1,
+      "inMs": 1000
+    },
+    {
+      "label": "C: after setBackgroundThrottling(false)",
+      "visibility": "hidden",
+      "rafFires": true,
+      "framesPresented": 11,
+      "inMs": 1000
+    },
+    {
+      "label": "C: after a navigation with backgroundThrottling off",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000
+    },
+    {
+      "label": "C: setVisible(false) with backgroundThrottling off (the cover)",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000
+    },
+    {
+      "label": "C: setVisible(true) again",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000
+    },
+    {
+      "label": "C: setBackgroundThrottling(true) again, 1.5 s later",
+      "visibility": "hidden",
+      "rafFires": true,
+      "framesPresented": 2,
+      "inMs": 1000
+    }
+  ]
+}

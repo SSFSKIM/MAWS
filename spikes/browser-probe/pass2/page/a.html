@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>pass two page</title>
+<style>
+  body { font: 14px system-ui; margin: 24px; }
+  #target { font-size: 16px; padding: 10px 18px; }
+  #log { white-space: pre; font: 12px ui-monospace, monospace; color: #444; max-height: 200px; overflow: auto; }
+</style>
+</head>
+<body>
+<h1 id="origin"></h1>
+<p>
+  <button id="target">Target</button>
+  <span>count: <b id="count">0</b></span>
+</p>
+<p><label>Field <input id="field" type="text" autocomplete="off"></label> <span>value: <code id="value"></code></span></p>
+<p><a id="other" href="#">a link</a></p>
+<div id="log"></div>
+<script>
+  document.getElementById('origin').textContent = location.origin;
+  const count = document.getElementById('count');
+  document.getElementById('target').addEventListener('click', () => { count.textContent = String(Number(count.textContent) + 1); });
+  const field = document.getElementById('field');
+  field.addEventListener('input', () => { document.getElementById('value').textContent = field.value; });
+  const log = document.getElementById('log');
+  for (const t of ['pointerdown', 'mousedown', 'click', 'keydown', 'input']) {
+    window.addEventListener(t, (e) => { log.textContent += `${t} trusted=${e.isTrusted} screen=${e.screenX ?? '-'},${e.screenY ?? '-'} client=${e.clientX ?? '-'},${e.clientY ?? '-'}\n`; });
+  }
+</script>
+</body>
+</html>

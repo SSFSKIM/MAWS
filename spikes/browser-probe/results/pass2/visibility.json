@@ -1,0 +1,188 @@
+{
+  "electron": "44.4.5",
+  "chrome": "152.0.7977.130",
+  "variants": [
+    {
+      "name": "BrowserWindow show:false, addChildView, then showInactive() (the pass-two probe and MAWS e2e)",
+      "windowFocused": false,
+      "windowVisible": true,
+      "afterLoad": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWebContentsFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterSetVisibleToggle": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWindowFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "windowFocusedAfter": false,
+      "afterBlur": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      }
+    },
+    {
+      "name": "BrowserWindow show:false, addChildView, then show() (active)",
+      "windowFocused": false,
+      "windowVisible": true,
+      "afterLoad": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWebContentsFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterSetVisibleToggle": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWindowFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "windowFocusedAfter": false,
+      "afterBlur": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      }
+    },
+    {
+      "name": "BrowserWindow showInactive() first, then addChildView",
+      "windowFocused": false,
+      "windowVisible": true,
+      "afterLoad": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWebContentsFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterSetVisibleToggle": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWindowFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "windowFocusedAfter": false,
+      "afterBlur": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      }
+    },
+    {
+      "name": "BrowserWindow showInactive(), view with backgroundThrottling:false",
+      "windowFocused": false,
+      "windowVisible": true,
+      "afterLoad": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWebContentsFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterSetVisibleToggle": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWindowFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "windowFocusedAfter": false,
+      "afterBlur": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      }
+    },
+    {
+      "name": "BaseWindow show:true at construction, addChildView (pass one)",
+      "windowFocused": false,
+      "windowVisible": true,
+      "afterLoad": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWebContentsFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterSetVisibleToggle": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWindowFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "windowFocusedAfter": false,
+      "afterBlur": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      }
+    },
+    {
+      "name": "BaseWindow show:false, addChildView, showInactive()",
+      "windowFocused": false,
+      "windowVisible": true,
+      "afterLoad": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWebContentsFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterSetVisibleToggle": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWindowFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "windowFocusedAfter": false,
+      "afterBlur": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      }
+    },
+    {
+      "name": "BrowserWindow show:true at construction, addChildView after ready-to-show",
+      "windowFocused": false,
+      "windowVisible": true,
+      "afterLoad": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWebContentsFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterSetVisibleToggle": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "afterWindowFocus": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      },
+      "windowFocusedAfter": false,
+      "afterBlur": {
+        "visibility": "hidden",
+        "rafFiresWithin1s": false
+      }
+    }
+  ]
+}
