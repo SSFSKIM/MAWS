@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -978,6 +978,75 @@ describe('dictation into the focused pane’s composer', () => {
     await waitFor(() => expect(invoked('voice.cancel')).toEqual([{ captureId: captureId() }]));
     expect(editorOf(0).editor.getText()).toBe('hello');
     expect(useDictationStore.getState().capture).toBeNull();
+  });
+
+  // Loss of input ends a capture whatever started it (Design §8): a pointer released over another app or under a native
+  // permission dialog never reaches the button, so the window's blur and a hidden document cancel the pointer's hold too.
+  const blurWindow = () => act(() => void window.dispatchEvent(new Event('blur')));
+  const hideDocument = () =>
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      try {
+        document.dispatchEvent(new Event('visibilitychange'));
+      } finally {
+        delete (document as { visibilityState?: unknown }).visibilityState;
+      }
+    });
+  const holdMic = () => {
+    const mic = within(composerOf(0)).getByRole('button', { name: 'Dictate' });
+    fireEvent.pointerDown(mic, { button: 0 });
+    return mic;
+  };
+
+  it('a pointer hold still asking for permission ends when the window loses focus, and its late start is dropped', async () => {
+    live(A);
+    focusTabs(0, [A]);
+    mount([{ index: 0, id: A }], <DictationKeys />);
+    act(() => editorOf(0).focus());
+    const mic = holdMic();
+    expect(invoked('voice.start')).toHaveLength(1);
+    blurWindow();
+    expect(invoked('voice.cancel')).toEqual([{ captureId: captureId() }]);
+    expect(dictationStatus(0)).toBeNull();
+    voice({ kind: 'started', captureId: captureId(), locale: 'en-US' });
+    voice({ kind: 'partial', captureId: captureId(), text: 'hello' });
+    fireEvent.pointerUp(mic, { button: 0 });
+    expect(dictationStatus(0)).toBeNull();
+    expect(editorOf(0).editor.getText()).toBe('');
+    expect(invoked('voice.stop')).toEqual([]);
+    expect(invoked('voice.cancel')).toHaveLength(1);
+  });
+
+  for (const [name, lose] of [['the window loses focus', blurWindow], ['the document is hidden', hideDocument]] as const) {
+    it(`a listening pointer hold ends when ${name}: cancelled on main and its words removed`, async () => {
+      live(A);
+      focusTabs(0, [A]);
+      mount([{ index: 0, id: A }], <DictationKeys />);
+      act(() => editorOf(0).focus());
+      holdMic();
+      voice({ kind: 'started', captureId: captureId(), locale: 'en-US' });
+      voice({ kind: 'partial', captureId: captureId(), text: 'hello' });
+      expect(editorOf(0).editor.getText()).toBe('hello');
+      lose();
+      expect(invoked('voice.cancel')).toEqual([{ captureId: captureId() }]);
+      expect(editorOf(0).editor.getText()).toBe('');
+      expect(dictationStatus(0)).toBeNull();
+    });
+  }
+
+  it('a key hold losing focus is cancelled once, though the key’s own route and the input-loss route both fire', async () => {
+    live(A);
+    focusTabs(0, [A]);
+    mount([{ index: 0, id: A }], <DictationKeys />);
+    act(() => editorOf(0).focus());
+    await key(editorOf(0), altSpace);
+    voice({ kind: 'started', captureId: captureId(), locale: 'en-US' });
+    voice({ kind: 'partial', captureId: captureId(), text: 'hello' });
+    blurWindow();
+    expect(invoked('voice.cancel')).toEqual([{ captureId: captureId() }]);
+    expect(editorOf(0).editor.getText()).toBe('');
+    await keyUp(altSpace); // the key's latch is gone: its later release does nothing
+    expect(invoked('voice.stop')).toEqual([]);
   });
 });
 // E9 end
