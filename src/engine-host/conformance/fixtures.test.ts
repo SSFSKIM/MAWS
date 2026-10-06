@@ -88,7 +88,9 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const e8 = ['e8-plugins-reload', 'e8-plugins-reload-settle']; // E8 (P1): reload_plugins and reload_skills on 2.1.290 around CLI writes under a scratch home, immediately and after a settle
     // E1 M2: the maws tool server recorded live through MAWS's own host (send_file, a blocking and an async ask, show_pane)
     const e1 = ['p1-maws-ask-async', 'p1-maws-ask-blocking', 'p1-maws-send-file', 'p1-maws-show-pane'];
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1].sort());
+    // E3 M0: a side thread forked while the parent's turn runs, an [image, text] `next` steer, and the thread resumed by its id (2.1.291)
+    const e3 = ['p1-side-thread-live', 'p1-side-thread-live-fork', 'p1-side-thread-live-resume'];
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
