@@ -34,7 +34,7 @@ export const commands = {
   'deliverables.listAll': { input: z.strictObject({ limit: z.number().int().min(1).max(DELIVERABLES_LIST_ALL_MAX).optional() }), output: RecordsSchema, owner: 'main' },
   // One record, null when gone; `present[n-1]`: whether version n's file is still on disk.
   'deliverables.get': {
-    input: z.strictObject({ appSessionId: AppSessionIdSchema, id: z.string() }),
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, id: z.uuid() }), // a record's id: it names a file on disk
     output: z.strictObject({ record: DeliverableRecordSchema.nullable(), present: z.array(z.boolean()) }),
     owner: 'main',
   },

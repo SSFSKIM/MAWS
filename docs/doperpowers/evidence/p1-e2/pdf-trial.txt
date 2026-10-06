@@ -1,0 +1,45 @@
+E2 M3, the PDF trial (E2 execution document, Design §3, Decision Log 14), 2026-10-06
+Electron 44.4.5 (its Chromium), macOS; the product app (MAWS_HARNESS=0 per launch, a MAWS_HARNESS=1 build), MAWS_E2E=1.
+
+What ran: e2e/deliverables.spec.ts, case "the PDF trial", under `pnpm e2e:deliverables` through
+/tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh. The case writes a hand-made one-page PDF (a 200 pt page
+that is mostly a filled black square) and its X12 record (kind file) into the scratch userData, then mounts an <iframe>
+pointed at maws-deliverable://<recordId>/app-e2-deliverables/1 at the window's top-left (600 x 500 CSS px) in the app
+page, with the scheme handler, the request and download filters, the frame guard and the app's CSP all installed as
+shipped, and reads from main: the frame rect's near-black pixel count (capturePage, r, g, b < 40; the viewer's own grey
+#282828 does not count) and every frame URL in the window. A frame "draws" at 2,000 or more dark pixels within 8 s.
+
+Outcome (the final run, /tmp/maws-e2-m3-e2e-3.log):
+a sandbox="allow-scripts"                    draws=false darkPixels=0       frames=[app, maws-deliverable://…/1]
+b sandbox="allow-scripts allow-same-origin"  draws=false darkPixels=0       frames=[app, maws-deliverable://…/1]
+c no sandbox attribute                       draws=true  darkPixels=246264  frames=[app, maws-deliverable://…/1,
+                                               chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html,
+                                               maws-deliverable://…/1]
+Screenshot of (c): docs/doperpowers/evidence/p1-e2/pdf-trial-c.png (the viewer's toolbar, the thumbnail and the page).
+
+Chosen: (c), the PDF frame without a sandbox attribute; pdf.js (d) was not needed and no dependency was added. The e2e pins
+it: (c) draws and (a) and (b) do not.
+
+Why a and b fail: in a sandboxed frame Chromium never instantiates its PDF viewer (no chrome-extension frame appears in
+the subtree, the frame stays white), with or without allow-same-origin; a scratch Electron probe with none of MAWS's
+policies (/tmp/maws-e2-pdf-probe/main.js, SANDBOX=allow-scripts and SANDBOX="allow-scripts allow-same-origin") shows
+the same, so it is the sandboxed plugins flag, not a MAWS policy.
+
+Two policy findings the trial forced (both in src/main/deliverables/policies.ts, unit-tested):
+1. The first run of (c) instantiated the viewer but drew an empty dark box. The scratch probe with request logging
+   showed the PDF frame itself (frame and initiator maws-deliverable://…) asking for
+   chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf_embedder.css, which the request filter cancelled as "not the
+   scheme". The filter now also passes that one origin, the viewer's own bundled files inside Electron (never the
+   network); any other chrome-extension: or chrome: URL from a deliverable frame is still cancelled.
+2. Still empty after that: the app-wide CSP override (window.ts) put the app's policy (script-src 'self') on the
+   viewer's own index.html, which then refused the chrome://resources scripts it is built from (the probe logged
+   "Loading the script 'chrome://resources/lit/v3_0/lit.rollup.js' violates … script-src 'self'"). The override now
+   leaves the viewer's pages alone as it leaves the scheme's answers alone (isCspExempt). With both, (c) draws in the
+   probe and in the product app.
+
+What still covers the unsandboxed PDF frame (Design §3, "whatever its sandbox"): it is its own origin
+(maws-deliverable://<recordId>), never the app's; the session's request filter cancels anything it asks for outside the
+scheme and the viewer's files; will-frame-navigate prevents its navigation away from the scheme; will-download cancels a
+download whose URL or redirect chain is the scheme's (the viewer's Download button was not pressed in this trial); the
+window denies new windows and top-level navigation; the WebRTC
+policy is disable_non_proxied_udp. The viewer frame's sandbox stays allow-scripts for HTML.

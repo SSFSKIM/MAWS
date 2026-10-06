@@ -32,6 +32,13 @@ describe('the store layout both processes share (E2 Design §2)', () => {
     expect(() => versionPath(userData, '..' as AppSessionId, ID1, 1)).toThrow();
   });
 
+  it('refuses a deliverable id that is not a uuid, so an id from outside cannot leave the session directory', () => {
+    for (const bad of ['../../x', '..', 'a/b', '', ID1.toUpperCase().replace(/-/g, '/')]) {
+      expect(() => recordPath(userData, A, bad)).toThrow('invalid deliverable id');
+      expect(() => versionPath(userData, A, bad, 1)).toThrow('invalid deliverable id');
+    }
+  });
+
   it('writes a record through a temp file and a rename, creating the directory and leaving no temp file', async () => {
     const path = recordPath(userData, A, ID1);
     await writeRecord(path, record(ID1, '2026-10-06T00:00:00.000Z'));

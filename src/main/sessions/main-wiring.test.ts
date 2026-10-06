@@ -48,6 +48,7 @@ vi.mock('../usage/claude-usage-control', () => ({ baseUrlFrom: () => null, Claud
 vi.mock('../gateway/claude-usage-app', () => ({ createClaudeUsageApp: () => ({}), execRunner: vi.fn() }));
 vi.mock('../settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: vi.fn() }) }));
 vi.mock('../widgets/fixture-backend', () => ({ installWidgetBackend: vi.fn() }));
+vi.mock('../deliverables', () => ({ registerDeliverableScheme: vi.fn(), startDeliverables: () => ({ reader: {}, stop: vi.fn() }) })); // E2
 
 const ID = '11111111-1111-4111-8111-111111111111' as AppSessionId;
 const invoke = async (name: string, input?: unknown) => state.handlers.get(name)!(input);

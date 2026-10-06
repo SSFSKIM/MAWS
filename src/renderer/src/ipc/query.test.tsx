@@ -45,7 +45,8 @@ describe('useCommand is for reads only', () => {
     const c11 = ['engine.binaryInfo', 'engine.models', 'engine.relayHealth', 'session.exportConversation', 'session.getHooksListing', 'session.getSandboxDialog', 'session.getSettings', 'session.getSkillsDialog', 'session.getStatus', 'session.getWorkspaceDiff', 'session.mcpStatus', 'settings.claudeUsage.status', 'fs.state'];
     const w3 = ['settings.userEngineDefaults']; // W3: an unstarted tab's model chip, the model selector
     const e9 = ['voice.status']; // E9: Settings › Voice (a non-prompting probe)
-    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11, ...w3, ...e9].sort());
+    const e2 = ['deliverables.list', 'deliverables.listAll', 'deliverables.get']; // E2: the deliverable store's reads
+    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11, ...w3, ...e9, ...e2].sort());
   });
 
   // Compile-time: writes and void-output commands are not queries (checked by `pnpm typecheck`); they go through

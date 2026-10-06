@@ -13,6 +13,7 @@ const electron = vi.hoisted(() => ({
   windows: [] as { webContents: Contents }[],
   focused: null as Contents | null,
 }));
+vi.mock('./windows', () => ({ appWindows: () => electron.windows })); // E2: the app-window registry Select All reads
 vi.mock('electron', () => ({
   Menu: { buildFromTemplate: (template: unknown) => ({ template }), setApplicationMenu: electron.setApplicationMenu },
   BrowserWindow: { getAllWindows: () => electron.windows },

@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { assertSafeAppSessionId } from '../engine/app-session-id';
+import { HostCommandError } from '../host/runtime';
 import type { AppSessionId } from '../graph/ids';
 import { DeliverableRecordSchema, type DeliverableRecord } from './deliverable';
 
@@ -15,11 +16,19 @@ export function deliverablesDir(userData: string, appSessionId: AppSessionId): s
   return join(userData, 'deliverables', appSessionId);
 }
 
+// A record id names a file and a directory under the session's directory, so only X12's uuid is accepted: an id that
+// arrives from outside (a renderer's `deliverables.get`, a URL) can never name a path elsewhere.
+function assertDeliverableId(id: string): void {
+  if (!DeliverableRecordSchema.shape.id.safeParse(id).success) throw new HostCommandError({ code: 'invalid_input', message: 'invalid deliverable id' });
+}
+
 export function recordPath(userData: string, appSessionId: AppSessionId, id: string): string {
+  assertDeliverableId(id);
   return join(deliverablesDir(userData, appSessionId), `${id}.json`);
 }
 
 export function versionPath(userData: string, appSessionId: AppSessionId, id: string, version: number): string {
+  assertDeliverableId(id);
   return join(deliverablesDir(userData, appSessionId), id, `v${version}.html`);
 }
 

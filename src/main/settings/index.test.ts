@@ -46,6 +46,7 @@ const electron = vi.hoisted(() => {
   };
   return { theme, win, handlers: new Map<string, (event: unknown, input: unknown) => Promise<unknown>>() };
 });
+vi.mock('../windows', () => ({ appWindows: () => [electron.win] })); // E2: the app-window registry
 vi.mock('electron', () => ({
   nativeTheme: electron.theme,
   BrowserWindow: {

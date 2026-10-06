@@ -14,6 +14,7 @@ export interface FilesHandlerDeps {
   openPath(path: string): Promise<string>; // Electron's shell.openPath
   showItemInFolder(path: string): void; // E1: Electron's shell.showItemInFolder (files.reveal)
   env?: NodeJS.ProcessEnv;
+  admitted?: (appSessionId: AppSessionId, real: string) => Promise<boolean>; // E2: the deliverable reader's admission (Design §3)
 }
 
 // The service, plus the per-window epochs (for tests and diagnostics: a closed window leaves no entry behind).
