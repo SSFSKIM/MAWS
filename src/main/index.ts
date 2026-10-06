@@ -65,6 +65,7 @@ import { saveTextFile } from './files/save-text';
 import { captureChords } from './settings/capture-chords';
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { startEngineConfigure } from './settings/engine-configure';
+import { startHostConfigure } from './settings/host-configure'; // E10
 import { revealPath } from './settings/reveal';
 import { sessionSettingsOf } from './settings/session-settings';
 import { knownSessionDirectories } from './settings/session-directories';
@@ -335,6 +336,16 @@ void startWithProfileLock(app, () => {
     // C12 end
   });
   app.on('will-quit', engineConfigure.stop); // C12: .stop
+  // E10: the supervisor's idle time, pushed beside engine.configure at every ready
+  const stopHostConfigure = startHostConfigure({
+    settings: () => settings.state().settings,
+    onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
+    hostState: () => hosts.snapshot('engine-host'),
+    onHostState: (listener) => hosts.onState('engine-host', listener),
+    dispatch: (input) => hosts.dispatch('engine-host', 'host.configure', input) as Promise<CommandResult<'host.configure'>>,
+    env: process.env,
+  });
+  app.on('will-quit', stopHostConfigure);
   // C12 start: the Settings tab's read of the configuration main holds for it
   registerMainHandler('settings.engineApplied', () => engineConfigure.applied());
   // C12 end
