@@ -1,0 +1,31 @@
+E4a M0: the on-screen visibility check (A-33's first act), run 2026-10-06T16:26:45-0700 by E4a's executor.
+
+Precondition, read by machine immediately before the run (E4-0's method):
+  (a) CGSessionCopyCurrentDictionary() (swift one-liner): no CGSSessionScreenIsLocked key (absent = unlocked);
+      kCGSSessionOnConsoleKey 1, kCGSessionLoginDoneKey 1.
+  (b) pmset -g log, last "Display is turned" line: "2026-10-06 16:01:08 -0700 Notification  Display is turned on".
+  (c) pmset -g assertions: UserIsActive 1 (powerd and WindowServer both holding it, HID tickles seconds old).
+All three true, so the run counts as on screen.
+
+Run: the shared Electron 44.4.5 binary (Chrome 152.0.7977.130) on visibility5.mjs, then visibility2.mjs, ELECTRON_RUN_AS_NODE unset;
+both exited 0 on their own. Results: results/pass2/visibility5-onscreen.json and results/pass2/visibility2-onscreen.json (the committed
+visibility5.json and visibility2.json, the locked-screen run of E4-0, were restored unchanged). The step labels in visibility5 still say
+"screen locked": that text is hard-coded in the script, not a reading.
+
+Readings:
+  visibility5 "A: ... child view, nothing attached": visibilityState visible, rAF fires, 11 frames presented in 1 s;
+  visibility5 "C: uncovered again, child view": visible, rAF fires, 11 frames; the script skipped its focus-steal step
+    ("the child was visible without taking focus"); covered by another window (B) both the shell and the child read hidden,
+    as Chromium's occlusion tracking should; setVisible(false) hides (D), setVisible(true) restores; a navigation keeps it visible (E).
+  visibility2 "child view after load, nothing attached": visible, rAF within 1 s, 16 frames in 1.5 s, timers ticking at 10 Hz;
+    unchanged with the debugger attached, after detach, after setBackgroundThrottling either way, and after a reload.
+    The last step (a second BrowserWindow opened over the first) reads the first window's child hidden: occlusion by a window,
+    the same as visibility5's B, not the A-33 condition.
+
+Verdict: VISIBLE. On an unlocked, lit display with the owner active, a WebContentsView's child page is visible, animates and presents
+frames with no debugger attached and no focus emulation. The hidden readings of pass two were the locked screen's occlusion.
+A-33's remedy does not apply: FOCUS_EMULATION defaults to 'off' (src/main/browser/visibility.ts, M2), MAWS_BROWSER_FOCUS_EMULATION=1
+keeps the remedy one environment variable away, and no Electron issue is drafted.
+
+Cleanup: no browser-probe Electron process remains (pgrep -fl browser-probe empty); /tmp/maws-e4-0/ (the scripts' userData) and
+/tmp/maws-e4a/ deleted.
