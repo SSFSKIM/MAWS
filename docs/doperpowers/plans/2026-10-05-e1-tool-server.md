@@ -13,7 +13,7 @@ To see it: launch a session in MAWS, send "Use the maws ask tool to ask me which
 - [x] M1 — X9 and the `maws` server: `send_file`, `show_pane`, the preview format (A-17), `files.reveal` (2026-10-05 23:20; e71867bc plus the fix wave e503c8d7..fd23e2b7, reviewed clean in two rounds; the full unit suite is still behind the load gate, run by the controller before M5's acceptance)
 - [x] M2 — `ask` in the host; the four fixtures recorded live; conformance admission (2026-10-06 00:40; b65ab57e plus the fix wave 37856046 and ed04d2a7..6ec7aabd, reviewed clean in two rounds; fixtures on 2.1.291, US$0.12, A-15 delta identical)
 - [x] M3 — Transcript rows (the capsule, the delivery row), the pane bridge, the question-row refusal (2026-10-06 01:55; 3140dc60 plus the fix wave 3bd28213..59c01ba8, reviewed clean in two rounds; the row carries no cancel reason, hand-back)
-- [ ] M4 — The Question sheet (X5 tool) (executed 2026-10-06 02:20 at b1d135c9, fix wave 12b629f0..21fefd3f; in re-review)
+- [x] M4 — The Question sheet (X5 tool) (2026-10-06 03:05; b1d135c9 plus the fix wave 12b629f0..21fefd3f, reviewed clean in two rounds)
 - [ ] M4b — The architect's rulings (2026-10-06): a blocking ask is a question attention item; the sheet never switches sessions
 - [ ] M5 — The `tools` e2e group, the live sitting, evidence, acceptance
 - [ ] Whole-branch review (`doperpowers:reviewer-high`, two rounds at most), hand-back, the one `docs/charter.md` §19 line
