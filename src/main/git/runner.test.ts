@@ -57,11 +57,12 @@ describe('git runner modes keep transport off and hooks per mode', () => {
     expect(env).toEqual({ ...read, GIT_CONFIG_COUNT: '4' });
   });
 
-  it('mutate takes the captured shell environment without its git, parent-session or launcher variables, and keeps transport off', () => {
+  it('mutate takes the captured shell environment without its git (but identity), parent-session or launcher variables, and keeps transport off', () => {
     const captured = {
       PATH: '/opt/homebrew/bin:/usr/bin:/bin',
       HOME: '/Users/owner',
       LANG: 'en_US.UTF-8',
+      LC_ALL: 'en_US.UTF-8',
       SSH_AUTH_SOCK: '/private/tmp/agent.sock',
       GPG_TTY: '/dev/ttys001',
       GIT_DIR: '/elsewhere/.git',
@@ -69,23 +70,36 @@ describe('git runner modes keep transport off and hooks per mode', () => {
       GIT_CONFIG_PARAMETERS: "'core.fsmonitor=true'",
       GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/evil',
       GIT_ASKPASS: '/usr/local/bin/askpass',
+      GIT_EXTERNAL_DIFF: '/usr/local/bin/difftool',
+      GIT_AUTHOR_NAME: 'Owner', GIT_AUTHOR_EMAIL: 'owner@example.com', GIT_COMMITTER_NAME: 'Owner', GIT_COMMITTER_EMAIL: 'owner@example.com',
+      GIT_AUTHOR_DATE: '2001-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2001-01-01T00:00:00Z',
       CLAUDE_CODE_SESSION_ID: 'parent', CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1',
       MAWS_E2E: '1', ELECTRON_RUN_AS_NODE: '1',
     };
     const env = gitEnv({ PATH: '/usr/bin:/bin', HOME: '/var/empty', MAWS_GIT: '/opt/git' }, 'mutate', captured);
-    expect(env).toMatchObject({ PATH: captured.PATH, HOME: captured.HOME, LANG: captured.LANG, SSH_AUTH_SOCK: captured.SSH_AUTH_SOCK, GPG_TTY: captured.GPG_TTY });
+    expect(env).toMatchObject({ PATH: captured.PATH, HOME: captured.HOME, SSH_AUTH_SOCK: captured.SSH_AUTH_SOCK, GPG_TTY: captured.GPG_TTY });
+    expect(env).toMatchObject({ LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' }); // the owner's locale, not C
     expect(configOf(env)).toEqual(SAFETY); // no core.hooksPath: the repository's hooks run
     expect(env).toMatchObject({
       GIT_ALLOW_PROTOCOL: '', GIT_SSH_COMMAND: '/usr/bin/false', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0',
-      GIT_PAGER: 'cat', GIT_EDITOR: 'true', GIT_EXTERNAL_DIFF: '/usr/bin/false', LC_ALL: 'C',
+      GIT_PAGER: 'cat', GIT_EDITOR: 'true',
+      GIT_AUTHOR_NAME: 'Owner', GIT_AUTHOR_EMAIL: 'owner@example.com', GIT_COMMITTER_NAME: 'Owner', GIT_COMMITTER_EMAIL: 'owner@example.com',
     });
-    // Every git variable is MAWS's own: nothing inherited redirects the repository or injects configuration.
+    // Every other git variable is MAWS's own: nothing inherited redirects the repository, injects configuration, pins a
+    // date or replaces a hook's own diff; MAWS sets no external diff here either.
     expect(Object.keys(env).filter((key) => key.startsWith('GIT_')).sort()).toEqual([
-      'GIT_ALLOW_PROTOCOL', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_KEY_1', 'GIT_CONFIG_KEY_2', 'GIT_CONFIG_KEY_3',
-      'GIT_CONFIG_VALUE_0', 'GIT_CONFIG_VALUE_1', 'GIT_CONFIG_VALUE_2', 'GIT_CONFIG_VALUE_3', 'GIT_EDITOR', 'GIT_EXTERNAL_DIFF',
+      'GIT_ALLOW_PROTOCOL', 'GIT_AUTHOR_EMAIL', 'GIT_AUTHOR_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_COMMITTER_NAME',
+      'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_KEY_1', 'GIT_CONFIG_KEY_2', 'GIT_CONFIG_KEY_3',
+      'GIT_CONFIG_VALUE_0', 'GIT_CONFIG_VALUE_1', 'GIT_CONFIG_VALUE_2', 'GIT_CONFIG_VALUE_3', 'GIT_EDITOR',
       'GIT_OPTIONAL_LOCKS', 'GIT_PAGER', 'GIT_SSH_COMMAND', 'GIT_TERMINAL_PROMPT',
     ]);
     for (const name of ['CLAUDE_CODE_SESSION_ID', 'CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'MAWS_E2E', 'MAWS_GIT', 'ELECTRON_RUN_AS_NODE']) expect(env).not.toHaveProperty(name);
+    expect(gitEnv({}, 'mutate', {})).not.toHaveProperty('LC_ALL'); // no locale of its own when the shell has none
+  });
+
+  it('mutate cannot be asked for without the captured environment', () => {
+    // @ts-expect-error: the overloads require `base` for mutate
+    expect(() => gitEnv({ PATH: '/usr/bin' }, 'mutate')).toThrow('the mutate mode needs the captured environment');
   });
 
   describe('against a scratch repository', () => {

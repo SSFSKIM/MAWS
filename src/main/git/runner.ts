@@ -4,7 +4,7 @@
 // checkout hooks and filters run) and `mutate` (E6's local mutations under the owner's login-shell environment, hooks
 // running as in a terminal); transport and credential helpers are off in all three.
 import { spawn, type ChildProcess, type ExecFileException } from 'node:child_process';
-import { childEnvironment } from '../scm/remote-env';
+import { mutatingBaseEnvironment } from '@shared/host/session-variables';
 
 export const GIT_TIMEOUT_MS = 10_000;
 const KILL_GRACE_MS = 500;
@@ -59,17 +59,24 @@ export function gitBinary(env: NodeJS.ProcessEnv): string {
 }
 
 // Command-scope config outranks repository/global config without trusting any caller-supplied GIT_* variables.
-// Reads cannot run fsmonitor or hooks. Diff's --no-ext-diff/--no-textconv additionally disable named diff drivers.
-// Pagers and transport executables are disabled for every invocation: MAWS never fetches, pushes or authenticates here.
+// Reads cannot run fsmonitor or hooks; their external diff is off too, and diff's --no-ext-diff/--no-textconv
+// additionally disable named diff drivers. Pagers and transport executables are disabled for every invocation: MAWS
+// never fetches, pushes or authenticates here.
 // GIT_ALLOW_PROTOCOL (empty allowlist) wins even over protocol.<name>.allow=always, including lazy object fetches.
 // Reset safe.directory's allowlist, not the ownership check: opening a repo is not permission to trust another owner.
 // `read` and `checkout` keep only PATH and HOME of `env`; `mutate` starts from `base`, the captured login-shell
-// environment (`env` when none is given), without any inherited GIT_* (`childEnvironment`), so hooks find the owner's
-// tools and signing finds its agent, and a commit message given with `-m` never opens an editor.
+// environment, without any inherited GIT_* but the owner's identity (`mutatingBaseEnvironment`), so hooks find the
+// owner's tools, signing finds its agent and a commit is authored as in a terminal; a commit message given with `-m`
+// never opens an editor. `mutate` keeps the owner's locale and sets no GIT_EXTERNAL_DIFF: none of its subcommands
+// diffs, and a hook's own `git diff` and words must be the terminal's (E6 Decision Log, task 1 review).
+export function gitEnv(env: NodeJS.ProcessEnv, mode?: 'read' | 'checkout'): NodeJS.ProcessEnv;
+export function gitEnv(env: NodeJS.ProcessEnv, mode: 'mutate', base: Record<string, string>): NodeJS.ProcessEnv;
 export function gitEnv(env: NodeJS.ProcessEnv, mode: GitMode = 'read', base?: Record<string, string>): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
-  if (mode === 'mutate') Object.assign(out, childEnvironment(base ?? env, 'mutate'));
-  else {
+  if (mode === 'mutate') {
+    if (base === undefined) throw new Error('the mutate mode needs the captured environment');
+    Object.assign(out, mutatingBaseEnvironment(base));
+  } else {
     if (env.PATH !== undefined) out.PATH = env.PATH;
     if (env.HOME !== undefined) out.HOME = env.HOME;
   }
@@ -85,9 +92,9 @@ export function gitEnv(env: NodeJS.ProcessEnv, mode: GitMode = 'read', base?: Re
     out[`GIT_CONFIG_VALUE_${i}`] = value;
   });
   return {
-    ...out, GIT_CONFIG_COUNT: String(config.length), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C',
-    GIT_PAGER: 'cat', GIT_EXTERNAL_DIFF: '/usr/bin/false', GIT_SSH_COMMAND: '/usr/bin/false', GIT_ALLOW_PROTOCOL: '',
-    ...(mode === 'mutate' ? { GIT_EDITOR: 'true' } : {}),
+    ...out, GIT_CONFIG_COUNT: String(config.length), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat',
+    GIT_SSH_COMMAND: '/usr/bin/false', GIT_ALLOW_PROTOCOL: '',
+    ...(mode === 'mutate' ? { GIT_EDITOR: 'true' } : { LC_ALL: 'C', GIT_EXTERNAL_DIFF: '/usr/bin/false' }),
   };
 }
 

@@ -40,10 +40,12 @@ describe('remote environment drops every redirecting git variable', () => {
     });
   });
 
-  it('for a mutation drops every git variable but adds nothing (the mutating runner adds its own)', () => {
-    const env = childEnvironment({ ...KEPT, ...REDIRECTING, ...parentSession, ...LAUNCHER, GH_REPO: 'o/r' }, 'mutate');
+  it('for a mutation drops every git variable but the identity, and adds nothing (the mutating runner adds its own)', () => {
+    const identity = { GIT_AUTHOR_EMAIL: 'owner@example.com', GIT_COMMITTER_NAME: 'Owner', GIT_COMMITTER_EMAIL: 'owner@example.com' };
+    const dates = { GIT_AUTHOR_DATE: '2001-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2001-01-01T00:00:00Z' };
+    const env = childEnvironment({ ...KEPT, ...identity, ...dates, ...REDIRECTING, ...parentSession, ...LAUNCHER, GIT_EXTERNAL_DIFF: '/usr/bin/false', GH_REPO: 'o/r' }, 'mutate');
     const rest = Object.fromEntries(Object.entries(KEPT).filter(([name]) => !name.startsWith('GIT_')));
-    expect(env).toEqual({ ...rest, GH_REPO: 'o/r' });
+    expect(env).toEqual({ ...rest, GIT_AUTHOR_NAME: 'Owner', ...identity, GH_REPO: 'o/r' });
     expect(rest).toHaveProperty('SSH_AUTH_SOCK');
   });
 

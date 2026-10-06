@@ -106,4 +106,37 @@ describe('mutating runner against a scratch repository', () => {
     expect(`${stdout}${stderr}`).toContain('nope');
     expect(await repo.git('rev-parse', 'HEAD')).toBe(head);
   });
+
+  it('authors the commit as the captured shell says, its date pin dropped', async () => {
+    const captured = {
+      PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: repo.home,
+      GIT_AUTHOR_NAME: 'Shell Owner', GIT_AUTHOR_EMAIL: 'shell@maws.invalid', GIT_COMMITTER_NAME: 'Shell Committer', GIT_COMMITTER_EMAIL: 'committer@maws.invalid',
+      GIT_AUTHOR_DATE: '2001-01-01T00:00:00Z',
+    };
+    const run = createMutatingRunner({ env: {}, captured: async () => captured });
+    await repo.write('a.txt', 'a\n');
+    await run(repo.root, ['add', '--', ':(top,literal)a.txt'], { timeoutMs: 10_000 });
+    await run(repo.root, ['commit', '-m', 'by the shell identity'], { timeoutMs: 60_000 });
+    expect((await repo.git('log', '-1', '--format=%an <%ae>|%cn <%ce>|%ad', '--date=format:%Y')).trim())
+      .toBe(`Shell Owner <shell@maws.invalid>|Shell Committer <committer@maws.invalid>|${new Date().getFullYear()}`);
+  });
+
+  it("lets a hook's own git diff run as in a terminal: no external diff of MAWS's or the shell's, the owner's locale", async () => {
+    const diffOut = repo.path('hook-diff');
+    const seen = repo.path('hook-env');
+    chmodSync(await repo.write('.git/hooks/pre-commit', [
+      '#!/bin/sh',
+      `git diff --cached > '${diffOut}' || exit 1`,
+      `printf '%s|%s' "\${GIT_EXTERNAL_DIFF-unset}" "\${LC_ALL-unset}" > '${seen}'`,
+      '',
+    ].join('\n')), 0o755);
+    const captured = { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: repo.home, LC_ALL: 'en_US.UTF-8', GIT_EXTERNAL_DIFF: '/usr/bin/false' };
+    const run = createMutatingRunner({ env: {}, captured: async () => captured });
+    await repo.write('README.md', 'hello\nfrom the hook\n');
+    await run(repo.root, ['add', '--', ':(top,literal)README.md'], { timeoutMs: 10_000 });
+    await run(repo.root, ['commit', '-m', 'hook diffed'], { timeoutMs: 60_000 });
+    expect((await repo.git('log', '-1', '--format=%s')).trim()).toBe('hook diffed');
+    expect(readFileSync(diffOut, 'utf8')).toContain('+from the hook');
+    expect(readFileSync(seen, 'utf8')).toBe('unset|en_US.UTF-8');
+  });
 });

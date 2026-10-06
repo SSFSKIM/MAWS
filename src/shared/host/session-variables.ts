@@ -27,3 +27,27 @@ export const PARENT_SESSION_VARIABLES = [
 // `ELECTRON_` is Electron's (`ELECTRON_RENDERER_URL` from `electron-vite dev` makes a built MAWS a dev-server client and
 // trips `window.ts`'s dev-CSP guard; `ELECTRON_RUN_AS_NODE` turns any Electron app into Node).
 export const LAUNCHER_PREFIXES = ['MAWS_', 'ELECTRON_'] as const;
+
+// The captured environment without the parent session's variables, the launcher's prefixes and whatever `drop` names:
+// the base of every git child main starts (E6: the mutating runner here, the remote runner in `src/main/scm`).
+export function childBaseEnvironment(captured: Record<string, string | undefined>, drop: (name: string) => boolean = () => false): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(captured)) {
+    if (value !== undefined && !parentSession.has(name) && !LAUNCHER_PREFIXES.some((prefix) => name.startsWith(prefix)) && !drop(name)) env[name] = value;
+  }
+  return env;
+}
+const parentSession = new Set<string>(PARENT_SESSION_VARIABLES);
+
+// Who the owner's commits are by, when their shell says so: kept by the mutating environment, which drops every other
+// inherited `GIT_*`, since they redirect no repository, configuration or transport (E6 Decision Log, task 1). The
+// `_DATE` variables stay dropped: a date pinned in a profile is not an identity.
+export const IDENTITY_GIT_VARIABLES = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'] as const;
+const identity = new Set<string>(IDENTITY_GIT_VARIABLES);
+
+// E6's mutating environment's base (`gitEnv(…, 'mutate')` adds its safety configuration): the capture without any
+// inherited git override but the identity, so nothing the owner's or the launcher's environment sets redirects a MAWS
+// mutation or injects configuration (`GIT_DIR`, `GIT_CONFIG_PARAMETERS`, `GIT_EXTERNAL_DIFF`, …).
+export function mutatingBaseEnvironment(captured: Record<string, string | undefined>): Record<string, string> {
+  return childBaseEnvironment(captured, (name) => name.startsWith('GIT_') && !identity.has(name));
+}
