@@ -46,6 +46,7 @@ function page(source: SessionEvent[], afterSeq: number | null, limit: number | n
 }
 
 const BATCH = 500; // the host's live batch size (SessionStream)
+const CALL_CAP = 100; // more requests than any case here needs
 
 function harness(ids: string[]) {
   const rows = new Map<string, { status: EngineSessionStatus; events: SessionEvent[] }>();
@@ -60,6 +61,8 @@ function harness(ids: string[]) {
   const ok = <T,>(value: T) => ({ ok: true, value }) as CommandResult<never>;
   const dispatch: HostDispatch = async (_owner, name, input) => {
     calls.push({ name, input });
+    // a resync that loops on an answer fails here at once rather than hanging the test
+    if (calls.length > CALL_CAP) throw new Error(`the resync asked the host more than ${CALL_CAP} times: a loop`);
     if (name === 'engine.sessions') return ok([...rows.values()].map((r) => r.status));
     if (name === 'session.events') {
       const { appSessionId, afterSeq, limit } = input as { appSessionId: string; afterSeq: number | null; limit: number | null };
@@ -279,8 +282,38 @@ describe('main’s resync (E10 Task 2.2)', () => {
     expect(h.pages(B)).toEqual([]);
     expect(h.model.engineStatus(B as AppSessionId)?.process).toBe('exited');
     expect(h.digest(B)?.phase).toBe('exited');
-    h.deliver(B, row(B, 'L9', 5, ['permission.requested', {}])); // the burst: what no client received, through the empty filter
-    expect(h.digest(B)).toMatchObject({ phase: 'exited', pendingRequests: 1 }); // history of an exited process moves no phase
+    const line = { type: 'text', text: 'written after the exit was announced' };
+    h.deliver(B, row(B, 'L9', 5, ['assistant.block.complete', { block: line }])); // the burst: what no client received, through the empty filter
+    expect(h.digest(B)).toMatchObject({ phase: 'exited', lastAssistantLine: line.text }); // folded, and an exited process's history moves no phase
+  });
+
+  it('an exited row of a launch main already folded this run is paged from its position: an in-run reconnect leaves no stale request', async () => {
+    const A = 'a1';
+    const h = harness([A]);
+    h.host(A, live(A, 'L1'), row(A, 'L1', 1, ['turn.started', {}]));
+    await h.connect();
+    h.deliver(A, row(A, 'L1', 2, ['permission.requested', {}])); // live
+    expect(h.digest(A)?.pendingRequests).toBe(1);
+    // the connection closed with rows 3 and 4 written and never read; the row exited during the gap
+    const gap = [...row(A, 'L1', 3, ['permission.resolved', {}], ['tool.result', {}]), ...row(A, 'L1', 4, ['turn.ended', {}])];
+    h.transition('restarting');
+    h.transition('ready');
+    h.host(A, live(A, 'L1', { process: 'exited' }), [...row(A, 'L1', 1, ['turn.started', {}]), ...row(A, 'L1', 2, ['permission.requested', {}]), ...gap]);
+    await h.connect();
+    expect(h.pages(A).at(-1)).toEqual({ appSessionId: A, afterSeq: 1, limit: RESYNC_PAGE });
+    expect(h.digest(A)).toMatchObject({ phase: 'exited', pendingRequests: 0 });
+  });
+
+  it('an exited row of another launch than the one main folded is not paged', async () => {
+    const A = 'a1';
+    const h = harness([A]);
+    h.host(A, live(A, 'L1'), row(A, 'L1', 1, ['turn.started', {}]));
+    await h.connect();
+    h.transition('restarting');
+    h.transition('ready');
+    h.host(A, live(A, 'L2', { process: 'exited' }), row(A, 'L2', 1, ['turn.started', {}]));
+    await h.connect();
+    expect(h.pages(A)).toHaveLength(1); // the first connect's page only
   });
 
   it('a disk answer still backfilling (seq-null events, complete false, the cursor unmoved) ends the row after one page, folding nothing', async () => {

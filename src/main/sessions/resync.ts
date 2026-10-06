@@ -85,7 +85,9 @@ export interface ResyncDeps {
 
 // One resync. Every row's status is applied; only live rows (process not `exited`) are paged: an exited row's history
 // would move only what the index already seeds (last line, context, cost, pending count; `foldEvents` with live false),
-// and its undelivered tail still folds once from the burst. A live row main already folded in this launch pages from
+// and its undelivered tail still folds once from the burst. An exited row whose launch main already folded this run is
+// paged too, from its position (an in-run reconnect: what was written to the closed connection and never read, the
+// resolution of a request among it, reaches the fold through no burst). A row main already folded in this launch pages from
 // the start of the last row it holds (the filter drops what of it the fold has, so a row a batch split is completed
 // once); any other live row from its launch's start. A page answered from the disk (events with `seq: null`: no stream
 // for the row) is not the launch's stream: it folds nothing and ends the row, as does a page that does not move the
@@ -104,7 +106,7 @@ export async function resyncDigests({ dispatch, signal, writer, filter, held, lo
     held.add(status.appSessionId);
     writer.applyEngineStatus(status);
   }
-  const paged = statuses.filter((status) => status.process !== 'exited');
+  const paged = statuses.filter((status) => status.process !== 'exited' || filter.position(status.appSessionId)?.launchId === status.launchId);
   const left = new Set(paged.map((s) => s.appSessionId));
   const atBound = () => {
     if (signal.reason === 'bound' && left.size > 0) {
@@ -136,7 +138,7 @@ export async function resyncDigests({ dispatch, signal, writer, filter, held, lo
       }
       left.delete(id);
     }
-    log(`resync: ${statuses.length} row${statuses.length === 1 ? '' : 's'} (${paged.length} live, paged), ${folded} events folded`);
+    log(`resync: ${statuses.length} row${statuses.length === 1 ? '' : 's'} (${paged.length} paged), ${folded} events folded`);
   } finally {
     signal.removeEventListener('abort', atBound);
   }
