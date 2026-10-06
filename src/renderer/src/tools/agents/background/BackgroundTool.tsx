@@ -4,19 +4,24 @@
 // exported). A section with nothing to show is omitted, except Tasks, which always says its state. Stop is the one
 // action on a task (§5.6: stop only), through the task-graph store's two-phase stop. Its state is a small handle holding
 // an immutable snapshot the body reads through useSyncExternalStore, plus the store watch for the session it shows.
+// E7 (Design §2): its view is the list or one run's widget, as Subagents' is its lists or a drill-in (Back is a state
+// change; the host sees one tab); a card's title or chevron, the transcript's workflow ref and `open({ view: 'run' })`
+// open the widget.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
+import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import type { PanelTool, PanelToolContext } from '../../../panel/tool';
 import { BACKGROUND_COPY } from '../copy';
 import { openLog } from '../log/LogTool';
 import { elapsedOf } from '../model/elapsed';
 import { emptyGraph, monitors, shells, workflows, type TaskNode } from '../model/task-graph';
+import { resolveRun, runView, type PhaseSelection } from '../model/workflow-run'; // E7
 import { useTaskGraph } from '../store';
 import { SLOW_TICK_MS, useTicker } from '../subagents/shared';
 import { AGENT_TOOL_IDS } from '../tool-ids';
 import { BackgroundSummary } from './BackgroundSummary';
 import { Group, type BackgroundSection } from './Group';
+import { RunWidget } from './RunWidget'; // E7
 import { TaskChecklist } from './TaskChecklist';
 import { MonitorRow, ShellRow } from './TaskRows';
 import { WorkflowCard } from './WorkflowCard';
@@ -26,19 +31,29 @@ import { WorkflowCard } from './WorkflowCard';
 export interface BackgroundParams {
   taskId?: string;
   appSessionId?: AppSessionId;
+  // E7 start: `view: 'run'` opens the run's widget rather than selecting its card; `runId`, the transcript ref's run id,
+  // a second name the run resolves by while no read has keyed it by its task id (Design §2)
+  view?: 'run';
+  runId?: string;
+  // E7 end
 }
 
 export type { BackgroundSection } from './Group';
 const ALL_SECTIONS: readonly BackgroundSection[] = ['workflows', 'shells', 'monitors', 'tasks'];
 
-// The snapshot. `appSessionId`: the session the view state belongs to. `collapsedRuns`: the workflow cards whose phases
-// the owner folded (every card shows its phases and tables by default, a finished run's too). `reveal` grows with each
-// `open({ taskId })`, so the body scrolls the selected card into view again.
+// E7: the list, or one run's widget (`taskId` the id it was opened on; `phase` the owner's pick, null following the run).
+export type BackgroundView = { kind: 'list' } | { kind: 'run'; taskId: string; phase: PhaseSelection | null };
+const LIST: BackgroundView = { kind: 'list' };
+
+// The snapshot. `appSessionId`: the session the view state belongs to. `reveal` grows with each `open({ taskId })`, so
+// the body scrolls the selected card into view again. `pendingRun` (E7): the ids an `open({ view: 'run' })` named
+// before any read brought the run; the widget opens once one resolves.
 export interface BackgroundState {
   appSessionId: AppSessionId | null;
+  view: BackgroundView;
+  pendingRun: string[] | null;
   selected: string | null;
   expanded: Set<BackgroundSection>;
-  collapsedRuns: Set<string>;
   showEarlierTasks: boolean;
   scrollTop: number;
   stopErrors: Map<string, string>;
@@ -54,7 +69,7 @@ export class BackgroundHandle {
 
   constructor(appSessionId: AppSessionId | null, params: BackgroundParams | undefined) {
     this.state = {
-      appSessionId, selected: null, expanded: new Set(ALL_SECTIONS), collapsedRuns: new Set(), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), reveal: 0,
+      appSessionId, view: LIST, pendingRun: null, selected: null, expanded: new Set(ALL_SECTIONS), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), reveal: 0,
     };
     this.watch(appSessionId);
     this.open(params);
@@ -76,25 +91,41 @@ export class BackgroundHandle {
     this.release = appSessionId === null ? null : useTaskGraph.getState().watch(appSessionId);
   }
 
-  // X5's `open`: a task id selects its card, expands its section and scrolls to it; no params leaves the view as it is.
+  // X5's `open`: a task id selects its card, expands its section and scrolls to it, in the list. E7: with `view: 'run'`
+  // it opens the run's widget, the id resolved through the graph (Design §2); while nothing resolves, the list reads
+  // `Run not found yet` with the id selected until a read brings the run. No task id (the summary's Open) shows the list.
   open = (params: BackgroundParams | undefined) => {
     if (params?.appSessionId !== undefined) this.follow(params.appSessionId);
-    if (!params?.taskId) return;
+    if (!params?.taskId) return this.back();
     const { appSessionId } = this.state;
-    const node = appSessionId === null ? undefined : useTaskGraph.getState().entries.get(appSessionId)?.graph.tasks.get(params.taskId as TaskId);
-    this.update({ selected: params.taskId, expanded: new Set([...this.state.expanded, sectionOfNode(node)]), reveal: this.state.reveal + 1 });
+    const graph = appSessionId === null ? undefined : useTaskGraph.getState().entries.get(appSessionId)?.graph;
+    if (params.view === 'run') {
+      const ids = params.runId === undefined ? [params.taskId] : [params.taskId, params.runId];
+      const taskId = graph === undefined ? null : resolveRun(graph, ids);
+      if (taskId !== null) return this.openRun(taskId);
+      return this.update({ view: LIST, pendingRun: ids, selected: params.taskId, expanded: new Set([...this.state.expanded, 'workflows']), reveal: this.state.reveal + 1 });
+    }
+    const node = graph?.tasks.get(params.taskId as TaskId);
+    this.update({ view: LIST, pendingRun: null, selected: params.taskId, expanded: new Set([...this.state.expanded, sectionOfNode(node)]), reveal: this.state.reveal + 1 });
   };
+
+  // E7 start: the widget's view. Opening a run selects its card too, so Back finds it marked.
+  openRun = (taskId: string) => this.update({ view: { kind: 'run', taskId, phase: null }, pendingRun: null, selected: taskId });
+
+  back = () => {
+    if (this.state.view.kind !== 'list' || this.state.pendingRun !== null) this.update({ view: LIST, pendingRun: null });
+  };
+
+  selectPhase = (phase: PhaseSelection) => {
+    const { view } = this.state;
+    if (view.kind === 'run' && view.phase !== phase) this.update({ view: { ...view, phase } });
+  };
+  // E7 end
 
   toggle = (section: BackgroundSection) => {
     const expanded = new Set(this.state.expanded);
     if (!expanded.delete(section)) expanded.add(section);
     this.update({ expanded });
-  };
-
-  toggleRun = (taskId: string) => {
-    const collapsedRuns = new Set(this.state.collapsedRuns);
-    if (!collapsedRuns.delete(taskId)) collapsedRuns.add(taskId);
-    this.update({ collapsedRuns });
   };
 
   toggleEarlierTasks = () => this.update({ showEarlierTasks: !this.state.showEarlierTasks });
@@ -122,7 +153,7 @@ export class BackgroundHandle {
   follow = (appSessionId: AppSessionId | null) => {
     if (appSessionId === null || appSessionId === this.state.appSessionId) return;
     this.watch(appSessionId);
-    this.update({ appSessionId, selected: null, collapsedRuns: new Set(), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map() });
+    this.update({ appSessionId, view: LIST, pendingRun: null, selected: null, showEarlierTasks: false, scrollTop: 0, stopErrors: new Map() });
   };
 
   dispose = () => {
@@ -142,7 +173,11 @@ function BackgroundBody({ state, ctx }: { state: BackgroundHandle; ctx: PanelToo
   }
   // Until the follow lands, another session's selection and scroll are not shown over this one.
   const own = snapshot.appSessionId === appSessionId;
-  return <BackgroundView key={appSessionId} appSessionId={appSessionId} handle={state} snapshot={snapshot} own={own} ctx={ctx} />;
+  if (own && snapshot.view.kind === 'run') {
+    const { stopErrors } = snapshot;
+    return <RunWidget key={appSessionId} appSessionId={appSessionId} handle={state} runId={snapshot.view.taskId} phase={snapshot.view.phase} stopError={(taskId) => stopErrors.get(taskId) ?? null} ctx={ctx} />;
+  }
+  return <ListView key={appSessionId} appSessionId={appSessionId} handle={state} snapshot={snapshot} own={own} ctx={ctx} />;
 }
 
 interface ViewProps {
@@ -153,7 +188,7 @@ interface ViewProps {
   ctx: PanelToolContext;
 }
 
-function BackgroundView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
+function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const graph = useTaskGraph((s) => s.entries.get(appSessionId)?.graph ?? EMPTY_GRAPH);
   const runsError = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.runsError ?? null);
   const live = ctx.status !== null;
@@ -184,9 +219,13 @@ function BackgroundView({ appSessionId, handle, snapshot, own, ctx }: ViewProps)
     if (!present || reveal === 0) return;
     scroller.current?.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(selected!)}"]`)?.scrollIntoView?.({ block: 'nearest' });
   }, [selected, reveal, present]);
+  // E7: an `open({ view: 'run' })` that came before its run opens the widget once a read brings the run.
+  const pendingRun = own ? snapshot.pendingRun : null;
+  const arrived = pendingRun === null ? null : resolveRun(graph, pendingRun);
+  useEffect(() => {
+    if (arrived !== null) handle.openRun(arrived);
+  }, [arrived, handle]);
 
-  // the selection names its session, so a pinned Subagents tab still on another session follows this one first
-  const openAgent = (agentId: AgentId) => ctx.openTool(AGENT_TOOL_IDS.subagents, { appSessionId, params: { agentId, appSessionId } });
   const running = (nodes: TaskNode[]) => nodes.filter((n) => n.status === 'running').length;
   const nothing = live && flows.length === 0 && shellNodes.length === 0 && monitorNodes.length === 0;
 
@@ -194,6 +233,7 @@ function BackgroundView({ appSessionId, handle, snapshot, own, ctx }: ViewProps)
     <div ref={scroller} onScroll={(e) => handle.setScrollTop(e.currentTarget.scrollTop)} className="flex h-full min-h-0 flex-col overflow-auto">
       {!live && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.shellsDiskOnly}</p>}
       {runsError !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-danger">{BACKGROUND_COPY.runsUnavailable(runsError)}</p>}
+      {pendingRun !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.runNotFound}</p>}
       {nothing && <p className="shrink-0 px-3.5 pt-3 text-ui text-fg-muted">{BACKGROUND_COPY.nothingRunning}</p>}
       {flows.length > 0 && (
         <Group id="workflows" heading={live ? BACKGROUND_COPY.workflows(flows.length) : BACKGROUND_COPY.runsOnDisk(flows.length)} expanded={expanded.has('workflows')} onToggle={handle.toggle}>
@@ -201,14 +241,12 @@ function BackgroundView({ appSessionId, handle, snapshot, own, ctx }: ViewProps)
             <WorkflowCard
               key={node.taskId}
               node={node}
-              now={now}
+              view={runView(node, null, now)}
               live={live}
               selected={selected === node.taskId}
-              collapsed={own && snapshot.collapsedRuns.has(node.taskId)}
               stopError={stopErrors.get(node.taskId) ?? null}
-              onToggle={handle.toggleRun}
+              onOpen={handle.openRun}
               onStop={handle.stop}
-              onOpenAgent={openAgent}
             />
           ))}
         </Group>

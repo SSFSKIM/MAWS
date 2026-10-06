@@ -262,7 +262,12 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.open('background');
     const card = async () => (await h.background())?.workflows.find((w) => w.taskId === WORKFLOW.taskId);
     await expect.poll(async () => (await card())?.title).toBe(WORKFLOW.description);
-    expect((await card())!.phases).toEqual([]);
+    expect((await card())!.summary).toBe('Phases arrive with the first progress frame');
+    // E7: the card is compact; its phases and agents live in the run's widget.
+    await h.panel('addTool', 'background', { params: { taskId: WORKFLOW.taskId, view: 'run' } });
+    const widget = () => h.agents('widget');
+    await expect.poll(async () => (await widget())?.header).toBe(WORKFLOW.description);
+    expect((await widget())!).toMatchObject({ phases: [], note: 'Phases arrive with the first progress frame' });
 
     // Per frame (the recorded run's workflow_agent rows): alpha starts, alpha is done (8,861 tokens, 1.4 s) while beta
     // runs, beta is done (8,857 tokens, 1.5 s). A running agent's time counts from its start; a done one's is its own.
@@ -274,28 +279,30 @@ test.describe('the #panel harness: the agent tools', () => {
     for (const [i, n] of progress.frames.entries()) {
       await h.release(n);
       const expected = frames[i];
-      await expect.poll(async () => (await card())?.phases, `frame ${i + 1}`).toEqual([expect.objectContaining({ title: 'Echo', count: expected.count })]);
-      const table = (await card())!.table;
+      await expect
+        .poll(async () => (await widget())?.phases, `frame ${i + 1}`)
+        .toEqual([expect.objectContaining({ title: 'All phases' }), expect.objectContaining({ title: 'Echo', count: expected.count, selected: true })]);
+      const table = (await widget())!.agents;
       expect(table.map((row) => ({ label: row.label, tokens: row.tokens })), `frame ${i + 1}: tokens`).toEqual(expected.table.map(({ label, tokens }) => ({ label, tokens })));
       for (const [j, row] of table.entries()) expect(row.time, `frame ${i + 1}: ${row.label}'s time`).toMatch(expected.table[j].time);
     }
-    expect((await card())!.line).toMatch(/^workflow maws-probe · .+ · 2 agents · .+ tokens$/);
+    expect((await widget())!.line).toMatch(/^workflow maws-probe · .+ · 2 agents · .+ tokens$/);
 
-    // As C3's status reads while the run runs, then Stop: the id is still listed when the call resolves.
+    // As C3's status reads while the run runs, then Stop from the widget: the id is still listed when the call resolves.
     await h.agents('patchStatus', 'A', { backgroundTasks: [WORKFLOW] });
     await h.agents('answerStop', WORKFLOW.taskId, 'ok');
     await h.agents('stop', WORKFLOW.taskId);
     expect((await h.agents('calls')).stopTask).toEqual([{ appSessionId: 'A', taskId: WORKFLOW.taskId }]);
-    expect((await card())?.stopping).toBe(true);
+    expect((await widget())?.stopping).toBe(true);
     // The engine's first frame, the snapshot without it, with the status C3 writes from the same frame: still stopping.
     await h.release(AGENTS_STOP_WORKFLOW_TAIL.batches[0]);
     await h.agents('patchStatus', 'A', { backgroundTasks: [] });
     await expect.poll(async () => (await h.agents('graph', 'A'))?.lastSeq, 'the snapshot batch applied').toBe(AGENTS_STOP_WORKFLOW_TAIL.first);
-    expect(await card()).toMatchObject({ stopping: true, status: '' });
+    expect(await widget()).toMatchObject({ stopping: true, status: '' });
     const started = Date.now();
     await h.release(AGENTS_STOP_WORKFLOW_TAIL.batches[1]);
     await h.release(AGENTS_STOP_WORKFLOW_TAIL.batches[2]);
-    await expect.poll(async () => card()).toMatchObject({ stopping: false, status: 'stopped', error: null });
+    await expect.poll(async () => widget()).toMatchObject({ stopping: false, status: 'stopped', error: null });
     expect(Date.now() - started, 'stopped from the frames, well inside STOP_SETTLE_MS').toBeLessThan(await h.agents('stopSettleMs'));
     h.expectQuietConsole();
   });
@@ -466,7 +473,13 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect.poll(async () => (await h.background())?.headings).toContain('Workflow runs on disk · 1');
     const view = (await h.background())!;
     expect(view.notes).toContain('Shells and monitors are known only while the session runs here');
-    expect(view.workflows).toEqual([expect.objectContaining({ status: 'completed', table: [expect.objectContaining({ label: 'alpha' }), expect.objectContaining({ label: 'beta' })] })]);
+    expect(view.workflows).toEqual([expect.objectContaining({ status: 'completed', summary: 'Done' })]);
+    // E7: the run's widget lists the agents the card's table did, each opening its sidecar transcript.
+    await h.panel('addTool', 'background', { params: { taskId: view.workflows[0].taskId, view: 'run' } });
+    await expect.poll(async () => (await h.agents('widget'))?.agents.map((row) => [row.label, row.openable])).toEqual([
+      ['alpha', true],
+      ['beta', true],
+    ]);
     h.expectQuietConsole();
   });
 
@@ -539,6 +552,16 @@ test.describe('the #panel harness: the agent tools', () => {
           await h.agents('stop', WORKFLOW.taskId);
           await expect.poll(async () => (await h.background())?.workflows[0]?.stopping).toBe(true);
           await expect.poll(async () => (await h.background())?.tasks.heading).toBe('Tasks · 0/1');
+        },
+      ],
+      [
+        'the workflow widget mid-run', // E7
+        async () => {
+          await h.load('A', 'events/agents-stop-workflow', { releaseTo: AGENTS_STOP_WORKFLOW_TAIL.progress.releaseTo });
+          for (const n of AGENTS_STOP_WORKFLOW_TAIL.progress.frames.slice(0, 2)) await h.release(n);
+          await h.open('background');
+          await h.panel('addTool', 'background', { params: { taskId: WORKFLOW.taskId, view: 'run' } });
+          await expect.poll(async () => (await h.agents('widget'))?.agents.map((row) => row.label)).toEqual(['alpha', 'beta']);
         },
       ],
       [

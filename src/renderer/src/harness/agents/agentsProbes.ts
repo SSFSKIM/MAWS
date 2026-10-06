@@ -13,7 +13,7 @@ import { STOP_SETTLE_MS, useTaskGraph } from '../../tools/agents/store';
 import { useTranscriptStore } from '../../transcript';
 import { fakeId } from '../panel/fakeSessions';
 import { attachesOf, childSourceFor, columnHandle, columnView, fake, feed, patchStatus, releaseThrough, reset, setAgentTab } from './AgentsHarnessBlock';
-import type { AgentRowView, AgentsHarnessApi, BackgroundView, LogView, SubagentsView } from './api';
+import type { AgentRowView, AgentsHarnessApi, BackgroundView, LogView, RunWidgetView, SubagentsView } from './api';
 
 // The fixture directories, raw, as C4's `fs.subagents` and `fs.workflows` would answer them (sizes and times are nominal;
 // the lists read neither).
@@ -105,13 +105,6 @@ function subagents(): SubagentsView | null {
 
 // ---- Background work -------------------------------------------------------------------------------------------------------
 
-function phaseOf(label: string): { title: string; count: string; state: string } {
-  const queued = label.endsWith(' · Queued');
-  if (queued) return { title: label.slice(0, -' · Queued'.length), count: '', state: 'queued' };
-  const match = /^(.*) (\d+)\/(\d+)$/.exec(label);
-  if (!match) return { title: label, count: '', state: '' };
-  return { title: match[1], count: `${match[2]}/${match[3]}`, state: match[2] === match[3] ? 'done' : 'running' };
-}
 const errorOf = (root: Element) => [...root.querySelectorAll('p')].map(text).find((line) => line.startsWith("Couldn't stop it:")) ?? null;
 const stoppingIn = (root: Element) => buttonNamed(root, BACKGROUND_COPY.stopping) !== null;
 
@@ -127,11 +120,7 @@ function background(): BackgroundView | null {
       title: text(card.querySelector('h4')),
       line: text(card.querySelector('[data-part="line"]')),
       status: text(card.querySelector('[data-part="status"]')),
-      phases: [...card.querySelectorAll('[data-phase]')].map((p) => phaseOf(text(p))),
-      table: [...card.querySelectorAll('tbody tr')].map((tr) => {
-        const [label, model, tokens, time] = [...tr.querySelectorAll('td')].map(text);
-        return { label, model, tokens, time };
-      }),
+      summary: text(card.querySelector('[data-part="summary"]')),
       stopping: stoppingIn(card),
       error: errorOf(card),
     })),
@@ -150,8 +139,39 @@ function background(): BackgroundView | null {
       earlier: earlier ? Number(earlier.split(' ')[0]) : 0,
       unavailable: notes.find((note) => note.startsWith('Tasks unavailable')) ?? null,
     },
-    notes: [...body.querySelectorAll('p')].filter((p) => !body.contains(p.parentElement?.closest('section, article, [data-shell], [data-monitor]') ?? null)).map(text),
+    notes: [...body.querySelectorAll('p')].filter((p) => !body.contains(p.parentElement?.closest('section, article, [data-shell], [data-monitor], [data-view="run"]') ?? null)).map(text),
     headings: [...body.querySelectorAll('section[data-section] > h3 > button')].map(text),
+  };
+}
+
+// E7: the run's widget, when the selected Background work tab shows one.
+function widget(): RunWidgetView | null {
+  const root = bodyOf('background')?.querySelector<HTMLElement>('[data-view="run"]');
+  if (!root) return null;
+  const header = root.querySelector('header');
+  const cell = (tr: Element, part: string) => text(tr.querySelector(`[data-part="${part}"]`));
+  return {
+    taskId: root.dataset.run ?? '',
+    header: text(root.querySelector('h2')),
+    line: text(root.querySelector('[data-part="line"]')),
+    status: text(root.querySelector('[data-part="status"]')),
+    phases: [...root.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => ({
+      title: text(option.querySelector('[data-part="title"]')),
+      count: text(option.querySelector('[data-part="count"]')),
+      state: option.dataset.state ?? '',
+      selected: option.getAttribute('aria-selected') === 'true',
+    })),
+    agents: [...root.querySelectorAll('tbody tr')].map((tr) => ({
+      label: cell(tr, 'agent-label'),
+      model: cell(tr, 'model'),
+      state: cell(tr, 'state'),
+      time: cell(tr, 'time'),
+      tokens: cell(tr, 'tokens'),
+      openable: tr.querySelector('[data-part="label"] button') !== null,
+    })),
+    note: [...root.querySelectorAll('p')].filter((p) => !header?.contains(p)).map(text)[0] ?? null,
+    stopping: header ? stoppingIn(header) : false,
+    error: header ? errorOf(header) : null,
   };
 }
 
@@ -310,6 +330,7 @@ export const agentsProbes: AgentsHarnessApi = {
   answerStop: (taskId, outcome) => fake.answerStop(taskId, outcome),
   subagents,
   background,
+  widget, // E7
   log,
   clickRow: (agentId) => click(bodyOf('subagents')?.querySelector(`[data-agent-row="${CSS.escape(agentId)}"]`), `the row of ${agentId}`),
   back: () => click(buttonNamed(bodyOf('subagents'), SUBAGENTS_COPY.back), 'Back'),

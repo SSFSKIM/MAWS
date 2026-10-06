@@ -810,4 +810,12 @@ describe('openSubagent', () => {
     expect(tab).toBeDefined();
     expect((instanceOf(tab!.id)?.state as BackgroundHandle).snapshot()).toMatchObject({ appSessionId: HOST_A, selected: 'wf' });
   });
+
+  // E7 (Design §2): the ref opens the run's widget, waiting under `Run not found yet` while no read has brought the run
+  // under either of its names.
+  it('asks Background work for the run’s widget by the ref’s task id and run id', () => {
+    act(() => agentTranscriptActions.openSubagent(ref({ kind: 'workflow', taskId: 'wf' as TaskId, runId: 'wf_run' })));
+    const tab = panelOf(HOST_A)?.tabs.find((t) => t.toolId === 'background');
+    expect((instanceOf(tab!.id)?.state as BackgroundHandle).snapshot()).toMatchObject({ view: { kind: 'list' }, pendingRun: ['wf', 'wf_run'] });
+  });
 });

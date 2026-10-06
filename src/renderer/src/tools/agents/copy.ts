@@ -88,14 +88,14 @@ export const BACKGROUND_COPY = {
   // name no frame or snapshot gave reads `workflow · …`
   workflowLine: (workflowName: string | null, elapsed: string, agents: number, tokens: string) =>
     `workflow${workflowName ? ` ${workflowName}` : ''} · ${elapsed} · ${plural(agents, 'agent')} · ${tokens}`,
-  phasesLabel: 'Phases', // the card's disclosure over its phase rows and tables
+  phasesLabel: 'Phases', // the widget's phase column, by its accessible name (E7: the card's disclosure left with its tables)
   // an ended task's state word (a card's badge, a row's `· <status> <ago>`)
   status: { completed: 'completed', failed: 'failed', stopped: 'stopped', exited: 'ended with the session', unknown: 'status unavailable' },
   runsUnavailable: (message: string) => `Workflow runs unavailable: ${message}`,
   phase: (title: string, done: number, total: number) => `${title} ${done}/${total}`,
   phaseQueued: (title: string) => `${title} · Queued`,
   phaseUntitled: (index: number) => `Phase ${index}`, // agents naming a phaseIndex with no workflow_phase row
-  columns: { agent: 'Agent', model: 'Model', tokens: 'Tokens', time: 'Time' },
+  columns: { agent: 'Agent', model: 'Model', tokens: 'Tokens', time: 'Time', /* E7 */ state: 'State' }, // the widget's agent table
   phasesPending: 'Phases arrive with the first progress frame',
   stopWorkflow: 'Stop workflow',
   stop: 'Stop',
@@ -117,6 +117,23 @@ export const BACKGROUND_COPY = {
   shellsDiskOnly: 'Shells and monitors are known only while the session runs here',
   runsOnDisk: (n: number) => `Workflow runs on disk · ${n}`,
   nothingRunning: 'Nothing running',
+  // E7 start: the workflow widget and the compact card (E7 execution document, Design §2): the card shows one summary
+  // line where its per-phase tables were, and its title and chevron open the widget.
+  back: '‹ Background work',
+  openRun: (description: string) => `Open ${description}`, // the card's chevron, by its accessible name
+  allPhases: 'All phases',
+  phaseCount: (done: number, total: number) => `${done}/${total}`,
+  phaseCountQueued: 'Queued',
+  agentsLabel: (phase: string) => `Agents · ${phase}`, // the agent table's accessible name
+  notStarted: 'Not started', // an agent row with no id: nothing to open yet
+  noAgentsInPhase: 'No agents in this phase yet',
+  runNotFound: 'Run not found yet', // a hand-off named a run no read has brought yet; the widget opens when one does
+  runSummary: {
+    queued: 'Queued',
+    done: 'Done',
+    phase: (title: string, done: number, total: number) => `${title} · ${done}/${total} agents`,
+  },
+  // E7 end
 } as const;
 
 export const LOG_COPY = {

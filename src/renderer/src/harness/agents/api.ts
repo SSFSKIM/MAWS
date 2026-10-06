@@ -49,13 +49,29 @@ export interface SubagentsView {
 }
 
 export interface BackgroundView {
-  workflows: { taskId: string; title: string; line: string; status: string; phases: { title: string; count: string; state: string }[]; table: { label: string; model: string; tokens: string; time: string }[]; stopping: boolean; error: string | null }[];
+  // E7: a card is compact (its per-phase tables live in the widget); `summary` is its one line under the run's line
+  workflows: { taskId: string; title: string; line: string; status: string; summary: string; stopping: boolean; error: string | null }[];
   shells: { taskId: string; line: string; output: 'enabled' | 'disabled'; stopping: boolean; error: string | null }[];
   monitors: { taskId: string; line: string }[];
   tasks: { heading: string; label: string | null; rows: string[]; earlier: number; unavailable: string | null };
   notes: string[]; // the disk-only sentence, `Nothing running`, an unavailable read
   headings: string[];
 }
+
+// E7 start: the workflow widget as shown (E7 execution document, Interfaces *Harness and e2e*): the run's header, its
+// phase options (`All phases` first, its count and state empty) and the selected phase's agent rows.
+export interface RunWidgetView {
+  taskId: string;
+  header: string;
+  line: string;
+  status: string;
+  phases: { title: string; count: string; state: string; selected: boolean }[];
+  agents: { label: string; model: string; state: string; time: string; tokens: string; openable: boolean }[];
+  note: string | null; // `Phases arrive with the first progress frame`, `Run not found yet`
+  stopping: boolean;
+  error: string | null;
+}
+// E7 end
 
 export interface LogView {
   title: string; // the tab's title as the strip shows it (`Log · <basename>`)
@@ -86,6 +102,7 @@ export interface AgentsHarnessApi {
 
   subagents(): SubagentsView | null; // the selected tab's Subagents body, else null
   background(): BackgroundView | null;
+  widget(): RunWidgetView | null; // E7: the selected Background work tab's run widget, else null
   log(): LogView | null;
 
   clickRow(agentId: string): void;

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { SessionEventSchema, type EventKind, type SessionEvent } from '@shared/graph/events';
 import type { AgentId } from '@shared/graph/ids';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
-import { SubagentMetaSchema, WorkflowSnapshotSchema } from '@shared/wire/store';
+import { SubagentMetaSchema, WorkflowJournalRowSchema, WorkflowSnapshotSchema } from '@shared/wire/store';
 import { journalToEvents } from '../../src/renderer/src/transcript/dev/journal';
 import { FIXTURE_DIR, loadJournal, type FixturePass } from './fixtures';
 
@@ -100,6 +100,8 @@ export function workflowRunsOf(): WorkflowRun[] {
     .filter((name) => /^wf_.*\.json$/.test(name))
     .map((name) => {
       const snapshot = WorkflowSnapshotSchema.parse(JSON.parse(readFileSync(join(root, name), 'utf8')));
-      return { runId: snapshot.runId, snapshot, journal: [] };
+      // The run's journal rows as C4 reads them (the fixture keeps `journal.jsonl` beside the run's snapshot).
+      const journal = readFileSync(join(root, 'journal.jsonl'), 'utf8').split('\n').filter((line) => line.trim() !== '').map((line) => WorkflowJournalRowSchema.parse(JSON.parse(line)));
+      return { runId: snapshot.runId, snapshot, journal };
     });
 }

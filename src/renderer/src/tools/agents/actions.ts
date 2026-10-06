@@ -1,6 +1,6 @@
 // The agent tools' hand-offs from the transcript (C8b execution document, Interfaces *Tools*, K3): the callbacks C8b
 // registers into C6's `TranscriptActions` from its App.tsx block. `openSubagent` opens Subagents on the agent (or on its
-// pending view before `subagent.started` named it) and a workflow's row on Background work with the run selected;
+// pending view before `subagent.started` named it) and a workflow's row on Background work's widget for the run (E7);
 // `openFullLog` opens the Log on the file the engine reported for a cell, or an Edit cell's file (K4). Kept apart from
 // the tools so a tool's own view (the drill-in) can merge them without importing the registration.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
@@ -13,6 +13,7 @@ import { AGENT_TOOL_IDS } from './tool-ids';
 import { useSessions } from '../../stores/sessions'; // E7
 import type { PeerAddress, PeerReplies } from '../../transcript'; // E7
 import { peerRelayKey, useRelays } from './relay-store'; // E7
+import type { BackgroundParams } from './background/BackgroundTool'; // E7
 
 export { AGENT_TOOL_IDS } from './tool-ids';
 
@@ -35,8 +36,10 @@ export function openSubagent(ref: SubagentRef): void {
   const appSessionId = sessionAtClick((key) => store.activity(key).some((turn) => turn.subagents.some((r) => r.taskId === ref.taskId)));
   if (appSessionId === null) return;
   if (ref.kind === 'workflow') {
-    // a pinned tab still on another session follows this one first, as Subagents does
-    panelHost.addTool(AGENT_TOOL_IDS.background, { appSessionId, params: { taskId: ref.taskId as string, appSessionId } });
+    // a pinned tab still on another session follows this one first, as Subagents does. E7 (Design §2): the run's widget,
+    // by the ref's task id and, when the Workflow result named it, its run id
+    const params: BackgroundParams = { taskId: ref.taskId as string, ...(ref.runId === undefined ? {} : { runId: ref.runId }), view: 'run', appSessionId };
+    panelHost.addTool(AGENT_TOOL_IDS.background, { appSessionId, params });
     return;
   }
   const id = (ref.agentId ?? ref.taskId) as string;
