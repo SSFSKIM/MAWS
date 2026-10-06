@@ -43,9 +43,12 @@ import * as scm from './schema/scm';
 // E2 start
 import * as deliverables from './schema/deliverables';
 // E2 end
+// E10 start
+import * as host from './schema/host';
+// E10 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -575,10 +578,11 @@ describe('ipc schema validates both directions', () => {
     it('adds its six commands under existing namespaces with their owners, and no namespace or event', () => {
       const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'layout.captureChords': 'main', 'engine.configure': 'engine-host' } as const;
       // Every C11 command sits under a namespace that existed before C11 (C8c's `files`, E8's `plugins` and
-      // `marketplaces`, E9's `voice`, E1's `maws`, E6's `scm`, E3's `side` and E2's `deliverables` are the ones added since).
+      // `marketplaces`, E9's `voice`, E1's `maws`, E6's `scm`, E3's `side`, E2's `deliverables` and E10's `host` are the ones
+      // added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables']);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host']);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -1038,4 +1042,51 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E2 end
+  // E10 start: the supervisor's own facts (engine host) and what the app shows of it (main); P1 ledger §5 `host.*`
+  describe('E10 entries', () => {
+    const supervisor = {
+      mode: 'detached', pid: 4321, startedAt: '2026-10-06T10:00:00.000Z', buildId: '0123456789abcdef', protocol: 1, wire: 'fedcba9876543210', liveSessions: 1, rows: 2,
+      idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log', orphansKilled: 0,
+    };
+    const status = { transport: 'detached', state: 'ready', supervisor, appBuildId: '0123456789abcdef', appWire: 'fedcba9876543210', matches: 'same', reason: null, lastExit: null };
+
+    it('adds the host namespace: four engine-host commands (three main-only senders), three main-owned, one event each side', () => {
+      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.status', 'host.restart', 'host.openLog']);
+      const owners = Object.fromEntries(Object.entries(host.commands).map(([name, spec]) => [name, spec.owner]));
+      expect(owners).toEqual({
+        'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host',
+        'host.status': 'main', 'host.restart': 'main', 'host.openLog': 'main',
+      });
+      expect(Object.keys(host.events)).toEqual(['host.supervisorStatus', 'host.status']);
+      // only main stops, configures or arms the supervisor: a renderer's stopAll would read as a crash to main's transport
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle']));
+      expect([...NAMES.host.commands]).toEqual(['host.supervisorStatus', 'host.status', 'host.restart', 'host.openLog']);
+    });
+
+    it('validates the supervisor status, its commands and the app-side status', () => {
+      expect(validateCommandOutput('host.supervisorStatus', supervisor).ok).toBe(true);
+      expect(validateEventPayload('host.supervisorStatus', supervisor).ok).toBe(true);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, mode: 'utility', socketPath: null, logPath: null, idleExitMs: null }).ok).toBe(true);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, idleExitAt: '2026-10-06T10:10:00.000Z' }).ok).toBe(true);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, mode: 'remote' }).ok).toBe(false);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, extra: 1 }).ok).toBe(false);
+      expect(validateCommandInput('host.configure', { idleExitMs: 600_000 }).ok).toBe(true);
+      expect(validateCommandInput('host.configure', { idleExitMs: null }).ok).toBe(true);
+      expect(validateCommandInput('host.configure', { idleExitMs: 0 }).ok).toBe(false);
+      expect(validateCommandInput('host.configure', { idleExitMs: 1.5 }).ok).toBe(false);
+      expect(validateCommandInput('host.stopAll', { graceMs: 5000 }).ok).toBe(true);
+      expect(validateCommandInput('host.stopAll', { graceMs: -1 }).ok).toBe(false);
+      expect(validateCommandOutput('host.stopAll', { stopped: 2, forced: 0 }).ok).toBe(true);
+      expect(validateCommandInput('host.exitWhenIdle', { armed: true }).ok).toBe(true);
+      expect(validateCommandInput('host.exitWhenIdle', {}).ok).toBe(false);
+      expect(validateCommandOutput('host.status', status).ok).toBe(true);
+      expect(validateEventPayload('host.status', { ...status, supervisor: null, matches: null, state: 'crashed', reason: 'held_lock' }).ok).toBe(true);
+      expect(validateEventPayload('host.status', { ...status, lastExit: { code: null, signal: 'SIGKILL', at: 't', interrupted: 2 } }).ok).toBe(true);
+      expect(validateEventPayload('host.status', { ...status, matches: 'other' }).ok).toBe(false);
+      expect(validateCommandInput('host.restart', { stopSessions: true }).ok).toBe(true);
+      expect(validateCommandInput('host.restart', {}).ok).toBe(false);
+      expect(validateCommandInput('host.openLog', undefined).ok).toBe(true);
+    });
+  });
+  // E10 end
 });

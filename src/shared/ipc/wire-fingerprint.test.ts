@@ -33,11 +33,13 @@ describe('HOST_EVENTS', () => {
         'deliverables.changed',
         'maws.pane.show',
         'maws.artifact.capture',
+        'host.supervisorStatus', // E10 M2
       ].sort(),
     );
     for (const name of HOST_EVENTS) expect(events).toHaveProperty([name]);
     expect(HOST_EVENTS).not.toContain('engine.hostState'); // main's own snapshot of the host
     expect(HOST_EVENTS).not.toContain('deliverables.console'); // main's
+    expect(HOST_EVENTS).not.toContain('host.status'); // main's composition of the supervisor's status and its own facts
   });
 });
 

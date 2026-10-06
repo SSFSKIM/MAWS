@@ -37,6 +37,9 @@ import * as side from './schema/side';
 // E2 start
 import * as deliverables from './schema/deliverables';
 // E2 end
+// E10 start
+import * as host from './schema/host';
+// E10 end
 
 export {
   HostPingSchema,
@@ -118,6 +121,9 @@ export const commands = {
   // E2 start
   ...deliverables.commands,
   // E2 end
+  // E10 start
+  ...host.commands,
+  // E10 end
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -149,6 +155,9 @@ export const events = {
   // E2 start
   ...deliverables.events,
   // E2 end
+  // E10 start
+  ...host.events,
+  // E10 end
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;
@@ -182,6 +191,7 @@ export const HOST_EVENTS = [
   'deliverables.changed',
   'maws.pane.show',
   'maws.artifact.capture',
+  'host.supervisorStatus', // the supervisor's own facts (host.status is main's)
 ] as const satisfies readonly EventName[];
 // E10 end
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
