@@ -11,7 +11,7 @@ To see it: in a MAWS session, send *Write a self-contained HTML page dashboard.h
 ## Progress
 
 - [x] M0 — The image-block probe — 2026-10-06, verdict yes, reviewed clean (the one engine fact this child depends on and no fixture records)
-- [ ] M1 — X9: the four artifact tools in the shared module and the host; the store's artifact half; the capture bridge; `maws.delivery.artifact`
+- [x] M1 (2026-10-06, reviewed clean) — X9: the four artifact tools in the shared module and the host; the store's artifact half; the capture bridge; `maws.delivery.artifact`
 - [ ] M2 — The live recording through `LiveHost`: `p1-maws-artifacts`, its transcript, conformance admission
 - [ ] M3 — Main: the reader, `deliverables.*`, the `maws-deliverable` scheme and the frame policies, the files-service admission, the capture, console attribution
 - [ ] M4 — Renderer: the Deliverables tool (list, viewer, versions, actions), the summary section, the `deliverable` tab
