@@ -7,11 +7,6 @@ import type { Settings } from '@shared/ipc/schema';
 import { STOP_ALL_GRACE_MS, type HostSupervisor } from '../hosts/supervisor';
 import type { QuitGuardDeps } from './quit-guard';
 
-// Settings version 10 adds the `supervisor` section (Task 3.2); until then it is read where present, keep the default.
-export function keepRunningDefaultOf(settings: Settings): boolean {
-  return (settings as { supervisor?: { keepRunningDefault?: boolean } }).supervisor?.keepRunningDefault ?? true;
-}
-
 export function engineQuitDeps(
   hosts: Pick<HostSupervisor, 'stopAllForQuit'> & { facts(owner: 'engine-host'): { transport: 'utility' | 'detached' } },
   settings: () => Settings,
@@ -19,6 +14,6 @@ export function engineQuitDeps(
   return {
     shutdownEngine: () => hosts.stopAllForQuit(STOP_ALL_GRACE_MS) /* bounded as a whole by the guard's SHUTDOWN_BOUND_MS */,
     keepOffered: () => hosts.facts('engine-host').transport === 'detached',
-    keepDefault: () => keepRunningDefaultOf(settings()),
+    keepDefault: () => settings().supervisor.keepRunningDefault, // read at each question
   };
 }

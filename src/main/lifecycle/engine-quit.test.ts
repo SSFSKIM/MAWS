@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Settings } from '@shared/ipc/schema';
-import { engineQuitDeps, keepRunningDefaultOf } from './engine-quit';
+import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
+import { engineQuitDeps } from './engine-quit';
 
 // The engine host's half of the quit guard (E10 execution document, §Design 5).
 describe('the engine host at quit', () => {
-  const settingsWith = (extra: object) => ({ version: 9, ...extra }) as unknown as Settings;
+  const settingsWith = (extra: Partial<Settings>): Settings => ({ ...SETTINGS_DEFAULTS_V10, ...extra });
   const hostsIn = (transport: 'utility' | 'detached') => ({ stopAllForQuit: vi.fn<(graceMs: number) => Promise<void>>(async () => {}), facts: vi.fn(() => ({ transport })) });
 
   it('stops every session through the quit’s stop-all with the 5 s grace, in either mode', async () => {
@@ -20,14 +21,13 @@ describe('the engine host at quit', () => {
     expect(engineQuitDeps(hostsIn('utility'), () => settingsWith({})).keepOffered()).toBe(false);
   });
 
-  it('reads the keep default from the setting at each question, true where the setting is absent', () => {
-    expect(keepRunningDefaultOf(settingsWith({}))).toBe(true);
-    expect(keepRunningDefaultOf(settingsWith({ supervisor: { idleExitMinutes: 10 } }))).toBe(true);
-    expect(keepRunningDefaultOf(settingsWith({ supervisor: { idleExitMinutes: 10, keepRunningDefault: false } }))).toBe(false);
-    let settings = settingsWith({ supervisor: { keepRunningDefault: true } });
+  it('reads the keep default from settings version 10 at each question, keep by default', () => {
+    let settings = settingsWith({});
     const deps = engineQuitDeps(hostsIn('detached'), () => settings);
     expect(deps.keepDefault()).toBe(true);
-    settings = settingsWith({ supervisor: { keepRunningDefault: false } });
+    settings = settingsWith({ supervisor: { idleExitMinutes: 10, keepRunningDefault: false } });
     expect(deps.keepDefault()).toBe(false);
+    settings = settingsWith({ supervisor: { idleExitMinutes: null, keepRunningDefault: true } });
+    expect(deps.keepDefault()).toBe(true);
   });
 });
