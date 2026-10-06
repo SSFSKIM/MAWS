@@ -83,9 +83,13 @@ export interface ResyncDeps {
   log: (line: string) => void;
 }
 
-// One resync. A row main already folded in this launch pages from the start of the last row it holds (the filter drops
-// what of it the fold has, so a row a batch split is completed once); any other row from its launch's start. A page
-// answered from the disk (events with `seq: null`: no stream for the row) is not the launch's stream and folds nothing.
+// One resync. Every row's status is applied; only live rows (process not `exited`) are paged: an exited row's history
+// would move only what the index already seeds (last line, context, cost, pending count; `foldEvents` with live false),
+// and its undelivered tail still folds once from the burst. A live row main already folded in this launch pages from
+// the start of the last row it holds (the filter drops what of it the fold has, so a row a batch split is completed
+// once); any other live row from its launch's start. A page answered from the disk (events with `seq: null`: no stream
+// for the row) is not the launch's stream: it folds nothing and ends the row, as does a page that does not move the
+// cursor (a disk answer still backfilling says `complete: false` with the same `lastSeq`).
 // Cancelled (the signal), it stops asking and folding at once; at the bound it logs the rows it left, whose digests then
 // fold from the burst with whatever position the filter holds for them.
 export async function resyncDigests({ dispatch, signal, writer, filter, held, log }: ResyncDeps): Promise<void> {
@@ -100,7 +104,8 @@ export async function resyncDigests({ dispatch, signal, writer, filter, held, lo
     held.add(status.appSessionId);
     writer.applyEngineStatus(status);
   }
-  const left = new Set(statuses.map((s) => s.appSessionId));
+  const paged = statuses.filter((status) => status.process !== 'exited');
+  const left = new Set(paged.map((s) => s.appSessionId));
   const atBound = () => {
     if (signal.reason === 'bound' && left.size > 0) {
       log(`resync: stopped at its bound with ${left.size} row${left.size === 1 ? '' : 's'} not folded (${[...left].join(', ')}); their digests fold from the tail`);
@@ -109,7 +114,7 @@ export async function resyncDigests({ dispatch, signal, writer, filter, held, lo
   signal.addEventListener('abort', atBound, { once: true });
   let folded = 0;
   try {
-    for (const status of statuses) {
+    for (const status of paged) {
       const id = status.appSessionId;
       const at = filter.position(id);
       let afterSeq: number | null = at !== null && at.launchId === status.launchId ? at.lastSeq - 1 : null;
@@ -125,12 +130,13 @@ export async function resyncDigests({ dispatch, signal, writer, filter, held, lo
         const passed = filter.pass(id, events.filter((event) => event.seq !== null));
         writer.fold(id, passed);
         folded += passed.length;
-        if (complete || events.length === 0) break;
+        const fromDisk = events.length > 0 && events.every((event) => event.seq === null);
+        if (complete || fromDisk || events.length === 0 || lastSeq === afterSeq) break;
         afterSeq = lastSeq;
       }
       left.delete(id);
     }
-    log(`resync: ${statuses.length} row${statuses.length === 1 ? '' : 's'}, ${folded} events folded`);
+    log(`resync: ${statuses.length} row${statuses.length === 1 ? '' : 's'} (${paged.length} live, paged), ${folded} events folded`);
   } finally {
     signal.removeEventListener('abort', atBound);
   }

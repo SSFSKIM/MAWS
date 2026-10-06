@@ -17,7 +17,11 @@ import type { HostResync } from '../hosts/supervisor';
 import type { HostDispatch } from '../ipc/router';
 import { hostEventSource } from '.';
 import { SessionReadModel } from './read-model';
-import { RESYNC_PAGE } from './resync';
+import { randomUUID } from 'node:crypto';
+import { loadJournal } from '../../../test/support/fixtures';
+import { mintLaunchId } from '../../engine-host/launch';
+import { Normalizer } from '../../engine-host/normalizer';
+import { FoldFilter, RESYNC_PAGE } from './resync';
 
 type Spec = [kind: Parameters<typeof ev>[0], overrides?: Record<string, unknown>];
 
@@ -52,6 +56,7 @@ function harness(ids: string[]) {
   let resync: HostResync | null = null;
   const gates = new Map<string, Promise<void>>(); // a row's `session.events` answers wait while it has one
   const failing = new Set<string>(); // rows whose `session.events` fails
+  const answers = new Map<string, () => EventsSnapshot>(); // rows whose `session.events` answer is scripted whole
   const ok = <T,>(value: T) => ({ ok: true, value }) as CommandResult<never>;
   const dispatch: HostDispatch = async (_owner, name, input) => {
     calls.push({ name, input });
@@ -60,6 +65,8 @@ function harness(ids: string[]) {
       const { appSessionId, afterSeq, limit } = input as { appSessionId: string; afterSeq: number | null; limit: number | null };
       await gates.get(appSessionId);
       if (failing.has(appSessionId)) return { ok: false, error: { code: 'internal', message: 'the journal could not be read' } } as CommandResult<never>;
+      const scripted = answers.get(appSessionId);
+      if (scripted) return ok(scripted());
       return ok(page(rows.get(appSessionId)?.events ?? [], afterSeq, limit));
     }
     throw new Error(`unscripted ${name}`);
@@ -78,6 +85,7 @@ function harness(ids: string[]) {
     calls,
     logs,
     failing,
+    answers,
     stop,
     registered: () => resync,
     // holds the answers to a row's pages until released
@@ -249,17 +257,68 @@ describe('main’s resync (E10 Task 2.2)', () => {
     expect(h.digest(A)?.childAgents).toEqual({ active: 0, done: 35 });
   });
 
-  it('events main synthesised (seq null) pass the filter; a row the host answers from disk folds nothing in the resync', async () => {
+  it('events main synthesised (seq null) pass the filter', async () => {
+    const A = 'a1';
+    const h = harness([A]);
+    h.host(A, live(A, 'L1'), [...row(A, 'L1', 1, ['turn.started', {}]), ...row(A, 'L1', 2, ['turn.ended', {}])]);
+    await h.connect();
+    expect(h.digest(A)?.phase).toBe('idle');
+    h.deliver(A, [ev('turn.started', { id: `${A}:c10:notice`, seq: null })]);
+    expect(h.digest(A)?.phase).toBe('working');
+  });
+
+  // Decision Log (d0e3de60): live rows only
+  it('an exited row has its status applied and is not paged; its undelivered tail folds once from the burst', async () => {
     const A = 'a1';
     const B = 'b2';
     const h = harness([A, B]);
-    h.host(A, live(A, 'L1'), [...row(A, 'L1', 1, ['turn.started', {}]), ...row(A, 'L1', 2, ['turn.ended', {}])]);
-    h.host(B, live(B, 'L9', { process: 'exited' }), [ev('assistant.block.complete', { id: 'uuid-1', seq: null, block: { type: 'text', text: 'from the transcript' } })]);
+    h.host(A, live(A, 'L1'), pairs(A, 'L1', 1, 2));
+    h.host(B, live(B, 'L9', { process: 'exited' }), pairs(B, 'L9', 1, 4));
     await h.connect();
-    expect(h.digest(A)?.phase).toBe('idle');
-    expect(h.digest(B)?.lastAssistantLine ?? null).toBeNull();
-    h.deliver(A, [ev('turn.started', { id: `${A}:c10:notice`, seq: null })]);
-    expect(h.digest(A)?.phase).toBe('working');
+    expect(h.pages(A)).toHaveLength(1);
+    expect(h.pages(B)).toEqual([]);
+    expect(h.model.engineStatus(B as AppSessionId)?.process).toBe('exited');
+    expect(h.digest(B)?.phase).toBe('exited');
+    h.deliver(B, row(B, 'L9', 5, ['permission.requested', {}])); // the burst: what no client received, through the empty filter
+    expect(h.digest(B)).toMatchObject({ phase: 'exited', pendingRequests: 1 }); // history of an exited process moves no phase
+  });
+
+  it('a disk answer still backfilling (seq-null events, complete false, the cursor unmoved) ends the row after one page, folding nothing', async () => {
+    const A = 'a1';
+    const B = 'b2';
+    const h = harness([A, B]);
+    h.host(A, live(A, 'L1'), []);
+    h.host(B, live(B, 'L1'), pairs(B, 'L1', 1, 2));
+    const fromDisk = ev('assistant.block.complete', { id: 'uuid-1', seq: null, block: { type: 'text', text: 'from the transcript' } });
+    h.answers.set(A, () => ({ events: [fromDisk], lastSeq: 0, complete: false }));
+    await h.connect();
+    expect(h.pages(A)).toEqual([{ appSessionId: A, afterSeq: null, limit: RESYNC_PAGE }]);
+    expect(h.digest(A)?.lastAssistantLine ?? null).toBeNull();
+    expect(h.digest(B)?.childAgents.done).toBe(2); // the rows after it are paged
+  });
+
+  it('a page that does not move the cursor ends the row', async () => {
+    const A = 'a1';
+    const h = harness([A]);
+    h.host(A, live(A, 'L1'), []);
+    const first = pairs(A, 'L1', 1, 1);
+    h.answers.set(A, () => ({ events: first, lastSeq: 1, complete: false })); // the same answer however asked
+    await h.connect();
+    expect(h.pages(A).map((p) => (p as { afterSeq: number | null }).afterSeq)).toEqual([null, 1]);
+    expect(h.digest(A)?.childAgents.done).toBe(1);
+  });
+
+  // launchOf reads the normaliser's event id: a change of that form must fail here, not pass every event silently
+  it('tracks the events the real normaliser mints: a second delivery of them is dropped for the fold', () => {
+    const appSessionId = randomUUID() as AppSessionId;
+    const launchId = mintLaunchId();
+    const normalizer = new Normalizer({ appSessionId, launchId, sessionId: null });
+    const events = loadJournal('pass1', 'subagent').flatMap((journalRow) => normalizer.push(journalRow)).filter((event) => event.seq !== null);
+    expect(events.length).toBeGreaterThan(3);
+    const filter = new FoldFilter();
+    expect(filter.pass(appSessionId, events)).toEqual(events);
+    expect(filter.position(appSessionId)).toMatchObject({ launchId, lastSeq: events.at(-1)!.seq });
+    expect(filter.pass(appSessionId, events)).toEqual([]);
   });
 
   it('a host transition mid-resync cancels it: nothing more is asked or folded', async () => {
