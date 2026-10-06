@@ -9,11 +9,13 @@
 // from names git or gh answered (the remote from `git remote`, branches through `check-ref-format --branch`, the
 // repository from `gh repo view`); user text goes in `--flag=value` form. MAWS never force-pushes.
 //
-// A branch's "own upstream" is one on the remote side under the same name (`refs/heads/<branch>`). A branch made from
-// `origin/main` tracks `origin/main` (git's `branch.autoSetupMerge`); pushing it publishes `refs/heads/<branch>` and
-// sets that as its upstream, and how far it is behind `origin/main` says nothing about the destination, so only an own
-// upstream holds a push back for being behind. A pull request needs an own upstream even with the branch, so `--head
-// <branch>` names exactly the commits the sheet showed.
+// A branch's "own upstream" is `<remote>/<branch>` on the remote it goes to, under the same name (`refs/heads/<branch>`
+// on that side). A branch made from `origin/main` tracks `origin/main` (git's `branch.autoSetupMerge`); pushing it
+// publishes `refs/heads/<branch>` and sets that as its upstream, and how far it is behind `origin/main` says nothing
+// about the destination, so only an own upstream holds a push back for being behind. Pushing to another remote than the
+// upstream's likewise publishes there and sets the upstream to it, as `git push -u` would: the plan's `upstream` is what
+// the argv makes it. A pull request needs an own upstream even with the branch, so `--head <branch>` names exactly the
+// commits the sheet showed.
 import { randomUUID } from 'node:crypto';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
@@ -99,7 +101,7 @@ export async function planPush(sources: PlanSources, { remote: asked }: Pick<Scm
   if (isRefusal(remote)) return remote;
   const destination = await destinationOf(sources, remote);
   if (isRefusal(destination)) return destination;
-  const ownUpstream = isOwnUpstream(status, upstream, branch);
+  const ownUpstream = isOwnUpstream(status, upstream, branch, remote);
   if (ownUpstream && status.behind > 0) {
     return refusal('behind', `${branch} is ${commits(status.behind)} behind ${status.upstream}. Pull in a terminal first; MAWS never force-pushes`);
   }
@@ -148,7 +150,9 @@ export async function planPr(sources: PlanSources, input: Omit<ScmPrPlanInput, '
 }
 
 // Plans issued and not yet run, by token. Any presentation spends the token: a second use, an expired one, one of the
-// other kind or one presented for another session or checkout answers `plan_expired`, and the sheet plans again.
+// other kind or one presented for another session or checkout answers `plan_expired`, and the sheet plans again. A new
+// plan retires the older ones of its session, checkout and kind, so a submit racing a re-plan (a PR sheet re-plans as
+// its fields are edited) can never run what the sheet no longer shows.
 export class PlanTable {
   private readonly plans = new Map<string, IssuedPlan>();
 
@@ -159,7 +163,10 @@ export class PlanTable {
 
   issue(draft: PlanDraft, binding: { appSessionId: AppSessionId; key: string }): RemotePlan {
     const now = this.now();
-    for (const [token, issued] of this.plans) if (now >= issued.expiresAtMs) this.plans.delete(token);
+    for (const [token, issued] of this.plans) {
+      const superseded = issued.appSessionId === binding.appSessionId && issued.key === binding.key && issued.plan.kind === draft.plan.kind;
+      if (superseded || now >= issued.expiresAtMs) this.plans.delete(token);
+    }
     const expiresAtMs = now + this.ttlMs;
     const plan: RemotePlan = { ...draft.plan, token: randomUUID(), expiresAt: new Date(expiresAtMs).toISOString() };
     this.plans.set(plan.token, { plan, basis: draft.basis, ...binding, expiresAtMs });
@@ -240,8 +247,9 @@ async function upstreamOf(sources: PlanSources): Promise<UpstreamFacts> {
   return { remote: remote === '' ? null : remote, ref: ref === '' ? null : ref };
 }
 
-function isOwnUpstream(status: GitStatus, upstream: UpstreamFacts, branch: string): boolean {
-  return status.upstream !== null && upstream.remote !== null && upstream.ref === `refs/heads/${branch}`;
+// The branch tracks `<remote>/<branch>` on the remote it goes to, under its own name.
+function isOwnUpstream(status: GitStatus, upstream: UpstreamFacts, branch: string, remote: string | null): boolean {
+  return status.upstream !== null && upstream.remote !== null && upstream.remote === remote && upstream.ref === `refs/heads/${branch}`;
 }
 
 // The asked remote, else the upstream's, else `origin`, else the sole remote; always one `git remote` lists.
@@ -299,7 +307,7 @@ async function branchNameRefusal(sources: PlanSources, name: string): Promise<Sc
 
 function notPushed(status: GitStatus, upstream: UpstreamFacts, branch: string): ScmRefusal | null {
   if (status.upstream === null || upstream.remote === null) return refusal('not_pushed', `${branch} is not pushed yet; push it first`);
-  if (!isOwnUpstream(status, upstream, branch)) {
+  if (!isOwnUpstream(status, upstream, branch, upstream.remote)) {
     return refusal('not_pushed', `${branch} tracks ${status.upstream}; push it to a branch of its own name first`);
   }
   if (status.behind > 0) return refusal('not_pushed', `${branch} is ${commits(status.behind)} behind ${status.upstream}; pull in a terminal first`);
