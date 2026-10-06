@@ -13,7 +13,9 @@ The question
   its path.)
 
 Verdict: YES.
-  The engine passes the server's image block to the model unchanged, and the model reads it.
+  The engine passes the server's image block to the model unchanged (seq 69 is the verdict's evidence). The model's
+  reply "Red." is consistent with reading it but proves nothing on its own: the tool's name `red_square` already says
+  red. M2's live case answers its capture with a green picture the prompt never names (Decision Log 26).
 
 Evidence, by frame
   - seq 13: tools/list answers one tool, `red_square`, no input.
@@ -56,8 +58,12 @@ Consequences for the execution document
      still the right rule (the engine's text is not JSON); M5's cells test should use the order the wire carries,
      [image, "[Image: source: …]", json], rather than the Acceptance's [image, json, text]. The host's own reading of
      its answer (`mapMawsAnswer`, from the mcp_response the host wrote) is unaffected: that response has no engine block.
-  3. The "frame's size" for a real capture: the tool_result frame carries the PNG's base64 once (plus ~250 bytes of
-     pointer text), so a 1280×800 capture of a few hundred KB makes a frame of that order, as Design §12 assumed.
+  3. The "frame's size" for a real capture: the tool_result frame (seq 69) carries the PNG's base64 TWICE, in
+     `message.content` and again in `tool_use_result`, plus ~250 bytes of pointer text; the engine's echo of the host's
+     mcp_response (seq 68) carries it once more, and the host's own answer (seq 67, out) once. So one capture puts the
+     base64 in the journal four times, and the engine's frame is about twice the PNG's base64: a 1280×800 capture of a
+     few hundred KB makes a frame of about a megabyte, and one at the 4 MiB cap about 11 MB, inside MAX_LINE_CHARS
+     (64 Mi).
   4. Under ENABLE_TOOL_SEARCH=true the model loaded the tool with a ToolSearch select before calling it (seq 42), though
      the tool was listed at initialize; E0a's p1-sdk-mcp-roundtrip and E1's p1-maws-send-file show the same select, so
      this is not new. It does qualify Decision Log 3's phrase "in the model's context from its first turn": a tool

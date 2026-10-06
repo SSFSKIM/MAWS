@@ -636,7 +636,7 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
 // on, the recorded prompt sent and the recorded permission allowed through the session, ended where the probe's own
 // writes begin (seq 96, its notifications/tools/list_changed), which the app never makes.
 describe('an app replay of pass3/p1-sdk-mcp-roundtrip (E0a Q1)', () => {
-  it('handshakes the maws server, lists the three tools and answers the probe-only echo_file as an unknown tool', async () => {
+  it('handshakes the maws server, lists every maws tool and answers the probe-only echo_file as an unknown tool', async () => {
     const fixture = loadJournal('pass3', 'p1-sdk-mcp-roundtrip');
     const spec = launchSpec({ appSessionId: 'replay-p1-sdk-mcp' as never, sessionId: null, model: null, replay: 'pass3/p1-sdk-mcp-roundtrip' });
     const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: FIXTURE_ENGINE_VERSION });

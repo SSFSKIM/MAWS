@@ -1,11 +1,11 @@
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, truncate, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, open, readdir, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DeliverableRecord } from '@shared/maws/deliverable';
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
-import { FileDeliverableStore, MemoryDeliverableStore } from './store';
+import { FileDeliverableStore, MemoryDeliverableStore, readAtMost } from './store';
 
 let userData: string;
 beforeEach(async () => {
@@ -147,6 +147,23 @@ describe('the deliverable store as E2 extends it', () => {
     await expect(store.copyVersion(A, ID1, 1, big)).rejects.toThrow(`too large (${ARTIFACT_MAX_BYTES + 1} bytes; the limit is 16 MiB)`);
     await expect(store.copyVersion(A, ID1, 1, userData)).rejects.toThrow();
     expect(await readdir(userData)).not.toContain('deliverables');
+  });
+
+  it('reads a source no further than the limit, so the cap bounds memory whatever the file grew to since its stat', async () => {
+    const path = join(userData, 'grown.html');
+    const bytes = Buffer.alloc(2_500_000, 0x61);
+    await writeFile(path, bytes);
+    const read = async (limit: number) => {
+      const handle = await open(path, 'r');
+      try {
+        return await readAtMost(handle, limit);
+      } finally {
+        await handle.close();
+      }
+    };
+    expect((await read(10)).length).toBe(10);
+    expect((await read(1_500_001)).length).toBe(1_500_001); // across more than one read
+    expect((await read(5_000_000)).equals(bytes)).toBe(true); // a file shorter than the limit, whole
   });
 
   it('announces every settled write as created and every rewrite as updated, and nothing for a write that failed', async () => {

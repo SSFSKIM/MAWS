@@ -5,7 +5,7 @@
 // reader (`@shared/maws/deliverable-files`). Every settled write announces itself through `onWritten` (the session
 // relays it as `deliverables.changed`), so no tool has to remember to. The writer stays in the host and assumes nothing
 // about main or a window (X13).
-import { open, readFile } from 'node:fs/promises';
+import { open, readFile, type FileHandle } from 'node:fs/promises';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DeliverableRecordSchema, type DeliverableRecord } from '@shared/maws/deliverable';
 import { deliverablesDir, readRecords, recordPath, versionPath, writeAtomic, writeRecord } from '@shared/maws/deliverable-files';
@@ -37,7 +37,7 @@ export interface DeliverableWriter {
 const MIB = 1024 * 1024;
 
 // The source of a version, read whole: a regular file of at most ARTIFACT_MAX_BYTES (checked on the open file, so one
-// that grew since the tool's own check is still refused).
+// that grew since the tool's own check is still refused, and never read past one byte over the cap).
 async function readSource(sourcePath: string): Promise<Buffer> {
   const handle = await open(sourcePath, 'r');
   try {
@@ -45,12 +45,29 @@ async function readSource(sourcePath: string): Promise<Buffer> {
     if (!found.isFile()) throw new Error('not a regular file');
     const tooLarge = (bytes: number) => new Error(`too large (${bytes} bytes; the limit is ${ARTIFACT_MAX_BYTES / MIB} MiB)`);
     if (found.size > ARTIFACT_MAX_BYTES) throw tooLarge(found.size);
-    const content = await handle.readFile();
-    if (content.length > ARTIFACT_MAX_BYTES) throw tooLarge(content.length);
+    const content = await readAtMost(handle, ARTIFACT_MAX_BYTES + 1);
+    if (content.length > ARTIFACT_MAX_BYTES) throw tooLarge((await handle.stat()).size);
     return content;
   } finally {
     await handle.close();
   }
+}
+
+const READ_CHUNK = 1024 * 1024;
+
+// At most `limit` bytes of an open file from its current position: a file that grew past its stat costs no more memory
+// than the limit.
+export async function readAtMost(handle: FileHandle, limit: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  while (total < limit) {
+    const chunk = Buffer.alloc(Math.min(READ_CHUNK, limit - total));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+    if (bytesRead === 0) break;
+    chunks.push(chunk.subarray(0, bytesRead));
+    total += bytesRead;
+  }
+  return Buffer.concat(chunks, total);
 }
 
 // One promise chain per session; a task that fails releases the chain for the next.

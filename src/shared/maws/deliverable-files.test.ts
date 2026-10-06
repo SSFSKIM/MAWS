@@ -49,6 +49,17 @@ describe('the store layout both processes share (E2 Design §2)', () => {
     expect(await readdir(join(userData, 'x'))).toEqual(['v1.html']);
   });
 
+  it('removes the temp file when the temp write itself fails, and rejects', async () => {
+    const path = join(userData, 'x', 'v1.html');
+    // writeFile opens the temp file and starts writing, then the data source fails mid-write
+    const failing = (function* () {
+      yield Buffer.from('<p>half');
+      throw new Error('source failed');
+    })();
+    await expect(writeAtomic(path, failing as unknown as Uint8Array)).rejects.toThrow('source failed');
+    expect(await readdir(join(userData, 'x'))).toEqual([]);
+  });
+
   it("reads a session's records oldest first, passing over a non-record, a torn file, a version directory and a removed file", async () => {
     const dir = deliverablesDir(userData, A);
     expect(await readRecords(dir)).toEqual([]); // no directory yet

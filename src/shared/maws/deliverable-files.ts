@@ -23,13 +23,13 @@ export function versionPath(userData: string, appSessionId: AppSessionId, id: st
   return join(deliverablesDir(userData, appSessionId), id, `v${version}.html`);
 }
 
-// The data at `path` through a temp file beside it and a rename; a temp file whose rename failed is removed. The temp
-// name is unique per write, so two overlapping writes of one path each land whole (the last rename wins).
+// The data at `path` through a temp file beside it and a rename; a temp file whose write or rename failed is removed.
+// The temp name is unique per write, so two overlapping writes of one path each land whole (the last rename wins).
 export async function writeAtomic(path: string, data: string | Uint8Array): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-  await writeFile(temp, data);
   try {
+    await writeFile(temp, data);
     await rename(temp, path);
   } catch (error) {
     await rm(temp, { force: true });
