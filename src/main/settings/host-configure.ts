@@ -6,8 +6,6 @@
 import type { CommandInput, CommandResult, HostState, Settings } from '@shared/ipc/schema';
 import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
 
-export const DEFAULT_IDLE_EXIT_MS = 10 * 60_000; // the setting's default (settings version 10), and the supervisor's own
-
 export interface HostConfigureDeps {
   settings(): Settings;
   onSettingsChanged(listener: (settings: Settings) => void): () => void; // settings.changed as main emits it
@@ -17,8 +15,7 @@ export interface HostConfigureDeps {
   env: Record<string, string | undefined>;
 }
 
-// The idle time to push: the e2e seam, else the setting in minutes (null: never), else the default.
-// Settings version 10 (M3) adds the `supervisor` section; until then it is read where present.
+// The idle time to push: the e2e seam, else the setting in minutes (null: never).
 export function idleExitMsOf(settings: Settings, env: Record<string, string | undefined>): number | null {
   const seam = env.MAWS_E2E === '1' ? env.MAWS_E2E_SUPERVISOR_IDLE_MS : undefined;
   if (seam !== undefined) {
@@ -26,8 +23,7 @@ export function idleExitMsOf(settings: Settings, env: Record<string, string | un
     if (Number.isInteger(ms) && ms > 0) return Math.min(ms, MAX_IDLE_EXIT_MS); // host.configure refuses more
     console.warn(`[settings] MAWS_E2E_SUPERVISOR_IDLE_MS=${seam} is not a positive whole number of milliseconds; using the setting`);
   }
-  const minutes = (settings as { supervisor?: { idleExitMinutes?: number | null } }).supervisor?.idleExitMinutes;
-  if (minutes === undefined) return DEFAULT_IDLE_EXIT_MS;
+  const minutes = settings.supervisor.idleExitMinutes;
   return minutes === null ? null : minutes * 60_000;
 }
 

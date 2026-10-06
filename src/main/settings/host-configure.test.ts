@@ -3,12 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CommandResult, HostState, Settings } from '@shared/ipc/schema';
 import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
 import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
-import { DEFAULT_IDLE_EXIT_MS, idleExitMsOf, startHostConfigure, type HostConfigureDeps } from './host-configure';
+import { idleExitMsOf, startHostConfigure, type HostConfigureDeps } from './host-configure';
 
 const host = (state: HostState['state']): HostState => ({ state, pid: state === 'ready' ? 1 : null, restarts: 0, revision: 0 });
 
-// Settings version 10 (M3) adds `supervisor`; until then the push reads it when present and defaults otherwise.
-const withIdle = (idleExitMinutes: number | null): Settings => ({ ...SETTINGS_DEFAULTS_V10, supervisor: { idleExitMinutes, keepRunningDefault: true } }) as Settings;
+// Settings version 10's `supervisor.idleExitMinutes` (Task 3.2)
+const withIdle = (idleExitMinutes: number | null): Settings => ({ ...SETTINGS_DEFAULTS_V10, supervisor: { idleExitMinutes, keepRunningDefault: true } });
 
 function harness(initial: HostState['state'], env: Record<string, string | undefined> = {}, settings: Settings = SETTINGS_DEFAULTS_V10) {
   let current = host(initial);
@@ -41,11 +41,10 @@ function harness(initial: HostState['state'], env: Record<string, string | undef
 }
 
 describe('the idle time main pushes', () => {
-  it('is the setting in minutes, null for never, and 10 minutes while settings carry no supervisor section', () => {
+  it('is the setting in minutes, null for never, and 10 minutes by default (the setting’s and the supervisor’s own)', () => {
     expect(idleExitMsOf(withIdle(3), {})).toBe(180_000);
     expect(idleExitMsOf(withIdle(null), {})).toBeNull();
-    expect(idleExitMsOf(SETTINGS_DEFAULTS_V10, {})).toBe(DEFAULT_IDLE_EXIT_MS);
-    expect(DEFAULT_IDLE_EXIT_MS).toBe(600_000);
+    expect(idleExitMsOf(SETTINGS_DEFAULTS_V10, {})).toBe(600_000);
   });
 
   it('is MAWS_E2E_SUPERVISOR_IDLE_MS under the e2e harness, in place of the setting; ignored elsewhere or when not a positive integer', () => {
@@ -77,7 +76,7 @@ describe('host.configure is pushed at every ready and on a change of the idle ti
   });
 
   it('pushes at once when the host is already ready', () => {
-    expect(harness('ready').dispatch).toHaveBeenCalledExactlyOnceWith({ idleExitMs: DEFAULT_IDLE_EXIT_MS });
+    expect(harness('ready').dispatch).toHaveBeenCalledExactlyOnceWith({ idleExitMs: 600_000 });
   });
 
   it('pushes on a change of the idle time while ready, not on any other change, and not while the host is away', () => {
