@@ -558,6 +558,13 @@ The executor replaces these lines with what actually ran and what it printed.
   Rationale: the executor's report (task 4); §Design 3's order (nothing before `ready`).
   Date/Author: 2026-10-06, the E10 controller.
 
+- Decision: Task 2.2 as built (87a353b3..c66bdeb1; `src/main/sessions/resync.ts`). A reconnect of a folded launch pages from `folded.lastSeq - 1` through the filter, since a live 500-event batch split at the disconnect would otherwise lose the rest of its row; the filter's position advances over burst and live events too; the launch is read from the event id, and an event of another launch resets the row's position. Disk-answered pages (`seq: null`) are not folded. The resync takes `(dispatch, signal)`, aborted with reason `bound` or `transition`; rows left unfolded are logged and fold from the tail. Every `engine.sessions` status is applied before any page; a failing or stalled page is logged and left to the tail. The session service's boot waits for the engine host to stream or crash (`engineHostSettled`; `HostSupervisor.streaming(owner)` added), because its `session.forgotten` events were dropped before the `ready` line. The launch-mode scenario registers no resync; the index source keeps its start-time sync. Consequence accepted for now: startup `session.*` commands wait for the resync (bounded at 30 s) and every row, exited ones included, is paged from its launch start; if M4 shows that slow on many exited rows, skipping exited rows (their digests fold from the disk path) is within this document's intent and is ruled here by a later entry.
+  Rationale: the executor's report (task 5); mutation runs proved the filter, the resync and the `lastSeq - 1` paging; the architect's note of 2026-10-06 on the exited-row option.
+  Date/Author: 2026-10-06, the E10 controller.
+- Decision: the owner questions taken so far are ruled by the architect (2026-10-06): an idle release reads "Stopped while MAWS was closed"; the supervisor shows as "MAWS" (packaged) in Activity Monitor.
+  Rationale: the architect's answer to the interim hand-back.
+  Date/Author: 2026-10-06, the E10 controller.
+
 Residue decisions (the design above carries each with its reason; the architect folded them as A-29, which accepts every one and rules the three that were marked ★ (10, 11, 21) and the `[parent-impact]` items, overturnable by the owner):
 
 1. The supervisor is the engine-host bundle itself, run by the Electron binary as Node (`process.execPath`, `ELECTRON_RUN_AS_NODE=1`) in dev and packaged alike; the `runAsNode` fuse must stay enabled and M4 guards it. Rejected: a bundled Node, a second Electron instance, a separate supervisor entry.
