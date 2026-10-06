@@ -10,7 +10,12 @@ import { replayFixture, type ConformanceRun } from './harness';
 // A `system` subtype or frame type the fixtures may carry without an X1 mapping. Empty: every fixture frame maps to
 // an event or to a "none" row of the table, and a new subtype in a future recording fails here, never silently.
 // (R0 admitted the remote-surface pushes here on 2026-10-01; R1 maps them to `plugin.*`.)
-const UNKNOWN_ALLOWLIST: ReadonlySet<string> = new Set();
+// E0a (P1 spec §9, spikes/protocol-probe/findings-pass3-p1-extension.txt) admits two frames the way R0 did, until E1
+// maps the SDK MCP round trip and E3 the side question's progress frame:
+const UNKNOWN_ALLOWLIST: ReadonlySet<string> = new Set([
+  'control_request/mcp_message', // pass3/p1-sdk-mcp-roundtrip: the engine's JSON-RPC frames for the host's `maws` server (E1 maps them)
+  'system/control_request_progress', // pass3/p1-side-question-session: `{request_id, status: 'started'}` ahead of a side_question answer (E3 maps it)
+]);
 
 // Outbound requests the probe issued that the engine refused, or that the recording ended before answering.
 const EXPECTED_REQUEST_FAILURES: Record<string, { subtype: string; code: string }[]> = {
@@ -19,6 +24,16 @@ const EXPECTED_REQUEST_FAILURES: Record<string, { subtype: string; code: string 
   'pass2/auto-unrouted': [{ subtype: 'set_permission_mode', code: 'auto_mode_model' }],
   'pass2/resume-live-bg': [{ subtype: 'initialize', code: 'exited' }], // the engine refused the resume on stderr and exited 1 before answering
   'pass3/mods-gate-served-off': [{ subtype: 'ui_render', code: 'unknown' }], // R0: with the rollout served off, 2.1.287 answers "Unsupported control request subtype: ui_render" with no error code
+  // E0a: 2.1.290 answers side_question `{response, synthetic}` where the typed schema expects `{text}` (E3 corrects the
+  // schema); a bad-typed fork_conversation is refused with "fork_conversation: title must be a string"
+  'pass3/p1-side-question-session': [{ subtype: 'side_question', code: 'invalid_response' }, { subtype: 'side_question', code: 'invalid_response' }, { subtype: 'side_question', code: 'invalid_response' }],
+  'pass3/p1-fork-start': [{ subtype: 'fork_conversation', code: 'unknown' }],
+};
+
+// The control client's warnings a fixture is expected to raise (the same schema failures as above, worded by the client;
+// request ids are the harness's, minted in order).
+const EXPECTED_CLIENT_WARNINGS: Record<string, string[]> = {
+  'pass3/p1-side-question-session': [2, 3, 4].map((n) => `side_question REPLAY01-${n}: response failed its schema at text`),
 };
 
 const runs = new Map<string, Promise<ConformanceRun>>();
@@ -66,7 +81,10 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const r2 = ['mods-surface-copy', 'mods-surface-invalidate', 'mods-surface-panes', 'mods-surface-press-input-select', 'mods-surface-prompt-access', 'mods-surface-render-sites']; // R2: the attached desktop surface (sites, presses, inputs and picks, panes, invalidate, prompt access, copy)
     const r3 = ['ask-user-question', 'assistant-message', 'command-output', 'to-human', 'tool-group', 'tool-result', 'tool-use', 'unhooked', 'user-message'].map((site) => `mods-surface-transcript-${site}`); // R3: seven transcript sites, unhooked baseline and the owner's to-human module (R3b: 7.135.0)
     const wave7 = ['hooks-flipped']; // debt wave 7: W1's blocking hooks with the forms flipped (an exit-2 Stop block, JSON prompt blocks), for the disk records beside it
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers'].sort());
+    // E0a (P1 spec §9): the engine probes on the installed 2.1.290 (the SDK MCP round trip, fork_conversation beside the
+    // --fork-session launch, side_question idle and mid-turn, the AskUserQuestion preview format unset and html)
+    const e0a = ['p1-fork-session-flag', 'p1-fork-start', 'p1-question-preview-html', 'p1-question-preview-unset', 'p1-sdk-mcp-roundtrip', 'p1-side-question-session'];
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -92,7 +110,7 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
         expect(result.problems.map((p) => `${label}: ${p.message}`)).toEqual([]);
         expect(result.writeErrors.map((e) => `${label}: ${e}`)).toEqual([]);
         expect(result.warnings.filter((w) => w.event === 'block_pairing').map((w) => `${label} seq ${w.seq}: ${JSON.stringify(w.detail)}`)).toEqual([]);
-        expect(result.clientWarnings.map((w) => `${label}: ${w}`)).toEqual([]);
+        expect(result.clientWarnings.map((w) => `${label}: ${w}`)).toEqual((EXPECTED_CLIENT_WARNINGS[label] ?? []).map((w) => `${label}: ${w}`));
         // every outbound control the probe issued parsed with its typed schema, except the refusals the probe recorded
         const expectedFailures = EXPECTED_REQUEST_FAILURES[label] ?? [];
         const failed = result.requests.filter((r) => !r.ok).map((r) => ({ subtype: r.subtype, code: r.code ?? 'unknown' }));
@@ -581,6 +599,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'compact_boundary', // W1: pass3/compact
       'ui_log', 'ui_status', 'ui_toast', 'ui_invalidate', // R0: pass3/mods-* on 2.1.287, the remote-surface pushes (R1 maps them to plugin.*)
       'ui_panes', 'ui_scroll', 'ui_focus', // R2: pass3/mods-surface-*, the attached surface's pushes
+      'control_request_progress', // E0a: pass3/p1-side-question-session, the side question's `started` progress
     ].sort());
   });
 
@@ -601,6 +620,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'boundary.compaction', // W1: pass3/compact seq 43
       'plugin.log', 'plugin.status', 'plugin.toast', 'plugin.invalidate', // R1: pass3/mods-* (no fixture carries a plugin load error or warning)
       'plugin.panes', 'plugin.scroll', 'plugin.focus', 'plugin.ask', // R2: pass3/mods-surface-*
+      'frame.unknown', // E0a: the two allowlisted frames above (pass3/p1-sdk-mcp-roundtrip, pass3/p1-side-question-session) until E1 and E3 map them
     ].sort());
     void kinds;
   });
