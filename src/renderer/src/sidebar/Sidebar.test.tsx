@@ -832,3 +832,44 @@ describe('a released session’s row', () => {
   });
 });
 // C12 end
+
+// E3 start: side threads and forks under their parent (E3 execution document, Design §6, M4's decisions)
+describe('the sidebar’s lineage nesting', () => {
+  const parent = () => nine.sessions.find((r) => r.title.text === 'Charter + research')!;
+  const child = (id: string, title: string, kind: 'side-thread' | 'fork', minute: number, parentId = parent().appId) =>
+    record(id, {
+      projectId: parent().projectId,
+      title: { text: title, source: 'user' },
+      createdAt: `2026-10-06T10:0${minute}:00.000Z`,
+      updatedAt: '2020-01-01T00:00:00.000Z', // oldest of all: only the nesting puts it next to its parent
+      lineage:
+        kind === 'side-thread'
+          ? { kind, parentAppSessionId: parentId, parentEngineSessionId: null, anchor: { kind: 'file-line', locator: '/r/src/x.ts#L42', label: 'x.ts:42', path: '/r/src/x.ts', line: 42 }, openedBy: 'comment' }
+          : { kind, parentAppSessionId: parentId, parentEngineSessionId: null, openedBy: 'fork' },
+    });
+
+  it('draws a thread and a fork under their parent, indented and marked, and ArrowLeft steps back to the parent', async () => {
+    fillStores({ ...nine, sessions: [...nine.sessions, child('side-1', 'x.ts:42', 'side-thread', 1), child('fork-1', 'Charter (fork)', 'fork', 2)] });
+    expand('proj-maws');
+    render(<Sidebar />);
+    const titles = sessionRows(row('MAWS'));
+    expect(titles.slice(titles.indexOf('Charter + research'), titles.indexOf('Charter + research') + 3)).toEqual(['Charter + research', 'x.ts:42', 'Charter (fork)']);
+    expect(row('x.ts:42').getAttribute('aria-level')).toBe('3');
+    expect(row('Charter + research').getAttribute('aria-level')).toBe('2');
+    expect(within(row('x.ts:42')).getByTestId('row-nested').textContent).toBe('↳');
+    expect(within(row('x.ts:42')).queryByTestId('row-lineage')).toBeNull(); // titled by its label already
+    row('Charter (fork)').focus();
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(document.activeElement).toBe(row('Charter + research'));
+  });
+
+  it('a thread whose parent is not listed is a root saying whose it is', () => {
+    fillStores({ ...nine, sessions: [...nine.sessions.filter((r) => r.appId !== parent().appId), child('side-1', 'Renamed thread', 'side-thread', 1)] });
+    expand('proj-maws');
+    render(<Sidebar />);
+    expect(row('Renamed thread').getAttribute('aria-level')).toBe('2');
+    expect(within(row('Renamed thread')).queryByTestId('row-nested')).toBeNull();
+    expect(within(row('Renamed thread')).getByTestId('row-lineage').textContent).toBe('↳ side thread');
+  });
+});
+// E3 end

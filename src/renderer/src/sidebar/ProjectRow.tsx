@@ -11,11 +11,10 @@
 // template.
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
 import { ArchiveIcon, FolderIcon, Icon, PlusIcon, SearchIcon } from '../app/IconButton';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { DisclosureBody } from '../ui/disclosure';
-import type { ProjectEntry, ProjectKey } from './derive';
+import type { ProjectEntry, ProjectKey, SessionTreeRow } from './derive';
 import { focusVisible } from './HoverCard';
 import { ProjectHoverCard } from './ProjectHoverCard';
 import { runProjectAction, useProjectActionEnabled } from './project-actions';
@@ -26,7 +25,7 @@ import { moreNodeId, projectNodeId, useTree } from './tree';
 export interface ProjectRowProps {
   entry: ProjectEntry;
   open: boolean;
-  sessions: SessionRecord[]; // the rows shown while open (ordered and capped); empty while closed
+  sessions: SessionTreeRow[]; // the rows shown while open (ordered, capped by trees, E3's nested under their parent); empty while closed
   more: number; // how many more "Show more" reveals; 0: no Show more row
   onToggle(key: ProjectKey): void;
   onShowMore(key: ProjectKey): void;
@@ -97,8 +96,8 @@ export function ProjectRow({ entry, open, sessions, more, onToggle, onShowMore }
         line
       )}
       <DisclosureBody open={open} role="group" aria-label={name} className="pt-px pb-2">
-        {shown.sessions.map((record) => (
-          <SessionRow key={record.appId} record={record} level={2} />
+        {shown.sessions.map(({ record, nestedUnder }) => (
+          <SessionRow key={record.appId} record={record} level={nestedUnder === null ? 2 : 3} /* E3: under its lineage parent */ />
         ))}
         {shown.more > 0 && <ShowMoreRow id={moreNodeId(key)} level={2} onShow={() => onShowMore(key)} />}
       </DisclosureBody>

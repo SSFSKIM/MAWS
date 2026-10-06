@@ -5,7 +5,7 @@
 // (the worktree's folder, holder or activity, the last answer, the pending request, context) is in the hover card. A
 // click shows it in place of the focused pane's session, ⌘-click or a middle-click in a new tab (I2); dragging carries
 // its id to a tab strip (`application/x-maws-session`, residue *Tab strip*). A foreign-live session shows no actions
-// (D-12).
+// (D-12). E3: a side thread or fork drawn under its parent is indented a step and marked `↳`.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { ArchiveIcon, PinIcon } from '../app/IconButton';
@@ -16,7 +16,7 @@ import { glyphFor } from '../attention/glyph';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
-import { rowBranch, sessionAge } from './derive';
+import { lineageCaption, rowBranch, sessionAge } from './derive';
 import { SessionHoverCard } from './HoverCard';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
 import { sessionNodeId, useTree } from './tree';
@@ -24,9 +24,18 @@ import { displayTitle } from '../sessions/title';
 
 export const SESSION_DRAG_TYPE = 'application/x-maws-session';
 
-export function SessionRow({ record, level }: { record: SessionRecord; level: 1 | 2 }) {
+export function SessionRow({ record, level }: { record: SessionRecord; level: 1 | 2 | 3 }) {
   const id = record.appId;
   const digest = useSessions((s) => s.digests.get(id));
+  // E3 start: a side thread or fork nested under its parent (level 3) is indented a step, marked `↳` and captioned by
+  // its anchor's label; one listed as a root says whose it is (the parent's title when the store holds it)
+  const nested = level === 3;
+  const parentTitle = useSessions((s) => {
+    const parent = record.lineage === null ? undefined : s.records.get(record.lineage.parentAppSessionId);
+    return parent === undefined ? null : displayTitle(parent);
+  });
+  const caption = lineageCaption(record, nested, parentTitle);
+  // E3 end
   const pending = useAttention((s) => selectPendingOf(s, id));
   const now = useNow();
   const tree = useTree();
@@ -60,11 +69,23 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: 1 
         // I2: a click replaces the focused pane's session; ⌘-click and a middle-click open a tab of its own (Chrome's rule)
         onClick={(event) => useLayout.getState().openSession(id, event.metaKey ? { how: 'tab' } : {})}
         onAuxClick={(event) => event.button === 1 && useLayout.getState().openSession(id, { how: 'tab' })}
-        className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[7px] rounded-sm px-[9px] outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
+        className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[7px] rounded-sm ${nested ? 'pr-[9px] pl-[30px]' : 'px-[9px]'} outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
       >
         <GlyphMark glyph={glyph} className="w-[14px] shrink-0" />
+        {/* E3 */}
+        {nested && (
+          <span aria-hidden data-testid="row-nested" className="-mr-[3px] shrink-0 text-ui text-fg">
+            ↳
+          </span>
+        )}
         <span className={`min-w-0 flex-1 truncate text-ui text-fg ${hoverActions.length > 0 ? 'group-hover/session:pr-7 group-focus-visible/session:pr-7' : ''}`}>{title}</span>
-        {branch !== null && (
+        {/* E3: the lineage caption takes the branch's place; a nested side thread shares its parent's branch */}
+        {caption !== null && (
+          <span data-testid="row-lineage" title={caption} className={`max-w-[45%] shrink-0 truncate text-ui-sm text-fg-muted ${yields}`}>
+            {caption}
+          </span>
+        )}
+        {branch !== null && caption === null && !(nested && record.lineage?.kind === 'side-thread') && (
           <span data-testid="row-branch" title={record.worktree?.path} className={`max-w-[40%] shrink-0 truncate text-ui-sm text-fg-faint ${yields}`}>
             ⎇ {branch}
           </span>

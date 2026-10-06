@@ -8,6 +8,8 @@ import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { NeedsYouRow } from '../attention/derive';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
+import { displayTitle } from '../sessions/title'; // E3
+import { SIDE_COPY } from '../side/copy'; // E3
 
 // "Other sessions": the pseudo-project at the end of the list, for sessions without a (known) project.
 export const OTHER_SESSIONS = 'other' as const;
@@ -121,6 +123,59 @@ export function projectSessions({ sessions, digests, rows, sort, matches }: Proj
   const shown = sessions.filter(matches);
   return [...order(shown.filter((r) => r.pinned)), ...order(shown.filter((r) => !r.pinned))];
 }
+
+// E3 start: the lineage forest (E3 execution document, Design §6, M4's decisions). A project's sorted sessions become
+// trees: a record whose lineage parent is in the list is nested under it (siblings by `createdAt`, a child's own
+// children after it, depth first); one whose parent is absent (archived, searched away, in another project) stays a
+// root where it sorted. The caps count trees, each shown whole.
+export interface SessionTreeRow {
+  record: SessionRecord;
+  nestedUnder: AppSessionId | null; // the parent it is drawn under; null for a root
+}
+export interface SessionTree {
+  root: SessionRecord;
+  rows: SessionTreeRow[]; // the root, then its descendants depth first
+}
+
+export function nestLineage(sorted: readonly SessionRecord[]): SessionTree[] {
+  const listed = new Set(sorted.map((r) => r.appId));
+  const parentOf = (record: SessionRecord): AppSessionId | null => {
+    const parent = record.lineage?.parentAppSessionId;
+    return parent !== undefined && parent !== record.appId && listed.has(parent) ? parent : null;
+  };
+  const children = new Map<AppSessionId, SessionRecord[]>();
+  for (const record of sorted) {
+    const parent = parentOf(record);
+    if (parent !== null) children.set(parent, [...(children.get(parent) ?? []), record]);
+  }
+  for (const list of children.values()) list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const placed = new Set<AppSessionId>();
+  const grow = (record: SessionRecord, nestedUnder: AppSessionId | null, rows: SessionTreeRow[]) => {
+    placed.add(record.appId);
+    rows.push({ record, nestedUnder });
+    for (const child of children.get(record.appId) ?? []) if (!placed.has(child.appId)) grow(child, record.appId, rows);
+  };
+  const trees: SessionTree[] = [];
+  const plant = (record: SessionRecord) => {
+    const rows: SessionTreeRow[] = [];
+    grow(record, null, rows);
+    trees.push({ root: record, rows });
+  };
+  for (const record of sorted) if (parentOf(record) === null) plant(record);
+  for (const record of sorted) if (!placed.has(record.appId)) plant(record); // a lineage cycle: never lose a record
+  return trees;
+}
+
+// What a lineage row says after its title, in place of the branch: nested under its parent, the anchor's label unless
+// the title is that already (a side thread is named by it, Design §3); a thread or fork listed as a root, whose it is.
+export function lineageCaption(record: SessionRecord, nested: boolean, parentTitle: string | null): string | null {
+  const lineage = record.lineage;
+  if (lineage === null) return null;
+  if (!nested) return SIDE_COPY.lineage.orphan(lineage.kind, parentTitle);
+  const label = lineage.kind === 'side-thread' ? (lineage.anchor?.label ?? null) : null;
+  return label !== null && label !== displayTitle(record) ? label : null;
+}
+// E3 end
 
 // ---- row text ----------------------------------------------------------------------------------------------------------
 

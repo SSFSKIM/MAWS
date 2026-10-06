@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { Lineage } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
 import { digest, item, project, record } from '../../../../test/support/builders';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
@@ -10,6 +11,8 @@ import { orderProjects } from '../overview/derive';
 import {
   filterProjectList,
   formatAge,
+  lineageCaption,
+  nestLineage,
   needsYouAge,
   OTHER_SESSIONS,
   projectList,
@@ -21,6 +24,7 @@ import {
   shownCount,
   type ProjectListInput,
   type ProjectSessionsInput,
+  type SessionTree,
 } from './derive';
 
 const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'));
@@ -141,6 +145,51 @@ describe('an expanded project’s sessions', () => {
     expect([shownCount(3, false), shownCount(5, false), shownCount(250, false)]).toEqual([3, 5, 5]);
     expect([shownCount(3, true), shownCount(6, true), shownCount(250, true)]).toEqual([3, 6, 8]);
     expect(SESSIONS_CAP).toBe(8);
+  });
+});
+
+// E3 (M4): side threads and forks nest under their parent (E3 execution document, Design §6, M4's decisions)
+describe('an expanded project’s lineage forest', () => {
+  const at = (minute: number) => `2026-10-06T10:${String(minute).padStart(2, '0')}:00.000Z`;
+  const thread = (id: string, parent: string, minute: number, over: Partial<Lineage> = {}) =>
+    record(id, { createdAt: at(minute), lineage: { kind: 'side-thread', parentAppSessionId: parent as AppSessionId, parentEngineSessionId: null, anchor: { kind: 'file-line', locator: '/r/x.ts#L4', label: 'x.ts:4', path: '/r/x.ts', line: 4 }, openedBy: 'comment', ...over } });
+  const fork = (id: string, parent: string, minute: number) => record(id, { createdAt: at(minute), lineage: { kind: 'fork', parentAppSessionId: parent as AppSessionId, parentEngineSessionId: null, openedBy: 'fork' } });
+  const shape = (trees: SessionTree[]) => trees.map((t) => t.rows.map((r) => (r.nestedUnder === null ? r.record.appId : `${r.record.appId}<${r.nestedUnder}`)));
+
+  it('nests a parent’s children under it in createdAt order, keeping the roots’ order', () => {
+    const sorted = [record('b'), thread('t2', 'a', 9), record('a'), fork('f1', 'a', 3), thread('t1', 'a', 5), record('c')];
+    expect(shape(nestLineage(sorted))).toEqual([['b'], ['a', 'f1<a', 't1<a', 't2<a'], ['c']]);
+  });
+
+  it('a child whose parent is not in the list (archived, searched away, another project) stays a root where it sorted', () => {
+    expect(shape(nestLineage([record('b'), thread('orphan', 'gone', 1), record('c')]))).toEqual([['b'], ['orphan'], ['c']]);
+  });
+
+  it('a side thread of a side thread follows its own parent, depth first', () => {
+    const sorted = [record('a'), thread('t1', 'a', 1), thread('t2', 'a', 2), thread('t11', 't1', 3)];
+    expect(shape(nestLineage(sorted))).toEqual([['a', 't1<a', 't11<t1', 't2<a']]);
+  });
+
+  it('a lineage cycle (never written by MAWS) loses no record: the first of it sorted is taken as a root', () => {
+    expect(shape(nestLineage([thread('x', 'y', 1), thread('y', 'x', 2)])).flat().sort()).toEqual(['x', 'y<x'].sort());
+  });
+
+  it('caps count roots: five trees, then eight, each with all its children', () => {
+    const sorted = Array.from({ length: 9 }, (_, i) => [record(`r${i}`), thread(`r${i}-t`, `r${i}`, i)]).flat();
+    const trees = nestLineage(sorted);
+    expect(trees).toHaveLength(9);
+    expect(trees.slice(0, shownCount(trees.length, false)).flatMap((t) => t.rows)).toHaveLength(10);
+    expect(trees.slice(0, shownCount(trees.length, true)).flatMap((t) => t.rows)).toHaveLength(16);
+  });
+
+  it('the caption: nested, the anchor’s label unless it is the title; not nested, whose thread or fork it is', () => {
+    expect(lineageCaption(thread('t', 'a', 1), true, 'Parent')).toBe('x.ts:4');
+    expect(lineageCaption({ ...thread('t', 'a', 1), title: { text: 'x.ts:4', source: 'user' } }, true, 'Parent')).toBeNull();
+    expect(lineageCaption(fork('f', 'a', 1), true, 'Parent')).toBeNull();
+    expect(lineageCaption(thread('t', 'a', 1), false, 'Parent')).toBe('↳ side thread of Parent');
+    expect(lineageCaption(thread('t', 'a', 1), false, null)).toBe('↳ side thread');
+    expect(lineageCaption(fork('f', 'a', 1), false, 'Parent')).toBe('↳ fork of Parent');
+    expect(lineageCaption(record('plain'), false, null)).toBeNull();
   });
 });
 
