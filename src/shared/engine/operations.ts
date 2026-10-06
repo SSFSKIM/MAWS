@@ -5,9 +5,9 @@
 // late table. Shared because X2's `session.ts` module validates both in the renderer's direction too.
 import * as z from 'zod';
 import { AppSessionIdSchema } from '../graph/ids';
-import { GenerateSessionTitleResponseSchema, ReloadPluginsResponseSchema, SideQuestionResponseSchema } from '../wire/control';
+import { GenerateSessionTitleResponseSchema, ReloadPluginsResponseSchema, ReloadSkillsResponseSchema, SideQuestionResponseSchema } from '../wire/control';
 
-export const OPERATION_COMMANDS = ['session.generateTitle', 'session.reloadPlugins', 'session.sideQuestion', 'session.mcpReconnect', 'session.mcpToggle'] as const;
+export const OPERATION_COMMANDS = ['session.generateTitle', 'session.reloadPlugins', 'session.sideQuestion', 'session.mcpReconnect', 'session.mcpToggle', 'session.reloadSkills' /* E8 */] as const;
 export type OperationCommand = (typeof OPERATION_COMMANDS)[number];
 
 export const OperationReceiptSchema = z.strictObject({ opId: z.string() });
@@ -22,7 +22,7 @@ export const OperationEventSchema = z.strictObject({
   command: z.enum(OPERATION_COMMANDS),
   late: z.boolean(),
   outcome: z.union([
-    z.strictObject({ ok: z.literal(true), value: z.union([GenerateSessionTitleResponseSchema, ReloadPluginsResponseSchema, SideQuestionResponseSchema, z.null()]) }), // null for the two MCP commands
+    z.strictObject({ ok: z.literal(true), value: z.union([GenerateSessionTitleResponseSchema, ReloadPluginsResponseSchema, SideQuestionResponseSchema, z.null(), ReloadSkillsResponseSchema /* E8 */]) }), // null for the two MCP commands
     z.strictObject({ ok: z.literal(false), error: OperationErrorSchema }),
   ]),
 });

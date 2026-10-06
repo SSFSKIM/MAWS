@@ -1,6 +1,6 @@
 // The resting card shown when no tab is selected (mockup 01's "Session overview", under rulings 2 and 5): Environment,
-// Plugins while a plugin pins a status line (R1), Push state, Subagents, Background work and Sources, then the footer;
-// with no session shown, the footer alone. The card holds the git watch on the session's directory for as long as it is
+// Plugins while the session loaded any or a plugin pins a status line (R1, E8 D-9), Push state, Subagents, Background
+// work and Sources, then the footer; with no session shown, the footer alone. The card holds the git watch on the session's directory for as long as it is
 // mounted (a selected tab unmounts it, so a session with a tool open costs no watcher of the card's), and shows its
 // sections once their persisted expansion is read, so a collapsed section never opens for a frame.
 import { useEffect, type FunctionComponent } from 'react';

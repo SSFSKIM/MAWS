@@ -14,6 +14,10 @@ import * as settings from './names/settings';
 // C8c start
 import * as files from './names/files';
 // C8c end
+// E8 start
+import * as plugins from './names/plugins';
+import * as marketplaces from './names/marketplaces';
+// E8 end
 // E9 start
 import * as voice from './names/voice';
 // E9 end
@@ -23,6 +27,7 @@ export const NAMESPACES = [
   // C8c start
   'files',
   // C8c end
+  'plugins', 'marketplaces', // E8
   // E9 start
   'voice',
   // E9 end
@@ -33,6 +38,7 @@ export type Namespace = (typeof NAMESPACES)[number];
 export const NAMES = {
   session, engine, fs, git, pty, layout, attention, settings,
   files, // C8c
+  plugins, marketplaces, // E8
   voice, // E9
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 

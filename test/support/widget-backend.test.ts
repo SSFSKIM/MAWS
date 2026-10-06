@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { EngineSessionStatusSchema } from '../../src/shared/engine/status';
 import type { AppSessionId } from '../../src/shared/graph/ids';
+import { ReloadPluginsResponseSchema, ReloadSkillsResponseSchema } from '../../src/shared/wire/control'; // E8
 import { loadScenario } from './scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, syntheticFixture, WidgetBackendError, WIDGET_BACKEND_COMMANDS } from './widget-backend';
 
@@ -92,7 +93,7 @@ describe('the widget backend', () => {
     expect(await bridge.invoke('session.getSandboxDialog', { appSessionId: READY })).toMatchObject({ ok: true, value: { mode: 'disabled', supported: true } });
     expect(await bridge.invoke('session.getStatus', { appSessionId: 'nobody' })).toEqual({ ok: false, error: { code: 'internal', message: 'unknown app session: nobody' } });
     expect(await bridge.invoke('session.bash', { appSessionId: READY, command: 'ls' })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
-    const event = { appSessionId: READY, opId: 'op-1', command: 'session.reloadPlugins' as const, late: false, outcome: { ok: true as const, value: {} } };
+    const event = { appSessionId: READY, opId: 'op-1', command: 'session.reloadPlugins' as const, late: false, outcome: { ok: true as const, value: { commands: [], agents: [], plugins: [], error_count: 0 } } }; // E8: the typed answer
     backend.emitOperation(event);
     off();
     backend.emitOperation(event);
@@ -140,6 +141,18 @@ describe('the widget backend', () => {
     expect(operations()).toHaveLength(1);
     expect(backend.settleOperations()).toBe(1);
     expect(operations()[1].outcome).toEqual({ ok: false, error: { code: 'engine_error', message: 'Server not found: x', engineCode: null } });
+  });
+
+  it('E8: answers Reload skills as an operation completing with the recorded reload_skills answer', async () => {
+    const { backend, emitted } = backendOf();
+    expect(WIDGET_BACKEND_COMMANDS).toContain('session.reloadSkills');
+    const { opId } = (await backend.answer('session.reloadSkills', { appSessionId: READY })) as { opId: string };
+    await vi.waitFor(() => expect(emitted.filter((e) => e.name === 'session.operation')).toHaveLength(1));
+    const event = emitted.find((e) => e.name === 'session.operation')!.payload as { opId: string; command: string; outcome: { ok: true; value: unknown } };
+    expect(event).toMatchObject({ opId, command: 'session.reloadSkills', outcome: { ok: true } });
+    const skills = ReloadSkillsResponseSchema.parse(event.outcome.value).skills;
+    expect(skills).toHaveLength(15); // pass3/e8-plugins-reload seq 34
+    expect(skills.map((s) => s.name)).toContain('e8-probe:e8-hello');
   });
 
   it('answers mcp_status with the toggles the engine accepted', async () => {
@@ -238,6 +251,8 @@ describe('the widget backend', () => {
     for (const name of ['reload-plugins.json', 'mcp-reconnect.json', 'mcp-toggle.json', 'mcp-toggle-connect-failed.json', 'get-session-cost.json']) {
       expect(syntheticFixture(ROOT, name)._from, name).toMatch(/SPEC/);
     }
+    // E8: the synthetic reload answer has the recorded answer's shape (pass3/e8-plugins-reload seq 31)
+    expect(ReloadPluginsResponseSchema.safeParse(syntheticFixture(ROOT, 'reload-plugins.json').response).success).toBe(true);
     const failed = syntheticFixture(ROOT, 'mcp-toggle-connect-failed.json') as { operation: unknown; mcp_status: { mcpServers: { name: string; status: string; error?: string }[] } };
     expect(failed.operation).toEqual({ ok: false, error: { code: 'engine_error', message: 'Connection failed', engineCode: null } });
     expect(failed.mcp_status.mcpServers.find((s) => s.name === 'openaiDeveloperDocs')).toMatchObject({ status: 'failed', error: 'Connection failed' });

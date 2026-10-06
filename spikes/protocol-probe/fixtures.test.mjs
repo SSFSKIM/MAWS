@@ -96,9 +96,9 @@ for(const file of readdirSync(dir3).filter(f=>f.endsWith('.jsonl')))test('pass3/
    if(pending.delete(key))answered.set(row.direction+':'+f.response.request_id,JSON.stringify(f));
    else assert.equal(answered.get((row.direction==='in'?'out':'in')+':'+f.response.request_id),JSON.stringify(f),'response has pending request '+key);}
   assert.notEqual(f.event,'parse_error');assert.notEqual(f.event,'scenario_error');}
- // any child of docs/charter.md may record a pass-3 fixture (C2, C3, C10, C8a, …), and from P1 on a child of the P1
- // composite spec (E0a, …; docs/doperpowers/plans/2026-10-05-p1-extension.md, whose blob is the pin)
- const prov=rows.find(r=>r.frame.event==='provenance')?.frame;assert.equal(prov.charter,'docs/charter.md');assert.match(prov.child,/^[CE]\d+[a-z]?$/);assert.match(prov.pin,/^[0-9a-f]{40}$/);
+ // any child of docs/charter.md may record a pass-3 fixture (C2, C3, C10, C8a, …); a P1 child (E0a, E8, …) names the P1
+ // composite spec too, as `spec` or as `document` (docs/doperpowers/plans/2026-10-05-p1-extension.md, whose blob is the pin)
+ const prov=rows.find(r=>r.frame.event==='provenance')?.frame;assert.equal(prov.charter,'docs/charter.md');assert.match(prov.child,/^(C\d+[a-z]?|E\d+[a-z]?)$/);assert.match(prov.pin,/^[0-9a-f]{40}$/);if(/^E/.test(prov.child))assert.match(prov.spec??prov.document,/^docs\/doperpowers\/plans\/.*\.md$/);
  assert.equal(rows.find(r=>r.frame.event==='exit')?.frame.code,0);assert.equal(pending.size,0);
 });
 // C8c end

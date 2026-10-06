@@ -23,6 +23,7 @@ export const commands = [
   // R2: the engine's remote surface
   'session.ui.render', 'session.ui.press', 'session.ui.input', 'session.ui.select', 'session.ui.focus', 'session.ui.scroll',
   'session.ui.panes', 'session.ui.paneShow', 'session.ui.paneFocus', 'session.ui.close', 'session.ui.promptEdit', 'session.ui.answer',
+  'session.reloadSkills', // E8
 ] as const;
 
 export const events = [

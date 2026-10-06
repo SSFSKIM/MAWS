@@ -54,6 +54,7 @@ export const RESPONSES: Record<string, FixtureLine> = {
   mcp_reconnect: 'widgets/mcp-reconnect.json',
   mcp_toggle: 'widgets/mcp-toggle.json',
   rename_session: 'reads#90', // success, no payload (C10's session.rename of a ready session runs it through the engine)
+  reload_skills: 'pass3/e8-plugins-reload#34', // E8: `/skills` and the panel's Reload skills
 };
 
 // `set_permission_mode { mode: 'auto' }` on a model the catalogue does not mark `supportsAutoMode`: the engine's refusal.
@@ -83,6 +84,7 @@ export const SUBTYPE_OF: Partial<Record<CommandName, string>> = {
   'session.mcpReconnect': 'mcp_reconnect',
   'session.mcpToggle': 'mcp_toggle',
   'session.renameSession': 'rename_session',
+  'session.reloadSkills': 'reload_skills', // E8
 };
 
 // The launch's init facts every answered status carries (C3 reads them from `system/init`): the owner's eleven plugins,
@@ -104,6 +106,7 @@ const OPERATIONS: Partial<Record<CommandName, OperationCommand>> = {
   'session.reloadPlugins': 'session.reloadPlugins',
   'session.mcpReconnect': 'session.mcpReconnect',
   'session.mcpToggle': 'session.mcpToggle',
+  'session.reloadSkills': 'session.reloadSkills', // E8
 };
 
 // A refusal the backend answers with: main's interceptor turns it into the X2 error envelope.

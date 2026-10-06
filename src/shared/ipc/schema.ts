@@ -18,6 +18,10 @@ import * as settings from './schema/settings';
 // C8c start
 import * as files from './schema/files';
 // C8c end
+// E8 start
+import * as plugins from './schema/plugins';
+import * as marketplaces from './schema/marketplaces';
+// E8 end
 // E9 start
 import * as voice from './schema/voice';
 // E9 end
@@ -85,6 +89,8 @@ export const commands = {
   // C8c start
   ...files.commands,
   // C8c end
+  ...plugins.commands, // E8
+  ...marketplaces.commands, // E8
   // E9 start
   ...voice.commands,
   // E9 end
@@ -102,6 +108,8 @@ export const events = {
   // C8c start
   ...files.events,
   // C8c end
+  ...plugins.events, // E8
+  ...marketplaces.events, // E8
   // E9 start
   ...voice.events,
   // E9 end

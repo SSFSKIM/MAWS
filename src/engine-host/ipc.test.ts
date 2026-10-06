@@ -17,7 +17,7 @@ import type { BinaryCheck } from './binary-info';
 import { autoResponder, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
 import { handshakeResponder, INIT_RESPONSE } from './conformance/session-harness';
 import { REQUEST_TIMEOUT_MS } from './controls';
-import { bounded, DEADLINE_SHAPES, PRE_SPAWN_BOUND_MS, registerEngineIpc, type EngineIpcDeps } from './ipc';
+import { bounded, DEADLINE_SHAPES, E8_DEADLINE_SHAPES, PRE_SPAWN_BOUND_MS, registerEngineIpc, type EngineIpcDeps } from './ipc';
 import { MemoryAppendBudgetSpent } from './memory-append';
 import { RELAY_URL } from './launch';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13
@@ -91,13 +91,15 @@ async function until(check: () => boolean, what: string, ms = 3_000): Promise<vo
 const replaySpec = (appSessionId: string, replay: string) => spec({ appSessionId: appSessionId as AppSessionId, replay });
 
 describe('x2 deadlines fit the bridge', () => {
-  it('every C3 engine-host command has a handler and exactly one deadline shape; operations are the five long ones', () => {
+  it('every C3 engine-host command has a handler and exactly one deadline shape; operations are the long ones (C3’s five, E8’s reloadSkills)', () => {
     const { handlers } = engineHost();
     const c3 = [...C3_SESSION_COMMANDS, ...C3_ENGINE_COMMANDS];
     expect(Object.keys(DEADLINE_SHAPES).sort()).toEqual([...c3].sort());
     for (const name of c3) expect(handlers.has(name), name).toBe(true);
     for (const name of handlers.keys()) expect(commands[name as CommandName].owner, name).toBe('engine-host');
-    expect(Object.entries(DEADLINE_SHAPES).filter(([, shape]) => shape === 'operation').map(([name]) => name).sort()).toEqual([...OPERATION_COMMANDS].sort());
+    const operationShaped = Object.entries({ ...DEADLINE_SHAPES, ...E8_DEADLINE_SHAPES /* E8: session.reloadSkills */ }).filter(([, shape]) => shape === 'operation').map(([name]) => name);
+    expect(operationShaped.sort()).toEqual([...OPERATION_COMMANDS].sort());
+    for (const name of Object.keys(E8_DEADLINE_SHAPES)) expect(handlers.has(name), name).toBe(true);
     expect(DEADLINE_SHAPES).toMatchObject({ 'session.launch': 'immediate', 'session.send': 'immediate', 'session.answer': 'immediate', 'session.bash': 'immediate', 'session.getUsage': 'bounded', 'session.stop': 'bounded', 'engine.shutdown': 'bounded', 'session.interrupt': 'bounded' });
   });
 

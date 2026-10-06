@@ -10,7 +10,7 @@ import type { OperationCommand, OperationError, OperationEvent } from '@shared/e
 import { CONTROLS, type OutboundRequest, type OutboundSubtype } from './controls';
 import { ControlError, LATE_TABLE_MS, type ControlClient, type LateResponse } from './rpc';
 
-export type OperationSubtype = Extract<OutboundSubtype, 'generate_session_title' | 'reload_plugins' | 'side_question' | 'mcp_reconnect' | 'mcp_toggle'>;
+export type OperationSubtype = Extract<OutboundSubtype, 'generate_session_title' | 'reload_plugins' | 'side_question' | 'mcp_reconnect' | 'mcp_toggle' | 'reload_skills' /* E8 */>;
 
 interface Open {
   appSessionId: AppSessionId;
@@ -19,8 +19,9 @@ interface Open {
 }
 
 // The two MCP commands carry no value: their effect is visible in `session.status.mcpServers`.
-const valueOf = (command: OperationCommand, response: unknown): Extract<OperationEvent['outcome'], { ok: true }>['value'] =>
-  command === 'session.mcpReconnect' || command === 'session.mcpToggle' ? null : (response as { title: string } | { text: string } | Record<string, unknown>);
+type OperationValue = Extract<OperationEvent['outcome'], { ok: true }>['value'];
+const valueOf = (command: OperationCommand, response: unknown): OperationValue =>
+  command === 'session.mcpReconnect' || command === 'session.mcpToggle' ? null : (response as NonNullable<OperationValue>); // the subtype's schema parsed it
 
 function operationError(error: unknown): OperationError {
   if (error instanceof ControlError) {

@@ -538,6 +538,15 @@ const r2Commands = {
 export const R2_SESSION_COMMANDS = Object.keys(r2Commands) as (keyof typeof r2Commands)[];
 // R2 end ----------------------------------------------------------------------------------------------------------------
 
+// E8 start (E8 execution document, Interfaces; D-11) ------------------------------------------------------------------
+// `reload_skills` beside C3's `session.reloadPlugins`: an operation (a receipt, completion through session.operation with
+// the skills the engine now offers), owner engine-host.
+const e8Commands = {
+  'session.reloadSkills': host(input({}), OperationReceiptSchema),
+} as const;
+export const E8_SESSION_COMMANDS = Object.keys(e8Commands) as (keyof typeof e8Commands)[];
+// E8 end ----------------------------------------------------------------------------------------------------------------
+
 export const commands = {
   ...c3Commands, // C3
   ...c4Commands, // C4
@@ -546,6 +555,7 @@ export const commands = {
   ...c10Commands, // C10
   ...newChatCommands, // New chat
   ...r2Commands, // R2
+  ...e8Commands, // E8
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

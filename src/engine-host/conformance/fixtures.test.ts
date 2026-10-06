@@ -84,7 +84,8 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // E0a (P1 spec §9): the engine probes on the installed 2.1.290 (the SDK MCP round trip, fork_conversation beside the
     // --fork-session launch, side_question idle and mid-turn, the AskUserQuestion preview format unset and html)
     const e0a = ['p1-fork-session-flag', 'p1-fork-start', 'p1-question-preview-html', 'p1-question-preview-unset', 'p1-sdk-mcp-roundtrip', 'p1-side-question-session'];
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a].sort());
+    const e8 = ['e8-plugins-reload', 'e8-plugins-reload-settle']; // E8 (P1): reload_plugins and reload_skills on 2.1.290 around CLI writes under a scratch home, immediately and after a settle
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
