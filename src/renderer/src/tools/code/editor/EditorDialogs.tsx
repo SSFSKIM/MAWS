@@ -4,17 +4,17 @@
 // prompt needs three answers. Rendered through C10's `Sheet` and `SheetForm`, mounted once from App.tsx, so a guard for
 // a tab that is not shown still has a surface. One sheet at a time: opening another answers a close sheet shown `cancel`.
 import { create } from 'zustand';
+import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { Sheet, SheetForm } from '../../../sessions/Sheet';
 import { PRIMARY, SECONDARY } from '../../../sessions/ui';
-import type { FileLineAnchor } from '../anchor/anchor';
 import { EDITOR_COPY } from '../copy';
 
 export type CloseChoice = 'save' | 'discard' | 'cancel';
 
 export type EditorDialog =
   | { kind: 'close'; tabId: string; name: string; answer(choice: CloseChoice): void }
-  | { kind: 'anchor'; anchor: FileLineAnchor; appSessionId: AppSessionId };
+  | { kind: 'anchor'; anchor: Anchor; appSessionId: AppSessionId };
 
 export const useEditorDialog = create<{ open: EditorDialog | null }>()(() => ({ open: null }));
 
@@ -41,7 +41,7 @@ export function askClose(tabId: string, name: string): Promise<CloseChoice> {
 }
 
 // The placeholder for E3's comment composer: the anchor a comment would attach to, on screen.
-export function showAnchor(anchor: FileLineAnchor, appSessionId: AppSessionId): void {
+export function showAnchor(anchor: Anchor, appSessionId: AppSessionId): void {
   show({ kind: 'anchor', anchor, appSessionId });
 }
 
@@ -71,13 +71,17 @@ export function EditorDialogs() {
 
 const dismiss = () => useEditorDialog.setState({ open: null });
 
-function AnchorPlaceholder({ anchor }: { anchor: FileLineAnchor }) {
-  const fields: [string, string][] = [
-    ['locator', anchor.locator],
-    ['label', anchor.label],
-    ['path', anchor.path],
-    ['line', String(anchor.line)],
-  ];
+// Any X10 anchor since E3 widened the seam; the fields a kind does not carry are left out.
+function AnchorPlaceholder({ anchor }: { anchor: Anchor }) {
+  const line = anchor.line === undefined ? undefined : String(anchor.line);
+  const fields = (
+    [
+      ['locator', anchor.locator],
+      ['label', anchor.label],
+      ['path', anchor.path],
+      ['line', line],
+    ] as const
+  ).filter((field): field is readonly [string, string] => field[1] !== undefined);
   return (
     <Sheet
       title={EDITOR_COPY.anchorTitle(anchor.label)}
@@ -87,7 +91,7 @@ function AnchorPlaceholder({ anchor }: { anchor: FileLineAnchor }) {
       data-anchor-locator={anchor.locator}
       data-anchor-label={anchor.label}
       data-anchor-path={anchor.path}
-      data-anchor-line={String(anchor.line)}
+      data-anchor-line={line}
     >
       <div className="flex flex-col gap-3">
         <p className="m-0 text-fg-muted">{EDITOR_COPY.anchorBody}</p>
