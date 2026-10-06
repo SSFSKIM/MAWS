@@ -103,20 +103,20 @@ function createInstance(ref: PanelTabRef, tool: AnyTool, init: PanelToolInit<unk
   return instance;
 }
 
-// A tab the strip shows for the first time: its state is created with the shown session and no params (a restored
-// tab, or a pinned one re-adopting at launch). Called by the host component; idempotent.
+// A tab the strip shows for the first time: its state is created with the shown session and no params, marked restored
+// (a restored tab, or a pinned one re-adopting at launch). Called by the host component; idempotent.
 export function ensureShownInstances(tabs: PanelTabRef[], appSessionId: AppSessionId | null): void {
   const { tools } = usePanelHost.getState();
   for (const ref of tabs) {
     const tool = tools.get(ref.toolId);
     if (!tool || instances.has(ref.id)) continue;
-    createInstance(ref, tool, { appSessionId, session: sessionRecord(appSessionId), instanceId: ref.id, params: undefined });
+    createInstance(ref, tool, { appSessionId, session: sessionRecord(appSessionId), instanceId: ref.id, params: undefined, restored: true });
   }
 }
 
 // Ensure-instance for a re-target: a restored ref whose list was never shown has none yet.
 function ensureInstance(ref: PanelTabRef, tool: AnyTool, target: AppSessionId | null): Instance {
-  return instances.get(ref.id) ?? createInstance(ref, tool, { appSessionId: target, session: sessionRecord(target), instanceId: ref.id, params: undefined });
+  return instances.get(ref.id) ?? createInstance(ref, tool, { appSessionId: target, session: sessionRecord(target), instanceId: ref.id, params: undefined, restored: true });
 }
 
 const sessionRecord = (appSessionId: AppSessionId | null) => (appSessionId === null ? null : (useSessions.getState().records.get(appSessionId) ?? null));

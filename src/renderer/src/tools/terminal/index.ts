@@ -34,7 +34,7 @@ export interface TerminalTabState {
   readonly terminalId: TerminalId | null; // the registry's terminal, once started (reads `ui`)
   readonly ui: StoreApi<TerminalTabUi>;
   readonly instanceId: string; // the terminal's label, which is how a reloaded page re-adopts it
-  readonly restored: boolean; // E10: restored from layout.json (X5 gives such a tab no params)
+  readonly restored: boolean; // E10: restored from layout.json (X5's `PanelToolInit.restored`)
   params: TerminalParams;
   owner: AppSessionId | null; // the session the tab was opened for, when known
   focusSeen: number; // the last X5 `focusRequest` the view acted on or used up (the counter outlives the view's mounts)
@@ -202,7 +202,7 @@ export function takeFocusRequest(state: TerminalTabState, request: number): bool
   return true;
 }
 
-function createState({ appSessionId, session, instanceId, params }: PanelToolInit<TerminalParams>): TerminalTabState {
+function createState({ appSessionId, session, instanceId, params, restored }: PanelToolInit<TerminalParams>): TerminalTabState {
   const ui = createStore<TerminalTabUi>()(() => ({ confirmClose: false, process: null, confirmed: false, closeError: null, terminalId: null, lostAtQuit: false }));
   const state: TerminalTabState = {
     get terminalId() {
@@ -210,9 +210,9 @@ function createState({ appSessionId, session, instanceId, params }: PanelToolIni
     },
     ui,
     instanceId,
-    restored: params === undefined,
+    restored: restored === true,
     params: { ...params },
-    owner: appSessionId ?? session?.appId ?? params?.owner ?? null, // a restored tab has no params
+    owner: appSessionId ?? session?.appId ?? params?.owner ?? null, // a restored tab, or an addTool without params, has none
     focusSeen: 0,
   };
   ensureTerminal(state, { appSessionId, session });

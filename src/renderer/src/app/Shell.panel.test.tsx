@@ -98,7 +98,7 @@ describe('shell renders the panel host in the region', () => {
     expect(within(panel()).getByText('files is not available')).toBeTruthy();
     const files = probeTool('files');
     act(() => void register(files.tool));
-    expect(files.probe.created).toEqual([{ appSessionId: A, session: expect.objectContaining({ appId: A }), instanceId: 'files:aaaaaaaa', params: undefined }]);
+    expect(files.probe.created).toEqual([{ appSessionId: A, session: expect.objectContaining({ appId: A }), instanceId: 'files:aaaaaaaa', params: undefined, restored: true }]);
     expect(screen.getByTestId('body:files:aaaaaaaa').textContent).toBe(`files · ${A} · unpinned · visible · focus 0`);
   });
 

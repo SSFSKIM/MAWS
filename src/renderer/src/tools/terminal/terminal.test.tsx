@@ -6,12 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { HostState, PtyInfo } from '@shared/ipc/schema';
-import { instanceOf, panelHost, registerPanelTool } from '../../panel/host';
+import { ensureShownInstances, instanceOf, panelHost, registerPanelTool } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
 import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { resetPanelStores } from '../../test-support/panel';
 import type { TerminalInfo } from '../../terminal/registry';
+import type { TerminalTabState } from './index';
 
 const registry = vi.hoisted(() => {
   type Listener = (infos: TerminalInfo[], host: HostState | null) => void;
@@ -125,9 +126,9 @@ function newState(init: { session?: SessionRecord | null; params?: { cwd?: strin
   return terminalTool.createState({ appSessionId: A, session: init.session === undefined ? SESSION_A : init.session, instanceId: init.instanceId ?? 'terminal:1', params: init.params ?? {} });
 }
 
-// A tab restored from layout.json: X5 gives it no params.
+// A tab restored from layout.json: X5 gives it no params and marks it restored.
 function restoredState(instanceId: string) {
-  return terminalTool.createState({ appSessionId: A, session: SESSION_A, instanceId, params: undefined as never });
+  return terminalTool.createState({ appSessionId: A, session: SESSION_A, instanceId, params: undefined as never, restored: true });
 }
 
 const View = terminalTool.render;
@@ -462,6 +463,35 @@ describe('a restored tab whose shell closed when MAWS quit', () => {
     act(() => void fireEvent.click(within(line).getByRole('button', { name: 'Dismiss' })));
     expect(screen.queryByRole('status', { name: 'previous shell' })).toBeNull();
     expect(lost(state)).toBe(false);
+  });
+});
+
+// The same through C8a's real host: the + menu's `addTool` gives no params either, so only the host's restore path
+// (`ensureShownInstances`, as the strip shows a restored ref) may mark a tab restored.
+describe('the lost-terminal line through the panel host', () => {
+  beforeEach(() => {
+    resetPanelStores();
+    useSessions.setState({ records: new Map([[A, SESSION_A]]) });
+    resetTerminalAdoption();
+    registerPanelTool(terminalTool);
+  });
+  afterEach(() => resetTerminalAdoption());
+  const stateOf = (tabId: string) => instanceOf(tabId)!.state as TerminalTabState;
+
+  it('says nothing for a tab the + menu opens after an adoption that listed nothing', async () => {
+    await adoptTerminals();
+    const tabId = panelHost.addTool('terminal', { appSessionId: A }); // TabStrip's + menu
+    expect(stateOf(tabId).terminalId).toBe('t1');
+    expect(stateOf(tabId).ui.getState().lostAtQuit).toBe(false);
+  });
+
+  it('says it for a tab restored from layout.json after a relaunch', async () => {
+    await adoptTerminals();
+    const ref = { id: 'terminal:restored', toolId: TERMINAL_TOOL_ID, pinned: false };
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref], activeTabId: ref.id }]]) }); // as hydration restores it
+    ensureShownInstances([ref], A);
+    expect(stateOf(ref.id).terminalId).toBe('t1');
+    expect(stateOf(ref.id).ui.getState().lostAtQuit).toBe(true);
   });
 });
 
