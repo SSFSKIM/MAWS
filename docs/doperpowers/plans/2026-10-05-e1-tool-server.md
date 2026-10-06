@@ -356,6 +356,8 @@ Working directory: the worktree root (`git rev-parse --show-toplevel`); `pnpm -C
 
 Records (filled as work proceeds): the A-15 digest before the first live run and after each; each live case's `total_cost_usd`; each gate's result and the file holding its output.
 
+- 2026-10-05 23:22, full unit suite after M1 (product tree fd23e2b7): 459 files passed, 1 skipped; 5,944 tests passed, 1 skipped; no type errors; 147 s. The load gate refused twice (388 and 126 after 20 minutes each) and opened at 19.34. Log: `docs/doperpowers/evidence/p1-e1/gates/units-after-m1-fd23e2b7.txt`. The log's "Closing file descriptor on garbage collection" warnings do not come from E1's suites (the focused run of `deliverables`, `tool-server`, `session-maws` and `main/files` prints none); they are pre-existing and left to the tracker if they persist at M5.
+
 ## Surprises & Discoveries
 
 - Observation: the engine's SDK-MCP handshake begins before the host's own `initialize` is answered (E0a seq 5 precedes seq 7).
