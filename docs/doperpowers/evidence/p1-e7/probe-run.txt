@@ -1,0 +1,29 @@
+E7 M0 probe run (docs/doperpowers/plans/2026-10-06-e7-orchestration.md, M0), 2026-10-06 10:54 to 11:17 UTC.
+Findings: spikes/protocol-probe/findings-pass3-p1-extension.txt, section "E7 M0". Owner-file delta: owner-file-check.txt.
+
+Engine   /Users/new/.local/share/claude/versions/2.1.291 (--version 2.1.291), unmodified
+Model    haiku (claude-haiku-4-5-20251001), default permission mode, MAWS's launch line and environment, ClaudeUsage relay
+Guards   --max-budget-usd 0.80 per launch, --debug-file; scratch CLAUDE_CONFIG_DIR per scenario under /tmp, removed
+Runner   node spikes/protocol-probe/run-pass3.mjs <scenario>, each through /tmp/maws-review/waitload20.sh && with-slot.sh
+
+Scenario          Journals (exit)                     Session cost (US$)  Verdict
+e7-peer-message   e7-peer-a (0), e7-peer-b (0)        0.052, 0.054        inbox bound under -p; listing, idle and mid-turn
+                  + e7-peer-transcripts/ (2 JSONL)                        frames, reply, failure recorded; disk forms recorded
+e7-cron           e7-cron (0), e7-cron-resume (0)     0.059, 0.070        results, fires (no user frame on the wire),
+                  + e7-cron-durable/ (2 files)                            durable file, resurrection on resume recorded
+                  (two earlier takes discarded:       0.062 + 0.073,      fire detection fixed twice; same shapes
+                  fire detection)                     0.057 + 0.064
+e7-team           e7-team (0)                         0.067               name reaches the wire and the sidecar; listed
+                  (optional, run)                                         under Subagents; no Teammates section
+e7-tasks          dropped before running (owner ruling P-20, the architect's course correction)
+e7-tasks-optin    dropped before running (same)
+
+Total spend (result frames, all takes): US$0.56.
+
+Suites after the recordings
+  node --test spikes/protocol-probe/fixtures.test.mjs          151 tests, 151 pass
+  pnpm exec vitest run src/engine-host/conformance             5 files, 197 tests pass (the five e7-* journals replay clean)
+
+Every process ended through end_session {reason:"stop"} and exited 0; the /tmp/cc-socks/<pid>.sock inboxes were
+unlinked by the engine; the engine's per-project temp directories under /private/tmp/claude-501/ for the scratch
+repositories were removed.

@@ -1,0 +1,15 @@
+{
+  "tasks": [
+    {
+      "id": "598b1690",
+      "cron": "0 9 * * 1",
+      "prompt": "E7 durable weekly",
+      "createdAt": 1791285408190,
+      "recurring": true,
+      "createdBySessionId": "5e8ddabd-603d-4ffb-9edd-d937c627f55d",
+      "createdByPid": 95239,
+      "createdByProcStart": "Tue Oct  6 11:12:14 2026",
+      "createdInProject": "/private/tmp/maws-e0a-e7-cron-LejMAt/repo-dM0EOc"
+    }
+  ]
+}

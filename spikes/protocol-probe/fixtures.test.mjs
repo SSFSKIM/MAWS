@@ -176,3 +176,96 @@ test('pass3 w7-take-over: SIGTERM ends an interactive holder, the registry clear
  assert.deepEqual(at('terminal_holds').holders,[{kind:'terminal',pid:at('terminal_holds').pid}]);
  const take=at('take_over');assert.deepEqual(take.outcome,{status:'released'});assert.equal(take.terminalExit.exitCode,143);assert.deepEqual(take.registry,[]);assert.ok(take.ms<10000);
  assert.match(at('resumed').answer,/BEFORE.*TERMINAL/);assert.equal(at('resumed').parentEntrypoint,'cli');});
+// E7 start (docs/doperpowers/plans/2026-10-06-e7-orchestration.md, M0): cross-session messages between two MAWS-launched
+// print-mode sessions, live (e7-peer-a, e7-peer-b) and on disk (e7-peer-transcripts/).
+const ENVELOPE_RE=/<cross-session-message from="([^"]+)"([^>]*)>\n([\s\S]*?)\n<\/cross-session-message>/;
+const userText=f=>typeof f.message?.content==='string'?f.message.content:'';
+test('pass3 e7-peer: the listing names B, B\'s message reaches idle A as a peer user frame, and the owner\'s relay steer becomes a SendMessage to the envelope\'s from',()=>{
+ const a=load3('e7-peer-a'),b=load3('e7-peer-b');
+ const listing=notes(a,'e7_listing')[0].result.structured.listing;
+ assert.match(listing,/^This session is \S+ \[[0-9a-f]+\] — the name other sessions use to message it/);
+ assert.match(listing,/\n\nPeer sessions \(1\):\n {2}\S+ \[[0-9a-f]+\] {2}· {2}interactive {2}· {2}idle {2}· {2}started \d+s ago$/);
+ // idle: the wire frame is a replayed, synthetic user frame with a peer origin; its text is preamble, envelope, trailer
+ const idle=notes(a,'e7_inbound').find(n=>n.case==='idle').inbound;
+ const frame=a.find(r=>r.seq===idle.seq).frame;
+ assert.equal(frame.isReplay,true);assert.equal(frame.isSynthetic,true);
+ assert.deepEqual(Object.keys(frame.origin).sort(),['body','from','fromMode','kind','msg_id','name','verifiedPeerPid']);
+ assert.equal(frame.origin.kind,'peer');assert.equal(frame.origin.body,'E7 probe: hello from B');
+ const m=ENVELOPE_RE.exec(userText(frame));assert.ok(m);assert.equal(m[1],frame.origin.from);assert.match(m[1],/^uds:\/tmp\/cc-socks\/\d+\.sock$/);
+ assert.equal(m[2],` from-name="${frame.origin.name}" from-mode="prompting"`);assert.equal(m[3],'E7 probe: hello from B');
+ assert.ok(userText(frame).startsWith('Another Claude session sent a message:\n<cross-session-message '));
+ assert.ok(userText(frame).endsWith('that\'s permission laundering.'));
+ // the peer message starts A's turn: command_lifecycle started for the frame's uuid ahead of it
+ assert.ok(a.some(r=>r.seq<idle.seq&&r.frame.type==='command_lifecycle'&&r.frame.command_uuid===frame.uuid&&r.frame.state==='started'));
+ // the owner's reply: the relay steer's SendMessage carries the owner's text to the envelope's from; success structured
+ const reply=notes(a,'e7_reply')[0];
+ assert.equal(reply.sendMessage.input.to,idle.from);assert.equal(reply.matchesOwnerText,true);
+ assert.equal(reply.result.isError,false);assert.equal(reply.result.structured.success,true);
+ assert.ok(reply.result.structured.message.startsWith('“E7 probe: reply from A” → '+idle.from));
+ assert.equal(notes(b,'e7_inbound').find(n=>n.case==='reply').inbound.origin.body,'E7 probe: reply from A');
+});
+test('pass3 e7-peer: mid-turn, the wire frame is the bare envelope right after the tool result; a send to nobody is success:false, not an error',()=>{
+ const a=load3('e7-peer-a');
+ const mid=notes(a,'e7_inbound').find(n=>n.case==='mid-turn');
+ assert.equal(mid.arrivedBeforeBashResult,false);assert.equal(mid.inbound.seq,mid.bashResultSeq+1);
+ const frame=a.find(r=>r.seq===mid.inbound.seq).frame;
+ assert.equal(userText(frame),'<cross-session-message from="'+frame.origin.from+'" from-name="'+frame.origin.name+'" from-mode="prompting">\nE7 probe: second message while you work\n</cross-session-message>');
+ const fail=notes(a,'e7_send_failure')[0].pairs[0].result;
+ assert.equal(fail.isError,false);
+ assert.deepEqual(fail.structured,{success:false,message:'No agent named \'nobody-e7\' is reachable.\nUse ListAgents to see everyone you can message.',display:'Not sent — no agent named \'nobody-e7\' is reachable.'});
+});
+test('pass3 e7-peer-transcripts: an idle peer message is a meta user record with a peer origin; a mid-turn one a queued_command attachment rendered as a system reminder',()=>{
+ const dir=new URL('e7-peer-transcripts/',dir3);const files=readdirSync(dir);assert.equal(files.length,2);
+ for(const f of files){const text=readFileSync(new URL(f,dir),'utf8');assert.ok(!text.includes('sk-ant-'),f);if(secret&&secret.length>=8)assert.ok(!text.includes(secret),f);}
+ const aId=notes(load3('e7-peer-a'),'provenance')[0].pinnedSessionId;
+ const a=readFileSync(new URL(aId+'.jsonl',dir),'utf8').trim().split('\n').map(JSON.parse);
+ const idle=a.find(r=>r.type==='user'&&r.origin?.kind==='peer');
+ assert.equal(idle.isMeta,true);assert.equal(idle.promptSource,'system');assert.equal(idle.turnOrigin,'peer');assert.equal(idle.origin.body,'E7 probe: hello from B');
+ assert.ok(idle.message.content.startsWith('Another Claude session sent a message:\n<cross-session-message '));
+ const mid=a.find(r=>r.type==='attachment'&&r.attachment.type==='queued_command'&&r.attachment.origin?.kind==='peer');
+ assert.equal(mid.attachment.prompt,'<cross-session-message from="'+mid.attachment.origin.from+'" from-name="'+mid.attachment.origin.name+'" from-mode="prompting">\nE7 probe: second message while you work\n</cross-session-message>');
+ assert.equal(mid.attachment.isMeta,true);assert.equal(mid.renderedRole,'system');
+ assert.match(mid.rendered[0].content,/^<system-reminder>\nAnother Claude session sent a message while you were working:\n<cross-session-message /);
+ assert.match(mid.rendered[0].content,/ After completing your current task, decide whether\/how to respond \(reply via SendMessage to the `from=` address\)\.\n<\/system-reminder>$/);
+ assert.ok(a.some(r=>r.type==='queue-operation'&&r.operation==='remove'&&r.reason==='absorbed_mid_turn'&&r.commandUuid===mid.attachment.source_uuid));
+});
+test('pass3 e7-cron: CronCreate answers its id structured; a fire opens a turn with no user frame, its prompt only on disk (turnOrigin scheduled)',()=>{
+ const c=load3('e7-cron');const at=e=>notes(c,e)[0];
+ const creates=at('e7_cron_setup').pairs.filter(p=>p.use.name==='CronCreate');
+ assert.deepEqual(creates.map(p=>Object.keys(p.result.structured).sort()),[['durable','humanSchedule','id','recurring'],['durable','humanSchedule','id','recurring']]);
+ const [tick,one]=creates.map(p=>p.result);
+ assert.equal(tick.text,`Scheduled recurring job ${tick.structured.id} (Every 2 minutes). Session-only (not written to disk, dies when Claude exits). Auto-expires after 7 days. Use CronDelete to cancel sooner.`);
+ assert.match(one.text,/^Scheduled one-shot task [0-9a-f]{8} \(\d+ \d+ \d+ \d+ \*\)\. Session-only \(not written to disk, dies when Claude exits\)\. It will fire once then auto-delete\.$/);
+ // both jobs fired (the recurring one each period, the one-shot once); the wire carries no user frame for a fire, and
+ // its result names no user message
+ const fires=at('e7_cron_jsonl').fires;
+ assert.deepEqual(fires.map(f=>f.job).slice(0,2),[tick.structured.id,one.structured.id]);
+ assert.equal(fires.filter(f=>f.job===one.structured.id).length,1);assert.ok(fires.every(f=>f.job===tick.structured.id||f.job===one.structured.id));
+ for(const f of fires){assert.equal(f.userFrameInTurn,null);assert.equal(f.result.user_message_uuids,null);
+  assert.equal(f.record.type,'user');assert.equal(f.record.isMeta,true);assert.equal(f.record.promptSource,'system');assert.equal(f.record.turnOrigin,'scheduled');assert.equal(f.record.origin,undefined);}
+ // the one-shot fires on its minute (no jitter off :00/:30); CronDelete answers its text and {id}
+ const oneShotAt=Date.parse(at('e7_cron_setup').oneShotAt);assert.ok(Math.abs(Date.parse(fires[1].at)-oneShotAt)<5000);
+ const del=at('e7_cron_delete').pairs.find(p=>p.use.name==='CronDelete').result;
+ assert.equal(del.text,`Cancelled job ${tick.structured.id}.`);assert.deepEqual(del.structured,{id:tick.structured.id});
+});
+test('pass3 e7-cron: a durable job lands in the project\'s scheduled_tasks.json, and a resume resurrects the session-only job under its id',()=>{
+ const durable=JSON.parse(readFileSync(new URL('e7-cron-durable/scheduled_tasks.json',dir3),'utf8'));
+ assert.equal(durable.tasks.length,1);
+ assert.deepEqual(Object.keys(durable.tasks[0]).sort(),['createdAt','createdByPid','createdByProcStart','createdBySessionId','createdInProject','cron','id','prompt','recurring']);
+ assert.equal(durable.tasks[0].prompt,'E7 durable weekly');
+ const after=JSON.parse(readFileSync(new URL('e7-cron-durable/scheduled_tasks.after-resume.json',dir3),'utf8'));
+ assert.equal(after.tasks[0].createdAt,durable.tasks[0].createdAt);assert.notEqual(after.tasks[0].createdByPid,durable.tasks[0].createdByPid);
+ const nightly=notes(load3('e7-cron'),'e7_cron_durable')[0].pairs.find(p=>p.use.input?.prompt==='E7 nightly').result.structured.id;
+ const listed=notes(load3('e7-cron-resume'),'e7_cron_resume')[0].pairs.find(p=>p.use.name==='CronList').result.structured.jobs;
+ assert.deepEqual(listed.map(j=>[j.id,j.durable??true]).sort(),[[durable.tasks[0].id,true],[nightly,false]].sort());
+});
+test('pass3 e7-team: under the teams gate a named background agent keeps its name on the wire and in its sidecar, and lists under Subagents, not Teammates',()=>{
+ const t=load3('e7-team');const spawn=notes(t,'e7_team_spawn')[0];
+ assert.equal(spawn.nameOnWire,true);
+ const listing=notes(t,'e7_team_listing')[0].listings[0].result.structured.listing;
+ assert.match(listing,/\n\nSubagents \(1\):\n {2}scout \[[0-9a-f]+\] {2}· {2}general-purpose {2}· {2}completed {2}· {2}started \d+s ago$/);
+ assert.doesNotMatch(listing,/Teammates/);
+ const disk=notes(t,'e7_team_disk')[0];assert.equal(disk.teamsDir,null);
+ assert.equal(Object.values(disk.sidecarMeta)[0].name,'scout');
+});
+// E7 end

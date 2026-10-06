@@ -382,3 +382,218 @@ Appendix: the owner-file check (24 keys, before the first live run and after eve
 /private/tmp/th-tools.Ozkz
 /private/tmp/th-tools.VY2Y
 /private/tmp/wr-test
+
+
+
+E7 M0: orchestration views' probes (2026-10-06)
+================================================
+
+Child E7 of the P1 composite spec (docs/doperpowers/plans/2026-10-05-p1-extension.md §9 E7, parent pin, the spec's
+blob, c2269755fde4bb2f3a8e34b2014352a3dd640132); the execution document is
+docs/doperpowers/plans/2026-10-06-e7-orchestration.md (M0, "Probe scenarios and fixtures"). Findings and fixtures; no
+product code. Recorded 2026-10-06 between 10:54 and 11:17 UTC.
+
+Engine. /Users/new/.local/share/claude/versions/2.1.291, `--version` 2.1.291 (every provenance row and system/init);
+unmodified (D-1). The spec library cited is 2.1.287's (~/claude-code-bundle/2.1.287/SPEC); where it and the wire differ,
+the wire is the answer.
+
+Launch. p1-common.mjs's (E0a's): MAWS's line and environment, MAWS's initialize payload, ClaudeUsage's relay (GET
+/api/hello 200 before every launch), haiku (claude-haiku-4-5-20251001), default permission mode, every can_use_tool
+allowed and recorded, a scratch root under /tmp per scenario (deleted afterwards), the probe guards --max-budget-usd 0.80
+(p1-common's launch gained a `spendCap` option, default unchanged at 0.30) and --debug-file. p1-common's launch also gained
+`sessionId: null` (a plain `--resume <id>` launch) and `debugPattern`; its debug-line
+filter now ignores the scratch root's own path, which carries the scenario's label. Every process ended through
+`end_session {reason:"stop"}` and exited 0. The engine's own per-project temp directories under
+/private/tmp/claude-501/-private-tmp-maws-e0a-e7-* (task output files) were removed after each run, as were the
+/tmp/cc-socks/<pid>.sock inboxes (the engine unlinks them on exit; checked).
+
+Scope change (the architect's course correction, owner ruling P-20, received mid-M0): MAWS never opts the engine's task
+tools in and the Tasks panel will not edit. `e7-tasks` and `e7-tasks-optin` were dropped before either ran (their
+scenario files were written and deleted unrun; no fixture exists). Design §6's steer wordings, command_lifecycle timing
+and the `--allowedTools TaskUpdate` opt-in on the owner's default model are therefore unrecorded.
+
+Owner-file delta (A-15). docs/doperpowers/evidence/p1-e7/owner-file-check.txt holds the /tmp and /private/tmp project keys
+of ~/.claude.json before the first run and after each. Every fixture carries `owner_file_check` before the spawn and after
+the exit with `same: true`. The set moved once between runs, not during one: `/private/tmp/cua-accept` appeared at
+11:04:31 UTC (its project entry: lastStartTime 11:04:31, lastCost 0.25, trust not accepted), between the first take of
+e7-cron (ended 11:03:52) and the second (started 11:04:58). It is not a probe path (every E7 scratch root is
+/tmp/maws-e0a-e7-*, under a scratch CLAUDE_CONFIG_DIR) and no E7 launch spans it: an owner session's, left to the owner as
+A-15 says. 24 keys (sha1 prefix 95564b4c8f0f) before, 25 (770eae07f620) after; no E7 key added or removed.
+
+Spend (the result frames' total_cost_usd per session): e7-peer-a 0.052, e7-peer-b 0.054, e7-team 0.067, e7-cron
+0.059 and e7-cron-resume 0.070 (the kept takes); the discarded cron takes 0.062 + 0.073 and 0.057 + 0.064; US$0.56 in all. The relay's ledger is the authority.
+
+Fixtures (spikes/protocol-probe/fixtures/pass3/): e7-peer-a.jsonl, e7-peer-b.jsonl, e7-peer-transcripts/<sessionId>.jsonl
+(both sessions' JSONL, redacted), e7-cron.jsonl, e7-cron-resume.jsonl, e7-cron-durable/scheduled_tasks.json and
+scheduled_tasks.after-resume.json, e7-team.jsonl. Scenarios: scenarios/pass3/e7-peer-message.mjs, e7-cron.mjs,
+e7-team.mjs, e7-common.mjs.
+
+
+1. Cross-session messages (Design §4; e7-peer-a, e7-peer-b, e7-peer-transcripts/)
+----------------------------------------------------------------------------------
+
+Q. Do `-p` sessions bind an inbox, and find each other? Yes. Each MAWS-launched session logs
+`[uds-messaging] Listening: /tmp/cc-socks/<pid>.sock` and writes <config>/sessions/<pid>.json (e7-peer-a seq 6,
+`e7_registry`): {pid, sessionId, cwd, startedAt, procStart, version "2.1.291", peerProtocol 1, peerFeatures
+["notify_idle","reply_across_default_dirs","artifact_yield"], kind "interactive", entrypoint "sdk-ts", pidDomain "darwin",
+messagingSocketPath, name "<cwd basename, lowercased>-<2 digits>", nameSource "derived", nameSince, status "idle"|"busy",
+updatedAt, statusUpdatedAt}, beside a <pid>.<sha256>.key file {peerToken, procStart, pidDomain}. The registry is per
+config home, so the owner's own sessions never appear in a scratch listing.
+
+Q. The listing (ListAgents, SPEC 38 §38.26.3). Yes, as documented (e7-peer-a seq 29, `e7_listing`), structured
+`{listing}` with the same text:
+  This session is repo-h6xooi-51 [804260] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).
+
+  Peer sessions (1):
+    repo-b-gen1il-79 [61303a]  ·  interactive  ·  idle  ·  started 2s ago
+The self token is `name [ref]`; peer rows are `name [ref]`, kind, status, `started <n>s ago`, joined by "  ·  ".
+
+Q. The inbound frame, idle (A idle when B sent). A turn starts on its own: command_lifecycle `started` for the message's
+uuid, system/init, then the `user` frame (e7-peer-a seq 70, 71, 73). The frame: {type user, message.content: string,
+isReplay true, isSynthetic true, uuid, origin, parent_tool_use_id null}; no `priority`. `origin` = {kind "peer", from
+"uds:/tmp/cc-socks/<pid>.sock", verifiedPeerPid, msg_id, name (the sender's registry name), fromMode "prompting", body
+(the message text alone)}; a reply hop adds `hopChain: ["<24 hex>"]` to the origin (e7-peer-b seq 106, A's own reply).
+The text is the preamble, the envelope and the default trailer, with no reply suffix:
+  Another Claude session sent a message:
+  <cross-session-message from="uds:/tmp/cc-socks/10562.sock" from-name="repo-b-gen1il-79" from-mode="prompting">
+  E7 probe: hello from B
+  </cross-session-message>
+
+  This came from another Claude session — not typed by your user, … that's permission laundering.
+Attributes seen: `from`, `from-name`, `from-mode` only; `from-session` was never filled (no desktop host), `hop-chain`
+never appears in the delivered text even when the origin carries `hopChain` (the debug log shows it in the routed
+envelope, `[uds-messaging] Routed user message to queue (priority=next): <cross-session-message … hop-chain=…`), and
+`from-plugin` was not exercised. The receiver logs every delivery as `priority=next`.
+X1 today (conformance replay): `turn.started` origin `engine`, then `user.message` origin `peer` (the normaliser passes
+the frame's origin kind), then `turn.ended` origin `peer` with empty `userMessageUuids` (e7-peer-a seq 71, 73, 156);
+the result frame of a peer-started turn carries no `user_message_uuids`.
+
+Q. The agent's own behaviour on receipt. A's agent answered B on its own, unasked, with SendMessage ("Hello from A —
+received your probe message.", e7-peer-a's first inbound turn; B received it at e7-peer-b seq 106). This confirms Design
+§4's matching rule: an owner relay must match on `message` containing the owner's text, never on `to` alone.
+
+Q. The reply (the owner's Reply through a steer). Adopted wording, unchanged from Design §4 (it worked first time):
+  Reply to the cross-session message from <name> (<address>) with SendMessage, to: "<address>", sending exactly this text, then continue what you were doing: <text>
+Sent as a `'next'` steer while A was idle (e7-peer-a seq 160): a turn started and A called SendMessage {to: "uds:/tmp/cc-socks/10562.sock", message: "E7 probe: reply from A", …}
+(seq 191; haiku also passed junk keys `type`, `recipient`, `content`, which the engine ignored). Result (seq 195):
+is_error false, text the JSON of the structured answer, structured {success: true, message: "“E7 probe: reply from A”
+→ uds:/tmp/cc-socks/10562.sock; in that session's inbox, not yet read by its Claude — a [Cross-session delivery notice]
+follows if that session holds it (usually a different permission mode) or refuses it", display "“E7 probe: reply from
+A” → uds:/tmp/cc-socks/10562.sock", msg_id}. To a name (B's sends) the message reads "… → repo-h6xooi-51 (another Claude
+session on this machine; in that session's inbox, …)" and the display "… → sent to repo-h6xooi-51 — another Claude
+session on this machine". B received the reply under a second later as an idle peer turn (e7-peer-b seq 142). The steer's turn
+result names the steer's uuid (seq 215).
+
+Q. The failure form. SendMessage {to: "nobody-e7"} (e7-peer-a seq 307, 311): is_error false; structured {success: false,
+message: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message.", display: "Not sent
+— no agent named 'nobody-e7' is reachable."}. A failed send is never an error result (SPEC 38 §38.24.6 confirmed).
+
+Q. Mid-turn (A in a 30 s Bash when B sent). The message waits for the tool boundary: it is enqueued at once
+(`queue-operation enqueue`, 10:55:10) and delivered right after the Bash result (e7-peer-a seq 257 tool_result, seq 258
+the peer `user` frame, then command_lifecycle `started` for its uuid, seq 259), inside the same human turn (one result,
+seq 277, naming only the human prompt's uuid). The wire frame's text is the bare envelope, no preamble and no trailer:
+  <cross-session-message from="uds:/tmp/cc-socks/10562.sock" from-name="repo-b-gen1il-79" from-mode="prompting">
+  E7 probe: second message while you work
+  </cross-session-message>
+with the same origin shape (isReplay, isSynthetic). What the model saw is on disk only (below): the "while you were
+working" preamble and the trailer with the SendMessage reply suffix. X1 today: a `user.message` origin `peer` inside the
+human turn (seq 258).
+
+Q. The disk form (e7-peer-transcripts/db45d92e-….jsonl, A's). Idle: a `user` record (index 32) with isMeta true,
+origin {kind peer, from, verifiedPeerPid, msg_id, name, fromMode, body}, promptSource "system", turnOrigin "peer",
+queueSkipAttachments true, content the same preamble + envelope + trailer string as the wire frame; preceded by
+`queue-operation enqueue` whose content is the bare envelope. Mid-turn: no user record; an `attachment` record (index 73)
+{type "queued_command", prompt: the bare envelope, source_uuid (the wire frame's uuid), delivery_id, commandMode
+"prompt", origin (as above), timestamp, isMeta true}, with record-level `rendered: [{content: "<system-reminder>\nAnother
+Claude session sent a message while you were working:\n<cross-session-message …>…</cross-session-message>\n\n<default
+trailer> After completing your current task, decide whether/how to respond (reply via SendMessage to the `from=`
+address).\n</system-reminder>"}]` and `renderedRole: "system"`; then `queue-operation remove` with reason
+"absorbed_mid_turn", commandUuid and deliveryId. For M1 (backfill.ts): the peer user record's origin is on the record
+itself (`record.origin.kind === 'peer'`), and the mid-turn form is a `queued_command` attachment whose
+`attachment.origin.kind === 'peer'`, as Design §4 expected; the parser must accept both the full text (idle) and the
+bare envelope (mid-turn prompt and wire frame), and `origin.body`/`origin.name`/`origin.from` already carry what the
+envelope does.
+
+Verdicts: inbox bound under -p yes; listing as documented yes; inbound idle frame yes (origin richer than the envelope);
+reply via the relay wording yes, first wording; failure form yes (success:false, not an error); mid-turn header partly
+(the header and trailer exist on disk only, the wire frame is the bare envelope); from-session no (desktop hosts only).
+
+
+2. Scheduled loops (Design §7; e7-cron, e7-cron-resume, e7-cron-durable/)
+---------------------------------------------------------------------------
+
+Recorded three times: the first take's fire detection looked for a `user` frame carrying the prompt and found none
+(there is none, below), and the second take's counted the probe's own prompts as fires (the probe keeps only inbound
+frames in memory); both takes were discarded and the third (11:12 to 11:17 UTC) is the fixture. All three recorded the
+same shapes.
+
+Q. The result texts (SPEC 22 §22.9, §22.10). As documented (e7-cron `e7_cron_setup`, `e7_cron_delete`,
+`e7_cron_durable`): CronCreate's text is
+  Scheduled recurring job 481abb0a (Every 2 minutes). Session-only (not written to disk, dies when Claude exits). Auto-expires after 7 days. Use CronDelete to cancel sooner.
+  Scheduled one-shot task 8d1a2582 (15 4 6 10 *). Session-only (not written to disk, dies when Claude exits). It will fire once then auto-delete.
+  Scheduled recurring job 598b1690 (Every Monday at 9:00 AM). Persisted to .claude/scheduled_tasks.json. Auto-expires after 7 days. Use CronDelete to cancel sooner.
+and its structured result {id, humanSchedule, recurring, durable} (durable false for session-only jobs; the one-shot's
+humanSchedule is the raw cron when no phrase fits). CronDelete: text `Cancelled job <id>.`, structured {id}. CronList:
+one line per job `<id> — <humanSchedule> (recurring|one-shot)[ [session-only]]: <prompt>` (no tag on a durable job) or
+`No scheduled jobs.`, structured {jobs: [{id, cron, humanSchedule, prompt, recurring?, durable?}]} (a one-shot has no `recurring` key, a
+durable job no `durable` key; a session-only one has `durable: false`). The input haiku sent: {cron, prompt, recurring}
+plus `durable` on the third take's last two calls.
+
+Q. Do session-only jobs fire under -p? Yes. The scheduler starts disabled (`[ScheduledTasks] scheduler start() —
+enabled=false, hasTasks=false`) and arms at the first CronCreate (`acquired scheduler lock (PID …)`, then `scheduled
+<id> for <time>`). Fires: the recurring job at 11:14:17.1 and 11:16:17.4 (scheduled for 11:14:16.9: the */2 match
+11:14:00 plus a 16.9 s delay that repeats every period; the discarded takes' jobs carried 45.7 s and 20.8 s, deterministic
+per id and under half the period, SPEC 22 §22.7), the one-shot at 11:15:00.2 (its minute; not on :00/:30, so no early
+fire). The engine bills a fire as `cc_workload=cron`.
+
+Q. The fire frame (Decision Log 9). There is no `user` frame for a fire on the wire, replayed or otherwise. A fire
+starts a turn while idle: session_state_changed running, `command_lifecycle started` for a command uuid the host never
+sent, system/init, the assistant's answer, a result whose `user_message_uuids` is absent, `command_lifecycle completed`
+for that uuid, idle (e7-cron seq 173 to 213, 217 to 249, 253 to 278). Live, a fire is therefore attributable to its
+job only by time, never by content. X1 today (conformance replay): `turn.started` origin `engine`, `turn.ended` origin
+null with empty `userMessageUuids`, and no `user.message` at all. The disk has what the wire lacks: a `user` record
+whose uuid is the lifecycle's command uuid, content the job's prompt as a string, isMeta true, promptSource "system",
+turnOrigin "scheduled", no `origin` field (`e7_cron_jsonl.fires[].record`), preceded by `queue-operation enqueue` with the
+prompt as content. For M6's fire rule: from disk, a `turnOrigin: 'scheduled'` user record whose content equals a job's
+prompt is that job's fire (the record carries no job id; two jobs with one prompt are indistinguishable); live, nothing
+names the job. The SPEC's `subkind: 'scheduled-trigger'` origin does not appear on 2.1.291.
+
+Q. The durable file (SPEC 22 §22.5). <cwd>/.claude/scheduled_tasks.json, written atomically at the CronCreate (e7-cron-
+durable/scheduled_tasks.json): {tasks: [{id, cron, prompt, createdAt, recurring: true, createdBySessionId, createdByPid,
+createdByProcStart, createdInProject}]}; no `permanent`, no `lastFiredAt` before a fire. Beside it, while a session holds
+the scheduler, `scheduled_tasks.lock` {sessionId, pid, procStart, acquiredAt}. Session-only jobs never appear in it.
+
+Q. Resurrection on resume. Yes. `--resume <id>` (e7-cron-resume) logs `resume: resurrected 1 session cron task(s)`,
+starts the scheduler enabled, and CronList lists the session-only `0 3 * * *` job under its original id beside the
+durable one. The resumed engine rewrites the durable file at start: the same id, cron, prompt and createdAt, with
+createdByPid and createdByProcStart changed to the new process (e7-cron-durable/scheduled_tasks.after-resume.json), so a
+watcher on the file sees a change on every resume that is not a job change.
+
+Verdicts: result texts yes; fires under -p yes; fire frame no user frame (live unattributable; disk `turnOrigin:
+"scheduled"`); durable file yes, with lock and owner fields the SPEC does not list; resurrection yes.
+
+
+3. Teams (Design §5; e7-team, optional, run)
+---------------------------------------------
+
+Q. Under CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 (MAWS's environment plus the variable), does a named agent become a
+teammate? No. `name` reaches the wire (the Agent tool_use input {description, prompt, name "scout", subagent_type
+"general-purpose", model "haiku"}, e7-team seq 63) and the sidecar meta (`agent-<id>.meta.json` {agentType, description,
+name "scout", toolUseId, spawnDepth 1, requestShape "background", requestNonInteractive true, model}), and the debug log
+shows `[TeammateModeSnapshot] Captured from config: in-process`, but the listing names it under Subagents with its name
+and a ref, never under Teammates (seq 98 running, seq 206 completed):
+  Subagents (1):
+    scout [15083b]  ·  general-purpose  ·  completed  ·  started 9s ago
+No <config>/teams directory was created; init.tools gained no team tool. The task_started frame carries no name. Verdict:
+Design §5's teammate grouping stays unverified live (Decision Log 7); a named subagent's listing row is `name [ref]`,
+which the listing parser must accept in the Subagents section too.
+
+
+Probe-suite changes
+-------------------
+
+- spikes/protocol-probe/fixtures.test.mjs: an E7 block of six behavioural checks over the new fixtures (the listing,
+  the idle frame and its turn, the relay reply, the mid-turn frame and the failure form, the disk records, the cron
+  results, fires and resume, the durable file, the team listing); the integrity test admits every new journal.
+- src/engine-host/conformance/fixtures.test.ts: the pass-3 list gains e7-cron, e7-cron-resume, e7-peer-a, e7-peer-b,
+  e7-team; no new frame subtype appeared (nothing allowlisted); all five replay clean.
