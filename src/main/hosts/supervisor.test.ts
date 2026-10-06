@@ -6,20 +6,28 @@ import { createHostRuntime, type HostEmit, type HostPort } from '@shared/host/ru
 // receives with its hello, so both ends of the host protocol are exercised together.
 const electron = vi.hoisted(() => {
   type Listener = (event: { data: unknown }) => void;
+  // Like a real MessagePort, a message posted before anyone listens on the other end waits for its first listener.
   class FakePort {
     peer: FakePort | null = null;
     listeners: Listener[] = [];
+    backlog: unknown[] = [];
     closed = false;
     on(_event: 'message', listener: Listener) {
       this.listeners.push(listener);
+      const waiting = this.backlog.splice(0);
+      if (waiting.length > 0) queueMicrotask(() => waiting.forEach((data) => this.deliver(data)));
       return this;
+    }
+    deliver(data: unknown) {
+      if (this.closed) return;
+      if (this.listeners.length === 0) this.backlog.push(data);
+      else this.listeners.forEach((l) => l({ data }));
     }
     postMessage(data: unknown) {
       const peer = this.peer;
       if (this.closed || !peer) return;
-      queueMicrotask(() => {
-        if (!peer.closed) peer.listeners.forEach((l) => l({ data: structuredClone(data) }));
-      });
+      const copy = structuredClone(data);
+      queueMicrotask(() => peer.deliver(copy));
     }
     start() {}
     close() {
@@ -340,6 +348,23 @@ describe('host supervisor', () => {
       expect(next.emit('session.brokerItems', BROKER)).toBe(true);
       expect(log.mock.calls.flat().join(' ')).toContain('resync failed');
     });
+  });
+
+  it('sends a request held while a utility host is restarting once its new port exists', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { engine } = await startReady(101);
+    let reply: Promise<unknown> | null = null;
+    supervisor.onState('engine-host', (s) => {
+      if (s.state === 'restarting' && !reply) reply = supervisor.dispatch('engine-host', 'engine.ping', undefined);
+    });
+    engine.exit(137);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(reply).not.toBeNull();
+    const next = latest('maws-engine-host');
+    serve(next, (on) => on('engine.ping', async () => PING(303)));
+    next.spawn(303);
+    await flush();
+    await expect(reply).resolves.toEqual({ ok: true, value: PING(303) });
   });
 
   it('fails a request made before start() at once, as before (requests are held only once the hosts are starting)', async () => {

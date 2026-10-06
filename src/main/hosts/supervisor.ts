@@ -39,7 +39,9 @@ export type HostResync = (dispatch: HostDispatch) => Promise<void>;
 
 export interface HostSupervisor {
   start(): Promise<void>; // idempotent: forks once; resolves when each host's first launch is ready or has given up
-  stop(): void; // terminal: kills both hosts, fails what is pending, never restarts; a later start() forks nothing
+  // terminal: kills a utility host (E10: closes a detached engine host's socket with no exit, so its supervisor keeps
+  // serving), fails what is pending and held, never restarts; a later start() starts nothing
+  stop(): void;
   dispatch: HostDispatch;
   snapshot(owner: HostOwner): HostState;
   onState(owner: HostOwner, listener: (state: HostState) => void): () => void;
@@ -162,6 +164,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     }
     host.child = child;
     host.port = port2;
+    sendHeld(host); // E10: what was asked while the host was restarting goes out on the new port
     forwardOutput(host.owner, child);
 
     child.on('spawn', () => {
@@ -234,6 +237,20 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     host.port!.postMessage(pending.request);
   }
 
+  function sendHeld(host: Host): void {
+    for (const pending of host.pending.values()) if (!pending.sent) send(host, pending);
+  }
+
+  // An unexpected exit, counted in the crash window: at the limit (three within 60 s) the host stays crashed for good;
+  // else the wait before the next start, by the restarts so far.
+  function recordExit(host: Host): { limit: boolean; delay: number } {
+    const now = Date.now();
+    host.exits = [...host.exits.filter((at) => now - at < CRASH_WINDOW_MS), now];
+    const limit = host.exits.length >= CRASH_LIMIT;
+    if (limit) console.error(`[hosts] ${host.owner} exited ${host.exits.length} times within ${CRASH_WINDOW_MS / 1000} s; not restarting`);
+    return { limit, delay: restartBackoffMs[Math.min(host.state.restarts, restartBackoffMs.length - 1)] };
+  }
+
   // The detached transport's reports, read into the state table of §Design 1 with the utility host's ladder.
   function detachedEvents(host: Host): DetachedEvents {
     const relaunch = (delay: number) => {
@@ -252,15 +269,12 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     // Between the exit and the next attempt the host is `restarting`, so requests are held for the successor.
     const unexpected = (exit: ExitInfo) => {
       console.error(`[hosts] ${host.owner} exited unexpectedly (${exit.signal ?? `code ${exit.code}`})`);
-      const now = Date.now();
-      host.exits = [...host.exits.filter((at) => now - at < CRASH_WINDOW_MS), now];
-      if (host.exits.length >= CRASH_LIMIT) {
-        console.error(`[hosts] ${host.owner} exited ${host.exits.length} times within ${CRASH_WINDOW_MS / 1000} s; not restarting`);
+      const { limit, delay } = recordExit(host);
+      if (limit) {
         transition(host, { state: 'crashed', pid: host.state.pid, restarts: host.state.restarts });
         host.settleFirstLaunch();
         return;
       }
-      const delay = restartBackoffMs[Math.min(host.state.restarts, restartBackoffMs.length - 1)];
       transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts + 1 });
       relaunch(delay);
     };
@@ -276,7 +290,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
         host.port = link;
         link.onMessage((data) => receive(host, data));
         transition(host, { state: 'ready', pid: welcome.pid, restarts: host.state.restarts });
-        for (const pending of host.pending.values()) if (!pending.sent) send(host, pending);
+        sendHeld(host);
         host.settleFirstLaunch();
         sayReady(host, link);
       },
@@ -311,15 +325,12 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     for (const ptyId of host.ptys) emit('pty.exit', { ptyId: ptyId as PtyId, exitCode: null, signal: null });
     host.ptys.clear();
 
-    const now = Date.now();
-    host.exits = [...host.exits.filter((at) => now - at < CRASH_WINDOW_MS), now];
+    const { limit, delay } = recordExit(host);
     transition(host, { state: 'crashed', pid: host.state.pid, restarts: host.state.restarts });
-    if (host.exits.length >= CRASH_LIMIT) {
-      console.error(`[hosts] ${host.owner} exited ${host.exits.length} times within ${CRASH_WINDOW_MS / 1000} s; not restarting`);
+    if (limit) {
       host.settleFirstLaunch();
       return;
     }
-    const delay = restartBackoffMs[Math.min(host.state.restarts, restartBackoffMs.length - 1)];
     host.restartTimer = setTimeout(() => {
       host.restartTimer = null;
       transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts + 1 });
