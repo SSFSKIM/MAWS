@@ -198,6 +198,14 @@ describe('the list', () => {
     expect(rows().some((r) => r.id === OTHER.id)).toBe(false);
   });
 
+  it('an HTML record of another session in the All scope frames that session’s URL', async () => {
+    const page = file(11, '/work/app-b/page.html', { appSessionId: B });
+    records = [...RECORDS, page];
+    await mount({ scope: 'all' });
+    await openRecord(11);
+    expect(frame()!.getAttribute('src')).toBe(deliverableUrl(B, page.id, 1));
+  });
+
   it('a row of another session in the All scope opens with that session’s id', async () => {
     const { handle } = await mount({ scope: 'all' });
     await openRecord(9);
@@ -253,6 +261,17 @@ describe('open', () => {
     expect(viewer()).toBeNull();
     expect(screen.getByRole('status').textContent).toBe(`No deliverable ${gone} in this session`);
     expect(rows().length).toBeGreaterThan(0);
+  });
+
+  it('a pinned tab keeps a record of the session it follows to (show_pane for another session, then the switch)', async () => {
+    const handle = create({ target: OTHER.id, appSessionId: B });
+    const shown = render(<Mounted state={handle} />);
+    await settle();
+    expect(viewer()!.dataset.deliverableId).toBe(OTHER.id);
+    shown.rerender(<Mounted state={handle} appSessionId={B} />);
+    await settle();
+    expect(viewer()!.dataset.deliverableId).toBe(OTHER.id);
+    expect(handle.snapshot()).toMatchObject({ appSessionId: B, view: { kind: 'record', appSessionId: B, id: OTHER.id } });
   });
 
   it('a pinned tab following another session resets to that session’s list', async () => {
@@ -404,6 +423,24 @@ describe('the console chip and Reload', () => {
     expect(frame()!.getAttribute('src')).toBe(deliverableUrl(A, ART.id, 2));
   });
 
+  it('counts once per version however often the frame mounts again (v2 → v1 → v2, Back and reopen)', async () => {
+    const { handle } = await mount({ target: ART.id });
+    const select = () => screen.getByRole('combobox', { name: 'Version' });
+    log(ART.id, 2); // v2's first mount logs its error
+    fireEvent.change(select(), { target: { value: '1' } });
+    await settle();
+    log(ART.id, 1);
+    fireEvent.change(select(), { target: { value: '2' } });
+    await settle();
+    log(ART.id, 2); // the remounted v2 frame logs the same error again
+    expect(document.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+    act(() => handle.back());
+    act(() => deliverablesTool.open!(handle, { target: ART.id }));
+    await settle();
+    log(ART.id, 2);
+    expect(document.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+  });
+
   it('shows on a delivered HTML file too', async () => {
     await mount({ target: PAGE.id });
     log(PAGE.id, 1);
@@ -419,6 +456,14 @@ describe('the summary section', () => {
     expect(document.querySelector('[data-summary="deliverables"]')!.textContent).toContain('9 delivered · Dashboard');
     fireEvent.click(button('Open')!);
     expect(opened).toEqual([undefined]);
+  });
+
+  it('says the read failed rather than that nothing was delivered', async () => {
+    main = installFakeMain((name) => (name === 'deliverables.list' ? fail('EACCES') : fail(`unexpected ${name}`)));
+    render(<DeliverablesSummary appSessionId={A} open={() => {}} />);
+    await settle();
+    expect(screen.queryByText('Nothing delivered yet')).toBeNull();
+    expect(screen.getByText("Couldn't read this session's deliverables")).toBeTruthy();
   });
 
   it('says nothing was delivered yet', async () => {
@@ -439,6 +484,17 @@ describe('the deliverable main tab', () => {
     expect(button('Back')).toBeNull();
     expect(button('Open in tab')).toBeNull();
     expect(button('Reveal in Finder')).not.toBeNull();
+  });
+
+  it('offers Retry when the record could not be read, which reads it again', async () => {
+    main = installFakeMain((name) => (name === 'deliverables.get' ? fail('EIO') : fail(`unexpected ${name}`)));
+    render(<DeliverableTab tab={tab(ART.id)} />);
+    await settle();
+    expect(screen.getByRole('alert').textContent).toBe("Couldn't read this deliverable: EIO");
+    installMain();
+    fireEvent.click(button('Retry')!);
+    await settle();
+    expect(viewer()!.dataset.deliverableId).toBe(ART.id);
   });
 
   it('restores to the session’s list with the notice when the record is gone; a row opens its own tab', async () => {

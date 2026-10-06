@@ -259,6 +259,7 @@ describe('X9 artifact tools (E2)', () => {
     expect(TOOL_ERRORS.captureTimeout).toBe('artifact_screenshot: MAWS did not answer within 45 s');
     expect(TOOL_ERRORS.notRecorded('artifact_update', '/r/x.html', 'ENOSPC')).toBe('artifact_update: /r/x.html was not recorded: ENOSPC');
     expect(TOOL_ERRORS.deliverableNotFound('d1')).toBe('show_pane: no deliverable "d1" in this session');
+    expect(TOOL_ERRORS.deliverableUnreadable('d1', 'EIO')).toBe('show_pane: could not read deliverable "d1": EIO');
     expect(TOOL_ERRORS.unknownTool('echo')).toBe('unknown tool "echo"; the maws server has send_file, ask, show_pane, artifact_create, artifact_update, artifact_list, artifact_screenshot');
   });
 });

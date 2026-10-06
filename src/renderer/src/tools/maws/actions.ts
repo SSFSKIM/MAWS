@@ -6,7 +6,7 @@
 // sheet, opening does nothing.
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { AppSessionId } from '@shared/graph/ids';
-import { ASK_SHEET_TOOL_ID, PANES } from '@shared/maws/panes';
+import { ASK_SHEET_TOOL_ID, DELIVERABLES_TOOL_ID } from '@shared/maws/panes';
 import { ipc } from '../../ipc/client';
 import { panelHost, usePanelHost } from '../../panel/host';
 import type { AskRowData, TranscriptActions } from '../../transcript';
@@ -46,7 +46,6 @@ export const mawsTranscriptActions = mawsTranscriptActionsOver(ipc);
 // when it names one, else the latest. A record that is gone shows the tool's list with the notice (the viewer reads it).
 // Until a build registers the tool, opening does nothing.
 export function openDeliverable(appSessionId: AppSessionId, id: string, version?: number): void {
-  const toolId = (PANES.deliverable as { toolId: string }).toolId;
-  if (!usePanelHost.getState().tools.has(toolId)) return;
-  panelHost.addTool(toolId, { appSessionId, params: { target: id, appSessionId, ...(version !== undefined && { version }) }, activate: true });
+  if (!usePanelHost.getState().tools.has(DELIVERABLES_TOOL_ID)) return;
+  panelHost.addTool(DELIVERABLES_TOOL_ID, { appSessionId, params: { target: id, appSessionId, ...(version !== undefined && { version }) }, activate: true });
 }

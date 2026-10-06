@@ -8,12 +8,15 @@ export const PANE_NAMES = ['diff', 'file', 'terminal', 'tasks', 'deliverable', '
 export const PaneSchema = z.enum(PANE_NAMES);
 export type Pane = z.infer<typeof PaneSchema>;
 
+// E2: the Deliverables tool's X5 id (the `deliverable` pane's tool).
+export const DELIVERABLES_TOOL_ID = 'deliverables';
+
 export const PANES: Record<Pane, { toolId: string } | { mainTab: 'file' }> = {
   diff: { toolId: 'review' },
   file: { mainTab: 'file' },
   terminal: { toolId: 'terminal' },
   tasks: { toolId: 'tasks' },
-  deliverable: { toolId: 'deliverables' },
+  deliverable: { toolId: DELIVERABLES_TOOL_ID },
   browser: { toolId: 'browser' },
   'source-control': { toolId: 'source-control' },
 };

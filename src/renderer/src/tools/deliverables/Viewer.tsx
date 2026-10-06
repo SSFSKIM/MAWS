@@ -67,7 +67,7 @@ export function DeliverableViewer({ appSessionId, id, version, mode, onBack, onV
     if (gone) onGone(id);
   }, [gone, id, onGone]);
 
-  if (found?.status === 'error') return <ReadError message={found.error} onBack={onBack} />;
+  if (found?.status === 'error') return <ReadError message={found.error} onBack={onBack} onRetry={() => setReloads((n) => n + 1)} />;
   if (found?.status !== 'ready' || found.record === null) return <Waiting onBack={onBack} />;
   const record = found.record;
   const latest = latestVersion(record);
@@ -100,13 +100,19 @@ function Waiting({ onBack }: { onBack?: () => void }) {
   );
 }
 
-function ReadError({ message, onBack }: { message: string; onBack?: () => void }) {
+// A refused read, with Retry (the tab has no Back to leave by), which reads the record again.
+function ReadError({ message, onBack, onRetry }: { message: string; onBack?: () => void; onRetry(): void }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {onBack && <BackButton onBack={onBack} />}
-      <p role="alert" className="p-4 text-ui text-fg">
-        {DELIVERABLES_COPY.couldNotRead(message)}
-      </p>
+      <div className="flex flex-col items-start gap-2 p-4">
+        <p role="alert" className="text-ui text-fg">
+          {DELIVERABLES_COPY.couldNotRead(message)}
+        </p>
+        <button type="button" onClick={onRetry} className={action}>
+          {DELIVERABLES_COPY.retry}
+        </button>
+      </div>
     </div>
   );
 }
@@ -167,7 +173,7 @@ function Body({ record, shown, path, body, title }: { record: DeliverableRecord;
   const url = deliverableUrl(record.appSessionId, record.id, shown);
   switch (body) {
     case 'html':
-      return <HtmlFrame key={url} url={url} title={DELIVERABLES_COPY.frameTitle(title)} />;
+      return <HtmlFrame key={url} url={url} title={DELIVERABLES_COPY.frameTitle(title)} appSessionId={record.appSessionId} deliverableId={record.id} version={shown} />;
     case 'pdf':
       return <PdfFrame key={url} url={url} title={DELIVERABLES_COPY.frameTitle(title)} />;
     case 'video':

@@ -6,15 +6,13 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DeliverableRecord } from '@shared/maws/deliverable';
-import { PANES } from '@shared/maws/panes';
+import { DELIVERABLES_TOOL_ID } from '@shared/maws/panes';
 import type { PanelTool, PanelToolContext } from '../../panel/tool';
 import { DELIVERABLES_COPY } from './copy';
 import { DeliverablesSummary } from './DeliverablesSummary';
 import { DeliverablesIcon } from './icons';
 import { DeliverablesList, type DeliverablesScope } from './List';
 import { DeliverableViewer } from './Viewer';
-
-export const DELIVERABLES_TOOL_ID = (PANES.deliverable as { toolId: string }).toolId;
 
 // X5 params (ledger §5): a record by its id (`target`), at a version (else the latest), of a session other than the
 // shown one (`appSessionId`, an All-scope row's or a transcript row's), and the list's scope.
@@ -87,10 +85,14 @@ export class DeliverablesHandle {
     if (scrollTop !== this.state.scrollTop) this.update({ scrollTop });
   };
 
-  // A pinned tab's session changed under it: that session's list. No session shown changes nothing.
+  // A pinned tab's session changed under it: that session's list, unless the tab already shows a record of that
+  // session (a `show_pane` or a row's Open for it, which switches the main area after opening). No session shown
+  // changes nothing.
   follow = (appSessionId: AppSessionId | null) => {
     if (appSessionId === null || appSessionId === this.state.appSessionId) return;
-    this.update({ appSessionId, view: LIST, scrollTop: 0, notice: null });
+    const { view } = this.state;
+    const keep = view.kind === 'record' && view.appSessionId === appSessionId;
+    this.update({ appSessionId, view: keep ? view : LIST, scrollTop: 0, notice: null });
   };
 }
 

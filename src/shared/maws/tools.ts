@@ -280,6 +280,7 @@ export const TOOL_ERRORS = {
   captureTimeout: `artifact_screenshot: MAWS did not answer within ${CAPTURE_ANSWER_MS / 1000} s`,
   notRecorded: (tool: ArtifactToolName, path: string, message: string) => `${tool}: ${path} was not recorded: ${message}`,
   deliverableNotFound: (id: string) => `show_pane: no deliverable "${id}" in this session`,
+  deliverableUnreadable: (id: string, message: string) => `show_pane: could not read deliverable "${id}": ${message}`, // E2: main refused the read
   // E2 end
 } as const;
 

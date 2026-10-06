@@ -74,13 +74,13 @@ export function connectPaneShows(client: MawsBridge = ipc): () => void {
 
 // E2 start: the `deliverable` pane. The target is the record's id (what `send_file` and `artifact_create` answer as the
 // deliverable id); an artifact's own short id (`dash`) is also found, through the session's list, since the model holds
-// both and either names one record.
-const readRefused = (target: string, message: string) => `show_pane: could not read deliverable "${target}": ${message}`;
-
+// both and either names one record (an artifact id may itself be shaped like a uuid, so a record id read as absent
+// falls through to the search).
 async function deliverableOf(client: MawsBridge, appSessionId: AppSessionId, target: string): Promise<{ id: string | null } | { error: string }> {
   if (z.uuid().safeParse(target).success) {
     const found = await client.invoke('deliverables.get', { appSessionId, id: target });
-    return found.ok ? { id: found.value.record?.id ?? null } : { error: found.error.message };
+    if (!found.ok) return { error: found.error.message };
+    if (found.value.record) return { id: found.value.record.id };
   }
   const listed = await client.invoke('deliverables.list', { appSessionId });
   if (!listed.ok) return { error: listed.error.message };
@@ -94,8 +94,8 @@ async function showDeliverable(tool: PanelTool<unknown, unknown>, appSessionId: 
   };
   if (target === null) return open({});
   const found = await deliverableOf(client, appSessionId, target);
-  if ('error' in found) return { ok: false, error: readRefused(target, found.error) };
+  if ('error' in found) return { ok: false, error: TOOL_ERRORS.deliverableUnreadable(target, found.error) };
   if (found.id === null) return { ok: false, error: TOOL_ERRORS.deliverableNotFound(target) };
-  return open({ target: found.id });
+  return open({ target: found.id, appSessionId }); // the session named, so a pinned tab showing another one follows it
 }
 // E2 end
