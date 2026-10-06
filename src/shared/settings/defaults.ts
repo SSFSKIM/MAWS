@@ -1,5 +1,5 @@
 // The values of MAWS's own settings file (C11 execution document, Interfaces "Settings, version 3"): the current
-// version's defaults (W13: version 8), the one migration from every earlier version, and the one patch merge
+// version's defaults (W13: version 8; E9: version 9), the one migration from every earlier version, and the one patch merge
 // `settings.set` applies. Pure; main's store (src/main/settings/store.ts) reads, migrates, merges and writes with these,
 // and nothing else does.
 import * as z from 'zod';
@@ -7,7 +7,7 @@ import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
 import { ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
 export const SETTINGS_DEFAULTS_V9: Settings = {
-  version: 8, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8
+  version: 9, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
   notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
@@ -16,6 +16,7 @@ export const SETTINGS_DEFAULTS_V9: Settings = {
   usage: { nearLimitPercent: 90 },
   appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
   permissions: { autoFallback: 'acceptEdits' }, // W3: the owner's ruling of 2026-10-01 (charter D-18)
+  voice: { locale: null }, // E9: the system locale
 };
 
 // The earlier files, as their versions wrote them: C1's and C5's.
@@ -27,8 +28,13 @@ const SettingsV2Schema = z.strictObject({
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
 
-// W13 start: W7's version 7, as it wrote it: version 8's sections with the engine's pin
-const SettingsV7Schema = SettingsSchema.extend({ version: z.literal(7), engine: SettingsSchema.shape.engine.extend({ pinnedVersion: z.string() }) });
+// E9 start: W13's version 8, as it wrote it: version 9's sections less the voice section
+const SettingsV8Schema = SettingsSchema.omit({ voice: true }).extend({ version: z.literal(8) });
+type SettingsV8 = z.infer<typeof SettingsV8Schema>;
+// E9 end
+
+// W13 start: W7's version 7, as it wrote it: version 8's sections with the engine's pin (E9: re-based on version 8)
+const SettingsV7Schema = SettingsV8Schema.extend({ version: z.literal(7), engine: SettingsV8Schema.shape.engine.extend({ pinnedVersion: z.string() }) });
 type SettingsV7 = z.infer<typeof SettingsV7Schema>;
 // W13 end
 
@@ -59,11 +65,13 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 
 const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V9);
 
-// W13: v7 → v8, the pin dropped (charter D-1 as amended 2026-10-01): a chosen binaryPath stays chosen
+// E9: v8 → v9, the voice section with the system locale
+const fromV8 = (v8: SettingsV8): Settings => ({ ...v8, version: 9, voice: defaults().voice });
+// W13: v7 → v8, the pin dropped (charter D-1 as amended 2026-10-01): a chosen binaryPath stays chosen; E9: then v8 → v9
 const fromV7 = (v7: SettingsV7): Settings => {
   const { pinnedVersion: _pin, ...engine } = v7.engine;
   void _pin;
-  return { ...v7, version: 8, engine };
+  return fromV8({ ...v7, version: 8, engine });
 };
 // W7: v6 → v7, the budget's switch on (the architect's default, charter §4.4 as amended 2026-10-01); W13: then v7 → v8
 const fromV6 = (v6: SettingsV6): Settings => fromV7({ ...v6, version: 7, engine: { ...v6.engine, memoryBudget: defaults().engine.memoryBudget } });
@@ -74,7 +82,7 @@ const fromV4 = (v4: SettingsV4): Settings => fromV5({ ...v4, version: 5, appeara
 
 // v1 → v2 (C5's step: no keymap overrides, the notification defaults) → v3 (the sections C11 adds, with their
 // defaults) → v4 (C12's budget) → v5 (W2's transcript width) → v6 (W3's auto fallback) → v7 (W7's budget switch) → v8
-// (W13: the pin dropped). A version 8 object is validated and returned as it is;
+// (W13: the pin dropped) → v9 (E9: the voice section). A version 9 object is validated and returned as it is;
 // anything else (another version, an invalid file of a known version) throws the schema's error, which the store turns
 // into the defaults with a warning. At any version, overrides of a retired action are dropped first (W10).
 export function migrateSettings(input: unknown): Settings {
@@ -105,6 +113,8 @@ export function migrateSettings(input: unknown): Settings {
       return fromV6(SettingsV6Schema.parse(raw)); // W7
     case 7:
       return fromV7(SettingsV7Schema.parse(raw)); // W13
+    case 8:
+      return fromV8(SettingsV8Schema.parse(raw)); // E9
     default:
       return SettingsSchema.parse(raw);
   }
@@ -123,7 +133,7 @@ function withoutRetiredActions(raw: unknown): unknown {
 // field, and `notifications.kinds` a second level, key by key, so a kinds patch never replaces the sibling kinds. The
 // theme and the keymap are values of their own and are replaced whole. A key present as `undefined` changes nothing.
 export function applySettingsPatch(state: Settings, patch: SettingsPatch): Settings {
-  const { notifications, engine, gateway, usage, appearance, permissions, ...values } = patch;
+  const { notifications, engine, gateway, usage, appearance, permissions, voice, ...values } = patch;
   const next: Settings = { ...state, ...defined(values) };
   if (notifications) {
     const { kinds, ...fields } = notifications;
@@ -134,6 +144,7 @@ export function applySettingsPatch(state: Settings, patch: SettingsPatch): Setti
   if (usage) next.usage = { ...state.usage, ...defined(usage) };
   if (appearance) next.appearance = { ...state.appearance, ...defined(appearance) };
   if (permissions) next.permissions = { ...state.permissions, ...defined(permissions) }; // W3
+  if (voice) next.voice = { ...state.voice, ...defined(voice) }; // E9
   return next;
 }
 

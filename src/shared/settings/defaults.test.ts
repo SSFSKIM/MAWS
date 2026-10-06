@@ -17,16 +17,21 @@ const unpinned = <E extends { pinnedVersion?: string }>(engine: E): Omit<E, 'pin
   void _pin;
   return rest;
 };
+// E9: the sections version 8 wrote (version 9 adds the voice section); `version` still says 9, so an object built from
+// them names its own
+const { voice: _voice, ...SECTIONS_V8 } = SETTINGS_DEFAULTS_V9;
+void _voice;
 // W3: the sections every version before 6 wrote (version 6 adds the permissions)
-const { permissions: _permissions, ...SECTIONS_BEFORE_V6 } = SETTINGS_DEFAULTS_V9;
+const { permissions: _permissions, ...SECTIONS_BEFORE_V6 } = SECTIONS_V8;
 void _permissions;
 const BEFORE_V6 = { ...SECTIONS_BEFORE_V6, engine: ENGINE_BEFORE_V7 };
 const ON = { memoryBudget: { enabled: true } }; // W7: what a migrated engine section gains
+const VOICE = { voice: { locale: null } }; // E9: what every migrated object gains
 
 describe('settings migrate v1 and v2 to v3', () => {
   it('holds the defaults the document states, and they validate', () => {
     expect(SETTINGS_DEFAULTS_V9).toEqual({
-      version: 8, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8
+      version: 9, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9
       theme: 'light',
       keymap: {},
       notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
@@ -35,6 +40,7 @@ describe('settings migrate v1 and v2 to v3', () => {
       usage: { nearLimitPercent: 90 },
       appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
       permissions: { autoFallback: 'acceptEdits' }, // W3
+      voice: { locale: null }, // E9: the system locale
     });
     expect(SettingsSchema.parse(SETTINGS_DEFAULTS_V9)).toEqual(SETTINGS_DEFAULTS_V9);
   });
@@ -65,44 +71,46 @@ describe('settings migrate v1 and v2 to v3', () => {
 
   // C12 start: version 4 (the memory budget); a v3 object gains the budget's defaults. W2: the identity moves to v5, and
   // a v3 or v4 object gains the transcript's default width. W3: the identity moves to v6. W7: to v7, and every earlier
-  // object gains the budget's switch, on. W13: the identity moves to v8, and every earlier object loses its pin.
-  it('is the identity over a v8 object', () => {
-    const v8: Settings = {
+  // object gains the budget's switch, on. W13: the identity moves to v8, and every earlier object loses its pin. E9: the
+  // identity moves to v9, and every earlier object gains the voice section.
+  it('is the identity over a v9 object', () => {
+    const v9: Settings = {
       ...SETTINGS_DEFAULTS_V9,
       theme: 'dark',
       gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false },
       appearance: { monoFont: 'JetBrainsMono Nerd Font', transcriptWidth: 1280 },
       engine: { ...SETTINGS_DEFAULTS_V9.engine, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'], memoryBudget: { enabled: false } },
       permissions: { autoFallback: 'default' },
+      voice: { locale: 'en-US' },
     };
-    expect(migrateSettings(structuredClone(v8))).toEqual(v8);
+    expect(migrateSettings(structuredClone(v9))).toEqual(v9);
   });
 
-  it('migrates a v3 object to v8 keeping every v3 value, with the budget’s defaults, the default width, the default fallback and the budget on', () => {
+  it('migrates a v3 object to v9 keeping every v3 value, with the budget’s defaults, the default width, the default fallback and the budget on', () => {
     const { memoryBudgetMiB: _m, statefulMcpServers: _s, ...engineV3 } = { ...ENGINE_BEFORE_V7, binaryPath: '/opt/claude', subagentModel: 'haiku' };
     void _m;
     void _s;
     const v3 = { ...BEFORE_V6, version: 3, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' }, usage: { nearLimitPercent: 80 }, engine: engineV3, appearance: { monoFont: 'Hack' } };
     const migrated = migrateSettings(structuredClone(v3));
-    expect(migrated).toEqual({ ...v3, version: 8, engine: { ...unpinned(engineV3), memoryBudgetMiB: null, statefulMcpServers: [], ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(migrated).toEqual({ ...v3, version: 9, ...VOICE, engine: { ...unpinned(engineV3), memoryBudgetMiB: null, statefulMcpServers: [], ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } });
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
   // C12 end
 
   // W2 start
-  it('migrates a v4 object to v8 keeping every v4 value, with the default width, the default fallback and the budget on', () => {
+  it('migrates a v4 object to v9 keeping every v4 value, with the default width, the default fallback and the budget on', () => {
     const v4 = { ...BEFORE_V6, version: 4, theme: 'dark', engine: { ...ENGINE_BEFORE_V7, memoryBudgetMiB: 6144 }, appearance: { monoFont: 'Hack' } };
     const migrated = migrateSettings(structuredClone(v4));
-    expect(migrated).toEqual({ ...v4, version: 8, engine: { ...unpinned(v4.engine), ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(migrated).toEqual({ ...v4, version: 9, ...VOICE, engine: { ...unpinned(v4.engine), ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } });
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
   // W2 end
 
   // W3 start
-  it('migrates a v5 object to v8 keeping every v5 value, with acceptEdits as the auto fallback and the budget on', () => {
+  it('migrates a v5 object to v9 keeping every v5 value, with acceptEdits as the auto fallback and the budget on', () => {
     const v5 = { ...BEFORE_V6, version: 5, theme: 'dark', appearance: { monoFont: 'Hack', transcriptWidth: 960 } };
     const migrated = migrateSettings(structuredClone(v5));
-    expect(migrated).toEqual({ ...v5, version: 8, engine: { ...unpinned(v5.engine), ...ON }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(migrated).toEqual({ ...v5, version: 9, ...VOICE, engine: { ...unpinned(v5.engine), ...ON }, permissions: { autoFallback: 'acceptEdits' } });
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
@@ -114,10 +122,10 @@ describe('settings migrate v1 and v2 to v3', () => {
   // W3 end
 
   // W7 start
-  it('migrates a v6 object to v8 keeping every v6 value, its own budget and stateful servers included, with the budget on', () => {
+  it('migrates a v6 object to v9 keeping every v6 value, its own budget and stateful servers included, with the budget on', () => {
     const v6 = { ...SECTIONS_BEFORE_V6, version: 6, theme: 'dark', engine: { ...ENGINE_BEFORE_V7, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'] }, permissions: { autoFallback: 'plan' } };
     const migrated = migrateSettings(structuredClone(v6));
-    expect(migrated).toEqual({ ...v6, version: 8, engine: { ...unpinned(v6.engine), ...ON } });
+    expect(migrated).toEqual({ ...v6, version: 9, ...VOICE, engine: { ...unpinned(v6.engine), ...ON } });
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
@@ -131,11 +139,11 @@ describe('settings migrate v1 and v2 to v3', () => {
   // W7 end
 
   // W13 start: v7 → v8 drops the pin (charter D-1 as amended 2026-10-01); a chosen binary stays chosen, any pin is dropped
-  it('migrates a v7 object to v8 dropping its pin and keeping every other value, a chosen binary path included', () => {
+  it('migrates a v7 object to v9 dropping its pin and keeping every other value, a chosen binary path included', () => {
     for (const pinnedVersion of ['2.1.283', '2.1.290']) {
-      const v7 = { ...SETTINGS_DEFAULTS_V9, version: 7, theme: 'dark', engine: { ...SETTINGS_DEFAULTS_V9.engine, binaryPath: '/opt/claude', pinnedVersion, memoryBudget: { enabled: false } } };
+      const v7 = { ...SECTIONS_V8, version: 7, theme: 'dark', engine: { ...SECTIONS_V8.engine, binaryPath: '/opt/claude', pinnedVersion, memoryBudget: { enabled: false } } };
       const migrated = migrateSettings(structuredClone(v7));
-      expect(migrated).toEqual({ ...v7, version: 8, engine: unpinned(v7.engine) });
+      expect(migrated).toEqual({ ...v7, version: 9, ...VOICE, engine: unpinned(v7.engine) });
       expect(SettingsSchema.safeParse(migrated).success).toBe(true);
     }
   });
@@ -148,14 +156,65 @@ describe('settings migrate v1 and v2 to v3', () => {
   });
 });
 
+// E9 start: version 9, the recognizer's locale (E9 execution document, Interfaces "Settings version 9")
+describe('settings v8 → v9 adds voice and keeps every earlier version', () => {
+  it('migrates a v8 object to v9 with the system locale and every other value unchanged', () => {
+    const v8 = { ...SECTIONS_V8, version: 8, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' }, usage: { nearLimitPercent: 80 }, permissions: { autoFallback: 'plan' } };
+    const migrated = migrateSettings(structuredClone(v8));
+    expect(migrated).toEqual({ ...v8, version: 9, voice: { locale: null } });
+    expect(SettingsSchema.safeParse(migrated).success).toBe(true);
+  });
+
+  it('ends every earlier version at 9 with the voice section', () => {
+    const earlier: unknown[] = [
+      fixture('v1.json'),
+      fixture('v2.json'),
+      { ...BEFORE_V6, version: 3, engine: { ...ENGINE_BEFORE_V7, memoryBudgetMiB: undefined, statefulMcpServers: undefined }, appearance: { monoFont: null } }, // the JSON round trip drops the two
+      { ...BEFORE_V6, version: 4, appearance: { monoFont: null } },
+      { ...BEFORE_V6, version: 5 },
+      { ...SECTIONS_V8, version: 6, engine: ENGINE_BEFORE_V7 },
+      { ...SECTIONS_V8, version: 7, engine: { ...SECTIONS_V8.engine, ...PIN } },
+      { ...SECTIONS_V8, version: 8 },
+    ];
+    for (const raw of earlier) {
+      const migrated = migrateSettings(JSON.parse(JSON.stringify(raw)));
+      expect(migrated.version).toBe(9);
+      expect(migrated.voice).toEqual({ locale: null });
+    }
+  });
+
+  it('validates a v9 object as it is and refuses a locale outside its bounds', () => {
+    expect(migrateSettings({ ...SETTINGS_DEFAULTS_V9, voice: { locale: 'ko-KR' } }).voice).toEqual({ locale: 'ko-KR' });
+    const valid = (voice: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V9, voice }).success;
+    expect(valid({ locale: null })).toBe(true);
+    expect(valid({ locale: 'en' })).toBe(true);
+    expect(valid({ locale: 'e' })).toBe(false);
+    expect(valid({ locale: 'x'.repeat(33) })).toBe(false);
+    expect(valid({})).toBe(false);
+    expect(valid({ locale: null, onDevice: true })).toBe(false);
+  });
+
+  it('patches the locale alone and leaves every other section as it was', () => {
+    const patch = SettingsPatchSchema.parse({ voice: { locale: 'en-US' } });
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V9, patch)).toEqual({ ...SETTINGS_DEFAULTS_V9, voice: { locale: 'en-US' } });
+    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V9, voice: { locale: 'en-US' } }, { voice: { locale: null } }).voice).toEqual({ locale: null });
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V9, { voice: {} })).toEqual(SETTINGS_DEFAULTS_V9);
+    expect(SettingsPatchSchema.safeParse({ voice: { locale: 'e' } }).success).toBe(false);
+    expect(SettingsPatchSchema.safeParse({ voice: { language: 'en-US' } }).success).toBe(false);
+  });
+});
+// E9 end
+
 describe('settings v3 validates and refuses unknown versions', () => {
   it.each([
-    ['a v9 object', { ...SETTINGS_DEFAULTS_V9, version: 9 }], // W2: v5 is the current version; W3: v6; W7: v7; W13: v8
-    ['a v7 file without its pin', { ...SETTINGS_DEFAULTS_V9, version: 7 }], // W13: every v7 file wrote one
-    ['a v8 file with a pin', { ...SETTINGS_DEFAULTS_V9, engine: { ...SETTINGS_DEFAULTS_V9.engine, ...PIN } }], // W13: v8 never has it
-    ['a v6 file with a v7 field', { ...SETTINGS_DEFAULTS_V9, version: 6, engine: { ...SETTINGS_DEFAULTS_V9.engine, ...PIN } }], // W7: v6 never had the budget's switch
-    ['a v3 file with a v4 field', { ...SETTINGS_DEFAULTS_V9, version: 3, engine: ENGINE_BEFORE_V7, appearance: { monoFont: null } }], // C12: v3 never had the budget's fields
-    ['a v4 file with a v5 field', { ...SETTINGS_DEFAULTS_V9, version: 4, engine: ENGINE_BEFORE_V7 }], // W2: v4 never had the transcript's width
+    ['a v10 object', { ...SETTINGS_DEFAULTS_V9, version: 10 }], // W2: v5 is the current version; W3: v6; W7: v7; W13: v8; E9: v9
+    ['a v9 file without its voice section', { ...SECTIONS_V8, version: 9 }], // E9: every v9 file writes one
+    ['a v8 file with a voice section', { ...SETTINGS_DEFAULTS_V9, version: 8 }], // E9: v8 never had it
+    ['a v7 file without its pin', { ...SECTIONS_V8, version: 7 }], // W13: every v7 file wrote one
+    ['a v8 file with a pin', { ...SECTIONS_V8, version: 8, engine: { ...SECTIONS_V8.engine, ...PIN } }], // W13: v8 never has it
+    ['a v6 file with a v7 field', { ...SECTIONS_V8, version: 6, engine: { ...SECTIONS_V8.engine, ...PIN } }], // W7: v6 never had the budget's switch
+    ['a v3 file with a v4 field', { ...SECTIONS_V8, version: 3, engine: ENGINE_BEFORE_V7, appearance: { monoFont: null } }], // C12: v3 never had the budget's fields
+    ['a v4 file with a v5 field', { ...SECTIONS_V8, version: 4, engine: ENGINE_BEFORE_V7 }], // W2: v4 never had the transcript's width
     ['a v0 object', { version: 0, theme: 'light' }],
     ['no version', { theme: 'light' }],
     ['not an object', 'settings'],
