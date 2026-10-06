@@ -573,6 +573,10 @@ The executor replaces these lines with what actually ran and what it printed.
   Rationale: the executor's report (task 6); local to the host, additive on the wire.
   Date/Author: 2026-10-06, the E10 controller.
 
+- Decision: main arms exit-when-idle on an incompatible supervisor by itself. When a connection is refused for its wire or protocol with `liveSessions > 0`, main sends `exit {when: 'idle'}` on that refused connection once per supervisor process (remembered by pid and `procStart`, as Task 1.3 does) and enters `waiting`; the banner's **Wait** acknowledges and dismisses, and **Restart now** stays `host.restart {stopSessions: true}`. No new X2 name is needed.
+  Rationale: Task 2.3a's review found that the seven `host.*` names give the renderer no way to ask for §Design 6's Wait; and while `waiting` the app has no host at all, so leaving the old supervisor un-armed until the owner clicks would keep the app unable to launch for as long as the banner is ignored. Arming at once is what Wait would do, and the release of idle rows under an armed exit-when-idle (§Design 1) ends the wait by itself.
+  Date/Author: 2026-10-06, the E10 controller.
+
 Residue decisions (the design above carries each with its reason; the architect folded them as A-29, which accepts every one and rules the three that were marked ★ (10, 11, 21) and the `[parent-impact]` items, overturnable by the owner):
 
 1. The supervisor is the engine-host bundle itself, run by the Electron binary as Node (`process.execPath`, `ELECTRON_RUN_AS_NODE=1`) in dev and packaged alike; the `runAsNode` fuse must stay enabled and M4 guards it. Rejected: a bundled Node, a second Electron instance, a separate supervisor entry.
