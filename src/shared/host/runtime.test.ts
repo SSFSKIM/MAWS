@@ -209,6 +209,25 @@ describe('host runtime client hooks', () => {
     expect(fake.posted).toHaveLength(1);
   });
 
+  it('hands the register the client hooks: a connect hook it registers runs at ready, and hasClient follows the client', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fake = fakePort();
+    const seen: boolean[] = [];
+    let hasClient!: () => boolean;
+    const runtime = createHostRuntime((on, emit, client) => {
+      on('engine.ping', async () => PING);
+      hasClient = client.hasClient;
+      client.onConnect(() => void seen.push(client.hasClient(), emit('session.brokerItems', ITEMS)));
+    });
+    runtime.serve(fake.port);
+    expect(hasClient()).toBe(false);
+    await fake.deliver({ t: 'ready' });
+    expect(seen).toEqual([true, true]);
+    expect(fake.posted).toEqual([{ t: 'evt', name: 'session.brokerItems', payload: ITEMS }]);
+    runtime.detach();
+    expect(hasClient()).toBe(false);
+  });
+
   it('a duplicate ready from the same client runs no hook twice', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const fake = fakePort();

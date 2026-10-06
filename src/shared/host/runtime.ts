@@ -22,7 +22,9 @@ import { isCommandName, validateCommandInput, validateCommandOutput, validateEve
 export type HostOn = <N extends CommandName>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => void;
 // E10: true when the event was written to a connected, ready client; false when it was refused or dropped.
 export type HostEmit = <N extends EventName>(name: N, payload: EventPayload<N>) => boolean;
-export type HostRegister = (on: HostOn, emit: HostEmit) => void;
+// E10: a register is handed the runtime's client hooks too (the engine host's connect burst, its bridges' fail-fast)
+export type HostClientHooks = Pick<HostRuntime, 'onConnect' | 'hasClient'>;
+export type HostRegister = (on: HostOn, emit: HostEmit, client: HostClientHooks) => void;
 
 // The part of MessagePortMain the runtime uses, so tests can drive it with a fake.
 // E10: `postMessage` may answer `false` when it wrote nothing (a socket port already closing); a MessagePort answers
@@ -107,7 +109,9 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     return port.postMessage({ t: 'evt', name, payload: checked.value } satisfies HostMessage) !== false;
   };
 
-  register(on, emit);
+  const hasClient = () => port !== null && ready; // E10
+  const onConnect = (hook: () => void) => void connectHooks.push(hook); // E10
+  register(on, emit, { onConnect, hasClient });
 
   // E10 start
   const setReady = () => {
@@ -157,10 +161,8 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
       ready = false;
     },
     setReady,
-    hasClient: () => port !== null && ready,
-    onConnect(hook) {
-      connectHooks.push(hook);
-    },
+    hasClient,
+    onConnect,
     // E10 end
   };
 

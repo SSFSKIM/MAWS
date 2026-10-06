@@ -119,10 +119,10 @@ export class FakeSupervisor {
     });
     if ((this.options.answer ?? 'serve') === 'serve') {
       this.clients = serveSocketClients(server, {
-        runtime: createHostRuntime((on, emit) => {
+        runtime: createHostRuntime((on, emit, client) => {
           this.emit = emit;
           on('engine.ping', async () => ({ pid: this.pid, uptimeMs: 1, hostVersion: 'fake' }));
-          this.options.register?.(on, emit);
+          this.options.register?.(on, emit, client);
         }),
         identity: () => ({
           protocol: this.options.protocol ?? SOCKET_PROTOCOL,
