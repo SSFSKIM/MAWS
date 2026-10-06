@@ -34,6 +34,13 @@ const type = (text: string, at = 0) => act(() => view().dispatch({ changes: { fr
 const replaceAll = (text: string) => act(() => view().dispatch({ changes: { from: 0, to: view().state.doc.length, insert: text }, userEvent: 'input.paste', annotations: isolateHistory.of('full') }));
 const undoOnce = () => act(() => void undo(view()));
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+// The cursor as a line (1-based) and a column (characters from the line's start).
+const placeCursor = (line: number, column: number) => act(() => view().dispatch({ selection: { anchor: view().state.doc.line(line).from + column } }));
+const cursor = () => {
+  const { doc: text, selection } = view().state;
+  const line = text.lineAt(selection.main.head);
+  return { line: line.number, column: selection.main.head - line.from };
+};
 
 describe('editor', () => {
   const offs: (() => void)[] = [];
@@ -133,6 +140,34 @@ describe('editor', () => {
       await waitFor(() => expect(entry().dirty).toBe(false));
       expect(viewer().getAttribute('data-dirty')).toBe('false');
       expect(saveButton()).toBeNull();
+    });
+
+    // Whole-branch review: a replacement of everything maps a cursor to 0, so a followed tab's next keystrokes would
+    // land at line 1, unseen.
+    it('keeps the cursor’s line and column when a change load replaces a clean document, clamped to a shorter one', async () => {
+      const { disk } = await open({ [APP]: 'line 1\nline 2\nline 3 here\nline 4\n' });
+      placeCursor(3, 4);
+      disk.files[APP] = 'one\ntwo\nthree is longer\nfour\n';
+      changed(disk);
+      await waitFor(() => expect(doc()).toBe('one\ntwo\nthree is longer\nfour\n'));
+      expect(cursor()).toEqual({ line: 3, column: 4 });
+      expect(entry().dirty).toBe(false);
+      disk.files[APP] = 'a\nbc'; // two lines: the cursor goes to the last line, its column to that line's end
+      changed(disk);
+      await waitFor(() => expect(doc()).toBe('a\nbc'));
+      expect(cursor()).toEqual({ line: 2, column: 2 });
+    });
+
+    it('keeps the cursor’s line and column across Reload', async () => {
+      const { disk } = await open({ [APP]: 'line 1\nline 2\nline 3 here\n' });
+      type('// mine\n');
+      placeCursor(3, 4);
+      disk.files[APP] = 'one\ntwo\nthree is longer\n';
+      changed(disk);
+      fireEvent.click(await screen.findByRole('button', { name: 'Reload' }));
+      await waitFor(() => expect(doc()).toBe('one\ntwo\nthree is longer\n'));
+      expect(cursor()).toEqual({ line: 3, column: 4 });
+      expect(entry().dirty).toBe(false);
     });
 
     it('edits markdown in Source, keeping the buffer and the mark across Rendered', async () => {
@@ -368,6 +403,26 @@ describe('editor', () => {
       await waitFor(() => expect(entry().theirs).toEqual({ text: 'const a = 3;\n', hash: fakeHash('const a = 3;\n'), view: 'merge' }));
       expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true });
       expect(entry().saving).toBe(false);
+    });
+
+    // Whole-branch review: a head's hash is discarded, so asking for it costs main a whole-file read and a SHA-256 on
+    // every change for nothing.
+    it('asks no hash on a change load of a head, and asks again once the file has become code', async () => {
+      const BIG = '/r/big.log';
+      const disk = installDisk({ [BIG]: { text: 'log line\n', bytes: 5 * MiB } });
+      offs.push(connectCodeEvents());
+      openFile(A, BIG);
+      render(<FileViewer tab={fileTab(BIG)} />);
+      await waitFor(() => expect(entry(BIG)?.kind).toBe('head'));
+      expect(disk.callsOf('files.read')[0].hash).toBe(true); // an open load: the kind is undecided
+      changed(disk, BIG);
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(2));
+      await settle();
+      expect(disk.callsOf('files.read')[1]).not.toHaveProperty('hash');
+      disk.files[BIG] = 'small now\n';
+      changed(disk, BIG);
+      await waitFor(() => expect(entry(BIG)).toMatchObject({ kind: 'code', editable: true, hash: fakeHash('small now\n') }));
+      expect(disk.callsOf('files.read').slice(2).map((input) => input.hash)).toEqual([undefined, true]);
     });
 
     it('answers noop to a save while one runs, and to a clean tab', async () => {

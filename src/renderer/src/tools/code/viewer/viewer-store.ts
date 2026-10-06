@@ -300,9 +300,19 @@ export function createViewerStore(client: MawsBridge) {
       const read = (offset: number, length: number, hash: boolean) =>
         settled(client.invoke('files.read', { appSessionId, path, offset, length, ...(hash ? { hash: true } : {}) }));
 
-      const first = await read(0, FILES_READ_DEFAULT_LENGTH, true);
+      // The hash is asked for only where it can be used: the kind still undecided (an open load, an entry with none) or
+      // one the editor takes. A change load of a head, an image or an external kind asks none (each would cost main a
+      // whole-file read and a SHA-256 per change), and asks again, once, should the file have become editable text.
+      const editableKind = (candidate: ViewerKind | null) => candidate === null || candidate === 'code' || candidate === 'markdown';
+      const hashed = reason === 'open' || editableKind(entry.kind);
+      let first = await read(0, FILES_READ_DEFAULT_LENGTH, hashed);
       if (!live()) return;
       if (!first.ok) return fail(tabId, first.error.message, reason);
+      if (!hashed && editableKind(kindOf({ name: path, mime: first.value.mime, bytes: first.value.bytes, encoding: first.value.encoding }))) {
+        first = await read(0, FILES_READ_DEFAULT_LENGTH, true);
+        if (!live()) return;
+        if (!first.ok) return fail(tabId, first.error.message, reason);
+      }
       const head = first.value;
       const kind = kindOf({ name: path, mime: head.mime, bytes: head.bytes, encoding: head.encoding });
       const file = { kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes };

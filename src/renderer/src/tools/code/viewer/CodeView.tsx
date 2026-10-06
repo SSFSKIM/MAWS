@@ -110,6 +110,14 @@ function keepOffset(view: EditorView, top: number) {
   });
 }
 
+// E5: a position's line and column in `before`, re-applied in `after`: a line past its end is its last line, a column
+// past its line's end that line's end.
+function samePlace(before: Text, position: number, after: Text): number {
+  const line = before.lineAt(position);
+  const target = after.line(Math.min(line.number, after.lines));
+  return target.from + Math.min(position - line.from, target.length);
+}
+
 // E5: the document as the file's text, its line breaks the store's current baseline's.
 const baselineText = (tabId: string) => useViewer.getState().entries.get(tabId)?.text ?? '';
 
@@ -212,8 +220,14 @@ export default function CodeView({ entry, wrap }: { entry: ViewerEntry; wrap: bo
       saved.clean = view.state.doc;
     } else {
       // A fresh view's first text is no step to undo; a re-read or a Reload under a shown document is (CodeMirror's default).
+      // E5: the cursor keeps its line and column, which a replacement of everything would map to the start.
       const top = view.scrollDOM.scrollTop;
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, annotations: [fromStore.of(true), Transaction.addToHistory.of(was.epoch !== -1)] });
+      const next = view.state.toText(text);
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: next },
+        selection: { anchor: samePlace(view.state.doc, view.state.selection.main.head, next) },
+        annotations: [fromStore.of(true), Transaction.addToHistory.of(was.epoch !== -1)],
+      });
       if (was.epoch !== -1) keepOffset(view, top);
       saved.clean = view.state.doc;
     }

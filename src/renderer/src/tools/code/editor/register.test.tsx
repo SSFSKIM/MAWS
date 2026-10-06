@@ -11,7 +11,7 @@ import { connectCodeEvents } from '../../../ipc/events';
 import { requestCloseTab, runAction } from '../../../keymap/actions-runtime';
 import { Tab } from '../../../main/Tab';
 import { useLayout } from '../../../stores/layout';
-import { allTabs } from '../../../stores/layout-model';
+import { activeTab, allTabs } from '../../../stores/layout-model';
 import { fakeHash, installDisk } from '../../../test-support/code-disk';
 import { useFiles } from '../files/store';
 import { openFile } from '../open-file';
@@ -137,6 +137,24 @@ describe('editor registrations', () => {
       expect(tabOpen()).toBe(true);
       expect(entry().theirs).toEqual({ text: 'const a = 2;\n', hash: fakeHash('const a = 2;\n'), view: 'merge' });
       expect(disk.files[APP]).toBe('const a = 2;\n');
+    });
+
+    // Whole-branch review: a save from the merge view sends the hash the merge shows, so the sheet's default button
+    // would write the unresolved document over the disk's change.
+    it('never saves a tab in the merge view: the guard keeps it, brings it to the front and writes nothing', async () => {
+      const { disk } = await openApp({ dirty: true });
+      disk.files[APP] = 'const a = 2;\n'; // no event: the save finds it
+      await act(async () => void (await useViewer.getState().save(ID)));
+      expect(entry().theirs?.view).toBe('merge');
+      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: 'app-s' as AppSessionId }));
+      expect(activeTab(useLayout.getState().main)?.id).not.toBe(ID);
+      await act(() => requestCloseTab(ID));
+      expect(sheet()).toBeNull();
+      expect(tabOpen()).toBe(true);
+      expect(activeTab(useLayout.getState().main)?.id).toBe(ID);
+      expect(disk.callsOf('files.write')).toHaveLength(1); // the save that found the change, only
+      expect(disk.files[APP]).toBe('const a = 2;\n');
+      expect(entry()).toMatchObject({ dirty: true, theirs: { view: 'merge' } });
     });
   });
 
