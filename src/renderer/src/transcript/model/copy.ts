@@ -295,6 +295,7 @@ export const reconnectCopy = (phase: 'attempting' | 'reconnected' | 'failed', at
   phase === 'attempting' ? `Reconnecting (${attempt}/${max ?? '?'})…` : phase === 'reconnected' ? 'Reconnected' : `Could not reconnect${reason ? ` · ${reason}` : ''}`;
 // C12 start: the memory budget's release and the resume after it (C12 execution document, "Surfaces of the budget")
 export const RELEASED_COPY = 'Released to stay under the memory budget · sending resumes it';
+export const IDLE_RELEASED_COPY = 'Stopped while MAWS was closed · sending resumes it'; // E10: the supervisor's idle release
 export const RESUMING_COPY = 'Resuming…';
 export const RESUMED_COPY = 'Resumed';
 // C12 end
@@ -304,7 +305,7 @@ const lostCopy = (lostAttentionCount: number, lostAskCount: number) => {
   return [approvals > 0 ? plural(approvals, 'approval') : null, lostAskCount > 0 ? plural(lostAskCount, 'question') : null].filter((part) => part !== null).join(' and ');
 };
 export const processExitCopy = (reason: string, lostAttentionCount: number, lostAskCount = 0) =>
-  reason === 'budget' ? RELEASED_COPY /* C12 */ : `Session process exited (${reason})${lostAttentionCount > 0 ? ` · ${lostCopy(lostAttentionCount, lostAskCount)} lost` : ''}`;
+  reason === 'budget' ? RELEASED_COPY /* C12 */ : reason === 'idle' ? IDLE_RELEASED_COPY /* E10 */ : `Session process exited (${reason})${lostAttentionCount > 0 ? ` · ${lostCopy(lostAttentionCount, lostAskCount)} lost` : ''}`;
 export const bashHeader = (command: string) => `! ${command}`;
 export const LOCAL_COMMAND_HEADER = 'Command output';
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init

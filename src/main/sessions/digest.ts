@@ -167,8 +167,10 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
     case 'subagent.finished':
       return { ...d, childAgents: { active: Math.max(0, d.childAgents.active - 1), done: d.childAgents.done + 1 } };
     case 'process.exited':
-      // C12: a release under the memory budget reads idle with the released mark (an existing mark kept)
-      if (event.reason === 'budget' && event.budget !== null) return { ...d, phase: 'idle', activity: null, pendingRequests: 0, released: d.released ?? { at: event.at, limitKiB: event.budget.limitKiB } };
+      // C12: a release under the memory budget reads idle with the released mark (an existing mark kept); E10: so does
+      // the supervisor's idle release, with no limit
+      if (event.reason === 'budget' && event.budget !== null) return { ...d, phase: 'idle', activity: null, pendingRequests: 0, released: d.released ?? { at: event.at, reason: 'budget', limitKiB: event.budget.limitKiB } };
+      if (event.reason === 'idle') return { ...d, phase: 'idle', activity: null, pendingRequests: 0, released: d.released ?? { at: event.at, reason: 'idle', limitKiB: null } }; // E10
       // The broker retires every pending item on exit (they become one `interrupted` attention item).
       return { ...d, phase: event.reason === 'crash' ? 'failed' : 'exited', activity: null, pendingRequests: 0 };
     case 'session.reconnect':
@@ -214,6 +216,7 @@ export function foldEvents(
 // digest already says `failed`; a process that became ready while the digest still says `starting` takes the engine
 // state's phase (the events that would otherwise say so may have preceded the fold).
 // C12: a release (exit reason `budget`) reads idle with the released mark, an existing mark kept; a launch drops it.
+// E10: the supervisor's idle release (exit reason `idle`) too, its mark with no limit.
 export function applyStatusToDigest(d: SessionDigest, status: EngineSessionStatus): SessionDigest {
   switch (status.process) {
     case 'starting':
@@ -221,7 +224,8 @@ export function applyStatusToDigest(d: SessionDigest, status: EngineSessionStatu
       return withoutReleased({ ...d, phase: 'starting' }); // C12
     case 'exited':
       // C12 start
-      if (status.exit?.reason === 'budget' && status.exit.release !== null) return { ...d, phase: 'idle', activity: null, released: d.released ?? { at: status.exit.at, limitKiB: status.exit.release.limitKiB } };
+      if (status.exit?.reason === 'budget' && status.exit.release !== null) return { ...d, phase: 'idle', activity: null, released: d.released ?? { at: status.exit.at, reason: 'budget', limitKiB: status.exit.release.limitKiB } };
+      if (status.exit?.reason === 'idle') return { ...d, phase: 'idle', activity: null, released: d.released ?? { at: status.exit.at, reason: 'idle', limitKiB: null } }; // E10
       // C12 end
       return d.phase === 'failed' ? d : { ...d, phase: 'exited', activity: null };
     case 'ready':
