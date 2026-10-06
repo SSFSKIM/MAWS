@@ -113,4 +113,33 @@ describe('session visibility', () => {
     hideSideChild(A, CHILD);
     expect(sent().slice(4)).toEqual([{ appSessionId: CHILD, visible: false }]);
   });
+
+  // M3's review (M4): a maximized panel covers the main area but shows the pane, so the child it draws is on screen
+  it('counts the side pane’s child while the panel is maximized (its parent covered), and drops it when the panel collapses', () => {
+    const CHILD = 'app-child' as AppSessionId;
+    useSessions.setState({ records: new Map([[A, record('app-a')], [CHILD, record('app-child')]]) });
+    useLayout.getState().setPanel({ collapsed: false });
+    useLayout.getState().openSession(A);
+    showSideChild(A, CHILD);
+    expect(sent()).toEqual([
+      { appSessionId: A, visible: true },
+      { appSessionId: CHILD, visible: true },
+    ]);
+    useLayout.getState().setPanel({ maximized: true });
+    expect(sent().slice(2)).toEqual([{ appSessionId: A, visible: false }]);
+    useLayout.getState().setPanel({ collapsed: true }); // the main area shows again; the pane does not
+    expect(sent().slice(3)).toEqual([
+      { appSessionId: CHILD, visible: false },
+      { appSessionId: A, visible: true },
+    ]);
+  });
+
+  it('counts the side pane’s child while a file tab of its parent is the shown tab (the panel shows that session)', () => {
+    const CHILD = 'app-child' as AppSessionId;
+    useSessions.setState({ records: new Map([[A, record('app-a')], [CHILD, record('app-child')]]) });
+    useLayout.getState().setPanel({ collapsed: false });
+    useLayout.getState().openTab({ kind: 'file', path: '/work/a.ts', line: null, appSessionId: A });
+    showSideChild(A, CHILD);
+    expect(sent()).toEqual([{ appSessionId: CHILD, visible: true }]);
+  });
 });

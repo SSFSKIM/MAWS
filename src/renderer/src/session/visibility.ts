@@ -2,15 +2,15 @@
 // pane, the main region is not covered by a maximized panel, the window has focus and the page is visible. Every change
 // is reported to main as `session.setVisible`, which the source turns into the unread rule and `lastSeen`. A session
 // tab with no record yet (an unstarted session) is reported once its record arrives. E3: a side thread the Side pane
-// draws is visible too while the panel is open beside its visible parent (the pane publishes it only while its tab is
-// selected), or the thread's unread mark would never clear.
+// draws is visible too while the panel is open on its parent, maximized or not (the pane publishes it only while its
+// tab is selected), or the thread's unread mark would never clear.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { LayoutMain, LayoutRegions } from '@shared/ipc/schema/layout';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
-import { currentSet } from '../stores/layout-model';
+import { activeTab, currentSet, sessionOfTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { sideChildrenShown, useSidePane } from '../side/store'; // E3
 
@@ -22,14 +22,19 @@ export function visibleSessions(
   sideChildren: ReadonlyMap<AppSessionId, AppSessionId> = new Map(), // E3: parent → the child its Side pane draws
 ): Set<AppSessionId> {
   const visible = new Set<AppSessionId>();
-  if (!windowActive || (regions.panel.maximized && !regions.panel.collapsed)) return visible;
-  for (const pane of currentSet(main).panes) { // W12: the strips show the current set
-    const tab = pane.tabs.find((t) => t.id === pane.activeTabId);
-    if (tab?.kind === 'session' && records.has(tab.appSessionId)) visible.add(tab.appSessionId);
+  if (!windowActive) return visible;
+  if (!(regions.panel.maximized && !regions.panel.collapsed)) {
+    for (const pane of currentSet(main).panes) { // W12: the strips show the current set
+      const tab = pane.tabs.find((t) => t.id === pane.activeTabId);
+      if (tab?.kind === 'session' && records.has(tab.appSessionId)) visible.add(tab.appSessionId);
+    }
   }
-  // E3 start
+  // E3 start: the open panel shows the session of the focused pane's active tab (a file tab's included, C5's region),
+  // maximized or not; the child its Side pane draws is on screen
   if (!regions.panel.collapsed) {
-    for (const [parent, child] of sideChildren) if (visible.has(parent) && records.has(child)) visible.add(child);
+    const shown = sessionOfTab(activeTab(main));
+    const child = shown === null ? undefined : sideChildren.get(shown);
+    if (child !== undefined && records.has(child)) visible.add(child);
   }
   // E3 end
   return visible;

@@ -4,7 +4,8 @@
 // composer's typed slash seam must not run here), and sending it to a side thread (the default, P-6) or to the main
 // conversation. A producer's screenshot shows as a chip the person can remove; the sheet has no screenshot of its own.
 // While a side thread starts the form is disabled and Send reads Starting…; a refusal stays under the form with Retry
-// and, while the parent runs, Send to main instead. Its own small store, as E5's editor sheets have, so it never
+// (disabled once its destination cannot send) and, while the parent runs, Send to main instead; a refusal arriving after
+// the sheet closed is a toast. Its own small store, as E5's editor sheets have, so it never
 // collides with C10's one-sheet dialog store or E1's sheets.
 import { useId, useState, type KeyboardEvent } from 'react';
 import { create } from 'zustand';
@@ -12,6 +13,7 @@ import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { Sheet, SheetForm } from '../sessions/Sheet';
 import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
+import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { sendComment, type CommentDestination } from './actions';
 import { SIDE_COPY } from './copy';
@@ -59,7 +61,11 @@ function CommentSheet({ anchor, parent }: { anchor: Anchor; parent: AppSessionId
     setDestination(to);
     setPhase({ kind: 'sending', destination: to });
     const result = await sendComment(to, { parent, anchor, text: text.trim(), screenshot });
-    if (useCommentComposer.getState().open?.anchor !== anchor) return; // closed, or replaced by another comment, meanwhile
+    // closed, or replaced by another comment, meanwhile: a refusal still says so, or the comment would be lost unseen
+    if (useCommentComposer.getState().open?.anchor !== anchor) {
+      if (!result.ok) toast({ level: 'warning', text: COPY.refusedAfterClose(result.error), actions: [], dismissible: true });
+      return;
+    }
     if (result.ok) close();
     else setPhase({ kind: 'refused', destination: to, error: result.error });
   };
@@ -104,7 +110,7 @@ function CommentSheet({ anchor, parent }: { anchor: Anchor; parent: AppSessionId
         {phase.kind === 'refused' && (
           <div role="alert" className="flex flex-wrap items-center gap-2 rounded-sm border border-danger px-2.5 py-1.5 text-ui-sm text-danger">
             <span className="min-w-0 flex-1 break-words">{phase.error}</span>
-            <button type="button" className={SECONDARY} onClick={() => void send(phase.destination)}>
+            <button type="button" className={SECONDARY} disabled={!canSend(phase.destination)} onClick={() => void send(phase.destination)}>
               {COPY.retry}
             </button>
             {phase.destination === 'thread' && ready && (

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { fileLineAnchor } from '../tools/code/anchor/anchor';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -25,6 +26,7 @@ function withParent(process: 'ready' | 'exited', turn = false) {
 
 beforeEach(() => {
   resetShellStores();
+  useNotices.setState({ notices: [] });
   fake = fakeClient({ 'side.sendToMain': { messageUuid: null, disposition: 'sent' } });
   window.maws = fake.client;
 });
@@ -95,5 +97,41 @@ describe('the comment composer', () => {
     act(() => openComposer({ ...ANCHOR, screenshot }, { appSessionId: PARENT }));
     await userEvent.click(screen.getByRole('button', { name: 'Remove screenshot' }));
     expect(screen.queryByText('Screenshot · 640 × 480')).toBeNull();
+  });
+
+  // M3's review (M4): the failure paths
+  it('a refusal arriving after the sheet closed mid-send is a toast with its reason', async () => {
+    withParent('ready');
+    show();
+    await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Why?{Enter}');
+    expect(fake.pending('side.thread.open')).toBe(1);
+    act(() => useCommentComposer.setState({ open: null }));
+    await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: 'b2222222-2222-4222-8222-222222222222', reason: 'unknown_session', message: 'The session is gone' }));
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['The comment was not sent: The session is gone']);
+  });
+
+  it('Send to main held by the app queue says so in a toast', async () => {
+    fake = fakeClient({ 'side.sendToMain': { messageUuid: null, disposition: 'queued' } });
+    window.maws = fake.client;
+    withParent('ready');
+    show();
+    await userEvent.click(screen.getByRole('radio', { name: /Send to main/ }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Later{Enter}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Queued; it sends when the queue resumes']);
+  });
+
+  it('Retry is disabled once its destination can no longer send (Send to main, the parent exited meanwhile)', async () => {
+    fake = fakeClient(); // main answers when the test says
+    window.maws = fake.client;
+    withParent('ready');
+    show();
+    await userEvent.click(screen.getByRole('radio', { name: /Send to main/ }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Now{Enter}');
+    await act(() => fake.fail('side.sendToMain', 'Session is not ready (exited)'));
+    const retry = screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(false);
+    act(() => withParent('exited'));
+    expect(retry.disabled).toBe(true);
   });
 });
