@@ -35,6 +35,11 @@ export interface MawsLaunchOptions {
 // whoever created it removes it.
 export interface ShellLaunchOptions extends MawsLaunchOptions {
   userData?: string;
+  // E6 start: writes into the launch's scratch homes before the app starts (E6 execution document, Interfaces *Harness and
+  // e2e*): the scratch shell home's startup files (so the captured login-shell PATH is the test's) and the engine store's
+  // trust file. Called after the shell home is written and `claude-config` created, with the config home the app reads.
+  prepare?: (paths: { userData: string; shellHome: string; claudeConfigDir: string }) => void;
+  // E6 end
 }
 // C5 end
 
@@ -87,6 +92,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   };
 
   try {
+    opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
     const launchedAt = Date.now();
     app = executable
       ? await _electron.launch({ executablePath: executable, env, cwd: REPO_ROOT })
