@@ -333,23 +333,31 @@ let localSpeechErrorDomain = "kLSRErrorDomain"
 let noSpeechDetectedCode = 1110
 let taskCancelledCodes: Set<Int> = [216, 301]
 
-/// "No speech detected": what a hold with nothing said produces after `endAudio()`.
-func isNoSpeech(_ error: Error) -> Bool {
-    let error = error as NSError
-    return error.domain == assistantErrorDomain && error.code == noSpeechDetectedCode
+/// What a recognition task's error means for its capture when no final result came with it.
+enum TaskErrorOutcome: Equatable {
+    /// "No speech detected" (what a hold with nothing said produces after `endAudio()`): settle the last partial.
+    case noSpeech
+    /// The cancellation error of a task the helper itself cancelled: the capture was already answered.
+    case cancelledByHelper
+    /// Anything else, a cancellation the helper did not issue included: `recognition_failed`.
+    case failure
 }
 
-/// The error a recognition task reports when it was cancelled.
-func isTaskCancellation(_ error: Error) -> Bool {
+/// Pure: reads only the error and whether the helper called `task.cancel()` on this capture's task.
+func classify(_ error: Error, cancelledByHelper: Bool) -> TaskErrorOutcome {
     let error = error as NSError
-    return (error.domain == assistantErrorDomain || error.domain == localSpeechErrorDomain)
+    if error.domain == assistantErrorDomain && error.code == noSpeechDetectedCode { return .noSpeech }
+    let isCancellation = (error.domain == assistantErrorDomain || error.domain == localSpeechErrorDomain)
         && taskCancelledCodes.contains(error.code)
+    if isCancellation && cancelledByHelper { return .cancelledByHelper }
+    return .failure
 }
 
+/// One recognition callback. Precedence: a final result answers the capture whatever else came with it; a
+/// non-final result is a partial; then an error, if any, ends the capture by `classify`.
 func recognized(_ capture: Capture, result: SFSpeechRecognitionResult?, error: Error?) {
-    if result == nil, let error, capture.taskCancelled, isTaskCancellation(error) {
-        return // the helper's own `task.cancel()`: the capture was already answered (`cancelled`, `final` or `error`)
-    }
+    // An ended capture was already answered (`cancelled`, `final` or `error`). The helper's own `task.cancel()`
+    // always ends the capture first, so the callbacks it causes stop here too.
     guard isLive(capture) else { return }
     if let result {
         let text = result.bestTranscription.formattedString
@@ -359,16 +367,16 @@ func recognized(_ capture: Capture, result: SFSpeechRecognitionResult?, error: E
         }
         capture.lastPartial = text
         emit([("type", .string("partial")), ("id", .string(capture.id)), ("text", .string(text))])
-        return
     }
     guard let error else { return }
-    if isNoSpeech(error) {
+    switch classify(error, cancelledByHelper: capture.taskCancelled) {
+    case .noSpeech:
         // Nothing (more) was heard: what was heard is the answer, usually "".
         log("no speech id=\(capture.id)")
         emitFinal(capture, text: capture.lastPartial, timedOut: false)
-    } else {
-        // Any other error with no final result, before or after `stop`, a cancellation the helper did not
-        // issue included, is a failure.
+    case .cancelledByHelper:
+        return // not reached while live (`end` marks the capture ended before it cancels the task)
+    case .failure:
         let ns = error as NSError
         log("task error id=\(capture.id) domain=\(ns.domain) code=\(ns.code)")
         fail(capture, code: "recognition_failed", message: error.localizedDescription)
