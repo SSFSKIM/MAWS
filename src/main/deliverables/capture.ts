@@ -1,8 +1,9 @@
 // `artifact_screenshot`'s capture (E2 execution document, Design §7, Decision Log 8 and 20). The engine host cannot
 // render, so it asks main through the IPC event `maws.artifact.capture`; main renders the version in its own offscreen
 // window and answers through the host command `maws.artifact.captured`. At most two captures run at once (the engine
-// may batch two screenshots: the tool is read-only); a third waits for a slot. Each capture has a 20 s guard, so a
-// queued request is answered within 40 s, inside the host's 45 s.
+// may batch two screenshots: the tool is read-only); a third waits for a slot. Each capture has a 20 s guard, and a
+// request still waiting for a slot after CAPTURE_QUEUE_MS is answered with the busy reason instead of being run, so every
+// answer leaves main within 42 s, inside the host's 45 s (CAPTURE_ANSWER_MS).
 //
 // The window is not an app window (never registered in `windows.ts`): offscreen (deterministic `paint` events, nothing
 // on the desktop), no preload, on the in-memory `maws-capture` partition, which carries the same scheme handler and the
@@ -25,6 +26,8 @@ import type { DeliverableReader } from './reader';
 
 export const CAPTURE_PARTITION = 'maws-capture';
 export const CAPTURE_GUARD_MS = 20_000;
+// The longest a request waits for a slot: with the guard, 42 s, which leaves the answer three seconds of the host's 45.
+export const CAPTURE_QUEUE_MS = 22_000;
 const CAPTURE_SETTLE_MS = 500; // after the load: the first paint, or this long (fonts, first animations)
 const CAPTURE_CONCURRENCY = 2;
 const CONSOLE_ERRORS_MAX = 20;
@@ -130,30 +133,45 @@ export interface CaptureServiceDeps extends CaptureDeps {
 // Main's side of the capture bridge: every `maws.artifact.capture` the engine host emits is captured (two at a time)
 // and answered. Answers the unsubscribe.
 export function startCaptureService({ onEvent, dispatch, ...deps }: CaptureServiceDeps): () => void {
-  const slot = slots(CAPTURE_CONCURRENCY);
+  const slot = slots(CAPTURE_CONCURRENCY, CAPTURE_QUEUE_MS);
+  const busy = (): MawsArtifactCapturedResult => ({ ok: false, error: `MAWS was busy with other captures for ${CAPTURE_QUEUE_MS / 1000} s; try again` });
   return onEvent('maws.artifact.capture', (request) => {
-    void slot(() => captureArtifact(request, deps))
+    void slot(() => captureArtifact(request, deps), busy)
       .then((result) => dispatch({ appSessionId: request.appSessionId, requestId: request.requestId, result }))
       .catch((error: unknown) => console.error('[deliverables] could not answer a capture', error));
   });
 }
 
-// Runs at most `max` tasks at once; a finished task hands its slot to the oldest waiting one.
-function slots(max: number): <T>(task: () => Promise<T>) => Promise<T> {
+// Runs at most `max` tasks at once; a finished task hands its slot to the oldest waiting one, and a task that waited
+// `maxWaitMs` without a slot leaves the queue unrun, answered by `expired`.
+function slots(max: number, maxWaitMs: number): <T>(task: () => Promise<T>, expired: () => T) => Promise<T> {
   let running = 0;
-  const waiting: (() => void)[] = [];
-  const acquire = () => (running < max ? (running++, Promise.resolve()) : new Promise<void>((resolve) => waiting.push(resolve)));
+  const waiting: { start(): void }[] = [];
   const release = () => {
     const next = waiting.shift();
-    if (next) next();
+    if (next) next.start();
     else running--;
   };
-  return async (task) => {
-    await acquire();
-    try {
-      return await task();
-    } finally {
-      release();
-    }
-  };
+  return (task, expired) =>
+    new Promise((resolve, reject) => {
+      const run = () => void task().then(resolve, reject).finally(release);
+      if (running < max) {
+        running++;
+        run();
+        return;
+      }
+      const entry = {
+        start: () => {
+          clearTimeout(timer);
+          run();
+        },
+      };
+      const timer = setTimeout(() => {
+        const at = waiting.indexOf(entry);
+        if (at < 0) return;
+        waiting.splice(at, 1);
+        resolve(expired());
+      }, maxWaitMs);
+      waiting.push(entry);
+    });
 }

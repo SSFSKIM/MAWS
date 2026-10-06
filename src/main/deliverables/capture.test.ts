@@ -73,7 +73,7 @@ vi.mock('electron', () => ({ app: electron.app, BrowserWindow: electron.BrowserW
 import { followAppPages } from '../attention';
 import { createNavigationRelay } from '../attention/navigation';
 import { registerAppWindow } from '../windows';
-import { captureArtifact, startCaptureService } from './capture';
+import { CAPTURE_QUEUE_MS, captureArtifact, startCaptureService } from './capture';
 
 vi.mock('../ipc/router', () => ({ registerMainHandler: vi.fn() }));
 
@@ -198,6 +198,28 @@ describe('the capture service: the event in, the host command out, two at a time
     await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(3));
     expect(dispatch.mock.calls.map((call) => (call as unknown[])[0] as { requestId: string }).map((input) => input.requestId)).toEqual(['r1', 'r2', 'r3']);
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ appSessionId: A, requestId: 'r1', result: expect.objectContaining({ ok: true, width: 640, height: 480 }) }));
+    stop();
+  });
+});
+
+describe('the capture queue answers within the host’s deadline', () => {
+  it('answers a request still queued after CAPTURE_QUEUE_MS with the busy reason instead of running it late', async () => {
+    vi.useFakeTimers();
+    electron.state.load = () => {}; // every page hangs, so each capture holds its slot until its 20 s guard
+    let listener!: (payload: MawsArtifactCapture) => void;
+    const answered: { requestId: string; at: number; result: { ok: boolean; error?: string } }[] = [];
+    const dispatch = vi.fn(async (input: { requestId: string; result: { ok: boolean; error?: string } }) => void answered.push({ requestId: input.requestId, at: Date.now(), result: input.result }));
+    const start = Date.now();
+    const stop = startCaptureService({ onEvent: (_name, l) => ((listener = l), () => {}), dispatch, reader: reader(), env: {} });
+    for (const id of ['r1', 'r2', 'r3', 'r4', 'r5']) listener(request({ requestId: id as RequestId }));
+    await vi.advanceTimersByTimeAsync(CAPTURE_QUEUE_MS);
+    // r1 and r2 hit their guard at 20 s and handed their slots to r3 and r4; r5 waited CAPTURE_QUEUE_MS and is answered
+    expect(answered.map((a) => [a.requestId, a.at - start])).toEqual([['r1', 20_000], ['r2', 20_000], ['r5', CAPTURE_QUEUE_MS]]);
+    expect(answered[2].result).toEqual({ ok: false, error: `MAWS was busy with other captures for ${CAPTURE_QUEUE_MS / 1000} s; try again` });
+    expect(electron.state.windows).toHaveLength(4); // r5 never opened a window
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(answered.map((a) => a.requestId)).toEqual(['r1', 'r2', 'r5', 'r3', 'r4']);
+    expect(CAPTURE_QUEUE_MS + 20_000).toBeLessThan(45_000); // queued plus guarded stays inside CAPTURE_ANSWER_MS
     stop();
   });
 });

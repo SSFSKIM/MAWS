@@ -30,16 +30,21 @@ Two policy findings the trial forced (both in src/main/deliverables/policies.ts,
    showed the PDF frame itself (frame and initiator maws-deliverable://…) asking for
    chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf_embedder.css, which the request filter cancelled as "not the
    scheme". The filter now also passes that one origin, the viewer's own bundled files inside Electron (never the
-   network); any other chrome-extension: or chrome: URL from a deliverable frame is still cancelled.
+   network); any other chrome-extension: URL, and any chrome: URL but chrome://resources/ (fix 1), is still cancelled.
 2. Still empty after that: the app-wide CSP override (window.ts) put the app's policy (script-src 'self') on the
    viewer's own index.html, which then refused the chrome://resources scripts it is built from (the probe logged
    "Loading the script 'chrome://resources/lit/v3_0/lit.rollup.js' violates … script-src 'self'"). The override now
    leaves the viewer's pages alone as it leaves the scheme's answers alone (isCspExempt). With both, (c) draws in the
    probe and in the product app.
 
-What still covers the unsandboxed PDF frame (Design §3, "whatever its sandbox"): it is its own origin
-(maws-deliverable://<recordId>), never the app's; the session's request filter cancels anything it asks for outside the
-scheme and the viewer's files; will-frame-navigate prevents its navigation away from the scheme; will-download cancels a
-download whose URL or redirect chain is the scheme's (the viewer's Download button was not pressed in this trial); the
-window denies new windows and top-level navigation; the WebRTC
-policy is disable_non_proxied_udp. The viewer frame's sandbox stays allow-scripts for HTML.
+What still covers the unsandboxed PDF frame (Design §3, "whatever its sandbox"; amended after M3's review, Decision Log
+31): it is its own origin (maws-deliverable://<recordId>), never the app's. Every policy judges a frame by its ancestry,
+so the PDF frame and Chromium's viewer frame beneath it are held alike: the session's request filter cancels anything
+they ask for outside the scheme, the viewer's own files and chrome://resources/; will-frame-navigate prevents a
+navigation of, or asked by, such a frame to anything outside the same three; will-download cancels a download whose URL
+or redirect chain is the scheme's or the viewer's Save (blob:chrome-extension://<viewer>/…); permission requests and
+checks from a deliverable origin are denied (every one on the capture partition); the window denies new windows and
+top-level navigation; the WebRTC policy is disable_non_proxied_udp. The viewer's Download button and a link inside a PDF
+were not pressed in this trial (M7's e2e presses them). The PDF answer is the one scheme answer without the sandboxing
+policy; the HTML frame's sandbox stays allow-scripts. The trial was re-run green after these changes
+(/tmp/maws-e2-m3-fix1-e2e.log: c draws, 246264 dark pixels; a and b do not).

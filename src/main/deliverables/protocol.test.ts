@@ -67,7 +67,7 @@ describe('the maws-deliverable: handler (E2 Design §3): one recorded file per U
       'accept-ranges': 'bytes',
       'content-length': '4',
     });
-    expect(response.headers.get('content-security-policy')).toBeNull(); // the policy is for HTML only
+    expect(response.headers.get('content-security-policy')).toBe(DELIVERABLE_HTML_CSP); // every answer but a PDF's
   });
 
   it('serves each version of an artifact from its own copy', async () => {
@@ -129,13 +129,19 @@ describe('the maws-deliverable: handler (E2 Design §3): one recorded file per U
     expect((await get(url, { headers: { Range: 'bytes=0-1,4-5' } })).status).toBe(200); // a multi-range is answered whole
   });
 
-  it('puts the sandboxing policy, with no network source and no self, on HTML only', async () => {
+  it('puts the sandboxing policy, with no network source and no self, on every answer but a PDF’s', async () => {
     expect(DELIVERABLE_HTML_CSP.startsWith('sandbox allow-scripts; ')).toBe(true);
     expect(DELIVERABLE_HTML_CSP).not.toMatch(/'self'|https?:/);
-    await deliver('page.html', '<p>x</p>');
-    const response = await get(deliverableUrl(A, FILE, 1));
-    expect(response.headers.get('content-type')).toBe('text/html');
-    expect(response.headers.get('content-security-policy')).toBe(DELIVERABLE_HTML_CSP);
+    // HTML, and the other documents that can run script when a frame loads them (SVG, XML), and everything else
+    for (const [name, type] of [['page.html', 'text/html'], ['logo.svg', 'image/svg+xml'], ['feed.xml', 'application/xml'], ['clip.webm', 'video/webm'], ['blob.bin', 'application/octet-stream']]) {
+      await deliver(name, '<x/>');
+      const response = await get(deliverableUrl(A, FILE, 1));
+      expect(response.headers.get('content-type'), name).toBe(type);
+      expect(response.headers.get('content-security-policy'), name).toBe(DELIVERABLE_HTML_CSP);
+    }
+    // a PDF has none: Chromium's viewer draws it, and the sandbox directive would keep the viewer from loading
+    await deliver('report.pdf', '%PDF-1.4');
+    expect((await get(deliverableUrl(A, FILE, 1))).headers.get('content-security-policy')).toBeNull();
   });
 
   it('serves a delivered HTML file byte for byte, with no bridge script', async () => {

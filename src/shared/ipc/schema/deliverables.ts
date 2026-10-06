@@ -10,6 +10,7 @@ import type { CommandSpec } from './common';
 
 export const DELIVERABLES_LIST_ALL_DEFAULT = 200;
 export const DELIVERABLES_LIST_ALL_MAX = 500;
+export const DELIVERABLE_CONSOLE_MESSAGE_MAX = 2000; // main cuts a frame's console message to this many characters
 
 export const DeliverablesChangedSchema = z.strictObject({ appSessionId: AppSessionIdSchema, id: z.string(), change: z.enum(['created', 'updated']) });
 export type DeliverablesChanged = z.infer<typeof DeliverablesChangedSchema>;
@@ -19,7 +20,7 @@ export const DeliverableConsoleSchema = z.strictObject({
   deliverableId: z.string(),
   version: z.number().int().min(1),
   level: z.enum(['error', 'warning']),
-  message: z.string(),
+  message: z.string().max(DELIVERABLE_CONSOLE_MESSAGE_MAX),
   line: z.number().int().nullable(),
   source: z.string().nullable(),
 });

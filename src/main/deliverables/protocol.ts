@@ -4,10 +4,10 @@
 // record holds, never by anything in the URL, so it serves exactly the store's files and nothing beside them.
 //
 // Every answer carries `nosniff`, `inline`, `no-store` and `Accept-Ranges`; a `Range` is answered 206 from a bounded
-// read of the opened file (media seek through it). HTML also carries a policy whose leading `sandbox allow-scripts`
-// sandboxes the document wherever it loads (the viewer's frame doubles it; the capture window, which loads it
-// top-level, has nothing else) and which admits no network source and no `'self'`: a self-contained page needs nothing
-// from any origin. The app-wide policy (`window.ts`) leaves this scheme's answers alone, so this one reaches the frame.
+// read of the opened file (media seek through it). Every answer but a PDF's also carries a policy whose leading
+// `sandbox allow-scripts` sandboxes the document wherever it loads (the viewer's frame doubles it; the capture window,
+// which loads it top-level, has nothing else) and which admits no network source and no `'self'`: a self-contained page
+// needs nothing from any origin. The app-wide policy (`window.ts`) leaves this scheme's answers alone, so this one reaches the frame.
 // An artifact's HTML gets the bridge script as the first element of its `<head>` (Design §10); a delivered HTML file is
 // served byte for byte.
 import { constants } from 'node:fs';
@@ -79,7 +79,9 @@ export function createDeliverableHandler(reader: Pick<DeliverableReader, 'get'>)
         'Cache-Control': 'no-store',
         'Accept-Ranges': 'bytes',
       });
-      if (mime === 'text/html') headers.set('Content-Security-Policy', DELIVERABLE_HTML_CSP);
+      // Every answer but a PDF's: SVG and XML documents run script too, and a frame may load any type as a document. A PDF
+      // has none, since Chromium's viewer draws it (the PDF trial) and the sandbox directive would keep the viewer out.
+      if (mime !== 'application/pdf') headers.set('Content-Security-Policy', DELIVERABLE_HTML_CSP);
       const head = request.method === 'HEAD';
       // An artifact's HTML is read whole (16 MiB at most, the tool's cap) for the bridge script; anything else streams.
       const bytes = record.kind === 'artifact' && mime === 'text/html' ? insertBridgeScript(await file.readFile()) : null;
