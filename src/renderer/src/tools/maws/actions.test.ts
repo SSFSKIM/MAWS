@@ -8,7 +8,7 @@ import { fakeClient } from '../../../../../test/support/fake-client';
 import { registerPanelTool } from '../../panel/host';
 import { A, panelOf, probeTool, resetPanelStores } from '../../test-support/panel';
 import type { AskRowData } from '../../transcript';
-import { mawsTranscriptActionsOver } from './actions';
+import { mawsTranscriptActionsOver, openDeliverable } from './actions';
 
 const PATH = '/repo/hello.txt';
 const ASK: AskRowData = {
@@ -56,5 +56,29 @@ describe('openAsk', () => {
     mawsTranscriptActionsOver(fakeClient().client).openAsk('app-b' as AppSessionId, ASK);
     expect(probe.created.map((init) => [init.appSessionId, init.params])).toEqual([['app-b', { askId: 'toolu_a', historical: ASK }]]);
     expect(panelOf('app-b' as AppSessionId)?.tabs.map((tab) => tab.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
+  });
+});
+
+// E2 (M4): a transcript row's Open (M5 registers it as `TranscriptActions.openDeliverable`): the Deliverables tool in the
+// row's session on the record, at the row's version; the viewer itself shows the list and the notice when the record is
+// gone. Nothing while no build registers the tool.
+describe('openDeliverable (E2)', () => {
+  beforeEach(() => resetPanelStores());
+  afterEach(() => resetPanelStores());
+  const ID = '00000000-0000-4000-8000-000000000001';
+
+  it('does nothing while no build registers the Deliverables tool', () => {
+    openDeliverable(A, ID, 2);
+    expect(panelOf(A)?.tabs ?? []).toEqual([]);
+  });
+
+  it('opens the tool in the row’s session on the record and version, its session named', () => {
+    const { tool, probe } = probeTool('deliverables', { multiInstance: false });
+    registerPanelTool(tool);
+    openDeliverable('app-b' as AppSessionId, ID, 2);
+    openDeliverable('app-b' as AppSessionId, ID);
+    expect(probe.created.map((init) => [init.appSessionId, init.params])).toEqual([['app-b', { target: ID, appSessionId: 'app-b', version: 2 }]]);
+    expect(probe.opens.map((open) => open.params)).toEqual([{ target: ID, appSessionId: 'app-b' }]);
+    expect(panelOf('app-b' as AppSessionId)?.tabs.map((tab) => tab.toolId)).toEqual(['deliverables']);
   });
 });

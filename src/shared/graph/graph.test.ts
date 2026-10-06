@@ -81,8 +81,9 @@ describe('graph schemas accept and reject', () => {
 
     it('lists every event kind once and the union covers each', () => {
       expect(new Set(EVENT_KINDS).size).toBe(EVENT_KINDS.length);
-      expect(EVENT_KINDS).toHaveLength(66); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds; E7: peer.message
-      expect(EVENT_KINDS.at(-1)).toBe('peer.message'); // E7: appended after E1's block (X1 is append-only)
+      expect(EVENT_KINDS).toHaveLength(67); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds; E7: peer.message; E2: maws.delivery.artifact
+      expect(EVENT_KINDS.at(-2)).toBe('peer.message'); // E7: appended after E1's block (X1 is append-only)
+      expect(EVENT_KINDS.at(-1)).toBe('maws.delivery.artifact'); // E2: appended after E7's (landing order)
       const covered = SessionEventSchema.options.map((option) => option.shape.kind.value).sort();
       expect(covered).toEqual([...EVENT_KINDS].sort());
     });
@@ -191,6 +192,9 @@ describe('graph schemas accept and reject', () => {
           hopChain: ['b4a75fd9e01cdb83eea3f9ee'], text: 'hello from B', midTurn: false, lineage: 'peer', replyable: true,
         },
         // E7 end
+        // E2 start: an artifact version (X9 artifact_create, artifact_update)
+        'maws.delivery.artifact': { toolUseId: 'toolu_4', requestId: 'r', action: 'update', artifactId: 'dash', deliverableId: '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f', version: 2, title: 'Dashboard' },
+        // E2 end
       };
       expect(Object.keys(samples).sort()).toEqual([...EVENT_KINDS].sort());
       for (const [kind, payload] of Object.entries(samples)) {

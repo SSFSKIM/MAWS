@@ -98,7 +98,7 @@ export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], De
 // E1: the `maws` tool server's commands (P1 ledger §5), each immediate: answered from the host's table or at the
 // answer's flushed write
 type MawsCommand = keyof typeof MawsCommands;
-export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.asks.list': 'immediate', 'maws.ask.answer': 'immediate', 'maws.pane.answer': 'immediate' };
+export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.asks.list': 'immediate', 'maws.ask.answer': 'immediate', 'maws.pane.answer': 'immediate', 'maws.artifact.captured': 'immediate' /* E2 */ };
 // E3: the side-question log's commands (P1 ledger §5), each answered from the host's log at once
 type SideHostCommand = { [N in keyof typeof SideCommands]: (typeof SideCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof SideCommands];
 export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 'side.question.list': 'immediate', 'side.question.clear': 'immediate' };
@@ -230,6 +230,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       modelKeys.set(spec.appSessionId, catalogueKey(plan.engineVersion, plan.gateway, { env: plan.env, cwd: plan.cwd, flagEnv: plan.flagSettings.env })); // C10; never rejects
       session.on('models', (list) => updateModels(spec.appSessionId, list)); // C10
       session.on('paneShow', (request) => emit('maws.pane.show', request)); // E1: relayed to every window
+      // E2 start: the store's writes (deliverables.changed) and the capture requests main answers (maws.artifact.capture)
+      session.on('deliverableChanged', (change) => emit('deliverables.changed', change));
+      session.on('artifactCapture', (request) => emit('maws.artifact.capture', request));
+      // E2 end
     },
   });
 
@@ -712,6 +716,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     }
   });
   handleMaws('maws.pane.answer', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerPane(requestId as RequestId, result) ?? 'not_pending' }));
+  handleMaws('maws.artifact.captured', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerCapture(requestId as RequestId, result) ?? 'not_pending' })); // E2
   // E1 end
 
   // E3 start: the side-question log's commands. The log lives as long as the session's process does here (an exited

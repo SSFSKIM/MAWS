@@ -34,6 +34,8 @@ vi.mock('electron', () => {
   };
 });
 vi.mock('./hosts', () => ({ createHosts: () => fake.hosts }));
+vi.mock('./windows', () => ({ appWindows: () => fake.windows })); // E2: the app-window registry `activate` reads
+vi.mock('./deliverables', () => ({ registerDeliverableScheme: vi.fn(), startDeliverables: () => ({ reader: {}, stop: vi.fn() }) })); // E2: the store's main side
 vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, interceptCommand: vi.fn(), CommandFailure: Error /* C11 */ }));
 // C3 start: main's attention service and its store, started from index.ts, are replaced like the other wired modules
 vi.mock('./attention/service', () => ({ startAttentionService: vi.fn() }));

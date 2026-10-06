@@ -11,7 +11,7 @@ import { CanUseToolRequestSchema, ElicitationRequestSchema, HookCallbackRequestS
 // E1 start
 import { withQuestionIds } from '@shared/maws/ask';
 import { readMcpMessage, toolCallOf } from '@shared/maws/rpc';
-import { AskAnswerSchema, AskResultSchema, isMawsToolName, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
+import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema, AskAnswerSchema, AskResultSchema, isMawsToolName, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
 // E1 end
 import type { ControlRequestFrame, ControlResponseFrame } from '@shared/wire/frames';
 import { compact, stringOrNull, type Attribution, type EventSink } from './normalizer-support';
@@ -222,6 +222,17 @@ function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: E
     out.emit({ kind: 'maws.pane.shown', toolUseId: call.toolUseId, requestId, pane: args.data.pane, target: args.data.target ?? null, opened: parsed.success ? parsed.data.opened : null, error: isError ? text : null }, attribution);
     return;
   }
+  // E2 start: `maws.delivery.artifact` for an `artifact_create` or `artifact_update` whose answer parses as its result (a
+  // refusal is an `isError` text and yields nothing). Their answers are the host's one text block; the engine's own
+  // pointer block beside an image block reaches the transcript, never this answer (E2 M0).
+  if (call.tool === 'artifact_create' || call.tool === 'artifact_update') {
+    const parsed = call.tool === 'artifact_create' ? ArtifactCreateResultSchema.safeParse(json) : ArtifactUpdateResultSchema.safeParse(json);
+    if (!parsed.success) return;
+    const { id: artifactId, deliverableId, version, title } = parsed.data;
+    out.emit({ kind: 'maws.delivery.artifact', toolUseId: call.toolUseId, requestId, action: call.tool === 'artifact_create' ? 'create' : 'update', artifactId, deliverableId, version, title }, attribution);
+    return;
+  }
+  // E2 end
   if (call.tool === 'ask' && call.askId !== null && openAsks.has(call.askId)) {
     const parsed = AskResultSchema.safeParse(json);
     if (!parsed.success || parsed.data.status !== 'answered') return;

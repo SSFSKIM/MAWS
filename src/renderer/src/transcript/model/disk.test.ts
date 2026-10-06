@@ -214,3 +214,31 @@ describe('a maws ask read from disk', () => {
     await expect(`${JSON.stringify(rows.map(sortKeys), null, 2)}\n`).toMatchFileSnapshot(join(SNAPSHOT_DIR, 'disk/p1-maws-ask-async.rows.json'));
   });
 });
+
+// E2 start (M5, Design §9; §12 "Terminal interop of new rows"): the artifact session read from its transcript on disk,
+// where there are no `maws.delivery.artifact` events, only the calls and their results, the screenshot's carrying the
+// engine's pointer text between the image and the server's JSON. The rows and cells read as the journal's do.
+describe('maws artifacts read from disk', () => {
+  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' })); // the snapshot suite's pin
+  afterAll(() => configureTime(null));
+  const sortKeys = (value: unknown): unknown =>
+    Array.isArray(value) ? value.map(sortKeys) : typeof value === 'object' && value !== null ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys((value as Record<string, unknown>)[key])])) : value;
+  const mawsCells = (rows: Row[]) => ofKind(rows, 'cell').filter((cell) => cell.toolName.startsWith('mcp__maws__artifact_')).map((cell) => [cell.toolName, cell.status, cell.label]);
+  const artifacts = (rows: Row[]) => ofKind(rows, 'artifact').map((row) => ({ ...row, turnId: null, at: '' })); // the two paths' clocks and turn keys differ
+
+  it('p1-maws-artifacts: the same artifact rows and cells as the journal, from the calls and results alone', async () => {
+    const disk = await backfillFixture('p1-maws-artifacts', '2269c353-97d9-4e4f-a868-5aab4cf2b0c4');
+    expect(disk.filter((event) => event.kind.startsWith('maws.'))).toEqual([]);
+    const rows = rowsOf(withAllExpanded(stateOf(disk)));
+    const journal = rowsOf(withAllExpanded(stateOf(journalToEvents(loadJournal('pass3', 'p1-maws-artifacts')))));
+    expect(artifacts(rows)).toHaveLength(3);
+    expect(artifacts(rows)).toEqual(artifacts(journal));
+    expect(mawsCells(rows)).toEqual([
+      ['mcp__maws__artifact_screenshot', 'done', 'Screenshot of Dashboard v1 (64 × 64)'],
+      ['mcp__maws__artifact_list', 'done', 'Listed 1 artifact'],
+    ]);
+    expect(mawsCells(rows)).toEqual(mawsCells(journal));
+    await expect(`${JSON.stringify(rows.map(sortKeys), null, 2)}\n`).toMatchFileSnapshot(join(SNAPSHOT_DIR, 'disk/p1-maws-artifacts.rows.json'));
+  });
+});
+// E2 end

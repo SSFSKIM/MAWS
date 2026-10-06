@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { SendFileResultSchema } from '@shared/maws/tools';
 import { MemoryDeliverableStore } from '../deliverables/store';
-import type { McpToolContext } from './server';
+import type { McpToolContext, McpToolResult } from './server';
 import { sendFileTool } from './send-file';
 
 let root: string;
@@ -18,7 +18,7 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 const ctx = (over: Partial<McpToolContext> = {}): McpToolContext => ({ appSessionId: 'app-1' as AppSessionId, cwd: root, toolUseId: 'toolu_01' as ToolUseId, requestId: 'r1' as RequestId, signal: new AbortController().signal, ...over });
-const text = (result: { content: { text: string }[] }) => result.content[0]!.text;
+const text = (result: McpToolResult) => (result.content[0] as { text: string }).text; // E2: content widened to image blocks
 let n = 0;
 const tool = (store: MemoryDeliverableStore) => sendFileTool({ deliverables: store, now: () => new Date('2026-10-05T12:00:00.000Z'), newId: () => `00000000-0000-4000-8000-00000000000${++n}` });
 
@@ -65,7 +65,8 @@ describe('send_file (G2, host half)', () => {
   });
 
   it('answers a store that refused the record as an error', async () => {
-    const result = await sendFileTool({ deliverables: { write: async () => Promise.reject(new Error('EACCES')) } }).call({ files: ['hello.txt'] }, ctx());
+    const refusing = Object.assign(new MemoryDeliverableStore(), { write: async () => Promise.reject(new Error('EACCES')) }); // E2: the writer's surface grew
+    const result = await sendFileTool({ deliverables: refusing }).call({ files: ['hello.txt'] }, ctx());
     expect(result).toEqual({ content: [{ type: 'text', text: `send_file: ${join(root, 'hello.txt')} was not recorded: EACCES` }], isError: true });
   });
 });

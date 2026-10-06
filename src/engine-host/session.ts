@@ -43,10 +43,10 @@ import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionSurface } from './surface'; // R2
 // E1 start
-import type { MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
+import type { MawsArtifactCapturedResult, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/ask';
 import type { AskAnswer, AskResult } from '@shared/maws/tools';
-import { MemoryDeliverableStore, type DeliverableWriter } from './deliverables/store';
+import { MemoryDeliverableStore, type DeliverableChange, type DeliverableWriter, type OnDeliverableWritten } from './deliverables/store';
 import { AskAnswerMismatch } from './tool-server/ask';
 import { askAttentionItem, AskTable, type AskCancelReason } from './tool-server/asks';
 import { PaneBridge, type PaneShowRequest } from './tool-server/panes';
@@ -57,6 +57,11 @@ import { mawsTools } from './tool-server/tools';
 import type { SideQuestionRequest } from '@shared/wire/control';
 import { SideQuestionLog } from './side-questions';
 // E3 end
+// E2 start
+import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
+import type { ArtifactCaptureRequest, CaptureBridge } from './tool-server/artifacts';
+import { HostBridge } from './tool-server/bridge';
+// E2 end
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
 
 export { HostHookRegistry } from './host-hooks';
@@ -102,7 +107,9 @@ export interface EngineSessionOptions {
   reconnectTrigger?: 'user' | 'process_exit';
   // C12 end
   sessionStartHookMs?: (plan: LaunchPlan) => Promise<number>; // debt wave 6: the hooks' bound; read from the settings by default
-  deliverables?: DeliverableWriter; // E1: where `send_file` records deliveries (the launcher's FileDeliverableStore; in memory by default)
+  // E1: where the `maws` tools record deliverables (the launcher's FileDeliverableStore; in memory by default). E2: built
+  // with the session's announcement, so every write the store settles reaches the windows as `deliverables.changed`.
+  deliverables?: (onWritten: OnDeliverableWritten) => DeliverableWriter;
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -119,6 +126,10 @@ interface Listeners {
   catalog: (catalog: Catalog) => void; // C7: the whole catalogue, whenever its revision moved
   models: (models: unknown[]) => void; // C10: the initialize response's model list, for the catalogue cache
   paneShow: (request: PaneShowRequest & { appSessionId: LaunchSpec['appSessionId'] }) => void; // E1: `show_pane` asks the windows (maws.pane.show)
+  // E2 start: the store wrote a record (deliverables.changed); `artifact_screenshot` asks main to capture (maws.artifact.capture)
+  deliverableChanged: (change: { appSessionId: LaunchSpec['appSessionId']; id: string; change: DeliverableChange }) => void;
+  artifactCapture: (request: ArtifactCaptureRequest & { appSessionId: LaunchSpec['appSessionId'] }) => void;
+  // E2 end
 }
 
 type ProcessState = EngineSessionStatus['process'];
@@ -144,12 +155,13 @@ export class EngineSession {
   // E1: the `maws` MCP server the engine handshakes over `mcp_message`, and the bridge `show_pane` opens panes through
   readonly toolServer: MawsToolServer;
   private readonly panes: PaneBridge;
+  private readonly captures: CaptureBridge; // E2: the bridge `artifact_screenshot` asks main through
   private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
   private askItems = new Map<string, AttentionItem>(); // E1 M4b: the blocking asks' attention items, published with the broker's
   readonly sideQuestions = new SideQuestionLog(); // E3: this process's `/btw` exchanges (host memory, X13)
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */ };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, deliverableChanged: new Set(), artifactCapture: new Set() /* E2 */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
@@ -204,6 +216,8 @@ export class EngineSession {
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.panes = new PaneBridge({ show: (request) => this.emit('paneShow', { appSessionId: opts.spec.appSessionId, ...request }) });
+    this.captures = new HostBridge({ send: (request) => this.emit('artifactCapture', { appSessionId: opts.spec.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS }); // E2
+    const announce: OnDeliverableWritten = (record, change) => this.emit('deliverableChanged', { appSessionId: record.appSessionId, id: record.id, change }); // E2
     this.askTable = new AskTable({
       onChange: () => {
         this.publishAsks(); // E1 M4b
@@ -211,7 +225,10 @@ export class EngineSession {
       },
     });
     this.toolServer = new MawsToolServer({
-      tools: mawsTools({ deliverables: opts.deliverables ?? new MemoryDeliverableStore(), bridge: this.panes, asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason) }),
+      tools: mawsTools({
+        deliverables: opts.deliverables?.(announce) ?? new MemoryDeliverableStore({ onWritten: announce }), bridge: this.panes, capture: this.captures /* E2 */,
+        asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
+      }),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,
       appSessionId: opts.spec.appSessionId,
@@ -371,6 +388,11 @@ export class EngineSession {
   // E1: a window's answer to a `show_pane` (`maws.pane.answer`); the first one wins.
   answerPane(requestId: RequestId, result: MawsPaneAnswerResult): 'delivered' | 'not_pending' {
     return this.panes.answer(requestId, result);
+  }
+
+  // E2: main's answer to an `artifact_screenshot` capture (`maws.artifact.captured`); the first one wins.
+  answerCapture(requestId: RequestId, result: MawsArtifactCapturedResult): 'delivered' | 'not_pending' {
+    return this.captures.answer(requestId, result);
   }
 
   // E1 M2: the asks waiting for the human (`maws.asks.list`), pending or being answered.
@@ -1110,6 +1132,7 @@ export class EngineSession {
     // E1: every tool call in flight is aborted (no pipe takes its answer) and every pane request settles
     this.toolServer.processExited(); // a blocking ask's call aborts with it, cancelling the ask (meta row)
     this.panes.processExited();
+    this.captures.processExited(); // E2
     for (const ask of this.askTable.cancelAll('exit')) this.askCancelled(ask, 'exit'); // E1 M2: the async asks, before the exit row
     this.sideQuestions.processExited(new Date().toISOString()); // E3: no answer comes once the process is gone
     this.client?.close('the process exited');

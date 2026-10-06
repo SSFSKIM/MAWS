@@ -254,6 +254,7 @@ function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) =>
       },
       peerReplies: NO_ACTIONS.peerReplies,
       // E7 end
+      openDeliverable: (_appSessionId, id, version) => say(`openDeliverable ${id}${version === undefined ? '' : ` v${version}`}`), // E2
       loadSpill: (spill) => {
         say(`loadSpill ${spill.path}`);
         return Promise.resolve(`(the harness has no spill content for ${spill.path})`);

@@ -5,6 +5,7 @@ import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, NOT_SENT, pl
 import { ASK, askAnswerCopy, DELIVERY } from './copy'; // E1
 import { agentListCopy } from './copy'; // E7
 import { previewHidesBody } from './rows'; // E7
+import { artifactHeading } from './copy'; // E2
 import type { Cell, Row } from './rows';
 import { untaggedUserText } from './user-text';
 import { SIDE_COPY, sideRowStatus } from '../../side/copy'; // E3
@@ -47,6 +48,7 @@ function partOf(row: Row): string | null {
     // E1 end
     case 'side_thread': return `*${SIDE_COPY.row.lead} \`${SIDE_COPY.label(row.label, row.openedBy)}\` ${sideRowStatus(row)}*`; // E3
     case 'agent_list': return listPart(row); // E7
+    case 'artifact': return `**${artifactHeading(row)}**`; // E2
   }
 }
 

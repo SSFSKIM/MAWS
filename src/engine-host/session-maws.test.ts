@@ -55,9 +55,14 @@ type Rpc = { jsonrpc: string; id: unknown; result?: { content?: { text: string }
 
 // A scripted session whose engine sends the `maws` server JSON-RPC messages, as 2.1.290 does (E0a Q1).
 async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSession>[0]>['transport'] = {}) {
-  const run = scriptedSession({ spec: { cwd }, session: { deliverables: new FileDeliverableStore(userData), appVersion: '0.9.0' }, transport });
+  const run = scriptedSession({ spec: { cwd }, session: { deliverables: (onWritten) => new FileDeliverableStore(userData, { onWritten }), appVersion: '0.9.0' }, transport });
   const shows: unknown[] = [];
   run.session.on('paneShow', (request) => shows.push(request));
+  // E2: the store's announcements and the capture requests
+  const changes: unknown[] = [];
+  run.session.on('deliverableChanged', (change) => changes.push(change));
+  const captures: unknown[] = [];
+  run.session.on('artifactCapture', (request) => captures.push(request));
   await run.session.start();
   let n = 0;
   const mcp = (message: Record<string, unknown>, server = 'maws'): RequestId => {
@@ -73,11 +78,11 @@ async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSess
     return answerOf(id)!;
   };
   const maws = () => run.events.filter((e) => e.kind.startsWith('maws.'));
-  return { ...run, shows, mcp, call, answerOf, answered, maws };
+  return { ...run, shows, changes, captures, mcp, call, answerOf, answered, maws };
 }
 
 describe('the maws server on an EngineSession (scripted)', () => {
-  it('answers the handshake and lists the three tools with their annotations', async () => {
+  it('answers the handshake and lists the seven tools with their annotations', async () => {
     const run = await mawsSession();
     const init = await run.answered(run.mcp({ id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.290' } } }));
     expect(init.result).toEqual({ protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'maws', version: '0.9.0' } });
@@ -86,6 +91,9 @@ describe('the maws server on an EngineSession (scripted)', () => {
     expect(list.result!.tools).toEqual(mawsToolList());
     expect((list.result!.tools as { name: string; annotations: unknown }[]).map((t) => [t.name, t.annotations])).toEqual([
       ['send_file', { ...MAWS_TOOL_ANNOTATIONS, title: 'Send file' }], ['ask', { ...MAWS_TOOL_ANNOTATIONS, title: 'Ask questions' }], ['show_pane', { ...MAWS_TOOL_ANNOTATIONS, title: 'Show pane' }],
+      // E2 (Decision Log 4): the two writers are not read-only
+      ['artifact_create', { readOnlyHint: false, openWorldHint: false, title: 'Create artifact' }], ['artifact_update', { readOnlyHint: false, openWorldHint: false, title: 'Update artifact' }],
+      ['artifact_list', { ...MAWS_TOOL_ANNOTATIONS, title: 'List artifacts' }], ['artifact_screenshot', { ...MAWS_TOOL_ANNOTATIONS, title: 'Screenshot artifact' }],
     ]);
     expect((await run.answered(run.mcp({ id: 2, method: 'resources/list' }))).error).toEqual({ code: -32601, message: 'Method not found: resources/list' });
     expect((await run.answered(run.mcp({ id: 0, method: 'initialize' }, 'maws2'))).error!.code).toBe(-32601);
@@ -107,6 +115,8 @@ describe('the maws server on an EngineSession (scripted)', () => {
     expect(await new FileDeliverableStore(userData).list(run.session.status().appSessionId)).toMatchObject([{ id: result.deliverables[0]!.id, kind: 'file', path: join(cwd, 'hello.txt'), title: 'hello.txt', caption: 'the greeting', toolUseId: 'toolu_send' }]);
     await until(() => run.maws().length > 0, 'the delivery event');
     expect(run.maws()).toMatchObject([{ kind: 'maws.delivery.file', toolUseId: 'toolu_send', requestId: id, deliverables: result.deliverables, caption: 'the greeting', urgency: 'normal' }]);
+    // E2: the store announces the record it wrote (deliverables.changed), send_file untouched
+    expect(run.changes).toEqual([{ appSessionId: run.session.status().appSessionId, id: result.deliverables[0]!.id, change: 'created' }]);
     // a refused call: an error result and no event (residue 1's admission rule)
     const refused = await run.answered(run.call('send_file', { files: ['gone.txt'] }));
     expect(refused.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.notAFile(join(cwd, 'gone.txt')) }], isError: true });
@@ -533,11 +543,100 @@ describe('a blocking ask as a question attention item (scripted)', () => {
   });
 });
 
+// E2 start (E2 execution document, M1 step 5): the artifact tools on the same scripted session: the store's copy and
+// record, `deliverables.changed`, `maws.delivery.artifact` live and on rebuild, the refusals, the capture bridge
+describe('the artifact tools on an EngineSession (scripted)', () => {
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+  const json = (rpc: Rpc) => JSON.parse(rpc.result!.content!.find((b) => (b as { type?: string }).type === 'text')!.text) as Record<string, unknown>;
+
+  it('create and update copy versions, write the record, announce it and yield maws.delivery.artifact, live and on rebuild; a refusal yields nothing', async () => {
+    writeFileSync(join(cwd, 'dashboard.html'), '<h1 style="color:red">HELLO_E2</h1>');
+    const run = await mawsSession();
+    const appSessionId = run.session.status().appSessionId;
+    const create = run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }, 'toolu_create');
+    const created = json(await run.answered(create));
+    expect(created).toMatchObject({ status: 'created', id: 'dash', version: 1, title: 'Dashboard', externalReferences: 0 });
+    const deliverableId = created.deliverableId as string;
+    const dir = join(userData, 'deliverables', appSessionId);
+    expect((await readdir(join(dir, deliverableId)))).toEqual(['v1.html']);
+    expect(run.changes).toEqual([{ appSessionId, id: deliverableId, change: 'created' }]);
+
+    writeFileSync(join(cwd, 'dashboard.html'), '<h1 style="color:blue">HELLO_E2</h1>');
+    const update = run.call('artifact_update', { id: 'dash', html_path: 'dashboard.html' }, 'toolu_update');
+    expect(json(await run.answered(update))).toEqual({ status: 'updated', id: 'dash', deliverableId, version: 2, title: 'Dashboard', externalReferences: 0 });
+    expect((await readdir(join(dir, deliverableId))).sort()).toEqual(['v1.html', 'v2.html']);
+    expect(await new FileDeliverableStore(userData).get(appSessionId, deliverableId)).toMatchObject({ kind: 'artifact', artifactId: 'dash', path: join(dir, deliverableId, 'v2.html'), versions: [{ toolUseId: 'toolu_create' }, { toolUseId: 'toolu_update' }] });
+    expect(run.changes).toEqual([{ appSessionId, id: deliverableId, change: 'created' }, { appSessionId, id: deliverableId, change: 'updated' }]);
+
+    const listed = json(await run.answered(run.call('artifact_list', {}, 'toolu_list')));
+    expect(listed).toMatchObject({ status: 'listed', artifacts: [{ id: 'dash', deliverableId, title: 'Dashboard', versions: 2 }] });
+    const refused = await run.answered(run.call('artifact_update', { id: 'nope', html_path: 'dashboard.html' }, 'toolu_nope'));
+    expect(refused.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.noArtifact('artifact_update', 'nope') }], isError: true });
+    const invalid = await run.answered(run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html' }, 'toolu_invalid'));
+    expect(invalid.result!.isError).toBe(true);
+
+    await until(() => run.maws().length === 2, 'the artifact events');
+    await new Promise((r) => setTimeout(r, 20)); // nothing more arrives for the list, the refusal or the invalid call
+    expect(run.maws()).toMatchObject([
+      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_create', requestId: create, action: 'create', artifactId: 'dash', deliverableId, version: 1, title: 'Dashboard' },
+      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_update', requestId: update, action: 'update', artifactId: 'dash', deliverableId, version: 2, title: 'Dashboard' },
+    ]);
+    expect(run.changes).toHaveLength(2);
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  it('artifact_screenshot asks main through maws.artifact.capture and answers the image block first; a second answer is not_pending', async () => {
+    writeFileSync(join(cwd, 'dashboard.html'), '<h1>HELLO_E2</h1>');
+    const run = await mawsSession();
+    const appSessionId = run.session.status().appSessionId;
+    const deliverableId = json(await run.answered(run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }))).deliverableId;
+    const shot = run.call('artifact_screenshot', { id: 'dash' }, 'toolu_shot');
+    await until(() => run.captures.length === 1, 'the capture request');
+    expect(run.captures).toEqual([{ appSessionId, requestId: shot, deliverableId, version: 1, width: 1280, height: 800 }]);
+    expect(run.session.status().pendingRequests).toBe(1);
+    expect(run.session.answerCapture(shot, { ok: true, png: PNG, width: 1280, height: 800, consoleErrors: [] })).toBe('delivered');
+    expect(run.session.answerCapture(shot, { ok: true, png: PNG, width: 1280, height: 800, consoleErrors: [] })).toBe('not_pending');
+    const rpc = await run.answered(shot);
+    expect(rpc.result!.content![0]).toEqual({ type: 'image', data: PNG, mimeType: 'image/png' });
+    expect(json(rpc)).toMatchObject({ status: 'captured', id: 'dash', deliverableId, title: 'Dashboard', version: 1, width: 1280, height: 800, consoleErrors: [] });
+    // a refusal from main
+    const failed = run.call('artifact_screenshot', { id: 'dash' });
+    await until(() => run.captures.length === 2, 'the second capture request');
+    run.session.answerCapture(failed, { ok: false, error: 'screenshot too large (5000000 bytes); ask for a smaller size' });
+    expect((await run.answered(failed)).result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.captureFailed('screenshot too large (5000000 bytes); ask for a smaller size') }], isError: true });
+    expect(run.maws()).toMatchObject([{ kind: 'maws.delivery.artifact', action: 'create' }]); // a screenshot makes no event
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  it('a screenshot the engine withdrew, and one pending at exit, are answered with nothing', async () => {
+    writeFileSync(join(cwd, 'dashboard.html'), '<h1>HELLO_E2</h1>');
+    const run = await mawsSession();
+    await run.answered(run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }));
+    const withdrawn = run.call('artifact_screenshot', { id: 'dash' });
+    const atExit = run.call('artifact_screenshot', { id: 'dash' });
+    await until(() => run.captures.length === 2, 'both capture requests');
+    run.transport.push({ type: 'control_cancel_request', request_id: withdrawn });
+    await until(() => run.session.status().pendingRequests === 1, 'the withdrawal');
+    expect(run.session.answerCapture(withdrawn, { ok: true, png: PNG, width: 1, height: 1, consoleErrors: [] })).toBe('not_pending');
+    run.transport.exit(1);
+    await run.session.exited;
+    await new Promise((r) => setTimeout(r, 10));
+    expect(run.answerOf(withdrawn)).toBeUndefined();
+    expect(run.answerOf(atExit)).toBeUndefined();
+    expect(run.session.answerCapture(atExit, { ok: true, png: PNG, width: 1, height: 1, consoleErrors: [] })).toBe('not_pending');
+  });
+});
+// E2 end
+
 // The app-replay pattern (surface-replay.test.ts): the app's own handshake through the replay transport, surface reads
 // on, the recorded prompt sent and the recorded permission allowed through the session, ended where the probe's own
 // writes begin (seq 96, its notifications/tools/list_changed), which the app never makes.
 describe('an app replay of pass3/p1-sdk-mcp-roundtrip (E0a Q1)', () => {
-  it('handshakes the maws server, lists the three tools and answers the probe-only echo_file as an unknown tool', async () => {
+  it('handshakes the maws server, lists every maws tool and answers the probe-only echo_file as an unknown tool', async () => {
     const fixture = loadJournal('pass3', 'p1-sdk-mcp-roundtrip');
     const spec = launchSpec({ appSessionId: 'replay-p1-sdk-mcp' as never, sessionId: null, model: null, replay: 'pass3/p1-sdk-mcp-roundtrip' });
     const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: FIXTURE_ENGINE_VERSION });

@@ -34,6 +34,9 @@ import * as scm from './schema/scm';
 // E3 start
 import * as side from './schema/side';
 // E3 end
+// E2 start
+import * as deliverables from './schema/deliverables';
+// E2 end
 
 export {
   HostPingSchema,
@@ -112,6 +115,9 @@ export const commands = {
   // E3 start
   ...side.commands,
   // E3 end
+  // E2 start
+  ...deliverables.commands,
+  // E2 end
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -140,6 +146,9 @@ export const events = {
   // E3 start
   ...side.events,
   // E3 end
+  // E2 start
+  ...deliverables.events,
+  // E2 end
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

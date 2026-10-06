@@ -975,3 +975,33 @@ describe('side questions (E3 M1)', () => {
   });
 });
 // E3 end
+// E2 start: the store's announcements and the capture bridge through the launcher's own store (E2 Design §2 and §7)
+describe('deliverables.changed and the capture bridge (E2 M1)', () => {
+  it("relays the launcher's store writes as deliverables.changed and a screenshot's request as maws.artifact.capture, answered by maws.artifact.captured", async () => {
+    const page = join(userData, 'dashboard.html');
+    writeFileSync(page, '<h1>HELLO_E2</h1>');
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    expect(await host.call('maws.artifact.captured', { appSessionId: 'app-none', requestId: 'r1', result: { ok: false, error: 'x' } })).toEqual({ outcome: 'not_pending' });
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    const call = (requestId: string, name: string, args: unknown) =>
+      transport.push({ type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: args } } } });
+    call('mcp-create', 'artifact_create', { id: 'dash', html_path: page, title: 'Dashboard' });
+    await until(() => host.emitted.some((e) => e.name === 'deliverables.changed'), 'the store announcement');
+    const changed = host.emitted.find((e) => e.name === 'deliverables.changed')!.payload as { appSessionId: string; id: string; change: string };
+    expect(changed).toMatchObject({ appSessionId: id, change: 'created' });
+    expect(existsSync(join(userData, 'deliverables', id, `${changed.id}.json`))).toBe(true);
+    call('mcp-shot', 'artifact_screenshot', { id: 'dash', width: 640, height: 480 });
+    await until(() => host.emitted.some((e) => e.name === 'maws.artifact.capture'), 'the capture request');
+    expect(host.emitted.find((e) => e.name === 'maws.artifact.capture')!.payload).toEqual({ appSessionId: id, requestId: 'mcp-shot', deliverableId: changed.id, version: 1, width: 640, height: 480 });
+    const result = { ok: true as const, png: 'iVBORw0KGgo=', width: 640, height: 480, consoleErrors: [] };
+    expect(await host.call('maws.artifact.captured', { appSessionId: id, requestId: 'mcp-shot', result })).toEqual({ outcome: 'delivered' });
+    expect(await host.call('maws.artifact.captured', { appSessionId: id, requestId: 'mcp-shot', result })).toEqual({ outcome: 'not_pending' });
+    await until(() => transport.writes.some((w) => w.type === 'control_response' && (w as { response: { request_id: string } }).response.request_id === 'mcp-shot'), 'the answer');
+    transport.exit(0);
+    await host.ipc.table.get(id)!.exited;
+  });
+});
+// E2 end

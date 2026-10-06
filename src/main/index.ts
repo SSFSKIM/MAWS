@@ -88,12 +88,18 @@ import { ScmService } from './scm/service';
 // E3 start
 import { sideThreadEvents, startSideThreads } from './side/side-threads';
 // E3 end
+// E2 start
+import { appWindows } from './windows';
+import { registerDeliverableScheme, startDeliverables } from './deliverables';
+// E2 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
 // The smoke runs unattended, so nothing may wait on a person: Chromium keeps its storage key in a mock keychain
 // instead of asking the login keychain, whose access prompt an unsigned or re-signed build can raise.
 if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');
+// E2: the deliverable store's scheme is privileged before the app is ready (protocol.registerSchemesAsPrivileged)
+registerDeliverableScheme();
 
 // macOS convention (D-11): closing the last window keeps the app running; the dock icon re-creates it (`activate`
 // below). This empty listener is load-bearing: with no `window-all-closed` listener Electron quits when the last
@@ -115,6 +121,12 @@ void startWithProfileLock(app, () => {
   process.env.MAWS_USER_DATA = app.getPath('userData');
   // (the attention service starts in C4's block below, over the index that now implements its store: C3's handover)
   // C3 end
+  // E2 start: the deliverable store's read side (E2 execution document, Design §2, §3, §7): main's reader over the files
+  // the engine host writes, the maws-deliverable: scheme and the frame policies on the window's session and the capture
+  // partition, deliverables.* and the capture service; the files service below admits delivered paths through the reader.
+  const deliverables = startDeliverables({ userData: app.getPath('userData'), hosts, register: registerMainHandler, env: process.env });
+  app.on('will-quit', deliverables.stop);
+  // E2 end
 
   // C4 start: the index (<userData>/index.sqlite) answers the record side of session.*, and its session source folds the
   // engine host's store events into it once the host is ready. C5's read model starts the source (its block below:
@@ -248,6 +260,7 @@ void startWithProfileLock(app, () => {
     emit: (payload) => void emit('files.changed', payload),
     openPath: (path) => shell.openPath(path),
     showItemInFolder: (path) => shell.showItemInFolder(path), // E1: files.reveal
+    admitted: (appSessionId, real) => deliverables.reader.admitted(appSessionId, real), // E2: a delivered file outside the roots
   });
   app.on('will-quit', () => filesService.dispose());
   // C8c end
@@ -441,7 +454,7 @@ void startWithProfileLock(app, () => {
   // C12 end
   // ---- end C5 ----
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) openWindow();
+    if (appWindows().length === 0) openWindow(); // E2: a capture window is not the app's
   });
   app.on('will-quit', () => hosts.stop());
   // E9 start: push-to-talk dictation (E9 execution document, M2): voice.* over the bundled helper, spawned on first use

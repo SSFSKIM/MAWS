@@ -5,10 +5,16 @@ import type { DenialKind, SafeguardVerdict } from '@shared/graph/enums';
 import { MAWS_SERVER_NAME, type MawsToolName } from '@shared/maws/tools'; // E1
 import type { ToolCategory, ToolClassification } from './rows';
 
-export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery' | /* E7 */ 'agent_list';
+export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery' | /* E7 */ 'agent_list' | /* E2 */ 'artifact';
 
 // E1 start: the names the engine gives the `maws` server's tools (X9), as tool uses carry them
-export const MAWS_TOOL_USE: Record<MawsToolName, string> = { send_file: `mcp__${MAWS_SERVER_NAME}__send_file`, ask: `mcp__${MAWS_SERVER_NAME}__ask`, show_pane: `mcp__${MAWS_SERVER_NAME}__show_pane` };
+export const MAWS_TOOL_USE: Record<MawsToolName, string> = {
+  send_file: `mcp__${MAWS_SERVER_NAME}__send_file`, ask: `mcp__${MAWS_SERVER_NAME}__ask`, show_pane: `mcp__${MAWS_SERVER_NAME}__show_pane`,
+  // E2 start: the artifact tools (an artifact row for the two writers, cells for the two readers)
+  artifact_create: `mcp__${MAWS_SERVER_NAME}__artifact_create`, artifact_update: `mcp__${MAWS_SERVER_NAME}__artifact_update`,
+  artifact_list: `mcp__${MAWS_SERVER_NAME}__artifact_list`, artifact_screenshot: `mcp__${MAWS_SERVER_NAME}__artifact_screenshot`,
+  // E2 end
+};
 // E1 end
 
 const ROW_KIND_TOOLS: Record<string, Presentation> = {
@@ -24,6 +30,10 @@ const ROW_KIND_TOOLS: Record<string, Presentation> = {
   // Design §4)
   ListAgents: 'agent_list',
   // E7 end
+  // E2 start: an artifact version the agent registered is an artifact row
+  [MAWS_TOOL_USE.artifact_create]: 'artifact',
+  [MAWS_TOOL_USE.artifact_update]: 'artifact',
+  // E2 end
 };
 
 export function presentationOf(toolName: string): Presentation {
@@ -44,7 +54,6 @@ const TABLE: Record<string, TableRow> = {
   EnterPlanMode: grouped('other', true), EnterWorktree: grouped('other', true), ExitWorktree: grouped('other', true),
   TodoWrite: grouped('other', true), TaskCreate: grouped('other', true), TaskUpdate: grouped('other', true), TaskList: grouped('other', true),
   TaskGet: grouped('other', true), TaskOutput: grouped('other', true), TaskStop: grouped('other', true),
-  SendUserFile: standalone('other'),
   // E1 start: a pane shown for the model is a cell of its own, never folded into a group of MCP calls
   [MAWS_TOOL_USE.show_pane]: standalone('other'),
   // E1 end
@@ -52,6 +61,10 @@ const TABLE: Record<string, TableRow> = {
   // that Background work's `Open creating turn` jumps to (E7 execution document, Design §7)
   CronCreate: grouped('other'), CronList: grouped('other'), CronDelete: grouped('other'),
   // E7 end
+  // E2 start: listing and screenshotting artifacts are cells of their own, as show_pane is
+  [MAWS_TOOL_USE.artifact_list]: standalone('other'),
+  [MAWS_TOOL_USE.artifact_screenshot]: standalone('other'),
+  // E2 end
 };
 
 export const MCP_TOOL = /^mcp__([^_].*?)__(.+)$/;

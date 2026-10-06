@@ -67,6 +67,98 @@ describe('the pane bridge, window side (E1)', () => {
     expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.paneUnavailable('deliverable') } }]);
   });
 
+  // E2 (Design §4 "show_pane 'deliverable'"): the target is resolved through main before anything opens, so the model
+  // reads that its id was wrong rather than "shown" over a list.
+  describe('deliverable (E2)', () => {
+    const DASH = '00000000-0000-4000-8000-000000000001';
+    const record = { id: DASH, appSessionId: A, kind: 'artifact', artifactId: 'dash', path: '/u/v1.html', title: 'Dashboard', versions: [{ path: '/u/v1.html', at: 't' }], createdAt: 't' };
+    beforeEach(() => {
+      disconnect();
+      fake = fakeClient({
+        'maws.pane.answer': { outcome: 'delivered' },
+        'deliverables.get': (input: { id: string }) => (input.id === DASH ? { record, present: [true] } : { record: null, present: [] }),
+        'deliverables.list': { records: [record] },
+      });
+      disconnect = connectPaneShows(fake.client);
+    });
+
+    it('a recorded target opens the Deliverables tool on it and answers panel-tool', async () => {
+      const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+      registerPanelTool(tool);
+      show(fake, { pane: 'deliverable', target: DASH });
+      await settle();
+      expect(fake.invoked('deliverables.get')).toEqual([{ appSessionId: A, id: DASH }]);
+      expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH, appSessionId: A }]); // the session named, so a pinned tab follows it
+      const [opened] = panelOf(A)!.tabs;
+      expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'deliverables', tabId: opened!.id, title: 'Deliverables' } } }]);
+    });
+
+    it('an artifact’s own id finds its record', async () => {
+      const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+      registerPanelTool(tool);
+      show(fake, { pane: 'deliverable', target: 'dash' });
+      await settle();
+      expect(fake.invoked('deliverables.get')).toEqual([]); // not a record id: main is not asked to read it
+      expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH, appSessionId: A }]);
+    });
+
+    it('an artifact id shaped like a uuid is still found by the artifact search when no record has that id', async () => {
+      const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+      registerPanelTool(tool);
+      const shaped = '00000000-0000-4000-8000-0000000000aa';
+      disconnect();
+      fake = fakeClient({
+        'maws.pane.answer': { outcome: 'delivered' },
+        'deliverables.get': { record: null, present: [] },
+        'deliverables.list': { records: [{ ...record, artifactId: shaped }] },
+      });
+      disconnect = connectPaneShows(fake.client);
+      show(fake, { pane: 'deliverable', target: shaped });
+      await settle();
+      expect(fake.invoked('deliverables.get')).toEqual([{ appSessionId: A, id: shaped }]);
+      expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH, appSessionId: A }]);
+    });
+
+    it('a refused read answers deliverableUnreadable with main’s message, nothing opened', async () => {
+      const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+      registerPanelTool(tool);
+      disconnect();
+      fake = fakeClient({ 'maws.pane.answer': { outcome: 'delivered' } });
+      disconnect = connectPaneShows(fake.client);
+      show(fake, { pane: 'deliverable', target: DASH });
+      await settle();
+      await fake.fail('deliverables.get', 'EACCES');
+      await settle();
+      expect(probe.created).toEqual([]);
+      expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.deliverableUnreadable(DASH, 'EACCES') } }]);
+    });
+
+    it('a target no record answers to: deliverableNotFound, nothing opened', async () => {
+      const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+      registerPanelTool(tool);
+      const missing = '00000000-0000-4000-8000-000000000009';
+      show(fake, { pane: 'deliverable', target: missing });
+      show(fake, { pane: 'deliverable', target: 'none', requestId: 'r2' });
+      await settle();
+      expect(probe.created).toEqual([]);
+      // the two answers in whichever order their reads settle (the uuid is read, then searched for as an artifact id)
+      const answers = fake.invoked('maws.pane.answer') as { requestId: string }[];
+      expect([...answers].sort((a, b) => a.requestId.localeCompare(b.requestId))).toEqual([
+        { appSessionId: A, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.deliverableNotFound(missing) } },
+        { appSessionId: A, requestId: 'r2', result: { ok: false, error: TOOL_ERRORS.deliverableNotFound('none') } },
+      ]);
+    });
+
+    it('no target opens the list', async () => {
+      const { tool, probe } = probeTool('deliverables', { title: 'Deliverables', multiInstance: false });
+      registerPanelTool(tool);
+      show(fake, { pane: 'deliverable', target: null });
+      await settle();
+      expect(probe.created.map((init) => init.params)).toEqual([{}]);
+      expect(fake.invoked('maws.pane.answer')[0]).toMatchObject({ result: { ok: true, opened: { kind: 'panel-tool', toolId: 'deliverables' } } });
+    });
+  });
+
   it('a sibling’s tool, once registered, receives the target', async () => {
     const { tool, probe } = probeTool('browser', { title: 'Browser' });
     registerPanelTool(tool);

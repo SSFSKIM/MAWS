@@ -1,10 +1,11 @@
-import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, open, readdir, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DeliverableRecord } from '@shared/maws/deliverable';
-import { FileDeliverableStore, MemoryDeliverableStore } from './store';
+import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
+import { FileDeliverableStore, MemoryDeliverableStore, readAtMost } from './store';
 
 let userData: string;
 beforeEach(async () => {
@@ -76,3 +77,121 @@ describe('the deliverable store (X12, residue 7)', () => {
     expect(store.records).toEqual([record(ID1, 'now')]);
   });
 });
+
+// E2 start (E2 execution document, Design §2): artifacts' version copies, rewrites, the per-session chain, onWritten
+describe('the deliverable store as E2 extends it', () => {
+  let source: string;
+  beforeEach(async () => {
+    source = join(userData, 'dashboard.html');
+    await writeFile(source, '<h1 style="color:red">Dashboard</h1>');
+  });
+
+  const artifact = (id: string, copy: string, over: Partial<DeliverableRecord> = {}): DeliverableRecord => ({
+    id, appSessionId: A, kind: 'artifact', artifactId: 'dash', title: 'Dashboard', path: copy, versions: [{ path: copy, at: 't1', sourcePath: source }], createdAt: 't1', updatedAt: 't1', ...over,
+  });
+
+  // the tools' read, copy, rewrite step for one more version, inside the session's chain
+  const addVersion = (store: FileDeliverableStore | MemoryDeliverableStore) =>
+    store.exclusive(A, async () => {
+      const found = (await store.findArtifact(A, 'dash'))!;
+      const n = found.versions.length + 1;
+      const copy = await store.copyVersion(A, found.id, n, source);
+      await new Promise((r) => setTimeout(r, 5)); // a slow write: an unserialised second update would read the same count
+      await store.update({ ...found, path: copy.path, versions: [...found.versions, { path: copy.path, at: `t${n}` }], updatedAt: `t${n}` });
+      return n;
+    });
+
+  it("copies a version to <id>/v<n>.html, answers the copy's path and bytes, and the record names it", async () => {
+    const store = new FileDeliverableStore(userData);
+    const copy = await store.copyVersion(A, ID1, 1, source);
+    expect(copy.path).toBe(join(userData, 'deliverables', A, ID1, 'v1.html'));
+    expect(copy.content.toString('utf8')).toBe('<h1 style="color:red">Dashboard</h1>');
+    expect(await readFile(copy.path, 'utf8')).toBe('<h1 style="color:red">Dashboard</h1>');
+    await store.write(artifact(ID1, copy.path));
+    expect(await store.get(A, ID1)).toEqual(artifact(ID1, copy.path));
+    expect(await store.findArtifact(A, 'dash')).toEqual(artifact(ID1, copy.path));
+    expect(await store.findArtifact(A, 'other')).toBeNull();
+    expect(await store.get(A, ID2)).toBeNull();
+    // the version directory is not a record
+    expect((await store.list(A)).map((r) => r.id)).toEqual([ID1]);
+    expect((await readdir(join(userData, 'deliverables', A))).sort()).toEqual([ID1, `${ID1}.json`].sort());
+  });
+
+  it('rewrites a record whole through a temp file, leaving none', async () => {
+    const store = new FileDeliverableStore(userData);
+    const v1 = await store.copyVersion(A, ID1, 1, source);
+    await store.write(artifact(ID1, v1.path));
+    const v2 = await store.copyVersion(A, ID1, 2, source);
+    const updated = artifact(ID1, v2.path, { title: 'Sales', versions: [{ path: v1.path, at: 't1' }, { path: v2.path, at: 't2' }], updatedAt: 't2' });
+    await store.update(updated);
+    expect(await store.get(A, ID1)).toEqual(updated);
+    expect((await readdir(join(userData, 'deliverables', A))).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+    expect((await readdir(join(userData, 'deliverables', A, ID1))).sort()).toEqual(['v1.html', 'v2.html']);
+  });
+
+  it('serialises one session: two overlapping updates number 2 then 3', async () => {
+    const store = new FileDeliverableStore(userData);
+    await store.write(artifact(ID1, (await store.copyVersion(A, ID1, 1, source)).path));
+    expect(await Promise.all([addVersion(store), addVersion(store)])).toEqual([2, 3]);
+    expect((await store.get(A, ID1))!.versions.map((v) => v.at)).toEqual(['t1', 't2', 't3']);
+    // a task that fails releases the chain for the next one
+    await expect(store.exclusive(A, async () => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
+    expect(await addVersion(store)).toBe(4);
+  });
+
+  it('refuses a source past the 16 MiB cap, and one that is not a regular file', async () => {
+    const store = new FileDeliverableStore(userData);
+    const big = join(userData, 'big.html');
+    await writeFile(big, '');
+    await truncate(big, ARTIFACT_MAX_BYTES + 1);
+    await expect(store.copyVersion(A, ID1, 1, big)).rejects.toThrow(`too large (${ARTIFACT_MAX_BYTES + 1} bytes; the limit is 16 MiB)`);
+    await expect(store.copyVersion(A, ID1, 1, userData)).rejects.toThrow();
+    expect(await readdir(userData)).not.toContain('deliverables');
+  });
+
+  it('reads a source no further than the limit, so the cap bounds memory whatever the file grew to since its stat', async () => {
+    const path = join(userData, 'grown.html');
+    const bytes = Buffer.alloc(2_500_000, 0x61);
+    await writeFile(path, bytes);
+    const read = async (limit: number) => {
+      const handle = await open(path, 'r');
+      try {
+        return await readAtMost(handle, limit);
+      } finally {
+        await handle.close();
+      }
+    };
+    expect((await read(10)).length).toBe(10);
+    expect((await read(1_500_001)).length).toBe(1_500_001); // across more than one read
+    expect((await read(5_000_000)).equals(bytes)).toBe(true); // a file shorter than the limit, whole
+  });
+
+  it('announces every settled write as created and every rewrite as updated, and nothing for a write that failed', async () => {
+    const written: [string, string][] = [];
+    const store = new FileDeliverableStore(userData, { onWritten: (r, change) => written.push([r.id, change]) });
+    await store.write(record(ID1, 't1'));
+    await store.update({ ...record(ID1, 't1'), title: 'renamed' });
+    await expect(store.write({ ...record(ID2, 't1'), id: 'not-a-uuid' })).rejects.toThrow();
+    await mkdir(join(userData, 'deliverables', A, `${ID2}.json`)); // the rename onto a directory fails
+    await expect(store.write(record(ID2, 't1'))).rejects.toThrow();
+    expect(written).toEqual([[ID1, 'created'], [ID1, 'updated']]);
+  });
+
+  it('keeps the same surface in memory: copies, rewrites, the chain and onWritten', async () => {
+    const written: [string, string][] = [];
+    const store = new MemoryDeliverableStore({ onWritten: (r, change) => written.push([r.id, change]) });
+    const copy = await store.copyVersion(A, ID1, 1, source);
+    expect(copy.content.toString('utf8')).toBe('<h1 style="color:red">Dashboard</h1>');
+    await store.write(artifact(ID1, copy.path));
+    expect(await Promise.all([addVersion(store), addVersion(store)])).toEqual([2, 3]);
+    expect((await store.get(A, ID1))!.versions).toHaveLength(3);
+    expect(store.records).toHaveLength(1);
+    expect(await store.list(A)).toEqual(store.records);
+    expect(written).toEqual([[ID1, 'created'], [ID1, 'updated'], [ID1, 'updated']]);
+    const big = join(userData, 'big.html');
+    await writeFile(big, '');
+    await truncate(big, ARTIFACT_MAX_BYTES + 1);
+    await expect(store.copyVersion(A, ID1, 4, big)).rejects.toThrow('too large');
+  });
+});
+// E2 end

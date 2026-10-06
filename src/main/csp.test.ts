@@ -12,7 +12,7 @@ const directives = (csp: string) =>
 describe('content security policy', () => {
   it('is exactly the production policy without a dev server', () => {
     expect(PRODUCTION_CSP).toBe(
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' maws-deliverable:; media-src 'self' maws-deliverable:",
     );
     expect(buildCsp(null)).toBe(PRODUCTION_CSP);
   });
@@ -20,13 +20,23 @@ describe('content security policy', () => {
   it('adds the nonce to script-src only, and the HMR socket to connect-src, in development', () => {
     const csp = buildCsp({ nonce: 'N', devServerUrl: 'http://localhost:5173' });
     expect(csp).toBe(
-      "default-src 'self'; script-src 'self' 'nonce-N'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://localhost:5173",
+      "default-src 'self'; script-src 'self' 'nonce-N'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://localhost:5173; frame-src 'self' maws-deliverable:; media-src 'self' maws-deliverable:",
     );
     const withNonce = Object.entries(directives(csp))
       .filter(([, sources]) => sources.some((s) => s.includes('nonce-')))
       .map(([name]) => name);
     expect(withNonce).toEqual(['script-src']);
   });
+
+  // E2 start: the Deliverables viewer's frames and media elements load the store through the scheme (Design §3); 'self'
+  // keeps the request card's srcdoc frame, which inherits the document's policy
+  it('admits the maws-deliverable: scheme to frames and media, and nothing else', () => {
+    const csp = directives(PRODUCTION_CSP);
+    expect(csp['frame-src']).toEqual(["'self'", 'maws-deliverable:']);
+    expect(csp['media-src']).toEqual(["'self'", 'maws-deliverable:']);
+    expect(PRODUCTION_CSP.match(/maws-deliverable:/g)).toHaveLength(2);
+  });
+  // E2 end
 
   it('takes the socket host and port from the dev server URL', () => {
     const csp = buildCsp({ nonce: 'abc+/=', devServerUrl: 'http://127.0.0.1:5174/' });

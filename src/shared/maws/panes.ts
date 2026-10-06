@@ -8,12 +8,15 @@ export const PANE_NAMES = ['diff', 'file', 'terminal', 'tasks', 'deliverable', '
 export const PaneSchema = z.enum(PANE_NAMES);
 export type Pane = z.infer<typeof PaneSchema>;
 
+// E2: the Deliverables tool's X5 id (the `deliverable` pane's tool).
+export const DELIVERABLES_TOOL_ID = 'deliverables';
+
 export const PANES: Record<Pane, { toolId: string } | { mainTab: 'file' }> = {
   diff: { toolId: 'review' },
   file: { mainTab: 'file' },
   terminal: { toolId: 'terminal' },
   tasks: { toolId: 'tasks' },
-  deliverable: { toolId: 'deliverables' },
+  deliverable: { toolId: DELIVERABLES_TOOL_ID },
   browser: { toolId: 'browser' },
   'source-control': { toolId: 'source-control' },
 };
@@ -23,3 +26,7 @@ export const ASK_SHEET_TOOL_ID = 'ask-sheet';
 
 // How long the host waits for a window to answer a `show_pane` before the call answers an error (residue 3).
 export const PANE_ANSWER_MS = 8_000;
+
+// E2 (Design §7): how long the host waits for main to answer an `artifact_screenshot` capture before the call answers
+// an error; main's own guard (20 s, two captures at once) keeps its answer inside it.
+export const CAPTURE_ANSWER_MS = 45_000;

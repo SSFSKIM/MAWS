@@ -123,4 +123,10 @@ export const RowSchema = z.discriminatedUnion('kind', [
     notes: z.array(z.string()), raw: z.string(), pending: z.boolean(),
   }),
   // E7 end
+  // E2 start
+  z.strictObject({
+    ...base, kind: z.literal('artifact'), toolUseId: z.string(), action: z.enum(['create', 'update']), artifactId: z.string(), title: nullable(z.string()), htmlPath: z.string(),
+    deliverableId: nullable(z.string()), version: nullable(z.number()), error: nullable(z.string()), answered: z.boolean(),
+  }),
+  // E2 end
 ]);

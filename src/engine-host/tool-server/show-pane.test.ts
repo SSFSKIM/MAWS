@@ -6,7 +6,7 @@ import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import type { MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import { PaneBridge, type PaneShowRequest } from './panes';
-import type { McpToolContext } from './server';
+import type { McpToolContext, McpToolResult } from './server';
 import { showPaneTool } from './show-pane';
 
 let root: string;
@@ -17,7 +17,7 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 const ctx = (): McpToolContext => ({ appSessionId: 'app-1' as AppSessionId, cwd: root, toolUseId: 'toolu_01' as ToolUseId, requestId: 'r1' as RequestId, signal: new AbortController().signal });
-const text = (result: { content: { text: string }[] }) => result.content[0]!.text;
+const text = (result: McpToolResult) => (result.content[0] as { text: string }).text; // E2: content widened to image blocks
 
 // A bridge whose windows answer every request at once with `answer`, recording what they were asked.
 function windows(answer: (request: PaneShowRequest) => MawsPaneAnswerResult) {

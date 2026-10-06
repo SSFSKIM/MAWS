@@ -17,6 +17,10 @@ export const TabRefSchema = z.discriminatedUnion('kind', [
   z.strictObject({ id: z.string(), kind: z.literal('diff'),    appSessionId: AppSessionIdSchema, ref: z.string(), pinned: z.boolean() }),
   z.strictObject({ id: z.literal('diagnostics'), kind: z.literal('diagnostics'), pinned: z.boolean() }),
   z.strictObject({ id: z.literal('settings'), kind: z.literal('settings'), section: z.enum(['engine', 'gateway', 'keyboard', 'appearance', 'notifications', 'voice']).nullable(), pinned: z.literal(false) }),   // C11: singleton; a second openTab activates it and updates `section`; titled 'Settings'; E9: 'voice' appended (the index places it after Keyboard)
+  // E2 start (X14): a deliverable's viewer as a main tab, one per record; restores to the record by id, and a record
+  // that is gone shows the Deliverables list for the tab's session with a notice
+  z.strictObject({ id: z.string(), kind: z.literal('deliverable'), appSessionId: AppSessionIdSchema, deliverableId: z.string(), pinned: z.boolean() }),
+  // E2 end
 ]);
 export type TabRef = z.infer<typeof TabRefSchema>;
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -37,6 +41,10 @@ export function tabId(tab: TabTarget): string {
       return 'diagnostics';
     case 'settings':
       return 'settings';
+    // E2 start
+    case 'deliverable':
+      return `deliverable:${tab.appSessionId}:${tab.deliverableId}`;
+    // E2 end
   }
 }
 
@@ -150,7 +158,7 @@ export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelP
 // C8a start: the panel summary's collapsed sections (C8a execution document, Interfaces *Layout key
 // `summary.sections`*), written by `stores/summary.ts`; an absent key means every section expanded. Outside the
 // `panel.` namespace on purpose: C5's hydration reads every `panel.<x>` key as a session's list.
-export const SUMMARY_SECTIONS = ['environment', 'push', 'subagents', 'background', 'sources', 'plugins' /* R1 */] as const;
+export const SUMMARY_SECTIONS = ['environment', 'push', 'subagents', 'background', 'sources', 'plugins' /* R1 */, 'deliverables' /* E2 */] as const;
 export type SummarySection = (typeof SUMMARY_SECTIONS)[number];
 export const SummarySectionsSchema = z.strictObject({ version: z.literal(1), collapsed: z.array(z.enum(SUMMARY_SECTIONS)) });   // key `summary.sections`
 export type SummarySections = z.infer<typeof SummarySectionsSchema>;

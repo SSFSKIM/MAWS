@@ -1038,3 +1038,62 @@ describe('files reveal', () => {
   });
 });
 // E1 end
+// E2 start: a delivered file outside the session's directories (E2 execution document, Design §3, Decision Log 17 and
+// 18): the reader's admission lets `read`, `openExternal` and `reveal` reach exactly the file a record names; `write`,
+// `list` and `watch` keep the roots.
+describe('files admission of delivered files', () => {
+  let delivered: string;
+  let admitted: ReturnType<typeof vi.fn<(appSessionId: AppSessionId, real: string) => Promise<boolean>>>;
+  beforeEach(() => {
+    delivered = join(outside, 'report.pdf');
+    write(delivered, '%PDF-1.4\n%%EOF\n');
+    write(join(outside, 'notes.md'), '# delivered notes\n');
+    admitted = vi.fn(async (appSessionId: AppSessionId, real: string) => appSessionId === A && (real === delivered || real === join(outside, 'notes.md')));
+  });
+
+  it('reads, opens outside and reveals a file the session’s records name, by its realpath', async () => {
+    const log = at('open.log');
+    const files = service({ admitted, env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
+    expect((await files.read({ appSessionId: A, path: join(outside, 'notes.md') })).content).toBe('# delivered notes\n');
+    expect(await files.openExternal(A, delivered)).toEqual({ opened: true, message: null });
+    expect(await files.reveal(A, delivered)).toEqual({ revealed: true, message: null });
+    expect(readFileSync(log, 'utf8')).toBe(`${delivered}\nreveal ${delivered}\n`);
+    expect(admitted).toHaveBeenCalledWith(A, delivered);
+  });
+
+  it('never writes, lists or watches it, nor its directory', async () => {
+    const files = service({ admitted, env: {} });
+    const { hash } = await files.read({ appSessionId: A, path: join(outside, 'notes.md'), hash: true });
+    await expect(files.write({ appSessionId: A, path: join(outside, 'notes.md'), content: 'changed', expectedHash: hash! })).rejects.toThrow(OUT);
+    expect(readFileSync(join(outside, 'notes.md'), 'utf8')).toBe('# delivered notes\n');
+    await expect(files.list({ appSessionId: A, path: outside })).rejects.toThrow(OUT);
+    await expect(files.watch(A, outside, 1)).rejects.toThrow(OUT);
+    await expect(files.read({ appSessionId: A, path: join(outside, 'secret.txt') })).rejects.toThrow(OUT); // a sibling it does not name
+  });
+
+  it('refuses an outside file the records do not name, and another session’s', async () => {
+    const files = service({ admitted, env: {} });
+    await expect(files.read({ appSessionId: A, path: join(outside, 'secret.txt') })).rejects.toThrow(OUT);
+    records.set(B, record(root));
+    await expect(files.read({ appSessionId: B, path: delivered })).rejects.toThrow(OUT);
+    expect(await files.reveal(B, delivered)).toEqual({ revealed: false, message: OUT });
+  });
+
+  it('refuses a symlink to it, inside the roots or beside it', async () => {
+    const files = service({ admitted, env: {} });
+    symlinkSync(delivered, inRoot('link.pdf'));
+    symlinkSync(delivered, join(outside, 'link.pdf'));
+    await expect(files.read({ appSessionId: A, path: inRoot('link.pdf') })).rejects.toThrow(OUT);
+    await expect(files.read({ appSessionId: A, path: join(outside, 'link.pdf') })).rejects.toThrow(OUT);
+    expect(await files.reveal(A, join(outside, 'link.pdf'))).toEqual({ revealed: false, message: OUT });
+  });
+
+  it('asks only for a file outside the roots, and admits nothing without a reader', async () => {
+    const files = service({ admitted, env: {} });
+    await files.read({ appSessionId: A, path: inRoot('README.md') });
+    expect(admitted).not.toHaveBeenCalled();
+    const plain = service({ env: {} });
+    await expect(plain.read({ appSessionId: A, path: delivered })).rejects.toThrow(OUT);
+  });
+});
+// E2 end

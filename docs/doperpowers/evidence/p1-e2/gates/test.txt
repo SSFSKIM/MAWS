@@ -1,0 +1,66 @@
+eligible: load 17.14 after 60s
+slot slot.1 acquired at 09:59:31 load { 17.14 16.97 12.81 }
+$ NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run --maxWorkers=4
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v5.0.2 /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1
+
+(node:28612) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/test/support/engine-pin.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:28781) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/test/support/engine-pin.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:28873) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/test/support/engine-pin.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29023) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/test/support/engine-pin.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29052) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/test/support/engine-pin.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29065) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/test/support/engine-pin.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29191) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/test/support/engine-pin.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29198) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/test/support/engine-pin.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29286) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/test/support/engine-pin.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:31831) Warning: Closing file descriptor 16 on garbage collection
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:31831) [DEP0137] DeprecationWarning: Closing a FileHandle object on garbage collection is deprecated. Please close FileHandle objects explicitly using FileHandle.prototype.close(). In the future, an error will be thrown if a file descriptor is closed during garbage collection.
+(node:31831) Warning: Closing file descriptor 14 on garbage collection
+(node:31831) Warning: Closing file descriptor 15 on garbage collection
+(node:37655) Warning: Closing file descriptor 15 on garbage collection
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:37655) [DEP0137] DeprecationWarning: Closing a FileHandle object on garbage collection is deprecated. Please close FileHandle objects explicitly using FileHandle.prototype.close(). In the future, an error will be thrown if a file descriptor is closed during garbage collection.
+(node:42338) Warning: Closing file descriptor 15 on garbage collection
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42338) [DEP0137] DeprecationWarning: Closing a FileHandle object on garbage collection is deprecated. Please close FileHandle objects explicitly using FileHandle.prototype.close(). In the future, an error will be thrown if a file descriptor is closed during garbage collection.
+
+ Test Files  567 passed | 1 skipped (568)
+      Tests  7552 passed | 1 skipped (7553)
+Type Errors  no errors
+   Start at  09:59:31
+   Duration  161.08s (tests 66%, import 16%, environment 9%, transform 6%, typecheck 2%)
+
+  Transform  |renderer-compiled| transforming modules took 18.73s · 33% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

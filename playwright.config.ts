@@ -10,7 +10,8 @@ export default defineConfig({
   // C8b (inside C6's block, as C9's and C8c's): so does the agent tools spec, under `pnpm e2e:agents`.
   // E5 (inside C6's block, as C8c's): so does the editor spec, under `pnpm e2e:code` beside the code tools spec.
   // E1 (inside C6's block, as C8b's): so does the `maws` tools spec, under `pnpm e2e:tools`.
-  testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts', 'terminal.spec.ts', 'code-tools.spec.ts', 'agent-tools.spec.ts', /* E5 start */ 'code-editor.spec.ts', /* E5 end */ /* E1 start */ 'maws-tools.spec.ts' /* E1 end */],
+  // E2 (inside C6's block, as E1's): so does the deliverables spec, under `pnpm e2e:deliverables`.
+  testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts', 'terminal.spec.ts', 'code-tools.spec.ts', 'agent-tools.spec.ts', /* E5 start */ 'code-editor.spec.ts', /* E5 end */ /* E1 start */ 'maws-tools.spec.ts' /* E1 end */, /* E2 start */ 'deliverables.spec.ts' /* E2 end */],
   // end C6
   // C8a start: so does the panel spec, under `pnpm e2e:panel` (its product-app cases pass MAWS_HARNESS=0 per launch),
   // and the live check against this checkout runs only when named under MAWS_PANEL_LIVE=1 (it skips itself otherwise).

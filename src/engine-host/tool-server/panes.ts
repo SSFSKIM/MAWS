@@ -2,11 +2,13 @@
 // do itself. The host asks every window once (`maws.pane.show`, an IPC event and never an X1 one, so a reload or a disk
 // replay re-opens nothing); the first `maws.pane.answer` wins and a later one is `not_pending`; silence becomes the
 // timeout error after PANE_ANSWER_MS. A request the engine withdrew, or one pending when the process ended, settles at
-// once with an error nobody reads (the server answers an aborted call with nothing).
+// once with an error nobody reads (the server answers an aborted call with nothing). E2: a thin instance of the host
+// bridge (`./bridge.ts`), which `artifact_screenshot`'s capture shares.
 import type { RequestId } from '@shared/graph/ids';
 import type { MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import { PANE_ANSWER_MS, type Pane } from '@shared/maws/panes';
 import { TOOL_ERRORS, type ShowPaneResult } from '@shared/maws/tools';
+import { HostBridge, type BridgeOutcome } from './bridge';
 
 export interface PaneShowRequest {
   requestId: RequestId;
@@ -21,48 +23,37 @@ export type PaneBridgeAnswer = ShowPaneResult | { error: string };
 const WITHDRAWN = 'show_pane: the request was withdrawn';
 const ENDED = 'show_pane: the session ended';
 
-interface Pending {
-  pane: Pane;
-  settle: (answer: PaneBridgeAnswer) => void;
-}
-
 export class PaneBridge {
-  private readonly requests = new Map<RequestId, Pending>();
+  private readonly bridge: HostBridge<PaneShowRequest, MawsPaneAnswerResult>;
 
-  constructor(private readonly deps: { show: (request: PaneShowRequest) => void; answerMs?: number }) {}
-
-  get pending(): number {
-    return this.requests.size;
+  constructor(deps: { show: (request: PaneShowRequest) => void; answerMs?: number }) {
+    this.bridge = new HostBridge({ send: deps.show, answerMs: deps.answerMs ?? PANE_ANSWER_MS });
   }
 
-  request(request: PaneShowRequest, signal: AbortSignal): Promise<PaneBridgeAnswer> {
-    if (signal.aborted) return Promise.resolve({ error: WITHDRAWN });
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => settle({ error: TOOL_ERRORS.paneTimeout }), this.deps.answerMs ?? PANE_ANSWER_MS);
-      (timer as { unref?: () => void }).unref?.();
-      const onAbort = () => settle({ error: WITHDRAWN });
-      const settle = (answer: PaneBridgeAnswer) => {
-        if (this.requests.get(request.requestId)?.settle !== settle) return;
-        this.requests.delete(request.requestId);
-        clearTimeout(timer);
-        signal.removeEventListener('abort', onAbort);
-        resolve(answer);
-      };
-      signal.addEventListener('abort', onAbort, { once: true });
-      this.requests.set(request.requestId, { pane: request.pane, settle });
-      this.deps.show(request);
-    });
+  get pending(): number {
+    return this.bridge.pending;
+  }
+
+  async request(request: PaneShowRequest, signal: AbortSignal): Promise<PaneBridgeAnswer> {
+    const outcome: BridgeOutcome<MawsPaneAnswerResult> = await this.bridge.request(request, signal);
+    switch (outcome.kind) {
+      case 'answered':
+        return outcome.answer.ok ? { status: 'shown', pane: request.pane, opened: outcome.answer.opened } : { error: outcome.answer.error };
+      case 'timeout':
+        return { error: TOOL_ERRORS.paneTimeout };
+      case 'withdrawn':
+        return { error: WITHDRAWN };
+      case 'ended':
+        return { error: ENDED };
+    }
   }
 
   // A window's answer: the first one settles the request.
   answer(requestId: RequestId, result: MawsPaneAnswerResult): 'delivered' | 'not_pending' {
-    const pending = this.requests.get(requestId);
-    if (!pending) return 'not_pending';
-    pending.settle(result.ok ? { status: 'shown', pane: pending.pane, opened: result.opened } : { error: result.error });
-    return 'delivered';
+    return this.bridge.answer(requestId, result);
   }
 
   processExited(): void {
-    for (const pending of [...this.requests.values()]) pending.settle({ error: ENDED });
+    this.bridge.processExited();
   }
 }

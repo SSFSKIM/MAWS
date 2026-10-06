@@ -1,0 +1,41 @@
+E2 final verification gates (2026-10-06)
+Gate head: a2232b0cbf1a33ecab94bdfb7997d4161d5b7d02 (a2232b0c), worktree /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7e73902f7aae8dc1
+Run sequentially by one driver with pnpm_config_verify_deps_before_run=false and MAWS_E2E unset; heavy gates (test, every e2e group) as
+/tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm -C <worktree> <script>. Output of each gate is <name>.txt in this directory (ANSI colour stripped).
+Durations are wall clock including any slot/load wait; the tool's own duration is in parentheses where it prints one.
+No gate failed and none was retried. The pre-run's one failure (artifacts.test.ts overlapping-create ordering, load-dependent) did not recur after the a2232b0c test fix.
+
+Gate                  Command                                                           Result                                   Duration
+typecheck             pnpm -C <wt> typecheck                                            PASS (3 tsc projects, exit 0)            40s
+lint                  pnpm -C <wt> lint                                                 PASS (eslint ., exit 0)                  25s
+unit suite            pnpm -C <wt> test --maxWorkers=4                                  PASS  567 files passed | 1 skipped (568); 222s (vitest 161.08s)
+                                                                                        7552 tests passed | 1 skipped (7553)
+conformance           pnpm -C <wt> exec vitest run src/engine-host/conformance          PASS  5 files, 211 tests                 1s (1.11s)
+e2e:deliverables      pnpm -C <wt> e2e:deliverables                                     PASS  10 passed                          71s (45.4s)
+e2e:tools             pnpm -C <wt> e2e:tools                                            PASS  8 passed                           38s (13.0s)
+e2e:transcript        pnpm -C <wt> e2e:transcript                                       PASS  31 passed                          198s (2.9m)
+e2e:panel             pnpm -C <wt> e2e:panel                                            PASS  23 passed                          61s (36.0s)
+e2e:code              pnpm -C <wt> e2e:code                                             PASS  35 passed                          101s (1.3m)
+e2e:side              pnpm -C <wt> e2e:side                                             PASS  8 passed                           53s (28.5s)
+e2e:scm               pnpm -C <wt> e2e:scm                                              PASS  8 passed                           54s (31.1s)
+protocol-probe        node --test <wt>/spikes/protocol-probe/fixtures.test.mjs          PASS  150 tests, 150 pass, 0 fail        1s
+
+Live spend (E2 total about US$0.187; Haiku through ClaudeUsage's relay, scratch CLAUDE_CONFIG_DIR under /tmp)
+  M0 image-block probe: US$0.0534, including one discarded attempt (docs/doperpowers/evidence/p1-e2/probe-image-block.txt)
+  M2 live recording:    US$0.1332 over two Haiku runs (docs/doperpowers/evidence/p1-e2/live-recording.txt)
+  These gates ran no live engine; the replay and harness e2e groups spend nothing.
+
+A-15 owner-file check (docs/doperpowers/evidence/p1-e2/owner-file-check.txt)
+  The /tmp and /private/tmp project keys of ~/.claude.json: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8, identical before and after
+  every live run (M0 both launches, M2 both runs).
+
+Pre-existing warnings in the unit-suite log (test.txt); both predate E2
+  MODULE_TYPELESS_PACKAGE_JSON (for test/support/engine-pin.ts): 9 occurrences in this run (same 9 as the pre-run, the E1 run and the 2026-10-03 main-checkout run).
+  FileHandle GC: 5 "Closing file descriptor N on garbage collection" warnings and 3 DEP0137 "Closing a FileHandle object on garbage collection is deprecated" lines in this run
+  (the pre-run printed 6 and the DEP0137 lines; the count varies with GC timing).
+  Neither is caused by E2: engine-pin.ts landed 2026-10-03 (7212f847) and both warnings appear in master's and sibling branches' earlier logs. Tracker rows:
+  docs/tech-debt-tracker.md, rows dated 2026-10-06 from E9 and E3.
+
+Side effect handled: the e2e runs (by name e2e:side for the E3 shots and e2e:scm for the E5 shots) rewrote other children's evidence screenshots (14 files: docs/doperpowers/evidence/p1-e3/shots/{dark,light}/{comment-sheet,
+parent-transcript,side-pane-thread,sidebar-nesting}.png and docs/doperpowers/evidence/p1-e5/shots/e5-{conflict,editor,merge}-{dark,light}.png). They were restored with git checkout
+after the last run and are not part of the commit.

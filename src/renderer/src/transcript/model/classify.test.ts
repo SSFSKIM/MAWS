@@ -34,7 +34,6 @@ describe('classification table', () => {
     ['TaskGet', 'other', 'grouped', true],
     ['TaskOutput', 'other', 'grouped', true],
     ['TaskStop', 'other', 'grouped', true],
-    ['SendUserFile', 'other', 'standalone', false],
     ['SomeFutureTool', 'other', 'grouped', false],
   ] as const)('%s → %s, %s%s', (name, category, presentation, hidden) => {
     const c = classifyTool(name, {}, base);

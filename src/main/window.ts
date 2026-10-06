@@ -4,6 +4,11 @@ import { pathToFileURL } from 'node:url';
 import { BrowserWindow, session } from 'electron';
 import type { WindowState } from '@shared/ipc/schema/layout';
 import { buildCsp } from './csp';
+import { appWindows, registerAppWindow } from './windows'; // E2
+// E2 start
+import { attributeConsole, guardFrames, isCspExempt } from './deliverables/policies';
+import { emit } from './ipc/events';
+// E2 end
 import type { ResolvedTheme } from './settings/store';
 
 // Each theme's `--bg` (X7), so the window's first frame and any area the page has not painted match the page.
@@ -36,6 +41,7 @@ export function installContentSecurityPolicy(): void {
   }
   const csp = buildCsp(devServerUrl ? { nonce: __MAWS_DEV_CSP_NONCE__!, devServerUrl } : null);
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    if (isCspExempt(details.url)) return callback({}); // E2: a deliverable's answer carries its own policy (Design §3)
     callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } });
   });
 }
@@ -69,9 +75,15 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: true,
+      plugins: true, // E2: Chromium's own PDF viewer, for a delivered PDF's frame (Design §3); Chromium ships no other plugin
       preload: join(__dirname, '../preload/index.js'),
     },
   });
+  // E2 start: an app window (a capture window is not one), its deliverable frames guarded and their console attributed
+  registerAppWindow(win);
+  guardFrames(win.webContents, process.env);
+  attributeConsole(win.webContents, emit);
+  // E2 end
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -91,5 +103,5 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
 }
 
 export function applyWindowBackground(theme: ResolvedTheme): void {
-  for (const win of BrowserWindow.getAllWindows()) win.setBackgroundColor(THEME_BACKGROUND[theme]);
+  for (const win of appWindows()) win.setBackgroundColor(THEME_BACKGROUND[theme]); // E2
 }

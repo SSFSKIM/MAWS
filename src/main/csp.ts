@@ -15,6 +15,10 @@ const directives = (script: string[], connect: string[]) => [
   ['img-src', "'self'", 'data:', 'blob:'],
   ['font-src', "'self'", 'data:'],
   ['connect-src', "'self'", ...connect],
+  // E2: the Deliverables viewer's frames and media load the store through the scheme ('self' keeps the request card's
+  // srcdoc frame, which inherits this policy); each answer of the scheme carries its own policy (deliverables/protocol.ts)
+  ['frame-src', "'self'", 'maws-deliverable:'],
+  ['media-src', "'self'", 'maws-deliverable:'],
 ];
 
 const serialize = (list: string[][]) => list.map((d) => d.join(' ')).join('; ');

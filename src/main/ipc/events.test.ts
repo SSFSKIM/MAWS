@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const electron = vi.hoisted(() => ({ windows: [] as { webContents: { send: ReturnType<typeof vi.fn>; isDestroyed: () => boolean } }[] }));
-vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => electron.windows } }));
+vi.mock('../windows', () => ({ appWindows: () => electron.windows })); // E2: the emitter sends to app windows only
 
 import { emit, onEmitted } from './events';
 import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
