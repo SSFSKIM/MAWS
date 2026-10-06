@@ -8,6 +8,7 @@ import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile, type Fake
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { HostState } from '@shared/ipc/schema';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
+import { SocketPort } from '@shared/host/socket-port';
 import { buildIdOf } from '../../engine-host/supervisor-files';
 import { engineHostSettled } from '../sessions/service-register';
 import { supervisorEnv } from './detached-transport';
@@ -82,7 +83,7 @@ afterEach(async () => {
   profile.dispose();
 });
 
-function makeSupervisor(packaged = false): HostSupervisor {
+function makeSupervisor(packaged = false, timing: Partial<typeof TIMING> = {}): HostSupervisor {
   const made = createHostSupervisor({
     hosts: { 'engine-host': { modulePath: profile.modulePath, serviceName: 'maws-engine-host', transport: 'detached' } } as Record<HostOwner, HostSpec>,
     emit,
@@ -93,7 +94,7 @@ function makeSupervisor(packaged = false): HostSupervisor {
       env: () => env,
       spawn: spawn as never,
       ...processes.deps,
-      timing: TIMING,
+      timing: { ...TIMING, ...timing },
       log: (line) => void logs.push(line),
     },
   });
@@ -332,6 +333,19 @@ describe('the detached transport: a served connection ends', () => {
     other.socket.destroy();
   });
 
+  it('an exit the socket refuses to write is not remembered: the later death is a crash', async () => {
+    const fake = await startFake();
+    await supervisor.start();
+    const write = vi.spyOn(SocketPort.prototype, 'postMessage').mockReturnValueOnce(false);
+    expect(supervisor.exitSupervisor('idle')).toBe(false);
+    write.mockRestore();
+    await sleep(50);
+    expect(fake.exits).toEqual([]);
+    await fake.die();
+    await until(() => state().state === 'ready' && state().pid !== fake.pid);
+    expect(state()).toMatchObject({ pid: candidates[0].pid, restarts: 1 }); // counted: no exit was asked
+  });
+
   it('stop() closes the socket without an exit, leaves the supervisor serving, and restarts nothing', async () => {
     const fake = await startFake();
     await supervisor.start();
@@ -350,6 +364,45 @@ describe('the detached transport: a served connection ends', () => {
     next.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: fake.token, buildId: buildIdOf(profile.modulePath), wire: wireFingerprint(), appPid: 2 });
     await expect(next.next()).resolves.toMatchObject({ t: 'welcome', pid: fake.pid });
     next.socket.destroy();
+  });
+});
+
+describe('the detached transport: a request held and never sent', () => {
+  it('fails on stop()', async () => {
+    onSpawn = () => {}; // the candidate never listens
+    void supervisor.start();
+    const reply = ping();
+    await sleep(50);
+    supervisor.stop();
+    await expect(reply).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable', message: expect.stringContaining('was stopped') } });
+  });
+
+  it('fails when the host reaches crashed', async () => {
+    onSpawn = (candidate) => candidate.exit(1);
+    void supervisor.start();
+    const reply = ping(); // held through two backoffs, failed at the third exit
+    await expect(reply).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable', message: expect.stringContaining('is crashed') } });
+    expect(spawn).toHaveBeenCalledTimes(3);
+  });
+
+  it('times out at 10 s when neither happens', async () => {
+    supervisor.stop();
+    supervisor = makeSupervisor(false, { startTimeoutMs: 60_000 });
+    onSpawn = () => {}; // the candidate never listens, within a budget longer than the request's
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      void supervisor.start();
+      const reply = ping();
+      let settled = false;
+      void reply.then(() => (settled = true));
+      await vi.advanceTimersByTimeAsync(9_990);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(reply).resolves.toMatchObject({ ok: false, error: { code: 'timeout' } });
+      expect(state().state).toBe('starting');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -399,6 +452,16 @@ describe('the detached transport: another build or wire (M1: the seam for §6)',
     const tries = old.connections.length;
     await until(() => old.connections.length > tries + 1); // asked again every waitRetryMs
     expect(stateNames()).toEqual(['crashed']);
+    // logged on entry and when the live count changes, not at every retry
+    const waitingLines = () => logs.filter((line) => line.includes('waiting')).length;
+    const waitingErrors = () => errors.mock.calls.flat().join('\n').split('incompatible supervisor').length - 1;
+    expect([waitingLines(), waitingErrors()]).toEqual([1, 1]);
+    old.counts = { liveSessions: 3, rows: 3 };
+    await until(() => waitingLines() === 2);
+    const seen = old.connections.length;
+    await until(() => old.connections.length > seen + 1);
+    expect([waitingLines(), waitingErrors()]).toEqual([2, 2]);
+    expect(logs.filter((line) => line.includes('waiting')).at(-1)).toContain('runs 3 sessions');
     await old.die();
     await until(() => state().state === 'ready');
     expect(state().pid).toBe(candidates[0].pid);

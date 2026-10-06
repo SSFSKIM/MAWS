@@ -150,6 +150,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   let served: Served | null = null;
   let awaitDeath: Proc | null = null; // the next attempt waits for this process to be gone (a deliberate close)
   let idleArmed: Proc | null = null; // the supervisor main asked to exit when idle: remembered across reconnects to it
+  let waitingFor: number | null = null; // while waiting, the live count last reported (reported again only if it changes)
   const spawned = new Map<number, ExitInfo | null>(); // candidates this app run started, and how each exited
 
   function after(ms: number, run: () => void): void {
@@ -186,7 +187,13 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     const fail = (reason: DetachedFailure, message: string) => {
       if (candidate && candidate.exit === null) stopCandidate(candidate.proc);
       finish();
+      waitingFor = null;
       events.failed(reason, message);
+    };
+    const exited = (exit: ExitInfo) => {
+      finish();
+      waitingFor = null;
+      events.exited(exit);
     };
 
     const dying = awaitDeath;
@@ -215,20 +222,13 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     function spawning(): void {
       if (candidate) {
         if (candidate.exit === null) return awaitCandidate();
-        if (candidate.exit.code !== START_EXIT_HELD) {
-          const exit = candidate.exit;
-          finish();
-          return events.exited(exit);
-        }
+        if (candidate.exit.code !== START_EXIT_HELD) return exited(candidate.exit);
         candidate = null; // it exited 3: another supervisor holds the lock
         return connecting();
       }
       if (pastBudget()) return fail('other', 'no supervisor answered within the start budget');
       const started = spawnCandidate();
-      if (!started) {
-        finish();
-        return events.exited({ code: null, signal: null });
-      }
+      if (!started) return exited({ code: null, signal: null });
       candidate = { proc: started, exit: null };
       awaitCandidate();
     }
@@ -310,8 +310,11 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       }
       socket.destroy();
       finish();
-      log(`supervisor ${holder ? `pid ${holder.pid} ` : ''}is incompatible (${refuse.reason}) and runs ${refuse.liveSessions} sessions; waiting`);
-      events.waiting(refuse.liveSessions);
+      if (waitingFor !== refuse.liveSessions) {
+        waitingFor = refuse.liveSessions;
+        log(`supervisor ${holder ? `pid ${holder.pid} ` : ''}is incompatible (${refuse.reason}) and runs ${refuse.liveSessions} sessions; waiting`);
+        events.waiting(refuse.liveSessions);
+      }
       after(timing.waitRetryMs, launch);
     }
 
@@ -417,6 +420,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     if (idleArmed && !(idleArmed.pid === proc.pid && idleArmed.procStart === proc.procStart)) idleArmed = null;
     const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, replaced: false };
     served = connection;
+    waitingFor = null;
     const listeners: ((data: unknown) => void)[] = [];
     port.on('message', ({ data }) => {
       const refuse = ServerRefuseSchema.safeParse(data);
@@ -488,9 +492,10 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     launch,
     exit(when) {
       if (!served || stopped) return false;
+      // remembered only once written: an exit the socket refused was never asked, and the next close is not deliberate
+      if (!served.port.postMessage({ t: 'exit', when } satisfies ClientExit)) return false;
       if (served.exitAsked !== 'now') served.exitAsked = when;
       if (when === 'idle') idleArmed = served.proc;
-      served.port.postMessage({ t: 'exit', when } satisfies ClientExit);
       log(`asked supervisor pid ${served.proc.pid} to exit ${when}`);
       return true;
     },
