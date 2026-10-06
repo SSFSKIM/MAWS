@@ -599,6 +599,9 @@ Questions for the owner beyond these: whether amend (`--amend`) and stash belong
 - Decision (task 1 concern, settled by the executor controller): the mutating environment keeps the owner's identity variables `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL` from the capture while every other inherited `GIT_*` is dropped.
   Rationale: Design §2's purpose is the commit the owner would make in Terminal.app; the identity variables redirect nothing (no repository, configuration or transport), and dropping them would author a panel commit differently from a terminal commit for an owner who sets identity in the shell. The `_DATE` variables stay dropped (a pinned date in a profile is not an identity).
   Date/Author: 2026-10-06, E6 executor.
+- Decision (task 1 review): the mutating environment no longer sets `GIT_EXTERNAL_DIFF=/usr/bin/false` nor `LC_ALL=C` (Design §2's override list amended); the owner's locale variables pass through from the capture. `read` and `checkout` keep both.
+  Rationale: the task reviewer found that a hook running `git diff --cached` under the inherited `GIT_EXTERNAL_DIFF=/usr/bin/false` dies with "external diff died", a commit that would succeed in Terminal.app; none of the five allowlisted subcommands produces a diff, so the variable bought no safety in `mutate`, and the hooks it broke are the owner's trusted code. The C locale likewise made a hook's words differ from the terminal's; MAWS matches git's results by exit code, never by its text. Transport stays off (`GIT_ALLOW_PROTOCOL=`, `GIT_SSH_COMMAND=/usr/bin/false`, empty `credential.helper`), which is P-12's binding part.
+  Date/Author: 2026-10-06, E6 executor.
 - Decision (executor pre-flight): the brief confirms the owner's two open questions stand as the author left them: amend and stash are a later child (not built), and the PR body defaults to empty.
   Date/Author: 2026-10-06, E6 executor.
 
