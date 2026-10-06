@@ -73,3 +73,38 @@ pnpm -C $W exec vitest run --project renderer --project renderer-compiled src/re
 
 pnpm -C $W e2e:code
   35 passed (1.4m)   [code-tools.spec.ts 25 + code-editor.spec.ts 10, the two quit cases included; exit 0]
+
+== Final-head gates (the E5 executor), 2026-10-06, head 3aaaa5d5 (source 1adeb54e, E5 M5 fix wave 1), through waitload20.sh && with-slot.sh, one-minute load 12 ==
+
+pnpm -C $W typecheck
+  exit 0
+
+pnpm -C $W lint
+  exit 0
+
+pnpm -C $W test --maxWorkers=4
+  Test Files  460 passed | 1 skipped (461)
+       Tests  6061 passed | 1 skipped (6062)
+  Type Errors  no errors   (the two main suites' quit-guard mocks fixed at 1adeb54e; no timing failure this run)
+
+pnpm -C $W e2e:code   (head 64103c95, the final source head; first attempt at one-minute load 18.8, through waitload20.sh && with-slot.sh)
+  1 failed | 34 passed (1.6m)   [code-editor.spec.ts:138 'asks before closing a dirty tab …' failed in the launch helper before any editor step:
+  the sidebar's project row not visible within 10 s of the app's start (support/code-product.ts:81); startup timing, retried once as the rule allows]
+pnpm -C $W e2e:code   (retry, head 64103c95, one-minute load 16.7)
+  35 passed (1.6m)   [code-tools.spec.ts 25 + code-editor.spec.ts 10; exit 0]
+(the M5 fixer's own run at 64103c95, before the controller's: 35 passed)
+
+== Final source head 64103c95 (E5 M5 fix wave 1: the e2e seam cancels only a repeated unsaved question), 2026-10-06, through waitload20.sh && with-slot.sh, one-minute load 18.8 ==
+
+pnpm -C $W typecheck
+  exit 0
+
+pnpm -C $W lint
+  exit 0
+
+pnpm -C $W test --maxWorkers=4
+  Test Files  460 passed | 1 skipped (461)
+       Tests  6061 passed | 1 skipped (6062)
+  Type Errors  no errors
+
+(the e2e attempts at 64103c95 are recorded above: first 34/35 with a startup timing failure, the retry 35/35)
