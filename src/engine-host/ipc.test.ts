@@ -73,6 +73,7 @@ function engineHost(deps: Partial<EngineIpcDeps> = {}) {
     const checked = validateEventPayload(name, payload);
     if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues).slice(0, 400)}`);
     emitted.push({ name, payload });
+    return true;
   };
   const ipc = registerEngineIpc(on, emit, { userData, replayEnabled: true, cwd: REPO_ROOT, binaryProbe: async () => OK_BINARY /* W13: never the machine's install */, ...deps });
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {

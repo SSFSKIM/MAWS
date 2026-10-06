@@ -32,7 +32,7 @@ describe('transcript sites reach the attached engine surface', () => {
     }) });
     await session.start();
     const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
-    registerEngineIpc((name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>), () => {}, {
+    registerEngineIpc((name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>), () => true, {
       userData: '/tmp/maws-r3-unused', replayEnabled: false,
       table: { get: () => session, list: () => [session], onBudget: () => {}, onDropped: () => {} } as never,
     });

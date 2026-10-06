@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { createHostRuntime, type HostPort } from '@shared/host/runtime';
+import { createHostRuntime, type HostEmit, type HostPort } from '@shared/host/runtime';
 
 // Electron is faked. A fork returns a child that spawns when the test says so; a MessageChannelMain is a pair of
 // ports delivering to each other on a microtask, like the real ones. The real host runtime serves the port a child
@@ -244,6 +244,23 @@ describe('host supervisor', () => {
     await flush();
     expect(emit).toHaveBeenCalledExactlyOnceWith('pty.data', { ptyId: 'p1', offset: 0, data });
     expect(log).toHaveBeenCalledOnce();
+  });
+
+  // E10: a host emits nothing before main's ready line (X13); main says it on the port right after its hello
+  it('says ready on each host’s port after hello, so the host runtime’s events reach main', async () => {
+    void supervisor.start();
+    const pty = latest('maws-pty-host');
+    let hostEmit!: HostEmit;
+    serve(pty, (on, e) => {
+      on('pty.ping', async () => PING(202));
+      hostEmit = e;
+    });
+    pty.spawn(202);
+    await flush();
+    const exit = { ptyId: 'p1', exitCode: 0, signal: null };
+    expect(hostEmit('pty.exit', exit as never)).toBe(true);
+    await flush();
+    expect(emit).toHaveBeenCalledWith('pty.exit', exit);
   });
 
   // C3 start: main-side subscription to validated host events (wave-2 ledger (b); C3's attention service, C4's index)

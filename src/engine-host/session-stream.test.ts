@@ -30,6 +30,7 @@ function recorder() {
     const checked = validateEventPayload(name, payload);
     if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
     emitted.push({ name, payload });
+    return true;
   };
   return { emitted, emit };
 }

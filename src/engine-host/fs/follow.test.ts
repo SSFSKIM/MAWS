@@ -202,6 +202,7 @@ function recordingHost() {
   const emit = ((name: EventName, payload: unknown) => {
     if (name === 'session.eventBatch') events.push(...(payload as EventPayload<'session.eventBatch'>).events);
     if (name === 'fs.followState') states.push(payload as EventPayload<'fs.followState'>);
+    return true;
   }) as HostEmit;
   return { events, states, emit };
 }
@@ -270,6 +271,7 @@ describe('a followed session backfills, then tails its transcript', () => {
         const checked = validateEventPayload(name, payload);
         if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
         emitted.push({ name, payload } as Emitted);
+        return true;
       },
       openReader: (locate) => {
         const reader = new RecordingReader(locate);

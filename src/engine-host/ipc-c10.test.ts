@@ -38,6 +38,7 @@ function engineHost(deps: Partial<EngineIpcDeps> = {}) {
     const checked = validateEventPayload(name, payload);
     if (!checked.ok) throw new Error(`invalid ${name}`);
     emitted.push({ name, payload });
+    return true;
   };
   // W13: the binary the catalogue is keyed by answers the tested version, as the replays were recorded on it
   const binaryProbe = async () => ({ path: '/x/claude', testedVersion: TESTED_ENGINE_VERSION, version: TESTED_ENGINE_VERSION, ok: true, error: null });

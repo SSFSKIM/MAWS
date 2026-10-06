@@ -590,6 +590,7 @@ function inProcessHost(configHome: string) {
     const checked = validateEventPayload(name, payload);
     if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
     listeners.get(name)?.forEach((l) => l(checked.value));
+    return true;
   };
   let service: FsService | null = null;
   const host: SourceHost = {

@@ -131,6 +131,9 @@ export function createHostSupervisor({ hosts: specs, emit }: HostSupervisorOptio
     port2.on('message', ({ data }) => receive(host, data));
     port2.start();
     child.postMessage({ t: 'hello' } satisfies HostMessage, [port1]);
+    // E10: the host emits no event before main's ready line (X13). Main has nothing to pull first yet, so it says ready
+    // at once; the port delivers it ahead of every request. The resync before it lands with the detached transport.
+    port2.postMessage({ t: 'ready' } satisfies HostMessage);
   }
 
   function detach(host: Host, reason: string): void {
