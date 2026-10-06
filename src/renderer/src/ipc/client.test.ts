@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { createClient } from './client';
+import { createClient, onCommandRefused } from './client';
 import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
 
 // A bridge that answers every invoke with `answer` and lets the test deliver raw event payloads.
@@ -58,6 +58,24 @@ describe('renderer ipc client', () => {
     const error = { code: 'invalid_input', message: 'invalid input for settings.set', issues: [{ path: ['theme'] }] };
     const { bridge } = fakeBridge({ ok: false, error });
     await expect(createClient(() => bridge).invoke('settings.set', { theme: 'dark' })).resolves.toEqual({ ok: false, error });
+  });
+
+  // E10: what reacts to a refusal app-wide (a launch refused while an incompatible supervisor is waited for).
+  it('tells refusal listeners about main’s own errors, until they unsubscribe', async () => {
+    const error = { code: 'host_unavailable', message: 'the engine host is not running' };
+    const { bridge } = fakeBridge({ ok: false, error });
+    const heard = vi.fn();
+    const off = onCommandRefused(heard);
+    await createClient(() => bridge).invoke('session.start', { appSessionId: 'a' as never, message: null, options: {} as never });
+    expect(heard).toHaveBeenCalledExactlyOnceWith('session.start', error);
+    off();
+    await createClient(() => bridge).invoke('session.start', { appSessionId: 'a' as never, message: null, options: {} as never });
+    expect(heard).toHaveBeenCalledOnce();
+    const { bridge: fine } = fakeBridge({ ok: true, value: LIGHT });
+    const offAgain = onCommandRefused(heard);
+    await createClient(() => fine).invoke('settings.get', undefined);
+    offAgain();
+    expect(heard).toHaveBeenCalledOnce(); // an answer is not a refusal
   });
 
   it('delivers a valid event to the listener', () => {
