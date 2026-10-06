@@ -2,7 +2,7 @@
 // come from `maws.asks.list` (the host's table, G6) and from live `maws.ask.*` events, an event winning over a snapshot
 // still on its way; drafts live in the store; Submit goes through `maws.ask.answer` and follows its three outcomes; a
 // host back at `ready` is read again; a live `maws.ask.opened` opens the sheet for a session this window knows.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import type { PendingAsk } from '@shared/maws/ask';
@@ -11,9 +11,12 @@ import type { AskQuestion } from '@shared/maws/tools';
 import { fakeClient } from '../../../../../../test/support/fake-client';
 import { record } from '../../../../../../test/support/builders';
 import { registerPanelTool } from '../../../panel/host';
-import { A, panelOf, probeTool, resetPanelStores } from '../../../test-support/panel';
+import { A, B, mainShowing, panelOf, probeTool, resetPanelStores } from '../../../test-support/panel';
+import { useLayout } from '../../../stores/layout';
+import { activeTab, sessionOfTab } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
 import type { AskRowData } from '../../../transcript';
+import { mawsTranscriptActionsOver } from '../actions';
 import { connectAsks } from './connect';
 import { EMPTY_DRAFT, pickOption, setOther, setText } from './draft';
 import { applyAskEvents, askSheet, editDraft, ensureLoaded, resetAskSheets, selectAsk, shownAsk, submitAsk } from './store';
@@ -46,6 +49,7 @@ beforeEach(() => {
   resetPanelStores();
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   resetAskSheets();
   resetPanelStores();
 });
@@ -292,6 +296,83 @@ describe('connectAsks', () => {
     expect(probe.created).toEqual([]);
     expect([...state().asks.keys()]).toEqual(['a1']); // the store still follows the session
     off();
+  });
+
+  // M4b (the architect's ruling 2): the sheet never switches the main view to the asking session
+  describe('the shown-session rule', () => {
+    const shownSession = () => sessionOfTab(activeTab(useLayout.getState().main));
+    const show = async (id: typeof A) => {
+      useLayout.setState({ main: mainShowing(id) });
+      await Promise.resolve(); // the sheet opens once the layout write that showed the session is done
+    };
+    function connected() {
+      const { tool, probe } = probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false });
+      registerPanelTool(tool);
+      const fake = fakeClient();
+      const openSession = vi.spyOn(useLayout.getState(), 'openSession');
+      return { probe, fake, openSession, off: connectAsks(fake.client) };
+    }
+
+    it('an ask from a session not shown opens nothing, and opens the sheet when that session is shown while it is pending', async () => {
+      await show(B);
+      const { probe, fake, openSession, off } = connected();
+      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+      expect(probe.created).toEqual([]);
+      expect(shownSession()).toBe(B);
+      expect(panelOf(A)).toBeUndefined();
+      expect(state().asks.get('a1')?.state).toBe('pending'); // the store follows it meanwhile
+      await show(A); // the person goes to the session
+      expect(probe.created.map((init) => [init.appSessionId, init.params])).toEqual([[A, { askId: 'a1' }]]);
+      expect(panelOf(A)?.activeTabId).toBe(panelOf(A)?.tabs[0]?.id);
+      await show(B);
+      await show(A); // once opened, it is the sheet's: going back opens nothing more
+      expect(probe.created).toHaveLength(1);
+      expect(probe.opens).toEqual([]);
+      expect(openSession).not.toHaveBeenCalled();
+      off();
+    });
+
+    it('opens the last ask still pending among those that waited, and none once all were answered or cancelled', async () => {
+      await show(B);
+      const { probe, fake, openSession, off } = connected();
+      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a2')] });
+      fake.event('session.eventBatch', { appSessionId: A, events: [answered('a2')] }); // answered from another window
+      await show(A);
+      expect(probe.created.map((init) => init.params)).toEqual([{ askId: 'a1' }]);
+      await show(B);
+      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a3'), opened('a4')] });
+      fake.event('session.eventBatch', { appSessionId: A, events: [cancelled('a3'), answered('a4')] });
+      await show(A);
+      expect(probe.created).toHaveLength(1);
+      expect(probe.opens).toEqual([]);
+      expect(openSession).not.toHaveBeenCalled();
+      off();
+    });
+
+    // The Overview card's or the hover card's button: the person's own way to the session, through `openAsk`, whose
+    // addTool opens the session before it writes its tab; the waiting ask then lands on that one tab
+    it('a waiting ask opened from a card goes to its session with one sheet tab', async () => {
+      await show(B);
+      const { probe, fake, off } = connected();
+      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+      const row: AskRowData = { askId: 'a1', toolUseId: 'a1' as ToolUseId, title: 'Setup', context: null, blocking: true, questions: QUESTIONS, state: 'pending', answers: null, error: null };
+      mawsTranscriptActionsOver(fake.client).openAsk(A, row);
+      await Promise.resolve();
+      expect(shownSession()).toBe(A);
+      expect(panelOf(A)?.tabs.map((t) => t.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
+      expect(probe.created).toHaveLength(1);
+      off();
+    });
+
+    it('stops following the shown session once disconnected', async () => {
+      await show(B);
+      const { probe, fake, off } = connected();
+      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+      off();
+      await show(A);
+      expect(probe.created).toEqual([]);
+    });
   });
 });
 

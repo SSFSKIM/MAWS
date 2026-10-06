@@ -9,8 +9,9 @@ import { readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { RequestId } from '@shared/graph/ids';
+import type { AttentionId, RequestId, SessionId, ToolUseId } from '@shared/graph/ids';
 import { PANE_ANSWER_MS } from '@shared/maws/panes';
 import { askSteerText } from '@shared/maws/ask';
 import { MAWS_TOOL_ANNOTATIONS, mawsToolList, TOOL_ERRORS, type AskAnswer } from '@shared/maws/tools';
@@ -26,6 +27,7 @@ import { buildLaunch, RELAY_URL } from './launch';
 import { appReplayHandshake } from './replay-handshake';
 import { replayEngine, type ReplayTransport } from './replay-transport';
 import { EngineSession } from './session';
+import { SessionStream } from './session-stream';
 import { AskAnswerMismatch } from './tool-server/ask';
 
 async function until(check: () => boolean, what: string, ms = 10_000): Promise<void> {
@@ -375,6 +377,80 @@ describe('ask on an EngineSession (scripted)', () => {
     run.transport.exit(0);
     await run.session.exited;
     expect(run.rebuilt()).toEqual(run.events);
+  });
+});
+
+// E1 M4b (the architect's ruling 1): a blocking ask waits on the human as an AskUserQuestion does, so it is a `question`
+// attention item published with the broker's list (Overview card, Needs-you, notifier) until it is answered or
+// cancelled, and `session.pendingRequest` answers its `maws.ask.opened` event for the card; an async ask is none.
+describe('a blocking ask as a question attention item (scripted)', () => {
+  const QUESTIONS = [{ question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] }];
+  const ANSWERS: AskAnswer[] = [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }];
+
+  // The session wired to a SessionStream as `registerEngineIpc` wires it, with every published list kept.
+  async function attended() {
+    const run = await mawsSession();
+    const published: AttentionItem[][] = [];
+    const stream = new SessionStream({ appSessionId: run.session.status().appSessionId, launchId: 'L', sessionId: null, journalPath: join(userData, 'L.jsonl'), emit: () => {} });
+    run.session.on('events', (events) => stream.events(events));
+    run.session.on('brokerItems', (items) => {
+      published.push(items);
+      stream.brokerItems(items);
+    });
+    return { ...run, published, stream, last: () => published.at(-1) ?? [] };
+  }
+
+  it('is pending while the ask waits, with its summary and request, and retires once answered', async () => {
+    const run = await attended();
+    const id = run.call('ask', { title: 'Setup', questions: QUESTIONS }, 'toolu_att');
+    await until(() => run.session.asks().length === 1, 'the pending ask');
+    const { appSessionId } = run.session.status();
+    const openedAt = run.session.asks()[0]!.openedAt;
+    const item: AttentionItem = {
+      id: `${appSessionId}:${id}` as AttentionId, appSessionId, sessionId: run.session.status().engineSessionId as SessionId, kind: 'question',
+      request: { requestId: id, toolUseId: 'toolu_att' as ToolUseId, taskId: null, agentId: null }, summary: 'Setup', createdAt: openedAt, state: 'pending', stateChangedAt: openedAt, expiresAt: null,
+    };
+    expect(run.last()).toEqual([item]);
+    expect(run.session.brokerItems()).toEqual([item]); // what a reload reads
+    const opened = run.maws().find((e) => e.kind === 'maws.ask.opened');
+    expect(run.stream.pendingRequest(id)).toEqual(opened);
+
+    expect(await run.session.answerAsk('toolu_att', ANSWERS)).toBe('delivered');
+    expect(run.last()).toEqual([]);
+    expect(run.session.brokerItems()).toEqual([]);
+    expect(run.stream.pendingRequest(id)).toBeNull();
+    run.transport.exit(0);
+    await run.session.exited;
+  });
+
+  it('summarises an untitled ask by its first question, and retires when the engine withdraws it or the process ends', async () => {
+    const run = await attended();
+    const gone = run.call('ask', { questions: QUESTIONS }, 'toolu_gone');
+    run.call('ask', { questions: QUESTIONS }, 'toolu_exit');
+    await until(() => run.session.asks().length === 2, 'both asks');
+    expect(run.last().map((i) => [i.request.toolUseId, i.summary, i.state])).toEqual([['toolu_gone', 'Which colour?', 'pending'], ['toolu_exit', 'Which colour?', 'pending']]);
+    run.transport.push({ type: 'control_cancel_request', request_id: gone });
+    await until(() => run.session.asks().length === 1, 'the withdrawal');
+    expect(run.last().map((i) => i.request.toolUseId)).toEqual(['toolu_exit']);
+    expect(run.stream.pendingRequest(gone)).toBeNull();
+    run.transport.exit(1);
+    await run.session.exited;
+    expect(run.last()).toEqual([]);
+    expect(run.session.brokerItems()).toEqual([]);
+  });
+
+  it('an async ask is no attention item, and publishes nothing', async () => {
+    const run = await attended();
+    const before = run.published.length;
+    const id = run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_async');
+    await run.answered(id);
+    expect(run.session.asks()).toHaveLength(1);
+    expect(await run.session.answerAsk('toolu_async', ANSWERS)).toBe('delivered');
+    expect(run.published.slice(before)).toEqual([]);
+    expect(run.session.brokerItems()).toEqual([]);
+    expect(run.stream.pendingRequest(id)).toBeNull();
+    run.transport.exit(0);
+    await run.session.exited;
   });
 });
 

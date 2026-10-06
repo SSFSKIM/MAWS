@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AttentionId } from '@shared/graph/ids';
 import { item } from '../../../../../test/support/builders';
-import { itemFor, permission, syntheticRequest } from '../../request-card/test-requests';
+import { askItemFor, askOpened, itemFor, permission, syntheticRequest } from '../../request-card/test-requests';
 import { swapOf } from './swap';
 
 const A = 'app-a';
@@ -51,5 +51,18 @@ describe('the docked swap takes the oldest answerable request, once it is read',
     const delivered = itemFor(event, A, { state: 'delivered' });
     expect(swapOf([delivered], new Map([[delivered.id, event as SessionEvent]])).item?.id).toBe(delivered.id);
     expect(swapOf([itemFor(event, A, { state: 'retired' })], new Map()).item).toBeNull();
+  });
+
+  // E1 M4b: the Question sheet answers an ask, not the composer, so its item never takes the editor's place
+  it('shows a blocking ask as a notice above the frame, leaving the editor and any request to dock', () => {
+    const ask = askOpened({ at: '2026-09-29T08:00:00.000Z' });
+    const asked = askItemFor(ask, A);
+    const event = permission();
+    const approval = itemFor(event, A);
+    const swap = swapOf([asked, approval], new Map<AttentionId, SessionEvent | null>([[asked.id, ask], [approval.id, event]]));
+    expect(swap.notice?.id).toBe(asked.id);
+    expect(swap.item?.id).toBe(approval.id);
+    expect(swap.waiting).toBe(0);
+    expect(swapOf([asked], new Map<AttentionId, SessionEvent | null>([[asked.id, ask]]))).toMatchObject({ item: null, notice: { id: asked.id }, waiting: 0 });
   });
 });

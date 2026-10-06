@@ -28,6 +28,8 @@ export const BATCH_MS = 16;
 export const BATCH_MAX = 500;
 
 const REQUESTED_KINDS = new Set(['permission.requested', 'question.requested', 'plan.requested', 'dialog.requested', 'elicitation.requested']);
+// E1 M4b: a blocking ask's attention item originates in its `maws.ask.opened` (an async ask is no item)
+const isRequested = (event: SessionEvent): boolean => REQUESTED_KINDS.has(event.kind) || (event.kind === 'maws.ask.opened' && event.blocking);
 
 export interface SessionStreamOptions {
   appSessionId: AppSessionId;
@@ -69,7 +71,7 @@ export class SessionStream {
   }
 
   events(batch: SessionEvent[]): void {
-    for (const event of batch) if (REQUESTED_KINDS.has(event.kind)) this.requests.set((event as { requestId: string }).requestId, event);
+    for (const event of batch) if (isRequested(event)) this.requests.set((event as { requestId: string }).requestId, event);
     this.ring.push(...batch);
     if (this.ring.length > this.ringSize + Math.floor(this.ringSize / 5)) this.trim(this.ringSize); // trims in chunks, never one shift per event
     this.pending.push(...batch);
@@ -118,7 +120,8 @@ export class SessionStream {
     this.opts.emit('session.brokerItems', { appSessionId: this.opts.appSessionId, items });
   }
 
-  // `session.pendingRequest`: the originating *.requested event of a pending or delivered broker item, else null.
+  // `session.pendingRequest`: the originating *.requested event (a blocking ask's `maws.ask.opened`, E1 M4b) of a pending
+  // or delivered broker item, else null.
   pendingRequest(requestId: RequestId): SessionEvent | null {
     return this.liveItems.has(requestId) ? (this.requests.get(requestId) ?? null) : null;
   }

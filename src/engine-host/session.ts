@@ -48,7 +48,7 @@ import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/a
 import type { AskAnswer, AskResult } from '@shared/maws/tools';
 import { MemoryDeliverableStore, type DeliverableWriter } from './deliverables/store';
 import { AskAnswerMismatch } from './tool-server/ask';
-import { AskTable, type AskCancelReason } from './tool-server/asks';
+import { askAttentionItem, AskTable, type AskCancelReason } from './tool-server/asks';
 import { PaneBridge, type PaneShowRequest } from './tool-server/panes';
 import { MawsToolServer, toolText } from './tool-server/server';
 import { mawsTools } from './tool-server/tools';
@@ -141,6 +141,7 @@ export class EngineSession {
   readonly toolServer: MawsToolServer;
   private readonly panes: PaneBridge;
   private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
+  private askItems = new Map<string, AttentionItem>(); // E1 M4b: the blocking asks' attention items, published with the broker's
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
   private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */ };
@@ -198,7 +199,12 @@ export class EngineSession {
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.panes = new PaneBridge({ show: (request) => this.emit('paneShow', { appSessionId: opts.spec.appSessionId, ...request }) });
-    this.askTable = new AskTable({ onChange: () => this.touch() });
+    this.askTable = new AskTable({
+      onChange: () => {
+        this.publishAsks(); // E1 M4b
+        this.touch();
+      },
+    });
     this.toolServer = new MawsToolServer({
       tools: mawsTools({ deliverables: opts.deliverables ?? new MemoryDeliverableStore(), bridge: this.panes, asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason) }),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
@@ -215,7 +221,7 @@ export class EngineSession {
       client: { respond: (requestId, response, opts) => (this.client ? this.client.respond(requestId, response, opts) : Promise.reject(new Error('no engine process'))) },
       meta: (frame) => this.record('meta', frame),
       onAttention: (items) => {
-        this.emit('brokerItems', items);
+        this.emit('brokerItems', [...items, ...this.askItems.values()]); // E1 M4b: with the blocking asks'
         this.touch();
       },
       onGrant: (updates) => {
@@ -511,8 +517,19 @@ export class EngineSession {
     this.touch();
   }
 
+  // The session's attention list: the broker's items, then the blocking asks' (E1 M4b).
   brokerItems(): AttentionItem[] {
-    return this.broker.snapshot();
+    return [...this.broker.snapshot(), ...this.askItems.values()];
+  }
+
+  // E1 M4b (the architect's ruling 1): the attention list again whenever the blocking asks held changed (one opened,
+  // was answered or was cancelled); an async ask, or a claim or release that leaves the set alone, publishes nothing.
+  // An item is built once per ask, so its fields never move between publications.
+  private publishAsks(): void {
+    const blocking = this.askTable.list().filter((ask) => ask.blocking);
+    if (blocking.length === this.askItems.size && blocking.every((ask) => this.askItems.has(ask.askId))) return;
+    this.askItems = new Map(blocking.map((ask) => [ask.askId, this.askItems.get(ask.askId) ?? askAttentionItem(ask, this.spec.appSessionId, this.normalizer.state.sessionId)]));
+    this.emit('brokerItems', this.brokerItems());
   }
 
   // The command catalogue C7's `session.catalog` answers from (coordinator, C7's asks).

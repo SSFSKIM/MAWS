@@ -6,7 +6,8 @@
 // through C5's dispatcher, bound `within` the element that owns focus for the placement. Docked, that is the
 // `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's article), since
 // the article, not the card, holds focus there; hover and inline bind no key. Digits pick a permission's scope from
-// the same owner.
+// the same owner. E1 M4b: a blocking `maws` ask's item (originating in `maws.ask.opened`) renders compact
+// (`variants/Ask.tsx`), its one action opening the Question sheet; the card never answers it.
 //
 // The card imports the docked frame from its own module, never `composer/index.ts`, so no editor code reaches it.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
@@ -28,6 +29,7 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../transcript';
 import { toAnswer } from './answers';
+import { ASK_CARD, AskBody } from './variants/Ask'; // E1 M4b
 import { CardButton, Controls, Muted } from './controls';
 import { HoverPreview } from './preview/HoverPreview';
 import { hoverApproval } from './quick-approval';
@@ -143,6 +145,8 @@ function titleOf(request: SessionEvent | null, requester: string): { title: stri
       return { title: dialogTitle(request.dialogKind, request.payload), subtitle: null };
     case 'elicitation.requested':
       return { title: request.mcpServerName, subtitle: `${request.mcpServerName} asks for input` };
+    case 'maws.ask.opened': // E1 M4b
+      return { title: request.title ?? ASK_CARD.untitled, subtitle: null };
     default:
       return { title: null, subtitle: null };
   }
@@ -281,6 +285,8 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
         Answered{what ? ` · ${what}` : ''}
       </p>
     );
+  } else if (request?.kind === 'maws.ask.opened') {
+    body = <AskBody appSessionId={item.appSessionId} request={request} />; // E1 M4b: every placement, the hover's too
   } else if (hover) {
     body = request ? <HoverPreview request={request} /> : <NoticeBody item={item} />;
   } else {
@@ -349,7 +355,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
         </p>
       )}
       {canAnswerHover && !collapsed && <Muted>Approve applies to this request only.</Muted>}
-      {(hover || (placement === 'card' && !answerable(request))) && (
+      {(hover || (placement === 'card' && !answerable(request))) && request?.kind !== 'maws.ask.opened' && (
         <Controls>
           <CardButton onClick={openSession} className="mr-auto">
             Open session
