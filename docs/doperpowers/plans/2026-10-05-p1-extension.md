@@ -96,7 +96,7 @@ Claude Desktop's model (`claude-desktop-extensions.txt` §8): marketplaces added
 
 ### H. Voice
 
-Push-to-talk dictation into the composer: hold a bound key, speak, release, the text lands at the caret. Local Apple speech recognition first (A-8), through a small Swift helper the app bundles; the microphone permission is requested on first use with the reason stated. Realtime voice conversation is deferred.
+Push-to-talk dictation into the composer: hold a bound key, speak, release, the text lands at the caret. Local Apple speech recognition first (A-8), through a small Swift helper the app bundles; the microphone and speech-recognition permissions (macOS asks for both, E9's finding) are requested on first use with the reason stated. Realtime voice conversation is deferred.
 
 ### I. The detachable supervisor
 
