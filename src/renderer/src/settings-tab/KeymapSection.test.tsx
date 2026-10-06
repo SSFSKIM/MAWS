@@ -68,6 +68,15 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ keymap: {} }));
   });
 
+  // E9 M6: the owner's ruling (2026-10-06) ships the hold to dictate unbound; this row is where a chord is bound
+  it('Hold to dictate is unbound by default and records ⌥Space by its code', async () => {
+    renderSection();
+    expect(chordOf('Hold to dictate')).toBe('Unbound');
+    fireEvent.keyDown(record('Hold to dictate'), { key: ' ', code: 'Space', altKey: true }); // Option+Space types a no-break space
+    await vi.waitFor(() => expect(b.sets).toEqual([{ keymap: { 'composer.dictate': 'Alt+Space' } }]));
+    expect(chordOf('Hold to dictate')).toBe('⌥Space');
+  });
+
   it('Reset to defaults clears every override after a confirm', async () => {
     renderSection({ 'attention.next': 'Cmd+Shift+U', 'palette.open': null });
     fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
