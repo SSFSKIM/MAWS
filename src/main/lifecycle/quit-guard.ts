@@ -9,7 +9,9 @@
 // Quit, Quit when idle or Cancel. Quit quits; Quit when idle holds the quit, publishes the waiting report for the page's
 // banner, re-reads it on every status change and every 2 s, and quits at zero. Every quit first stops the engine host's
 // sessions (`engine.shutdown`, each through its ladder) and waits for that answer, bounded by SHUTDOWN_BOUND_MS, before
-// the final app.quit(): will-quit then kills the hosts, and an engine still running there would outlive the app.
+// the final app.quit(): will-quit then kills the hosts, and an engine still running there would outlive the app. (E10:
+// in detached mode every quit but a keep stops them through `stopAllForQuit`, which sends `host.stopAll` and the
+// supervisor exits after it; will-quit only closes the supervisor's socket, killing nothing.)
 // Foreign-live sessions and the owner's terminals outside MAWS are never waited on (the statuses and the pty table are
 // MAWS's own). Quitting is one flight: once it starts, outside quits stay held and any report, question or wait still
 // out is inert until the one final app.quit() (review fix). The end-to-end smoke answers without a dialog. The
@@ -47,11 +49,12 @@ export interface BusyReport { midTurn: number; backgroundWork: number; busyTermi
 
 export const PROBE_TIMEOUT_MS = 2_000; // per terminal, and for the list
 export const WAIT_POLL_MS = 2_000;
-// How long a quit waits for engine.shutdown. The host's ladder (session-ladder.ts) writes end_session and waits 3 s for
+// How long a quit waits for engine.shutdown (E10: or, detached, host.stopAll; the same ladder). The host's ladder (session-ladder.ts) writes end_session and waits 3 s for
 // the exit, then closes stdin and sends SIGTERM (2.1.283's own handler exits 143: pass3/sigterm-disposition.mjs), then
 // SIGKILL at 6 s. 5 s covers the end_session rung and 2 s of the SIGTERM rung, so only an engine that ignores both
-// would lose its SIGKILL rung, since will-quit kills the engine host (debt wave 6): past the bound main sends that rung
-// itself (`killEngines`) before the final app.quit().
+// would lose its SIGKILL rung, since will-quit kills the engine host (debt wave 6; E10: in detached mode will-quit only
+// closes the socket, and the supervisor exits after its stop-all): past the bound main sends that rung itself
+// (`killEngines`, the engines being the supervisor's children there) before the final app.quit().
 export const SHUTDOWN_BOUND_MS = 5_000;
 export const KILL_PS_TIMEOUT_MS = 1_000; // the process listing that confirms each pid before its SIGKILL
 

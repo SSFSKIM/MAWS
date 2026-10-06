@@ -1183,13 +1183,14 @@ describe('keeping sessions running at quit', () => {
 
   it('after Save all the ordinary question follows with keep, and keep is honoured there', async () => {
     let files = ['/r/a.ts'];
-    const ask = vi.fn<(r: unknown) => Promise<'save_all' | 'keep'>>().mockResolvedValueOnce('save_all').mockResolvedValueOnce('keep');
+    const ask = vi.fn<(r: unknown, asked: unknown, keep: unknown) => Promise<'save_all' | 'keep'>>().mockResolvedValueOnce('save_all').mockResolvedValueOnce('keep');
     const saveAll = vi.fn(async () => ((files = []), new Map<string, string>()));
     const { deps } = guard(modelWith(midTurn(1)), { unsavedFiles: () => files, saveAll, ask });
     electron.app.attempt();
     await settle();
     await settle();
     expect(ask.mock.calls.map(([r]) => r)).toEqual([{ ...NONE, midTurn: 1, unsavedFiles: ['/r/a.ts'] }, { ...NONE, midTurn: 1 }]);
+    expect(ask.mock.calls[1]![2]).not.toBeNull(); // the question after Save all offers keep
     expect(deps.shutdownEngine).not.toHaveBeenCalled();
     expect(electron.app.quits).toBe(1);
   });
