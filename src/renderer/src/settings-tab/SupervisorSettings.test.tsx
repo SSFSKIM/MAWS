@@ -121,6 +121,33 @@ describe('the status line, from host.status', () => {
     await statusLine('Running since 14:02 · pid 48213 · 3 sessions · exits 10 min after the last session ends');
     expect(within(row('Status')).queryByRole('button')).toBeNull();
   });
+
+  it('a refused Restart now is a warning toast', async () => {
+    await renderGroup(status({ state: 'crashed', supervisor: null, matches: 'wire', reason: 'incompatible', waitingLiveSessions: 2 }));
+    b.answers['host.restart'] = () => {
+      throw new Error('the engine host is not available');
+    };
+    fireEvent.click(within(row('Status')).getByRole('button', { name: 'Restart now' }));
+    await vi.waitFor(() => expect(toasts()).toEqual(['The supervisor was not restarted · the engine host is not available']));
+  });
+
+  it('when Restart now leaves with the focus, the focus goes to the group’s heading', async () => {
+    await renderGroup(status({ state: 'crashed', supervisor: null, matches: null, reason: 'held_lock' }));
+    const button = within(row('Status')).getByRole('button', { name: 'Restart now' });
+    button.focus();
+    fireEvent.click(button);
+    await vi.waitFor(() => expect(restarts()).toEqual([{ stopSessions: true }]));
+    event(status({ state: 'starting', supervisor: null, matches: null })); // main starts afresh: the button goes
+    expect(within(row('Status')).queryByRole('button')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Background supervisor' }));
+  });
+
+  it('says what the background process is for only while the engine host is one (detached)', async () => {
+    await renderGroup();
+    expect(within(row('Status')).getByText('Sessions run in this background process, so they can keep running after MAWS quits.')).toBeTruthy();
+    event(status({ transport: 'utility', supervisor: supervisor({ mode: 'utility', socketPath: null, logPath: null }) }));
+    expect(within(row('Status')).queryByText('Sessions run in this background process, so they can keep running after MAWS quits.')).toBeNull();
+  });
 });
 
 describe('the idle time', () => {
@@ -215,6 +242,52 @@ describe('Stop all', () => {
     await renderGroup(status({ state: 'starting', supervisor: null, matches: null }));
     await statusLine('Starting');
     expect((stopAll() as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a question the supervisor’s restart interrupted does not come back when it is ready again', async () => {
+    await renderGroup();
+    fireEvent.click(stopAll());
+    expect(within(row('Stop all')).getByText('Stop 3 sessions and the supervisor?')).toBeTruthy();
+    event(status({ state: 'restarting', supervisor: null, matches: null }));
+    expect(within(row('Stop all')).queryByText('Stop 3 sessions and the supervisor?')).toBeNull();
+    event(status());
+    expect(stopAll()).toBeTruthy();
+    expect(within(row('Stop all')).queryByText('Stop 3 sessions and the supervisor?')).toBeNull();
+    expect(within(row('Stop all')).queryByRole('button', { name: 'Cancel' })).toBeNull();
+  });
+
+  it('names the question on both its buttons', async () => {
+    await renderGroup();
+    fireEvent.click(stopAll());
+    const question = within(row('Stop all')).getByText('Stop 3 sessions and the supervisor?');
+    for (const name of ['Stop all', 'Cancel']) expect(within(row('Stop all')).getByRole('button', { name }).getAttribute('aria-describedby')).toBe(question.id);
+  });
+
+  it('moves the focus to Cancel when it asks and back to the action when cancelled', async () => {
+    await renderGroup();
+    stopAll().focus();
+    fireEvent.click(stopAll());
+    expect(document.activeElement).toBe(within(row('Stop all')).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(row('Stop all')).getByRole('button', { name: 'Cancel' }));
+    expect(document.activeElement).toBe(stopAll());
+  });
+
+  it('confirmed, the question closes at once (its count frozen out of sight) and the focus goes to the heading while it stops', async () => {
+    await renderGroup();
+    let answer = () => {};
+    b.answers['host.restart'] = () => undefined;
+    const invoke = b.bridge.invoke as unknown as { getMockImplementation(): (name: string, input: unknown) => Promise<unknown>; mockImplementation(f: (name: string, input: unknown) => Promise<unknown>): void };
+    const real = invoke.getMockImplementation();
+    invoke.mockImplementation((name, input) => (name === 'host.restart' ? new Promise((resolve) => (answer = () => resolve(real(name, input)))) : real(name, input)));
+    fireEvent.click(stopAll());
+    fireEvent.click(within(row('Stop all')).getByRole('button', { name: 'Stop all' }));
+    expect(within(row('Stop all')).queryByText('Stop 3 sessions and the supervisor?')).toBeNull();
+    const stopping = within(row('Stop all')).getByRole('button', { name: 'Stopping…' }) as HTMLButtonElement;
+    expect(stopping.disabled).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Background supervisor' }));
+    await act(async () => answer());
+    expect(await within(row('Stop all')).findByRole('button', { name: 'Stop all sessions and the supervisor…' })).toBeTruthy();
+    expect(restarts()).toEqual([{ stopSessions: true }]);
   });
 });
 

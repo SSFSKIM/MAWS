@@ -1,5 +1,6 @@
 // The Settings tab's words (C11 execution document, Interfaces "Settings tab"; mockup 06 vignette 04). Every row says
 // where its value comes from and what MAWS will not touch.
+import { MAX_IDLE_MINUTES } from '@shared/ipc/schema/settings'; // E10
 
 export const SECTIONS = {
   engine: 'Engine',
@@ -95,7 +96,7 @@ export const SUPERVISOR = {
   idleUnit: 'min',
   idleNote: (minutes: number) => `With MAWS closed, the supervisor exits ${minutes} min after its last session ends, and a kept session idle that long is stopped (Send resumes it). Empty means never.`,
   idleNeverNote: 'Never · the supervisor keeps running after its last session ends, even with MAWS closed.',
-  idleInvalid: 'Enter whole minutes from 1 to 1440, or leave the field empty for never',
+  idleInvalid: `Enter whole minutes from 1 to ${MAX_IDLE_MINUTES}, or leave the field empty for never`,
   quitDefault: 'When quitting with work in flight',
   quitKeep: 'Keep sessions running',
   quitStop: 'Stop them',

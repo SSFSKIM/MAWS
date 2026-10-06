@@ -5,9 +5,10 @@
 // quit default write settings version 10's `supervisor` section; main pushes the idle time to the supervisor
 // (`host.configure`) and the quit guard reads the default. Stop all asks inline, naming the live count, then calls
 // `host.restart {stopSessions: true}`: main stops every session through the supervisor and starts a fresh one.
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { Settings } from '@shared/ipc/schema';
 import type { HostStatus } from '@shared/ipc/schema/host';
+import { MAX_IDLE_MINUTES } from '@shared/ipc/schema/settings';
 import { clockTime } from '../budget/copy';
 import { ipc } from '../ipc/client';
 import { DANGER } from '../sessions/ui';
@@ -16,19 +17,18 @@ import { toast } from '../stores/notices';
 import { SUPERVISOR } from './copy';
 import { INPUT, Segment, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 
-const MAX_IDLE_MINUTES = 1440; // the schema's bound, a day
-
-// Whole minutes from 1 to 1440 as typed, or null when the text is not one.
-export function idleMinutesOf(text: string): number | null {
+// Whole minutes from 1 to MAX_IDLE_MINUTES as typed, or null when the text is not one.
+function idleMinutesOf(text: string): number | null {
   if (!/^\d+$/.test(text)) return null;
   const minutes = Number(text);
   return minutes >= 1 && minutes <= MAX_IDLE_MINUTES ? minutes : null;
 }
 
-// What the status line says, and whether the way back (Restart now) is offered.
-function describe(status: HostStatus | null): { text: string; restart: boolean; note: string } {
-  const note = SUPERVISOR.statusNote;
-  if (status === null) return { text: SUPERVISOR.reading, restart: false, note };
+// What the status line says, whether the way back (Restart now) is offered, and its note: what the background process
+// is for, said only while the engine host is one (detached).
+function describe(status: HostStatus | null): { text: string; restart: boolean; note?: string } {
+  const note = status?.transport === 'detached' ? SUPERVISOR.statusNote : undefined;
+  if (status === null) return { text: SUPERVISOR.reading, restart: false };
   if (status.state === 'crashed') {
     if (status.reason === 'incompatible') return { text: SUPERVISOR.waiting(status.waitingLiveSessions ?? 0), restart: true, note: SUPERVISOR.waitingNote };
     return { text: status.reason === 'held_lock' ? SUPERVISOR.heldLock : SUPERVISOR.notRunning, restart: true, note };
@@ -47,16 +47,28 @@ async function restart(failed: (why: string) => string): Promise<void> {
   if (!result.ok) toast({ level: 'warning', text: failed(result.error.message), actions: [], dismissible: true });
 }
 
+// After an action removes or disables the control that had focus, focus would fall to the page: it goes to `preferred`
+// when that is still there and enabled, else to the group's heading. Focus the owner moved elsewhere is left alone.
+type KeepFocus = (preferred: HTMLButtonElement | null) => void;
+
 export function SupervisorSettings({ settings }: { settings: Settings }) {
-  const heading = useId();
+  const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
   const status = useHosts((s) => s.supervisor);
   useEffect(() => useHosts.getState().connect(), []);
+  const keepFocus = useCallback<KeepFocus>((preferred) => {
+    const active = document.activeElement;
+    const lost = active === null || active === document.body || (active instanceof HTMLButtonElement && active.disabled);
+    if (!lost) return;
+    if (preferred?.isConnected && !preferred.disabled) preferred.focus();
+    else heading.current?.focus({ preventScroll: true });
+  }, []);
   return (
-    <div role="group" aria-labelledby={heading} className="mt-3">
-      <h4 id={heading} className="m-0 mb-0.5 text-ui-sm font-semibold text-fg">
+    <div role="group" aria-labelledby={headingId} className="mt-3">
+      <h4 id={headingId} ref={heading} tabIndex={-1} className="m-0 mb-0.5 text-ui-sm font-semibold text-fg outline-accent focus-visible:outline-2">
         {SUPERVISOR.title}
       </h4>
-      <StatusRow status={status} />
+      <StatusRow status={status} keepFocus={keepFocus} />
       <IdleExit settings={settings} />
       <Setting label={SUPERVISOR.quitDefault} note={SUPERVISOR.quitNote}>
         <Segment
@@ -69,23 +81,33 @@ export function SupervisorSettings({ settings }: { settings: Settings }) {
           onChange={(next) => void writeSettings({ supervisor: { keepRunningDefault: next === 'keep' } })}
         />
       </Setting>
-      <StopAll status={status} />
+      <StopAll status={status} keepFocus={keepFocus} />
     </div>
   );
 }
 
-function StatusRow({ status }: { status: HostStatus | null }) {
+function StatusRow({ status, keepFocus }: { status: HostStatus | null; keepFocus: KeepFocus }) {
   const [busy, setBusy] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const acted = useRef(false); // Restart now was pressed, and its button may take focus with it as it goes
   const { text, restart: offered, note } = describe(status);
+  useEffect(() => {
+    if (!acted.current) return;
+    keepFocus(button.current);
+    if (!offered) acted.current = false;
+  }, [busy, offered, keepFocus]);
   const restartNow = () => {
+    acted.current = true;
     setBusy(true);
     void restart(SUPERVISOR.restartFailed).finally(() => setBusy(false));
   };
   return (
     <Setting label={SUPERVISOR.status} note={note}>
-      <span className="min-w-0 text-ui-sm text-fg tabular-nums">{text}</span>
+      <span role="status" className="min-w-0 text-ui-sm text-fg tabular-nums">
+        {text}
+      </span>
       {offered && (
-        <button type="button" disabled={busy} className={TEXT_ACTION} onClick={restartNow}>
+        <button ref={button} type="button" disabled={busy} className={TEXT_ACTION} onClick={restartNow}>
           {SUPERVISOR.restartNow}
         </button>
       )}
@@ -113,52 +135,49 @@ function IdleExit({ settings }: { settings: Settings }) {
 }
 
 // The action, then in its place the question naming the live count (it follows the status while asked), Stop all and
-// Cancel. Focus moves to Cancel when asked and back to the action when the question closes.
-function StopAll({ status }: { status: HostStatus | null }) {
+// Cancel. The question ends when the supervisor stops being ready (it never reopens by itself) and as soon as the owner
+// confirms (the action then reads Stopping… until main answers). Focus moves to Cancel when asked and, when the
+// question closes, back to the action if it is enabled, else to the group's heading.
+function StopAll({ status, keepFocus }: { status: HostStatus | null; keepFocus: KeepFocus }) {
+  const questionId = useId();
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const ready = status?.state === 'ready';
+  if (asking && !ready) setAsking(false); // readiness lost: the question is over
   const open = asking && ready;
   const action = useRef<HTMLButtonElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
   useEffect(() => {
     if (open) cancel.current?.focus();
-    else if (wasOpen.current) action.current?.focus();
+    else if (wasOpen.current) keepFocus(action.current);
     wasOpen.current = open;
-  }, [open]);
+  }, [open, keepFocus]);
   const onEscape = (e: KeyboardEvent<HTMLButtonElement>) => {
-    if (e.key === 'Escape' && !busy) setAsking(false);
+    if (e.key === 'Escape') setAsking(false);
   };
   const stop = () => {
+    setAsking(false);
     setBusy(true);
-    void restart(SUPERVISOR.stopFailed).finally(() => {
-      setBusy(false);
-      setAsking(false);
-    });
+    void restart(SUPERVISOR.stopFailed).finally(() => setBusy(false));
   };
   return (
     <Setting label={SUPERVISOR.stopAll} note={SUPERVISOR.stopAllNote}>
       {open ? (
         <>
-          <span className="text-ui-sm text-fg">{SUPERVISOR.confirm(status?.supervisor?.liveSessions ?? 0)}</span>
-          <button type="button" disabled={busy} className={`${DANGER} text-ui-sm`} onClick={stop} onKeyDown={onEscape}>
-            {busy ? SUPERVISOR.stopping : SUPERVISOR.confirmAction}
+          <span id={questionId} className="text-ui-sm text-fg">
+            {SUPERVISOR.confirm(status?.supervisor?.liveSessions ?? 0)}
+          </span>
+          <button type="button" aria-describedby={questionId} className={`${DANGER} text-ui-sm`} onClick={stop} onKeyDown={onEscape}>
+            {SUPERVISOR.confirmAction}
           </button>
-          <button
-            ref={cancel}
-            type="button"
-            disabled={busy}
-            className={TEXT_ACTION}
-            onClick={() => setAsking(false)}
-            onKeyDown={onEscape}
-          >
+          <button ref={cancel} type="button" aria-describedby={questionId} className={TEXT_ACTION} onClick={() => setAsking(false)} onKeyDown={onEscape}>
             {SUPERVISOR.cancel}
           </button>
         </>
       ) : (
-        <button ref={action} type="button" disabled={!ready} className={TEXT_ACTION} onClick={() => setAsking(true)}>
-          {SUPERVISOR.stopAllAction}
+        <button ref={action} type="button" disabled={!ready || busy} className={TEXT_ACTION} onClick={() => setAsking(true)}>
+          {busy ? SUPERVISOR.stopping : SUPERVISOR.stopAllAction}
         </button>
       )}
     </Setting>

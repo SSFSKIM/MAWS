@@ -6,10 +6,11 @@
 // `host.openLog`). The main-owned half never crosses the socket, so only the engine-host half is in the wire fingerprint.
 import * as z from 'zod';
 import { HostStateSchema, type CommandSpec } from './common';
+import { MAX_IDLE_MINUTES } from './settings';
 
-// The supervisor's idle time: settings' 1 to 1440 minutes, in ms, or null for never. Capped on the wire because past
-// 2^31 - 1 ms Node clamps a timer to 1 ms, which would make both idle clocks fire at once and spin.
-export const MAX_IDLE_EXIT_MS = 1440 * 60_000;
+// The supervisor's idle time: settings' 1 to MAX_IDLE_MINUTES minutes, in ms, or null for never. Capped on the wire
+// because past 2^31 - 1 ms Node clamps a timer to 1 ms, which would make both idle clocks fire at once and spin.
+export const MAX_IDLE_EXIT_MS = MAX_IDLE_MINUTES * 60_000;
 const IdleExitMsSchema = z.number().int().positive().max(MAX_IDLE_EXIT_MS).nullable();
 
 export const SupervisorStatusSchema = z.strictObject({

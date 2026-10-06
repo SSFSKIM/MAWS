@@ -75,7 +75,8 @@ export const VoiceSettingsSchema = z.strictObject({ locale: z.string().min(2).ma
 // idleExitMinutes: how long the supervisor waits, with no app connected and no live session, before it exits (and how
 // long a kept session with no hard reason runs while no app is connected); null = never. keepRunningDefault: whether
 // "Quit and keep sessions running" is the quit question's default button when work is in flight.
-export const SupervisorSettingsSchema = z.strictObject({ idleExitMinutes: z.number().int().min(1).max(1440).nullable(), keepRunningDefault: z.boolean() });
+export const MAX_IDLE_MINUTES = 1440; // a day; host.configure's millisecond cap is derived from it (schema/host.ts)
+export const SupervisorSettingsSchema = z.strictObject({ idleExitMinutes: z.number().int().min(1).max(MAX_IDLE_MINUTES).nullable(), keepRunningDefault: z.boolean() });
 // E10 end
 
 export const SettingsSchema = z.strictObject({
