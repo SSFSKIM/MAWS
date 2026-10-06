@@ -164,6 +164,7 @@ export function createFakeAgentWorkClient(init: { session: AppSessionId } & Part
     watchDir: async () => {},
     unwatchDir: async () => {},
     onFilesChanged: (listener) => listen(filesListeners, listener),
+    listRoots: async () => [], // a read here never refuses, so nothing asks
     // E7 end
   };
 

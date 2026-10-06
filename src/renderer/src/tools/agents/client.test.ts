@@ -57,7 +57,10 @@ describe('agent-work client', () => {
   // E7 (Design §7): the project's durable cron file, read with its hash and watched by its directory, never written.
   it('reads a session file with files.read, watches and unwatches a directory, and passes files.changed through', async () => {
     const read = { encoding: 'utf8', content: '{}', bytes: 2, offset: 0, length: 2, truncated: false, mime: 'application/json', hash: 'a'.repeat(64), utf8: true };
-    const fake = fakeClient({ 'files.read': read, 'files.watch': undefined, 'files.unwatch': undefined });
+    const roots = { root: null, path: '', truncated: false, entries: [{ name: 'r', path: '/private/r', kind: 'dir', size: 1, mtimeMs: 1, target: null }] };
+    const fake = fakeClient({ 'files.read': read, 'files.watch': undefined, 'files.unwatch': undefined, 'files.list': roots });
+    expect(await createAgentWorkClient(fake.client).listRoots(A)).toEqual(['/private/r']);
+    expect(fake.invoked('files.list')).toEqual([{ appSessionId: 'A' }]);
     const client = createAgentWorkClient(fake.client);
     expect(await client.readFile({ appSessionId: A, path: '/r/.claude/scheduled_tasks.json', hash: true })).toEqual(read);
     await client.watchDir(A, '/r/.claude');

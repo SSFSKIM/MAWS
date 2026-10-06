@@ -27,8 +27,8 @@ export interface FakeAgentWorkClient {
   listeners(): number; // the event-batch listeners
   // E7 start
   files: Map<string, string>; // path → text
-  dirs: Set<string>; // the directories a watch finds
-  fileCalls: string[]; // `read <path>`, `watch <path>`, `unwatch <path>`, `on filesChanged`, `off filesChanged`
+  dirs: Set<string>; // the directories a watch finds; those of them `listRoots` asks about are the roots that resolve
+  fileCalls: string[]; // `read <path>`, `watch <path>`, `unwatch <path>`, `roots`, `on filesChanged`, `off filesChanged`
   refuse: Map<string, string>; // path → the message a read or watch of it fails with (a refusal, an I/O error)
   filesChanged(payload: { appSessionId: string; path: string; kind: FilesChanged['kind'] }): void;
   // E7 end
@@ -105,6 +105,10 @@ export function fakeAgentWorkClient(): FakeAgentWorkClient {
       return found(path, dirs.has(path));
     },
     unwatchDir: async (_appSessionId, path) => void fileCalls.push(`unwatch ${path}`),
+    listRoots: async () => {
+      fileCalls.push('roots');
+      return [...dirs];
+    },
     onFilesChanged: (listener) => {
       fileCalls.push('on filesChanged');
       filesListeners.add(listener);

@@ -191,8 +191,8 @@ describe('promptLine and projectRootOf', () => {
     expect(promptLine('x'.repeat(81))).toBe(`${'x'.repeat(79)}…`);
   });
 
-  it('is the worktree when the session has one, else its directory', () => {
-    expect(projectRootOf({ directory: '/repo', worktree: null })).toBe('/repo');
-    expect(projectRootOf({ directory: '/repo', worktree: { path: '/repo/.claude/worktrees/w1' } })).toBe('/repo/.claude/worktrees/w1');
+  it('is the launch directory, also inside a worktree (the engine’s projectRoot is its launch cwd)', () => {
+    expect(projectRootOf({ directory: '/repo' })).toBe('/repo');
+    expect(projectRootOf({ directory: '/repo/.claude/worktrees/w1/pkg' })).toBe('/repo/.claude/worktrees/w1/pkg');
   });
 });

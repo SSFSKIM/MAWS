@@ -734,10 +734,11 @@ describe('scheduled jobs', () => {
     vi.setSystemTime(now);
     withDurable();
     await attachTranscript(CRON.filter((e) => (e.seq ?? 0) <= 166));
-    await mount({ engineSessionId: CREATOR });
+    const monitor = event('task.started', { taskId: 'm1', taskType: 'monitor_ws', description: 'until tests pass' }, { seq: 1, at: T });
+    await mount({ engineSessionId: CREATOR, events: [monitor] });
     await waitFor(() => expect(heading('scheduled')).toBe('Scheduled · 3'));
     // after Monitors, before Tasks (Decision Log 10)
-    expect(Array.from(document.querySelectorAll<HTMLElement>('section[data-section]')).map((s) => s.dataset.section)).toEqual(['scheduled', 'tasks']);
+    expect(Array.from(document.querySelectorAll<HTMLElement>('section[data-section]')).map((s) => s.dataset.section)).toEqual(['monitors', 'scheduled', 'tasks']);
     const rows = scheduled();
     expect(rows.map(({ id, schedule, kind, prompt, link }) => ({ id, schedule, kind, prompt, link }))).toEqual([
       { id: '598b1690', schedule: '0 9 * * 1', kind: 'recurring · durable · this session', prompt: 'E7 durable weekly', link: null }, // made after this point of the transcript
@@ -758,17 +759,17 @@ describe('scheduled jobs', () => {
     expect(useTranscriptStore.getState().entries[A]!.jump?.focus).toBe(cellId.tool(callOf('E7 cron tick').toolUseId));
   });
 
-  it('follows the transcript: a delete removes its job, a durable create links its file row, another session’s durable job says so', async () => {
+  it('follows the transcript: a delete removes its job, and the durable create links its file row', async () => {
     const created = Date.parse(callOf('E7 nightly').at);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(created + 60_000);
     withDurable();
     // the one-shot left out: whether it has fired by now depends on the machine's zone (scheduled.test.ts pins it)
     await attachTranscript(CRON.filter((e) => !('toolUseId' in e) || e.toolUseId !== ONE_SHOT.toolUseId));
-    await mount();
+    await mount({ engineSessionId: CREATOR }); // the session that recorded the run, as the file names it
     await waitFor(() => expect(heading('scheduled')).toBe('Scheduled · 2'));
     expect(scheduled().map(({ id, schedule, kind, link }) => ({ id, schedule, kind, link }))).toEqual([
-      { id: '598b1690', schedule: 'Every Monday at 9:00 AM', kind: 'recurring · durable · another session', link: 'Open creating turn' },
+      { id: '598b1690', schedule: 'Every Monday at 9:00 AM', kind: 'recurring · durable · this session', link: 'Open creating turn' },
       { id: '1040f3a5', schedule: 'Every day at 3:00 AM', kind: 'recurring · session-only', link: 'Open creating turn' },
     ]);
   });
@@ -807,7 +808,35 @@ describe('scheduled jobs', () => {
       await flush();
     });
     expect(scheduled().map((r) => r.id)).toEqual(['598b1690', '481abb0a', '8d1a2582']);
+    // made by another session as far as this record knows (its engine id is not the file's creator): no link to a call
+    expect(scheduled()[0]).toMatchObject({ kind: 'recurring · durable · another session', link: null });
     expect(section('scheduled')!.querySelector(':scope > p')).toBeNull();
+  });
+
+  it('lists both rows of a hand-authored file that repeats an id, each its own', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fake.dirs.add(`${ROOT}/.claude`);
+    const job = (prompt: string) => ({ id: 'same', cron: '0 9 * * *', prompt, createdAt: Date.now() });
+    fake.files.set(FILE, JSON.stringify({ tasks: [job('first'), job('second')] }));
+    await mount();
+    await waitFor(() => expect(scheduled().map((r) => [r.id, r.prompt])).toEqual([['same', 'first'], ['same', 'second']]));
+    expect(errors).not.toHaveBeenCalled(); // no duplicate-key warning
+    errors.mockRestore();
+  });
+
+  // main drops a root that no longer resolves from the allowlist and refuses every path under it (allowlist.ts rootsOf)
+  it('a session whose directory is gone shows no section and no error; a refusal under a root that resolves says why', async () => {
+    const refusal = "path outside the session's directories";
+    fake.refuse.set(FILE, refusal);
+    await mount();
+    await waitFor(() => expect(fake.fileCalls).toContain('roots'));
+    await act(async () => flush());
+    expect(section('scheduled')).toBeNull();
+    unmountAll();
+    fake.dirs.add(ROOT);
+    await mount();
+    await waitFor(() => expect(section('scheduled')?.querySelector(':scope > p')?.textContent).toBe(`Scheduled jobs unavailable: ${refusal}`));
+    expect(scheduled()).toEqual([]);
   });
 
   it('shows no section without jobs, and none after the transcript deleted its only one', async () => {

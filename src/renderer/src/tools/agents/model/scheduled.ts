@@ -109,10 +109,12 @@ export function parseScheduledFile(text: string): { ok: true; jobs: DurableJob[]
   return { ok: true, jobs };
 }
 
-// Where the engine keeps a project's durable jobs: `<projectRoot>/.claude/scheduled_tasks.json`, the project root the
-// session runs in (its worktree when it has one).
-export function projectRootOf(record: { directory: string; worktree: { path: string } | null }): string {
-  return record.worktree?.path ?? record.directory;
+// Where the engine keeps a project's durable jobs: `<projectRoot>/.claude/scheduled_tasks.json`, the project root
+// being the engine's launch directory (2.1.287 `cli.pretty.js:376815`, `{ originalCwd: e, projectRoot: e, cwd: e }`),
+// which the record's `directory` is (MAWS launches there, a worktree included; discovery reads it from the
+// transcript). Not `worktree.path`: discovery sets that to the worktree's root for a directory inside one.
+export function projectRootOf(record: { directory: string }): string {
+  return record.directory;
 }
 export const SCHEDULED_DIR = '.claude';
 export const SCHEDULED_FILE = 'scheduled_tasks.json';

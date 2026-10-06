@@ -34,6 +34,7 @@ export interface AgentWorkClient {
   watchDir(appSessionId: AppSessionId, path: string): Promise<void>;
   unwatchDir(appSessionId: AppSessionId, path: string): Promise<void>;
   onFilesChanged(listener: (payload: FilesChanged) => void): () => void;
+  listRoots(appSessionId: AppSessionId): Promise<string[]>; // the session's roots that resolve now (files.list with no path)
   // E7 end
 }
 
@@ -62,6 +63,7 @@ export function createAgentWorkClient(bridge: MawsBridge): AgentWorkClient {
     watchDir: async (appSessionId, path) => valueOf(await bridge.invoke('files.watch', { appSessionId, path })),
     unwatchDir: async (appSessionId, path) => valueOf(await bridge.invoke('files.unwatch', { appSessionId, path })),
     onFilesChanged: (listener) => bridge.on('files.changed', listener),
+    listRoots: async (appSessionId) => valueOf(await bridge.invoke('files.list', { appSessionId })).entries.map((entry) => entry.path),
     // E7 end
   };
 }

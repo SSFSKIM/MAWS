@@ -62,8 +62,9 @@ export function ScheduledSection({ appSessionId, session, live, visible, expande
     <Group id="scheduled" heading={SCHEDULED_COPY.heading(rows.length)} expanded={expanded} onToggle={onToggle}>
       {error !== null && <p className="px-3.5 pb-1 text-ui-sm text-danger">{SCHEDULED_COPY.unavailable(error)}</p>}
       <ul className="flex flex-col">
-        {rows.map((row) => (
-          <ScheduledItem key={`${row.store}:${row.id}`} row={row} now={now} onOpen={open} />
+        {rows.map((row, i) => (
+          // the index too: a hand-authored durable file may repeat an id (the engine loads any string, SPEC 22 §22.5)
+          <ScheduledItem key={`${i}:${row.store}:${row.id}`} row={row} now={now} onOpen={open} />
         ))}
       </ul>
     </Group>
