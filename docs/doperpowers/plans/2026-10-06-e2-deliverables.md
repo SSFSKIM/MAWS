@@ -15,7 +15,7 @@ To see it: in a MAWS session, send *Write a self-contained HTML page dashboard.h
 - [x] M2 (2026-10-06, reviewed clean; US$0.1332 over two Haiku runs, A-15 identical at 25 keys) — The live recording through `LiveHost`: `p1-maws-artifacts`, its transcript, conformance admission
 - [x] M3 (2026-10-06, reviewed clean after one fix wave; PDF frame case c) — Main: the reader, `deliverables.*`, the `maws-deliverable` scheme and the frame policies, the files-service admission, the capture, console attribution
 - [x] M4 (2026-10-06, reviewed clean after one fix wave) — Renderer: the Deliverables tool (list, viewer, versions, actions), the summary section, the `deliverable` tab
-- [ ] M5 — Transcript: the artifact row, the cells, the delivery row's Open, `SendUserFile` retired, replay parity
+- [x] M5 (2026-10-06, reviewed clean) — Transcript: the artifact row, the cells, the delivery row's Open, `SendUserFile` retired, replay parity
 - [ ] M6 — Comment mode on an artifact element (G6; the composer E3's when landed, else the documented stub)
 - [ ] M7 — `e2e:deliverables`, evidence in both themes, gates, tracker rows, the whole-branch review, hand-back
 
