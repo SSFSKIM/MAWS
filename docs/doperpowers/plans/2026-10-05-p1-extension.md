@@ -291,9 +291,9 @@ What exists, read-only, that the children build on or replace.
 - **Acceptance:** **G1** a bound key (default configurable in the keymap) starts recording while held and shows a recording state in the composer; release stops. **G2** recognition runs locally through a bundled Swift helper over Apple's Speech framework, streaming partial text at the caret and the final text on release; the helper's absence or failure shows a reason. **G3** the microphone permission is requested on first use with the reason in the dialog; denial shows how to grant it. **G4** the packaged build carries the helper, signed as the app is; the e2e harness stubs recognition.
 - **Edges:** blocked-by: —. blocks: —.
 - **Contracts:** consumes the composer's insertion seam (C7).
-- **Design inheritance:** §3 H [binding: push-to-talk into the composer]; Apple speech [advisory, A-6].
+- **Design inheritance:** §3 H [binding: dictation into the composer; the button first, P-18]; Apple speech [advisory, A-6].
 - **Required:** required.
-- **Status:** in-flight, dispatched 2026-10-05 (wave one).
+- **Status:** landed 2026-10-06 (75b352d2). G1 met; G2 and G3 met as far as a machine proves (the live recognition path and the two macOS dialogs are the owner's hands: §2 item 3 at the sitting); G4 met. Four tracker rows added.
 
 ### E10: The detachable supervisor — plan
 
@@ -358,7 +358,7 @@ What exists, read-only, that the children build on or replace.
 | E6 Source control | plan | not-dispatched, dispatchable now | execution document at dispatch |
 | E7 Orchestration views | plan | not-dispatched, dispatchable now | execution document at dispatch |
 | E8 Plugins, marketplaces and mods | plan | in-flight (dispatched 2026-10-05, wave one) | execution document at dispatch |
-| E9 Voice | plan | in-flight (dispatched 2026-10-05, wave one) | execution document at dispatch |
+| E9 Voice | plan | landed 2026-10-06 (merged to master at 75b352d2 from 0af16f74, code tree 3869830a; 62 commits over 76b58fe0; gates on the code tree: typecheck, lint, 6,061 units, `e2e:voice` 14, `e2e:c7` 29, unsigned `build:app`, packaged helper probed and packaged e2e 1; adversarial document review 7 findings folded; every task approved within two rounds; whole-branch reviewer-high two Important fixed, round two clean; the owner's three rulings applied as M6; the live Apple recognition and the two TCC dialogs are the owner's first hold) | `docs/doperpowers/plans/2026-10-05-e9-voice.md` (Outcomes & Retrospective written), `docs/doperpowers/evidence/p1-e9/` |
 | E10 Detachable supervisor | plan | not-dispatched, blocked-by E1 | execution document at dispatch |
 | E11 Finish | plan | not-dispatched, deliberately late | execution document at dispatch |
 
@@ -373,6 +373,7 @@ What exists, read-only, that the children build on or replace.
 - 2026-10-05, E0a: `mcp_set_servers` is authoritative over the whole SDK server map (sending `{maws2}` alone removed `maws`), and the engine re-handshakes every server; the cheap way to add tools to a running `maws` server is the client-sent `notifications/tools/list_changed`, which makes the engine re-list at once. Under `ENABLE_TOOL_SEARCH` the model ToolSearches an MCP tool before calling it, so tool descriptions are what the index sees. `system/init` is re-emitted each turn with the current tool list. A JSON-RPC request from the engine has no timeout, so a blocking `ask` can wait.
 - 2026-10-05, E0a: `side_question` answers whole in the control response after one `system/control_request_progress {status:"started"}`, in 1.6 to 2.7 s, while a 20 s Bash tool ran in the main turn; MAWS's typed `SideQuestionResponseSchema {text}` is wrong (the answer is `{response, synthetic}`), pinned as an expected failure until E3 fixes it.
 - 2026-10-05, E0a: the AskUserQuestion preview format is a launch variable, `CLAUDE_CODE_QUESTION_PREVIEW_FORMAT` (`markdown` or `html`), not a handshake field; under `html` the engine refuses a non-HTML preview before any permission request; MAWS's `buildEnvironment` passes the owner's `CLAUDE_`-prefixed shell variables through, so MAWS must set or delete it explicitly. The installed engine moved to 2.1.290 during the probe.
+- 2026-10-06, E9: macOS asks two permissions for dictation, Microphone and Speech Recognition, not one; under `pnpm dev` the responsible app is Electron.app, whose Info.plist lacks the speech usage key, so a dev-mode first speech request may terminate the helper while the packaged app carries both keys through `extendInfo`. The load rule held E9's gates for about twelve hours on 2026-10-05 while the machine sat at a one-minute load of 70 to 436 from nProtect's `nosmain` and a `tart` VM, cleared by the owner.
 - 2026-10-05, E0b: every cookie value in the owner's Chrome profile is encrypted with the Safe Storage key (5,112 rows, `value` empty), so the one Keychain consent gates cookies, not only passwords; the saved passwords live in `Login Data For Account` (228 rows), not `Login Data` (91 blocklist rows). Unmodified Electron has no consumer for imported passwords; Codex's importer runs inside its Electron fork with compiled password-manager and autofill components. The remote-debugging port exposes every WebContents in the app, the MAWS renderer included, and Electron's debugger client is trusted and can reach every target, so the CDP bridge must filter Target, Browser and Storage methods and unknown sessions.
 
 ## 15. Outcomes and retrospective
