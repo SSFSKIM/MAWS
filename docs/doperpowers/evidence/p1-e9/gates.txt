@@ -1,0 +1,10 @@
+E9 (voice) M5 gate log. Each entry: the command, the one-minute load when it started (from /tmp/maws-review/waitload20.sh
+and the slot's own line), and the tail of its output. Every heavy command ran through /tmp/maws-review/with-slot.sh
+after the load gate printed `eligible`. MAWS_E2E was unset in the shell; the e2e launcher sets it for the app.
+
+Pre-gate targeted checks (light, outside the slot), 2026-10-05 22:50 KST, load 369:
+  pnpm exec eslint e2e/voice.spec.ts src/renderer/src/harness/composer/ComposerHarness.tsx src/renderer/src/harness/composer/api.ts
+    -> no output, exit 0
+  pnpm exec tsc --noEmit -p tsconfig.e2e.json --composite false
+    -> no output, exit 0
+

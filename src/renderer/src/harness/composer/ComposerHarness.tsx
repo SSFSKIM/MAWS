@@ -10,13 +10,15 @@
 // transcript above it on request (C6's slot, with the composer's edit-and-resubmit registered as the app registers it),
 // and can fail a composer's next `session.send` before it reaches main. W2: that composer sits in C5's own composer
 // column, as a started session pane holds it, and `wide` spans the page so the column reaches its cap.
+// E9 (M5): the page mounts the app's dictation key and controller beside ComposerAppKeys, and reads its store.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { Composer, ComposerAppKeys, connectComposer, connectInlineEdit, DockedCardFrame, dockCard, registerSlashWidget, WidgetDialogHost } from '../../composer';
+import { Composer, ComposerAppKeys, connectComposer, connectInlineEdit, DictationKeys, DockedCardFrame, dockCard, registerSlashWidget, WidgetDialogHost } from '../../composer';
+import { useDictationStore } from '../../composer/dictation/store';
 import { setRewindWindow } from '../../composer/resubmit-seam';
 import { ipc } from '../../ipc/client';
 import { connectShell } from '../../ipc/events';
@@ -157,6 +159,14 @@ export function ComposerHarness() {
       stubAccepts: () => stub.current.accepts,
       failNextSend: (appSessionId) => void failSend.add(appSessionId),
       rewindWindow: (ms) => setRewindWindow(ms),
+      dictation: () => {
+        const capture = useDictationStore.getState().capture;
+        return capture && { phase: capture.phase, appSessionId: capture.appSessionId };
+      },
+      voiceNotice: () => {
+        const notice = useDictationStore.getState().notice;
+        return notice && { kind: notice.kind, message: notice.message };
+      },
     };
     return () => {
       offs.forEach((off) => off());
@@ -205,6 +215,7 @@ export function ComposerHarness() {
         })}
       </main>
       <ComposerAppKeys />
+      <DictationKeys />
       <WidgetDialogHost />
     </QueryClientProvider>
   );
