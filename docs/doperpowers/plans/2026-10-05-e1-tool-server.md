@@ -14,7 +14,7 @@ To see it: launch a session in MAWS, send "Use the maws ask tool to ask me which
 - [x] M2 — `ask` in the host; the four fixtures recorded live; conformance admission (2026-10-06 00:40; b65ab57e plus the fix wave 37856046 and ed04d2a7..6ec7aabd, reviewed clean in two rounds; fixtures on 2.1.291, US$0.12, A-15 delta identical)
 - [x] M3 — Transcript rows (the capsule, the delivery row), the pane bridge, the question-row refusal (2026-10-06 01:55; 3140dc60 plus the fix wave 3bd28213..59c01ba8, reviewed clean in two rounds; the row carries no cancel reason, hand-back)
 - [x] M4 — The Question sheet (X5 tool) (2026-10-06 03:05; b1d135c9 plus the fix wave 12b629f0..21fefd3f, reviewed clean in two rounds)
-- [ ] M4b — The architect's rulings (2026-10-06): a blocking ask is a question attention item; the sheet never switches sessions (executed 2026-10-06 03:40 at 49bc987a; in review)
+- [x] M4b — The architect's rulings (2026-10-06): a blocking ask is a question attention item; the sheet never switches sessions (2026-10-06 04:25; 49bc987a plus the fix wave 753cefae..0125b3ca, reviewed clean in two rounds)
 - [ ] M5 — The `tools` e2e group, the live sitting, evidence, acceptance
 - [ ] Whole-branch review (`doperpowers:reviewer-high`, two rounds at most), hand-back, the one `docs/charter.md` §19 line
 
