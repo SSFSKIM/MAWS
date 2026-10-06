@@ -142,7 +142,9 @@ export class GitService {
     if ((await stat(join(repoRoot, path)).catch(() => null))?.isDirectory()) throw refused();
     const patch = await this.run(
       repoRoot,
-      ['-c', 'diff.autoRefreshIndex=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-index', `-U${context ?? 3}`, '--', '/dev/null', path],
+      // The prefixes are fixed so the header check reads `a/`/`b/` whatever the owner's diff.noprefix, mnemonicPrefix
+      // or srcPrefix/dstPrefix say (`--default-prefix` needs git 2.41; Apple's is older).
+      ['-c', 'diff.autoRefreshIndex=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-index', '--src-prefix=a/', '--dst-prefix=b/', `-U${context ?? 3}`, '--', '/dev/null', path],
       { acceptExitCodes: [1] },
     );
     if (!patchNames(patch, path)) throw refused();

@@ -28,6 +28,8 @@ export const PARENT_SESSION_VARIABLES = [
 // trips `window.ts`'s dev-CSP guard; `ELECTRON_RUN_AS_NODE` turns any Electron app into Node).
 export const LAUNCHER_PREFIXES = ['MAWS_', 'ELECTRON_'] as const;
 
+const parentSession = new Set<string>(PARENT_SESSION_VARIABLES);
+
 // The captured environment without the parent session's variables, the launcher's prefixes and whatever `drop` names:
 // the base of every git child main starts (E6: the mutating runner here, the remote runner in `src/main/scm`).
 export function childBaseEnvironment(captured: Record<string, string | undefined>, drop: (name: string) => boolean = () => false): Record<string, string> {
@@ -37,7 +39,6 @@ export function childBaseEnvironment(captured: Record<string, string | undefined
   }
   return env;
 }
-const parentSession = new Set<string>(PARENT_SESSION_VARIABLES);
 
 // Who the owner's commits are by, when their shell says so: kept by the mutating environment, which drops every other
 // inherited `GIT_*`, since they redirect no repository, configuration or transport (E6 Decision Log, task 1). The

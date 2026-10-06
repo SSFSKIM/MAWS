@@ -292,7 +292,7 @@ describe('git.diff untracked scope', () => {
     await repo.write('src/new.ts', 'one\ntwo\n');
     const diff = await service.diff({ directory: repo.path('src'), scope: 'untracked', path: 'src/new.ts' });
     expect(noIndexCalls().map(([, args]) => args)).toEqual([
-      ['-C', repo.root, '-c', 'diff.autoRefreshIndex=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-index', '-U3', '--', '/dev/null', 'src/new.ts'],
+      ['-C', repo.root, '-c', 'diff.autoRefreshIndex=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-index', '--src-prefix=a/', '--dst-prefix=b/', '-U3', '--', '/dev/null', 'src/new.ts'],
     ]);
     // The shape C8c's splitPatch reads as one `added` file: the git header, then `new file mode` before the first hunk.
     const lines = diff.patch.split('\n');
@@ -344,6 +344,18 @@ describe('git.diff untracked scope', () => {
       const diff = await service.diff({ directory: repo.root, scope: 'untracked', path });
       expect(diff.files, path).toEqual([{ path, oldPath: null, insertions: content === '' ? 0 : 1, deletions: 0, binary: false }]);
     }
+  });
+
+  it.each([
+    [['diff.mnemonicPrefix', 'true']],
+    [['diff.noprefix', 'true']],
+    [['diff.srcPrefix', 'old:'], ['diff.dstPrefix', 'new:']],
+  ])('answers whatever prefixes the configuration asks for (%j)', async (...settings: [string, string][]) => {
+    for (const [key, value] of settings) await repo.git('config', key, value);
+    await repo.write('new.txt', 'one\n');
+    const diff = await service.diff({ directory: repo.root, scope: 'untracked', path: 'new.txt' });
+    expect(diff.patch.split('\n')[0]).toBe('diff --git a/new.txt b/new.txt');
+    expect(diff.files).toEqual([{ path: 'new.txt', oldPath: null, insertions: 1, deletions: 0, binary: false }]);
   });
 
   it('refuses an answer about another path: the entry became a symlink to a directory between the checks and the diff', async () => {
