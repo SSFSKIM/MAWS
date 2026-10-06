@@ -3,7 +3,8 @@
 // (`_meta["claudecode/toolUseId"]`), else the control request id. A blocking ask holds its `tools/call` open: the
 // session answers it through the server's `reply` once the human submits, so the call settles here only with what was
 // written, or when the engine withdrew it or the process ended (its signal's reason), which cancels the ask with nothing
-// written. An async ask is answered `{status: 'asked', askId}` at once and its answers travel later as a steer.
+// written. An async ask is answered `{status: 'asked', askId}` at once and its answers travel later as a steer; a
+// withdrawal or an exit before that acknowledgement is written cancels it the same way.
 import type { PendingAsk } from '@shared/maws/ask';
 import { withQuestionIds } from '@shared/maws/ask';
 import { parseToolArguments, type AskResult } from '@shared/maws/tools';
@@ -25,18 +26,19 @@ export function askTool(deps: { asks: AskTable; cancelled: (ask: PendingAsk, rea
       askId, toolUseId: ctx.toolUseId, requestId: ctx.requestId, blocking, title: title ?? null, context: context ?? null,
       questions: withQuestionIds(questions), openedAt: (deps.now?.() ?? new Date()).toISOString(),
     };
+    // While the call is in flight (for an async ask, until its acknowledgement is written), the engine withdrawing it
+    // or the process ending cancels the ask: nothing will be written for it, so no one can answer it either. Once the
+    // call settled the server never aborts its signal again.
+    ctx.signal.addEventListener('abort', () => {
+      const reason: AskCancelReason = ctx.signal.reason === 'exit' ? 'exit' : 'withdrawn';
+      const cancelled = deps.asks.cancel(askId, reason);
+      if (cancelled) deps.cancelled(cancelled, reason);
+    }, { once: true });
     if (!blocking) {
       deps.asks.open(ask, { blocking: false });
       const asked: AskResult = { status: 'asked', askId };
       return toolText(asked);
     }
-    return new Promise<McpToolResult>((resolve) => {
-      deps.asks.open(ask, { blocking: true, resolve });
-      ctx.signal.addEventListener('abort', () => {
-        const reason: AskCancelReason = ctx.signal.reason === 'exit' ? 'exit' : 'withdrawn';
-        const cancelled = deps.asks.cancel(askId, reason);
-        if (cancelled) deps.cancelled(cancelled, reason);
-      }, { once: true });
-    });
+    return new Promise<McpToolResult>((resolve) => deps.asks.open(ask, { blocking: true, resolve }));
   });
 }
