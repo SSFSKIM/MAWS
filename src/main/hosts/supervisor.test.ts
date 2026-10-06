@@ -97,6 +97,7 @@ vi.mock('electron', () => ({
 }));
 
 import type { HostDispatch } from '../ipc/router';
+import { engineHostSettled } from '../sessions/service-register';
 import { createHostSupervisor, RESYNC_BOUND_MS, type HostSupervisor } from './supervisor';
 
 const HOSTS = {
@@ -426,6 +427,36 @@ describe('host supervisor', () => {
       await flush();
       expect(nextEmit('session.brokerItems', BROKER)).toBe(true);
       expect(streaming).toHaveBeenCalledOnce();
+    });
+
+    // E10: the session service's boot forgets stale bootstrap ids, whose `session.forgotten` retires their attention: it
+    // waits for the host to stream, so that event reaches main
+    it('streaming() holds from the ready line until the host leaves ready; engineHostSettled waits for it, or for crashed', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      let release!: () => void;
+      supervisor.setResync('engine-host', () => new Promise<void>((resolve) => (release = resolve)));
+      void supervisor.start();
+      latest('maws-pty-host').spawn(202);
+      const engine = serveEngine(101);
+      await flush();
+      expect(supervisor.snapshot('engine-host').state).toBe('ready');
+      expect(supervisor.streaming('engine-host')).toBe(false);
+      let settled = false;
+      void engineHostSettled(supervisor).then(() => (settled = true));
+      await flush();
+      expect(settled).toBe(false); // ready, but still pulled from
+      release();
+      await flush();
+      expect(supervisor.streaming('engine-host')).toBe(true);
+      expect(settled).toBe(true);
+      await expect(engineHostSettled(supervisor)).resolves.toBeUndefined(); // already streaming: at once
+
+      engine.engine.exit(137);
+      expect(supervisor.streaming('engine-host')).toBe(false);
+      let again = false;
+      void engineHostSettled(supervisor).then(() => (again = true));
+      await flush();
+      expect(again).toBe(true); // crashed settles it (the session service answers host_unavailable rather than hang)
     });
 
     it('at RESYNC_BOUND_MS aborts the resync (reason bound) before the ready line, then fires onStreaming', async () => {

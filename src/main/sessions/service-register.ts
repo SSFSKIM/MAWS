@@ -45,15 +45,18 @@ export function registerSessionServiceHandlers(service: SessionService): void {
 
 // The engine host answers: its first launch is ready, or it has given up (a crashed host answers `host_unavailable`,
 // which the service records per intent rather than waiting forever).
-export function engineHostSettled(hosts: Pick<HostSupervisor, 'snapshot' | 'onState'>): Promise<void> {
+// E10: ready means streaming (after main's resync and the `ready` line): the boot's commands whose effect reaches main
+// only as an event (`session.forget`'s `session.forgotten`, which retires the id's attention) are sent once the host's
+// events reach main.
+export function engineHostSettled(hosts: Pick<HostSupervisor, 'snapshot' | 'onState' | 'onStreaming' | 'streaming'>): Promise<void> {
   return new Promise((resolve) => {
-    const settled = (state: HostState) => state.state === 'ready' || state.state === 'crashed';
-    if (settled(hosts.snapshot('engine-host'))) return resolve();
-    const off = hosts.onState('engine-host', (state) => {
-      if (!settled(state)) return;
-      off();
+    const crashed = (state: HostState) => state.state === 'crashed';
+    if (hosts.streaming('engine-host') || crashed(hosts.snapshot('engine-host'))) return resolve();
+    const settle = () => {
+      offs.forEach((off) => off());
       resolve();
-    });
+    };
+    const offs = [hosts.onState('engine-host', (state) => crashed(state) && settle()), hosts.onStreaming('engine-host', settle)];
   });
 }
 

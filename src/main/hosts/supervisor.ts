@@ -59,6 +59,7 @@ export interface HostSupervisor {
   // Once per connection, after the `ready` line was sent (after the resync, if any): the host's events reach main from
   // here, so a command whose effect comes back only as events is dispatched here rather than at the `ready` state.
   onStreaming(owner: HostOwner, listener: () => void): () => void;
+  streaming(owner: HostOwner): boolean; // from the `ready` line until the host leaves `ready`
   // Asks a detached engine host's supervisor to exit now, or when it holds nothing live; the close that follows is
   // deliberate (no crash count, a fresh start once it is gone). False when the engine host is not detached and served.
   exitSupervisor(when: 'now' | 'idle'): boolean;
@@ -105,6 +106,7 @@ interface Host {
   // E10 start
   resync: HostResync | null;
   resyncing: AbortController | null; // the resync in flight on the current connection
+  streaming: boolean; // told `ready` on the current connection
   streamingListeners: Set<() => void>;
   transport: DetachedTransport | null; // a detached host's; null for a utility host
   // E10 end
@@ -127,6 +129,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       ptys: new Set(),
       resync: null,
       resyncing: null,
+      streaming: false,
       streamingListeners: new Set(),
       transport: null,
     };
@@ -155,6 +158,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
 
   function transition(host: Host, next: Omit<HostState, 'revision'>): void {
     cancelResync(host, 'transition'); // E10: the connection it pulled through is gone (or replaced)
+    host.streaming = false; // E10
     host.state = { ...next, revision: host.state.revision + 1 };
     if (next.state === 'crashed') failHeld(host, 'is crashed'); // E10: a held request fails only on crashed or stop()
     for (const listener of host.listeners) listener(host.state);
@@ -241,6 +245,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
   }
 
   function streaming(host: Host): void {
+    host.streaming = true;
     for (const listener of host.streamingListeners) {
       try {
         listener();
@@ -497,6 +502,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       hosts[owner].streamingListeners.add(listener);
       return () => hosts[owner].streamingListeners.delete(listener);
     },
+    streaming: (owner) => hosts[owner].streaming,
     exitSupervisor(when) {
       return hosts['engine-host']?.transport?.exit(when) ?? false;
     },
