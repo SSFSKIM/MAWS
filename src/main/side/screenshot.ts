@@ -22,7 +22,9 @@ export async function readScreenshotBlock(path: string, roots: readonly string[]
   if (real === null) throw new ScreenshotRefused('not found');
   const allowed = await Promise.all(roots.map((root) => realpath(root).catch(() => null)));
   if (!allowed.some((root) => root !== null && under(root, real))) throw new ScreenshotRefused('not under an allowed root');
-  const handle = await open(real, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => null);
+  // O_NONBLOCK: a FIFO (or a device) under a root opens at once rather than holding a libuv thread until a writer
+  // comes; the regular-file check below refuses it, and a regular file reads the same either way
+  const handle = await open(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(() => null);
   if (handle === null) throw new ScreenshotRefused('not found');
   try {
     const stat = await handle.stat();

@@ -1,5 +1,6 @@
 // The one path main opens for an anchored comment (E3 execution document, Design §9): a screenshot under an allowed
 // root, a regular file of at most 5 MiB, typed by its magic bytes.
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -71,4 +72,12 @@ describe('readScreenshotBlock', () => {
     expect(await refusal(readScreenshotBlock(join(root.path, 'dir.png'), [root.path]))).toBe('screenshot: not a regular file');
     expect(await refusal(readScreenshotBlock(join(root.path, 'missing.png'), [root.path]))).toBe('screenshot: not found');
   });
+
+  // the final fix wave: a FIFO under a root (no writer) is opened without blocking, so it cannot stall a libuv thread,
+  // and is refused as not a regular file
+  it('refuses a FIFO at once, without waiting for a writer', async () => {
+    const fifo = join(root.path, 'pipe.png');
+    execFileSync('mkfifo', [fifo]);
+    expect(await refusal(readScreenshotBlock(fifo, [root.path]))).toBe('screenshot: not a regular file');
+  }, 2_000);
 });
