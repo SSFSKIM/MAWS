@@ -338,6 +338,32 @@ describe('git.diff untracked scope', () => {
     expect(noIndexCalls()).toEqual([]);
   });
 
+  it('reads names git quotes or tab-ends in its header as the requested path', async () => {
+    for (const [path, content] of [['naïve file.txt', 'x\n'], ['sp ace.txt', 'y\n'], ['e mpty.txt', ''], ['q"uote.txt', 'z\n']] as const) {
+      await repo.write(path, content);
+      const diff = await service.diff({ directory: repo.root, scope: 'untracked', path });
+      expect(diff.files, path).toEqual([{ path, oldPath: null, insertions: content === '' ? 0 : 1, deletions: 0, binary: false }]);
+    }
+  });
+
+  it('refuses an answer about another path: the entry became a symlink to a directory between the checks and the diff', async () => {
+    writeFileSync(join(outside, 'null'), 'outside null\n');
+    await repo.write('brief.txt', 'here\n');
+    const swapping: ExecFileFn = (file, args, options, callback) => {
+      if (args.includes('--no-index')) {
+        rmSync(repo.path('brief.txt'));
+        symlinkSync(outside, repo.path('brief.txt'));
+      }
+      return (execFile as unknown as ExecFileFn)(file, args, options, callback);
+    };
+    const racing = new GitService({ env: repo.serviceEnv(), execFile: swapping });
+    try {
+      await expect(racing.diff({ directory: repo.root, scope: 'untracked', path: 'brief.txt' })).rejects.toThrow('not an untracked file: brief.txt');
+    } finally {
+      racing.dispose();
+    }
+  });
+
   it('refuses a listed file that is gone when the diff runs rather than answering an empty patch', async () => {
     await repo.write('brief.txt', 'here\n');
     const vanishing: ExecFileFn = (file, args, options, callback) => {

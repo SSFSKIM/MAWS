@@ -11,6 +11,9 @@ import { parseBranches, parseLog, parseNumstat, parseRevParse, parseStatus, upst
 import { createGitRunner, GitCommandError, GitTimeoutError, type ExecFileFn, type GitRun } from './runner';
 import { GitWatcher, type WatchFn, type WatchOwner } from './watcher';
 
+// The repository a directory lies in: its top level (the watcher's key for a root), git dir and common dir.
+const REV_PARSE = ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir'];
+
 export interface GitServiceOptions {
   emit?: (change: GitChanged) => void; // `git.changed`; main passes the router's emit
   env?: NodeJS.ProcessEnv; // where PATH, HOME and MAWS_GIT are read; process.env by default
@@ -29,9 +32,7 @@ export class GitService {
 
   async status(directory: string): Promise<GitStatus> {
     requireAbsolute(directory);
-    const { repoRoot, gitDir, commonDir } = parseRevParse(
-      await this.run(directory, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir']),
-    );
+    const { repoRoot, gitDir, commonDir } = parseRevParse(await this.run(directory, REV_PARSE));
     const [porcelain, stashes] = await Promise.all([
       this.run(repoRoot, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=normal']),
       this.run(repoRoot, ['stash', 'list', '--format=%H']),
@@ -109,12 +110,12 @@ export class GitService {
 
   // E6: after a mutation, the watcher re-reads the directory's root now (no-op for a root nobody watches), so
   // `git.changed` reaches every surface within one status read and stays the one ordered publication path. The root is
-  // git's own answer for the directory, the key the watcher holds it by (a subdirectory, a symlinked spelling). Best
-  // effort: a failure here leaves the change to the watcher's own events.
+  // read exactly as `status` reads it, which is the key the watcher holds it by (a subdirectory, a symlinked spelling).
+  // Best effort: a failure here leaves the change to the watcher's own events.
   refresh(directory: string): void {
     requireAbsolute(directory);
-    void this.run(directory, ['rev-parse', '--path-format=absolute', '--show-toplevel']).then(
-      (out) => this.watcher.refreshNow(out.trim()),
+    void this.run(directory, REV_PARSE).then(
+      (out) => this.watcher.refreshNow(parseRevParse(out).repoRoot),
       () => {},
     );
   }
@@ -130,7 +131,9 @@ export class GitService {
   // shows one: mode 120000 and its target's path. A listed symlink to a directory is refused: `--no-index` takes a
   // directory on one side as `<dir>/<other side's basename>` and would read `<target>/null` (probed, Apple Git 2.50.1).
   // Exit 1 is git's "differs", which every listed file does (an empty one by its header); an empty answer is git
-  // failing to read the path (it went since the status), which exits 1 too.
+  // failing to read the path (it went since the status), which exits 1 too. An answer whose header names any other path
+  // is refused: the entry changed between the checks and the diff (a symlink to a directory swapped in reads as
+  // `<path>/null`).
   private async untrackedDiff(directory: string, path: string | undefined, context: number | undefined): Promise<GitDiff> {
     if (path === undefined) throw new Error('the untracked scope needs a path');
     const refused = () => new Error(`not an untracked file: ${path}`);
@@ -142,7 +145,7 @@ export class GitService {
       ['-c', 'diff.autoRefreshIndex=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-index', `-U${context ?? 3}`, '--', '/dev/null', path],
       { acceptExitCodes: [1] },
     );
-    if (patch === '') throw refused();
+    if (!patchNames(patch, path)) throw refused();
     return { patch, files: [addedFileFacts(path, patch)] };
   }
 
@@ -194,6 +197,57 @@ function addedFileFacts(path: string, patch: string): GitDiffFile {
   const binary = header.some((line) => line.startsWith('Binary files ') || line === 'GIT binary patch');
   const insertions = binary || firstHunk === -1 ? 0 : lines.slice(firstHunk).filter((line) => line.startsWith('+')).length;
   return { path, oldPath: null, insertions, deletions: 0, binary };
+}
+
+// Whether an added file's patch is about `path` and only it: one `diff --git a/<path> b/<path>` block, and its
+// `+++ b/<path>` when it has one (an empty or binary file has none). Git writes a name holding a quote, a backslash, a
+// control or (by default) a non-ASCII byte C-quoted (`"b/na\303\257ve.txt"`), and ends an unquoted `+++` name holding a
+// space with a tab; both readings are undone before comparing.
+function patchNames(patch: string, path: string): boolean {
+  const lines = patch.split('\n');
+  if (lines.filter((line) => line.startsWith('diff --git ')).length !== 1) return false;
+  const firstHunk = lines.findIndex((line) => line.startsWith('@@'));
+  const header = firstHunk === -1 ? lines : lines.slice(0, firstHunk);
+  const rest = header[0].startsWith('diff --git ') ? header[0].slice('diff --git '.length) : null;
+  if (rest === null) return false;
+  const sides = rest.startsWith('"') ? quotedPair(rest) : rest === `a/${path} b/${path}` ? [`a/${path}`, `b/${path}`] : null;
+  if (sides === null || sides[0] !== `a/${path}` || sides[1] !== `b/${path}`) return false;
+  const plus = header.find((line) => line.startsWith('+++ '));
+  return plus === undefined || unquoteC(plus.slice(4).replace(/\t$/, '')) === `b/${path}`;
+}
+
+// `"a/…" "b/…"`: the two C-quoted names of a `diff --git` line, unquoted; null when the line is not that shape.
+function quotedPair(text: string): [string, string] | null {
+  const end = (from: number) => {
+    let i = from + 1;
+    while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+    return i;
+  };
+  const first = end(0);
+  if (text[first + 1] !== ' ' || text[first + 2] !== '"') return null;
+  const second = end(first + 2);
+  if (second !== text.length - 1) return null;
+  return [unquoteC(text.slice(0, first + 1)), unquoteC(text.slice(first + 2))];
+}
+
+// Git's C-style quoting undone (`quote_c_style`): the escapes \a \b \t \n \v \f \r \" \\ and three-digit octal bytes.
+function unquoteC(text: string): string {
+  if (text.length < 2 || !text.startsWith('"') || !text.endsWith('"')) return text;
+  const escapes: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, '\\': 92 };
+  const chars = Array.from(text.slice(1, -1)); // by code point: a raw non-ASCII name (core.quotePath=false) stays whole
+  const bytes: number[] = [];
+  for (let i = 0; i < chars.length; i++) {
+    if (chars[i] !== '\\') {
+      bytes.push(...Buffer.from(chars[i], 'utf8'));
+      continue;
+    }
+    const next = chars[++i] ?? '';
+    if (/[0-7]/.test(next)) {
+      bytes.push(parseInt(chars.slice(i, i + 3).join(''), 8));
+      i += 2;
+    } else bytes.push(escapes[next] ?? next.charCodeAt(0));
+  }
+  return Buffer.from(bytes).toString('utf8');
 }
 
 function requireAbsolute(directory: string): void {
