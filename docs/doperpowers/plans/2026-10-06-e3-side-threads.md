@@ -499,6 +499,9 @@ Every e2e run is under `MAWS_E2E=1` with its own `userData` and an empty `CLAUDE
   Evidence: `pragma_table_info` on the copy; the architect's message of 2026-10-06.
 - Observation (M2): `refoldLinkedWorktrees` and `attachOrphans` change `project_id` without refolding a fork family. Such a family converges at its next summary.
 
+- Observation (M4): `pnpm typecheck` runs `tsc` with `--composite false`, while vitest's typecheck of the node project is composite, and the two disagree. M3's `serialize.ts` import of `side/copy.ts` failed the composite check (TS6307: a file outside the node project's list) while the typecheck gate passed. Fixed in e7b97062 by listing `side/copy.ts` and `composer/submit/submit-state.ts` in `tsconfig.node.json` (an E3 block). The gate gap is a tracker row: the gate list should include the composite check.
+  Evidence: task 5's report; e7b97062.
+
 ## Decision Log
 
 - Decision: verification call at authoring. This document gets one adversarial review (`doperpowers:adversarial-reviewer`, Opus) before the executor starts; each task a `doperpowers:task-reviewer` on Opus, two rounds at most; the whole branch `doperpowers:reviewer-high` on Opus at the end (A-14, A-22); M0's findings a task-reviewer read against the fixture.
@@ -563,6 +566,21 @@ Every e2e run is under `MAWS_E2E=1` with its own `userData` and an empty `CLAUDE
 
 - Decision (from M3's review, added to M4's scope since M4 works the same store and actions): (1) the sheet's failure paths: a refusal that arrives after the sheet closed mid-send is toasted with its reason (the comment is not silently lost); a `queued` disposition from `side.sendToMain` is toasted ("Queued; it sends when the queue resumes"); Retry is disabled when its destination can no longer send. (2) A maximized Side pane counts its child as visible for the unread rule (the child is on screen), reversing M3's choice. (3) The thread header's "opening question for a promotion" (Design §6) is built from the child's first prompt (the promotion message parses to `kind:'none'`; its first `Q:` line is the question). (4) `SIDE_COPY.pane.gone` is used or removed. (5) The derive tests gain an incremental case (derive after `opened`, apply a `summarised`, derive again), a second summary with null text, and an out-of-order lower `turns`. The third copy of `shownSession` goes to the tracker.
   Rationale: M3's task review, minors 1 to 6 and its ⚠️ on the promotion header; Acceptance 1's "thumbnail" stays a chip (Decision (M3, as built)) and is listed for the owner at hand-back.
+  Date/Author: 2026-10-06, the E3 executor.
+
+- Decision (M4, as built):
+  - **No `btw` widget.** If no `btw` widget is registered, any `/btw` draft is refused and never reaches `session.send`.
+  - **Multi-line or pasted `/btw`.** The draft is asked with its full text; pasted content is expanded through a new `plainTextOf`. The guard feeds C11's typed path.
+  - **Labels.** The question view's chip reads `/btw`.
+  - **"Continue as a side thread".** It sends the field's text as the thread's own request, and it stays enabled when the parent has exited, because a fork resumes from disk.
+  - **Unread rule.** The pane's child counts as visible whenever the panel is open on its parent, maximized included.
+  - **Retry.** Retry hides the failed entry and asks again. A question refused before reaching the host stays a failed local entry.
+  - **Sidebar captions.**
+    - A nested row shows the anchor's label only when it differs from the title.
+    - A nested fork has no caption.
+    - Orphans read "↳ fork of <parent>" or "↳ side thread of <parent>".
+  - **For M5.** `e2e/widgets.spec.ts`'s `NAMES` lacks `btw` and must gain it.
+  Rationale: task 5's report; each serves Design §7's rule that a `/btw` draft never reaches the main conversation, and §6's sidebar.
   Date/Author: 2026-10-06, the E3 executor.
 
 ## Deferred
