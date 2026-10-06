@@ -1,0 +1,9 @@
+E2 owner-file check (spec A-15): the /tmp and /private/tmp project keys of ~/.claude.json, read-only.
+Command: python3 -c "import json;d=json.load(open('/Users/new/.claude.json'));print(sorted(k for k in d.get('projects',{}) if k.startswith('/tmp') or k.startswith('/private/tmp')))" | shasum
+
+M0 (2026-10-06, the image-block probe, two launches of spikes/protocol-probe/scenarios/pass3/p1-sdk-mcp-image.mjs)
+  before the first launch: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after the second launch: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8  (identical; byte-equal lists)
+  the harness's own check inside each launch (sha1 of the sorted keys joined by newlines, first 12 hex): before
+  770eae07f620, after 770eae07f620, same: true (the kept fixture's seqs 3 and 97; the discarded first attempt recorded
+  the same pair)

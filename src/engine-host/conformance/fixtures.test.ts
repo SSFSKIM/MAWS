@@ -88,7 +88,10 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const e8 = ['e8-plugins-reload', 'e8-plugins-reload-settle']; // E8 (P1): reload_plugins and reload_skills on 2.1.290 around CLI writes under a scratch home, immediately and after a settle
     // E1 M2: the maws tool server recorded live through MAWS's own host (send_file, a blocking and an async ask, show_pane)
     const e1 = ['p1-maws-ask-async', 'p1-maws-ask-blocking', 'p1-maws-send-file', 'p1-maws-show-pane'];
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1].sort());
+    // E2 start: M0's image-block probe (an SDK server's image content block on 2.1.291)
+    const e2 = ['p1-sdk-mcp-image'];
+    // E2 end
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e2].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -805,6 +808,32 @@ describe('normaliser: the maws server traffic (E1, pass3/p1-sdk-mcp-roundtrip)',
     expect(events.filter((e) => mcp.some((r) => r.seq === e.seq))).toEqual([]);
   });
 });
+
+// E2 start: M0's probe (E2 execution document, M0; spikes/protocol-probe/findings-pass3-e2-deliverables.txt). The probe's
+// `red_square` is no X9 tool, so its call yields no `maws.*` event; the tool_result carrying an image block maps as any
+// tool result does.
+describe('normaliser: an SDK server image block (E2 M0, pass3/p1-sdk-mcp-image)', () => {
+  it('maps the image-carrying tool result with no unknown frame and no maws event', async () => {
+    const { events, rows } = await run('pass3', 'p1-sdk-mcp-image');
+    const mcp = rows.filter((r) => r.direction === 'in' && (r.frame as { request?: { subtype?: string } }).request?.subtype === 'mcp_message');
+    expect(mcp.length).toBeGreaterThan(2); // the handshake, the list and the call
+    expect(ofKind(events, 'frame.unknown')).toEqual([]);
+    expect(events.filter((e) => e.kind.startsWith('maws.'))).toEqual([]);
+    expect(events.filter((e) => mcp.some((r) => r.seq === e.seq))).toEqual([]);
+    // the result keeps the image block, the engine's "[Image: source: <saved original>]" text right after it, then the
+    // server's own text: a reader of a maws result's JSON must not assume it is the first or the only text block
+    const use = ofKind(events, 'tool.use').find((e) => e.toolName === 'mcp__maws__red_square')!;
+    const [result, ...more] = ofKind(events, 'tool.result').filter((e) => e.toolUseId === use.toolUseId);
+    expect(more).toEqual([]);
+    expect(result.isError).toBe(false);
+    const blocks = result.content as { type: string; text?: string; source?: { media_type?: string } }[];
+    expect(blocks.map((b) => b.type)).toEqual(['image', 'text', 'text']);
+    expect(blocks[0].source?.media_type).toBe('image/png');
+    expect(blocks[1].text).toMatch(/^\[Image: source: \/.*\/tool-results\/mcp-maws-blob-[^/]+\.png\]$/);
+    expect(blocks[2].text).toBe('the picture');
+  });
+});
+// E2 end
 
 // E1 M2 (E1 execution document, M2 "Conformance"): the four tools recorded live through MAWS's own host on the installed
 // engine. Each fixture normalises with no unknown frame and no request failure (the generic case above); these pin what
