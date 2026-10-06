@@ -37,6 +37,10 @@ import { MemorySessionStateStore } from './store/memory-session-state-store';
 import * as mawsSchema from '@shared/ipc/schema/maws';
 import { MAWS_DEADLINE_SHAPES } from './ipc';
 // E1 end
+// E3 start
+import * as sideSchema from '@shared/ipc/schema/side';
+import { SIDE_DEADLINE_SHAPES } from './ipc';
+// E3 end
 
 const REPO_ROOT = resolve(__dirname, '../..');
 const ROUTER_TIMEOUT_MS = 10_000; // C1's supervisor (src/main/hosts/supervisor.ts REQUEST_TIMEOUT_MS), which imports electron
@@ -930,6 +934,47 @@ describe('maws.* commands (E1 M1)', () => {
 });
 // E1 end
 
+// E3 start: the side-question log through its commands (E3 execution document, Design §7; M1)
+describe('side questions (E3 M1)', () => {
+  it('registers the host’s two side commands, immediate; a session this host does not hold has no side question', async () => {
+    const host = engineHost();
+    const hostOwned = Object.entries(sideSchema.commands).filter(([, spec]) => spec.owner === 'engine-host').map(([name]) => name);
+    expect(Object.keys(SIDE_DEADLINE_SHAPES).sort()).toEqual(hostOwned.sort());
+    expect(Object.values(SIDE_DEADLINE_SHAPES)).toEqual(['immediate', 'immediate']);
+    for (const name of hostOwned) expect(host.handlers.has(name), name).toBe(true);
+    expect(await host.call('side.question.list', { appSessionId: 'app-none' })).toEqual({ exchanges: [] });
+    expect(await host.call('side.question.clear', { appSessionId: 'app-none' })).toEqual({});
+  });
+
+  it('logs each side question, sends the answered exchanges as history, settles on the completion, and fails the pending one at exit', async () => {
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    const completions = () => host.emitted.filter((e) => e.name === 'session.operation').map((e) => e.payload as { opId: string; command: string });
+
+    const first = await host.call('session.sideQuestion', { appSessionId: id, question: 'What word?' });
+    expect(transport.requestsOf('side_question').at(-1)!.request).toEqual({ subtype: 'side_question', question: 'What word?' });
+    expect(await host.call('side.question.list', { appSessionId: id })).toEqual({ exchanges: [expect.objectContaining({ id: first.opId, question: 'What word?', state: 'pending' })] });
+    transport.answer('side_question', { response: 'ZEBRA', synthetic: false });
+    await until(() => completions().some((c) => c.opId === first.opId), 'the first completion');
+    expect((await host.call('side.question.list', { appSessionId: id })).exchanges[0]).toMatchObject({ id: first.opId, state: 'answered', response: 'ZEBRA', synthetic: false, answeredAt: expect.any(String) });
+
+    const second = await host.call('session.sideQuestion', { appSessionId: id, question: 'Lowercase?' });
+    expect(transport.requestsOf('side_question').at(-1)!.request).toEqual({ subtype: 'side_question', question: 'Lowercase?', history: [{ question: 'What word?', response: 'ZEBRA' }] });
+    transport.answer('side_question', { response: 'tools?', synthetic: true });
+    await until(() => completions().some((c) => c.opId === second.opId), 'the second completion');
+
+    await host.call('side.question.clear', { appSessionId: id });
+    const third = await host.call('session.sideQuestion', { appSessionId: id, question: 'Still there?' });
+    expect(transport.requestsOf('side_question').at(-1)!.request).toEqual({ subtype: 'side_question', question: 'Still there?' }); // cleared: no history
+    transport.exit(0);
+    await host.ipc.table.get(id)!.exited;
+    expect(await host.call('side.question.list', { appSessionId: id })).toEqual({ exchanges: [expect.objectContaining({ id: third.opId, state: 'failed', error: 'The session ended' })] });
+  });
+});
+// E3 end
 // E2 start: the store's announcements and the capture bridge through the launcher's own store (E2 Design §2 and §7)
 describe('deliverables.changed and the capture bridge (E2 M1)', () => {
   it("relays the launcher's store writes as deliverables.changed and a screenshot's request as maws.artifact.capture, answered by maws.artifact.captured", async () => {

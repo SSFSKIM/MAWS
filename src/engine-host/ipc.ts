@@ -46,6 +46,9 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { commands as MawsCommands } from '@shared/ipc/schema/maws';
 import { AskAnswerMismatch } from './tool-server/ask';
 // E1 end
+// E3 start
+import type { commands as SideCommands } from '@shared/ipc/schema/side';
+// E3 end
 // C10 start
 import type { ModelCatalogue } from '@shared/sessions/models';
 import { catalogueKey, ModelsCache, modelsKey } from './models-cache';
@@ -96,6 +99,9 @@ export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], De
 // answer's flushed write
 type MawsCommand = keyof typeof MawsCommands;
 export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.asks.list': 'immediate', 'maws.ask.answer': 'immediate', 'maws.pane.answer': 'immediate', 'maws.artifact.captured': 'immediate' /* E2 */ };
+// E3: the side-question log's commands (P1 ledger §5), each answered from the host's log at once
+type SideHostCommand = { [N in keyof typeof SideCommands]: (typeof SideCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof SideCommands];
+export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 'side.question.list': 'immediate', 'side.question.clear': 'immediate' };
 
 // The longest wait before a live launch spawns: its three checks run in parallel, each under its own bound (W13: the
 // binary probe's covers a PATH lookup that waits for the capture before `--version`).
@@ -156,6 +162,8 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   const operations = new OperationTable((event) => {
     // E8 (D-13): a successful reload_plugins answer is the session's plugins now, published before its completion
     if (event.command === 'session.reloadPlugins' && event.outcome.ok && event.outcome.value !== null) table.get(event.appSessionId)?.noteReload(event.outcome.value as ReloadPluginsResponse);
+    // E3: a side question's completion settles its log entry before it goes out, so a window that lists on the event reads it
+    if (event.command === 'session.sideQuestion') table.get(event.appSessionId)?.sideQuestions.settle(event.opId, event.outcome, new Date().toISOString());
     emit('session.operation', event);
   });
   const relayCheck = deps.checkRelay ?? ((force: boolean) => checkRelayHealth(RELAY_URL, undefined, { force }));
@@ -484,9 +492,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     const { id, client } = operation(appSessionId);
     return operations.start(id, 'session.mcpToggle', client, 'mcp_toggle', { serverName, enabled });
   });
+  // E3: the host's side-question log supplies `history` and keeps the exchange (`side.question.list`)
   handle('session.sideQuestion', async ({ appSessionId, question }) => {
-    const { id, client } = operation(appSessionId);
-    return operations.start(id, 'session.sideQuestion', client, 'side_question', { question });
+    const { session, client } = ready(appSessionId);
+    return session.sideQuestion(question, (request) => operations.start(appSessionId as AppSessionId, 'session.sideQuestion', client, 'side_question', request));
   });
 
   // -- structured reads --------------------------------------------------------------------------------------------------
@@ -709,6 +718,16 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handleMaws('maws.pane.answer', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerPane(requestId as RequestId, result) ?? 'not_pending' }));
   handleMaws('maws.artifact.captured', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerCapture(requestId as RequestId, result) ?? 'not_pending' })); // E2
   // E1 end
+
+  // E3 start: the side-question log's commands. The log lives as long as the session's process does here (an exited
+  // one stays readable until the session is forgotten or relaunched); a session this host does not hold has none.
+  const handleSide = <N extends SideHostCommand>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
+  handleSide('side.question.list', async ({ appSessionId }) => ({ exchanges: table.get(appSessionId as AppSessionId)?.sideQuestions.list() ?? [] }));
+  handleSide('side.question.clear', async ({ appSessionId }) => {
+    table.get(appSessionId as AppSessionId)?.sideQuestions.clear();
+    return {};
+  });
+  // E3 end
 
   return { table, plugins };
 }

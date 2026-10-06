@@ -1,7 +1,7 @@
 // The index (C4 execution document, Interfaces "Index"; charter §4.4 as amended): main's one SQLite file holding what
-// the engine does not — projects and membership, app session records (X1), attention items, drafts, replay fixtures —
-// opened at `app.whenReady()` on `<userData>/index.sqlite`. Everything main-side (the session source, C3's attention
-// service, C5's read model, C10) reaches it through these stores.
+// the engine does not — projects and membership, app session records (X1), attention items, drafts, replay fixtures,
+// and (E3) the side-thread rows — opened at `app.whenReady()` on `<userData>/index.sqlite`. Everything main-side (the
+// session source, C3's attention service, C5's read model, C10) reaches it through these stores.
 import { IndexAttentionStore, type AttentionStore } from './attention';
 import { openDb, type Db } from './db';
 import { DraftStore } from './drafts';
@@ -9,6 +9,7 @@ import { MIGRATIONS, REPAIRS } from './migrations';
 import { ProjectStore } from './projects';
 import { ReplayFixtureStore } from './replay-fixtures';
 import { SessionStore } from './sessions';
+import { SideThreadStore } from './side-threads'; // E3
 
 export class Index {
   readonly sessions: SessionStore;
@@ -16,6 +17,7 @@ export class Index {
   readonly attention: AttentionStore;
   readonly drafts: DraftStore;
   readonly fixtures: ReplayFixtureStore;
+  readonly sideThreads: SideThreadStore; // E3
   private readonly db: Db;
   private stamped = 0;
 
@@ -29,6 +31,7 @@ export class Index {
     this.attention = new IndexAttentionStore(this.db);
     this.drafts = new DraftStore(this.db);
     this.fixtures = new ReplayFixtureStore(this.db);
+    this.sideThreads = new SideThreadStore(this.db); // E3
   }
 
   // A newer app's database, opened read-only and not used: every store call fails with `index unavailable: <reason>`.

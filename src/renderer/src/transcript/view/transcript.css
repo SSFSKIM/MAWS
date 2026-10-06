@@ -485,6 +485,21 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-delivery-problem { flex-basis: 100%; color: var(--danger); }
 .transcript-question-refused { margin: 0; padding: 0 12px 8px; color: var(--danger); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
 /* E1 end */
+
+/* E3 start: an anchored comment's chip, above the comment in its bubble, in the accent's tint; and a side thread's row,
+   one line in the notice's quiet register with its Open beside it */
+.transcript-user-anchor { display: flex; }
+.transcript-chip[data-chip="anchor"] { border-color: transparent; background: var(--accent-soft); }
+button.transcript-chip[data-chip="anchor"]:hover { background: var(--bg-hover); }
+.transcript-chip[data-chip="anchor"] > .transcript-icon { flex: none; color: var(--fg-muted); }
+.transcript-side-thread { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 10px; color: var(--fg-muted); font-size: var(--text-ui); }
+.transcript-side-thread > .transcript-icon { flex: none; align-self: center; color: var(--fg-muted); }
+.transcript-side-thread[data-state="failed"] > .transcript-icon { color: var(--danger); }
+.transcript-side-thread-text { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.transcript-side-thread-label { padding: 0 4px; border-radius: var(--radius-sm); background: var(--bg-active); color: var(--fg); font-family: var(--font-mono); font-size: var(--text-ui-sm); }
+.transcript-side-thread > .transcript-quiet-button { flex: none; margin-top: 0; }
+/* E3 end */
+
 /* E2 start: the artifact row (a bordered widget like the delivery row) and a delivered file's name as the viewer's
    button: the name's own colour, underlined on hover. */
 .transcript-artifact { width: fit-content; min-width: 240px; max-width: min(560px, 100%); margin: 4px 0 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); }

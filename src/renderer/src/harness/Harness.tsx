@@ -245,6 +245,7 @@ function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) =>
         return Promise.resolve(null);
       },
       // E1 end
+      openSideThread: (_parent, child) => say(`openSideThread ${child}`), // E3
       openDeliverable: (_appSessionId, id, version) => say(`openDeliverable ${id}${version === undefined ? '' : ` v${version}`}`), // E2
       loadSpill: (spill) => {
         say(`loadSpill ${spill.path}`);

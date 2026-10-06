@@ -158,6 +158,27 @@ describe('a session row’s hover card', () => {
     expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Live in terminal · /);
   });
 
+  // E3: whose side thread or fork it is
+  it('a side thread or fork names its parent', async () => {
+    withMain();
+    const charter = idOf('Charter + research');
+    const drag = idOf('Fix sidebar drag');
+    act(() =>
+      fillStores({
+        ...nine,
+        sessions: nine.sessions.map((r) =>
+          r.appId === drag ? { ...r, lineage: { kind: 'fork' as const, parentAppSessionId: charter, parentEngineSessionId: null, openedBy: 'fork' as const } } : r,
+        ),
+      }),
+    );
+    render(<Sidebar />);
+    const card = await open('Fix sidebar drag');
+    expect(within(card).getByTestId('hover-lineage').textContent).toBe('Fork of Charter + research');
+    await userEvent.setup().unhover(needsRow('Fix sidebar drag'));
+    const plain = await open('Charter + research');
+    expect(within(plain).queryByTestId('hover-lineage')).toBeNull();
+  });
+
   it('a worktree session names its branch and the worktree’s folder; a main session its branch', async () => {
     withMain();
     const charter = idOf('Charter + research');

@@ -27,6 +27,9 @@ import * as maws from './names/maws';
 // E6 start
 import * as scm from './names/scm';
 // E6 end
+// E3 start
+import * as side from './names/side';
+// E3 end
 // E2 start
 import * as deliverables from './names/deliverables';
 // E2 end
@@ -46,6 +49,9 @@ export const NAMESPACES = [
   // E6 start
   'scm',
   // E6 end
+  // E3 start
+  'side',
+  // E3 end
   // E2 start
   'deliverables',
   // E2 end
@@ -60,6 +66,7 @@ export const NAMES = {
   voice, // E9
   maws, // E1
   scm, // E6
+  side, // E3
   deliverables, // E2
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 

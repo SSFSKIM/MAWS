@@ -76,6 +76,7 @@ vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: () => Promis
 vi.mock('./sessions/service', () => ({ SessionService: class { start = async () => void (c10.started += 1); } }));
 vi.mock('./sessions/service-register', () => ({ registerSessionServiceHandlers: vi.fn(), engineHostSettled: vi.fn() }));
 vi.mock('./sessions/yield', () => ({ startYield: () => () => {} })); // W7
+vi.mock('./side/side-threads', () => ({ startSideThreads: () => () => {}, sideThreadEvents: () => [] })); // E3
 // C10 end
 // C11 start: the engine host's binary configuration follows the settings, which this test replaces
 vi.mock('./settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: () => {} }) })); // C12: the coordinator

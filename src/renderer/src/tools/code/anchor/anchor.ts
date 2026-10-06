@@ -3,19 +3,15 @@
 // E3's (the shared component and its destination control); E3 registers it here and E5 never re-implements it. Until
 // then the editor's placeholder sheet shows the anchor. No CodeMirror here: the seam is in the main chunk.
 import { sha256Hex } from '@shared/composer/sha256';
+import type { Anchor, FileLineAnchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { showAnchor } from '../editor/EditorDialogs';
 
-// X10's file-line anchor, as E5 produces it; E3 owns the full union and the composer.
-export interface FileLineAnchor {
-  kind: 'file-line';
-  locator: string; // `<absolute path>#L<line>`
-  label: string; // `<basename>:<line>`
-  path: string;
-  line: number; // 1-based
-}
+// X10's file-line anchor, as E5 produces it: since E3 a member of the shared union (`@shared/anchor/anchor`), which the
+// composer seam takes whole so E6's, E4's and E2's producers call the same opener.
+export type { FileLineAnchor } from '@shared/anchor/anchor';
 
-export type CommentComposerOpener = (anchor: FileLineAnchor, context: { appSessionId: AppSessionId }) => void;
+export type CommentComposerOpener = (anchor: Anchor, context: { appSessionId: AppSessionId }) => void;
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
@@ -80,7 +76,7 @@ export function registerCommentComposer(open: CommentComposerOpener): () => void
 }
 
 // The registered composer, else the placeholder sheet naming the anchor.
-export function openCommentComposer(anchor: FileLineAnchor, context: { appSessionId: AppSessionId }): void {
+export function openCommentComposer(anchor: Anchor, context: { appSessionId: AppSessionId }): void {
   const registration = registrations.at(-1);
   if (registration) registration.open(anchor, context);
   else showAnchor(anchor, context.appSessionId);

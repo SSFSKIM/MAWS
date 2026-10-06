@@ -70,6 +70,7 @@
         "effective": "default",
         "refusal": null
       },
+      "lineage": null,
       "createdAt": "2026-09-28T09:22:04.927Z",
       "updatedAt": "2026-09-28T09:24:31.225Z",
       "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
@@ -117,6 +118,7 @@
         "effective": "auto",
         "refusal": null
       },
+      "lineage": null,
       "createdAt": "2026-09-28T09:21:49.636Z",
       "updatedAt": "2026-09-28T09:21:58.773Z",
       "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
@@ -162,6 +164,7 @@
         "effective": "default",
         "refusal": null
       },
+      "lineage": null,
       "createdAt": "2026-09-28T09:21:58.817Z",
       "updatedAt": "2026-09-28T09:22:04.886Z",
       "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
@@ -206,6 +209,7 @@
         "effective": "auto",
         "refusal": null
       },
+      "lineage": null,
       "createdAt": "2026-09-28T09:59:22.801Z",
       "updatedAt": "2026-09-28T09:59:36.275Z",
       "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
@@ -250,6 +254,7 @@
         "effective": "auto",
         "refusal": null
       },
+      "lineage": null,
       "createdAt": "2026-09-28T10:00:15.842Z",
       "updatedAt": "2026-09-28T10:00:22.510Z",
       "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
@@ -296,6 +301,7 @@
         "effective": "auto",
         "refusal": null
       },
+      "lineage": null,
       "createdAt": "2026-09-28T10:07:18.218Z",
       "updatedAt": "2026-09-28T10:07:23.709Z",
       "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
@@ -340,6 +346,7 @@
         "effective": "auto",
         "refusal": null
       },
+      "lineage": null,
       "createdAt": "2026-09-28T09:57:15.999Z",
       "updatedAt": "2026-09-28T09:57:38.142Z",
       "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
@@ -385,6 +392,7 @@
         "effective": "default",
         "refusal": null
       },
+      "lineage": null,
       "createdAt": "2026-09-28T09:22:15.820Z",
       "updatedAt": "2026-09-28T09:22:18.561Z",
       "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
@@ -429,6 +437,7 @@
         "effective": "auto",
         "refusal": null
       },
+      "lineage": null,
       "createdAt": "2026-09-28T09:58:32.860Z",
       "updatedAt": "2026-09-28T09:59:00.248Z",
       "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
@@ -473,6 +482,7 @@
         "effective": "auto",
         "refusal": null
       },
+      "lineage": null,
       "createdAt": "2026-09-28T10:00:55.374Z",
       "updatedAt": "2026-09-28T10:01:02.083Z",
       "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
@@ -518,6 +528,7 @@
         "effective": "default",
         "refusal": null
       },
+      "lineage": null,
       "createdAt": "2026-09-28T09:21:20.976Z",
       "updatedAt": "2026-09-28T09:21:23.094Z",
       "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"

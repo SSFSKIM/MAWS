@@ -7,7 +7,10 @@
 // bubble on hover or focus instead of reserving a line under it, and the collapse follows the rendered height (a long
 // paragraph folds as a long list does), measured while folded and again whenever the content's size changes. W3 (B6):
 // Edit edits the bubble in place: C7's registered editor stands in the bubble's place while its session edits it.
+// E3: an anchored comment opens with a chip naming what it is about (its kind's glyph and label; a chip with a path
+// opens the file at the line), above the comment, its screenshot drawn as the image attachment it is.
 import { useLayoutEffect, useRef, useState } from 'react';
+import type { Anchor } from '@shared/anchor/anchor'; // E3
 import { NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
 import type { Attachment, Row } from '../../model/rows';
 import { placeholdersOf, untaggedUserText } from '../../model/user-text';
@@ -15,6 +18,7 @@ import { useActions, useDisclosure, useTranscriptContext } from '../context';
 import { useRegisteredBubbleEditor } from '../registry';
 import { Markdown } from '../markdown/Markdown';
 import { Chevron, clockTime, copyText } from './parts';
+import { AnchorIcon } from './icons'; // E3
 
 type UserRowData = Extract<Row, { kind: 'user' }>;
 type Segment = { kind: 'text'; text: string } | { kind: 'pasted'; n: number; lines: number; attachment: Attachment };
@@ -63,6 +67,7 @@ export function UserRow({ row }: { row: UserRowData }) {
       <div className="transcript-user-bubble" data-bubble="" data-open={open ? '' : undefined} data-collapsed={overflows && !open ? '' : undefined}>
         <div ref={content} className="transcript-user-content" data-user-content="">
           <div>
+            {row.anchor && <AnchorChip anchor={row.anchor} /> /* E3 */}
             {segmentsOf(row).map((segment, i) =>
               segment.kind === 'text' ? (
                 <Markdown key={i} markdown={segment.text} live={false} />
@@ -127,6 +132,32 @@ function PastedBlock({ rowId, n, lines, attachment }: { rowId: string; n: number
         {attachment.name} · {lines} lines
       </button>
       {open && <pre className="transcript-pasted-text">{attachment.text}</pre>}
+    </div>
+  );
+}
+
+// E3: what an anchored comment is about. A file or PR line opens the file at its line (C5's file tab through the
+// transcript's `openFile`); any other anchor is a label only until its surface exists (E4's browser, E2's viewer).
+function AnchorChip({ anchor }: { anchor: Anchor }) {
+  const actions = useActions();
+  const content = (
+    <>
+      <AnchorIcon kind={anchor.kind} />
+      {anchor.label}
+    </>
+  );
+  const { path } = anchor;
+  return (
+    <div className="transcript-user-anchor">
+      {path !== undefined ? (
+        <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator} onClick={() => actions.openFile(path, anchor.line)}>
+          {content}
+        </button>
+      ) : (
+        <span className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator}>
+          {content}
+        </span>
+      )}
     </div>
   );
 }

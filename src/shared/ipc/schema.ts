@@ -31,6 +31,9 @@ import * as maws from './schema/maws';
 // E6 start
 import * as scm from './schema/scm';
 // E6 end
+// E3 start
+import * as side from './schema/side';
+// E3 end
 // E2 start
 import * as deliverables from './schema/deliverables';
 // E2 end
@@ -109,6 +112,9 @@ export const commands = {
   // E6 start
   ...scm.commands,
   // E6 end
+  // E3 start
+  ...side.commands,
+  // E3 end
   // E2 start
   ...deliverables.commands,
   // E2 end
@@ -137,6 +143,9 @@ export const events = {
   // E6 start
   ...scm.events,
   // E6 end
+  // E3 start
+  ...side.events,
+  // E3 end
   // E2 start
   ...deliverables.events,
   // E2 end

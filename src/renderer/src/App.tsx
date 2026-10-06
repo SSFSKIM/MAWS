@@ -76,6 +76,10 @@ import { registerTranscriptActions as registerMawsTranscriptActions } from './tr
 // E6 start
 import { connectScmRunEnds, registerScmTool } from './tools/scm';
 // E6 end
+// E3 start
+import { CommentComposerHost } from './side/CommentComposer';
+import { connectSide, registerSidePane } from './side/register';
+// E3 end
 // E2 start
 import { deliverablesTool } from './tools/deliverables/DeliverablesTool';
 import { DeliverableTab } from './tools/deliverables/DeliverableTab';
@@ -198,6 +202,13 @@ export function App() {
   // and a run's end reads every PR state again, whether or not a Source control body is mounted
   useEffect(() => connectScmRunEnds(), []);
   // E6 end
+  // E3 start: side threads (E3 execution document, M3): the Side pane, registered once and never unregistered (C8a's
+  // rule above); the comment composer in E5's seam and the transcript's summary-row Open
+  useEffect(() => {
+    registerSidePane();
+  }, []);
+  useEffect(() => connectSide(), []);
+  // E3 end
   // E2 start: the Deliverables tool and its main tab, registered once and never unregistered (C8a's rule above), and
   // the host's write announcements and main's console attribution into the deliverables store; the transcript's
   // artifact row and a delivered file's name open the viewer through openDeliverable
@@ -237,6 +248,9 @@ export function App() {
       {/* E5 start: the editor's close sheet (registerEditor's guard, registered by C8c's registerCodeTools) */}
       <EditorDialogs />
       {/* E5 end */}
+      {/* E3 start: the comment composer's sheet, opened through E5's seam */}
+      <CommentComposerHost />
+      {/* E3 end */}
     </QueryClientProvider>
   );
 }

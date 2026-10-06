@@ -38,8 +38,9 @@ export function ModelChip({ appSessionId, binding, onOpen, onClosed }: { appSess
         else if (chipWidget('effort')) requestChipWidget(appSessionId, 'effort', '');
       }}
     >
-      <Popover.Trigger aria-label={`Model ${binding.label}`} title={binding.disabled ?? 'Model and effort'} className={CHIP}>
-        {binding.label}
+      <Popover.Trigger aria-label={`Model ${binding.label}`} title={binding.disabled ?? 'Model and effort'} className={`${CHIP} shrink-0`}>
+        {/* E3: whole and on one line in a narrow pane (the Side pane's thread): the location's label gives way first */}
+        <span className="truncate">{binding.label}</span>
         <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
       <Popover.Portal>

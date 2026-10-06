@@ -10,6 +10,7 @@ import type { HostState } from '@shared/ipc/schema';
 import type { HostSupervisor } from '../hosts/supervisor';
 import { CommandFailure, registerMainHandler } from '../ipc/router';
 import { IntentRefused, type SessionService } from './service';
+import { InvalidSideInput } from '../side/invalid'; // E3
 
 // The runtime hands a handler the schema's parsed value; the ids in it passed the branded id schemas, which is what the
 // brands stand for (as C4's handlers read them).
@@ -36,6 +37,10 @@ export function registerSessionServiceHandlers(service: SessionService): void {
   registerMainHandler('session.deletions.list', async () => ({ manifests: await service.listDeletions() }));
   registerMainHandler('session.deletions.keep', ({ appSessionId }) => service.keepDeletion(id(appSessionId)));
   registerMainHandler('session.deletions.preview', ({ appSessionId }) => service.previewDeletion(id(appSessionId)));
+  // E3 start: the side namespace's main commands (E3 execution document, Design §3, §8 and §9)
+  registerMainHandler('side.thread.open', ({ appSessionId, from }) => relaySide(['from'], () => service.openSideThread(id(appSessionId), from)));
+  registerMainHandler('side.sendToMain', (input) => relaySide([], () => service.sendToMain(input)));
+  // E3 end
 }
 
 // The engine host answers: its first launch is ready, or it has given up (a crashed host answers `host_unavailable`,
@@ -50,6 +55,17 @@ export function engineHostSettled(hosts: Pick<HostSupervisor, 'snapshot' | 'onSt
       resolve();
     });
   });
+}
+
+// E3: a side input main refuses (a screenshot, an oversized first message) is `invalid_input` at its path under `at`,
+// where the command's input holds the comment; every other refusal, the host's included, stays `internal`, verbatim.
+async function relaySide<T>(at: string[], call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (!(error instanceof InvalidSideInput)) throw error;
+    throw new CommandFailure(ipcError('invalid_input', error.message, [{ path: [...at, ...error.path], message: error.message }]));
+  }
 }
 
 async function relay<T>(call: () => Promise<T>): Promise<T> {

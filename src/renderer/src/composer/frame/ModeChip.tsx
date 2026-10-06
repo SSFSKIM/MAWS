@@ -19,13 +19,14 @@ export function ModeChip({ binding, onOpen }: { binding: ModeBinding; onOpen?():
         setOpen(next);
       }}
     >
-      <Popover.Trigger aria-label={`Permission mode ${PERMISSION_MODE_LABELS[binding.value ?? 'auto']}${refusal ? ` · ${refusal}` : ''}`} title={refusal ?? binding.disabled ?? 'Permission mode'} className={CHIP}>
+      <Popover.Trigger aria-label={`Permission mode ${PERMISSION_MODE_LABELS[binding.value ?? 'auto']}${refusal ? ` · ${refusal}` : ''}`} title={refusal ?? binding.disabled ?? 'Permission mode'} className={`${CHIP} shrink-0`}>
         {refusal && (
           <span aria-hidden className="text-warning">
             ⚠
           </span>
         )}
-        {PERMISSION_MODE_LABELS[binding.value ?? 'auto']}
+        {/* E3: whole and on one line in a narrow pane (the Side pane's thread): the location's label gives way first */}
+        <span className="truncate">{PERMISSION_MODE_LABELS[binding.value ?? 'auto']}</span>
         <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
       <Popover.Portal>

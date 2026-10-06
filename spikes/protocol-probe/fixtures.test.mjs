@@ -176,3 +176,25 @@ test('pass3 w7-take-over: SIGTERM ends an interactive holder, the registry clear
  assert.deepEqual(at('terminal_holds').holders,[{kind:'terminal',pid:at('terminal_holds').pid}]);
  const take=at('take_over');assert.deepEqual(take.outcome,{status:'released'});assert.equal(take.terminalExit.exitCode,143);assert.deepEqual(take.registry,[]);assert.ok(take.ms<10000);
  assert.match(at('resumed').answer,/BEFORE.*TERMINAL/);assert.equal(at('resumed').parentEntrypoint,'cli');});
+// E3 M0 (docs/doperpowers/plans/2026-10-06-e3-side-threads.md; findings-pass3-e3-side-thread.txt): a side thread forked
+// while the parent's turn runs, an [image, text] `next` steer in that turn, and the thread resumed by its own id.
+test('pass3 p1-side-thread-live: the fork starts mid-turn and recalls, the image steer folds in and is kept on disk, the thread resumes by its id',()=>{
+ const parent=load3('p1-side-thread-live'),fork=load3('p1-side-thread-live-fork'),resume=load3('p1-side-thread-live-resume');
+ for(const rows of [parent,fork,resume])assert.ok(notes(rows,'check').length>0&&notes(rows,'check').every(c=>c.ok===true));
+ // (a) the child's system/init came after the parent's Bash tool_use and before its result; the parent's turn completed
+ const t=notes(parent,'fork_timing')[0];assert.ok(t.bashUseAt<t.childInitAt&&t.childInitAt<t.parentToolResultAt);
+ const pin=notes(fork,'provenance')[0].pinnedSessionId;assert.equal(ins(fork,f=>f.type==='system'&&f.subtype==='init')[0].frame.session_id,pin);
+ assert.match(lastResult(fork).result,/ZEBRA/);assert.equal(lastResult(parent).subtype,'success');
+ // the child's copy closes the parent's open Bash call with the engine's interrupted placeholder before the comment
+ const child=notes(fork,'jsonl_snapshot')[0].records,parentRecs=notes(parent,'jsonl_snapshot')[0].records;
+ const root=recs=>recs.find(r=>r.parentUuid===null&&typeof r.uuid==='string').uuid;assert.equal(root(child),root(parentRecs));
+ assert.ok(child.some(r=>r.type==='user'&&JSON.stringify(r.message.content).includes('[Tool call interrupted')));
+ // (b) queued before the Bash result, started after it, one result naming both prompts; on disk a queued_command
+ // attachment whose prompt keeps the image block byte for byte
+ const d=notes(parent,'steer_delivery')[0];const state=s=>d.lifecycle.find(l=>l.state===s).seq;
+ assert.ok(state('queued')<d.toolResultSeq&&d.toolResultSeq<state('started'));assert.equal(d.results.length,1);assert.equal(d.results[0].user_message_uuids.length,2);
+ const steer=parentRecs.find(r=>r.attachment?.type==='queued_command');const sent=parent.find(r=>r.direction==='out'&&r.frame.priority==='next').frame;
+ assert.equal(steer.attachment.source_uuid,sent.uuid);assert.deepEqual(steer.attachment.prompt,sent.message.content);
+ // (c) the resume answers under the child's id and writes no new transcript
+ assert.equal(ins(resume,f=>f.type==='system'&&f.subtype==='init')[0].frame.session_id,pin);assert.match(lastResult(resume).result,/ZEBRA/);
+ assert.equal(notes(resume,'provenance')[0].pinnedSessionId,null);});

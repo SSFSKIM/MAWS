@@ -36,13 +36,13 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     }
   };
 
-  it('a fresh index has user_version 3 and the five tables, in WAL mode', () => {
+  it('a fresh index has user_version 4 and the six tables, in WAL mode', () => {
     const path = join(dir.path, 'index.sqlite');
     const index = open(path);
     expect(index.readOnly).toBe(false);
-    expect(index.applied).toEqual([1, 2, 3]);
-    expect(MIGRATIONS).toHaveLength(3);
-    expect(inspect(path)).toEqual({ version: 3, tables: ['attention_items', 'drafts', 'projects', 'replay_fixtures', 'sessions'], mode: 'wal' });
+    expect(index.applied).toEqual([1, 2, 3, 4]);
+    expect(MIGRATIONS).toHaveLength(4);
+    expect(inspect(path)).toEqual({ version: 4, tables: ['attention_items', 'drafts', 'projects', 'replay_fixtures', 'sessions', 'side_threads'], mode: 'wal' });
     // The removal mark was amended into v1 (see the repair cases below for databases created before that).
     const db = new DatabaseSync(path, { readOnly: true });
     try {
@@ -72,7 +72,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([2, 3]);
+    expect(index.applied).toEqual([2, 3, 4]);
     const routed = (appId: string) => index.sessions.get(appId as AppSessionId)?.gateway.routed;
     expect([routed('discovered'), routed('routed'), routed('direct'), routed('mismatch')]).toEqual([null, true, false, false]);
     // The rebuild touches only the flag: every other column, its values and the project index survive.
@@ -84,7 +84,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     });
     const db = new DatabaseSync(path, { readOnly: true });
     try {
-      expect(columnsOf(db)).toEqual(v1Columns);
+      expect(columnsOf(db)).toEqual([...v1Columns, 'lineage', 'lineage_source', 'root_uuid', 'transcript_birthtime_ms'].sort()); // v4 adds four
       const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sessions'").all() as { name: string }[]).map((i) => i.name);
       expect(indexes).toContain('sessions_project');
     } finally {
@@ -109,7 +109,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([3]);
+    expect(index.applied).toEqual([3, 4]);
     const of = (appId: string) => index.sessions.get(appId as AppSessionId)!;
     expect([of('non-repo').branch, of('empty').branch, of('empty').worktree, of('on-main').branch, of('on-main').worktree]).toEqual([
       null,
@@ -126,6 +126,44 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     expect(index.sessions.upsertFromSummary(nonRepo).record.branch).toBeNull();
     expect(index.sessions.upsertFromSummary({ ...onMain, gitBranch: 'HEAD', lastRecordAt: '2026-09-28T11:00:00.000Z' }).record.branch).toBeNull();
     expect(index.sessions.upsertFromSummary({ ...onMain, gitBranch: 'topic', lastRecordAt: '2026-09-28T12:00:00.000Z' }).record.branch).toBe('topic');
+  });
+
+  // E3 (X11, A-16): lineage and the disk signal's columns, the side-thread rows, and one forced re-summarise of every
+  // engine transcript so the root uuid and the birth time fill for transcripts already indexed
+  it('v4 adds lineage, the root uuid, the birth time and the side-thread table, and forces one re-summarise of engine transcripts', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const raw = new DatabaseSync(path);
+    for (const migration of MIGRATIONS.slice(0, 3)) raw.exec(migration.sql);
+    raw.exec('PRAGMA user_version = 3');
+    const insert = raw.prepare("INSERT INTO sessions (app_id, engine_session_id, directory, transcript_path, transcript_size, transcript_mtime_ms, kind, created_at, updated_at) VALUES (?, ?, '/w', ?, ?, ?, ?, 't', 't')");
+    insert.run('on-disk', 'e-1', '/cfg/projects/-w/e-1.jsonl', 4096, 1_000, 'engine');
+    insert.run('no-transcript', 'e-2', null, null, null, 'engine');
+    insert.run('replay', 'e-3', '/fixtures/r.jsonl', 10, 2_000, 'replay');
+    raw.close();
+
+    const index = open(path);
+    expect(index.applied).toEqual([4]);
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      const columns = (db.prepare('PRAGMA table_info(sessions)').all() as { name: string; type: string }[]).map((c) => [c.name, c.type]);
+      expect(columns).toEqual(expect.arrayContaining([['lineage', 'TEXT'], ['lineage_source', 'TEXT'], ['root_uuid', 'TEXT'], ['transcript_birthtime_ms', 'REAL']]));
+      const sideColumns = (db.prepare('PRAGMA table_info(side_threads)').all() as { name: string }[]).map((c) => c.name);
+      expect(sideColumns).toEqual(['child_app_id', 'parent_app_id', 'opened_at', 'summarised_at', 'text', 'is_error', 'turns', 'last_turn_event_id']);
+      const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map((i) => i.name);
+      expect(indexes).toEqual(['sessions_project', 'sessions_root', 'side_threads_parent']);
+      const sizes = db.prepare('SELECT app_id, transcript_size, transcript_mtime_ms, lineage, lineage_source FROM sessions ORDER BY app_id').all();
+      expect(sizes).toEqual([
+        { app_id: 'no-transcript', transcript_size: null, transcript_mtime_ms: null, lineage: null, lineage_source: null },
+        { app_id: 'on-disk', transcript_size: 4096, transcript_mtime_ms: -1, lineage: null, lineage_source: null }, // the next sync re-summarises it
+        { app_id: 'replay', transcript_size: 10, transcript_mtime_ms: 2_000, lineage: null, lineage_source: null },
+      ]);
+    } finally {
+      db.close();
+    }
+    // the host is told the on-disk transcript as known with an mtime no file has, so its next scan re-reads it and, the
+    // row staying in `known`, still marks it removed when the file went while MAWS was closed (the whole-branch review)
+    expect(index.sessions.bindings().find((b) => b.appSessionId === 'on-disk')).toMatchObject({ size: 4096, mtimeMs: -1 });
+    expect(index.sessions.get('on-disk' as AppSessionId)!.lineage).toBeNull();
   });
 
   it('opening it again runs no migration and keeps its rows', () => {
@@ -179,8 +217,10 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       const index = open(path);
-      expect(index.applied).toEqual([]);
-      expect(inspect(path).version).toBe(3);
+      // E3's migration 4 (and any later entry) is pending on a version-3 database and applies after the repair
+      const pending = MIGRATIONS.filter((m) => m.version > 3).map((m) => m.version);
+      expect(index.applied).toEqual(pending);
+      expect(inspect(path).version).toBe(MIGRATIONS[MIGRATIONS.length - 1].version);
       expect(sessionColumns(path)).toContainEqual(['removed_at', 'TEXT', 0]);
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('sessions.removed_at'));
@@ -231,15 +271,17 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const path = join(dir.path, 'index.sqlite');
       preAmendment(path);
       vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const failing = [...MIGRATIONS, { version: 4, sql: 'CREATE TABLE later (x); SELECT * FROM no_such_table;' }];
+      const next = MIGRATIONS[MIGRATIONS.length - 1].version + 1; // past every released entry (E3 took 4)
+      const pending = MIGRATIONS.filter((m) => m.version > 3).map((m) => m.version);
+      const failing = [...MIGRATIONS, { version: next, sql: 'CREATE TABLE later (x); SELECT * FROM no_such_table;' }];
       expect(() => openDb(path, failing, REPAIRS)).toThrow(/no_such_table/);
       expect(sessionColumns(path).map(([name]) => name)).not.toContain('removed_at');
       expect(inspect(path)).toMatchObject({ version: 3, tables: ['attention_items', 'drafts', 'projects', 'replay_fixtures', 'sessions'] });
 
-      const later = [...MIGRATIONS, { version: 4, sql: 'CREATE INDEX sessions_removed ON sessions(removed_at);' }];
+      const later = [...MIGRATIONS, { version: next, sql: 'CREATE INDEX sessions_removed ON sessions(removed_at);' }];
       const db = openDb(path, later, REPAIRS);
       try {
-        expect(db.applied).toEqual([4]);
+        expect(db.applied).toEqual([...pending, next]);
         expect(db.get<{ n: number }>("SELECT count(*) AS n FROM sqlite_master WHERE name = 'sessions_removed'")).toEqual({ n: 1 });
       } finally {
         db.close();
@@ -257,9 +299,9 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(true);
-    expect(index.unavailable).toBe('user_version 99 is newer than this app knows (3)');
+    expect(index.unavailable).toBe('user_version 99 is newer than this app knows (4)');
     expect(error).toHaveBeenCalledWith(expect.stringContaining('user_version 99'));
-    const message = 'index unavailable: user_version 99 is newer than this app knows (3)';
+    const message = 'index unavailable: user_version 99 is newer than this app knows (4)';
     expect(() => index.sessions.list()).toThrow(message);
     expect(() => index.sessions.get('x' as AppSessionId)).toThrow(message);
     expect(() => index.sessions.setPinned('x' as AppSessionId, true)).toThrow(message);
@@ -291,13 +333,13 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(false);
-    expect(index.applied).toEqual([1, 2, 3]);
+    expect(index.applied).toEqual([1, 2, 3, 4]);
     const aside = readdirSync(dir.path).filter((name) => /^index\.sqlite\.broken-\d+$/.test(name));
     expect(aside).toHaveLength(1);
     expect(readFileSync(join(dir.path, aside[0]), 'utf8')).toBe(garbage);
     expect(error).toHaveBeenCalledWith(expect.stringContaining(aside[0]));
     expect(existsSync(path)).toBe(true);
-    expect(inspect(path).version).toBe(3);
+    expect(inspect(path).version).toBe(4);
   });
 
   it('a transient failure at open (another connection holds the lock) throws and leaves the file untouched', () => {

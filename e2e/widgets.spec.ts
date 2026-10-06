@@ -29,7 +29,7 @@ const SCENARIO = 'stub:test/fixtures/shell/nine-sessions.json';
 const READY = 'app-7412a115'; // ready, idle, routed through the relay
 const READS = 'spikes/protocol-probe/fixtures/reads.jsonl';
 const CONTROLS = 'test/fixtures/engine/auto-routed-controls.jsonl'; // pass2/auto-routed without the unissuable fork_conversation pair
-const NAMES = ['model', 'effort', 'fast', 'permissions', 'usage', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'compact', 'context', 'rename', 'resume', 'export', 'diff', 'rewind' /* W3 */];
+const NAMES = ['model', 'effort', 'fast', 'permissions', 'usage', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'compact', 'context', 'rename', 'resume', 'export', 'diff', 'rewind' /* W3 */, 'btw' /* E3 */];
 
 // E8 (M3): `/plugins` reads the engine's CLI through the engine host, which runs MAWS_E2E_ENGINE_BIN; under the widget
 // backend that is the plugin CLI stub (test/support/plugin-cli-stub.ts) over this starting state: one folder

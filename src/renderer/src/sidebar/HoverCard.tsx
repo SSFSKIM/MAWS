@@ -24,6 +24,7 @@ import { selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { rowBranch, sessionAge } from './derive';
 import { displayTitle } from '../sessions/title';
+import { SIDE_COPY } from '../side/copy'; // E3
 
 export interface SidebarHoverCardProps {
   label: string; // the card's accessible name
@@ -92,6 +93,11 @@ function Body({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const digest = useSessions((s) => s.digests.get(appSessionId) ?? null);
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
+  const parentTitle = useSessions((s) => { // E3
+    const parentId = s.records.get(appSessionId)?.lineage?.parentAppSessionId;
+    const parent = parentId === undefined ? undefined : s.records.get(parentId);
+    return parent === undefined ? null : displayTitle(parent);
+  });
   const now = useNow();
   if (!record) return null;
   const glyph = glyphFor(record, digest, pending);
@@ -113,6 +119,12 @@ function Body({ appSessionId }: { appSessionId: AppSessionId }) {
       {place && (
         <p data-testid="hover-place" title={place.title ?? undefined} className="m-0 truncate text-fg-muted">
           {place.text}
+        </p>
+      )}
+      {/* E3: whose side thread or fork it is */}
+      {record.lineage !== null && (
+        <p data-testid="hover-lineage" className="m-0 truncate text-fg-muted">
+          {SIDE_COPY.lineage.of(record.lineage.kind, parentTitle)}
         </p>
       )}
       {doing && (

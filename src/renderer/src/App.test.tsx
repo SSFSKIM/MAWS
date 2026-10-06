@@ -270,6 +270,7 @@ describe('store section of the diagnostics strip', () => {
       model: { requested: null, resolved: null },
       effort: null,
       permissionMode: { requested: 'auto', effective: 'auto', refusal: null },
+      lineage: null,
       createdAt: '2026-09-28T10:00:00.000Z',
       updatedAt: '2026-09-28T10:00:00.000Z',
     };

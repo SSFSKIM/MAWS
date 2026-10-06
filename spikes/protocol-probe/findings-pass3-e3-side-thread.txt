@@ -1,0 +1,129 @@
+Protocol probe, pass 3: E3 M0, the side-thread live probe
+=========================================================
+
+Child E3 of the P1 composite spec (docs/doperpowers/plans/2026-10-05-p1-extension.md §3 C, §9 E3, A-16; parent pin, the
+spec's blob, 1023793f7feceb755097783df87dbde938dd6e7f), execution document
+docs/doperpowers/plans/2026-10-06-e3-side-threads.md, Plan of Work M0. A spike: a scenario, three fixtures, these
+findings, no product code. Recorded 2026-10-06 11:03:49Z to 11:04:21Z, one take (nothing discarded).
+
+Engine. The installed Claude Code, the realpath of ~/.local/bin/claude at run time:
+/Users/new/.local/share/claude/versions/2.1.291, `--version` 2.1.291; every provenance row and every system/init
+(`claude_code_version`) names it. Unmodified (D-1).
+
+Launch. p1-common.mjs as E0a ran it: MAWS's launch line and environment, MAWS's initialize payload, ClaudeUsage's relay
+(GET /api/hello 200 before each launch), model haiku (claude-haiku-4-5-20251001), default permission mode,
+--max-budget-usd 0.30 per process, a scratch root under /tmp (/private/tmp/maws-e0a-side-thread-wDcmUb: its own
+CLAUDE_CONFIG_DIR and seeded repository, deleted afterwards), every process ended with `end_session {reason:"stop"}` and
+exited 0. One addition to p1-common.mjs: `launch(…, {pinned: false})` omits `--session-id`, as MAWS's buildLaunch does for a
+plain (non-fork) `--resume` (src/engine-host/launch.ts: "--session-id never co-occurs with a non-fork --resume").
+
+Scenario and fixtures (spikes/protocol-probe/scenarios/pass3/p1-side-thread.mjs; run with
+`node spikes/protocol-probe/run-pass3.mjs p1-side-thread` through the slot). One process per fixture, because the
+conformance replay drives one engine per journal:
+  p1-side-thread-live.jsonl          the parent P (cb92d80b-…): the plant, the slow Bash turn, the image steer, the
+                                     cross-process timing, P's JSONL (jsonl_snapshot label side-thread-parent)
+  p1-side-thread-live-fork.jsonl     the side thread C (aadd13c2-…): `--resume P --fork-session --session-id C` spawned
+                                     2 s after P's Bash tool_use, its first prompt the anchored comment; C's JSONL
+                                     (label side-thread-child)
+  p1-side-thread-live-resume.jsonl   the third launch: `--resume C`, no fork, no --session-id; C's JSONL after it
+                                     (label side-thread-child-after-resume)
+Provenance: charter docs/charter.md, child E3, pin 1023793f…, spec (the P1 spec) and document (the E3 document),
+spike "E3 M0", role parent / side-thread / resumed-side-thread. Seqs below are each fixture's `seq` column.
+
+The texts. Built in the scenario by a local copy of the E3 document's Interfaces (`src/shared/anchor/message.ts`):
+SIDE_THREAD_PREAMBLE verbatim, E5's `fileLineAnchor(<repo>/probe.txt, 1)`, the file-line lead, the screenshot form of the
+lead (final colon replaced by ". A screenshot of it is attached:"), `anchoredMessage` = lead + "\n" + text.trim() +
+("\n\n" + preamble, thread only) + "\n\n" + tag, the tag's attributes in Interfaces order, values escaped & " < >. The
+exact strings sent are in the fixtures (fork seq 4 `fork_paths.firstPrompt`, sent at fork seq 7; the steer's text block
+at parent seq 68), so M1's `anchoredMessage` can be pinned against them byte for byte.
+
+
+Verdict (a): yes. A --fork-session child launched while the parent's turn runs starts, answers from the parent's earlier
+context, and leaves the parent's turn unaffected.
+----------------------------------------------------------------------------------------------------------------------
+- P planted the word (parent seq 6, result 25), then the slow prompt (seq 27); the Bash tool_use `sleep 20; echo
+  SLEPT_OK` arrived at seq 62 (11:03:53.320Z; no can_use_tool, the safe-command path); the fork spawned 2 s later
+  (seq 67 `fork_spawning`, toolResultYet false).
+- C's spawn row (fork seq 1) carries MAWS's line plus `--session-id C … --resume P --fork-session`; C's system/init
+  (fork seq 11) names the pin C at 11:03:55.732Z, its comment (fork seq 7) ran as an ordinary first prompt and the result
+  (fork seq 29, success, "ZEBRA", 11:03:56.819Z) recalls the word P planted. C's whole turn ran and ended while P's Bash
+  was still sleeping (P's tool_result at parent seq 73, 11:04:14.564Z): parent seq 149 `fork_timing`, check 150.
+- P was unaffected: its tool_result is SLEPT_OK (parent seq 73), its one result is success, terminal_reason completed
+  (parent seq 143); P's JSONL holds only P's session id (check 159).
+- What C's file holds (fork seq 40, 41 records): seven session-level records without uuids (ai-title copied from P,
+  "Remember the word ZEBRA"; mode; atis-latch; two file-history-snapshots; two queue-operations of C's own prompt at
+  11:03:55.699Z and .700Z), then P's history under C's session id with P's uuids and timestamps, root `f3ae79a6-…` with
+  `parentUuid: null` (P's first prompt, parent seq 6), through P's Bash tool_use `294e8971-…`; then two records the
+  engine synthesised at the fork (new uuids, stamped 11:03:55.674Z): a user tool_result for the open call, is_error true,
+  "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check
+  whether it took effect before relying on it or running it again.]", and an assistant text "No response requested.";
+  then C's own anchored prompt `93dbd800-…` and its turn. No forkedFrom or lineage key anywhere (as E0a found on 2.1.290).
+- A-16's disk signal holds mid-turn: C's first record with `parentUuid: null` and a uuid is P's root (fork check seq 41:
+  f3ae79a6-a101-45ee-8ce9-5f12f93aa4b0 in both files).
+Design §3 stands: `openSideThread` forks at once, mid-turn included; the M0 fallback is not needed.
+
+
+Verdict (b): yes, image kept. A `priority:'next'` steer whose content is [image, text] is accepted mid-turn, delivered at
+the tool boundary, and recorded in the parent's JSONL with the image block byte for byte.
+----------------------------------------------------------------------------------------------------------------------
+- Written 4 s after the tool_use (parent seq 68: `{type:'user', uuid 2aad8c48-…, content [image base64 image/png (a 2×2
+  PNG), text], origin human, priority 'next'}`); command_lifecycle queued at seq 70 (before the Bash result, seq 73),
+  the engine's isReplay echo at seq 74 (blocks [image, text], the image's base64 identical to what was sent), started at
+  seq 75 (after the result: the tool boundary), completed at seq 142; one result at seq 143 naming both prompts
+  (`user_message_uuids` [f0f8bab2 (the slow prompt), 2aad8c48 (the steer)], num_turns 3). Checks 145 to 148.
+- The model read it: after the boundary it Read probe.txt (the commented file) and ended its reply with "ZEBRA" (seq 143,
+  check 148). Its reply did not describe the image; the image reached the API without an error.
+- On disk (parent seq 157, the snapshot's records [33] to [37], 0-based): the steer is not a user record. It is an `attachment` record of type
+  `queued_command` (uuid 57356fce-…, its own, not the steer's) placed after the Bash tool_result, whose `prompt` is the
+  content array as sent (image block `{type:'image', source:{type:'base64', media_type:'image/png', data}}`, data equal,
+  then the text block), with `source_uuid` = the steer's uuid 2aad8c48-…, `commandMode: 'prompt'`, `origin: {kind:
+  'human'}`, `humanTurn: true`, `delivery_id`. Its timestamp is the write time (11:03:57.323Z) though it sits after the
+  11:04:14.563Z tool_result in the file. Around it: a `queue-operation` enqueue at 11:03:57.323Z with no `content` (a
+  string prompt's enqueue carries `content`; this array prompt's does not) and a `queue-operation` remove with reason
+  `absorbed_mid_turn` and `commandUuid` = the steer's uuid.
+- This is the shape backfill already reads (src/engine-host/fs/backfill.ts `humanQueuedPrompt`: array prompts kept,
+  `isContentBlock` admits image blocks; the steer is emitted as a `user.message` under `source_uuid` then `started`), so
+  the disk-form thumbnail draws; Acceptance 3 case 6 asserts the image, and its seed is a queued_command attachment.
+
+
+Verdict (c): yes. The child resumes by its own id as an ordinary session.
+----------------------------------------------------------------------------------------------------------------------
+- After P and C exited, `--resume C` with no --fork-session and no --session-id (resume seq 1): system/init names C
+  (resume seq 10), the result names C and answers "ZEBRA" (seq 25; checks 27, 28), so the resumed thread remembers the
+  parent's context it was forked with.
+- The resume wrote no new transcript (check 36: the project holds P's and C's files before and after) and appended its
+  turn to C's file under C's id, chained to C's last assistant record (resume seq 34 `resumed_jsonl`, seq 35 snapshot,
+  51 records).
+
+
+Owner-file delta (spec A-15)
+----------------------------
+Every fixture has an `owner_file_check` row before the spawn and after the exit: count 24, digest 95564b4c8f0f (sha1
+prefix of the newline-joined /tmp and /private/tmp project keys of ~/.claude.json), `same: true` (parent seq 3 and 162,
+fork 3 and 45, resume 3 and 39; the last at 11:04:20.957Z). The shell-level command of the document's Concrete Steps
+printed 24 keys before the run (`| shasum` ea47f3167c3016feb511703df2968ac238564502, the same 24 keys as E0a's
+appendix). Run again after the run it printed 25: one key added, `/private/tmp/cua-accept`. ~/.claude.json's mtime was
+11:05:17Z, 56 s after the probe's last check. That key is not this probe's: the probe's paths are
+/private/tmp/maws-e0a-side-thread-*, its engines ran under the scratch config home and never cd'd there, and every
+in-run check (the last after the third process exited) saw the 24. Another session on this Mac wrote it. No
+`maws-e0a-side-thread` key appears. The run left no scratch directory under /tmp
+and no process.
+
+
+Spend
+-----
+The result frames' `total_cost_usd` (cumulative per process): parent US$0.0247 (the planting turn 0.0143 included),
+side thread 0.0032, resume 0.0059. US$0.034 in all, one take.
+
+
+Consequences for the E3 document
+--------------------------------
+- (a) yes: Design §3 stands (fork at once through `sideThreadRefusal`); no fallback in M2.
+- (b) image kept: Acceptance 3 case 6 seeds the disk-form steer as a `queued_command` attachment (`prompt` [image, text],
+  `source_uuid`, `commandMode: 'prompt'`, `origin.kind: 'human'`, `humanTurn: true`) after a tool_result, and asserts
+  the chip and the image.
+- (c) yes: Acceptance 5's terminal clause holds on 2.1.291.
+- A side thread forked mid-turn begins, on disk, with the parent's history ending in an interrupted tool call (an
+  error tool_result) and an assistant "No response requested." before the thread's first prompt. A side thread reopened
+  after a restart draws those rows; the Deferred entry on scrolling the pane to the thread's anchored prompt covers it.
+- The copied `ai-title` is the parent's; finishBinding's rename (Design §3) is what names the thread.

@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { currentChain } from '@shared/wire/transcript';
-import { loadTranscriptFixture, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
+import { loadJournal, loadTranscriptFixture, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { HEAD_TAIL_BYTES, summarize } from './summarize';
 
 const PARENT_FIXTURE = join(TEST_FIXTURE_DIR, 'transcripts/subagent-parent.jsonl');
@@ -16,6 +16,7 @@ function headAndTail(bytes: Buffer): { head: Buffer; tail: Buffer } {
 }
 
 const line = (record: object) => JSON.stringify(record) + '\n';
+const records0 = () => loadTranscriptFixture('subagent-parent').filter((r) => typeof r.uuid === 'string' && r.parentUuid === null);
 
 describe('head and tail summary', () => {
   it('summarises subagent-parent.jsonl from its 64 KiB windows', () => {
@@ -23,7 +24,7 @@ describe('head and tail summary', () => {
     expect(bytes.length).toBeGreaterThan(HEAD_TAIL_BYTES); // head and tail are distinct windows for this file
     const stat = statSync(PARENT_FIXTURE);
     const { head, tail } = headAndTail(bytes);
-    const summary = summarize(head, tail, { size: stat.size, mtimeMs: stat.mtimeMs }, PARENT_PATH, '-private-tmp-maws-probe-WmHZ2j');
+    const summary = summarize(head, tail, { size: stat.size, mtimeMs: stat.mtimeMs, birthtimeMs: stat.birthtimeMs }, PARENT_PATH, '-private-tmp-maws-probe-WmHZ2j');
 
     expect(summary.sessionId).toBe('9a1d4262-0b43-46ad-acb9-5982f31d209c');
     expect(summary.transcriptPath).toBe(PARENT_PATH);
@@ -32,6 +33,8 @@ describe('head and tail summary', () => {
     expect(summary.relocatedCwd).toBeNull();
     expect(summary.size).toBe(stat.size);
     expect(summary.mtimeMs).toBe(stat.mtimeMs);
+    expect(summary.birthtimeMs).toBe(stat.birthtimeMs); // E3: orders a fork family (A-16)
+    expect(summary.rootUuid).toBe(records0()[0]?.uuid);
     expect(summary.engineVersion).toBe('2.1.283');
     expect(summary.gitBranch).toBe('master');
     expect(summary.entrypoint).toBe('sdk-ts');
@@ -60,7 +63,7 @@ describe('head and tail summary', () => {
       line({ type: 'user', uuid: 'u2', parentUuid: 'a1', cwd: '/first', version: '2.1.287', timestamp: '2026-10-01T10:00:00.000Z', message: { role: 'user', content: 'Again' } }) +
       line({ type: 'last-prompt', lastPrompt: 'Again', leafUuid: 'u2', sessionId: 'S' });
     const bytes = Buffer.from(text, 'utf8');
-    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 5 }, '/store/projects/-first/S.jsonl', '-first').engineVersion).toBe('2.1.287');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 5, birthtimeMs: 0 }, '/store/projects/-first/S.jsonl', '-first').engineVersion).toBe('2.1.287');
   });
 
   it('takes the last title, prompt, branch and relocation in the tail, the first cwd in the head', () => {
@@ -74,7 +77,7 @@ describe('head and tail summary', () => {
       line({ type: 'relocated', relocatedCwd: '/moved', sessionId: 'S' }) +
       line({ type: 'last-prompt', lastPrompt: 'Hello there', leafUuid: 'a1', sessionId: 'S' });
     const bytes = Buffer.from(text, 'utf8');
-    const summary = summarize(bytes, bytes, { size: bytes.length, mtimeMs: 5 }, '/store/projects/-first/S.jsonl', '-first');
+    const summary = summarize(bytes, bytes, { size: bytes.length, mtimeMs: 5, birthtimeMs: 0 }, '/store/projects/-first/S.jsonl', '-first');
     expect(summary.sessionId).toBe('S');
     expect(summary.directory).toBe('/first');
     expect(summary.relocatedCwd).toBe('/moved');
@@ -103,12 +106,12 @@ describe('head and tail summary', () => {
       line({ type: 'user', uuid: 'u2', parentUuid: 'a1', timestamp: '2026-09-29T10:00:02.000Z', message: { role: 'user', content: steer } }) +
       line({ type: 'last-prompt', lastPrompt: steer, leafUuid: 'u2', sessionId: 'S' });
     const bytes = Buffer.from(text, 'utf8');
-    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('Fix the drag handle');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt).toBe('Fix the drag handle');
 
     // a real terminal transcript with three prompts: last-prompt ends on the third
     const real = readFileSync(join(TEST_FIXTURE_DIR, 'transcripts/rewind-terminal.jsonl'));
     const windows = headAndTail(real);
-    expect(summarize(windows.head, windows.tail, { size: real.length, mtimeMs: 1 }, '/p/a76ad588-e4b4-4a99-bf4e-69287514916f.jsonl', '-p').firstPrompt).toBe('Remember APPLE.');
+    expect(summarize(windows.head, windows.tail, { size: real.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/a76ad588-e4b4-4a99-bf4e-69287514916f.jsonl', '-p').firstPrompt).toBe('Remember APPLE.');
   });
 
   // W9 (H2): the engine writes `"gitBranch":"HEAD"` in a folder that is no repository (and for a detached checkout)
@@ -116,10 +119,10 @@ describe('head and tail summary', () => {
     const real = readFileSync(join(TEST_FIXTURE_DIR, 'transcripts/rewind-terminal.jsonl'));
     expect(real.toString('utf8')).toContain('"gitBranch":"HEAD"');
     const windows = headAndTail(real);
-    expect(summarize(windows.head, windows.tail, { size: real.length, mtimeMs: 1 }, '/p/a76ad588-e4b4-4a99-bf4e-69287514916f.jsonl', '-p').gitBranch).toBeNull();
+    expect(summarize(windows.head, windows.tail, { size: real.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/a76ad588-e4b4-4a99-bf4e-69287514916f.jsonl', '-p').gitBranch).toBeNull();
     const of = (...branches: string[]) => {
       const bytes = Buffer.from(branches.map((gitBranch, i) => line({ type: 'user', uuid: `u${i}`, parentUuid: i === 0 ? null : `u${i - 1}`, cwd: '/d', gitBranch, message: { role: 'user', content: 'go' } })).join(''), 'utf8');
-      return summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').gitBranch;
+      return summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').gitBranch;
     };
     expect([of(''), of('main', 'HEAD'), of('HEAD', 'main')]).toEqual([null, null, 'main']);
   });
@@ -130,7 +133,7 @@ describe('head and tail summary', () => {
       line({ type: 'user', uuid: 'u2', parentUuid: 'u1', message: { role: 'user', content: '<bash-stdout>clean</bash-stdout><bash-stderr></bash-stderr>' } }) +
       line({ type: 'user', uuid: 'u3', parentUuid: 'u2', message: { role: 'user', content: 'Now fix the drag handle' } });
     const bytes = Buffer.from(text, 'utf8');
-    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('! git status');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt).toBe('! git status');
   });
 
   // W11 (I1): an empty first text block titled the session blank; the block with words is the prompt
@@ -139,12 +142,12 @@ describe('head and tail summary', () => {
       line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', message: { role: 'user', content: [{ type: 'text', text: '' }, { type: 'text', text: 'Fix the drag handle' }] } }) +
       line({ type: 'user', uuid: 'u2', parentUuid: 'u1', message: { role: 'user', content: 'later' } });
     const bytes = Buffer.from(text, 'utf8');
-    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('Fix the drag handle');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt).toBe('Fix the drag handle');
     const blank =
       line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', message: { role: 'user', content: [{ type: 'text', text: '  ' }] } }) +
       line({ type: 'user', uuid: 'u2', parentUuid: 'u1', message: { role: 'user', content: 'Then this one' } });
     const blankBytes = Buffer.from(blank, 'utf8');
-    expect(summarize(blankBytes, blankBytes, { size: blankBytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('Then this one');
+    expect(summarize(blankBytes, blankBytes, { size: blankBytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt).toBe('Then this one');
   });
 
   it('a first prompt longer than the head window falls back to the earliest last-prompt the windows hold', () => {
@@ -155,7 +158,7 @@ describe('head and tail summary', () => {
       line({ type: 'last-prompt', lastPrompt: 'a steer', leafUuid: 'u2', sessionId: 'S' });
     const whole = Buffer.from(big + rest, 'utf8');
     const windows = headAndTail(whole);
-    expect(summarize(windows.head, windows.tail, { size: whole.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('yyyy…');
+    expect(summarize(windows.head, windows.tail, { size: whole.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt).toBe('yyyy…');
   });
 
   it('takes the custom title from the tail record, else the custom-title.json sidecar, else the head record (SPEC 35.14.3)', () => {
@@ -168,13 +171,13 @@ describe('head and tail summary', () => {
       'utf8',
     );
     const windows = headAndTail(headOnly);
-    const stat = { size: headOnly.length, mtimeMs: 1 };
+    const stat = { size: headOnly.length, mtimeMs: 1, birthtimeMs: 0 };
     expect(summarize(windows.head, windows.tail, stat, '/p/S.jsonl', '-p').customTitle).toBe('In the head');
     expect(summarize(windows.head, windows.tail, stat, '/p/S.jsonl', '-p', 'From the sidecar').customTitle).toBe('From the sidecar');
 
     const inTail = Buffer.concat([headOnly, Buffer.from(line({ type: 'custom-title', customTitle: 'In the tail', sessionId: 'S' }), 'utf8')]);
     const tailWindows = headAndTail(inTail);
-    expect(summarize(tailWindows.head, tailWindows.tail, { size: inTail.length, mtimeMs: 1 }, '/p/S.jsonl', '-p', 'From the sidecar').customTitle).toBe('In the tail');
+    expect(summarize(tailWindows.head, tailWindows.tail, { size: inTail.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p', 'From the sidecar').customTitle).toBe('In the tail');
   });
 
   it('falls back to the first user text for the prompt, clears an empty custom title, and reads a bookkeeping-only file as having no messages', () => {
@@ -184,13 +187,13 @@ describe('head and tail summary', () => {
       line({ type: 'user', uuid: 'u3', parentUuid: 'u2', message: { role: 'user', content: 'x'.repeat(300) } }) +
       line({ type: 'custom-title', customTitle: '', sessionId: 'S' });
     const bytes = Buffer.from(text, 'utf8');
-    const summary = summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p');
+    const summary = summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p');
     expect(summary.firstPrompt).toBe('x'.repeat(200));
     expect(summary.customTitle).toBeNull();
     expect(summary.lastAssistantText).toBeNull();
 
     const bookkeeping = Buffer.from(line({ type: 'queue-operation', operation: 'enqueue', sessionId: 'S' }) + line({ type: 'cost-state', sessionId: 'S' }), 'utf8');
-    const empty = summarize(bookkeeping, bookkeeping, { size: bookkeeping.length, mtimeMs: 1 }, '/p/S.jsonl', '-p');
+    const empty = summarize(bookkeeping, bookkeeping, { size: bookkeeping.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p');
     expect(empty.hasMessages).toBe(false);
     expect(empty.directory).toBeNull();
     expect(empty.leafUuid).toBeNull();
@@ -203,7 +206,7 @@ describe('head and tail summary', () => {
     const tailRecord = line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: '2026-09-28T10:00:05.000Z', gitBranch: 'topic', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } });
     const whole = Buffer.from(big + tailRecord, 'utf8');
     expect(whole.length).toBeGreaterThan(2 * HEAD_TAIL_BYTES);
-    const summary = summarize(headAndTail(whole).head, headAndTail(whole).tail, { size: whole.length, mtimeMs: 1 }, '/p/S.jsonl', '-p');
+    const summary = summarize(headAndTail(whole).head, headAndTail(whole).tail, { size: whole.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p');
     expect(summary.directory).toBe('/private/tmp/long-prompt');
     expect(summary.engineVersion).toBe('2.1.283');
     expect(summary.entrypoint).toBe('cli');
@@ -223,7 +226,7 @@ describe('head and tail summary', () => {
       message: { id: 'm', model: 'x', content: [{ type: 'tool_use', id: 't', name: 'Write', input: { uuid: 'nested-input-uuid', gitBranch: 'nested-input-branch', cwd: '/nested', content: 'y'.repeat(150 * 1024) } }] },
     });
     const whole = Buffer.from(big, 'utf8');
-    const summary = summarize(headAndTail(whole).head, headAndTail(whole).tail, { size: whole.length, mtimeMs: 1 }, '/p/S.jsonl', '-p');
+    const summary = summarize(headAndTail(whole).head, headAndTail(whole).tail, { size: whole.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p');
     expect(summary.leafUuid).toBe('real-message');
     expect(summary.gitBranch).toBe('main');
     expect(summary.directory).toBe('/real');
@@ -241,7 +244,7 @@ describe('head and tail summary', () => {
     });
     const last = line({ type: 'assistant', uuid: 'a1', parentUuid: 'real-message', timestamp: '2026-09-28T10:00:05.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } });
     const whole = Buffer.from(big + last, 'utf8');
-    const summary = summarize(headAndTail(whole).head, headAndTail(whole).tail, { size: whole.length, mtimeMs: 1 }, '/p/S.jsonl', '-p');
+    const summary = summarize(headAndTail(whole).head, headAndTail(whole).tail, { size: whole.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p');
     expect(summary.leafUuid).toBe('a1');
     expect(summary.gitBranch).toBe('main');
     expect(summary.directory).toBe('/real');
@@ -253,7 +256,7 @@ describe('head and tail summary', () => {
     const first = line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', gitBranch: 'main', timestamp: '2026-09-28T10:00:00.000Z', message: { role: 'user', content: 'hi' } });
     const torn = JSON.stringify({ parentUuid: 'u1', type: 'assistant', uuid: 'u2', gitBranch: 'torn', timestamp: '2026-09-28T10:00:01.000Z', message: { id: 'm', content: [{ type: 'tool_use', input: { uuid: 'nested-input-uuid', gitBranch: 'nested-input-branch' } }] } });
     const whole = Buffer.from(first + torn.slice(0, torn.length - 20), 'utf8'); // cut inside the nested input, no newline
-    const summary = summarize(whole, whole, { size: whole.length, mtimeMs: 1 }, '/p/S.jsonl', '-p');
+    const summary = summarize(whole, whole, { size: whole.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p');
     expect(summary.leafUuid).toBe('u2');
     expect(summary.gitBranch).toBe('torn');
     expect(summary.lastRecordAt).toBe('2026-09-28T10:00:01.000Z');
@@ -268,11 +271,32 @@ describe('head and tail summary', () => {
     // A head that ends inside `middle` and a tail that starts inside `middle`: the torn title line is in neither window whole.
     const head = whole.subarray(0, first.length + 10);
     const tail = whole.subarray(first.length + 12);
-    const summary = summarize(head, tail, { size: whole.length, mtimeMs: 1 }, '/p/S.jsonl', '-p');
+    const summary = summarize(head, tail, { size: whole.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p');
     expect(summary.aiTitle).toBeNull();
     expect(summary.leafUuid).toBe('a1');
     expect(summary.directory).toBe('/d');
     expect(summary.firstRecordAt).toBe('2026-09-28T10:00:00.000Z');
     expect(summary.lastRecordAt).toBe('2026-09-28T10:00:01.000Z');
+  });
+});
+
+// E3 (A-16's disk signal): a `--fork-session` copy repeats its parent's root record under its own session id, so the
+// first `parentUuid: null` record of the head names the conversation a transcript belongs to.
+describe('the transcript’s root uuid', () => {
+  it('finds the parent’s root in the fork child of p1-fork-session-flag (seq 40), past its uuid-less head records', () => {
+    const snapshot = loadJournal('pass3', 'p1-fork-session-flag').find((row) => row.seq === 40)!.frame as { label: string; records: object[] };
+    expect(snapshot.label).toBe('fork-child');
+    const bytes = Buffer.from(snapshot.records.map(line).join(''), 'utf8');
+    const summary = summarize(bytes, bytes, { size: bytes.length, mtimeMs: 2, birthtimeMs: 1759721379180 }, '/p/bfdf4123-a931-4896-abd3-1f99c542f54e.jsonl', '-p');
+    expect(summary.rootUuid).toBe('b1277739-a5e8-440b-99de-90dd59edf04f');
+    expect(summary.birthtimeMs).toBe(1759721379180);
+  });
+
+  it('is null for a head with no message record, and skips records that are not roots', () => {
+    const bookkeeping = Buffer.from(line({ type: 'queue-operation', operation: 'enqueue', sessionId: 'S' }) + line({ type: 'mode', mode: 'normal', sessionId: 'S' }), 'utf8');
+    expect(summarize(bookkeeping, bookkeeping, { size: bookkeeping.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').rootUuid).toBeNull();
+    const text = line({ type: 'file-history-snapshot', messageId: 'm1', snapshot: {} }) + line({ type: 'user', uuid: 'u2', parentUuid: 'u1', message: { role: 'user', content: 'x' } }) + line({ type: 'user', uuid: 'u3', parentUuid: null, message: { role: 'user', content: 'y' } });
+    const bytes = Buffer.from(text, 'utf8');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').rootUuid).toBe('u3');
   });
 });
