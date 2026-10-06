@@ -15,9 +15,12 @@ import { writesOf, type PluginsAction, type PluginsScope } from '../../src/share
 // path (prefixed `config/` or `project/.claude/`) → a fingerprint; a clone or a cached plugin version (thousands of
 // files) is one entry over its files' names, sizes and mtimes.
 export type Files = Record<string, string>;
+// `<config home>/.claude.json` as read: absent, a JSON object, or contents that could not be judged (malformed, or JSON
+// that is not an object), which fail the audit rather than passing as a harmless rewrite.
+export type ClaudeJson = { state: 'absent' } | { state: 'object'; value: Record<string, unknown> } | { state: 'unreadable'; reason: string };
 export interface Tree {
   files: Files;
-  claudeJson: Record<string, unknown> | null; // `<config home>/.claude.json`, parsed
+  claudeJson: ClaudeJson;
 }
 
 // Directories the delta treats as one entry: a marketplace's clone and one cached plugin version.
@@ -59,17 +62,28 @@ function filesOf(dir: string, prefix: string): Files {
   return out;
 }
 
-export function readTree(config: string, project: string): Tree {
-  const file = join(config, '.claude.json');
-  let claudeJson: Record<string, unknown> | null = null;
-  if (existsSync(file)) {
-    try {
-      claudeJson = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-    } catch {
-      claudeJson = null; // mid-write: the delta still shows the file
-    }
+function claudeJsonOf(file: string): ClaudeJson {
+  if (!existsSync(file)) return { state: 'absent' };
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    return { state: 'unreadable', reason: error instanceof Error ? error.message : String(error) };
   }
-  return { files: { ...filesOf(config, 'config'), ...filesOf(join(project, '.claude'), 'project/.claude') }, claudeJson };
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return { state: 'unreadable', reason: `not a JSON object (${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value})` };
+  return { state: 'object', value: value as Record<string, unknown> };
+}
+
+const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// The trees now; a `.claude.json` that could not be read is read once more after a moment (the engine may be mid-write),
+// with the files read again beside it, and stays `unreadable` if the second read fails too.
+export function readTree(config: string, project: string): Tree {
+  const read = (): Tree => ({ claudeJson: claudeJsonOf(join(config, '.claude.json')), files: { ...filesOf(config, 'config'), ...filesOf(join(project, '.claude'), 'project/.claude') } });
+  const first = read();
+  if (first.claudeJson.state !== 'unreadable') return first;
+  pause(250);
+  return read();
 }
 
 export interface Delta {
@@ -116,9 +130,15 @@ const BOOKKEEPING_KEYS = new Set(['pluginUsage', 'firstStartTime', 'firstStartVe
 const BOOKKEEPING_PATTERNS = [/MigrationComplete$/, /^hasReset[A-Z]/];
 const isBookkeeping = (key: string) => BOOKKEEPING_KEYS.has(key) || BOOKKEEPING_PATTERNS.some((re) => re.test(key));
 
-export function claudeJsonChanges(before: Record<string, unknown> | null, after: Record<string, unknown> | null): { key: string; kind: 'records (D-12)' | 'unannounced' }[] {
-  const b = before ?? {};
-  const a = after ?? {};
+// The judged changes between two reads of `.claude.json`: per top-level key when both are objects (an absent file reads
+// as no keys), `unclassified` when either side could not be read, `unannounced` when the file was removed.
+export function claudeJsonChanges(before: ClaudeJson, after: ClaudeJson): { key: string; kind: 'records (D-12)' | 'unannounced' | 'unclassified' }[] {
+  for (const [side, read] of [['before', before], ['after', after]] as const) {
+    if (read.state === 'unreadable') return [{ key: `its contents ${side} could not be read (${read.reason})`, kind: 'unclassified' }];
+  }
+  if (before.state === 'object' && after.state === 'absent') return [{ key: 'the file was removed', kind: 'unannounced' }];
+  const b = before.state === 'object' ? before.value : {};
+  const a = after.state === 'object' ? after.value : {};
   return [...new Set([...Object.keys(b), ...Object.keys(a)])]
     .sort()
     .filter((key) => JSON.stringify(b[key]) !== JSON.stringify(a[key]))
@@ -157,6 +177,7 @@ export function auditOf(before: Tree, after: Tree, manifest: Manifest | null): A
         for (const { key, kind: verdict } of keys) {
           out.lines.push(`  ${kind.padEnd(7)} ${path} · ${key}   [${verdict}]`);
           if (verdict === 'unannounced') out.unannounced.push(`${label} · ${key}`);
+          if (verdict === 'unclassified') out.unclassified.push(`${label} · ${key}`);
         }
         continue;
       }
@@ -167,4 +188,27 @@ export function auditOf(before: Tree, after: Tree, manifest: Manifest | null): A
     }
   }
   return out;
+}
+
+// ---- when a window closes ---------------------------------------------------------------------------------------
+
+// The CLI reads in flight (the `plugins.*` and `marketplaces.*` invokes main is answering) and when the last one settled
+// (epoch ms; 0 when none has).
+export interface InvokeTracker {
+  inflight(): Promise<number>;
+  lastSettledAt(): Promise<number>;
+}
+
+// Waits until no tracked invoke is in flight and none has settled for `quietMs`: a read the widget refetches behind its
+// cached data (or one a `plugins.changed` triggered) has finished, and its CLI's writes have landed, before the window's
+// after-tree is read. A read still in flight at `timeoutMs` fails the window.
+export async function untilQuiet(tracker: InvokeTracker, opts: { quietMs: number; timeoutMs: number; pollMs?: number }): Promise<void> {
+  const deadline = Date.now() + opts.timeoutMs;
+  for (;;) {
+    const inflight = await tracker.inflight();
+    const quietFor = Date.now() - (await tracker.lastSettledAt());
+    if (inflight === 0 && quietFor >= opts.quietMs) return;
+    if (Date.now() >= deadline) throw new Error(inflight > 0 ? `${inflight} CLI read(s) still in flight after ${opts.timeoutMs} ms` : `no quiet ${opts.quietMs} ms after the last CLI read within ${opts.timeoutMs} ms`);
+    await new Promise((resolve) => setTimeout(resolve, opts.pollMs ?? 100));
+  }
 }

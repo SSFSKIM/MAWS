@@ -6,9 +6,13 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { auditOf, claudeJsonChanges, manifestOf, pathKind, readTree, type Tree } from './plugins-audit';
+import { auditOf, claudeJsonChanges, manifestOf, pathKind, readTree, untilQuiet, type ClaudeJson, type Tree } from './plugins-audit';
 
-const tree = (files: Record<string, string>, claudeJson: Record<string, unknown> | null = null): Tree => ({ files, claudeJson });
+const obj = (value: Record<string, unknown>): ClaudeJson => ({ state: 'object', value });
+const tree = (files: Record<string, string>, claudeJson: Record<string, unknown> | ClaudeJson | null = null): Tree => ({
+  files,
+  claudeJson: claudeJson === null ? { state: 'absent' } : 'state' in claudeJson && typeof claudeJson.state === 'string' ? (claudeJson as ClaudeJson) : obj(claudeJson as Record<string, unknown>),
+});
 const listing = null;
 
 describe('the plugins audit', () => {
@@ -18,7 +22,7 @@ describe('the plugins audit', () => {
   it('accepts the engine’s .claude.json bookkeeping and rejects a configuration key changing there', () => {
     const before = { theme: 'light', projects: { '/tmp/r': { hasTrustDialogAccepted: true } }, pluginUsage: {} };
     const usage = { ...before, pluginUsage: { 'e8-probe@e8-scratch': { usageCount: 1 } }, machineID: 'm', migrationVersion: 14, opusProMigrationComplete: true, seenNotifications: {}, cachedGrowthBookFeatures: {} };
-    expect(claudeJsonChanges(before, usage).map((c) => c.kind)).toEqual(Array(6).fill('records (D-12)'));
+    expect(claudeJsonChanges(obj(before), obj(usage)).map((c) => c.kind)).toEqual(Array(6).fill('records (D-12)'));
     const files = { 'config/.claude.json': '1' };
     const accepted = auditOf(tree(files, before), tree({ 'config/.claude.json': '2' }, usage), listing);
     expect(accepted.unannounced).toEqual([]);
@@ -68,9 +72,58 @@ describe('the plugins audit', () => {
     writeFileSync(join(config, '.claude.json'), JSON.stringify({ theme: 'light' }));
     utimesSync(join(config, 'settings.json'), 1_000, 1_000);
     const first = readTree(config, join(root, 'project'));
-    expect(first.claudeJson).toEqual({ theme: 'light' });
+    expect(first.claudeJson).toEqual({ state: 'object', value: { theme: 'light' } });
     writeFileSync(join(config, 'settings.json'), '{}\n'); // the same bytes, written again
     utimesSync(join(config, 'settings.json'), 2_000, 2_000);
     expect(auditOf(first, readTree(config, join(root, 'project')), listing).unannounced).toEqual(['changed config/settings.json']);
+  });
+
+  it('fails closed on a .claude.json it could not read: malformed before, malformed after, or not a JSON object', () => {
+    const files = { 'config/.claude.json': '1' };
+    const changed = { 'config/.claude.json': '2' };
+    const unreadable: ClaudeJson = { state: 'unreadable', reason: 'Unexpected end of JSON input' };
+    const malformedBefore = auditOf(tree(files, unreadable), tree(changed, { theme: 'light' }), listing);
+    expect(malformedBefore.unclassified).toEqual(['changed config/.claude.json · its contents before could not be read (Unexpected end of JSON input)']);
+    const malformedAfter = auditOf(tree(files, { theme: 'light' }), tree(changed, unreadable), listing);
+    expect(malformedAfter.unclassified).toEqual(['changed config/.claude.json · its contents after could not be read (Unexpected end of JSON input)']);
+    expect(malformedAfter.lines.join('\n')).toContain('[unclassified]');
+    // absent and unreadable are told apart: a file the engine creates is judged by its keys
+    expect(auditOf(tree({}), tree(changed, { pluginUsage: {} }), listing)).toMatchObject({ unannounced: [], unclassified: [] });
+    expect(auditOf(tree(files, { theme: 'light' }), tree({}), listing).unannounced).toEqual(['removed config/.claude.json · the file was removed']);
+
+    const root = mkdtempSync(join(tmpdir(), 'maws-plugins-audit-'));
+    dirs.push(root);
+    const config = join(root, 'config');
+    mkdirSync(config);
+    expect(readTree(config, root).claudeJson).toEqual({ state: 'absent' });
+    for (const [text, reason] of [['{"theme": "li', /JSON/], ['[1, 2]', /not a JSON object \(array\)/], ['null', /not a JSON object \(null\)/], ['"light"', /not a JSON object \(string\)/]] as const) {
+      writeFileSync(join(config, '.claude.json'), text);
+      const read = readTree(config, root).claudeJson; // read twice (the bounded retry), unreadable both times
+      expect(read.state, text).toBe('unreadable');
+      expect(read.state === 'unreadable' ? read.reason : '', text).toMatch(reason);
+    }
+  });
+
+  it('closes a window only once no CLI read is in flight and none settled within the quiet period: a delayed read’s write is caught', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'maws-plugins-audit-'));
+    dirs.push(root);
+    const config = join(root, 'config');
+    mkdirSync(config);
+    writeFileSync(join(config, 'settings.json'), '{}\n');
+    // cached data is on screen; its refetch, a CLI read, is still running and writes after a second
+    let inflight = 1;
+    let lastSettledAt = 0;
+    setTimeout(() => writeFileSync(join(config, 'plugins-cache-written-late.json'), '{}'), 1_000);
+    setTimeout(() => {
+      inflight = 0;
+      lastSettledAt = Date.now();
+    }, 1_200);
+    const before = readTree(config, root);
+    const started = Date.now();
+    await untilQuiet({ inflight: async () => inflight, lastSettledAt: async () => lastSettledAt }, { quietMs: 300, timeoutMs: 5_000 });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_400);
+    expect(auditOf(before, readTree(config, root), listing).unclassified).toEqual(['added config/plugins-cache-written-late.json']);
+    // a read that never settles is the window's failure, not a silent snapshot
+    await expect(untilQuiet({ inflight: async () => 1, lastSettledAt: async () => 0 }, { quietMs: 100, timeoutMs: 400 })).rejects.toThrow(/still in flight/);
   });
 });
