@@ -52,7 +52,8 @@ export const EXIT_GRACE_MS = 3_000; // the exit order's ladder grace for every l
 const EXIT_SHUTDOWN_BOUND_MS = 10_000; // past this the exit order goes on without the ladder's answer
 
 // The detached entry: routes console into the log, treats an uncaught exception as fatal and SIGTERM as an exit, and
-// starts the supervisor. Exit codes: 0 clean, 1 fatal, START_EXIT_HELD (3) when another supervisor holds the lock.
+// starts the supervisor. Exit codes: 0 clean, 1 fatal, START_EXIT_HELD (3) when another supervisor holds the lock,
+// START_EXIT_ABORTED (143) when a SIGTERM arrived during the start (main reads 1 and 143 as an unexpected exit).
 export function runDetached(hostVersion: string, register: HostRegister, opts: DetachedOptions): void {
   routeConsole(opts.log);
   const proc: SupervisorProcess = { exit: (code) => process.exit(code) };

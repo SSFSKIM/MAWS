@@ -1,20 +1,28 @@
 // Wires the host supervisor into main: the two utility-process entries (bundled by electron-vite's `?modulePath`,
 // which evaluates to the emitted file's path in dev and inside the packaged asar alike), the `engine.hostState` and
 // `pty.hostState` snapshot commands, and the events of the same names on every transition.
+// E10: the engine host runs in the mode MAWS_HOST_MODE picks (mode.ts): detached (the supervisor, by default) or a
+// utility process (under the harnesses); the pty host is always a utility process.
 import engineHostPath from '../../engine-host/index?modulePath';
 import ptyHostPath from '../../pty-host/index?modulePath';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
+import { hostModeFromEnv } from './mode';
 import { createHostSupervisor, type HostSupervisor } from './supervisor';
 
 export function createHosts(): HostSupervisor {
+  const mode = hostModeFromEnv(process.env);
+  console.log(`[hosts] the engine host runs ${mode === 'detached' ? 'detached (the supervisor)' : 'as a utility process'}`);
   const supervisor = createHostSupervisor({
     hosts: {
-      'engine-host': { modulePath: engineHostPath, serviceName: 'maws-engine-host' },
+      'engine-host': { modulePath: engineHostPath, serviceName: 'maws-engine-host', transport: mode },
       'pty-host': { modulePath: ptyHostPath, serviceName: 'maws-pty-host' },
     },
     emit,
   });
+  // E10: the engine host is told ready after main's resync (X13); M2's resync (sessions/index.ts) replaces this one,
+  // which pulls nothing yet.
+  supervisor.setResync('engine-host', async () => {});
   registerMainHandler('engine.hostState', () => supervisor.snapshot('engine-host'));
   registerMainHandler('pty.hostState', () => supervisor.snapshot('pty-host'));
   supervisor.onState('engine-host', (state) => emit('engine.hostState', state));
