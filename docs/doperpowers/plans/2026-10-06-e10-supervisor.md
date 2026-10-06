@@ -16,7 +16,7 @@ Every stopping point is recorded here with a timestamp; the executor splits a ta
   - Done (2026-10-06): the branch contains master 68b45f9a (E1, E2, E3, E5, E6, E7, E8, E9 landed; `git merge master` was a no-op, so 68b45f9a is the merge point); parent pin `8f366417d2a694de9e8094efaa073edbf9d82eff`; `@electron/fuses` 2.1.3 added as an exact devDependency (163e83eb); the landed host and main files re-read and §Grounding, §Design 4's table, Surprises & Discoveries and the Decision Log amended; A-29 folded (settings version 10, residue 10, 11 and 21 ruled).
   - Baseline at 163e83eb: `pnpm typecheck` green; `pnpm test --maxWorkers=4` 580 files, 7790 passed, 1 skipped (`/tmp/maws-review/gates/e10-preflight-*.log`).
 - [x] (2026-10-06 12:05) M0 — Probes: `spikes/supervisor-probe/findings.txt` with the five verdicts.
-- [ ] M1 — The transport and the two modes: the socket protocol, the detached entry, main's connect-or-start, `MAWS_HOST_MODE`.
+- [x] (2026-10-06 14:40) M1 — The transport and the two modes: the socket protocol, the detached entry, main's connect-or-start, `MAWS_HOST_MODE`.
 - [ ] M2 — Catch-up and host state: the delivered cursor and the connect burst, main's resync fold, `host.*`, idle exit, Stop all, the build handshake and exit-when-idle, the orphan sweep, the fail-fast bridges.
 - [ ] M3 — The app's surfaces: the quit answer and settings version 10, Settings and Diagnostics rows, the update banner, the crash notice, the lost-terminal state.
 - [ ] M4 — Proof: `pnpm e2e:supervisor`, the live reconnect probe, the packaged check, evidence in both themes, gates, the whole-branch review, Outcomes.
@@ -505,6 +505,9 @@ The executor replaces these lines with what actually ran and what it printed.
   Evidence: task 3's report; `src/engine-host/process-table.ts` `shuttingDown`.
 - Observation (Task 1.4): `pnpm e2e:tools` (8/8) and `pnpm e2e:transcript` (31/31) pass in utility mode after the `{t: 'ready'}` line, the first real-`MessagePortMain` check of it; a manual replay run under a scratch profile showed `maws-supervisor` in its own group, files 0600 in a 0700 directory, survival of the app's SIGTERM with PPID 1, and the relaunch connecting to the same pid.
   Evidence: task 3's report; `/tmp/maws-review/gates/e10-task3-units.log`.
+
+- Observation (Task 1.3's fix wave): `e2e/support/launch.ts` passes the outer environment to the app (`:57`), so `MAWS_HOST_MODE=detached pnpm e2e:transcript` runs a whole group detached with no script change: 31/31 passed, six cases launching replay sessions through the supervisor over the socket. Every test left its supervisor running (until Task 3.1, a quit latches it and does not stop it) under a profile `launch.ts` then deletes, so Task 4.1's cleanup of every spawned supervisor is load-bearing.
+  Evidence: `/tmp/maws-review/gates/e10-task3-e2e-transcript-detached.log`; task 3's report.
 
 ## Decision Log
 
