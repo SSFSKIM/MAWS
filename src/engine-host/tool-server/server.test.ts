@@ -111,8 +111,42 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
     server.processExited();
     await flush();
     expect(signals.every((s) => s.aborted)).toBe(true);
+    expect(signals.map((s) => s.reason)).toEqual(['withdrawn', 'exit', 'exit']); // E1 M2: an ask's cancellation names why
     expect(server.inFlight).toBe(0);
     expect(sent).toEqual([]); // no one waits for those answers
+  });
+
+  // E1 M2: a blocking ask answers its own call with the write's outcome in hand (residue 12)
+  it('reply answers a call in flight with the given write options, and the tool settling after writes nothing more', async () => {
+    let settle!: (result: ReturnType<typeof toolText>) => void;
+    const held = defineMawsTool('ask', () => new Promise((resolve) => (settle = resolve)));
+    const options: unknown[] = [];
+    const sent: { requestId: RequestId; response: unknown }[] = [];
+    let fail = true;
+    const server = new MawsToolServer({
+      tools: [held], appSessionId: 'app-1' as AppSessionId, version: '0', cwd: () => '/r', log: () => {},
+      respond: async (requestId, response, opts) => {
+        options.push(opts);
+        if (fail) throw new Error('EPIPE');
+        sent.push({ requestId, response });
+      },
+    });
+    server.accept({ type: 'control_request', request_id: 'r1', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'ask', arguments: {} } } } } as ControlRequestFrame);
+    await flush();
+    const result = toolText({ status: 'answered' });
+    const flushed = () => {};
+    await expect(server.reply('r1' as RequestId, result, { flushed })).rejects.toThrow('EPIPE');
+    expect(server.inFlight).toBe(1); // a refused write leaves the call open for a retry
+    fail = false;
+    await server.reply('r1' as RequestId, result, { flushed });
+    expect(options).toEqual([{ flushed }, { flushed }]);
+    expect(sent).toEqual([{ requestId: 'r1', response: { mcp_response: { jsonrpc: '2.0', id: 4, result } } }]);
+    await expect(server.reply('r1' as RequestId, result)).rejects.toThrow('no call r1 waits for an answer'); // answered once
+    settle(result);
+    await flush();
+    expect(sent).toHaveLength(1);
+    expect(server.inFlight).toBe(0);
+    await expect(server.reply('r9' as RequestId, result)).rejects.toThrow('no call r9 waits for an answer');
   });
 
   it('logs an answer the pipe refused', async () => {

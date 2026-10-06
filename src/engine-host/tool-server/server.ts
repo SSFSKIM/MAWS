@@ -5,12 +5,18 @@
 // pass3/p1-sdk-mcp-roundtrip seqs 5 to 14). The handshake interleaves with the host's own initialize, so the server
 // answers from construction on. A tool's failure is an MCP result with `isError: true`, which the model reads as an
 // ordinary failed call; JSON-RPC errors answer only an unknown method or a malformed message (residue 4). A call the
-// engine withdrew, or one still running when the process ended, is aborted and answered with nothing: no one waits.
-// Nothing here builds an event: the normaliser maps the `tools/call` rows and their answers.
+// engine withdrew, or one still running when the process ended, is aborted (its signal's reason `withdrawn` or `exit`)
+// and answered with nothing: no one waits. A call may instead be answered from outside its tool through `reply` (a
+// blocking ask, whose answer must be committed only once its write settled: residue 12); the tool settling after that
+// writes nothing more. Nothing here builds an event: the normaliser maps the `tools/call` rows and their answers.
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { MAWS_SERVER_NAME, mawsServerInfo, mawsToolList, TOOL_ERRORS, type MawsToolName } from '@shared/maws/tools';
 import { McpMessageRequestSchema } from '@shared/wire/control';
 import type { ControlRequestFrame } from '@shared/wire/frames';
+import type { WriteOptions } from '../outbound-writer';
+
+// Why a call's signal aborted (`signal.reason`).
+export type CallAbortReason = 'withdrawn' | 'exit';
 
 export interface McpToolContext {
   appSessionId: AppSessionId;
@@ -53,7 +59,7 @@ type RpcMessage = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: 
 
 export interface MawsToolServerDeps {
   tools: McpToolDefinition[];
-  respond: (requestId: RequestId, response: unknown) => Promise<void>;
+  respond: (requestId: RequestId, response: unknown, opts?: WriteOptions) => Promise<void>;
   cwd: () => string;
   appSessionId: AppSessionId;
   version: string; // the app's, for `serverInfo`
@@ -63,7 +69,7 @@ export interface MawsToolServerDeps {
 
 export class MawsToolServer {
   private readonly tools: Map<string, McpToolDefinition>;
-  private readonly calls = new Map<RequestId, AbortController>();
+  private readonly calls = new Map<RequestId, { id: RpcId; controller: AbortController; answered: boolean }>();
 
   constructor(private readonly deps: MawsToolServerDeps) {
     this.tools = new Map(deps.tools.map((tool) => [tool.name, tool]));
@@ -115,12 +121,27 @@ export class MawsToolServer {
 
   // The engine withdrew the request (`control_cancel_request`): the call's signal aborts and nothing is answered.
   cancel(requestId: RequestId): void {
-    this.calls.get(requestId)?.abort();
+    this.calls.get(requestId)?.controller.abort('withdrawn' satisfies CallAbortReason);
   }
 
   // The process is gone: every call in flight aborts; the pipe that would take their answers is closed.
   processExited(): void {
-    for (const controller of this.calls.values()) controller.abort();
+    for (const call of this.calls.values()) call.controller.abort('exit' satisfies CallAbortReason);
+  }
+
+  // Answers a call still in flight now, with the write's options (its `flushed` row), and settles only once the write
+  // did: a refused write rejects and leaves the call open for another answer. The call's tool settling afterwards writes
+  // nothing more. Rejects for a call that is not waiting (unknown, aborted, or already answered).
+  async reply(requestId: RequestId, result: McpToolResult, opts: WriteOptions = {}): Promise<void> {
+    const call = this.calls.get(requestId);
+    if (!call || call.answered || call.controller.signal.aborted) throw new Error(`no call ${requestId} waits for an answer`);
+    call.answered = true; // before the write: its flushed row may settle the tool before the write's promise resolves
+    try {
+      await this.deps.respond(requestId, { mcp_response: { jsonrpc: '2.0', id: call.id, result } }, opts);
+    } catch (error) {
+      call.answered = false;
+      throw error;
+    }
   }
 
   private async call(requestId: RequestId, id: RpcId, params: Record<string, unknown>): Promise<void> {
@@ -133,7 +154,8 @@ export class MawsToolServer {
     const meta = isObject(params._meta) ? (params._meta as Record<string, unknown>) : {};
     const toolUseId = typeof meta['claudecode/toolUseId'] === 'string' ? (meta['claudecode/toolUseId'] as ToolUseId) : null;
     const controller = new AbortController();
-    this.calls.set(requestId, controller);
+    const call = { id, controller, answered: false };
+    this.calls.set(requestId, call);
     this.deps.onChange?.();
     let result: McpToolResult;
     try {
@@ -146,7 +168,7 @@ export class MawsToolServer {
       this.calls.delete(requestId);
       this.deps.onChange?.();
     }
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted || call.answered) return;
     this.result(requestId, id, result);
   }
 

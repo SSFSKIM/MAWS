@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { askSteerText, parseAskSteer, PendingAskSchema } from './ask';
+import { askAnswersProblem, askSteerText, parseAskSteer, PendingAskSchema, withQuestionIds } from './ask';
 import type { AskAnswer, AskQuestion } from './tools';
 
 const questions: AskQuestion[] = [
@@ -81,5 +81,47 @@ describe('PendingAsk', () => {
     const ask = { askId: 'toolu_9', toolUseId: 'toolu_9', requestId: 'r1', blocking: true, title: null, context: null, questions: [questions[0]], openedAt: '2026-10-05T00:00:00.000Z' };
     expect(PendingAskSchema.parse(ask)).toEqual(ask);
     expect(PendingAskSchema.safeParse({ ...ask, extra: 1 }).success).toBe(false);
+  });
+});
+
+// E1 M2: an ask's questions as the host holds them, and the answers `maws.ask.answer` admits for them
+describe('withQuestionIds', () => {
+  it('fills `q<n>` by position where a question has no id, keeping the ones it has', () => {
+    expect(withQuestionIds(questions).map((q) => q.id)).toEqual(['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7']);
+    expect(withQuestionIds([{ question: 'A?', modality: 'text' }, { id: 'mine', question: 'B?', modality: 'text' }])).toEqual([{ id: 'q1', question: 'A?', modality: 'text' }, { id: 'mine', question: 'B?', modality: 'text' }]);
+  });
+});
+
+describe('askAnswersProblem (residue 12: a mismatch is invalid input, never written)', () => {
+  const held = withQuestionIds(questions);
+  const swap = (id: string, patch: Partial<AskAnswer>) => answers.map((a) => (a.id === id ? { ...a, ...patch } : a));
+
+  it('admits one answer per question whose status and value fit its modality', () => {
+    expect(askAnswersProblem(held, answers)).toBeNull();
+    expect(askAnswersProblem(held, [...answers].reverse())).toBeNull(); // order is free
+    // a single-select choice answered under Other alone
+    expect(askAnswersProblem([held[0]!], [{ id: 'q1', question: 'Which colour?', status: 'answered', value: [], otherText: 'Teal' }])).toBeNull();
+  });
+
+  it('refuses a missing, a repeated or an unknown question id', () => {
+    expect(askAnswersProblem(held, answers.slice(1))).toBe('no answer for question q1');
+    expect(askAnswersProblem(held, [...answers, answers[0]!])).toBe('question q1 is answered twice');
+    expect(askAnswersProblem(held, [...answers, { id: 'q9', question: 'x', status: 'skipped' }])).toBe('no question q9 in this ask');
+  });
+
+  it('refuses a value where the status says there is none, and a missing value where it says answered', () => {
+    expect(askAnswersProblem(held, swap('q6', { value: 'x' }))).toBe('question q6 is skipped and carries a value');
+    expect(askAnswersProblem(held, swap('q7', { value: ['Yes'] }))).toBe('question q7 is decide_for_me and carries a value');
+    expect(askAnswersProblem(held, answers.map((a) => (a.id === 'q3' ? { id: 'q3', question: a.question, status: 'answered' as const } : a)))).toBe('question q3 is answered with no value');
+  });
+
+  it('refuses a value of the wrong shape for the modality, and a field of another modality', () => {
+    expect(askAnswersProblem(held, swap('q3', { value: ['a'] }))).toBe('question q3 (text) needs a string value');
+    expect(askAnswersProblem(held, swap('q5', { value: ['/r'] }))).toBe('question q5 (repository) needs a string value');
+    expect(askAnswersProblem(held, swap('q1', { value: 'Blue' }))).toBe('question q1 (choice) needs a list value');
+    expect(askAnswersProblem(held, swap('q4', { value: '/r/assets' }))).toBe('question q4 (folder) needs a list value');
+    expect(askAnswersProblem(held, swap('q1', { value: ['Red', 'Blue'] }))).toBe('question q1 is single-select and has 2 choices');
+    expect(askAnswersProblem(held, swap('q3', { otherText: 'x' }))).toBe('question q3 carries otherText, which only a choice answer has');
+    expect(askAnswersProblem(held, swap('q3', { name: 'x' }))).toBe('question q3 carries name, which only a repository answer has');
   });
 });

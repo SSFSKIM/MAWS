@@ -44,6 +44,7 @@ import type { SessionEvent } from '@shared/graph/events';
 // C4 end
 // E1 start
 import type { commands as MawsCommands } from '@shared/ipc/schema/maws';
+import { AskAnswerMismatch } from './tool-server/ask';
 // E1 end
 // C10 start
 import type { ModelCatalogue } from '@shared/sessions/models';
@@ -613,11 +614,20 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   });
   // R2 end
 
-  // E1 start: the `maws` tool server's commands. The pending-ask table is E1 M2's: until then a session holds no ask,
-  // so the list is empty and an answer finds nothing pending.
+  // E1 start: the `maws` tool server's commands. A session this host does not hold has no ask and nothing pending;
+  // answers that do not fit the ask's questions are invalid input, never written.
   const handleMaws = <N extends MawsCommand>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
-  handleMaws('maws.asks.list', async () => ({ asks: [] }));
-  handleMaws('maws.ask.answer', async () => ({ outcome: 'not_pending' }));
+  handleMaws('maws.asks.list', async ({ appSessionId }) => ({ asks: table.get(appSessionId as AppSessionId)?.asks() ?? [] }));
+  handleMaws('maws.ask.answer', async ({ appSessionId, askId, answers }) => {
+    const session = table.get(appSessionId as AppSessionId);
+    if (!session) return { outcome: 'not_pending' };
+    try {
+      return { outcome: await session.answerAsk(askId, answers) };
+    } catch (error) {
+      if (error instanceof AskAnswerMismatch) throw new HostCommandError({ code: 'invalid_input', message: error.message });
+      throw error;
+    }
+  });
   handleMaws('maws.pane.answer', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerPane(requestId as RequestId, result) ?? 'not_pending' }));
   // E1 end
 

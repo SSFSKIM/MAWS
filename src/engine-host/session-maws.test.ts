@@ -2,6 +2,8 @@
 // the handshake, the tool list, `send_file` writing its record and yielding `maws.delivery.file`, `show_pane` through
 // the pane bridge (answered, refused, silent), the withdrawn and exited calls, and every event reproduced by a journal
 // rebuild. Replayed: E0a's pass3/p1-sdk-mcp-roundtrip through the app's own handshake, up to the probe's own writes.
+// E1 M2 (Plan of Work M2, "What it proves"): the `ask` lifecycle on the same scripted session (blocking and async, the
+// claim-write-commit rule with its failures, the withdrawn and exit cancellations, every event on rebuild).
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,7 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { RequestId } from '@shared/graph/ids';
 import { PANE_ANSWER_MS } from '@shared/maws/panes';
-import { MAWS_TOOL_ANNOTATIONS, mawsToolList, TOOL_ERRORS } from '@shared/maws/tools';
+import { askSteerText } from '@shared/maws/ask';
+import { MAWS_TOOL_ANNOTATIONS, mawsToolList, TOOL_ERRORS, type AskAnswer } from '@shared/maws/tools';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadJournal } from '../../test/support/fixtures';
@@ -23,7 +26,7 @@ import { buildLaunch, RELAY_URL } from './launch';
 import { appReplayHandshake } from './replay-handshake';
 import { replayEngine, type ReplayTransport } from './replay-transport';
 import { EngineSession } from './session';
-import { ASK_NOT_YET_SERVED } from './tool-server/tools';
+import { AskAnswerMismatch } from './tool-server/ask';
 
 async function until(check: () => boolean, what: string, ms = 10_000): Promise<void> {
   const start = Date.now();
@@ -49,8 +52,8 @@ afterEach(() => {
 type Rpc = { jsonrpc: string; id: unknown; result?: { content?: { text: string }[]; isError?: boolean; tools?: unknown[] } & Record<string, unknown>; error?: { code: number; message: string } };
 
 // A scripted session whose engine sends the `maws` server JSON-RPC messages, as 2.1.290 does (E0a Q1).
-async function mawsSession() {
-  const run = scriptedSession({ spec: { cwd }, session: { deliverables: new FileDeliverableStore(userData), appVersion: '0.9.0' } });
+async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSession>[0]>['transport'] = {}) {
+  const run = scriptedSession({ spec: { cwd }, session: { deliverables: new FileDeliverableStore(userData), appVersion: '0.9.0' }, transport });
   const shows: unknown[] = [];
   run.session.on('paneShow', (request) => shows.push(request));
   await run.session.start();
@@ -180,14 +183,177 @@ describe('the maws server on an EngineSession (scripted)', () => {
     expect(run.maws()).toEqual([]);
     expect(run.session.status().pendingRequests).toBe(0);
   });
+});
 
-  it('ask is listed and answers a tool error until its lifecycle lands (M2)', async () => {
+// E1 M2: the ask lifecycle (residue 12's claim, write, commit; G6's table in host memory)
+describe('ask on an EngineSession (scripted)', () => {
+  const QUESTIONS = [
+    { question: 'Which colour?', header: 'Colour', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] },
+    { id: 'title', question: 'What should the title be?', modality: 'text' },
+    { question: 'Which folder?', modality: 'folder' },
+  ];
+  const HELD = [{ ...QUESTIONS[0], id: 'q1' }, QUESTIONS[1], { ...QUESTIONS[2], id: 'q3' }];
+  const ANSWERS: AskAnswer[] = [
+    { id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] },
+    { id: 'title', question: 'What should the title be?', status: 'skipped' },
+    { id: 'q3', question: 'Which folder?', status: 'decide_for_me' },
+  ];
+  const isAnswerTo = (id: RequestId) => (frame: StdinFrame) => frame.type === 'control_response' && (frame as { response: { request_id: string } }).response.request_id === id;
+  const metaOf = (rows: JournalRow[], event: string) => rows.filter((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === event);
+
+  it('a blocking ask holds its call until answered, then answers the AskResult (a skip has no value) and yields opened, answered', async () => {
     const run = await mawsSession();
-    const rpc = await run.answered(run.call('ask', { questions: [{ question: 'Q?', modality: 'text' }] }));
-    expect(rpc.result).toEqual({ content: [{ type: 'text', text: ASK_NOT_YET_SERVED }], isError: true });
-    expect(run.maws()).toEqual([]);
+    const id = run.call('ask', { title: 'Setup', questions: QUESTIONS }, 'toolu_ask');
+    await until(() => run.session.asks().length === 1, 'the pending ask');
+    expect(run.session.asks()).toEqual([{ askId: 'toolu_ask', toolUseId: 'toolu_ask', requestId: id, blocking: true, title: 'Setup', context: null, questions: HELD, openedAt: expect.any(String) }]);
+    expect(run.session.status().pendingRequests).toBe(1); // the call in flight, counted once
+    expect(run.answerOf(id)).toBeUndefined();
+    expect(run.maws()).toMatchObject([{ kind: 'maws.ask.opened', askId: 'toolu_ask', toolUseId: 'toolu_ask', requestId: id, blocking: true, title: 'Setup', context: null, questions: HELD }]);
+
+    expect(await run.session.answerAsk('nope', ANSWERS)).toBe('not_pending');
+    expect(await run.session.answerAsk('toolu_ask', ANSWERS)).toBe('delivered');
+    const rpc = await run.answered(id);
+    expect(rpc).toEqual({ jsonrpc: '2.0', id: expect.any(Number), result: { content: [{ type: 'text', text: JSON.stringify({ status: 'answered', askId: 'toolu_ask', answers: ANSWERS }, null, 2) }] } });
+    expect(await run.session.answerAsk('toolu_ask', ANSWERS)).toBe('not_pending'); // answered once
+    expect(run.session.asks()).toEqual([]);
+    await until(() => run.session.status().pendingRequests === 0, 'the call settled');
+    await until(() => run.maws().length === 2, 'the answered event');
+    expect(run.maws()[1]).toMatchObject({ kind: 'maws.ask.answered', askId: 'toolu_ask', toolUseId: 'toolu_ask', answers: ANSWERS, delivery: 'result' });
+    expect(run.transport.writes.filter(isAnswerTo(id))).toHaveLength(1); // the call's own settling wrote nothing more
     run.transport.exit(0);
     await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  it('an async ask answers {status: asked} at once; its answers go as a next steer, then maws_ask_answered', async () => {
+    const run = await mawsSession();
+    const id = run.call('ask', { blocking: false, questions: [QUESTIONS[0]] }, 'toolu_async');
+    const ack = await run.answered(id);
+    expect(JSON.parse(ack.result!.content![0]!.text)).toEqual({ status: 'asked', askId: 'toolu_async' });
+    expect(run.session.asks()).toMatchObject([{ askId: 'toolu_async', blocking: false }]);
+    await until(() => run.session.status().pendingRequests === 1, 'the async ask counted');
+    const answers = [ANSWERS[0]!];
+    expect(await run.session.answerAsk('toolu_async', answers)).toBe('delivered');
+    const steer = run.transport.writes.find((w) => w.type === 'user') as { message: { content: string }; priority: string; uuid: string };
+    expect(steer.priority).toBe('next');
+    expect(steer.message.content).toBe(askSteerText('toolu_async', [HELD[0]!] as never, answers));
+    const rows = run.journal.rows;
+    const steerRow = rows.find((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user')!;
+    const [meta] = metaOf(rows, 'maws_ask_answered');
+    expect(meta!.frame).toEqual({ event: 'maws_ask_answered', askId: 'toolu_async', toolUseId: 'toolu_async', answers });
+    expect(meta!.seq).toBeGreaterThan(steerRow.seq); // journaled once the steer's write settled
+    expect(run.session.asks()).toEqual([]);
+    expect(run.session.status().pendingRequests).toBe(0);
+    expect(run.maws().map((e) => e.kind)).toEqual(['maws.ask.opened', 'maws.ask.answered']);
+    expect(run.maws()[1]).toMatchObject({ askId: 'toolu_async', answers, delivery: 'steer' });
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  it('refuses answers that do not fit the questions before any claim, writing nothing', async () => {
+    const run = await mawsSession();
+    run.call('ask', { questions: QUESTIONS }, 'toolu_bad');
+    await until(() => run.session.asks().length === 1, 'the pending ask');
+    await expect(run.session.answerAsk('toolu_bad', ANSWERS.slice(1))).rejects.toThrow(AskAnswerMismatch);
+    await expect(run.session.answerAsk('toolu_bad', ANSWERS.slice(1))).rejects.toThrow('ask toolu_bad: no answer for question q1');
+    expect(run.transport.writes.filter((w) => w.type === 'control_response')).toEqual([]);
+    expect(await run.session.answerAsk('toolu_bad', ANSWERS)).toBe('delivered'); // still pending, still answerable
+    run.transport.exit(0);
+    await run.session.exited;
+  });
+
+  it('a second submit while the first is being written is not_pending', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let holding: RequestId | null = null;
+    const run = await mawsSession({ holdWrite: (frame) => (holding !== null && isAnswerTo(holding)(frame) ? held : null) });
+    holding = run.call('ask', { questions: QUESTIONS }, 'toolu_twice');
+    await until(() => run.session.asks().length === 1, 'the pending ask');
+    const first = run.session.answerAsk('toolu_twice', ANSWERS);
+    expect(await run.session.answerAsk('toolu_twice', ANSWERS)).toBe('not_pending');
+    expect(run.session.asks()).toHaveLength(1); // listed while being answered
+    release();
+    expect(await first).toBe('delivered');
+    run.transport.exit(0);
+    await run.session.exited;
+  });
+
+  it.each([true, false])('a refused write (blocking %s) is write_failed with the ask still listed and no answered row; a retry delivers', async (blocking) => {
+    let failing = true;
+    let askRequest: RequestId | null = null;
+    const isAnswerWrite = (frame: StdinFrame) => (blocking ? askRequest !== null && isAnswerTo(askRequest)(frame) : frame.type === 'user');
+    const run = await mawsSession({ failWrite: (frame) => failing && isAnswerWrite(frame) });
+    askRequest = run.call('ask', { blocking, questions: QUESTIONS }, 'toolu_retry');
+    await until(() => run.session.asks().length === 1, 'the pending ask');
+    expect(await run.session.answerAsk('toolu_retry', ANSWERS)).toBe('write_failed');
+    expect(run.session.asks()).toMatchObject([{ askId: 'toolu_retry' }]);
+    expect(metaOf(run.journal.rows, 'maws_ask_answered')).toEqual([]);
+    expect(run.maws().map((e) => e.kind)).toEqual(['maws.ask.opened']);
+    failing = false;
+    expect(await run.session.answerAsk('toolu_retry', ANSWERS)).toBe('delivered');
+    await until(() => run.maws().length === 2, 'the answered event');
+    expect(run.maws()[1]).toMatchObject({ kind: 'maws.ask.answered', delivery: blocking ? 'result' : 'steer' });
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  it('an exit during an answer is write_failed, then every pending ask is cancelled before the exit row', async () => {
+    let holding: RequestId | null = null;
+    let reached = false;
+    const run = await mawsSession({ holdWrite: (frame) => (holding !== null && isAnswerTo(holding)(frame) ? ((reached = true), new Promise<void>(() => {})) : null) });
+    holding = run.call('ask', { questions: QUESTIONS }, 'toolu_exit');
+    run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_later');
+    await until(() => run.session.asks().length === 2, 'both asks');
+    const answering = run.session.answerAsk('toolu_exit', ANSWERS);
+    await until(() => reached, 'the answer on its way to the pipe');
+    run.transport.exit(1);
+    await run.session.exited;
+    expect(await answering).toBe('write_failed');
+    expect(run.session.asks()).toEqual([]);
+    const rows = run.journal.rows;
+    const cancelled = metaOf(rows, 'maws_ask_cancelled');
+    expect(cancelled.map((r) => r.frame)).toEqual([
+      { event: 'maws_ask_cancelled', askId: 'toolu_exit', toolUseId: 'toolu_exit', reason: 'exit' },
+      { event: 'maws_ask_cancelled', askId: 'toolu_later', toolUseId: 'toolu_later', reason: 'exit' },
+    ]);
+    const exitRow = metaOf(rows, 'exit')[0]!;
+    expect(cancelled.every((r) => r.seq < exitRow.seq)).toBe(true);
+    expect(run.maws().filter((e) => e.kind === 'maws.ask.cancelled')).toMatchObject([{ askId: 'toolu_exit', reason: 'exit' }, { askId: 'toolu_later', reason: 'exit' }]);
+    expect(run.answerOf(holding)).toBeUndefined();
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  it('an ask the engine withdrew is cancelled (withdrawn) and answered with nothing', async () => {
+    const run = await mawsSession();
+    const id = run.call('ask', { questions: QUESTIONS }, 'toolu_gone');
+    await until(() => run.session.asks().length === 1, 'the pending ask');
+    run.transport.push({ type: 'control_cancel_request', request_id: id });
+    await until(() => run.session.asks().length === 0, 'the withdrawal');
+    expect(await run.session.answerAsk('toolu_gone', ANSWERS)).toBe('not_pending');
+    expect(metaOf(run.journal.rows, 'maws_ask_cancelled').map((r) => r.frame)).toEqual([{ event: 'maws_ask_cancelled', askId: 'toolu_gone', toolUseId: 'toolu_gone', reason: 'withdrawn' }]);
+    await until(() => run.maws().length === 2, 'the cancelled event');
+    expect(run.maws()[1]).toMatchObject({ kind: 'maws.ask.cancelled', askId: 'toolu_gone', reason: 'withdrawn' });
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.answerOf(id)).toBeUndefined();
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  it('a refused ask call answers an error, holds nothing and yields no maws event; without _meta the askId is the request id', async () => {
+    const run = await mawsSession();
+    const refused = await run.answered(run.call('ask', { questions: [{ question: 'Q?', modality: 'choice' }] }));
+    expect(refused.result!.isError).toBe(true);
+    expect(refused.result!.content![0]!.text).toMatch(/^ask: invalid arguments: /);
+    expect(run.session.asks()).toEqual([]);
+    expect(run.maws()).toEqual([]);
+    const bare = run.mcp({ id: 99, method: 'tools/call', params: { name: 'ask', arguments: { blocking: false, questions: [QUESTIONS[1]] } } });
+    expect(JSON.parse((await run.answered(bare)).result!.content![0]!.text)).toEqual({ status: 'asked', askId: bare });
+    expect(run.maws()).toMatchObject([{ kind: 'maws.ask.opened', askId: bare, toolUseId: null }]);
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
   });
 });
 

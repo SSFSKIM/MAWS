@@ -19,6 +19,39 @@ export const PendingAskSchema = z.strictObject({
 });
 export type PendingAsk = z.infer<typeof PendingAskSchema>;
 
+// The questions as an ask holds them: each with its id, `q<n>` by position where the model gave none, so the host's
+// table, the `maws.ask.opened` event and the answers all name a question the same way.
+export function withQuestionIds(questions: readonly AskQuestion[]): AskQuestion[] {
+  return questions.map((question, index) => ({ ...question, id: askQuestionId(question, index) }));
+}
+
+// Why `answers` cannot answer an ask holding `questions` (ids filled), or null when they can: one answer per question;
+// a skipped or delegated answer carries no value; an answered one carries the value its modality names (a string for
+// text and repository, a list for choice, file and folder; at most one label for a single-select choice); `otherText`
+// only on a choice, `name` only on a repository.
+export function askAnswersProblem(questions: readonly AskQuestion[], answers: readonly AskAnswer[]): string | null {
+  const byId = new Map(questions.map((question, index) => [askQuestionId(question, index), question]));
+  const seen = new Set<string>();
+  for (const answer of answers) {
+    const question = byId.get(answer.id);
+    if (question === undefined) return `no question ${answer.id} in this ask`;
+    if (seen.has(answer.id)) return `question ${answer.id} is answered twice`;
+    seen.add(answer.id);
+    if (answer.otherText !== undefined && question.modality !== 'choice') return `question ${answer.id} carries otherText, which only a choice answer has`;
+    if (answer.name !== undefined && question.modality !== 'repository') return `question ${answer.id} carries name, which only a repository answer has`;
+    if (answer.status !== 'answered') {
+      if (answer.value !== undefined || answer.otherText !== undefined || answer.name !== undefined) return `question ${answer.id} is ${answer.status} and carries a value`;
+      continue;
+    }
+    if (answer.value === undefined) return `question ${answer.id} is answered with no value`;
+    const wantsString = question.modality === 'text' || question.modality === 'repository';
+    if (wantsString !== (typeof answer.value === 'string')) return `question ${answer.id} (${question.modality}) needs a ${wantsString ? 'string' : 'list'} value`;
+    if (question.modality === 'choice' && question.multi !== true && answer.value.length > 1) return `question ${answer.id} is single-select and has ${answer.value.length} choices`;
+  }
+  for (const id of byId.keys()) if (!seen.has(id)) return `no answer for question ${id}`;
+  return null;
+}
+
 const STEER_TAG = /^\[MAWS ask ([^\]\s]+)\] /;
 const BLOCK_OPEN = '\n```json\n';
 const BLOCK_CLOSE = '\n```';
