@@ -30,3 +30,25 @@ Screenshots written by e2e/code-editor.spec.ts's last case, the viewer's box at 
   docs/doperpowers/evidence/p1-e5/shots/e5-conflict-light.png  e5-conflict-dark.png
 
 The full unit suite (/tmp/maws-review/with-slot.sh pnpm -C $W test --maxWorkers=4) is the controller's, on the final head.
+
+== Final-head gates (the E5 executor), 2026-10-06, head b1d468e7 (E5 M4 fix: the own-save barrier counts completed loads), through /tmp/maws-review/waitload20.sh && with-slot.sh, one-minute load 8 to 11 ==
+
+pnpm -C $W typecheck
+  exit 0 (tsc over tsconfig.node.json, tsconfig.web.json, tsconfig.e2e.json: no output)
+
+pnpm -C $W lint
+  exit 0 (eslint .: no output)
+
+pnpm -C $W test --maxWorkers=4
+  Test Files  1 failed | 457 passed | 1 skipped (459)
+       Tests  1 failed | 6028 passed | 1 skipped (6030)
+  the one failure: src/main/sessions/pause-take-over.pty.test.ts > clears an unfinished line at middle in /bin/zsh emacs mode
+  (a real zsh pty, waitMs 3000; untouched by E5; green in the interim run at b4bc9c70). Retried once alone, the timing rule:
+pnpm -C $W exec vitest run src/main/sessions/pause-take-over.pty.test.ts
+  Test Files  1 passed (1)
+       Tests  6 passed (6)
+
+(interim run at b4bc9c70, source 03cfe1ba, same route: typecheck exit 0, lint exit 0, test 458 passed | 1 skipped files, 6025 passed | 1 skipped tests)
+
+pnpm -C $W e2e:code   (head b1d468e7, one-minute load 12, through waitload20.sh && with-slot.sh)
+  33 passed (1.2m)   [code-tools.spec.ts 25 + code-editor.spec.ts 8; exit 0; log /tmp/maws-review/e5-e2e.log]
