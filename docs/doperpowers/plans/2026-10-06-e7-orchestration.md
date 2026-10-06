@@ -20,7 +20,7 @@ To see it working: `pnpm dev`, open a live session that ran a Workflow, click th
 - [x] (2026-10-06, f2f9e7fa..0e048d91 + fix 17aac2ed, reviewed clean on Opus) M4 — The topology tree and teammates (and the live suite `e2e/agent-tools-live.spec.ts` adapted to the compact card, the widget and the collapsed Done; unrun, it needs a live engine).
 - [x] (2026-10-06, 38b52ca9, reviewed clean on Opus; three minor polish items carried into M6) M5 — The Tasks panel, read-only (P-20; Decision Log 21): the checklist as X5 tool `tasks` with `open` and a task-id target.
 - [x] (2026-10-06, bca2e1b9 + fix 3c99d0d0, reviewed clean on Opus; with the M5 follow-ups a844f8fb, 49554f06) M6 — Scheduled loops.
-- [ ] M7 — Harness, e2e, gates, evidence, whole-branch review, hand-back.
+- [x] (2026-10-06, merge b67219bb, cad6cc4e..056c61fe, evidence 87882400; gates green on 056c61fe; whole-branch reviewer-high on Opus "correct" with one P3, a record, folded into Decision Log 25) M7 — Harness, e2e, gates, evidence, whole-branch review, hand-back.
 
 ## Terms
 
@@ -428,7 +428,7 @@ Commits: one per task, fresh, staged by path, message in the repository's regist
 | 22 | (2026-10-06, M0) The envelope parser accepts three texts: the idle form (header, envelope, trailer), the bare envelope (live mid-turn, and the `queued_command` attachment's `prompt` on disk), and the disk `rendered` form inside `<system-reminder>`. `midTurn` is true when the header is absent or says `while you were working`. `peerEventsOf(text, messageUuid, origin?)` takes the frame's or record's `origin` object as an optional third argument and fills `hopChain` from `origin.hopChain` (the text never carries it) and `from`/`fromName`/`fromMode` from it when the text lacks them; `replyable` is true unless a suffix says otherwise (no such suffix was observed). The backfill admits the idle `isMeta: true` peer `user` record (it carries `origin.kind === 'peer'`), so any `isMeta` filter before `userEvents` must let it through. | M0's findings: the mid-turn wire frame has no header or trailer, and `hop-chain` is only in `origin`; the X1 payload's fields are filled from the richest source both sites already hold. |
 | 23 | (2026-10-06, M0; refines 9) The fire rule: a session-only job carries no last-fire fact (a live fire is an `engine` turn with an unknown uuid and no prompt; the disk record has no job id); a one-shot is dropped once its next match is before now (fired or missed alike, as the engine deletes it either way); a durable job's `lastFiredAt` comes from the file when present. The disk record's `turnOrigin:'scheduled'` is not read by E7. | No observable live fire frame; attributing disk fires by prompt text would mis-attribute two jobs with one prompt, and the row needs no more than the next run. |
 | 24 | (2026-10-06, M0) The listing parser accepts `name [ref]` rows in every section (a named agent lists under Subagents on 2.1.291); teammate grouping (Design §5) keys on the `Teammates` section only and ships tested on hand-built listings. | `e7-team`: the gate keeps `name` but the engine lists the agent as a subagent. |
-| 25 | (2026-10-06, M1) The backfill gives a peer `user` record its own turn (`turn.started {userMessageUuid: null, origin: 'peer'}` before the synthetic `user.message`), mirroring the live engine-opened peer turn; `startsTurn`/`isHumanPrompt` are unchanged; peer `queued_command` attachments are admitted on any lane and their companion is parsed from the record's `rendered` text first, then `prompt`; the event's `replyable` also requires a non-empty `from`. | Row parity for G3 and §8: without it a disk peer message and its answer merge into the previous human turn. The smallest host change that gives parity; it stays inside the emission site (X13). |
+| 25 | (2026-10-06, M1) The backfill gives a peer `user` record its own turn (`turn.started {userMessageUuid: null, origin: 'peer'}` before the synthetic `user.message`), mirroring the live engine-opened peer turn; `startsTurn`/`isHumanPrompt` are unchanged; peer `queued_command` attachments are admitted on any lane and their companion is parsed from the record's `rendered` text first, then `prompt`; the event's `replyable` also requires a non-empty `from`. Amended 2026-10-06 (M1 review fix 45179c1c, recorded at the whole-branch review): the disk follower's unended-turn rule (`chain-follower.ts` `unendedTurnExit`) reads a per-record `opensTurn` fact exported by `backfill.ts` (a turn opener or a non-marker peer `user` record) where it read `startsTurn`, so a peer turn after a `turn_duration`-closed turn in a transcript nobody writes still gets its `process.exited`; `isHumanPrompt`, `terminalRewind` and the hidden-history rule keep `startsTurn`. This per-record skeleton fact sits beside the emission site, carries no host state, and is the one X13 reading beyond the two emissions. | Row parity for G3 and §8: without it a disk peer message and its answer merge into the previous human turn. The smallest host change that gives parity; it stays inside the emission site (X13). |
 | 26 | (2026-10-06, M1) `TurnActivity.crons` and `.listings` are computed by `transcript/model/orchestration.ts` from the turn's top-level `tool.use`/`tool.result` events and spread into the activity literal (`activity.ts`), not carried on `TurnWork`. Shapes: `TurnCron { toolUseId; at; call; result }` (a create's `recurring` defaults true and `durable` false as the engine's; an input the engine would refuse is not recorded; an unknown success text falls back to the structured `{id, humanSchedule, durable}`); `Listing { self; sections; notes }` (`self` the `name [ref]` token; `raw` stays on M2's row); `TurnListing.parsed` null only before the result; `parseCronResult` returns `{ id, humanSchedule, recurring, durable } | null`. | Presentation-independent, so M2's reclassification of `ListAgents` cannot drop them; the activity's memo covers them. |
 | 27 | (2026-10-06, M1) `nextCronMatch` mirrors the engine's own stepping code (`setHours(h + 1, 0, 0, 0)` and kin), not only SPEC 22's prose; the Workflow ref's rewrite also moves its glyph and status entry to the task id, as `task.started`'s rename does live. `peer-envelope.ts` also exports `handbackReport(body)` and `messageText(content)`. | DST behaviour equals the engine's; a disk-only and a live ref draw the same; one text rule for both sites and M2's report row. |
 | 28 | (2026-10-06, M1) Until M2 lands, a live hand-back's `subagent.message` draws through the existing derive case as a work row with the raw frame text; M2 replaces it with `Report from <title>` and the expander. | Interim only; no snapshot pins it. |
@@ -453,4 +453,54 @@ Commits: one per task, fresh, staged by path, message in the repository's regist
 
 ## Outcomes & Retrospective
 
-Pending — written by the executor at landing.
+**Outcome (2026-10-06, branch `worktree-agent-a71e0c1552b80bfc3`, code head 056c61fe, master db4870dc merged in).** The owner now supervises orchestration in the right panel, without the terminal:
+- A Workflow run opens from Background work's compact card, or from the transcript's workflow ref, into the widget. Phases sit on the left with `done/total`; the selected phase's agents sit on the right with model, state, time and tokens. A click on an agent opens its drill-in. `Stop workflow` works while the run runs here. The widget draws the same from the live wire and from the run's files (G1).
+- The Subagents resting state is a tree. Running roots come first with their subtrees, a running parent's finished children fold under `Done · N`, finished roots sit under a collapsed Done, and orphans are marked as before (G2).
+- Cross-session traffic draws as rows, live and from the JSONL alike (G3):
+  - a `ListAgents` result is a sectioned list with a `Message` action per row;
+  - a `SendMessage` to another session reads `Sent to <recipient>` with `sent` or `failed` from the engine's structured `success`;
+  - a message from another session shows its sender, a preview and a **Reply** composer. The reply is a `'next'` steer whose observables walk asked → forwarded → sent or failed, matched only on the owner's own text. The row stays visible after its turn folds;
+  - in-process hand-backs read `Report from <title>`;
+  - active teammates the newest listing names group under `Team · led by this session`.
+- The Tasks panel is the read-only checklist as X5 tool `tasks`. `show_pane 'tasks'` opens it, with a task id as its target (G4 as amended by P-20).
+- Scheduled jobs are listed in Background work's `Scheduled` section, each with its next run from MAWS's cron match, its expiry and `Open creating turn` (G5):
+  - session-only jobs come from the transcript's `CronCreate`/`CronDelete` pairs, live, disk-only and across a resume;
+  - durable jobs come from the project's `scheduled_tasks.json`, read and watched, never written.
+- The host changed only at its two emission sites: `peer.message` and `subagent.message` are emitted live and from `backfill.ts` through one shared parser. The disk path also gives a peer record its own turn, and the follower's unended-turn rule sees it (Decision Log 25).
+
+**Gates on 056c61fe** (`docs/doperpowers/evidence/p1-e7/gates.txt`):
+- typecheck and lint clean;
+- 7,543 unit tests, with the conformance suite admitting the five `e7-*` journals;
+- `e2e:agents` 23, including the E7 block's five cases;
+- `e2e:transcript` 31;
+- `e2e:panel` 23;
+- probe fixtures 159.
+
+Screenshots in both themes are `g1`..`g5` beside it. M0's live probes cost US$0.56. The owner-file key set was identical across every launch (`owner-file-check.txt`).
+
+**Reviews.** Every milestone was approved by `doperpowers:task-reviewer` on Opus within two rounds:
+- M0 approved first time;
+- M1 had one Important (the disk `subagent.message` proof);
+- M2 approved, with six Minors fixed;
+- M3 approved, with five Minors fixed;
+- M4 had one Important (a live-suite click under the collapsed Done);
+- M5 approved, with its polish carried into M6;
+- M6 had one Important (a false error when a session's directory is gone).
+
+The whole branch had one round of `doperpowers:reviewer-high` on Opus: "correct", one P3 (a record, folded into Decision Log 25). Eight tracker rows carry the deferred Minors.
+
+**Left unverified live:**
+- teammate grouping: the engine lists a named agent as a subagent on 2.1.291 (Decision Log 7, 24);
+- the listing's `Message` wording;
+- the live-only suite `e2e/agent-tools-live.spec.ts`, adapted to the widget and the collapsed Done but not run;
+- a peer `user` record that is not `isMeta`, as an interactive terminal session might write it.
+
+**Retrospective:**
+- **M0 first paid for itself three times over.** The mid-turn peer message is a bare envelope on the wire. A cron fire puts no user frame on the wire. A named agent is no teammate. Any of these, guessed, would have shipped wrong parsers. The probe also proved the reply wording on the first try.
+- **The disk path is where parity breaks.** The first draft's review moved the emission to `backfill.ts`. M1 then found the `isMeta` record needed its own turn, and the M1 review found the follower needed to see it. Each layer of the disk path has its own notion of a turn. A child that adds a turn-opening record must touch all of them, so a single exported predicate is worth having early.
+- **Owner rulings mid-run were cheap because the document was the one source.** P-20 struck M5 down to a registration and a target: one Decision Log line, void marks on the dropped items, and no executor ever built the edit machine.
+- **Fixes resumed on the writing executor were fast**, two to seven minutes each. Re-reviews by the same reviewer stayed focused on the fix range.
+- **Costs of the shared machine:**
+  - two e2e failures came from tests nobody had run since an earlier milestone (`e2e:panel` after M5, the live suite after M3). A milestone that changes what a sibling suite reads should run that suite;
+  - the harness idled this executor four times while children ran.
+
