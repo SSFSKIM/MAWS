@@ -142,6 +142,13 @@ describe('ipc schema validates both directions', () => {
     });
     // end C4
 
+    // E6 start: git.diff's untracked scope (the service requires its path and refuses a base)
+    it('accepts the E6 untracked scope on git.diff', () => {
+      expect(validateCommandInput('git.diff', { directory: '/r', scope: 'untracked', path: 'new.txt' }).ok).toBe(true);
+      expect(validateCommandInput('git.diff', { directory: '/r', scope: 'untracked', path: 'new.txt', context: 0 }).ok).toBe(true);
+    });
+    // E6 end
+
     // C10 start: the worktree service's git.worktree.* entries (C10 execution document, Interfaces "Worktrees"), owner main.
     it('carries the C10 git.worktree.* entries, every command owned by main, with the cleanup ladder’s refusals', () => {
       const c10 = Object.keys(git.commands).filter((name) => name.startsWith('git.worktree.'));
