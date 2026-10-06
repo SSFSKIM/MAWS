@@ -377,6 +377,7 @@ Written by the executor as it goes: every heavy command with its log path and re
 
 - 2026-10-06 pre-flight: parent pin recomputed at dispatch (`hash-object` of `docs/doperpowers/plans/2026-10-05-p1-extension.md`) = `52839004d02d3115d136926c50d8a485475622fc` at master `86f2a4d1` (this document cites `e955d9dc…`; the delta is record-keeping plus A-35, which accepts Decision Log 1 to 30 as written and records the `clipboard-sanitized-write` carve-out under A-31 and browser memory beside the budget; nothing binding moved). Master's `migrateSettings` is at 9 (E10 in flight on another branch), so Task 1.3's settings half moves to Task 3.5 (Constraints X15). The worktree's `node_modules` is a symlink to the main checkout's, untracked and never staged (`.gitignore`'s `node_modules/` does not match a symlink, so `git add -A` would stage it).
 - 2026-10-06 16:26 PDT M0: readings (a) no `CGSSessionScreenIsLocked` key, (b) "Display is turned on" at 16:01:08, (c) `UserIsActive` 1; `visibility5.mjs` then `visibility2.mjs` with the shared Electron binary, both exit 0; verdict visible; results copied to `results/pass2/*-onscreen.json`, originals restored; no probe process left; `/tmp/maws-e4-0/` and `/tmp/maws-e4a/` deleted.
+- 2026-10-06 16:34 PDT M0 review (task-reviewer, Opus, one round): one Important (visibility2's last hidden reading explained away without evidence), one Minor (outside window moves unrecorded). Fixed by the controller: the readings re-taken (all true), `pass2/visibility6.mjs` run (every step visible), the findings file rewritten for both points; no process left, `/tmp/maws-e4a/` deleted.
 
 ## Decision Log
 
@@ -428,7 +429,7 @@ Written by the executor as it goes: every heavy command with its log path and re
 
 ## Surprises & Discoveries
 
-Written by the executor.
+- 2026-10-06, M0: on screen, `visibility2.mjs`'s last step (a second, focused window opened partly over the first) read the child view hidden. M0's review asked whether a second app window hides a child view (a second MAWS window, the capture window, a detached DevTools window from Inspect). A discriminating supplement (`pass2/visibility6.mjs`, `results/pass2/visibility6-onscreen.json`) read the shell and the child under a second window focused or inactive, clear of or partly over the child: visible in every step. The one hidden reading did not reproduce; the owner was moving windows during the run (visibility5's window moved and gained focus from outside the script). The verdict stands.
 
 ## Outcomes & Retrospective
 
