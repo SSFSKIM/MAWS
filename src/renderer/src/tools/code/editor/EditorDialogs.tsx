@@ -74,14 +74,12 @@ const dismiss = () => useEditorDialog.setState({ open: null });
 // Any X10 anchor since E3 widened the seam; the fields a kind does not carry are left out.
 function AnchorPlaceholder({ anchor }: { anchor: Anchor }) {
   const line = anchor.line === undefined ? undefined : String(anchor.line);
-  const fields = (
-    [
-      ['locator', anchor.locator],
-      ['label', anchor.label],
-      ['path', anchor.path],
-      ['line', line],
-    ] as const
-  ).filter((field): field is readonly [string, string] => field[1] !== undefined);
+  const fields: [string, string][] = [
+    ['locator', anchor.locator],
+    ['label', anchor.label],
+  ];
+  if (anchor.path !== undefined) fields.push(['path', anchor.path]);
+  if (line !== undefined) fields.push(['line', line]);
   return (
     <Sheet
       title={EDITOR_COPY.anchorTitle(anchor.label)}

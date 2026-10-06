@@ -169,6 +169,7 @@ function toRecord(row: SessionRow): SessionRecord {
       effective: row.pm_effective as SessionRecord['permissionMode']['effective'],
       refusal: row.pm_refusal as SessionRecord['permissionMode']['refusal'],
     },
+    lineage: null, // E3 (X11): index migration 4 (E3 M2) brings the column and its read
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

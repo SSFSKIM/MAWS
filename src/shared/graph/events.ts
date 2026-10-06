@@ -20,6 +20,10 @@ import { PaneRosterSchema, PromptFillModeSchema, SURFACE_ASKS } from '../engine/
 import { PaneSchema } from '../maws/panes';
 import { AskAnswerSchema, AskQuestionSchema, DeliveredFileSchema, ShowPaneOpenedSchema } from '../maws/tools';
 // E1 end
+// E3 start
+import { AnchorSchema } from '../anchor/anchor';
+import { AppSessionIdSchema } from './ids';
+// E3 end
 
 // An API content block, unknown keys kept.
 export const ContentBlockSchema = z.looseObject({ type: z.string() });
@@ -97,6 +101,9 @@ export const EVENT_KINDS = [
   // E1 start: the maws tool server (P1 X9): an ask's life, a delivered file, a pane shown for the model
   'maws.ask.opened', 'maws.ask.answered', 'maws.ask.cancelled', 'maws.delivery.file', 'maws.pane.shown',
   // E1 end
+  // E3 start: side threads (P1 X10/X11): a thread opened from this session, and its latest turn's summary
+  'side.thread.opened', 'side.thread.summarised',
+  // E3 end
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -261,6 +268,12 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('maws.delivery.file', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, deliverables: z.array(DeliveredFileSchema), caption: nullableString(), urgency: z.enum(['normal', 'high']) }),
   event('maws.pane.shown', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, pane: PaneSchema, target: nullableString(), opened: ShowPaneOpenedSchema.nullable(), error: nullableString() }),
   // E1 end
+  // E3 start (E3 execution document, Interfaces "X1 events", Design §5): app-synthesised by main into the parent's
+  // stream (`seq: null`; ids `<parent>:side-thread:<child>:opened` and `…:summarised:<turns>`), re-synthesised from the
+  // index's `side_threads` row for a snapshot. `turns` counts the thread's ended turns; one row per thread, updated.
+  event('side.thread.opened', { childAppSessionId: AppSessionIdSchema, childEngineSessionId: SessionIdSchema.nullable(), anchor: AnchorSchema.nullable(), openedBy: z.enum(['comment', 'btw']) }),
+  event('side.thread.summarised', { childAppSessionId: AppSessionIdSchema, text: nullableString(), isError: z.boolean(), turns: z.number().int().positive() }),
+  // E3 end
 ]);
 
 export type SessionEvent = z.infer<typeof SessionEventSchema>;

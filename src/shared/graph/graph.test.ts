@@ -59,6 +59,7 @@ const record = (): SessionRecord =>
     model: { requested: null, resolved: 'claude-sonnet-5' },
     effort: null,
     permissionMode: { requested: 'default', effective: 'default', refusal: null },
+    lineage: null, // E3 (X11)
     createdAt: '2026-09-28T10:00:00.000Z',
     updatedAt: '2026-09-28T10:00:00.000Z',
   });
@@ -80,7 +81,7 @@ describe('graph schemas accept and reject', () => {
 
     it('lists every event kind once and the union covers each', () => {
       expect(new Set(EVENT_KINDS).size).toBe(EVENT_KINDS.length);
-      expect(EVENT_KINDS).toHaveLength(63); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds
+      expect(EVENT_KINDS).toHaveLength(65); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds
       const covered = SessionEventSchema.options.map((option) => option.shape.kind.value).sort();
       expect(covered).toEqual([...EVENT_KINDS].sort());
     });
@@ -179,6 +180,10 @@ describe('graph schemas accept and reject', () => {
         'maws.delivery.file': { toolUseId: 'toolu_2', requestId: 'r', deliverables: [{ id: 'd1', path: '/r/hello.txt', name: 'hello.txt' }], caption: 'the greeting', urgency: 'normal' },
         'maws.pane.shown': { toolUseId: 'toolu_3', requestId: 'r', pane: 'terminal', target: null, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:1', title: 'Terminal' }, error: null },
         // E1 end
+        // E3 start
+        'side.thread.opened': { childAppSessionId: 'app-child', childEngineSessionId: null, anchor: { kind: 'file-line', locator: '/r/a.ts#L3', label: 'a.ts:3', path: '/r/a.ts', line: 3 }, openedBy: 'comment' },
+        'side.thread.summarised': { childAppSessionId: 'app-child', text: 'Done.', isError: false, turns: 1 },
+        // E3 end
       };
       expect(Object.keys(samples).sort()).toEqual([...EVENT_KINDS].sort());
       for (const [kind, payload] of Object.entries(samples)) {
@@ -219,6 +224,20 @@ describe('graph schemas accept and reject', () => {
     it('rejects a refusal that did not happen and accepts the honoured request', () => {
       expect(SessionRecordSchema.safeParse({ ...record(), permissionMode: { requested: 'auto', effective: 'auto', refusal: 'auto_mode_model' } }).success).toBe(false);
       expect(SessionRecordSchema.safeParse({ ...record(), permissionMode: { requested: 'auto', effective: 'auto', refusal: null } }).success).toBe(true);
+    });
+
+    // E3 (X11): a side thread's lineage carries its anchor; a fork's carries none; a root's is null and never absent
+    it('carries lineage: null for a root, a side thread with its anchor, a fork without one', () => {
+      const anchor = { kind: 'file-line', locator: '/r/a.ts#L3', label: 'a.ts:3', path: '/r/a.ts', line: 3 };
+      const sideThread = { kind: 'side-thread', parentAppSessionId: 'app-parent', parentEngineSessionId: 's0', anchor, openedBy: 'comment' };
+      expect(SessionRecordSchema.parse({ ...record(), lineage: sideThread }).lineage).toEqual(sideThread);
+      expect(SessionRecordSchema.safeParse({ ...record(), lineage: { kind: 'fork', parentAppSessionId: 'app-parent', parentEngineSessionId: null, openedBy: 'fork' } }).success).toBe(true);
+      const withoutLineage: Record<string, unknown> = { ...record() };
+      delete withoutLineage.lineage;
+      expect(SessionRecordSchema.safeParse(withoutLineage).success).toBe(false);
+      expect(SessionRecordSchema.safeParse({ ...record(), lineage: { ...sideThread, kind: 'branch' } }).success).toBe(false);
+      expect(SessionRecordSchema.safeParse({ ...record(), lineage: { ...sideThread, openedBy: 'menu' } }).success).toBe(false);
+      expect(SessionRecordSchema.safeParse({ ...record(), lineage: { ...sideThread, source: 'disk' } }).success).toBe(false); // lineage_source is index-only
     });
 
     it('rejects an unknown refusal code, an unknown mode and an unknown holder', () => {

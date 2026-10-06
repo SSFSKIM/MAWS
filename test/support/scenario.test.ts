@@ -12,7 +12,7 @@ const record = (appId: string, over: Record<string, unknown> = {}) => ({
   title: { text: appId, source: 'user', _synthetic: true }, pinned: false, archived: false, holder: { kind: 'self' },
   lastSeen: { messageUuid: null, at: null }, unread: false, engineVersion: '2.1.283', gateway: { routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'unknown' },
   model: { requested: null, resolved: 'claude-opus' }, effort: null, permissionMode: { requested: 'auto', effective: 'auto', refusal: null },
-  createdAt: '2026-09-28T09:00:00Z', updatedAt: '2026-09-28T09:00:00Z', _from: 'hand-written', ...over,
+  lineage: null, createdAt: '2026-09-28T09:00:00Z', updatedAt: '2026-09-28T09:00:00Z', _from: 'hand-written', ...over,
 });
 const turn = { origin: 'human', startedAt: '2026-09-28T09:59:00Z', userMessageUuids: [] };
 const file = (over: Record<string, unknown> = {}) => ({
