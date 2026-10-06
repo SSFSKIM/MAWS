@@ -1,0 +1,98 @@
+E2 M2 live recording (2026-10-06): the four maws artifact tools through MAWS's own engine host (LiveHost)
+
+==== The kept recording: the second run (the case exactly as committed at c38dbab2), green ====
+Same command, engine, relay, model, mode and prompt as the first run below. Scratch: config home
+/private/tmp/maws-e2-config-HwgNrm, userData /private/tmp/maws-e2-live-gzIZtI, repository /private/tmp/maws-e2-repo-5uEyLu;
+appSessionId live-8e969ceb, engine session 2269c353-97d9-4e4f-a868-5aab4cf2b0c4.
+Vitest: Test Files 1 passed (1), Tests 1 passed (1), 30.41 s. Every assertion of the case held, including the reply check.
+Fixture seqs (spikes/protocol-probe/fixtures/pass3/p1-maws-artifacts.jsonl, now 455 rows):
+  - can_use_tool allowed once: Write 154, mcp__maws__artifact_create 176, mcp__maws__artifact_screenshot 200, Edit 338,
+    mcp__maws__artifact_update 359, mcp__maws__artifact_list 381, mcp__maws__artifact_update 408. No Agent.
+  - tools/call: artifact_create {id dash, html_path dashboard.html, title Dashboard} 183; artifact_screenshot {id dash}
+    207 (answered with the green 64×64 PNG; the engine's tool_result at 210 is [image, text, text]); artifact_update
+    {id dash} 366; artifact_list {} 388; artifact_update {id nope} 415 (refused with the exact noArtifact text).
+  - 442 result success, num_turns 10, total_cost_usd 0.06810895; reply "green 2 artifact_update no artifact nope in".
+  - 454 exit code 0 (session.stop).
+  - The store: record 10edca26-3f45-406b-b141-781c4e54fe4b.json (kind artifact, artifactId dash, title Dashboard, path on
+    v2, two versions with toolUseId and sourcePath <repo>/dashboard.html); v1.html background-color red, v2.html blue.
+  - The PNG original persisted under the scratch home only
+    (projects/-private-tmp-maws-e2-repo-5uEyLu/2269c353-…/tool-results/mcp-maws-blob-1791291194857-hx5xy2.png).
+Exports copied: the journal → spikes/protocol-probe/fixtures/pass3/p1-maws-artifacts.jsonl (provenance costUsd 0.0681),
+the engine transcript → test/fixtures/transcripts/p1-maws-artifacts.jsonl (80 records); the rows snapshot
+test/snapshots/transcript/pass3/p1-maws-artifacts.rows.json regenerated from it.
+A-15: before 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8; after 25 keys, shasum
+42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; byte-equal lists); the case's own check identical.
+Processes: none of the run's remained; scratch roots removed after the copies.
+Spend: second run US$0.0681; first run US$0.0651; M2 total US$0.1332.
+
+==== The first run (superseded; its fixture was replaced by the second run's) ====
+Case: test/live/maws-artifacts.live.test.ts, run as
+  /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh env pnpm_config_verify_deps_before_run=false MAWS_LIVE=1 \
+    pnpm -C <worktree> exec vitest run --project live test/live/maws-artifacts.live.test.ts
+Engine: the installed Claude Code 2.1.291 (/Users/new/.local/share/claude/versions/2.1.291, `binary: null` as main configures a
+fresh install), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641 (GET /api/hello 200 before the run; the
+launcher's gateway environment: ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN=claudeusage-local-gateway, ENABLE_TOOL_SEARCH=true),
+Haiku, default permission mode, maxBudgetUsd 0.5.
+Scratch: config home /private/tmp/maws-e2-config-erPnfr (settings.json {}, .claude.json trusting the repo), userData
+/private/tmp/maws-e2-live-3b9KOk, repository /private/tmp/maws-e2-repo-3Pion0 (git, one commit). appSessionId live-8dec92b3,
+engine session ef1aa265-c848-4958-9622-6ce0337d2df0.
+
+The prompt (exact; the document's, steered as M0's was: every tool by its full mcp__maws__ name, "report what the picture
+shows; do not investigate", and the calls made "yourself, one after another, not through an agent"):
+  Write a self-contained HTML file named dashboard.html in the working directory whose body is one full-page div with an
+  inline red background and the text HELLO_E2, with no external resources. Register it with the mcp__maws__artifact_create
+  tool using id "dash" and title "Dashboard". Then call the mcp__maws__artifact_screenshot tool for id "dash" and note in
+  one word what colour fills the picture (report what the picture shows; do not investigate). Then rewrite dashboard.html
+  with a blue background and call the mcp__maws__artifact_update tool for id "dash". Then call the mcp__maws__artifact_list
+  tool. Then call mcp__maws__artifact_update with id "nope" and the same file and note the error text. Make every one of
+  these calls yourself, one after another, not through an agent. Reply with one line: the colour word, the number of
+  versions artifact_list reported, and the first six words of the error.
+
+What happened (seqs are the first recording's seqs (not kept), 373 rows)
+  - Permissions allowed once, in order: Write (150), mcp__maws__artifact_create (170), mcp__maws__artifact_screenshot (194),
+    Edit (256), mcp__maws__artifact_update (275), mcp__maws__artifact_list (297), mcp__maws__artifact_update (323). No
+    background Agent: the steer held.
+  - 177/178 artifact_create {id:"dash", html_path:"dashboard.html", title:"Dashboard"} → created v1, externalReferences 0.
+  - 201 artifact_screenshot {id:"dash"}: the host emitted maws.artifact.capture {deliverableId 4fcc7417-…, version 1,
+    width 1280, height 800}; the case answered maws.artifact.captured with the synthetic solid-green 64×64 PNG (132 bytes;
+    ok, width 64, height 64, consoleErrors []) → outcome delivered; 202 the host's answer [image/png, text {status
+    captured, title Dashboard, version 1, 64 × 64, bytes 132, consoleErrors []}]; 204 the engine's tool_result
+    [image, "[Image: source: <scratch home>/projects/…/tool-results/mcp-maws-blob-….png]", the result's JSON] (M0's order).
+  - 282/283 artifact_update {id:"dash", html_path:"dashboard.html"} → updated v2.
+  - 304/305 artifact_list {} → one artifact, versions 2.
+  - 330/331 artifact_update {id:"nope"} → isError "artifact_update: no artifact "nope" in this session; use artifact_create".
+  - X1: maws.delivery.artifact create dash v1 "Dashboard", then update dash v2, both deliverableId
+    4fcc7417-1bca-4309-b8a8-5a2281a7f221; nothing for the refused update.
+  - 360 result success, num_turns 9, total_cost_usd 0.0650544; the reply: "green 2 artifact_update no artifact nope in this".
+    The page Haiku wrote is red; the reply names green, the colour only the image block carried (Decision Log 26).
+  - The store: <userData>/deliverables/live-8dec92b3/4fcc7417-1bca-4309-b8a8-5a2281a7f221.json (kind artifact, artifactId
+    dash, title Dashboard, path on v2, versions [v1.html, v2.html] each with its toolUseId and sourcePath
+    /private/tmp/maws-e2-repo-3Pion0/dashboard.html); v1.html red, v2.html blue, v2.html byte-equal to the rewritten file.
+  - The engine persisted the PNG's original under the scratch home only
+    (projects/-private-tmp-maws-e2-repo-3Pion0/ef1aa265-…/tool-results/mcp-maws-blob-1791290540914-ld8e5j.png, 132 bytes);
+    nothing under ~/.claude/projects.
+  - session.stop: {exited: true, code: 0, signal: null}; journal exit meta code 0 (seq 372).
+
+The case's verdict: every assertion held except one too-literal check of the reply. The case expected the substring
+`no artifact "nope"`; Haiku, counting "the first six words", dropped the quotes ("no artifact nope"). The check now reads
+/no artifact "?nope"?/. The case stopped at that assertion, so the store assertions after it were checked by hand on the
+run's userData (above): all hold. The case was not re-run, to keep the spend to one recording.
+
+Exports (copied by hand after a look by eye; the exported journal carries E2's provenance: charter docs/charter.md, child
+E2, pin 7094958a1431369ef699ff9875cd7e9259a37695, document docs/doperpowers/plans/2026-10-05-p1-extension.md,
+executionDocument docs/doperpowers/plans/2026-10-06-e2-deliverables.md, engineVersion 2.1.291, model haiku, scenario
+p1-maws-artifacts, costUsd 0.0651):
+  spikes/protocol-probe/fixtures/pass3/p1-maws-artifacts.jsonl  ← <userData>/exports/p1-maws-artifacts.jsonl
+  test/fixtures/transcripts/p1-maws-artifacts.jsonl            ← <userData>/exports/p1-maws-artifacts-transcript.jsonl
+                                                                 (the engine's session JSONL, redacted)
+
+Spend (first run): US$0.0651 on Haiku.
+
+A-15 (the /tmp and /private/tmp project keys of ~/.claude.json, read only; the command in owner-file-check.txt):
+  before the run: 25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8
+  after the run:  25 keys, shasum 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical; byte-equal lists)
+  the case's own check (sorted key lists before and after): identical.
+
+Processes: the engine exited 0 on session.stop and the host shut down; no process of the run remained afterwards (the
+only claude process matching the version path was the owner's own bg-pty-host spare, started the day before). The
+scratch roots were removed after the exports were copied.

@@ -6,7 +6,8 @@
 // The menu is rebuilt on every `settings.changed` (overrides, the checked appearance) and every change of that set.
 // Items carry `id` (the action id; `tab.select:<n>` for the nine tab items; `edit.selectAll` for the Edit menu's own
 // Select All) so the smoke can click them by id.
-import { BrowserWindow, Menu, webContents, type MenuItemConstructorOptions } from 'electron';
+import { Menu, webContents, type MenuItemConstructorOptions } from 'electron';
+import { appWindows } from './windows'; // E2
 import type { Settings, ThemeSetting } from '@shared/ipc/schema';
 import { ACTIONS, ACTION_IDS, type ActionId, type ActionSpec, type KeymapOverrides } from '@shared/keymap/actions';
 import type { emit as emitEvent } from './ipc/events';
@@ -34,7 +35,7 @@ const group = (id: ActionId) => (id.startsWith('sidebar.') || id.startsWith('pan
 // role's ⌘A, which a page leaves to it when unhandled; xterm selects on that keydown already, so a second select is a no-op.
 // With no window key nothing is focused (an end-to-end run shows its window inactive), and the one window's page stands in.
 function selectAll(emit: Emit): void {
-  const pages = BrowserWindow.getAllWindows().map((win) => win.webContents);
+  const pages = appWindows().map((win) => win.webContents); // E2: the app's pages, never a capture window's
   const target = webContents.getFocusedWebContents() ?? pages[0];
   if (!target) return;
   target.selectAll();

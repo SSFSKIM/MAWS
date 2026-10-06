@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { parseAskSteer } from '@shared/maws/ask';
-import { AskResultSchema, TOOL_ERRORS } from '@shared/maws/tools';
+import { ArtifactCreateResultSchema, ArtifactListResultSchema, ArtifactScreenshotResultSchema, ArtifactUpdateResultSchema, AskResultSchema, TOOL_ERRORS } from '@shared/maws/tools';
 import { ClaimSessionResponseSchema, GetStatusResponseSchema, GetWorkspaceDiffResponseSchema, InitializeResponseSchema, UiRenderResponseSchema, RewindConversationResponseSchema, RewindFilesResponseSchema } from '@shared/wire/control';
 import { FIXTURE_PASSES, listJournals, loadJournal, type FixturePass } from '../../../test/support/fixtures';
 import { ownerMarkedText, sittingSeed } from '../../../test/support/r3-surface';
@@ -88,7 +88,11 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // E7 (P1, docs/doperpowers/plans/2026-10-06-e7-orchestration.md M0): two peer sessions messaging each other, CronCreate
     // with its fires and the resume, a named agent under the teams gate, on the installed 2.1.291
     const e7 = ['e7-cron', 'e7-cron-resume', 'e7-peer-a', 'e7-peer-b', 'e7-team'];
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7].sort());
+    // E2 start: M0's image-block probe (an SDK server's image content block on 2.1.291); M2's artifact tools recorded live
+    // through MAWS's own host
+    const e2 = ['p1-maws-artifacts', 'p1-sdk-mcp-image'];
+    // E2 end
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -628,6 +632,9 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       // session-maws.test.ts pins it over a scripted session)
       'maws.ask.opened', 'maws.ask.answered', 'maws.delivery.file', 'maws.pane.shown',
       'peer.message', // E7 M1: pass3/e7-peer-a and e7-peer-b (no pass journal carries an in-process agent's message: subagent.message is pinned over test/fixtures/engine/handback-pointer in normalizer.test.ts)
+      // E2 start: M2's pass3/p1-maws-artifacts (a create and an update)
+      'maws.delivery.artifact',
+      // E2 end
     ].sort());
     void kinds;
   });
@@ -805,6 +812,96 @@ describe('normaliser: the maws server traffic (E1, pass3/p1-sdk-mcp-roundtrip)',
     expect(events.filter((e) => mcp.some((r) => r.seq === e.seq))).toEqual([]);
   });
 });
+
+// E2 start: M0's probe (E2 execution document, M0; spikes/protocol-probe/findings-pass3-e2-deliverables.txt). The probe's
+// `red_square` is no X9 tool, so its call yields no `maws.*` event; the tool_result carrying an image block maps as any
+// tool result does.
+describe('normaliser: an SDK server image block (E2 M0, pass3/p1-sdk-mcp-image)', () => {
+  it('maps the image-carrying tool result with no unknown frame and no maws event', async () => {
+    const { events, rows } = await run('pass3', 'p1-sdk-mcp-image');
+    const mcp = rows.filter((r) => r.direction === 'in' && (r.frame as { request?: { subtype?: string } }).request?.subtype === 'mcp_message');
+    expect(mcp.length).toBeGreaterThan(2); // the handshake, the list and the call
+    expect(ofKind(events, 'frame.unknown')).toEqual([]);
+    expect(events.filter((e) => e.kind.startsWith('maws.'))).toEqual([]);
+    expect(events.filter((e) => mcp.some((r) => r.seq === e.seq))).toEqual([]);
+    // the result keeps the image block, the engine's "[Image: source: <saved original>]" text right after it, then the
+    // server's own text: a reader of a maws result's JSON must not assume it is the first or the only text block
+    const use = ofKind(events, 'tool.use').find((e) => e.toolName === 'mcp__maws__red_square')!;
+    const [result, ...more] = ofKind(events, 'tool.result').filter((e) => e.toolUseId === use.toolUseId);
+    expect(more).toEqual([]);
+    expect(result.isError).toBe(false);
+    const blocks = result.content as { type: string; text?: string; source?: { media_type?: string } }[];
+    expect(blocks.map((b) => b.type)).toEqual(['image', 'text', 'text']);
+    expect(blocks[0].source?.media_type).toBe('image/png');
+    expect(blocks[1].text).toMatch(/^\[Image: source: \/.*\/tool-results\/mcp-maws-blob-[^/]+\.png\]$/);
+    expect(blocks[2].text).toBe('the picture');
+  });
+});
+
+// M2's live recording (E2 execution document, M2; test/live/maws-artifacts.live.test.ts): the four artifact tools through
+// MAWS's own host on the installed engine, the capture answered with a green 64×64 square. The generic case above admits
+// it (no unknown frame, no request failure); these pin what the tool server's traffic yields.
+describe('normaliser: the artifact tools recorded live (E2 M2, pass3/p1-maws-artifacts)', () => {
+  type Block = { type: string; text?: string; data?: string; mimeType?: string; source?: { media_type?: string } };
+  const callsOf = (rows: { seq: number; direction: string; frame: unknown }[], name: string) =>
+    rows.filter((r) => r.direction === 'in' && (r.frame as { request?: { subtype?: string; message?: { method?: string; params?: { name?: string } } } }).request?.message?.params?.name === name).map((r) => ({ seq: r.seq, requestId: (r.frame as { request_id: string }).request_id }));
+  const answerOf = (rows: { direction: string; frame: unknown }[], requestId: string) =>
+    (rows.find((r) => r.direction === 'out' && (r.frame as { type?: string; response?: { request_id?: string } }).type === 'control_response' && (r.frame as { response: { request_id: string } }).response.request_id === requestId)?.frame as
+      | { response: { response: { mcp_response: { jsonrpc: string; id: number; result: { content: Block[]; isError?: boolean } } } } }
+      | undefined)?.response.response.mcp_response;
+  const resultJson = (content: Block[]) => JSON.parse(content.find((b) => b.type === 'text')!.text!) as unknown;
+
+  it('two maws.delivery.artifact events in order, create v1 then update v2, each at its admitted answer', async () => {
+    const { events, rows } = await run('pass3', 'p1-maws-artifacts');
+    const artifacts = ofKind(events, 'maws.delivery.artifact');
+    expect(artifacts.map((e) => [e.action, e.artifactId, e.version, e.title])).toEqual([['create', 'dash', 1, 'Dashboard'], ['update', 'dash', 2, 'Dashboard']]);
+    expect(seq(artifacts[0])).toBeLessThan(seq(artifacts[1]));
+    expect(artifacts[1]!.deliverableId).toBe(artifacts[0]!.deliverableId);
+    const [create] = callsOf(rows, 'artifact_create');
+    const [update] = callsOf(rows, 'artifact_update');
+    expect([artifacts[0]!.requestId, artifacts[1]!.requestId]).toEqual([create!.requestId, update!.requestId]);
+    expect(ArtifactCreateResultSchema.parse(resultJson(answerOf(rows, create!.requestId)!.result.content))).toMatchObject({ status: 'created', id: 'dash', deliverableId: artifacts[0]!.deliverableId, version: 1 });
+    expect(ArtifactUpdateResultSchema.parse(resultJson(answerOf(rows, update!.requestId)!.result.content))).toMatchObject({ status: 'updated', id: 'dash', version: 2 });
+    for (const e of artifacts) expect(ofKind(events, 'tool.use').find((u) => u.toolUseId === e.toolUseId)?.toolName).toBe(e.action === 'create' ? 'mcp__maws__artifact_create' : 'mcp__maws__artifact_update');
+    const [list] = callsOf(rows, 'artifact_list');
+    expect(ArtifactListResultSchema.parse(resultJson(answerOf(rows, list!.requestId)!.result.content)).artifacts).toMatchObject([{ id: 'dash', deliverableId: artifacts[0]!.deliverableId, title: 'Dashboard', versions: 2 }]);
+  });
+
+  it("the screenshot answer is an image block then the result's JSON; the engine's tool_result inserts its pointer text between them", async () => {
+    const { events, rows } = await run('pass3', 'p1-maws-artifacts');
+    const [shot, ...more] = callsOf(rows, 'artifact_screenshot');
+    expect(more).toEqual([]);
+    const answer = answerOf(rows, shot!.requestId)!;
+    expect(Object.keys(answer)).toEqual(['jsonrpc', 'id', 'result']); // the order the engine's echo reproduces
+    expect(answer.result.isError).toBeUndefined();
+    expect(answer.result.content.map((b) => b.type)).toEqual(['image', 'text']);
+    expect(answer.result.content[0]).toMatchObject({ mimeType: 'image/png' });
+    expect(Buffer.from(answer.result.content[0]!.data!, 'base64').subarray(1, 4).toString('latin1')).toBe('PNG');
+    const parsed = ArtifactScreenshotResultSchema.parse(JSON.parse(answer.result.content[1]!.text!));
+    expect(parsed).toMatchObject({ status: 'captured', id: 'dash', title: 'Dashboard', version: 1, width: 64, height: 64, consoleErrors: [] });
+    // no X1 event for a screenshot (Decision Log 10); the model's result as the engine delivered it
+    const use = ofKind(events, 'tool.use').find((e) => e.toolName === 'mcp__maws__artifact_screenshot')!;
+    const [result] = ofKind(events, 'tool.result').filter((e) => e.toolUseId === use.toolUseId);
+    const blocks = result!.content as Block[];
+    expect(blocks.map((b) => b.type)).toEqual(['image', 'text', 'text']);
+    expect(blocks[0]!.source?.media_type).toBe('image/png');
+    expect(blocks[1]!.text).toMatch(/^\[Image: source: \/.*\/tool-results\/mcp-maws-blob-[^/]+\.png\]$/);
+    expect(ArtifactScreenshotResultSchema.parse(JSON.parse(blocks[2]!.text!))).toEqual(parsed);
+  });
+
+  it('the refused update is one isError tool.result with the exact text, and no event', async () => {
+    const { events, rows } = await run('pass3', 'p1-maws-artifacts');
+    const updates = callsOf(rows, 'artifact_update');
+    expect(updates).toHaveLength(2);
+    const refusedAnswer = answerOf(rows, updates[1]!.requestId)!;
+    expect(refusedAnswer.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.noArtifact('artifact_update', 'nope') }], isError: true });
+    const errors = ofKind(events, 'tool.result').filter((e) => e.isError && ofKind(events, 'tool.use').find((u) => u.toolUseId === e.toolUseId)?.toolName.startsWith('mcp__maws__artifact_'));
+    expect(errors).toHaveLength(1);
+    expect(text(errors[0]!.content)).toBe(TOOL_ERRORS.noArtifact('artifact_update', 'nope')); // seq 418 carries exactly it
+    expect(events.filter((e) => e.kind.startsWith('maws.') && (e as { requestId?: string }).requestId === updates[1]!.requestId)).toEqual([]);
+  });
+});
+// E2 end
 
 // E1 M2 (E1 execution document, M2 "Conformance"): the four tools recorded live through MAWS's own host on the installed
 // engine. Each fixture normalises with no unknown frame and no request failure (the generic case above); these pin what

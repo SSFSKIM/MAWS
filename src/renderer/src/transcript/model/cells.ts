@@ -5,8 +5,10 @@ import type { SafeguardVerdict } from '@shared/graph/enums';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { TaskId, ToolUseId } from '@shared/graph/ids';
 import { ShowPaneResultSchema } from '@shared/maws/tools'; // E1
+import { ArtifactListResultSchema, ArtifactScreenshotResultSchema } from '@shared/maws/tools'; // E2
 import { classifyTool, MAWS_TOOL_USE, MCP_TOOL, tableRowOf, type ClassifyContext } from './classify';
 import { baseName, cellLabel, hostOf, PANE_CELL, thinkingLabel } from './copy';
+import { ARTIFACT_CELL } from './copy'; // E2
 import { cellId } from './keys';
 import type { Cell, CellDetail, ChangedFile, Hunk, Spill, ToolCategory, Truncation } from './rows';
 
@@ -71,6 +73,23 @@ const TOOL_USE_ERROR = /^\s*<tool_use_error>([\s\S]*)<\/tool_use_error>\s*$/;
 export const engineRefusalOf = (text: string): string | null => TOOL_USE_ERROR.exec(text)?.[1]!.trim() ?? null;
 export const toolErrorText = (text: string): string => engineRefusalOf(text) ?? text.trim();
 // E1 end
+
+// E2 start (Design §9, Decision Log 23): a `maws` result's JSON from the first text block that parses as a JSON object,
+// null when none does. Beside an image block the engine adds a text block of its own pointing at the saved original
+// (M0: `[image, "[Image: source: …]", <server JSON>]`), which `resultJson`'s joined text would not parse.
+export function firstJsonBlock(content: string | ContentBlock[]): unknown {
+  const texts = typeof content === 'string' ? [content] : content.filter((block) => block.type === 'text').map((block) => str(block.text));
+  for (const text of texts) {
+    try {
+      const value: unknown = JSON.parse(text);
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) return value;
+    } catch {
+      // not JSON: the next block
+    }
+  }
+  return null;
+}
+// E2 end
 
 const imageBlocks = (content: string | ContentBlock[]) => (typeof content === 'string' ? [] : content.filter((block) => block.type === 'image'));
 
@@ -196,6 +215,8 @@ function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], ca
     return cellLabel({ kind: 'denied', subject, disposition: classification.denial.disposition, denialKind: classification.denial.kind, reason: classification.denial.reason });
   }
   if (rec.use.toolName === MAWS_TOOL_USE.show_pane) return paneLabel(rec); // E1
+  if (rec.use.toolName === MAWS_TOOL_USE.artifact_list) return artifactListLabel(rec); // E2
+  if (rec.use.toolName === MAWS_TOOL_USE.artifact_screenshot) return screenshotLabel(rec); // E2
   switch (detail.kind) {
     case 'shell':
       return cellLabel({ kind: 'shell', command: detail.command, status: status === 'denied' ? 'stopped' : status, durationMs: elapsedMs(rec, turn), background: detail.backgroundTaskId !== null && status === 'running' });
@@ -213,7 +234,6 @@ function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], ca
         rec.use.toolName === 'Skill' ? (typeof input.skill === 'string' ? input.skill : null)
         : rec.use.toolName === 'ToolSearch' ? String(Array.isArray(s.matches) ? s.matches.length : 0)
         : rec.use.toolName === 'EnterWorktree' ? str(s.path, str(input.path)) || null
-        : rec.use.toolName === 'SendUserFile' ? baseName(filePathOf(input)) || null
         : null;
       return cellLabel({ kind: 'generic', toolName: rec.use.toolName, category, detail: detailText });
     }
@@ -232,6 +252,26 @@ function paneLabel(rec: ToolRecord): string {
   const { opened } = parsed.data;
   return PANE_CELL.opened(opened.kind === 'panel-tool' ? opened.title : baseName(opened.path));
 }
+
+// E2 start: an `artifact_list` call reads how many artifacts it listed, an `artifact_screenshot` call what it captured
+// (the result's title, version and size), or the host's refusal without the tool's own prefix.
+function artifactListLabel(rec: ToolRecord): string {
+  const { result } = rec;
+  if (!result) return ARTIFACT_CELL.listing;
+  if (result.isError) return ARTIFACT_CELL.listFailed(toolErrorText(resultText(result.content)).replace(/^artifact_list: /, ''));
+  const parsed = ArtifactListResultSchema.safeParse(firstJsonBlock(result.content));
+  return ARTIFACT_CELL.listed(parsed.success ? parsed.data.artifacts.length : null);
+}
+
+function screenshotLabel(rec: ToolRecord): string {
+  const { result } = rec;
+  const id = str(record(rec.use.input).id);
+  if (!result) return ARTIFACT_CELL.screenshotting(id);
+  if (result.isError) return ARTIFACT_CELL.screenshotFailed(toolErrorText(resultText(result.content)).replace(/^artifact_screenshot: /, ''));
+  const parsed = ArtifactScreenshotResultSchema.safeParse(firstJsonBlock(result.content));
+  return ARTIFACT_CELL.screenshot(parsed.success ? parsed.data : null, id);
+}
+// E2 end
 
 // Draw-time rewrites may override status, before deriving both detail and label. Model callers omit it.
 export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean, displayStatus?: Cell['status']): Cell {

@@ -27,8 +27,12 @@ export interface McpToolContext {
   signal: AbortSignal; // aborted when the engine withdraws the request or the process ends
 }
 
+// E2: an image block (`artifact_screenshot`'s PNG) reaches the model unchanged; the engine inserts its own text block
+// pointing at the original it saved (E2 M0, pass3/p1-sdk-mcp-image seq 69).
+export type McpContentBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+
 export interface McpToolResult {
-  content: { type: 'text'; text: string }[];
+  content: McpContentBlock[];
   isError?: true;
 }
 

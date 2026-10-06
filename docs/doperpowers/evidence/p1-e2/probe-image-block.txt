@@ -1,0 +1,20 @@
+E2 M0: the image-block probe (does an SDK MCP server's image content block reach the model?)
+
+Verdict: YES. The engine forwards the image block unchanged to the model (seq 69 of
+spikes/protocol-probe/fixtures/pass3/p1-sdk-mcp-image.jsonl: [image/png base64, "[Image: source: <saved original>]",
+"the picture"]) and Haiku answers "Red." (seq 79). The original is persisted under the scratch config home at
+<CLAUDE_CONFIG_DIR>/projects/<slug>/<sessionId>/tool-results/mcp-maws-blob-<ms>-<rand>.png (132 bytes), nowhere else
+the probe looked. Design §7's image-block form stands; its fallback is not adopted.
+Findings: spikes/protocol-probe/findings-pass3-e2-deliverables.txt.
+
+Engine version: 2.1.291 (claude --version)
+Model: haiku, through ClaudeUsage's relay (http://127.0.0.1:8641; GET /api/hello 200 before each launch)
+Parent pin in the fixture's provenance: 7094958a1431369ef699ff9875cd7e9259a37695 (Decision Log 24)
+Cost: the kept recording $0.0208075 (provenance costUsd "0.0208"); a first attempt, not kept, $0.03264725 (Haiku
+  delegated the call to a background Agent under the document's prompt verbatim; the prompt now names the tool in full
+  and says "yourself"). Total live spend for M0: $0.0534.
+Owner-file delta: identical before and after (owner-file-check.txt).
+Processes: every engine exited (exit 0 on the kept run; the first attempt's engine stopped by the harness, 143); the
+  scratch roots /tmp/maws-e0a-sdk-mcp-image-* removed.
+Admission: pnpm exec vitest run src/engine-host/conformance (203/203; the fixture listed and pinned);
+  node --test fixtures.test.mjs from spikes/protocol-probe (145/145).

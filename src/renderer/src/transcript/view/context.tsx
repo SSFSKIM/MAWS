@@ -28,6 +28,9 @@ export interface TranscriptActions {
   replyToPeer(appSessionId: AppSessionId, target: PeerAddress, text: string): Promise<void>;
   peerReplies: PeerReplies;
   // E7 end
+  // E2 start: the artifact row's Open and a delivered file's name (tools/maws/actions.ts, registered from App.tsx's E2 block)
+  openDeliverable(appSessionId: AppSessionId, id: string, version?: number): void; // the Deliverables viewer on the record, at that version
+  // E2 end
 }
 
 // E7 start: who a Reply or a Message goes to, and what became of the last one to that address (E7 execution document,
@@ -63,6 +66,7 @@ export const NO_ACTIONS: TranscriptActions = {
   openAsk: noop, openDelivered: () => Promise.resolve(null), revealDelivered: () => Promise.resolve(null), // E1
   openSideThread: noop, // E3
   replyToPeer: () => Promise.resolve(), peerReplies: NO_PEER_REPLIES, // E7
+  openDeliverable: noop, // E2
 };
 // What a Transcript does for an action its caller did not supply: the two X2 commands C6 can call itself (a spilled
 // result through fs.readSpill, a link through layout.openExternal); the rest belong to C5, C7 and C8 and do nothing.

@@ -49,6 +49,9 @@ export const rowId = {
   // E7 start: a `ListAgents` call's listing row, keyed by the tool use
   agentList: (toolUse: ToolUseId) => row(`agents:${toolUse}`),
   // E7 end
+  // E2 start: an artifact call's row, keyed by the tool use
+  artifact: (toolUse: ToolUseId) => row(`artifact:${toolUse}`),
+  // E2 end
 };
 
 export const cellId = {

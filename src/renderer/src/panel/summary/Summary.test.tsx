@@ -350,4 +350,14 @@ describe('summary card', () => {
     await userEvent.setup().click(within(agents).getByRole('button', { name: `custom ${A}` }));
     expect(panelOf(A)!.tabs.map((t) => t.toolId)).toEqual(['subagents']);
   });
+
+  // E2: Deliverables follows Sources once a build registers the tool, filled by the tool's own summary; none before.
+  it('shows Deliverables after Sources only while the Deliverables tool is registered', async () => {
+    const { tool } = probeTool('deliverables', { title: 'Deliverables', summary: () => <p>3 delivered</p> });
+    offs.push(registerPanelTool(tool));
+    await mount();
+    const card = screen.getByRole('tabpanel');
+    expect(within(card).getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['Environment', 'Push state', 'Subagents', 'Background work', 'Sources', 'Deliverables']);
+    expect(within(section('Deliverables')).getByText('3 delivered')).toBeTruthy();
+  });
 });

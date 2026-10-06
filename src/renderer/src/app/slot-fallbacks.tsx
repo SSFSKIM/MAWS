@@ -37,6 +37,7 @@ const NewSession: Slots['newSession'] = () => null;
 const SettingsTab: Slots['settingsTab'] = () => <Placeholder className="h-full">Settings unavailable</Placeholder>;
 // The top bar's right end holds nothing until W6 registers the usage pill there.
 const TopBarEnd: Slots['topBarEnd'] = () => null;
+const DeliverableTab: Slots['deliverableTab'] = ({ tab }) => <Placeholder className="h-full font-mono">{tab.deliverableId}</Placeholder>; // E2
 
 export const FALLBACKS: Slots = {
   transcript: Transcript,
@@ -48,4 +49,5 @@ export const FALLBACKS: Slots = {
   newSession: NewSession,
   settingsTab: SettingsTab,
   topBarEnd: TopBarEnd,
+  deliverableTab: DeliverableTab, // E2
 };

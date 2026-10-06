@@ -3,7 +3,7 @@
 // the follow-the-file refresh, the no-session tab).
 import { EditorView } from '@codemirror/view';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { mimeOf } from '@shared/files/mime';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
@@ -18,7 +18,8 @@ import { deferred, fail, installFakeMain, ok } from '../../../test-support/code'
 import { useFiles } from '../files/store';
 import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } from '../open-file';
 import { FLASH_CLASS } from './CodeView';
-import { FileViewer } from './FileViewer';
+import { FileBody, FileViewer } from './FileViewer';
+import { installDisk } from '../../../test-support/code-disk';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
 import { existingViewState, useViewer, VIEWER_ENTRIES_MAX } from './viewer-store';
 import { currentSet } from '../../../stores/layout-model';
@@ -488,6 +489,33 @@ describe('viewer', () => {
     expect(useViewer.getState().entries.has('file:/r/f0.ts')).toBe(false); // the least recently used went first
     act(() => useLayout.getState().closeTab('file:/r/f24.ts'));
     expect(useViewer.getState().entries.has('file:/r/f24.ts')).toBe(false);
+  });
+});
+
+// E2 (M4): the deliverables viewer draws markdown and code through the same body, read-only (Decision Log 7): the entry
+// is never editable whatever the file is, the bar holds no editor controls, and the file tab of the same file still edits.
+describe('a read-only mount (E2)', () => {
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  });
+  afterEach(() => cleanup());
+
+  it('reports editable: false for a file a file tab would edit, and the code view takes no typing', async () => {
+    installDisk({ '/r/app.ts': 'const a = 1;\n' });
+    render(<FileBody tabId="deliverable:d1:v1" appSessionId={A} path="/r/app.ts" readOnly />);
+    await waitFor(() => expect(useViewer.getState().entries.get('deliverable:d1:v1')).toMatchObject({ status: 'ready', kind: 'code', complete: true, editable: false, readOnly: true }));
+    expect(useViewer.getState().entries.get('deliverable:d1:v1')!.hash).not.toBeNull(); // everything isEditable asks for is there
+    await waitFor(() => expect(document.querySelector('.cm-editor')).not.toBeNull());
+    expect(EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!.state.facet(EditorView.editable)).toBe(false);
+    expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-editable')).toBe('false');
+    cleanup();
+
+    openFile(A, '/r/app.ts');
+    render(<FileViewer tab={fileTab('/r/app.ts')} />);
+    await waitFor(() => expect(useViewer.getState().entries.get('file:/r/app.ts')).toMatchObject({ editable: true, readOnly: false }));
   });
 });
 

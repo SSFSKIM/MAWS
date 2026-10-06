@@ -56,6 +56,11 @@ export const QUERY_COMMANDS = [
   'scm.status',
   'scm.pr.state',
   // E6 end
+  // E2 start: the deliverable store's reads (main's reader, no cache)
+  'deliverables.list',
+  'deliverables.listAll',
+  'deliverables.get',
+  // E2 end
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
 

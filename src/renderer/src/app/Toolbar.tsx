@@ -18,10 +18,13 @@ import { sidebarWidth, useWindowWidth } from './regions';
 import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from './session-actions';
 import { useSlot } from './slots';
 import { displayTitle } from '../sessions/title';
+import { DELIVERABLES_COPY } from '../tools/deliverables/copy'; // E2
+import { useDeliverableTitle } from '../tools/deliverables/store'; // E2
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
-export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSessionId, SessionRecord>): { title: string; branch: string | null } {
+// E2: `deliverableTitle` is a `deliverable` tab's record title, when the deliverables store holds it.
+export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSessionId, SessionRecord>, deliverableTitle: string | null = null): { title: string; branch: string | null } {
   switch (tab?.kind) {
     case undefined:
       return { title: '', branch: null }; // an empty main area (W5: the Overview is no tab)
@@ -39,6 +42,8 @@ export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSession
       return { title: 'Diagnostics', branch: null };
     case 'settings':
       return { title: 'Settings', branch: null };
+    case 'deliverable': // E2
+      return { title: deliverableTitle ?? DELIVERABLES_COPY.fallbackTitle, branch: null };
   }
 }
 
@@ -55,7 +60,8 @@ export function Toolbar() {
   const End = useSlot('topBarEnd');
   const appSessionId = tab?.kind === 'session' ? tab.appSessionId : null;
   const unstarted = useUnstartedTitle(appSessionId ?? ('' as AppSessionId));
-  const titled = toolbarTitle(tab, records);
+  const deliverableTitle = useDeliverableTitle(tab?.kind === 'deliverable' ? tab.appSessionId : null, tab?.kind === 'deliverable' ? tab.deliverableId : null); // E2
+  const titled = toolbarTitle(tab, records, deliverableTitle);
   // An unstarted session is titled like its tab.
   const { title, branch } = appSessionId && !records.has(appSessionId) ? { title: unstarted.title, branch: null } : titled;
 

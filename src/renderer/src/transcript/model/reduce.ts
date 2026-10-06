@@ -730,6 +730,12 @@ function apply(batch: Batch, event: SessionEvent): void {
       return;
     }
     // E7 end
+    // E2 start: an artifact version the host registered goes to the turn of its call, as E1's events do
+    case 'maws.delivery.artifact': {
+      if (!pushRouted(event.toolUseId === null ? undefined : index.toolUses.get(event.toolUseId))) batch.loose(event, false);
+      return;
+    }
+    // E2 end
     default:
       return; // session lifecycle, accounting, snapshots and unknown frames: nothing the transcript shows
   }

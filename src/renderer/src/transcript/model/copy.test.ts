@@ -117,7 +117,6 @@ describe('cell lines', () => {
     expect(cellLabel({ kind: 'generic', toolName: 'WebSearch', category: 'web', detail: 'q' })).toBe('Searched the web for q');
     expect(cellLabel({ kind: 'generic', toolName: 'EnterPlanMode', category: 'other' })).toBe('Entered plan mode');
     expect(cellLabel({ kind: 'generic', toolName: 'EnterWorktree', category: 'other', detail: '/tmp/wt' })).toBe('Entered worktree /tmp/wt');
-    expect(cellLabel({ kind: 'generic', toolName: 'SendUserFile', category: 'other', detail: 'report.pdf' })).toBe('Sent report.pdf');
     expect(cellLabel({ kind: 'generic', toolName: 'TodoWrite', category: 'other' })).toBe('Used TodoWrite');
   });
 

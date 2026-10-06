@@ -57,6 +57,16 @@ describe('layout value shapes', () => {
     expect(tabId({ kind: 'file', path: '/x/y.ts', line: 3, appSessionId: null })).toBe('file:/x/y.ts');
     expect(tabId({ kind: 'diff', appSessionId: 'a1' as never, ref: 'HEAD' })).toBe('diff:a1:HEAD');
     expect(tabId({ kind: 'diagnostics' })).toBe('diagnostics');
+    // E2 (X14): one tab per record, whatever version it was opened at
+    expect(tabId({ kind: 'deliverable', appSessionId: 'App-1' as never, deliverableId: '0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11' })).toBe('deliverable:App-1:0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11');
+  });
+
+  // E2 (X14): the deliverable tab, appended to the union; its session is required (it restores to the record by id)
+  it('admits a deliverable tab with its session and record', () => {
+    const tab = { id: 'deliverable:a1:d1', kind: 'deliverable', appSessionId: 'a1', deliverableId: 'd1', pinned: false };
+    expect(TabRefSchema.parse(tab)).toEqual(tab);
+    expect(TabRefSchema.safeParse({ ...tab, appSessionId: null }).success).toBe(false);
+    expect(TabRefSchema.safeParse({ ...tab, version: 2 }).success).toBe(false);
   });
 
   // W5: only `StoredMainSchema` still knows the Overview's tab, to drop it from a layout saved before the panel.

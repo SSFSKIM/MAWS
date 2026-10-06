@@ -523,7 +523,7 @@ test('an async ask: acknowledged at once, Submit sends the recorded steer, and t
 
 // ---- G5: show_pane --------------------------------------------------------------------------------------------------
 
-test('show_pane: the Terminal opens in the panel, a pane this build lacks and an unknown pane are error cells', async () => {
+test('show_pane: the Terminal opens in the panel, a deliverable no record answers to and an unknown pane are error cells', async () => {
   await scene({ titles: ['E1 tools: show_pane'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -535,21 +535,24 @@ test('show_pane: the Terminal opens in the panel, a pane this build lacks and an
     await allowNext(s, id); // nope (seq 100)
     await idle(s, id);
 
-    // what the host answered: the renderer's Terminal, the renderer's "not available", the host's unknown pane
+    // what the host answered: the renderer's Terminal, the renderer's "no deliverable" (E2: the recording's target `none`
+    // names no record; the recording itself carried "not available", and the replay compares no bodies), the host's
+    // unknown pane
     const calls = mcpCalls(s.journal(id));
     expect(calls.map((c) => c.args)).toEqual([{ pane: 'terminal' }, { pane: 'deliverable', target: 'none' }, { pane: 'nope' }]);
     const results = calls.map((c) => mcpResultOf(s.journal(id), c.requestId)!);
     expect(JSON.parse(results[0]!.content[0]!.text)).toMatchObject({ status: 'shown', pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal', title: 'Terminal' } });
-    expect(results[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.paneUnavailable('deliverable') }], isError: true });
+    expect(results[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.deliverableNotFound('none') }], isError: true });
     expect(results[2]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownPane('nope') }], isError: true });
     expect(ofKind(await s.events(id), 'maws.pane.shown').map((e) => [e.pane, e.opened?.kind ?? null, e.error])).toEqual([
       ['terminal', 'panel-tool', null],
-      ['deliverable', null, TOOL_ERRORS.paneUnavailable('deliverable')],
+      ['deliverable', null, TOOL_ERRORS.deliverableNotFound('none')],
     ]);
 
     // the cells: what opened, and why nothing did twice
     await unfoldWork(s.pane);
     await expect(s.pane.getByText('Opened Terminal')).toBeVisible();
+    // the cell reads the engine's tool_result, which the replay plays as recorded (E1's build answered "not available")
     await expect(s.pane.getByText('Could not open pane: the deliverable pane is not available in this build of MAWS')).toBeVisible();
     await expect(s.pane.getByText(/Could not open pane: unknown pane "nope"/)).toBeVisible();
     await shoot(s, 'pane');
@@ -558,7 +561,7 @@ test('show_pane: the Terminal opens in the panel, a pane this build lacks and an
 
 // ---- G1 and G7 in the app: E0a's round trip ------------------------------------------------------------------------
 
-test('the SDK MCP round trip: the app answers the engine’s handshake with the three tools and refuses the probe’s own tool', async () => {
+test('the SDK MCP round trip: the app answers the engine’s handshake with the seven tools and refuses the probe’s own tool', async () => {
   // The probe's journal: its scratch directory is the engine cwd, and from seq 96 on it holds at the probe's own writes,
   // which the app never makes (M1's decisions), so the case ends after the first turn.
   await scene({ titles: ['E1 tools: round trip'] }, async (s) => {
@@ -575,6 +578,12 @@ test('the SDK MCP round trip: the app answers the engine’s handshake with the 
       ['send_file', { title: 'Send file', readOnlyHint: true, openWorldHint: false }],
       ['ask', { title: 'Ask questions', readOnlyHint: true, openWorldHint: false }],
       ['show_pane', { title: 'Show pane', readOnlyHint: true, openWorldHint: false }],
+      // E2: the artifact tools, listed from the first `tools/list`; the two writers are not read-only, so the engine never
+      // batches them (E2 execution document, Decision Logs 3 and 4)
+      ['artifact_create', { title: 'Create artifact', readOnlyHint: false, openWorldHint: false }],
+      ['artifact_update', { title: 'Update artifact', readOnlyHint: false, openWorldHint: false }],
+      ['artifact_list', { title: 'List artifacts', readOnlyHint: true, openWorldHint: false }],
+      ['artifact_screenshot', { title: 'Screenshot artifact', readOnlyHint: true, openWorldHint: false }],
     ]);
     const [echo] = mcpCalls(rows);
     expect(mcpResultOf(rows, echo!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true });

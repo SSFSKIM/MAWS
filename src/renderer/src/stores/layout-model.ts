@@ -104,6 +104,7 @@ export function sessionOfTab(tab: TabTarget | null): AppSessionId | null {
     case 'agent':
     case 'diff':
     case 'file':
+    case 'deliverable': // E2
       return tab.appSessionId;
     default:
       return null;

@@ -69,7 +69,19 @@ export interface FilesServiceOptions {
   openPath?: (path: string) => Promise<string>; // Electron's shell.openPath: '' on success, else the error text
   showItemInFolder?: (path: string) => void; // E1: Electron's shell.showItemInFolder, which reports nothing
   env?: NodeJS.ProcessEnv; // MAWS_E2E and MAWS_E2E_OPEN_LOG, the e2e's openExternal (and E1's reveal) seam
+  // E2: whether the session's deliverable records name this realpath (main's `DeliverableReader.admitted`), consulted for
+  // a path outside the roots by `read`, `openExternal` and `reveal` only (Design §3, Decision Log 18)
+  admitted?: (appSessionId: AppSessionId, real: string) => Promise<boolean>;
 }
+
+// E2: what an operation may reach beyond the roots. Only looking at a file (`read`) and handing it to the OS
+// (`openExternal`, `reveal`) admit a delivered file; `write`, `list` and `watch` never do, so a file an agent delivered
+// from outside is never written through MAWS and the store's version copies are never edited in place.
+interface Purpose {
+  admitDelivered: boolean;
+}
+const ROOTS_ONLY: Purpose = { admitDelivered: false };
+const DELIVERED_TOO: Purpose = { admitDelivered: true };
 
 export interface FilesService {
   list(input: { appSessionId: AppSessionId; path?: string }): Promise<FilesListOutput>;
@@ -117,7 +129,7 @@ interface Confirmed {
   roots: string[];
 }
 
-export function createFilesService({ records, hooks, emit = () => {}, openPath, showItemInFolder, env = process.env }: FilesServiceOptions): FilesService {
+export function createFilesService({ records, hooks, emit = () => {}, openPath, showItemInFolder, env = process.env, admitted /* E2 */ }: FilesServiceOptions): FilesService {
   const at = async (point: BoundaryPoint, path: string) => {
     await hooks?.at?.(point, path);
   };
@@ -130,21 +142,27 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
   // Step 1: absolute, already normal (a `..` is refused before the disk is touched, since the kernel resolves `/X/..`
   // only when `/X` exists) and with no trailing separator (under which `lstat` follows a final-component symlink, so
   // the check below would pass a link to a directory), a known session with at least one resolvable root, and a
-  // realpath under one of them.
-  async function precheck(appSessionId: AppSessionId, path: string): Promise<{ roots: string[]; real0: string }> {
+  // realpath under one of them. E2: for a purpose that admits delivered files, a realpath outside every root that the
+  // session's records name is a root of its own for the rest of the boundary (`under` accepts it as equal), so step 5
+  // and every later confirmation hold for exactly that file and nothing beside it.
+  async function precheck(appSessionId: AppSessionId, path: string, purpose: Purpose): Promise<{ roots: string[]; real0: string }> {
     if (!isAbsolute(path)) throw new Error('path must be absolute');
     const record = records(appSessionId);
     if (!record) throw new Error(`unknown app session: ${appSessionId}`);
     if (normalize(path) !== path || (path !== sep && path.endsWith(sep))) throw new Refusal();
-    const roots = await rootsOf(record);
-    if (roots.length === 0) throw new Refusal();
+    let roots = await rootsOf(record);
+    const admits = purpose.admitDelivered && admitted !== undefined; // E2
+    if (roots.length === 0 && !admits) throw new Refusal();
     let real0: string;
     try {
       real0 = await fs.promises.realpath(path);
     } catch (error) {
       throw await missing(path, roots, error);
     }
-    if (!roots.some((root) => under(root, real0))) throw new Refusal();
+    if (!roots.some((root) => under(root, real0))) {
+      if (!admits || !(await admitted?.(appSessionId, real0))) throw new Refusal();
+      roots = [...roots, real0]; // E2
+    }
     // P0 opens no symlink (K1): a path that ends in one is refused even when its target lies inside, since step 3
     // opens real0, which is the target.
     const own = await fs.promises.lstat(path).catch(() => null);
@@ -154,8 +172,8 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
 
   // Steps 2 to 5b for a regular file (`read`; `write` opens it read-write) or a directory (`list`, `watch`). The caller
   // closes the handle.
-  async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'write' | 'dir'): Promise<Confirmed> {
-    const { roots, real0 } = await precheck(appSessionId, path);
+  async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'write' | 'dir', purpose: Purpose = ROOTS_ONLY): Promise<Confirmed> {
+    const { roots, real0 } = await precheck(appSessionId, path, purpose);
     await at('before-open', path);
     let handle: FileHandle;
     try {
@@ -217,7 +235,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
   }
 
   async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false }: FilesReadInput): Promise<FilesReadOutput> {
-    const { handle, stat, real } = await openConfirmed(appSessionId, path, 'file');
+    const { handle, stat, real } = await openConfirmed(appSessionId, path, 'file', DELIVERED_TOO); // E2: a delivered file is read
     try {
       // A hashed read is one read of the descriptor: the whole file into one buffer, hashed, and every byte answered
       // (the chunk, the sniffed head, the settle step's extra bytes, `bytes` itself) taken from that buffer, so the chunk
@@ -327,7 +345,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
   }
 
   async function openExternal(appSessionId: AppSessionId, path: string): Promise<FilesOpenExternalOutput> {
-    const { real0 } = await precheck(appSessionId, path);
+    const { real0 } = await precheck(appSessionId, path, DELIVERED_TOO); // E2: a delivered file opens outside wherever it lives
     // "Open externally" shows a document in its viewer; it never runs a program an agent wrote into the tree. The
     // object is in-root (step 1), so naming it in the message leaks nothing.
     const target = await fs.promises.lstat(real0).catch(() => null);
@@ -347,7 +365,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
   async function reveal(appSessionId: AppSessionId, path: string): Promise<FilesRevealOutput> {
     let real0: string;
     try {
-      ({ real0 } = await precheck(appSessionId, path));
+      ({ real0 } = await precheck(appSessionId, path, DELIVERED_TOO)); // E2
       const target = await fs.promises.lstat(real0).catch(() => null);
       if (!target?.isFile()) throw new Error(`not a file: ${path}`);
     } catch (error) {
