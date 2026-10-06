@@ -23,7 +23,7 @@ const supervisorStatus = (over: Partial<SupervisorStatus> = {}): SupervisorStatu
 
 function harness(transport: HostFacts['transport'] = 'detached') {
   let state: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
-  let facts: HostFacts = { transport, reason: null, refused: null, lastExit: null };
+  let facts: HostFacts = { transport, reason: null, refused: null, waitingLiveSessions: null, lastExit: null };
   const stateListeners = new Set<(s: HostState) => void>();
   const eventListeners = new Set<(s: SupervisorStatus) => void>();
   const handlers = new Map<string, (input: unknown) => unknown>();
@@ -68,7 +68,7 @@ describe('host.status', () => {
   it('answers with no supervisor while none has reported, and is emitted at every transition', async () => {
     const h = harness();
     await expect(h.call('host.status')).resolves.toEqual({
-      transport: 'detached', state: 'starting', supervisor: null, appBuildId: APP_BUILD, appWire: APP_WIRE, matches: null, reason: null, lastExit: null,
+      transport: 'detached', state: 'starting', supervisor: null, appBuildId: APP_BUILD, appWire: APP_WIRE, matches: null, reason: null, waitingLiveSessions: null, lastExit: null,
     });
     h.move({ state: 'ready', pid: 4242 });
     expect(h.emitted.at(-1)).toMatchObject({ state: 'ready', supervisor: null, matches: null });
@@ -94,8 +94,19 @@ describe('host.status', () => {
     h.status(supervisorStatus());
     h.move({ state: 'crashed' }, { reason: 'held_lock' });
     expect(h.emitted.at(-1)).toMatchObject({ state: 'crashed', supervisor: null, matches: null, reason: 'held_lock' });
-    h.move({ state: 'crashed' }, { reason: 'incompatible', refused: 'wire' });
-    expect(h.emitted.at(-1)).toMatchObject({ reason: 'incompatible', matches: 'wire' }); // what the incompatible one refused
+    h.move({ state: 'crashed' }, { reason: 'incompatible', refused: 'wire', waitingLiveSessions: 2 });
+    expect(h.emitted.at(-1)).toMatchObject({ reason: 'incompatible', matches: 'wire', waitingLiveSessions: 2 }); // what the incompatible one refused, and runs
+  });
+
+  it('names the sessions an incompatible supervisor still runs while it is waited for, and none otherwise', () => {
+    const h = harness();
+    h.move({ state: 'crashed' }, { reason: 'incompatible', refused: 'protocol', waitingLiveSessions: 3 });
+    expect(h.emitted.at(-1)).toMatchObject({ state: 'crashed', matches: 'protocol', waitingLiveSessions: 3 });
+    h.move({ state: 'crashed' }, { waitingLiveSessions: 1 }); // its sessions go idle one by one
+    expect(h.emitted.at(-1)?.waitingLiveSessions).toBe(1);
+    h.move({ state: 'restarting' }, { reason: null, refused: null, waitingLiveSessions: null });
+    expect(h.emitted.at(-1)).toMatchObject({ matches: null, reason: null, waitingLiveSessions: null });
+    for (const status of h.emitted) expect(validateEventPayload('host.status', status).ok).toBe(true);
   });
 
   it('the last unexpected exit counts the rows live at the last status, once per exit', () => {
@@ -109,6 +120,18 @@ describe('host.status', () => {
     h.move({ state: 'ready', pid: 5151 });
     h.status(supervisorStatus({ pid: 5151, liveSessions: 0 }));
     expect(h.emitted.at(-1)?.lastExit).toEqual({ ...exit, interrupted: 3 }); // the successor's count does not rewrite it
+  });
+
+  it('a count is spent by the exit it was captured into: a candidate dying before any status interrupted nothing', () => {
+    const h = harness();
+    h.move({ state: 'ready', pid: 4242 });
+    h.status(supervisorStatus({ liveSessions: 3 }));
+    const first = { code: null, signal: 'SIGKILL', at: '2026-10-06T10:05:00.000Z' };
+    h.move({ state: 'restarting', pid: null }, { lastExit: first });
+    expect(h.emitted.at(-1)?.lastExit).toEqual({ ...first, interrupted: 3 });
+    const second = { code: 1, signal: null, at: '2026-10-06T10:05:01.000Z' }; // the successor exits before any welcome
+    h.move({ state: 'restarting', restarts: 1 }, { lastExit: second });
+    expect(h.emitted.at(-1)?.lastExit).toEqual({ ...second, interrupted: 0 });
   });
 
   it('a utility host reports its own transport', async () => {

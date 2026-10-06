@@ -38,6 +38,8 @@ export const HostStatusSchema = z.strictObject({
   appWire: z.string(),
   matches: z.enum(['same', 'build', 'wire', 'protocol']).nullable(), // null while no supervisor is connected
   reason: z.enum(['incompatible', 'held_lock']).nullable(), // why `crashed`, when it is
+  // while `incompatible`: the sessions the refusing supervisor said it runs (the banner's N); null otherwise
+  waitingLiveSessions: z.number().int().nonnegative().nullable(),
   // the last unexpected exit this app run; code and signal only for a supervisor this run spawned
   lastExit: z.strictObject({ code: z.number().int().nullable(), signal: z.string().nullable(), at: z.string(), interrupted: z.number().int() }).nullable(),
 });

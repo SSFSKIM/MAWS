@@ -37,8 +37,12 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
 
   const status = (): HostStatus => {
     const facts = deps.hosts.facts('engine-host');
-    // an exit is counted against the status before it, once: a successor's status does not rewrite it
-    if (facts.lastExit && facts.lastExit.at !== lastExit?.at) lastExit = { ...facts.lastExit, interrupted: liveAtLastStatus };
+    // an exit is counted against the status before it, once: a successor's status does not rewrite it, and a successor
+    // that dies before sending one interrupted nothing
+    if (facts.lastExit && facts.lastExit.at !== lastExit?.at) {
+      lastExit = { ...facts.lastExit, interrupted: liveAtLastStatus };
+      liveAtLastStatus = 0;
+    }
     return {
       transport: facts.transport,
       state: deps.hosts.snapshot('engine-host').state,
@@ -48,6 +52,7 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
       // while an incompatible supervisor is waited for, nothing is connected; what it refused says how it differs
       matches: supervisor ? matchesOf(supervisor) : facts.reason === 'incompatible' ? facts.refused : null,
       reason: facts.reason,
+      waitingLiveSessions: facts.waitingLiveSessions,
       lastExit,
     };
   };

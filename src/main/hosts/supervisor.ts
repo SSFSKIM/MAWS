@@ -48,6 +48,7 @@ export interface HostFacts {
   transport: 'utility' | 'detached';
   reason: HostStatus['reason']; // why `crashed`, when main knows: an incompatible supervisor runs sessions, or a held lock
   refused: 'wire' | 'protocol' | null; // while `incompatible`: what the supervisor's refusal named
+  waitingLiveSessions: number | null; // while `incompatible`: the sessions its last refusal said it runs (Task 2.4)
   lastExit: { code: number | null; signal: string | null; at: string } | null; // the last unexpected exit this app run
 }
 
@@ -134,8 +135,10 @@ interface Host {
   transport: DetachedTransport | null; // a detached host's; null for a utility host
   reason: HostFacts['reason'];
   refused: HostFacts['refused'];
+  waitingLiveSessions: HostFacts['waitingLiveSessions'];
   lastExit: HostFacts['lastExit'];
   quitting: boolean; // stopAllForQuit was asked: nothing restarts, nothing more is held
+  utilityRestart: Promise<CommandResult<'host.restart'>> | null; // a utility restart under way, until it forks the successor
   // E10 end
 }
 
@@ -161,8 +164,10 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       transport: null,
       reason: null,
       refused: null,
+      waitingLiveSessions: null,
       lastExit: null,
       quitting: false,
+      utilityRestart: null,
     };
     // E10: a detached host's transport, reporting into the same state, ladder and requests as a utility host's
     if (host.spec.transport === 'detached') {
@@ -190,7 +195,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
   function transition(host: Host, next: Omit<HostState, 'revision'>): void {
     cancelResync(host, 'transition'); // E10: the connection it pulled through is gone (or replaced)
     host.streaming = false; // E10
-    if (next.state !== 'crashed') [host.reason, host.refused] = [null, null]; // E10: a reason is a crashed host's
+    if (next.state !== 'crashed') clearReason(host); // E10: a reason is a crashed host's
     host.state = { ...next, revision: host.state.revision + 1 };
     if (next.state === 'crashed') failHeld(host, 'is crashed'); // E10: a held request fails only on crashed or stop()
     for (const listener of host.listeners) listener(host.state);
@@ -301,6 +306,10 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
   }
 
   // E10 start
+  function clearReason(host: Host): void {
+    [host.reason, host.refused, host.waitingLiveSessions] = [null, null, null];
+  }
+
   function failHeld(host: Host, reason: string): void {
     for (const [id, pending] of host.pending) {
       if (pending.sent) continue;
@@ -350,6 +359,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       console.error(`[hosts] ${host.owner} exited unexpectedly (${exit.signal ?? `code ${exit.code}`})`);
       const { limit, delay } = recordExit(host, exit);
       if (limit) {
+        clearReason(host); // crashed for its exits, whatever an earlier wait named
         transition(host, { state: 'crashed', pid: host.state.pid, restarts: host.state.restarts });
         host.settleFirstLaunch();
         return;
@@ -357,11 +367,14 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts + 1 });
       relaunch(delay);
     };
-    const crashed = (why: string, reason: HostFacts['reason'] = null, refused: HostFacts['refused'] = null) => {
+    // A fact that changes while crashed (another reason, a waited-for supervisor's live count) is a transition too, so
+    // host.status reports it.
+    const crashed = (why: string, facts: Partial<Pick<HostFacts, 'reason' | 'refused' | 'waitingLiveSessions'>> = {}) => {
       console.error(`[hosts] ${host.owner} ${why}`);
       detach(host, 'is unreachable');
-      const changed = host.reason !== reason || host.refused !== refused;
-      [host.reason, host.refused] = [reason, refused];
+      const { reason = null, refused = null, waitingLiveSessions = null } = facts;
+      const changed = host.reason !== reason || host.refused !== refused || host.waitingLiveSessions !== waitingLiveSessions;
+      [host.reason, host.refused, host.waitingLiveSessions] = [reason, refused, waitingLiveSessions];
       if (host.state.state !== 'crashed' || changed) transition(host, { state: 'crashed', pid: host.state.pid, restarts: host.state.restarts });
       host.settleFirstLaunch();
     };
@@ -392,10 +405,10 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
         if (!stopped) unexpected(exit);
       },
       failed(reason, message) {
-        if (!stopped) crashed(`could not be reached${reason === 'held_lock' ? ' (held_lock)' : ''}: ${message}`, reason === 'held_lock' ? 'held_lock' : null);
+        if (!stopped) crashed(`could not be reached${reason === 'held_lock' ? ' (held_lock)' : ''}: ${message}`, { reason: reason === 'held_lock' ? 'held_lock' : null });
       },
       waiting(liveSessions, refused) {
-        if (!stopped) crashed(`has an incompatible supervisor running ${liveSessions} sessions; waiting for it`, 'incompatible', refused);
+        if (!stopped) crashed(`has an incompatible supervisor running ${liveSessions} sessions; waiting for it`, { reason: 'incompatible', refused, waitingLiveSessions: liveSessions });
       },
     };
   }
@@ -477,23 +490,40 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       return result.ok ? restarted : { ok: false, error: result.error };
     }
     if (host.state.state !== 'crashed') return restarted; // starting or restarting: the attempt under way reaches the newest
-    // Task 2.4 asks the incompatible supervisor to exit on its refused connection; until then it is waited for
-    if (host.reason === 'incompatible') return notRestartable(host, 'waits for an incompatible supervisor');
     if (host.reason === 'held_lock') await transport.killHeld();
     if (stopped || host.quitting) return notRestartable(host, 'is stopping with the app');
+    // waiting: an incompatible supervisor is asked to exit now on its refused connection (it cannot be sent host.stopAll;
+    // its exit order stops its sessions either way), and a fresh one starts once it is gone
+    const incompatible = host.reason === 'incompatible';
     host.exits = []; // asked for: the crash window starts afresh
     transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
-    transport.launch();
+    if (incompatible) transport.replaceIncompatible();
+    else transport.launch();
     return restarted;
   }
 
   // A utility host's sessions end with it whichever way it is restarted, so they are stopped within the grace first.
-  async function restartUtility(host: Host): Promise<CommandResult<'host.restart'>> {
+  // One restart at a time: a second one asked before the first has forked the successor is answered by the first, so
+  // overlapping restarts never fork two successors (one of which nothing would ever stop).
+  function restartUtility(host: Host): Promise<CommandResult<'host.restart'>> {
+    // started a microtask later, so the latch is set before a restart that forks at once clears it
+    host.utilityRestart ??= Promise.resolve().then(() => restartUtilityOnce(host));
+    return host.utilityRestart;
+  }
+
+  async function restartUtilityOnce(host: Host): Promise<CommandResult<'host.restart'>> {
+    const forked = () => {
+      host.utilityRestart = null;
+      if (!stopped) launch(host);
+    };
     if (host.state.state === 'ready' && host.port) {
       const result = await dispatch(host.owner, 'host.stopAll', { graceMs: STOP_ALL_GRACE_MS });
       if (!result.ok) console.warn(`[hosts] ${host.owner}'s stop-all before its restart failed; restarting it anyway`, result.error);
     }
-    if (stopped) return notRestartable(host, 'was stopped');
+    if (stopped) {
+      host.utilityRestart = null;
+      return notRestartable(host, 'was stopped');
+    }
     if (host.restartTimer) clearTimeout(host.restartTimer);
     host.restartTimer = null;
     host.exits = [];
@@ -501,12 +531,10 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     detach(host, 'was restarted'); // the old child is no longer the host's: its exit is not a crash
     transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
     if (!child) {
-      launch(host);
+      forked();
       return restarted;
     }
-    child.on('exit', () => {
-      if (!stopped) launch(host);
-    });
+    child.on('exit', forked);
     child.kill();
     return restarted;
   }
@@ -594,7 +622,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     },
     facts(owner) {
       const host = hosts[owner];
-      return { transport: host.transport ? 'detached' : 'utility', reason: host.reason, refused: host.refused, lastExit: host.lastExit };
+      return { transport: host.transport ? 'detached' : 'utility', reason: host.reason, refused: host.refused, waitingLiveSessions: host.waitingLiveSessions, lastExit: host.lastExit };
     },
     restartSupervisor({ stopSessions }) {
       const host = hosts['engine-host'];

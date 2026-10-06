@@ -29,9 +29,7 @@ import {
   type ServerWelcome,
 } from '@shared/host/socket-protocol';
 import type { HostMessage } from '@shared/ipc/host-protocol';
-import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import {
-  buildIdOf,
   isAlive,
   isSameProcess,
   PID_POLL_MS,
@@ -42,6 +40,7 @@ import {
   SUPERVISOR_FILES,
   type LockFile,
 } from '../../engine-host/supervisor-files';
+import { appIdentity, type AppIdentity } from './identity'; // E10 Task 2.4
 
 export const CONNECT_TIMEOUT_MS = 1_000;
 export const START_TIMEOUT_MS = 15_000; // one budget for the whole attempt, exit-3 loops included
@@ -84,6 +83,9 @@ export interface DetachedTransportOptions {
   isAlive?(pid: number): boolean;
   procStartOf?(pid: number): string | null;
   kill?(pid: number, signal: NodeJS.Signals): void;
+  // E10 Task 2.4: the build id and wire main presents in its hello and compares a welcome with (identity.ts; the bundle's
+  // own and the wire fingerprint unless the e2e seams stand in); told when this run starts a supervisor of its own
+  identity?: AppIdentity;
   timing?: Partial<DetachedTiming>;
   log?(line: string): void;
 }
@@ -121,6 +123,9 @@ export interface DetachedTransport {
   launch(): void; // a fresh attempt (after a deliberate close, once the welcomed pid is gone)
   exit(when: ClientExit['when']): boolean; // asks the served supervisor to exit; its close is then deliberate
   // E10 start
+  // The owner's Restart now while waiting: a fresh attempt in which an incompatible supervisor is asked to exit now on
+  // its refused connection, sessions live or not, and a fresh one started once it is gone.
+  replaceIncompatible(): void;
   // Main is about to send the served supervisor a command after which it exits whatever its answer (`host.stopAll`):
   // its close is then deliberate. False when nothing is served.
   expectExit(): boolean;
@@ -155,6 +160,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   const kill = options.kill ?? ((pid: number, signal: NodeJS.Signals) => process.kill(pid, signal));
   const log = options.log ?? ((line: string) => console.log(`[hosts] engine-host: ${line}`));
   const sameProcess = (proc: Proc) => isSameProcess(proc, processes);
+  const identity = options.identity ?? appIdentity(options.modulePath, {});
 
   let stopped = false;
   let quitting = false; // E10 Task 2.3b: the quit asked; the served connection's close is terminal
@@ -183,7 +189,8 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     attemptSockets.clear();
   }
 
-  function launch(): void {
+  // `replaceRefused`: the owner asked to restart an incompatible supervisor (replaceIncompatible), for this attempt only.
+  function launch(replaceRefused = false): void {
     if (stopped || quitting) return;
     cancelAttempt();
     const gen = generation;
@@ -276,7 +283,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         if (answer.kind === 'welcome') return welcomed(socket, answer.welcome, answer.leftover, lock);
         refused(socket, answer.refuse, lock);
       });
-      const hello: ClientHello = { t: 'hello', protocol: SOCKET_PROTOCOL, token, buildId: buildIdOf(options.modulePath), wire: wireFingerprint(), appPid: process.pid };
+      const hello: ClientHello = { t: 'hello', protocol: SOCKET_PROTOCOL, token, buildId: identity.buildId(), wire: identity.wire(), appPid: process.pid };
       socket.write(`${JSON.stringify(hello)}\n`);
     }
 
@@ -293,15 +300,17 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
 
     function welcomed(socket: Socket, welcome: ServerWelcome, leftover: Buffer, lock: LockFile | null): void {
       const proc: Proc = { pid: welcome.pid, procStart: lock?.pid === welcome.pid ? lock.procStart : (processes.procStartOf(welcome.pid) ?? '') };
-      // §6: another build with the same wire and nothing live is replaced at once, unseen. (M2's Task 2.4 adds the
-      // other rows: exit-when-idle and the banner when sessions are live; until then such a supervisor is served.)
-      if (welcome.buildId !== buildIdOf(options.modulePath) && welcome.liveSessions === 0) {
+      // §6: another build with the same wire is replaced at once, unseen, when nothing is live; with sessions live it is
+      // served and asked to exit when idle (the update banner reads `matches: 'build'` from its status), so the app
+      // moves to its own build once they are idle.
+      const otherBuild = welcome.buildId !== identity.buildId();
+      if (otherBuild && welcome.liveSessions === 0) {
         log(`supervisor pid ${welcome.pid} runs build ${welcome.buildId} with nothing live; replacing it`);
         return replace(socket, proc);
       }
       attemptSockets.delete(socket);
       finish();
-      serve(socket, leftover, proc, welcome);
+      serve(socket, leftover, proc, welcome, otherBuild);
     }
 
     function refused(socket: Socket, refuse: ServerRefuse, lock: LockFile | null): void {
@@ -315,14 +324,25 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         socket.destroy();
         return unanswered(lock, 'a refusal no hello asks for');
       }
-      // §6: another protocol or wire. With nothing live the old supervisor is asked to exit and a fresh one started;
-      // with sessions live it is left to run them, and main waits (the banner's Restart now and Wait are M3's).
+      // §6: another protocol or wire. With nothing live (or at the owner's Restart now) the old supervisor is asked to
+      // exit now and a fresh one started once it is gone; with sessions live it is left to run them, asked once per
+      // process to exit when idle (Decision Log b2e4a1b1: the banner's Wait only acknowledges), and main waits.
       const holder = readLock(dir) ?? lock;
-      if (refuse.liveSessions === 0) {
-        log(`supervisor ${holder ? `pid ${holder.pid} ` : ''}speaks ${refuse.reason === 'wire' ? `wire ${refuse.wire}` : `protocol ${refuse.protocol}`} with nothing live; replacing it`);
+      const speaks = refuse.reason === 'wire' ? `wire ${refuse.wire}` : `protocol ${refuse.protocol}`;
+      if (refuse.liveSessions === 0 || replaceRefused) {
+        log(`supervisor ${holder ? `pid ${holder.pid} ` : ''}speaks ${speaks} with ${refuse.liveSessions === 0 ? 'nothing live' : `${refuse.liveSessions} sessions live, restarted as asked`}; replacing it`);
         return replace(socket, holder ? { pid: holder.pid, procStart: holder.procStart } : null);
       }
-      socket.destroy();
+      const armed = holder !== null && idleArmed !== null && idleArmed.pid === holder.pid && idleArmed.procStart === holder.procStart;
+      if (armed) socket.destroy();
+      else {
+        // the refused connection stays open for this one line; it closes by itself once the supervisor has read it
+        attemptSockets.delete(socket);
+        socket.end(`${JSON.stringify({ t: 'exit', when: 'idle' } satisfies ClientExit)}\n`);
+        socket.setTimeout(timing.helloTimeoutMs, () => socket.destroy());
+        if (holder) idleArmed = { pid: holder.pid, procStart: holder.procStart };
+        log(`asked the incompatible supervisor ${holder ? `pid ${holder.pid} ` : ''}to exit when idle`);
+      }
       finish();
       if (waitingFor !== refuse.liveSessions) {
         waitingFor = refuse.liveSessions;
@@ -387,6 +407,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         });
         child.unref();
         spawned.set(pid, null);
+        identity.startedOwn(); // what this run starts is of its build
         log(`spawned a supervisor, pid ${pid}`);
         return { pid, procStart: processes.procStartOf(pid) ?? '' };
       } catch (error) {
@@ -429,12 +450,17 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   }
 
   // The welcomed connection: C1's envelope through a SocketPort; the layer's own `refuse replaced` is read here.
-  function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: ServerWelcome): void {
+  // `otherBuild`: a supervisor of another build still running sessions, asked to exit when idle unless already asked.
+  function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: ServerWelcome, otherBuild: boolean): void {
     const port = new SocketPort(socket, leftover, { log: (line) => log(`socket: ${line}`) });
     if (idleArmed && !(idleArmed.pid === proc.pid && idleArmed.procStart === proc.procStart)) idleArmed = null;
     const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, replaced: false };
     served = connection;
     waitingFor = null;
+    if (otherBuild && connection.exitAsked === null) {
+      log(`supervisor pid ${welcome.pid} runs build ${welcome.buildId} with ${welcome.liveSessions} sessions live; serving it until they are idle`);
+      askExit(connection, 'idle');
+    }
     const listeners: ((data: unknown) => void)[] = [];
     port.on('message', ({ data }) => {
       const refuse = ServerRefuseSchema.safeParse(data);
@@ -525,18 +551,23 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     timer.unref?.();
   }
 
+  // Remembered only once written: an exit the socket refused was never asked, and the next close is not deliberate.
+  function askExit(connection: Served, when: ClientExit['when']): boolean {
+    if (!connection.port.postMessage({ t: 'exit', when } satisfies ClientExit)) return false;
+    if (connection.exitAsked !== 'now') connection.exitAsked = when;
+    if (when === 'idle') idleArmed = connection.proc;
+    log(`asked supervisor pid ${connection.proc.pid} to exit ${when}`);
+    return true;
+  }
+
   return {
-    launch,
+    launch: () => launch(),
     exit(when) {
       if (!served || stopped) return false;
-      // remembered only once written: an exit the socket refused was never asked, and the next close is not deliberate
-      if (!served.port.postMessage({ t: 'exit', when } satisfies ClientExit)) return false;
-      if (served.exitAsked !== 'now') served.exitAsked = when;
-      if (when === 'idle') idleArmed = served.proc;
-      log(`asked supervisor pid ${served.proc.pid} to exit ${when}`);
-      return true;
+      return askExit(served, when);
     },
     // E10 start
+    replaceIncompatible: () => launch(true),
     expectExit() {
       if (!served || stopped) return false;
       served.exitAsked = 'now';

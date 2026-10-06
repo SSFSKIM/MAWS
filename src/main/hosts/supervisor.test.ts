@@ -698,7 +698,7 @@ describe('host supervisor', () => {
       await expect(supervisor.dispatch('engine-host', 'engine.ping', undefined)).resolves.toEqual({ ok: true, value: PING(303) });
       expect(supervisor.snapshot('engine-host')).toMatchObject({ state: 'ready', pid: 303, restarts: 0 });
       expect(states).toEqual(['restarting', 'ready']);
-      expect(supervisor.facts('engine-host')).toEqual({ transport: 'utility', reason: null, refused: null, lastExit: null });
+      expect(supervisor.facts('engine-host')).toEqual({ transport: 'utility', reason: null, refused: null, waitingLiveSessions: null, lastExit: null });
       expect(error).not.toHaveBeenCalledWith(expect.stringContaining('unexpectedly'));
     });
 
@@ -715,6 +715,44 @@ describe('host supervisor', () => {
       await expect(reply).resolves.toEqual({ ok: true, value: PING(303) });
     });
 
+    it('two restarts back to back fork one successor: the second answers with the restart under way', async () => {
+      void supervisor.start();
+      const first = latest('maws-engine-host');
+      const stops: unknown[] = [];
+      serveLatching(first, 101, stops);
+      first.spawn(101);
+      serve(latest('maws-pty-host'), () => {});
+      latest('maws-pty-host').spawn(202);
+      await flush();
+      const both = Promise.all([supervisor.restartSupervisor({ stopSessions: true }), supervisor.restartSupervisor({ stopSessions: false })]);
+      await expect(both).resolves.toEqual([{ ok: true, value: undefined }, { ok: true, value: undefined }]);
+      await flush();
+      expect(stops).toHaveLength(1);
+      expect(forksOf('maws-engine-host')).toHaveLength(2); // the first and its one successor
+      expect(latest('maws-engine-host').killed).toBe(false);
+      const next = latest('maws-engine-host');
+      serveLatching(next, 303);
+      next.spawn(303);
+      await flush();
+      await expect(supervisor.dispatch('engine-host', 'engine.ping', undefined)).resolves.toEqual({ ok: true, value: PING(303) });
+    });
+
+    it('a restart asked while the old host is still exiting is the restart under way', async () => {
+      void supervisor.start();
+      const first = latest('maws-engine-host');
+      serveLatching(first, 101);
+      first.spawn(101);
+      await flush();
+      first.kill = () => ((first.killed = true), true); // it takes its time to exit
+      await supervisor.restartSupervisor({ stopSessions: true });
+      expect(supervisor.snapshot('engine-host').state).toBe('restarting');
+      await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toEqual({ ok: true, value: undefined });
+      expect(forksOf('maws-engine-host')).toHaveLength(1); // nothing forked beside the host still exiting
+      first.exit(0);
+      await flush();
+      expect(forksOf('maws-engine-host')).toHaveLength(2);
+    });
+
     it('a crashed host is forked afresh at once, its crash window cleared', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       const { engine } = await startReady(101);
@@ -725,6 +763,9 @@ describe('host supervisor', () => {
       expect(forksOf('maws-engine-host')).toHaveLength(2); // at once, not after the backoff
       await vi.advanceTimersByTimeAsync(5_000);
       expect(forksOf('maws-engine-host')).toHaveLength(2); // the backoff's own restart was cancelled
+      await supervisor.restartSupervisor({ stopSessions: true }); // a later restart is its own
+      await flush();
+      expect(forksOf('maws-engine-host')).toHaveLength(3);
     });
 
     it('stopAllForQuit sends engine.shutdown with the grace, as the quit did before', async () => {

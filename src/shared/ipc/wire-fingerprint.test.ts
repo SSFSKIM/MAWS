@@ -75,6 +75,9 @@ describe('wireFingerprint', () => {
     changed.commands['pty.ping'] = { ...commands['pty.ping'], input: z.strictObject({ anything: z.string() }) };
     changed.events['engine.hostState'] = z.strictObject({ anything: z.string() });
     changed.events['deliverables.console'] = z.strictObject({ anything: z.string() });
+    // E10: main's host.status (HostStatus, which gains fields such as waitingLiveSessions) never crosses the socket
+    changed.commands['host.status'] = { ...commands['host.status'], output: z.strictObject({ anything: z.string() }) };
+    changed.events['host.status'] = z.strictObject({ anything: z.string() });
     expect(fingerprintOf(changed, HOST_EVENTS)).toBe(base);
   });
 });

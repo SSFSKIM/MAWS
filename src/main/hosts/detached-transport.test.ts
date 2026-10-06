@@ -11,7 +11,8 @@ import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { SocketPort } from '@shared/host/socket-port';
 import { buildIdOf } from '../../engine-host/supervisor-files';
 import { engineHostSettled } from '../sessions/service-register';
-import { supervisorEnv } from './detached-transport';
+import { supervisorEnv, type DetachedTransportOptions } from './detached-transport';
+import { appIdentity } from './identity';
 
 // supervisor.ts imports electron for its utility transport; these tests run the engine host detached only.
 vi.mock('electron', () => ({ app: { isPackaged: false, getPath: () => '/nonexistent' }, utilityProcess: {}, MessageChannelMain: class {} }));
@@ -83,7 +84,7 @@ afterEach(async () => {
   profile.dispose();
 });
 
-function makeSupervisor(packaged = false, timing: Partial<typeof TIMING> = {}): HostSupervisor {
+function makeSupervisor(packaged = false, timing: Partial<typeof TIMING> = {}, extra: Partial<DetachedTransportOptions> = {}): HostSupervisor {
   const made = createHostSupervisor({
     hosts: { 'engine-host': { modulePath: profile.modulePath, serviceName: 'maws-engine-host', transport: 'detached' } } as Record<HostOwner, HostSpec>,
     emit,
@@ -96,6 +97,7 @@ function makeSupervisor(packaged = false, timing: Partial<typeof TIMING> = {}): 
       ...processes.deps,
       timing: { ...TIMING, ...timing },
       log: (line) => void logs.push(line),
+      ...extra,
     },
   });
   made.onState('engine-host', (state) => void states.push(state));
@@ -106,6 +108,22 @@ async function startFake(options: Partial<FakeSupervisorOptions> = {}): Promise<
   const fake = new FakeSupervisor(profile, processes, { pid: options.pid ?? processes.newPid(), ...options });
   fakes.push(fake);
   return fake.start();
+}
+
+// A supervisor whose host.stopAll answers, then exits as the real one does (the answer first, then the exit order).
+async function startStoppable(options: Partial<FakeSupervisorOptions> = {}) {
+  const asked: number[] = [];
+  const self: FakeSupervisor = await startFake({
+    ...options,
+    register: (on) => {
+      on('host.stopAll', async ({ graceMs }) => {
+        asked.push(graceMs);
+        setImmediate(() => void self.die());
+        return { stopped: 1, forced: 0 };
+      });
+    },
+  });
+  return { fake: self, asked };
 }
 
 const state = () => supervisor.snapshot('engine-host');
@@ -471,8 +489,45 @@ describe('the detached transport: early exits and the crash ladder', () => {
   });
 });
 
-describe('the detached transport: another build or wire (M1: the seam for §6)', () => {
-  it('a refused wire with nothing live: exit now, then a fresh supervisor once the old pid is dead', async () => {
+describe('the detached transport: the build and wire handshake (§Design 6’s table)', () => {
+  const live = (liveSessions: number) => ({ counts: { liveSessions, rows: liveSessions } });
+
+  it('same protocol, wire and build: served, nothing asked of it', async () => {
+    const fake = await startFake(live(2));
+    await supervisor.start();
+    expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
+    await sleep(30);
+    expect(fake.exits).toEqual([]);
+  });
+
+  it('another build, nothing live: exit now, then a fresh supervisor once the old pid is dead, unseen', async () => {
+    const old = await startFake({ buildId: 'older-build' });
+    await supervisor.start();
+    expect(old.exits).toEqual(['now']);
+    expect(processes.alive.has(old.pid)).toBe(false);
+    expect(state()).toMatchObject({ state: 'ready', pid: candidates[0].pid });
+    expect(stateNames()).toEqual(['ready']);
+  });
+
+  it('another build, sessions live: served and asked to exit when idle, once per supervisor process; its exit is deliberate', async () => {
+    const old = await startFake({ buildId: 'older-build', ...live(1) });
+    await supervisor.start();
+    expect(state()).toMatchObject({ state: 'ready', pid: old.pid });
+    await until(() => old.exits.length === 1);
+    expect(old.exits).toEqual(['idle']);
+    old.dropClient(); // a socket error: the same process is reconnected to, and not asked again
+    await until(() => state().state === 'restarting');
+    await until(() => state().state === 'ready');
+    await sleep(30);
+    expect(old.exits).toEqual(['idle']);
+    old.counts = { liveSessions: 0, rows: 1 };
+    await old.die(); // its last live row went idle: it exits, as asked
+    await until(() => state().state === 'ready' && state().pid !== old.pid);
+    expect(state()).toMatchObject({ pid: candidates[0].pid, restarts: 0 });
+    expect(errors.mock.calls.flat().join(' ')).not.toContain('unexpectedly');
+  });
+
+  it('a refused wire with nothing live: exit now on the refused connection, then a fresh supervisor once the old pid is dead', async () => {
     const old = await startFake({ wire: 'other-wire' });
     await supervisor.start();
     expect(old.exits).toEqual(['now']);
@@ -480,66 +535,135 @@ describe('the detached transport: another build or wire (M1: the seam for §6)',
     expect(state()).toMatchObject({ state: 'ready', pid: candidates[0].pid });
   });
 
-  it('a refused wire with sessions live: crashed (waiting), session commands unavailable, retried until it is gone', async () => {
-    const old = await startFake({ wire: 'other-wire', counts: { liveSessions: 2, rows: 2 } });
-    await supervisor.start();
-    expect(state().state).toBe('crashed');
-    await expect(engineHostSettled(supervisor)).resolves.toBeUndefined();
-    await expect(ping()).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
-    expect(old.exits).toEqual([]);
-    const tries = old.connections.length;
-    await until(() => old.connections.length > tries + 1); // asked again every waitRetryMs
-    expect(stateNames()).toEqual(['crashed']);
-    // logged on entry and when the live count changes, not at every retry
-    const waitingLines = () => logs.filter((line) => line.includes('waiting')).length;
-    const waitingErrors = () => errors.mock.calls.flat().join('\n').split('incompatible supervisor').length - 1;
-    expect([waitingLines(), waitingErrors()]).toEqual([1, 1]);
-    old.counts = { liveSessions: 3, rows: 3 };
-    await until(() => waitingLines() === 2);
-    const seen = old.connections.length;
-    await until(() => old.connections.length > seen + 1);
-    expect([waitingLines(), waitingErrors()]).toEqual([2, 2]);
-    expect(logs.filter((line) => line.includes('waiting')).at(-1)).toContain('runs 3 sessions');
-    await old.die();
-    await until(() => state().state === 'ready');
-    expect(state().pid).toBe(candidates[0].pid);
-  });
-
-  it('a welcome from another build with nothing live is replaced at once, unseen', async () => {
-    const old = await startFake({ buildId: 'older-build' });
+  it('a refused protocol with nothing live: the same', async () => {
+    const old = await startFake({ protocol: SOCKET_PROTOCOL + 1 });
     await supervisor.start();
     expect(old.exits).toEqual(['now']);
     expect(state()).toMatchObject({ state: 'ready', pid: candidates[0].pid });
-    expect(stateNames()).toEqual(['ready']);
   });
 
-  it('a welcome from another build with sessions live is served (exit-when-idle and the banner are Task 2.4’s)', async () => {
-    const old = await startFake({ buildId: 'older-build', counts: { liveSessions: 1, rows: 1 } });
+  it('a refused wire with sessions live: exit when idle asked once on a refused connection, waiting (crashed), session commands unavailable, retried until it is gone', async () => {
+    const old = await startFake({ wire: 'other-wire', ...live(2) });
     await supervisor.start();
-    expect(old.exits).toEqual([]);
-    expect(state()).toMatchObject({ state: 'ready', pid: old.pid });
+    expect(state().state).toBe('crashed');
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'wire', waitingLiveSessions: 2 });
+    await expect(engineHostSettled(supervisor)).resolves.toBeUndefined();
+    await expect(ping()).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    await until(() => old.exits.length === 1);
+    const tries = old.connections.length;
+    await until(() => old.connections.length > tries + 1); // asked again every waitRetryMs
+    expect(old.exits).toEqual(['idle']); // once per supervisor process, not at every retry
+    // logged on entry and when the live count changes, not at every retry; the count reaches host.status
+    const waitingLines = () => logs.filter((line) => line.includes('waiting')).length;
+    const waitingErrors = () => errors.mock.calls.flat().join('\n').split('incompatible supervisor').length - 1;
+    expect([waitingLines(), waitingErrors()]).toEqual([1, 1]);
+    old.counts = { liveSessions: 1, rows: 2 };
+    await until(() => waitingLines() === 2);
+    expect(supervisor.facts('engine-host').waitingLiveSessions).toBe(1);
+    const seen = old.connections.length;
+    await until(() => old.connections.length > seen + 1);
+    expect([waitingLines(), waitingErrors()]).toEqual([2, 2]);
+    expect(logs.filter((line) => line.includes('waiting')).at(-1)).toContain('runs 1 sessions');
+    expect(stateNames()).toEqual(['crashed', 'crashed']); // the count changed: host.status is told
+    expect(old.exits).toEqual(['idle']);
+    await old.die(); // its sessions went idle: it exits
+    await until(() => state().state === 'ready');
+    expect(state().pid).toBe(candidates[0].pid);
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: null, refused: null, waitingLiveSessions: null });
+  });
+
+  it('a refused protocol with sessions live: the same wait, and another incompatible process is asked again', async () => {
+    const first = await startFake({ protocol: SOCKET_PROTOCOL + 1, ...live(1) });
+    await supervisor.start();
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'protocol', waitingLiveSessions: 1 });
+    await until(() => first.exits.length === 1);
+    expect(first.exits).toEqual(['idle']);
+    await first.die();
+    const second = await startFake({ protocol: SOCKET_PROTOCOL + 1, ...live(3) });
+    await until(() => second.exits.length === 1);
+    expect(second.exits).toEqual(['idle']);
+    expect(supervisor.facts('engine-host').waitingLiveSessions).toBe(3);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('engineHostSettled answers while waiting when the wait follows a ready host’s restart', async () => {
+    const first = await startFake();
+    await supervisor.start();
+    await first.die({ keepLock: true }); // a crash: restarting, then the attempt finds an incompatible one
+    await until(() => state().state === 'restarting');
+    const settled = engineHostSettled(supervisor);
+    await startFake({ wire: 'other-wire', ...live(2) });
+    await expect(settled).resolves.toBeUndefined();
+    expect(state().state).toBe('crashed');
+    expect(supervisor.facts('engine-host').reason).toBe('incompatible');
+    await expect(ping()).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+  });
+
+  it('host.restart while waiting: exit now on a refused connection, then a fresh supervisor once the old pid is dead, with no crash count', async () => {
+    const old = await startFake({ wire: 'other-wire', ...live(2) });
+    await supervisor.start();
+    expect(state().state).toBe('crashed');
+    await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toEqual({ ok: true, value: undefined });
+    const reply = ping(); // held while it restarts
+    await until(() => state().state === 'ready');
+    await expect(reply).resolves.toMatchObject({ ok: true, value: { pid: candidates[0].pid } });
+    expect(old.exits.at(-1)).toBe('now');
+    expect(processes.alive.has(old.pid)).toBe(false);
+    expect(state()).toMatchObject({ pid: candidates[0].pid, restarts: 0 });
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: null, refused: null, waitingLiveSessions: null, lastExit: null });
+  });
+
+  it('a crash at the limit after a wait reads as no incompatible supervisor', async () => {
+    onSpawn = (candidate) => {
+      candidate.exit(1);
+      // between the second early exit and the next attempt, an incompatible supervisor appears
+      if (candidates.length === 2) void startFake({ wire: 'other-wire', ...live(2) });
+    };
+    await supervisor.start();
+    expect(supervisor.facts('engine-host').reason).toBe('incompatible');
+    await fakes[0].die(); // its sessions ended: the next retry spawns, and that candidate dies early too (the third)
+    await until(() => candidates.length === 3 && state().state === 'crashed' && supervisor.facts('engine-host').reason !== 'incompatible');
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: null, refused: null, waitingLiveSessions: null });
   });
 });
 
+describe('the detached transport: MAWS_E2E_BUILD_ID and MAWS_E2E_WIRE', () => {
+  const withIdentity = (env: NodeJS.ProcessEnv) => {
+    supervisor.stop();
+    supervisor = makeSupervisor(false, {}, { identity: appIdentity(profile.modulePath, { MAWS_E2E: '1', ...env }) });
+  };
+
+  it('a build override makes the running supervisor another build (served, exit when idle); the one main starts after Restart now is its own', async () => {
+    withIdentity({ MAWS_E2E_BUILD_ID: 'stale' });
+    const { fake, asked } = await startStoppable({ counts: { liveSessions: 1, rows: 1 } });
+    await supervisor.start();
+    expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
+    await until(() => fake.exits.length === 1);
+    expect(fake.exits).toEqual(['idle']);
+    await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toEqual({ ok: true, value: undefined });
+    expect(asked).toHaveLength(1);
+    await until(() => state().state === 'ready' && state().pid !== fake.pid);
+    await sleep(50);
+    expect(spawn).toHaveBeenCalledOnce(); // served, not replaced as another build
+    expect(fakes.at(-1)!.exits).toEqual([]);
+  });
+
+  it('a wire override makes the running supervisor incompatible (waiting); after Restart now main serves the one it starts', async () => {
+    withIdentity({ MAWS_E2E_WIRE: 'other' });
+    const old = await startFake({ counts: { liveSessions: 2, rows: 2 } });
+    await supervisor.start();
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'wire', waitingLiveSessions: 2 });
+    expect(old.logs.join('\n')).toContain('refused wire other');
+    await supervisor.restartSupervisor({ stopSessions: false });
+    await until(() => state().state === 'ready');
+    await sleep(50);
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(state().pid).toBe(candidates[0].pid);
+  });
+});
 
 // E10 Task 2.3b: what main asks of the supervisor (Stop all, Restart now, the quit's stop-all), told apart from a crash.
 describe('the detached transport: deliberate stops, restarts and the quit', () => {
-  // A supervisor whose host.stopAll answers, then exits as the real one does (the answer first, then the exit order).
-  async function startStoppable(options: Partial<FakeSupervisorOptions> = {}) {
-    const asked: number[] = [];
-    const self: FakeSupervisor = await startFake({
-      ...options,
-      register: (on) => {
-        on('host.stopAll', async ({ graceMs }) => {
-          asked.push(graceMs);
-          setImmediate(() => void self.die());
-          return { stopped: 1, forced: 0 };
-        });
-      },
-    });
-    return { fake: self, asked };
-  }
-
   it('Stop all (restart with stopSessions): host.stopAll, then a fresh supervisor once the old pid is dead, with no crash count', async () => {
     const { fake, asked } = await startStoppable({ counts: { liveSessions: 2, rows: 2 } });
     await supervisor.start();
@@ -649,6 +773,39 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
     await until(() => state().state === 'ready');
     expect(state()).toMatchObject({ pid: candidates[0].pid });
     expect(supervisor.facts('engine-host').reason).toBeNull();
+  });
+
+  it('host.restart while starting answers ok and does nothing: the attempt under way reaches the supervisor', async () => {
+    onSpawn = (candidate) => void sleep(100).then(() => startFake({ pid: candidate.pid! }));
+    void supervisor.start();
+    await until(() => spawn.mock.calls.length === 1);
+    expect(state().state).toBe('starting');
+    await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toEqual({ ok: true, value: undefined });
+    await until(() => state().state === 'ready');
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(state()).toMatchObject({ pid: candidates[0].pid, restarts: 0 });
+    expect(stateNames()).toEqual(['ready']);
+  });
+
+  it('host.restart while restarting answers ok and does nothing: the reconnect under way reaches the same supervisor', async () => {
+    const fake = await startFake();
+    await supervisor.start();
+    fake.dropClient();
+    await until(() => state().state === 'restarting');
+    await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toEqual({ ok: true, value: undefined });
+    await until(() => state().state === 'ready');
+    await sleep(30);
+    expect(state()).toMatchObject({ pid: fake.pid, restarts: 0 });
+    expect(fake.exits).toEqual([]);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('killHeldSupervisor refuses the supervisor it serves', async () => {
+    const fake = await startFake();
+    await supervisor.start();
+    await expect(supervisor.killHeldSupervisor()).resolves.toBe(false);
+    expect(processes.kills).toEqual([]);
+    expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
   });
 
   it('killHeldSupervisor leaves a pid whose start time no longer matches the lock’s (a reused pid)', async () => {
