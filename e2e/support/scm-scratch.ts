@@ -45,7 +45,7 @@ export interface ScmScratch {
   gh(name: string, content: string | null): void; // writes (or, with null, removes) one of the fake's files under gh/
   createLog(): string[]; // the arguments of every `gh pr create`, one per line
   writeHook(script: string): void; // replaces the pre-commit hook's body (after its shebang)
-  slowGit(): void; // `bin/git`: says it waits, sleeps 3 s, then execs the real git (the reload case only)
+  slowGit(): void; // `bin/git`: a push says it waits and sleeps 3 s; every call then execs the real git (the reload case only)
   cleanup(): void;
 }
 
@@ -195,7 +195,21 @@ function buildIn(root: string): ScmScratch {
     writeHook,
     slowGit: () => {
       const wrapper = join(bin, 'git');
-      writeFileSync(wrapper, `#!/bin/sh\necho "slow git: waiting 3 s" >&2\nsleep 3\nexec ${sh(realGit())} "$@"\n`);
+      // Only a push waits: a plan's own reads (`remote`, `for-each-ref`, `get-url`) run through the same git and go at
+      // once. The subcommand is the first word that is not an option (`-C <dir>` and `-c <key=value>` take a value).
+      const script = [
+        '#!/bin/sh',
+        'sub=; skip=',
+        'for arg in "$@"; do',
+        '  if [ -n "$skip" ]; then skip=; continue; fi',
+        '  case "$arg" in -C|-c) skip=1; continue ;; -*) continue ;; esac',
+        '  sub=$arg; break',
+        'done',
+        'if [ "$sub" = push ]; then echo "slow git: waiting 3 s" >&2; sleep 3; fi',
+        `exec ${sh(realGit())} "$@"`,
+        '',
+      ].join('\n');
+      writeFileSync(wrapper, script);
       chmodSync(wrapper, 0o755);
     },
     cleanup: () => {
