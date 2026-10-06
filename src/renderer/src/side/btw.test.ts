@@ -10,7 +10,6 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SideExchange } from '@shared/side/question';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { A, B, panelOf, resetPanelStores } from '../test-support/panel';

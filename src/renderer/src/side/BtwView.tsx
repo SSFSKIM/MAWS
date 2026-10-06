@@ -26,12 +26,14 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
   const [question, setQuestion] = useState('');
   const [promoting, setPromoting] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
-  const end = useRef<HTMLDivElement>(null);
+  const log = useRef<HTMLDivElement>(null);
 
   useEffect(() => void refreshSide(parent), [parent, process]);
   const shown = (exchanges ?? []).slice(-SHOWN);
   const last = shown.at(-1);
-  useEffect(() => end.current?.scrollIntoView?.({ block: 'end' }), [shown.length, last?.state]);
+  useEffect(() => {
+    if (log.current) log.current.scrollTop = log.current.scrollHeight; // the newest exchange in view
+  }, [shown.length, last?.state]);
 
   const ask = () => {
     const q = question.trim();
@@ -58,7 +60,7 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
 
   return (
     <div data-side-btw-view={parent} className="flex h-full min-h-0 flex-col">
-      <div role="log" aria-label={COPY.log} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <div ref={log} role="log" aria-label={COPY.log} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {shown.length === 0 ? (
           <p className="m-0 mx-auto mt-6 max-w-[280px] text-center text-ui text-fg-muted">{COPY.empty}</p>
         ) : (
@@ -68,7 +70,6 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
             ))}
           </ol>
         )}
-        <div ref={end} />
       </div>
       <div className="flex shrink-0 flex-col gap-2 border-t border-border px-3 py-2.5">
         {!ready && <p className="m-0 text-ui-sm text-fg-muted">{COPY.notRunning}</p>}
