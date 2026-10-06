@@ -13,6 +13,7 @@ import { inWorkArea } from '../motion';
 import { AgentMessageRow } from './AgentMessage';
 import { AskCapsule } from './AskCapsule'; // E1
 import { DeliveryRowView } from './Delivery'; // E1
+import { SideThreadRow } from './SideThread'; // E3
 import { FoldedAssistantProbes, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
@@ -49,6 +50,7 @@ function body(row: Row) {
     case 'ask': return <AskCapsule row={row} />;
     case 'delivery': return <DeliveryRowView row={row} />;
     // E1 end
+    case 'side_thread': return <SideThreadRow row={row} />; // E3
   }
 }
 

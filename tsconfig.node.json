@@ -22,7 +22,12 @@
     // C8b start: test/support/agents-fixtures.test.ts checks the derived fixtures' tails through the agent tools' pure
     // models (applyTaskEvents, matchesSendMessage, phasesOf) and their copy; listed for the same reason as C8a's
     "src/renderer/src/tools/agents/model/*.ts",
-    "src/renderer/src/tools/agents/copy.ts"
+    "src/renderer/src/tools/agents/copy.ts",
     // C8b end
+    // E3 start: the transcript model's export words the side-thread row through E3's copy, which takes the composer's
+    // own "next step" wording; listed for the same reason as C8a's
+    "src/renderer/src/side/copy.ts",
+    "src/renderer/src/composer/submit/submit-state.ts"
+    // E3 end
   ]
 }

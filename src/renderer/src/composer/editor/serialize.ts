@@ -75,6 +75,17 @@ function modeOfPieces(pieces: Piece[], paragraphs: number, attachments: number):
   return 'send';
 }
 
+// E3 start: the document's text as the person wrote it, pasted text in place and unframed (no `<pasted_content>` tags),
+// mentions as their text, attachments and unavailable atoms left out: what a `/btw` question asks (E3 execution
+// document, Design §7), which the engine receives as a question, never as a prompt.
+export function plainTextOf(doc: JSONContent): string {
+  const { pieces } = piecesOf(doc);
+  return trimTrailing(pieces)
+    .map((p) => (p.kind === 'text' ? p.typed : p.kind === 'mention' ? p.text : p.attrs.kind === 'text' ? (p.attrs.text ?? '') : ''))
+    .join('');
+}
+// E3 end
+
 // The mode alone (the editor's decoration reads it on every change).
 export function modeOf(doc: JSONContent): Serialized['mode'] {
   const { pieces, paragraphs } = piecesOf(doc);

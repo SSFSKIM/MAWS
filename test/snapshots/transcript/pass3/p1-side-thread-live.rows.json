@@ -1,0 +1,226 @@
+[
+  {
+    "at": "2026-10-06T11:03:50.456Z",
+    "id": "time:turn:f3ae79a6-a101-45ee-8ce9-5f12f93aa4b0",
+    "kind": "time",
+    "label": "Oct 6, 2026 11:03 AM",
+    "turnId": "turn:f3ae79a6-a101-45ee-8ce9-5f12f93aa4b0"
+  },
+  {
+    "at": "2026-10-06T11:03:50.456Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:f3ae79a6-a101-45ee-8ce9-5f12f93aa4b0",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "f3ae79a6-a101-45ee-8ce9-5f12f93aa4b0",
+    "placeholders": [],
+    "steer": false,
+    "text": "Remember the word ZEBRA. Reply with exactly OK.",
+    "turnId": "turn:f3ae79a6-a101-45ee-8ce9-5f12f93aa4b0"
+  },
+  {
+    "at": "2026-10-06T11:03:51.578Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfksYoQVGReKQLPt5Bkhj:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "7d495455-d2fe-4c7c-8029-0f264dbda867",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:f3ae79a6-a101-45ee-8ce9-5f12f93aa4b0"
+  },
+  {
+    "at": "2026-10-06T11:03:51.603Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:f0f8bab2-dd91-4659-842b-beee9d2c28ed",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "f0f8bab2-dd91-4659-842b-beee9d2c28ed",
+    "placeholders": [],
+    "steer": false,
+    "text": "Run exactly this bash command and nothing else: sleep 20; echo SLEPT_OK. When it finishes, reply with the command output.",
+    "turnId": "turn:f0f8bab2-dd91-4659-842b-beee9d2c28ed"
+  },
+  {
+    "at": "2026-10-06T11:03:51.603Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-06T11:04:19.123Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:f0f8bab2-dd91-4659-842b-beee9d2c28ed",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-06T11:03:51.605Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 1,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.024737,
+      "denials": [],
+      "durationMs": 27518,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 2,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 2,
+      "usage": {
+        "cacheCreationInputTokens": 964,
+        "cacheReadInputTokens": 66513,
+        "inputTokens": 28,
+        "outputTokens": 514,
+        "thinkingTokens": 268
+      }
+    },
+    "toolCalls": 2,
+    "turnId": "turn:f0f8bab2-dd91-4659-842b-beee9d2c28ed"
+  },
+  {
+    "agent": null,
+    "at": "2026-10-06T11:03:53.318Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": "blhbokmim",
+      "command": "sleep 20; echo SLEPT_OK",
+      "cwd": null,
+      "description": "Sleep for 20 seconds then echo SLEPT_OK",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "SLEPT_OK",
+      "truncated": null
+    },
+    "endedAt": "2026-10-06T11:04:14.563Z",
+    "expanded": true,
+    "id": "cell:toolu_016MkCYYFxXyX5y9KG3eVxcq",
+    "kind": "cell",
+    "label": "Ran `sleep 20; echo SLEPT_OK` in 21s",
+    "paths": [],
+    "startedAt": "2026-10-06T11:03:53.318Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_016MkCYYFxXyX5y9KG3eVxcq",
+    "turnId": "turn:f0f8bab2-dd91-4659-842b-beee9d2c28ed"
+  },
+  {
+    "anchor": {
+      "kind": "file-line",
+      "label": "probe.txt:1",
+      "line": 1,
+      "locator": "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt#L1",
+      "path": "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt"
+    },
+    "at": "2026-10-06T11:03:57.322Z",
+    "attachments": [
+      {
+        "bytes": 73,
+        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==",
+        "kind": "image",
+        "mediaType": "image/png",
+        "name": "Image 1",
+        "text": null
+      }
+    ],
+    "dropped": false,
+    "editable": true,
+    "id": "user:2aad8c48-5d8d-4cf5-971c-5870b3509fc6",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "2aad8c48-5d8d-4cf5-971c-5870b3509fc6",
+    "placeholders": [],
+    "steer": true,
+    "text": "When the command has finished, end your reply with the word I asked you to remember.",
+    "turnId": "turn:f0f8bab2-dd91-4659-842b-beee9d2c28ed"
+  },
+  {
+    "agent": null,
+    "at": "2026-10-06T11:04:17.203Z",
+    "category": "exploration",
+    "classification": {
+      "category": "exploration",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "files": [
+        {
+          "path": "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt",
+          "range": null
+        }
+      ],
+      "kind": "read",
+      "preview": "1\tthe line this comment is about\n2\t",
+      "truncated": null
+    },
+    "endedAt": "2026-10-06T11:04:17.213Z",
+    "expanded": true,
+    "id": "cell:toolu_01G9njnN9MJQMtX7SWcRafFE",
+    "kind": "cell",
+    "label": "Read /private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt",
+    "paths": [
+      "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt"
+    ],
+    "startedAt": "2026-10-06T11:04:17.203Z",
+    "status": "done",
+    "toolName": "Read",
+    "toolUseId": "toolu_01G9njnN9MJQMtX7SWcRafFE",
+    "turnId": "turn:f0f8bab2-dd91-4659-842b-beee9d2c28ed"
+  },
+  {
+    "at": "2026-10-06T11:04:18.607Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfksamJnxr94B7LsRemcj:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The command has finished. Here's the output:\n\n```\nSLEPT_OK\n```\n\nRegarding probe.txt:1 — this line reads \"the line this comment is about\", which is a meta-reference to itself describing its own purpose.\n\nZEBRA",
+    "messageUuid": "f09b6a4b-56fa-4bac-b24c-9fe2d1dd5e90",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:f0f8bab2-dd91-4659-842b-beee9d2c28ed"
+  },
+  {
+    "at": "2026-10-06T11:04:19.322Z",
+    "attempt": null,
+    "id": "error:replay:journal:155:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

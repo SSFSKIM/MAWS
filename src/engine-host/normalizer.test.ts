@@ -493,6 +493,7 @@ describe('normaliser: meta rows, system subtypes and the unknown', () => {
       sys('thinking_tokens', { estimated_tokens: 1, estimated_tokens_delta: 1 }),
       sys('elicitation_complete', { mcp_server_name: 's', elicitation_id: 'e' }),
       sys('local_command_output', { content: 'Set model to haiku' }), // table: journaled, no event
+      sys('control_request_progress', { request_id: 'r-1', status: 'started' }), // E3: journaled, no event
       sys('turn_starting', {}),
       inRow({ type: 'command_lifecycle', command_uuid: 'u-1', state: 'queued' }),
       inRow({ type: 'tool_progress', tool_use_id: 'toolu_1', tool_name: 'Bash', elapsed_time_seconds: 2.5 }),

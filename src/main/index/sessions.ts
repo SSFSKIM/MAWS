@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { AppSessionId, MessageUuid, ProjectId, SessionId } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
+import type { Lineage, SessionRecord } from '@shared/graph/session';
 import { branchName } from '@shared/sessions/branch';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { Db, Value } from './db';
@@ -68,6 +68,11 @@ interface SessionRow {
   kind: 'engine' | 'replay';
   created_at: string;
   updated_at: string;
+  // E3 (migration 4): X11 lineage as JSON and where it came from; the transcript's root uuid and birth time (A-16)
+  lineage: string | null;
+  lineage_source: 'intent' | 'disk' | null;
+  root_uuid: string | null;
+  transcript_birthtime_ms: number | null;
 }
 
 export interface LaunchInit {
@@ -81,6 +86,9 @@ export interface LaunchInit {
   // W11 (I1): the first message as the composer displays it, seeding `first_prompt` so the row has a title before the
   // transcript's first summary (which overwrites it); null for a launch without one (a fork without a message)
   firstPrompt?: string | null;
+  // E3 (X11): the lineage the launch's intent carries (a side thread's, C10's Fork's), kept as `intent` and never
+  // recomputed by the disk rule; absent or null for a root session
+  lineage?: Lineage | null;
 }
 
 // What the engine host needs to know of a record's engine id: bound (fs.scan's `known` when a transcript is on disk).
@@ -169,6 +177,7 @@ function toRecord(row: SessionRow): SessionRecord {
       effective: row.pm_effective as SessionRecord['permissionMode']['effective'],
       refusal: row.pm_refusal as SessionRecord['permissionMode']['refusal'],
     },
+    lineage: row.lineage === null ? null : (JSON.parse(row.lineage) as Lineage), // E3 (X11)
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -241,6 +250,10 @@ export class SessionStore {
       // the previous summary: a branch the engine stopped naming (a non-repository's `HEAD`, a detached checkout) must not
       // outlive it, and migration 3 cleared the `HEAD` an earlier summary stored.
       const branch = branchName(summary.gitBranch);
+      // E3: a summary stored before migration 4 (re-upserted unvalidated by a rebind) has no root fields. Its mtime is
+      // stored as -1, as migration 4 does, so the next scan reads it again and fills them while the row stays in `known`
+      // and a removal is still seen.
+      const preV4 = summary.birthtimeMs === undefined;
       const facts: Record<string, Value> = {
         project_id: projectId,
         directory: location.realpath ?? summary.relocatedCwd ?? summary.directory ?? existing?.directory ?? '',
@@ -254,11 +267,13 @@ export class SessionStore {
         engine_version: summary.engineVersion ?? existing?.engine_version ?? null,
         transcript_path: summary.transcriptPath,
         transcript_size: summary.size,
-        transcript_mtime_ms: summary.mtimeMs,
+        transcript_mtime_ms: preV4 ? -1 : summary.mtimeMs,
         first_record_at: summary.firstRecordAt,
         last_record_at: summary.lastRecordAt,
         last_assistant_text: summary.lastAssistantText,
         summary: JSON.stringify(summary),
+        root_uuid: summary.rootUuid ?? null, // E3 (A-16)
+        transcript_birthtime_ms: summary.birthtimeMs ?? null, // E3
       };
 
       if (!existing) {
@@ -268,6 +283,7 @@ export class SessionStore {
         this.changed(appId, 'discovered');
         this.bindingChanged(appId);
         if (projectId !== null) this.projects.sessionPresenceChanged();
+        this.refoldFamilyOf(this.row(appId)); // E3
         return { record: this.require(appId), created: true, advanced: false };
       }
 
@@ -285,7 +301,9 @@ export class SessionStore {
       const advanced = existing.last_record_at !== null && summary.lastRecordAt !== null && summary.lastRecordAt > existing.last_record_at;
       const appId = existing.app_id as AppSessionId;
       if ((projectId !== null && existing.transcript_path === null) || existing.project_id !== projectId) this.projects.sessionPresenceChanged();
+      const family = familyKey(existing); // E3: the family it was in, before the write
       if (this.write(existing, facts)) this.changed(appId, 'facts');
+      this.refoldFamilyOf(existing, family); // E3
       return { record: this.require(appId), created: false, advanced };
     });
   }
@@ -354,6 +372,7 @@ export class SessionStore {
         pm_effective: init.permissionMode.effective,
         pm_refusal: init.permissionMode.refusal,
         first_prompt: init.firstPrompt ?? null,
+        ...(init.lineage ? { lineage: JSON.stringify(init.lineage), lineage_source: 'intent' } : {}), // E3 (X11)
         created_at: now,
         updated_at: now,
       });
@@ -561,10 +580,17 @@ export class SessionStore {
       first_prompt: null,
       last_assistant_text: null,
       last_record_at: null,
+      // E3: the disk signal and what the disk rule read from it belong to the old transcript too; a lineage from the
+      // launch's intent is the app session's and stays
+      root_uuid: null,
+      transcript_birthtime_ms: null,
+      ...(existing.lineage_source === 'disk' ? { lineage: null, lineage_source: null } : {}),
     };
+    const family = familyKey(existing); // E3
     this.write(existing, { engine_session_id: sessionId, ...(rebinding ? forgotten : {}) });
     this.changed(existing.app_id as AppSessionId, cause);
     this.bindingChanged(existing.app_id as AppSessionId);
+    if (rebinding && family !== null) this.refoldFamily(family); // E3: the old transcript left its family
     if (previous !== null) this.upsertFromSummary(previous);
     if (other?.summary) this.upsertFromSummary(JSON.parse(other.summary) as TranscriptSummary);
   }
@@ -580,12 +606,46 @@ export class SessionStore {
   }
 
   private deleteRow(existing: SessionRecord): void {
+    const row = this.db.get<SessionRow>('SELECT * FROM sessions WHERE app_id = ?', existing.appId);
     this.db.run('DELETE FROM sessions WHERE app_id = ?', existing.appId);
     if (existing.projectId !== null) this.projects.sessionPresenceChanged();
     this.removed.set(existing.appId, existing);
     this.changed(existing.appId, 'removed');
     this.bindingChanged(existing.appId);
+    const family = row === null ? null : familyKey(row); // E3: its forks are re-read against the members left
+    if (family !== null) this.refoldFamily(family);
   }
+
+  // E3 start: the disk rule (A-16; E3 execution document, Design §4). After a member's write: its family is
+  // recomputed, and the one it left (a root or project that moved) too; a member in no family any more loses a lineage
+  // the rule gave it.
+  private refoldFamilyOf(row: SessionRow, before: FamilyKey | null = null): void {
+    const now = familyKey(row);
+    if (before !== null && (now === null || !sameFamily(before, now))) this.refoldFamily(before);
+    if (now !== null) this.refoldFamily(now);
+    else if (row.lineage_source === 'disk' && this.write(row, { lineage: null, lineage_source: null })) this.changed(row.app_id as AppSessionId, 'facts');
+  }
+
+  // A family is every session in one project (with no project: one directory) whose transcript has this root uuid.
+  // Its original is the earliest-born member (ties by creation, then by insertion); every other member whose lineage is null or the
+  // rule's own is a fork of the original, and the original holds no lineage of the rule's. A lineage from a launch's
+  // intent is never touched. Recomputed whole each time, so the reading does not depend on discovery's order.
+  private refoldFamily(family: FamilyKey): void {
+    const members =
+      family.projectId !== null
+        ? this.db.all<FamilyRow>('SELECT rowid AS row_order, * FROM sessions WHERE project_id = ? AND root_uuid = ? AND transcript_birthtime_ms IS NOT NULL', family.projectId, family.rootUuid)
+        : this.db.all<FamilyRow>('SELECT rowid AS row_order, * FROM sessions WHERE project_id IS NULL AND directory = ? AND root_uuid = ? AND transcript_birthtime_ms IS NOT NULL', family.directory, family.rootUuid);
+    if (members.length === 0) return;
+    const original = members.reduce((first, row) => (bornBefore(row, first) ? row : first));
+    for (const row of members) {
+      if (row.lineage_source === 'intent') continue;
+      const lineage: Lineage | null =
+        row === original ? null : { kind: 'fork', parentAppSessionId: original.app_id as AppSessionId, parentEngineSessionId: original.engine_session_id as SessionId | null, openedBy: 'fork' };
+      const values: Record<string, Value> = lineage === null ? { lineage: null, lineage_source: null } : { lineage: JSON.stringify(lineage), lineage_source: 'disk' };
+      if (this.write(row, values)) this.changed(row.app_id as AppSessionId, 'facts');
+    }
+  }
+  // E3 end
 
   // Writes the columns that differ from the row (and `updated_at` with them); answers whether anything changed.
   private write(existing: SessionRow, values: Record<string, Value>): boolean {
@@ -631,6 +691,28 @@ export class SessionStore {
       for (const listener of this.bindingListeners) listener(change);
     });
   }
+}
+
+// E3: the disk rule's grouping of a row (null: no root uuid, so no family) and its order (A-16).
+interface FamilyKey {
+  projectId: string | null;
+  directory: string;
+  rootUuid: string;
+}
+
+function familyKey(row: SessionRow): FamilyKey | null {
+  return row.root_uuid === null || row.transcript_birthtime_ms === null ? null : { projectId: row.project_id, directory: row.directory, rootUuid: row.root_uuid };
+}
+
+function sameFamily(a: FamilyKey, b: FamilyKey): boolean {
+  return a.rootUuid === b.rootUuid && a.projectId === b.projectId && (a.projectId !== null || a.directory === b.directory);
+}
+
+type FamilyRow = SessionRow & { row_order: number }; // rowid: the insertion order, for creations within one millisecond
+
+function bornBefore(a: FamilyRow, b: FamilyRow): boolean {
+  const [x, y] = [a.transcript_birthtime_ms!, b.transcript_birthtime_ms!];
+  return x !== y ? x < y : a.created_at !== b.created_at ? a.created_at < b.created_at : a.row_order < b.row_order;
 }
 
 // W7: MAWS's own holder with the foreign one it shares the session with, if any (charter §4.3 as amended 2026-10-01).

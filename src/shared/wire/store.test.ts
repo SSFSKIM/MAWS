@@ -108,6 +108,7 @@ describe('store record schemas accept the owner\'s shapes', () => {
       directory: '/p', relocatedCwd: null, size: 10, mtimeMs: 1,
       firstRecordAt: null, lastRecordAt: null, customTitle: null, aiTitle: null, firstPrompt: null, lastAssistantText: null,
       gitBranch: null, engineVersion: null, entrypoint: null, sessionKind: null, hasMessages: false, leafUuid: null,
+      rootUuid: null, birthtimeMs: 0, // E3
     };
     expect(TranscriptSummarySchema.parse(summary)).toEqual(summary);
     expect(TranscriptSummarySchema.safeParse({ ...summary, extra: 1 }).success).toBe(false);

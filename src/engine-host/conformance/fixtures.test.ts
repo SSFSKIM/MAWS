@@ -13,10 +13,8 @@ import { replayFixture, type ConformanceRun } from './harness';
 // an event or to a "none" row of the table, and a new subtype in a future recording fails here, never silently.
 // (R0 admitted the remote-surface pushes here on 2026-10-01; R1 maps them to `plugin.*`.)
 // E0a (P1 spec §9, spikes/protocol-probe/findings-pass3-p1-extension.txt) admitted two frames the way R0 did; E1 maps
-// the SDK MCP round trip (`control_request/mcp_message`), and E3 will map the side question's progress frame:
-const UNKNOWN_ALLOWLIST: ReadonlySet<string> = new Set([
-  'system/control_request_progress', // pass3/p1-side-question-session: `{request_id, status: 'started'}` ahead of a side_question answer (E3 maps it)
-]);
+// the SDK MCP round trip (`control_request/mcp_message`), and E3 maps the side question's progress frame (`none`).
+const UNKNOWN_ALLOWLIST: ReadonlySet<string> = new Set([]);
 
 // Outbound requests the probe issued that the engine refused, or that the recording ended before answering.
 const EXPECTED_REQUEST_FAILURES: Record<string, { subtype: string; code: string }[]> = {
@@ -25,17 +23,14 @@ const EXPECTED_REQUEST_FAILURES: Record<string, { subtype: string; code: string 
   'pass2/auto-unrouted': [{ subtype: 'set_permission_mode', code: 'auto_mode_model' }],
   'pass2/resume-live-bg': [{ subtype: 'initialize', code: 'exited' }], // the engine refused the resume on stderr and exited 1 before answering
   'pass3/mods-gate-served-off': [{ subtype: 'ui_render', code: 'unknown' }], // R0: with the rollout served off, 2.1.287 answers "Unsupported control request subtype: ui_render" with no error code
-  // E0a: 2.1.290 answers side_question `{response, synthetic}` where the typed schema expects `{text}` (E3 corrects the
-  // schema); a bad-typed fork_conversation is refused with "fork_conversation: title must be a string"
-  'pass3/p1-side-question-session': [{ subtype: 'side_question', code: 'invalid_response' }, { subtype: 'side_question', code: 'invalid_response' }, { subtype: 'side_question', code: 'invalid_response' }],
+  // E0a: a bad-typed fork_conversation is refused with "fork_conversation: title must be a string" (E3 corrected the
+  // side_question schema to the `{response, synthetic}` 2.1.290 answers, so its three answers parse)
   'pass3/p1-fork-start': [{ subtype: 'fork_conversation', code: 'unknown' }],
 };
 
 // The control client's warnings a fixture is expected to raise (the same schema failures as above, worded by the client;
 // request ids are the harness's, minted in order).
-const EXPECTED_CLIENT_WARNINGS: Record<string, string[]> = {
-  'pass3/p1-side-question-session': [2, 3, 4].map((n) => `side_question REPLAY01-${n}: response failed its schema at text`),
-};
+const EXPECTED_CLIENT_WARNINGS: Record<string, string[]> = {};
 
 const runs = new Map<string, Promise<ConformanceRun>>();
 function run(pass: FixturePass, name: string): Promise<ConformanceRun> {
@@ -88,7 +83,9 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const e8 = ['e8-plugins-reload', 'e8-plugins-reload-settle']; // E8 (P1): reload_plugins and reload_skills on 2.1.290 around CLI writes under a scratch home, immediately and after a settle
     // E1 M2: the maws tool server recorded live through MAWS's own host (send_file, a blocking and an async ask, show_pane)
     const e1 = ['p1-maws-ask-async', 'p1-maws-ask-blocking', 'p1-maws-send-file', 'p1-maws-show-pane'];
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1].sort());
+    // E3 M0: a side thread forked while the parent's turn runs, an [image, text] `next` steer, and the thread resumed by its id (2.1.291)
+    const e3 = ['p1-side-thread-live', 'p1-side-thread-live-fork', 'p1-side-thread-live-resume'];
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -603,7 +600,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'compact_boundary', // W1: pass3/compact
       'ui_log', 'ui_status', 'ui_toast', 'ui_invalidate', // R0: pass3/mods-* on 2.1.287, the remote-surface pushes (R1 maps them to plugin.*)
       'ui_panes', 'ui_scroll', 'ui_focus', // R2: pass3/mods-surface-*, the attached surface's pushes
-      'control_request_progress', // E0a: pass3/p1-side-question-session, the side question's `started` progress
+      'control_request_progress', // E0a: pass3/p1-side-question-session, the side question's `started` progress (E3: journaled, no event)
     ].sort());
   });
 
@@ -624,7 +621,6 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'boundary.compaction', // W1: pass3/compact seq 43
       'plugin.log', 'plugin.status', 'plugin.toast', 'plugin.invalidate', // R1: pass3/mods-* (no fixture carries a plugin load error or warning)
       'plugin.panes', 'plugin.scroll', 'plugin.focus', 'plugin.ask', // R2: pass3/mods-surface-*
-      'frame.unknown', // E0a: the allowlisted frame above (pass3/p1-side-question-session) until E3 maps it (E1 mapped pass3/p1-sdk-mcp-roundtrip's)
       // E1 M2: pass3/p1-maws-* (every recorded ask is answered before the stop, so no fixture yields maws.ask.cancelled;
       // session-maws.test.ts pins it over a scripted session)
       'maws.ask.opened', 'maws.ask.answered', 'maws.delivery.file', 'maws.pane.shown',
@@ -864,5 +860,22 @@ describe('normaliser: the maws tools recorded live (E1 M2, pass3/p1-maws-*)', ()
     const refused = ofKind(events, 'tool.result').find((e) => e.toolUseId === nope.toolUseId)!;
     expect(refused.isError).toBe(true);
     expect(text(refused.content)).toContain(TOOL_ERRORS.unknownPane('nope'));
+  });
+});
+
+// E3 (E3 execution document, M1): the side question's wire as 2.1.290 answered it, idle, with history, and mid-turn.
+describe('normaliser: side questions (E3, pass3/p1-side-question-session)', () => {
+  it('parses the three answers as `{response, synthetic}`, sends history as recorded, and maps the progress frame to no event', async () => {
+    const { events, requests } = await run('pass3', 'p1-side-question-session');
+    const asked = requests.filter((r) => r.subtype === 'side_question');
+    expect(asked.map((r) => [r.seq, r.ok, r.response])).toEqual([
+      [88, true, { response: 'ZEBRA', synthetic: false }],
+      [95, true, { response: 'zebra', synthetic: false }],
+      [128, true, { response: 'ZEBRA', synthetic: false }],
+    ]);
+    const history = loadJournal('pass3', 'p1-side-question-session').find((row) => row.seq === 95)!.frame as { request: { history: unknown } };
+    expect(history.request.history).toEqual([{ question: 'What word did I ask you to remember? Answer with just the word.', response: 'ZEBRA' }]);
+    expect(ofKind(events, 'frame.unknown')).toEqual([]);
+    expect(events.filter((e) => e.seq === 91 || e.seq === 96 || e.seq === 129)).toEqual([]); // the three `control_request_progress` rows
   });
 });

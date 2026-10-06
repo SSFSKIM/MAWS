@@ -40,6 +40,7 @@ vi.mock('../window-state', () => ({ restoreWindowState: vi.fn(), trackWindowStat
 vi.mock('../lifecycle/quit-guard', () => ({ installQuitGuard: () => ({}), askToQuit: vi.fn(), listProcesses: vi.fn(), trackUnsavedFiles: () => ({}) /* E5 */ }));
 vi.mock('../sessions', () => ({ startSessions: () => ({ model: state.model, stop: vi.fn() }) }));
 vi.mock('./yield', () => ({ startYield: () => vi.fn() }));
+vi.mock('../side/side-threads', () => ({ startSideThreads: () => vi.fn(), sideThreadEvents: () => [] })); // E3
 vi.mock('./service', () => ({ SessionService: class { constructor(deps: SessionServiceDeps) { state.deps = deps; } async start() { await state.deps!.intents.load(); } } }));
 vi.mock('./service-register', () => ({ registerSessionServiceHandlers: vi.fn(), engineHostSettled: vi.fn() }));
 vi.mock('../files/register', () => ({ registerFilesHandlers: () => ({ dispose: vi.fn() }) }));

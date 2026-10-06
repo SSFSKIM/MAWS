@@ -16,7 +16,7 @@ const SESSION_KINDS = ['bg', 'daemon', 'daemon-worker'] as const;
 export function summarize(
   head: Buffer,
   tail: Buffer,
-  stat: { size: number; mtimeMs: number },
+  stat: { size: number; mtimeMs: number; birthtimeMs: number }, // E3: `birthtimeMs` is APFS's birth time (0 where the filesystem has none)
   path: string,
   slug: string,
   sidecarTitle: string | null = null, // `custom-title.json`'s `customTitle`, which discovery reads beside the transcript (M2)
@@ -29,6 +29,9 @@ export function summarize(
   const headReversed = [...headRecords].reverse();
 
   const firstUuid = headRecords.find(isUuidRecord) ?? tailRecords.find(isUuidRecord) ?? null;
+  // E3 (A-16): the conversation's root, which a `--fork-session` copy repeats under its own session id. A parsed head
+  // record only: a cut fragment carries no `parentUuid` to tell a root by.
+  const root = headRecords.find((r) => isUuidRecord(r) && r.parentUuid === null) ?? null;
   const lastUuid = tailReversed.find(isUuidRecord) ?? headReversed.find(isUuidRecord) ?? null;
   const leaf = tailReversed.find((r) => isUuidRecord(r) && r.type !== 'progress') ?? headReversed.find((r) => isUuidRecord(r) && r.type !== 'progress') ?? null;
   const lastAssistant = tailReversed.map(assistantText).find((text) => text !== null) ?? headReversed.map(assistantText).find((text) => text !== null) ?? null;
@@ -62,6 +65,8 @@ export function summarize(
     sessionKind,
     hasMessages: headText.includes('"parentUuid":') || tailText.includes('"parentUuid":'),
     leafUuid: (leaf?.uuid as MessageUuid | undefined) ?? null,
+    rootUuid: (root?.uuid as MessageUuid | undefined) ?? null, // E3
+    birthtimeMs: stat.birthtimeMs, // E3
   };
 }
 

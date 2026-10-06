@@ -90,17 +90,18 @@ export const lastResult=p=>p.frames.filter(r=>r.frame.type==='result').at(-1)?.f
 export const resultSummary=r=>r?{subtype:r.subtype,is_error:r.is_error,num_turns:r.num_turns,total_cost_usd:r.total_cost_usd,terminal_reason:r.terminal_reason??null}:null;
 
 // One launch as MAWS launches, with `vars` added to the environment and `flags` after MAWS's; the body gets the probe.
+// `pinned: false` (E3 M0) omits `--session-id`, as MAWS does for a plain `--resume` (launch.ts: the resumed id is kept).
 // Handlers answer every engine→host request the protocol can send besides the ones a scenario registers itself, so a
 // recording never leaves one open. Throws when the scenario body failed, the engine exited non-zero or the owner-file
 // delta is not empty.
-export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[],debugFile=run.debugFile}={},body){
+export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[],debugFile=run.debugFile,pinned=true}={},body){
  const env=engineEnv(run.home,vars);
  const {configHome,globalConfig}=assertScratch(env);
  await relayReady();
  const before=ownerTmpKeys();
  let failure;
  const p=await harnessRun(name,async p=>{
-  p.note({event:'provenance',...PROVENANCE,...provenance,model,configHome,globalConfig,pinnedSessionId:sessionId,envKeys:Object.keys(env).sort(),extraFlags:flags,settings:JSON.parse(readFileSync(join(run.home,'settings.json'),'utf8'))});
+  p.note({event:'provenance',...PROVENANCE,...provenance,model,configHome,globalConfig,pinnedSessionId:pinned?sessionId:null,envKeys:Object.keys(env).sort(),extraFlags:flags,settings:JSON.parse(readFileSync(join(run.home,'settings.json'),'utf8'))});
   p.note({event:'owner_file_check',phase:'before',count:before.length,digest:digest(before)});
   p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
   p.on('elicitation',r=>{p.note({event:'elicitation_seen',request:r});return {action:'decline'};});
@@ -110,7 +111,7 @@ export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance
   p.on('ui_prompt_suggest',()=>({shown:false}));
   try{await body(p,{sessionId,run});}catch(e){failure=e;throw e;}
   finally{noteDebug(p,debugFile);p.note({event:'spend',result:resultSummary(lastResult(p))});}
- },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,'--session-id',sessionId,'--max-budget-usd',SPEND_CAP,'--debug-file',debugFile,...flags]});
+ },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,...(pinned?['--session-id',sessionId]:[]),'--max-budget-usd',SPEND_CAP,'--debug-file',debugFile,...flags]});
  const exit=await p.closed;
  const after=ownerTmpKeys();
  const same=JSON.stringify(after)===JSON.stringify(before);

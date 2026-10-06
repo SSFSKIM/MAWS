@@ -2,6 +2,7 @@
 // per name of `WIDGET_COMMANDS`, so every palette name opens a widget (W3: the model selector's three in the model chip). Called from App.tsx's C11
 // block and the `#widgets` harness; the answer removes every registration it made.
 import { registerSlashWidget, WIDGET_COMMANDS, type SlashWidget, type WidgetCommandName } from '../composer';
+import { BtwWidget } from '../side/BtwWidget'; // E3
 import { AgentsWidget } from './AgentsWidget';
 import { CompactWidget } from './CompactWidget';
 import { ConfigWidget } from './ConfigWidget';
@@ -46,6 +47,7 @@ export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
   export: ExportWidget,
   diff: DiffWidget,
   rewind: RewindWidget, // W3 (B7)
+  btw: BtwWidget, // E3: registered here alone; its typed apply is `applyBtw` (TYPED_APPLY)
 };
 
 // W3: `/model`, `/effort` and `/fast` are the model selector, which opens in the composer's model chip menu.

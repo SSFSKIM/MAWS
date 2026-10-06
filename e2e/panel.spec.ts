@@ -1014,7 +1014,7 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await panel.getByRole('button', { name: 'Add a tool' }).click();
       // E6 (a C8a test amended by E6): Source control registers from App.tsx's E6 block; outside MENU_ORDER, it follows the
       // ranked tools.
-      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Source control']); // by MENU_ORDER; Log is menu: false
+      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Source control', 'Side' /* E3 */]); // by MENU_ORDER (Source control and Side, not in it, after); Log is menu: false
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });

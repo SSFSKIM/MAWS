@@ -17,7 +17,7 @@ vi.mock('../ipc/router', () => ({
   CommandFailure: class extends Error {},
 }));
 
-import { startSessions } from '.';
+import { emittedAppEventsSource, startSessions } from '.';
 
 // The source is real: after the renderer disappears, a disk advance must stay unread.
 describe('visibility belongs to the reporting renderer', () => {
@@ -140,5 +140,32 @@ describe('C4’s index source attaches through the read model', () => {
     expect(source.start).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith('read-model: scenario mode, source ignored');
     log.mockRestore();
+  });
+});
+
+// E3 (Design §5): a side thread's rows come back from the index, not from the read model's store of 20 app events
+describe('side-thread events in session.appEvents', () => {
+  afterEach(() => handlers.clear());
+  const parent = '6f1f8a52-6f0b-4c43-9a55-9a4b0f3f0a01' as AppSessionId;
+  const event = (id: string, kind: 'notice.posted' | 'side.thread.opened') =>
+    (kind === 'notice.posted'
+      ? { id: `${parent}:${id}`, sessionId: 's', at: 't', seq: null, agentId: null, parentToolUseId: null, kind, level: 'info', key: 'k', text: 'x' }
+      : { id: `${parent}:${id}`, sessionId: 's', at: 't', seq: null, agentId: null, parentToolUseId: null, kind, childAppSessionId: 'c', childEngineSessionId: null, anchor: null, openedBy: 'btw' }) as never;
+
+  it('keeps side.thread.* out of the read model’s capped store', () => {
+    const observed: unknown[] = [];
+    let tapped: ((payload: { appSessionId: string; events: unknown[] }) => void) | null = null;
+    const source = emittedAppEventsSource(((_name: string, fn: typeof tapped) => ((tapped = fn), () => {})) as never);
+    source.start({ observeAppEvents: (_id: AppSessionId, events: unknown[]) => observed.push(...events) } as never);
+    tapped!({ appSessionId: parent, events: [event('notice', 'notice.posted'), event('side-thread:c:opened', 'side.thread.opened')] });
+    expect(observed.map((e) => (e as { kind: string }).kind)).toEqual(['notice.posted']);
+  });
+
+  it('answers the read model’s events with the index’s, once per id', () => {
+    const extra = vi.fn(() => [event('side-thread:c:opened', 'side.thread.opened'), event('side-thread:c:opened', 'side.thread.opened')]);
+    const sessions = startSessions({ env: {}, packaged: false, appRoot: process.cwd(), hosts, appEventsExtra: extra });
+    expect(handlers.get('session.appEvents')!({ appSessionId: parent })).toEqual({ events: [event('side-thread:c:opened', 'side.thread.opened')] });
+    expect(extra).toHaveBeenCalledWith(parent);
+    sessions.stop();
   });
 });

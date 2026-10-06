@@ -19,6 +19,7 @@ import { isGatewayModel } from '@shared/sessions/models';
 import { TYPED } from './copy';
 import { applyFlagSettings, effortLevelsOf, rowNamed, rowOf, setEffort, setModel, type ControlAnswer } from './model';
 import { setPermissionMode } from './PermissionsWidget';
+import { applyBtw } from '../side/btw'; // E3
 
 export type TypedApply = (appSessionId: AppSessionId, args: string, tooLate?: AbortSignal) => Promise<boolean>;
 
@@ -98,4 +99,4 @@ const applyPermissions: TypedApply = async (id, args, tooLate) => {
   return true;
 };
 
-export const TYPED_APPLY: Partial<Record<WidgetCommandName, TypedApply>> = { model: applyModel, effort: applyEffort, fast: applyFast, permissions: applyPermissions };
+export const TYPED_APPLY: Partial<Record<WidgetCommandName, TypedApply>> = { model: applyModel, effort: applyEffort, fast: applyFast, permissions: applyPermissions, btw: applyBtw /* E3 */ };

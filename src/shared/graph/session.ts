@@ -1,5 +1,6 @@
 // X1 session record (charter §13 X1; C1 execution document, Interfaces "X1 — session record and attention item").
 import * as z from 'zod';
+import { AnchorSchema } from '../anchor/anchor'; // E3: X10, carried by a side thread's lineage
 import { AutoModeRefusalCodeSchema, PermissionModeSchema, TITLE_SOURCES } from './enums';
 import { AppSessionIdSchema, MessageUuidSchema, ProjectIdSchema, SessionIdSchema } from './ids';
 
@@ -28,6 +29,18 @@ export const SessionHolderSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('none') }),
 ]);
 
+// X11, lineage (P1 spec §10 X11; E3 execution document, Interfaces "X11"): what a session was forked from. Filled from
+// the launch intent for MAWS's own forks (a side thread, C10's Fork) and from the disk rule for a `--fork-session` copy
+// MAWS did not launch (A-16: a transcript repeating another's root uuid, drawn as a fork of the family's original).
+export const LineageSchema = z.strictObject({
+  kind: z.enum(['side-thread', 'fork']),
+  parentAppSessionId: AppSessionIdSchema,
+  parentEngineSessionId: SessionIdSchema.nullable(), // null only for a disk-derived fork whose original has no engine id yet (never in practice; kept nullable so a record never fails to load)
+  anchor: AnchorSchema.optional(), // a comment-opened side thread; absent for 'btw' and 'fork'
+  openedBy: z.enum(['comment', 'btw', 'fork']),
+});
+export type Lineage = z.infer<typeof LineageSchema>;
+
 export const SessionRecordSchema = z.strictObject({
   appId: AppSessionIdSchema,
   engineSessionId: SessionIdSchema.nullable(), // null until the first frame carrying session_id
@@ -52,6 +65,7 @@ export const SessionRecordSchema = z.strictObject({
   model: z.strictObject({ requested: z.string().nullable(), resolved: z.string().nullable() }),
   effort: z.string().nullable(),
   permissionMode: SessionPermissionModeSchema,
+  lineage: LineageSchema.nullable(), // X11 (E3); null for a root session
   createdAt: z.string(),
   updatedAt: z.string(),
 });

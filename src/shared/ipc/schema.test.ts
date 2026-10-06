@@ -28,6 +28,9 @@ import { E8_SESSION_COMMANDS } from './schema/session';
 // E1 start
 import * as maws from './schema/maws';
 // E1 end
+// E3 start
+import * as side from './schema/side';
+// E3 end
 // C11 start
 import { SETTINGS_DEFAULTS_V9 } from '../settings/defaults';
 // C11 end
@@ -39,7 +42,7 @@ import * as scm from './schema/scm';
 // E6 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -569,10 +572,10 @@ describe('ipc schema validates both directions', () => {
     it('adds its six commands under existing namespaces with their owners, and no namespace or event', () => {
       const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'layout.captureChords': 'main', 'engine.configure': 'engine-host' } as const;
       // Every C11 command sits under a namespace that existed before C11 (C8c's `files`, E8's `plugins` and
-      // `marketplaces`, E9's `voice`, E1's `maws` and E6's `scm` are the ones added since).
+      // `marketplaces`, E9's `voice`, E1's `maws`, E6's `scm` and E3's `side` are the ones added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm']);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side']);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -960,4 +963,39 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E6 end
+  // E3 start: anchored comments and side questions (P1 ledger §5)
+  describe('E3 entries', () => {
+    const anchor = { kind: 'file-line', locator: '/r/a.ts#L3', label: 'a.ts:3', path: '/r/a.ts', line: 3 };
+    it('adds the side namespace: two main commands, two engine-host commands, no event', () => {
+      expect(Object.fromEntries(Object.entries(side.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({
+        'side.thread.open': 'main', 'side.sendToMain': 'main', 'side.question.list': 'engine-host', 'side.question.clear': 'engine-host',
+      });
+      expect([...NAMES.side.commands]).toEqual(Object.keys(side.commands));
+      expect(Object.keys(side.events)).toEqual([]);
+    });
+
+    it('opens a side thread from a comment or from answered side questions, and answers StartOutcome', () => {
+      expect(validateCommandInput('side.thread.open', { appSessionId: 'a', from: { kind: 'comment', anchor, text: 'why?', screenshot: null } }).ok).toBe(true);
+      expect(validateCommandInput('side.thread.open', { appSessionId: 'a', from: { kind: 'comment', anchor, text: 'why?', screenshot: { path: '/u/s.png', width: 2, height: 2 } } }).ok).toBe(true);
+      expect(validateCommandInput('side.thread.open', { appSessionId: 'a', from: { kind: 'btw', exchanges: [{ question: 'q', response: 'r' }], text: null } }).ok).toBe(true);
+      expect(validateCommandInput('side.thread.open', { appSessionId: 'a', from: { kind: 'btw', exchanges: [], text: null } }).ok).toBe(false);
+      // M1's review: an engine answer is capped too (the promotion message must fit the 1 MiB send bound)
+      expect(validateCommandInput('side.thread.open', { appSessionId: 'a', from: { kind: 'btw', exchanges: [{ question: 'q', response: 'r'.repeat(100_000) }], text: null } }).ok).toBe(true);
+      expect(validateCommandInput('side.thread.open', { appSessionId: 'a', from: { kind: 'btw', exchanges: [{ question: 'q', response: 'r'.repeat(100_001) }], text: null } }).ok).toBe(false);
+      expect(validateCommandInput('side.thread.open', { appSessionId: 'a', from: { kind: 'comment', anchor, text: 'x'.repeat(20_001), screenshot: null } }).ok).toBe(false);
+      expect(validateCommandInput('side.thread.open', { appSessionId: 'a', from: { kind: 'comment', anchor: { ...anchor, label: 'a\nb' }, text: 'x', screenshot: null } }).ok).toBe(false);
+      expect(validateCommandOutput('side.thread.open', { status: 'starting', appSessionId: 'child' }).ok).toBe(true);
+    });
+
+    it('sends to main with its disposition, and lists the host’s side questions', () => {
+      expect(validateCommandInput('side.sendToMain', { appSessionId: 'a', anchor, text: 'look', screenshot: null }).ok).toBe(true);
+      expect(validateCommandOutput('side.sendToMain', { messageUuid: null, disposition: 'queued' }).ok).toBe(true);
+      expect(validateCommandOutput('side.sendToMain', { messageUuid: null, disposition: 'dropped' }).ok).toBe(false);
+      const exchange = { id: 'r1', question: 'q', state: 'answered', response: 'ZEBRA', synthetic: false, error: null, askedAt: 't0', answeredAt: 't1' };
+      expect(validateCommandOutput('side.question.list', { exchanges: [exchange] }).ok).toBe(true);
+      expect(validateCommandOutput('side.question.list', { exchanges: [{ ...exchange, state: 'done' }] }).ok).toBe(false);
+      expect(validateCommandOutput('side.question.clear', {}).ok).toBe(true);
+    });
+  });
+  // E3 end
 });

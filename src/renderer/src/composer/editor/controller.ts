@@ -26,7 +26,7 @@ import { closeSuggestions, suggesting } from './extensions';
 import { historyNavigation, recallDoc, recallEntries, type HistoryNav, type Recall } from './history';
 import { classifyFile, classifyText, mentionPath } from './paste';
 import { mentionLabel, prefillToDoc } from './recall';
-import { modeOf, serializeDraft, type Serialized } from './serialize';
+import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
 import { submitSerialized } from './submit';
 
 // Where the draft lives: C4's `session.drafts.*` by default; C10's intent on an unstarted session (M4 passes it).
@@ -99,6 +99,11 @@ export interface ControllerView {
 
 const HISTORY_LIMIT = 200;
 const warn = (text: string) => void toast({ level: 'warning', text, actions: [], dismissible: true });
+
+// E3 start: the composer's refusals of a `/btw` draft it will not ask (submit below)
+const BTW_UNAVAILABLE = 'Side questions are not available here';
+const BTW_TEXT_ONLY = 'Side questions take text only; remove the attachment';
+// E3 end
 
 // C4's drafts, which need the session's index record: a session the index does not hold has no draft to restore, and
 // its writes fail (said once per mount, not on every pause).
@@ -291,6 +296,19 @@ export class EditorController {
     this.endDictation('keep');
     const s = serializeDraft(editor.getJSON(), { sessionId, cwd });
     if (s.empty) return;
+    // E3 start: a `/btw` draft is a side question to the engine, never a prompt (E3 execution document, Design §7). The
+    // typed seam below asks it through C11's `btw` widget, a draft it would not take (several lines, pasted text) with
+    // its whole text; one holding an attachment, or with no `btw` widget registered, is refused here and kept, so no
+    // `/btw` draft reaches `session.send` or `session.steer`.
+    const btw = /^\/btw(?:\s|$)/.test(s.display.trim());
+    if (btw) {
+      const refusal = !slashWidget('btw') ? BTW_UNAVAILABLE : typeof s.content !== 'string' ? BTW_TEXT_ONLY : null;
+      if (refusal !== null) {
+        warn(refusal);
+        return;
+      }
+    }
+    // E3 end
     this.revision += 1;
     this.attachmentEpoch += 1;
     // C11 start: a typed `/<name> <args>` naming a registered widget is the widget's (a registered widget wins over the
@@ -300,7 +318,8 @@ export class EditorController {
     // is a message, and sends as text.
     const plain =
       s.mode === 'send' && typeof s.content === 'string' && Object.keys(s.pastedContents).length === 0 && !isMultiline(editor.getJSON());
-    const typed = plain ? /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(s.display.trim()) : null;
+    const command = plain ? s.display.trim() : btw ? plainTextOf(editor.getJSON()).trim() : null; // E3: a non-plain `/btw`
+    const typed = command !== null ? /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(command) : null;
     const widget = typed ? slashWidget(typed[1]) : null;
     if (typed && widget) {
       this.writer.cancel();

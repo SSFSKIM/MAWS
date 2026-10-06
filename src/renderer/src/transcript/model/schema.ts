@@ -6,6 +6,7 @@ import { DENIAL_KINDS, PLAN_OUTCOMES, SAFEGUARD_VERDICTS } from '@shared/graph/e
 import { ContentBlockSchema, QuestionSchema, TokenUsageSchema } from '@shared/graph/events';
 import { AskCancelReasonSchema } from '@shared/maws/ask'; // E1
 import { AskAnswerSchema, AskQuestionSchema } from '@shared/maws/tools'; // E1
+import { ANCHOR_KINDS, AnchorSchema } from '@shared/anchor/anchor'; // E3
 import { TOOL_CATEGORIES } from './rows';
 
 const nullable = <T extends z.ZodType>(schema: T) => schema.nullable();
@@ -61,7 +62,7 @@ const AttachmentSchema = z.strictObject({ kind: z.enum(['image', 'file', 'text']
 
 export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('time'), label: z.string() }),
-  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean(), pending: z.enum(['next', 'held']).optional() }),
+  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean(), pending: z.enum(['next', 'held']).optional(), anchor: AnchorSchema.optional() /* E3 */ }),
   z.strictObject({ ...base, kind: z.literal('assistant_text'), messageUuid: nullable(z.string()), blockIndex: z.number(), markdown: z.string(), live: z.boolean(), phase: z.enum(['answer', 'commentary']), model: nullable(z.string()) }),
   z.strictObject({
     ...base, kind: z.literal('divider'), state: z.enum(['working', 'completed', 'stopped', 'failed']), origin: z.enum(['human', 'engine', 'peer']), startedAt: z.string(), endedAt: nullable(z.string()),
@@ -99,4 +100,10 @@ export const RowSchema = z.discriminatedUnion('kind', [
     urgency: z.enum(['normal', 'high']), error: nullable(z.string()),
   }),
   // E1 end
+  // E3 start
+  z.strictObject({
+    ...base, kind: z.literal('side_thread'), childAppSessionId: z.string(), label: nullable(z.string()), anchorKind: nullable(z.enum(ANCHOR_KINDS)), openedBy: nullable(z.enum(['comment', 'btw'])),
+    state: z.enum(['opened', 'finished', 'failed']), text: nullable(z.string()), turns: z.number().int().nonnegative(),
+  }),
+  // E3 end
 ]);

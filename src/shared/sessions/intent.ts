@@ -10,6 +10,7 @@ import * as z from 'zod';
 import { PermissionModeSchema } from '../graph/enums';
 import { ContentBlockSchema } from '../graph/events';
 import { AppSessionIdSchema, MessageUuidSchema, ProjectIdSchema, SessionIdSchema } from '../graph/ids';
+import { LineageSchema } from '../graph/session'; // E3
 import { EffortSchema } from '../engine/launch-spec';
 import { SETUP_PHASES, SetupResourcesSchema } from './setup';
 
@@ -68,6 +69,9 @@ export const SetupIntentSchema = z.strictObject({
       .nullable(), // the handoff: from here the message is C3's and is never sent again
     lastFailure: z.strictObject({ at: z.string(), phase: z.enum(SETUP_PHASES), message: z.string(), resources: SetupResourcesSchema }).nullable(),
   }),
+  // E3 (X11): the lineage the launched record carries (a side thread's, or C10's Fork's); optional because persisted
+  // intents are parsed strictly and the ones written before E3 have none
+  lineage: LineageSchema.optional(),
 });
 export type SetupIntent = z.infer<typeof SetupIntentSchema>;
 
