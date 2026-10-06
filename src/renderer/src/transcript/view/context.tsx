@@ -22,7 +22,32 @@ export interface TranscriptActions {
   openDelivered(appSessionId: AppSessionId, path: string): Promise<string | null>; // files.openExternal; what to show inline when it was refused, null when opened
   revealDelivered(appSessionId: AppSessionId, path: string): Promise<string | null>; // files.reveal; the same
   // E1 end
+  // E7 start: the Reply under a message from another session and the Message on a listing row (tools/agents/actions.ts,
+  // registered with C8b's callbacks): one steer asking the session to SendMessage the text, and the walk of that ask
+  replyToPeer(appSessionId: AppSessionId, target: PeerAddress, text: string): Promise<void>;
+  peerReplies: PeerReplies;
+  // E7 end
 }
+
+// E7 start: who a Reply or a Message goes to, and what became of the last one to that address (E7 execution document,
+// Design §4): asked (the steer answered), forwarded (the session's SendMessage carries the text), sent, or failed with
+// the reason. A source the row subscribes to, so the transcript reads the agent tools' relay store without importing it.
+export interface PeerAddress {
+  address: string; // SendMessage's `to`
+  name: string | null; // the sender's name, when the envelope gave one
+  mode: 'reply' | 'message';
+}
+export interface PeerReply {
+  text: string;
+  state: { kind: 'asked'; sentAt: string; parentTurnOpenAtSend: boolean } | { kind: 'forwarded' } | { kind: 'sent' } | { kind: 'failed'; message: string };
+}
+export interface PeerReplies {
+  subscribe(listener: () => void): () => void;
+  get(appSessionId: AppSessionId, address: string): PeerReply | undefined; // the same object until it changes
+  dismiss(appSessionId: AppSessionId, address: string): void;
+}
+const NO_PEER_REPLIES: PeerReplies = { subscribe: () => () => {}, get: () => undefined, dismiss: () => {} };
+// E7 end
 
 export interface RewindInterface {
   canUndo(turnId: TurnId): Promise<{ ok: boolean; reason: string | null }>; // dry run; disables the button with the reason as tooltip
@@ -35,6 +60,7 @@ export const NO_ACTIONS: TranscriptActions = {
   openSubagent: noop, openFullLog: noop, reviewChanges: noop, openFile: noop, openExternal: noop, editAndResubmit: noop, editPrompt: noop,
   loadSpill: () => Promise.reject(new Error('loadSpill: no adapter supplied')),
   openAsk: noop, openDelivered: () => Promise.resolve(null), revealDelivered: () => Promise.resolve(null), // E1
+  replyToPeer: () => Promise.resolve(), peerReplies: NO_PEER_REPLIES, // E7
 };
 // What a Transcript does for an action its caller did not supply: the two X2 commands C6 can call itself (a spilled
 // result through fs.readSpill, a link through layout.openExternal); the rest belong to C5, C7 and C8 and do nothing.

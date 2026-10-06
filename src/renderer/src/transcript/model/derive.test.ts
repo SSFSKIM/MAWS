@@ -620,10 +620,10 @@ describe('cross-session rows (E7)', () => {
     b.end(['u2']);
     const outbound = messages(rows(b.events)).slice(1);
     expect(outbound.map((row) => [row.direction, row.text, row.peer?.recipient, row.peer?.result, row.peer?.resultText, row.peer?.summary, row.peer?.toolUseId])).toEqual([
-      ['between', 'Sent to repo-b: reply', B, 'sent', null, 'Answer B', 's1'],
-      ['between', 'Sent to nobody: hi', 'nobody', 'failed', "No agent named 'nobody' is reachable.", null, 's2'],
-      ['between', 'Sent to peer-c: x', 'peer-c', 'failed', 'InputValidationError: bad', null, 's3'],
-      ['between', 'Sent to peer-d: waiting', 'peer-d', 'pending', null, null, 's4'],
+      ['between', 'Sent to repo-b: reply', { name: 'repo-b', address: B }, 'sent', null, 'Answer B', 's1'],
+      ['between', 'Sent to nobody: hi', { name: null, address: 'nobody' }, 'failed', "No agent named 'nobody' is reachable.", null, 's2'],
+      ['between', 'Sent to peer-c: x', { name: null, address: 'peer-c' }, 'failed', 'InputValidationError: bad', null, 's3'],
+      ['between', 'Sent to peer-d: waiting', { name: null, address: 'peer-d' }, 'pending', null, null, 's4'],
     ]);
     expect(outbound[0]!.peer).toMatchObject({ sender: null, body: 'reply\nmore', preview: 'reply', replyTo: null });
     const folded = messages(rowsOf(reduce(b.events)));

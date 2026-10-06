@@ -485,3 +485,38 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-delivery-problem { flex-basis: 100%; color: var(--danger); }
 .transcript-question-refused { margin: 0; padding: 0 12px 8px; color: var(--danger); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
 /* E1 end */
+
+/* E7 start: a message between sessions (its party, preview, send state, Reply), a subagent's report, the inline composer
+   under them, and a ListAgents listing as compact lists. Muted lifecycle lines like the agent messages they sit among. */
+.transcript-peer { padding-bottom: 4px; }
+.transcript-peer > .transcript-lifecycle { flex-wrap: wrap; padding-bottom: 4px; }
+.transcript-peer-text { min-width: 0; }
+.transcript-peer-who { color: var(--fg); font-weight: 500; }
+.transcript-peer-state { color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.transcript-peer-state[data-result="failed"] { color: var(--danger); }
+.transcript-peer-toggle { margin-top: 0; font-size: var(--text-ui-sm); }
+.transcript-peer-error { margin: 0 0 4px 24px; color: var(--danger); font-size: var(--text-ui-sm); overflow-wrap: anywhere; white-space: pre-wrap; }
+.transcript-peer-body { margin: 0 0 6px 24px; padding: 6px 10px; border-left: 2px solid var(--border); color: var(--fg); font-size: var(--text-ui); line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.transcript-peer-composer { display: flex; flex-direction: column; gap: 6px; max-width: min(560px, 100%); margin: 2px 0 10px 24px; padding: 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-raised); }
+.transcript-peer-line { margin: 0; color: var(--fg-muted); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
+.transcript-peer-line[data-failed] { color: var(--danger); }
+.transcript-peer-label { color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.transcript-peer-input { display: block; width: 100%; resize: none; background: transparent; color: var(--fg); font-size: var(--text-ui); outline-color: var(--accent); }
+.transcript-peer-input::placeholder { color: var(--fg-muted); }
+.transcript-peer-input:focus-visible { outline-width: 2px; outline-style: solid; }
+.transcript-peer-input:disabled { cursor: not-allowed; }
+.transcript-peer-actions { display: flex; justify-content: flex-end; }
+.transcript-peer-send { padding: 2px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-active); color: var(--fg); font-size: var(--text-ui-sm); }
+.transcript-peer-send:hover:not(:disabled) { background: var(--bg-hover); }
+.transcript-peer-send:disabled { color: var(--fg-faint); }
+.transcript-listing { padding-bottom: 6px; }
+.transcript-listing > .transcript-lifecycle { padding-bottom: 4px; }
+.transcript-listing-section { margin-left: 24px; }
+.transcript-listing-heading { color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.transcript-listing-rows { margin: 2px 0 6px; padding: 0; list-style: none; }
+.transcript-listing-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; padding: 1px 0; font-size: var(--text-ui); }
+.transcript-listing-name { color: var(--fg); font-weight: 500; overflow-wrap: anywhere; }
+.transcript-listing-ref { padding: 0 5px; border-radius: var(--radius-sm); background: var(--bg-hover); color: var(--fg-muted); font-family: var(--font-mono); font-size: var(--text-ui-sm); }
+.transcript-listing-extras { color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.transcript-listing-note { margin: 0 0 4px 24px; color: var(--fg-muted); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
+/* E7 end */

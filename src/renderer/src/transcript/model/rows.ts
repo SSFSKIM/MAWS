@@ -82,12 +82,13 @@ export type Row = RowBase &
 
 // E7 start: a message between sessions (E7 execution document, Design §4). Inbound (`sender` set) from a `peer.message`;
 // outbound (`recipient` set) from a SendMessage whose `to` names no agent of this transcript. `sender.name` is the
-// envelope's `from-name` (null when it had none; the view labels the address as the TUI does); `replyTo` the address a
-// Reply answers, null when the engine says SendMessage cannot reach it. `result` is an outbound send's: pending until
-// its tool result, failed with `resultText` when the engine could not send it; `summary` the call's own summary.
+// envelope's `from-name` (null when it had none; the view labels the address as the TUI does); `recipient.address` the
+// call's `to`, its `name` the one an earlier message from that address gave. `replyTo` is the address a Reply answers,
+// null when the engine says SendMessage cannot reach it. `result` is an outbound send's: pending until its tool result,
+// failed with `resultText` when the engine could not send it; `summary` the call's own summary.
 export interface PeerMessage {
   sender: { name: string | null; address: string; session: string | null } | null;
-  recipient: string | null;
+  recipient: { name: string | null; address: string } | null;
   body: string;
   preview: string; // the body's first line, cut to 120 columns
   replyTo: string | null;

@@ -10,6 +10,9 @@ import { activeTab, sessionOfTab } from '../../stores/layout-model';
 import { registeredActions, useTranscriptStore, type Cell, type SubagentRef, type TranscriptActions } from '../../transcript';
 import { openLog } from './log/LogTool';
 import { AGENT_TOOL_IDS } from './tool-ids';
+import { useSessions } from '../../stores/sessions'; // E7
+import type { PeerAddress, PeerReplies } from '../../transcript'; // E7
+import { peerRelayKey, useRelays } from './relay-store'; // E7
 
 export { AGENT_TOOL_IDS } from './tool-ids';
 
@@ -59,4 +62,20 @@ export function openFullLog(cell: Cell): void {
   openLog(appSessionId, spill?.path ?? null, cell.label);
 }
 
-export const agentTranscriptActions: Pick<TranscriptActions, 'openSubagent' | 'openFullLog'> = { openSubagent, openFullLog };
+// E7 start: the transcript's Reply under a message from another session, and its Message on a listing row (E7
+// execution document, Design §4): the relay store asks the row's session, by one `'next'` steer, to SendMessage the
+// text to the address; the row reads that ask back through `peerReplies` (the store's relay for the address, the same
+// object until it changes). Whether the session had a turn open when asked is the line's clause, as the drill-in's.
+export async function replyToPeer(appSessionId: AppSessionId, target: PeerAddress, text: string): Promise<void> {
+  const turnOpen = (useSessions.getState().engine.get(appSessionId)?.turn ?? null) !== null;
+  await useRelays.getState().send(appSessionId, { kind: 'peer', ...target }, text, turnOpen);
+}
+
+export const peerReplies: PeerReplies = {
+  subscribe: (listener) => useRelays.subscribe(listener),
+  get: (appSessionId, address) => useRelays.getState().peers.get(peerRelayKey(appSessionId, address)),
+  dismiss: (appSessionId, address) => useRelays.getState().dismiss(peerRelayKey(appSessionId, address)),
+};
+// E7 end
+
+export const agentTranscriptActions: Pick<TranscriptActions, 'openSubagent' | 'openFullLog' | /* E7 */ 'replyToPeer' | 'peerReplies'> = { openSubagent, openFullLog, replyToPeer, peerReplies };

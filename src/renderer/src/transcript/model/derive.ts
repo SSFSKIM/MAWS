@@ -1009,11 +1009,16 @@ function knownOfTurn(state: TranscriptState, turn: TurnState): KnownAgents {
   if (!known) {
     const memo = state.memo.get(turn.id);
     const work = memo && memo.version === turn.version ? memo.work : deriveTurn(turn, null).work;
-    known = { refs: work.subagents.map(({ status: _status, ...ref }) => ref), ...namesOf(turn.events) };
+    known = { refs: work.subagents.map(refOf), ...namesOf(turn.events) };
     knownByTurn.set(turn, known);
   }
   return known;
 }
+
+// A turn's child as a ref, without the status its work entry adds.
+const refOf = ({ taskId, agentId, toolUseId, name, glyph, kind, subagentType, runId }: TurnWork['subagents'][number]): SubagentRef => ({
+  taskId, agentId, toolUseId, name, glyph, kind, subagentType, ...(runId !== undefined && { runId }),
+});
 
 // The turns before this one, latest first (a turn of a rewound branch, outside the order, looks at none).
 function earlierTurns(state: TranscriptState, turn: TurnState): TurnState[] {
@@ -1070,10 +1075,11 @@ function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | u
   if (agent !== null || to === '') return { ...base, direction: 'to_child', to: agent, text: agentMessageCopy('to_child', to || null, message) };
   const outcome = result === undefined ? null : sendMessageOutcome(result);
   const preview = previewOf(message);
+  const name = peerNamed(known, to);
   return {
-    ...base, direction: 'between', to: null, text: peerMessageCopy.outbound(peerNamed(known, to) ?? to, preview),
+    ...base, direction: 'between', to: null, text: peerMessageCopy.outbound(name ?? to, preview),
     peer: {
-      sender: null, recipient: to, body: message, preview, replyTo: null, toolUseId: use.toolUseId, messageUuid: null,
+      sender: null, recipient: { name, address: to }, body: message, preview, replyTo: null, toolUseId: use.toolUseId, messageUuid: null,
       result: outcome === null ? 'pending' : outcome.ok ? 'sent' : 'failed', resultText: outcome !== null && !outcome.ok ? outcome.message : null,
       summary: typeof input.summary === 'string' && input.summary.length > 0 ? input.summary : null,
     },
@@ -1083,7 +1089,7 @@ function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | u
 // An in-process agent's message to the main conversation (`<agent-message>`), the agent by its title; its hand-back
 // reads as its report (Decision Log 28's interim row replaced).
 function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, known: KnownAgents[]): RowOf<'agent_message'> {
-  const agent = agentNamed(known, event.fromAgentId);
+  const agent = event.fromAgentId === null ? null : agentNamed(known, event.fromAgentId);
   const title = agent?.name ?? event.fromAgentId;
   const report = handbackReport(event.text);
   const base = { id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message' as const, direction: 'from_child' as const, from: agent, to: null };

@@ -150,7 +150,10 @@
       "body": "E7 probe: hello from B",
       "messageUuid": null,
       "preview": "E7 probe: hello from B",
-      "recipient": "repo-h6xooi-51",
+      "recipient": {
+        "address": "repo-h6xooi-51",
+        "name": null
+      },
       "replyTo": null,
       "result": "sent",
       "resultText": null,
@@ -412,7 +415,10 @@
       "body": "E7 probe: second message while you work",
       "messageUuid": null,
       "preview": "E7 probe: second message while you work",
-      "recipient": "repo-h6xooi-51",
+      "recipient": {
+        "address": "repo-h6xooi-51",
+        "name": null
+      },
       "replyTo": null,
       "result": "sent",
       "resultText": null,

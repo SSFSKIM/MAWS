@@ -438,7 +438,9 @@ type PeerMode = 'reply' | 'message';
 export const peerMessageCopy = {
   inbound: (sender: string, preview: string) => `Message from ${sender}: ${preview}`,
   outbound: (recipient: string, preview: string) => `Sent to ${recipient}: ${preview}`,
-  report: (title: string) => `Report from ${title}`, // a subagent's hand-back; the report folds under it
+  report: (title: string | null) => `Report from ${title ?? 'agent'}`, // a subagent's hand-back; the report folds under it
+  sender: (name: string) => `@ ${name}`, // the row's lead, the address as its tooltip
+  recipient: (name: string) => `To @ ${name}`,
   result: { pending: 'Sending', sent: 'Sent', failed: 'Not sent' } as const, // an outbound send's state
   showMessage: 'Show the whole message',
   showReport: 'Show the report',

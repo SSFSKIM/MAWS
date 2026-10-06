@@ -10,6 +10,7 @@ export { replaySource } from './source/replay';
 // The component, its props and the callbacks its caller supplies. The heavy components (this one, TranscriptSlot and
 // Markdown) load as a chunk of their own the first time one renders (lazy.tsx), so the app's entry carries none of them.
 export type { RewindInterface, TranscriptActions } from './view/context';
+export type { PeerAddress, PeerReplies } from './view/context'; // E7: the Reply's target and the read of its ask
 export { Transcript } from './lazy';
 export type { TranscriptProps } from './view/Transcript';
 

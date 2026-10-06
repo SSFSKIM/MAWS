@@ -60,7 +60,7 @@ export const TurnSummarySchema = z.strictObject({
 const base = { id: z.string(), turnId: nullable(z.string()), at: z.string() };
 // E7 start: a message between sessions (rows.ts's PeerMessage)
 const PeerMessageSchema = z.strictObject({
-  sender: nullable(z.strictObject({ name: nullable(z.string()), address: z.string(), session: nullable(z.string()) })), recipient: nullable(z.string()), body: z.string(), preview: z.string(),
+  sender: nullable(z.strictObject({ name: nullable(z.string()), address: z.string(), session: nullable(z.string()) })), recipient: nullable(z.strictObject({ name: nullable(z.string()), address: z.string() })), body: z.string(), preview: z.string(),
   replyTo: nullable(z.string()), toolUseId: nullable(z.string()), messageUuid: nullable(z.string()), result: nullable(z.enum(['pending', 'sent', 'failed'])), resultText: nullable(z.string()), summary: nullable(z.string()),
 });
 // E7 end

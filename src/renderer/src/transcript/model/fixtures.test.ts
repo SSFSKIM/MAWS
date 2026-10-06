@@ -589,10 +589,10 @@ describe('cross-session rows (E7)', () => {
   }));
   const EXPECTED = [
     { direction: 'between', text: 'Message from repo-b-gen1il-79: E7 probe: hello from B', sender: { name: 'repo-b-gen1il-79', address: B, session: null }, recipient: null, replyTo: B, result: null, resultText: null },
-    { direction: 'between', text: 'Sent to repo-b-gen1il-79: Hello from A — received your probe message.', sender: null, recipient: 'repo-b-gen1il-79', replyTo: null, result: 'sent', resultText: null },
-    { direction: 'between', text: 'Sent to repo-b-gen1il-79: E7 probe: reply from A', sender: null, recipient: B, replyTo: null, result: 'sent', resultText: null },
+    { direction: 'between', text: 'Sent to repo-b-gen1il-79: Hello from A — received your probe message.', sender: null, recipient: { name: null, address: 'repo-b-gen1il-79' }, replyTo: null, result: 'sent', resultText: null },
+    { direction: 'between', text: 'Sent to repo-b-gen1il-79: E7 probe: reply from A', sender: null, recipient: { name: 'repo-b-gen1il-79', address: B }, replyTo: null, result: 'sent', resultText: null },
     { direction: 'between', text: 'Message from repo-b-gen1il-79: E7 probe: second message while you work', sender: { name: 'repo-b-gen1il-79', address: B, session: null }, recipient: null, replyTo: B, result: null, resultText: null },
-    { direction: 'between', text: 'Sent to nobody-e7: E7 probe: nobody', sender: null, recipient: 'nobody-e7', replyTo: null, result: 'failed', resultText: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." },
+    { direction: 'between', text: 'Sent to nobody-e7: E7 probe: nobody', sender: null, recipient: { name: null, address: 'nobody-e7' }, replyTo: null, result: 'failed', resultText: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." },
   ];
   const LISTING = { self: 'repo-h6xooi-51 [804260]', sections: [{ title: 'Peer sessions', count: 1, rows: [{ name: 'repo-b-gen1il-79', ref: '61303a', extras: ['interactive', 'idle', 'started 2s ago'] }] }], notes: [], pending: false };
 

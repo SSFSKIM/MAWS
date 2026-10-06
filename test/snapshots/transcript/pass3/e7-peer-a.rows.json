@@ -236,7 +236,10 @@
       "body": "Hello from A — received your probe message.",
       "messageUuid": null,
       "preview": "Hello from A — received your probe message.",
-      "recipient": "repo-b-gen1il-79",
+      "recipient": {
+        "address": "repo-b-gen1il-79",
+        "name": null
+      },
       "replyTo": null,
       "result": "sent",
       "resultText": null,
@@ -330,7 +333,10 @@
       "body": "E7 probe: reply from A",
       "messageUuid": null,
       "preview": "E7 probe: reply from A",
-      "recipient": "uds:/tmp/cc-socks/10562.sock",
+      "recipient": {
+        "address": "uds:/tmp/cc-socks/10562.sock",
+        "name": "repo-b-gen1il-79"
+      },
       "replyTo": null,
       "result": "sent",
       "resultText": null,
@@ -561,7 +567,10 @@
       "body": "E7 probe: nobody",
       "messageUuid": null,
       "preview": "E7 probe: nobody",
-      "recipient": "nobody-e7",
+      "recipient": {
+        "address": "nobody-e7",
+        "name": null
+      },
       "replyTo": null,
       "result": "failed",
       "resultText": "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message.",
