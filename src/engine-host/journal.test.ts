@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { createRedactor, redactJournal } from '../../test/live/support/live';
-import { JOURNAL_MAX_BYTES, JournalReader, JournalWriter, pruneJournals } from './journal';
+import { JOURNAL_MAX_BYTES, JOURNAL_PRUNE_EVERY_MS, JournalReader, JournalWriter, pruneJournals, scheduleJournalPruning } from './journal';
 
 let root: string;
 beforeEach(() => {
@@ -161,6 +161,69 @@ describe('transport frames and journals', () => {
       expect(existsSync(sessionC)).toBe(false); // an emptied session directory goes too
       expect(existsSync(join(root, 'README.txt'))).toBe(true);
       expect(await pruneJournals(join(root, 'nope'), { keepPerSession: 20, maxAgeDays: 30, now })).toEqual({ removed: 0 });
+    });
+
+    // E10: a supervisor outlives the app by days, so pruning also runs while launches are held; a launch the host still
+    // holds a row for (live, or exited and answering session.events from its journal) is never removed
+    it('never removes a launch it is told to keep, however old', async () => {
+      const now = new Date('2026-09-28T12:00:00Z');
+      const session = join(root, 'app-a');
+      seedLaunch(session, 'held', new Date(now.getTime() - 40 * 86_400_000));
+      seedLaunch(session, 'stale', new Date(now.getTime() - 40 * 86_400_000));
+      expect(await pruneJournals(root, { keepPerSession: 20, maxAgeDays: 30, now, keep: new Set(['held']) })).toEqual({ removed: 1 });
+      expect(readdirSync(session)).toEqual(['held.jsonl']);
+    });
+  });
+
+  // E10 execution document, §Design 1 "Long-lived host hygiene": at host start and every 24 h after
+  describe('scheduleJournalPruning', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('prunes at once and every 24 h, keeping the launches the host holds at each run', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+      const start = new Date('2026-09-28T12:00:00Z');
+      vi.setSystemTime(start);
+      const session = join(root, 'app-a');
+      seedLaunch(session, 'old', new Date(start.getTime() - 31 * 86_400_000));
+      let held = new Set(['live']);
+      const lines: string[] = [];
+      const stop = scheduleJournalPruning(root, { keep: () => held, log: (line) => void lines.push(line) });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(existsSync(join(session, 'old.jsonl'))).toBe(false);
+      seedLaunch(session, 'live', new Date(start.getTime() - 29.5 * 86_400_000)); // a launch held across the 30-day mark
+      seedLaunch(session, 'done', new Date(start.getTime() - 29.5 * 86_400_000));
+      await vi.advanceTimersByTimeAsync(JOURNAL_PRUNE_EVERY_MS);
+      expect(readdirSync(session).sort()).toEqual(['live.jsonl']);
+      held = new Set();
+      await vi.advanceTimersByTimeAsync(JOURNAL_PRUNE_EVERY_MS);
+      expect(existsSync(session)).toBe(false);
+      stop();
+      seedLaunch(session, 'later', new Date(start.getTime() - 40 * 86_400_000));
+      await vi.advanceTimersByTimeAsync(JOURNAL_PRUNE_EVERY_MS);
+      expect(readdirSync(session)).toEqual(['later.jsonl']); // stopped: no run after it
+      expect(JOURNAL_PRUNE_EVERY_MS).toBe(86_400_000);
+      expect(lines).toEqual([]);
+    });
+
+    it('logs a failed run and runs again at the next interval', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+      const lines: string[] = [];
+      let fail = true;
+      const stop = scheduleJournalPruning(root, {
+        keep: () => {
+          if (fail) throw new Error('table unavailable');
+          return new Set();
+        },
+        log: (line) => void lines.push(line),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(lines).toEqual([expect.stringContaining('table unavailable')]);
+      fail = false;
+      seedLaunch(join(root, 'app-a'), 'old', new Date(Date.now() - 31 * 86_400_000));
+      await vi.advanceTimersByTimeAsync(JOURNAL_PRUNE_EVERY_MS);
+      expect(existsSync(join(root, 'app-a'))).toBe(false);
+      expect(lines).toHaveLength(1);
+      stop();
     });
   });
 });

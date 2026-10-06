@@ -110,3 +110,10 @@ export function captureShellEnvironment(opts: ShellCaptureOptions = {}): Promise
   if (useCache) cached = capture;
   return capture;
 }
+
+// E10 (E10 execution document, §Design 1 "Long-lived host hygiene"): the detached supervisor outlives the app, so the
+// cached capture is dropped when a client connects (the owner is back, perhaps with a changed shell) and the next
+// launch captures again, once. A capture already handed out stays with its callers.
+export function invalidateShellEnvironment(): void {
+  cached = null;
+}

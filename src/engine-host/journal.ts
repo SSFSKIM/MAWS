@@ -156,8 +156,9 @@ export class JournalReader {
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Pruning at host start: keep the most recent launches per session and nothing older than the age limit; a session
-// directory left empty goes too. Counts launches removed.
-export async function pruneJournals(root: string, opts: { keepPerSession: number; maxAgeDays: number; now?: Date }): Promise<{ removed: number }> {
+// directory left empty goes too. Counts launches removed. E10: `keep` names launches never removed whatever their age
+// or rank (the rows the host holds, once pruning also runs in a host that has been up for days).
+export async function pruneJournals(root: string, opts: { keepPerSession: number; maxAgeDays: number; now?: Date; keep?: ReadonlySet<string> }): Promise<{ removed: number }> {
   if (!existsSync(root) || !statSync(root).isDirectory()) return { removed: 0 };
   const cutoff = (opts.now ?? new Date()).getTime() - opts.maxAgeDays * 86_400_000;
   let removed = 0;
@@ -166,11 +167,28 @@ export async function pruneJournals(root: string, opts: { keepPerSession: number
     if (!statSync(dir).isDirectory()) continue;
     const launches = launchesIn(dir).reverse(); // newest first
     launches.forEach((launch, index) => {
-      if (index < opts.keepPerSession && launch.startedAt >= cutoff) return;
+      if ((index < opts.keepPerSession && launch.startedAt >= cutoff) || opts.keep?.has(launch.launchId)) return;
       for (const file of launch.files) unlinkSync(file);
       removed += 1;
     });
     if (readdirSync(dir).length === 0) rmdirSync(dir);
   }
   return { removed };
+}
+
+// E10 (E10 execution document, §Design 1 "Long-lived host hygiene"): the detached supervisor outlives the app by days,
+// so pruning runs at host start and every 24 h after, keeping every launch the host still holds a row for (`keep`, read
+// at each run). A failed run is logged; the next one comes at the next interval. Answers the stop.
+export const JOURNAL_PRUNE_EVERY_MS = 24 * 60 * 60_000;
+
+export function scheduleJournalPruning(root: string, opts: { keep: () => ReadonlySet<string>; log: (line: string) => void; everyMs?: number }): () => void {
+  const run = () => {
+    void (async () => pruneJournals(root, { keepPerSession: JOURNAL_KEEP_PER_SESSION, maxAgeDays: JOURNAL_MAX_AGE_DAYS, keep: opts.keep() }))().catch((error: unknown) =>
+      opts.log(`journal pruning failed: ${error instanceof Error ? error.message : String(error)}`),
+    );
+  };
+  run();
+  const timer = setInterval(run, opts.everyMs ?? JOURNAL_PRUNE_EVERY_MS);
+  (timer as { unref?: () => void }).unref?.(); // the host's own work keeps it alive, never this clock
+  return () => clearInterval(timer);
 }
