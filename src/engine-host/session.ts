@@ -258,7 +258,7 @@ export class EngineSession {
       },
       log: this.log,
     });
-    const writeFrame = (frame: Parameters<OutboundWriter['write']>[0]) => (this.writer ? this.writer.write(frame) : Promise.reject(new Error('no engine process')));
+    const writeFrame = (frame: Parameters<OutboundWriter['write']>[0], writeOpts?: WriteOptions) => (this.writer ? this.writer.write(frame, writeOpts) : Promise.reject(new Error('no engine process')));
     this.queue = new MessageQueue({
       appSessionId: opts.spec.appSessionId,
       store: this.store,
@@ -370,8 +370,9 @@ export class EngineSession {
   // E1 M2 (residue 12): the human's answers to one ask (`maws.ask.answer`), checked against its questions first (a
   // mismatch throws AskAnswerMismatch and writes nothing), then claimed, written, and committed only once the write
   // settled: a blocking ask's call is answered with the AskResult (committed at the flushed row), an async ask's answers
-  // go as a `next` steer and `maws_ask_answered` is journaled after it. A refused write releases the ask (`write_failed`,
-  // still pending, so the human can retry); an exit meanwhile cancels it with the rest.
+  // go as a `next` steer whose write carries `maws_ask_answered` as its preface. A refused write releases the ask
+  // (`write_failed`, still pending, so the human can retry); a live journal failure does not (answerNotWritten); an exit
+  // meanwhile cancels it with the rest.
   async answerAsk(askId: string, answers: AskAnswer[]): Promise<'delivered' | 'not_pending' | 'write_failed'> {
     const held = this.askTable.get(askId);
     if (held === null) return 'not_pending';
@@ -385,26 +386,31 @@ export class EngineSession {
       const written = toolText(result);
       try {
         await this.toolServer.reply(ask.requestId, written, { flushed: () => this.askTable.commit(askId, written) });
-      } catch {
-        this.askTable.release(askId);
-        return 'write_failed';
+      } catch (error) {
+        return this.answerNotWritten(askId, error);
       }
       this.askTable.commit(askId, written); // a client that does not call `flushed` still ends committed
       return 'delivered';
     }
+    // the meta row rides the steer's own write as its preface: journaled just before the steer's row, and only if the
+    // write succeeded, under the writer's journal-failure handling
     try {
-      await this.steer(askSteerText(askId, ask.questions, answers), { priority: 'next' });
-    } catch {
-      this.askTable.release(askId);
-      return 'write_failed';
-    }
-    try {
-      this.record('meta', { event: 'maws_ask_answered', askId, toolUseId: ask.toolUseId, answers });
+      await this.queue.steer(askSteerText(askId, ask.questions, answers), { priority: 'next', preface: [{ event: 'maws_ask_answered', askId, toolUseId: ask.toolUseId, answers }] });
     } catch (error) {
-      this.log(`maws_ask_answered for ${askId} not journaled: ${messageOf(error)}`); // the process ended meanwhile
+      return this.answerNotWritten(askId, error);
+    } finally {
+      this.touch();
     }
     this.askTable.commit(askId);
     return 'delivered';
+  }
+
+  // E1 M2: an answer whose write failed. A refused write releases the ask for a retry. A journal failure while live
+  // (the frame may have reached the engine, only its row is missing) leaves it claimed: the writer has already ended
+  // the process through the journal-failure path, a retry could deliver the answers twice, and the exit cancels it.
+  private answerNotWritten(askId: string, error: unknown): 'write_failed' {
+    if (!(error instanceof JournalWriteFailed)) this.askTable.release(askId);
+    return 'write_failed';
   }
 
   // E1 M2: an ask nobody will answer any more (the engine withdrew its call, or the process ended): journaled, since no

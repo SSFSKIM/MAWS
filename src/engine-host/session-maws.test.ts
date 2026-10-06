@@ -241,7 +241,7 @@ describe('ask on an EngineSession (scripted)', () => {
     const steerRow = rows.find((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user')!;
     const [meta] = metaOf(rows, 'maws_ask_answered');
     expect(meta!.frame).toEqual({ event: 'maws_ask_answered', askId: 'toolu_async', toolUseId: 'toolu_async', answers });
-    expect(meta!.seq).toBeGreaterThan(steerRow.seq); // journaled once the steer's write settled
+    expect(meta!.seq).toBe(steerRow.seq - 1); // the steer write's preface: journaled only with a successful write, just before its row
     expect(run.session.asks()).toEqual([]);
     expect(run.session.status().pendingRequests).toBe(0);
     expect(run.maws().map((e) => e.kind)).toEqual(['maws.ask.opened', 'maws.ask.answered']);
@@ -296,6 +296,27 @@ describe('ask on an EngineSession (scripted)', () => {
     expect(run.maws()[1]).toMatchObject({ kind: 'maws.ask.answered', delivery: blocking ? 'result' : 'steer' });
     run.transport.exit(0);
     await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  // M2 fix wave: the answer reached the engine but its journal row could not be written (disk full): never `delivered`,
+  // never retryable (a retry would deliver the answers twice); the session ends the process through its journal-failure
+  // path, and the exit cancels the ask
+  it.each([true, false])('a live journal failure on the answer (blocking %s) is write_failed, not retryable, and the session ends', async (blocking) => {
+    const run = await mawsSession();
+    const askRequest = run.call('ask', { blocking, questions: QUESTIONS }, 'toolu_disk');
+    await until(() => run.session.asks().length === 1, 'the pending ask');
+    run.journal.failOnce = (direction, frame) =>
+      blocking ? direction === 'out' && isAnswerTo(askRequest)(frame as StdinFrame) : direction === 'meta' && (frame as { event?: string }).event === 'maws_ask_answered';
+    expect(await run.session.answerAsk('toolu_disk', ANSWERS)).toBe('write_failed');
+    expect(await run.session.answerAsk('toolu_disk', ANSWERS)).toBe('not_pending'); // claimed: no second delivery
+    expect(metaOf(run.journal.rows, 'transport_error').map((r) => r.frame)).toContainEqual({ event: 'transport_error', code: 'journal_failed', message: 'journal write failed: ENOSPC: no space left on device' });
+    expect(metaOf(run.journal.rows, 'maws_ask_answered')).toEqual([]);
+    expect(run.logs.some((m) => m.includes('journal write failed') && m.includes('ending the process'))).toBe(true);
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.session.asks()).toEqual([]);
+    expect(run.maws().map((e) => e.kind)).toEqual(['maws.ask.opened', 'maws.ask.cancelled']); // never answered
     expect(run.rebuilt()).toEqual(run.events);
   });
 

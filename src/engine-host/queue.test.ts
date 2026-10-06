@@ -30,11 +30,13 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
   const changes: QueueState[] = [];
   const held: (() => void)[] = [];
   const cancels: MessageUuid[] = [];
-  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, storeAtWrite: [] as QueueState[], onWrite: null as ((frame: UserInputFrame) => void) | null, cancelAnswer: null as Promise<void> | null, cancelFor: null as ((uuid: MessageUuid) => boolean | Promise<boolean>) | null };
+  const prefaces: (Record<string, unknown>[] | undefined)[] = []; // E1: each write's preface rows, as the writer was handed them
+  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, prefaces, storeAtWrite: [] as QueueState[], onWrite: null as ((frame: UserInputFrame) => void) | null, cancelAnswer: null as Promise<void> | null, cancelFor: null as ((uuid: MessageUuid) => boolean | Promise<boolean>) | null };
   const queue = new MessageQueue({
     appSessionId: ID,
     store,
-    write: async (frame) => {
+    write: async (frame, writeOpts) => {
+      prefaces.push(writeOpts?.preface);
       h.storeAtWrite.push(await store.loadQueue(ID)); // what a crash at this instant would leave behind
       if (opts.holdWrites) await new Promise<void>((r) => held.push(r));
       if (opts.failWrite?.(frame)) throw new Error('EPIPE');
@@ -749,6 +751,15 @@ describe('pending steers and hold (W1)', () => {
     const now = await t.queue.steer('stop', { priority: 'now' });
     expect(t.queue.state.steers).toBeUndefined(); // a now steer preempts at once: nothing to hold
     expect(now.messageUuid).toBeTruthy();
+  });
+
+  // E1 M2 fix wave: an async ask's `maws_ask_answered` row rides its steer's write, journaled only with a successful one
+  it('a steer hands its preface rows to the write, and a plain steer hands none', async () => {
+    const t = await harness();
+    const preface = [{ event: 'maws_ask_answered', askId: 'toolu_1' }];
+    await t.queue.steer('the answers', { priority: 'next', preface });
+    await t.queue.steer('plain', { priority: 'next' });
+    expect(t.prefaces.slice(-2)).toEqual([preface, undefined]);
   });
 
   it('hold withdraws the pending steer and appends it to the app queue, remembering its uuid; the turn end releases it', async () => {
