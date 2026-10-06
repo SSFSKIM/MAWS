@@ -162,3 +162,13 @@ Unrun on 7d0442ac: build:app, the packaged checks, the packaged e2e.
           "locale":"ko-KR","supportsOnDevice":true,"permission":{"microphone":"authorized","speech":"notDetermined"}}
 
 All gates of Acceptance items 1 to 5 have run green on e196298e.
+
+== Acceptance item 1's named suites   2026-10-06 00:17 KST   (targeted, light: Concrete Steps' form, maxWorkers=2)
+   The full suite's default reporter prints only totals, so the named suites were listed by a verbose run of their files:
+   command: pnpm --dir <W> exec vitest run --maxWorkers=2 --reporter=verbose src/main/voice src/shared/settings/defaults.test.ts src/shared/ipc/schema.test.ts src/shared/keymap src/renderer/src/keymap src/renderer/src/composer/editor src/renderer/src/composer/dictation src/renderer/src/settings-tab/SettingsView.test.tsx
+   tail: Test Files 24 passed (24) · Tests 434 passed (434); every suite present, with its count of passing tests:
+     voice helper protocol lines parse (6) · voice service owns one capture and drops late events (19) ·
+     helper backend spawns, times out, and reports a crash (27) · scripted backend follows MAWS_E2E_VOICE (16) ·
+     settings v8 → v9 adds voice and keeps every earlier version (4) · chord Space matches on code (2) ·
+     dispatcher holds and releases a hold action (10) · editor dictation replaces interim text and settles the final (27) ·
+     dictation controller state machine (29) · settings view lists Voice (9) · ipc schema validates both directions (77)
