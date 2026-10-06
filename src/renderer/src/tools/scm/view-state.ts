@@ -127,7 +127,7 @@ export const selectionKey = (selection: ScmSelection) => `${selection.group}\0${
 
 // A new status: a selection its group no longer lists follows the file to the group that lists it now (Stage moves it
 // to Staged, Unstage back), or is dropped once git lists it nowhere (committed, discarded).
-export function followSelection(ui: ScmUi, groups: ScmGroups): Partial<ScmUi> {
+export function followSelection(ui: Pick<ScmUi, 'selected'>, groups: ScmGroups): Partial<ScmUi> {
   if (ui.selected === null || isListed(groups, ui.selected)) return {};
   const found = findTarget(groups, ui.selected.path);
   return found ? selectFile(found) : { selected: null, hunk: 0, scrollTop: 0 };

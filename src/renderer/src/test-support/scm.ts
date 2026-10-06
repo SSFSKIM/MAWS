@@ -1,8 +1,11 @@
-// Source control tool tests (E6): a C4 status to vary per case, and the answers `scm.*` gives. Imported only by
-// happy-dom suites.
+// Source control tool tests (E6): a C4 status to vary per case, the answers `scm.*` gives, and main as the tool's body
+// reads it (`scmMain`). Imported only by happy-dom suites.
 import type { AppSessionId } from '@shared/graph/ids';
-import type { GitStatus } from '@shared/ipc/schema/git';
-import type { RemotePlan, ScmRefusal } from '@shared/ipc/schema/scm';
+import type { GitDiff, GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
+import type { RemotePlan, ScmRefusal, ScmStatus } from '@shared/ipc/schema/scm';
+import { fail, installFakeMain, ok } from './code';
+
+type Answer = ReturnType<typeof ok> | ReturnType<typeof fail>;
 
 export const A = 'app-a' as AppSessionId;
 export const B = 'app-b' as AppSessionId;
@@ -32,6 +35,88 @@ export const refusal = (refused: ScmRefusal['refused'], detail = '', output = ''
 
 export const TOKEN = '6f1c2e0a-0000-4000-8000-000000000001';
 export const OTHER_TOKEN = '6f1c2e0a-0000-4000-8000-000000000002';
+
+export function scmStatusOf(over: Partial<ScmStatus> = {}): ScmStatus {
+  return {
+    directory: DIR,
+    repository: true,
+    trusted: true,
+    trustKey: DIR,
+    remotes: [{ name: 'origin', url: 'https://github.com/o/r.git' }],
+    defaultRemote: 'origin',
+    defaultBase: 'main',
+    gh: { state: 'missing' },
+    checkedAt: '2026-10-06T10:00:00.000Z',
+    ...over,
+  };
+}
+
+// The body's scratch checkout (M3): an unstaged modification, a staged new file, an untracked file and an untracked
+// directory, with the patches C4's `git.diff` answers for each scope.
+export const scmFile = (path: string, index: string, worktree: string): GitFileStatus => ({ path, oldPath: null, index, worktree, untracked: false });
+export const scmUntracked = (path: string): GitFileStatus => ({ path, oldPath: null, index: '?', worktree: '?', untracked: true });
+export const SCRATCH_FILES: GitFileStatus[] = [scmFile('src/app.ts', '.', 'M'), scmFile('src/staged.ts', 'A', '.'), scmUntracked('untracked.txt'), scmUntracked('udir/')];
+export const APP_PATCH = 'diff --git a/src/app.ts b/src/app.ts\nindex 1111111..2222222 100644\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1,2 +1,3 @@\n one\n+two\n three\n';
+export const STAGED_PATCH = 'diff --git a/src/staged.ts b/src/staged.ts\nnew file mode 100644\nindex 0000000..3333333\n--- /dev/null\n+++ b/src/staged.ts\n@@ -0,0 +1 @@\n+export {};\n';
+export const UNTRACKED_PATCH = 'diff --git a/untracked.txt b/untracked.txt\nnew file mode 100644\nindex 0000000..4444444\n--- /dev/null\n+++ b/untracked.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n';
+const diffFile = (path: string, insertions: number, deletions = 0) => ({ path, oldPath: null, insertions, deletions, binary: false });
+
+type ScmCommand = 'scm.stage' | 'scm.unstage' | 'scm.discard' | 'scm.commit' | 'scm.status';
+
+// Main as the Source control body reads it: C4's watch and diffs over a scripted status, `scm.status`, and the four
+// mutations (each `{ ok: true }` with the current status unless the case scripts an answer). `change` replaces the
+// status and emits C4's `git.changed`, as the watcher's refresh after a mutation does.
+export function scmMain(init: { status?: GitStatus; scm?: ScmStatus } = {}) {
+  const state = {
+    status: init.status ?? statusOf({ files: SCRATCH_FILES, ahead: 1 }),
+    scm: init.scm ?? scmStatusOf(),
+    watchError: null as string | null,
+    diffs: {
+      worktree: { patch: APP_PATCH, files: [diffFile('src/app.ts', 1)] },
+      staged: { patch: STAGED_PATCH, files: [diffFile('src/staged.ts', 1)] },
+    } as Record<'worktree' | 'staged', GitDiff>,
+    untracked: new Map<string, string>([['untracked.txt', UNTRACKED_PATCH]]),
+    answers: {} as Partial<Record<ScmCommand, (input: Record<string, unknown>) => Answer | Promise<Answer>>>,
+  };
+  const fake = installFakeMain((name, input) => {
+    switch (name) {
+      case 'git.watch':
+        return state.watchError !== null ? fail(state.watchError) : ok(state.status);
+      case 'git.unwatch':
+        return ok();
+      case 'git.diff': {
+        const scope = input.scope as string;
+        if (scope === 'untracked') {
+          const patch = state.untracked.get(input.path as string);
+          return patch === undefined ? fail(`not an untracked file: ${input.path as string}`) : ok({ patch, files: [diffFile(input.path as string, 2)] });
+        }
+        return ok(scope === 'staged' ? state.diffs.staged : state.diffs.worktree);
+      }
+      case 'scm.status':
+        return state.answers['scm.status']?.(input) ?? ok(state.scm);
+      case 'scm.stage':
+      case 'scm.unstage':
+      case 'scm.discard':
+      case 'scm.commit':
+        return state.answers[name]?.(input) ?? ok({ ok: true, status: state.status, output: '' });
+      default:
+        return fail(`no answer for ${name} in the source control suites`);
+    }
+  });
+  return {
+    ...fake,
+    state,
+    change(status: GitStatus) {
+      state.status = status;
+      fake.emit('git.changed', { repoRoot: status.repoRoot, status, reason: 'index' });
+    },
+  };
+}
+
+// The diff view measures text on a canvas, which happy-dom does not draw (as Review's suite stubs it).
+export function stubCanvas(): void {
+  HTMLCanvasElement.prototype.getContext = (() => ({ font: '', measureText: (text: string) => ({ width: text.length * 7 }) })) as never;
+}
 
 export function planOf(over: Partial<RemotePlan> = {}): RemotePlan {
   return {

@@ -73,6 +73,9 @@ import { connectAsks } from './tools/maws/ask/connect';
 import { connectPaneShows } from './tools/maws/panes/connect';
 import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
 // E1 end
+// E6 start
+import { registerScmTool } from './tools/scm';
+// E6 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -180,6 +183,12 @@ export function App() {
   }, []);
   useEffect(() => connectAsks(), []);
   // E1 end
+  // E6 start: the Source control tool in the panel's "+" menu (and `show_pane`'s `source-control`), registered once and
+  // never unregistered, as C8a's block does
+  useEffect(() => {
+    registerScmTool();
+  }, []);
+  // E6 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
