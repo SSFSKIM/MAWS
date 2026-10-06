@@ -10,7 +10,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { writesOf, type PluginsAction, type PluginsScope } from '../../src/shared/plugins/cli';
+import { writesOf, type PluginsAction, type PluginsInstallation, type PluginsScope } from '../../src/shared/plugins/cli';
 
 // path (prefixed `config/` or `project/.claude/`) → a fingerprint; a clone or a cached plugin version (thousands of
 // files) is one entry over its files' names, sizes and mtimes.
@@ -110,11 +110,14 @@ export interface Manifest {
 
 // The manifest of one action as patterns over the tree's paths: the scope's settings file and `writesOf`'s others under
 // `config/plugins/`, the segments the action names filled in, any other `<…>` one segment; a trailing `/` covers the
-// directory and everything under it.
-export function manifestOf(action: PluginsAction, scope: PluginsScope, source: string | null, fill: Record<string, string>): Manifest {
-  const writes = writesOf(action, scope, source);
+// directory and everything under it. A marketplace removal's `uninstalls` add the settings of each scope its plugins
+// are at: the config home's, and `project`'s (the audited project) where one is installed there; another project's
+// files lie outside the audited trees.
+export function manifestOf(action: PluginsAction, scope: PluginsScope, source: string | null, fill: Record<string, string>, uninstalls: readonly PluginsInstallation[] = [], project: string | null = null): Manifest {
+  const writes = writesOf(action, scope, source, uninstalls);
   const filled = (path: string) => path.replace(/<([a-z]+)>/g, (whole, name: string) => fill[name] ?? whole);
-  const paths = [scope === 'user' ? `config/${writes.settings}` : `project/${writes.settings}`, ...writes.others.map((other) => `config/plugins/${filled(other)}`)];
+  const scopeSettings = writes.scopeSettings.flatMap((entry) => (entry.project === null ? [`config/${entry.file}`] : entry.project === project ? [`project/${entry.file}`] : []));
+  const paths = [...new Set([scope === 'user' ? `config/${writes.settings}` : `project/${writes.settings}`, ...writes.others.map((other) => `config/plugins/${filled(other)}`), ...scopeSettings])];
   const patterns = paths.map((path) => {
     const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/<[a-z]+>/g, '[^/]+');
     return new RegExp(path.endsWith('/') ? `^${escaped}` : `^${escaped}$`);
@@ -192,19 +195,40 @@ export function auditOf(before: Tree, after: Tree, manifest: Manifest | null): A
 
 // ---- when a window closes ---------------------------------------------------------------------------------------
 
-// The CLI reads in flight (the `plugins.*` and `marketplaces.*` invokes main is answering) and when the last one settled
-// (epoch ms; 0 when none has).
+// One invoke main answered: its command, when it settled (epoch ms), how long it took, whether main's handler threw,
+// and its answer's outcome (`{ ok, error: { code } }`, the shape the bridge answers).
+export interface SettledInvoke {
+  name: string;
+  at: number;
+  ms: number;
+  threw: boolean;
+  answer: unknown;
+}
+
+// The bridge's own deadline (10 s, src/main/hosts/supervisor.ts): the invoke settled, but the host's CLI keeps running
+// and may still write, so the invoke's settling says nothing about when the CLI's writes end.
+export function bridgeTimedOut(invoke: SettledInvoke): boolean {
+  const answer = invoke.answer as { ok?: unknown; error?: { code?: unknown } } | null;
+  return !invoke.threw && typeof answer === 'object' && answer !== null && answer.ok === false && answer.error?.code === 'timeout';
+}
+
+// The CLI reads in flight (the `plugins.*` and `marketplaces.*` invokes main is answering), when the last one settled
+// (epoch ms; 0 when none has), and every one that settled.
 export interface InvokeTracker {
   inflight(): Promise<number>;
   lastSettledAt(): Promise<number>;
+  settled(): Promise<SettledInvoke[]>;
 }
 
 // Waits until no tracked invoke is in flight and none has settled for `quietMs`: a read the widget refetches behind its
 // cached data (or one a `plugins.changed` triggered) has finished, and its CLI's writes have landed, before the window's
-// after-tree is read. A read still in flight at `timeoutMs` fails the window.
+// after-tree is read. A read still in flight at `timeoutMs` fails the window, and so does any read the bridge answered
+// `timeout`: its CLI ran on past the answer, so no window can tell when its writes end.
 export async function untilQuiet(tracker: InvokeTracker, opts: { quietMs: number; timeoutMs: number; pollMs?: number }): Promise<void> {
   const deadline = Date.now() + opts.timeoutMs;
   for (;;) {
+    const timedOut = (await tracker.settled()).filter(bridgeTimedOut);
+    if (timedOut.length > 0) throw new Error(timedOut.map((read) => `${read.name} was answered timeout by the bridge after ${read.ms} ms while its CLI kept running: the audit cannot tell when its writes end`).join('; '));
     const inflight = await tracker.inflight();
     const quietFor = Date.now() - (await tracker.lastSettledAt());
     if (inflight === 0 && quietFor >= opts.quietMs) return;

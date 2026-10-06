@@ -13,6 +13,7 @@ export interface StubPlugin {
   name: string;
   version: string | null;
   description: string | null;
+  dependencies?: string[]; // plugins of the same marketplace an install brings with it
 }
 
 export type StubMarketplace = { name: string; plugins: StubPlugin[] } & ({ source: 'directory'; path: string } | { source: 'github'; repo: string } | { source: 'git' | 'url'; url: string });

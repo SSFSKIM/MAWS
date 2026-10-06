@@ -6,7 +6,8 @@
 // marketplace added from GitHub and removed (network-dependent: a refusal is recorded, the folder case stays the gate),
 // `e8-probe@e8-scratch` installed and reflected in the running session before any new turn, the panel's Reload mods and
 // Reload skills, Refresh, a real Update to 0.2.0, `/skills` after the next turn, disable, enable, uninstall, the
-// engine's error for a plugin its marketplace withdrew, and the marketplace removed. Around every action the config
+// engine's error for a plugin its marketplace withdrew, the plugin installed again, and the marketplace removed with it
+// still installed (2.1.291 uninstalls it; the sheet names it). Around every action the config
 // home's file tree is read and its delta set beside the action's `writesOf` manifest in `<scratch>/live-run.txt`; each
 // step leaves `<scratch>/live-<step>.png`; what was seen goes to `<scratch>/observations.json`. The owner's
 // ~/.claude.json check runs around the whole run, outside this file (Concrete Steps). Run on purpose only; it spends
@@ -15,7 +16,7 @@
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { PluginsAction, PluginsScope } from '@shared/plugins/cli';
+import type { PluginsAction, PluginsInstallation, PluginsScope } from '@shared/plugins/cli';
 import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws } from './support/launch';
@@ -83,7 +84,7 @@ async function openWidget(page: Page, name: string): Promise<Locator> {
 async function audited(before: Tree, startedAt: number, manifest: Manifest | null, what: string): Promise<void> {
   await untilQuiet(reads, { quietMs: QUIET_MS, timeoutMs: 180_000 });
   const settled = await reads.settledSince(startedAt);
-  scratch.log(`CLI reads settled in this window: ${settled.length === 0 ? 'none' : settled.map((r) => `${r.name} ${r.ms} ms${r.ok ? '' : ' (failed)'}`).join(' · ')}`);
+  scratch.log(`CLI reads settled in this window: ${settled.length === 0 ? 'none' : settled.map((r) => `${r.name} ${r.ms} ms${r.outcome === 'answered' ? '' : ` (${r.outcome})`}`).join(' · ')}`);
   const audit = auditOf(before, scratch.tree(), manifest);
   scratch.log(manifest ? `manifest: ${manifest.paths.join(' · ')}` : `${what}: a listing (D-12: the catalogue caches and .claude.json bookkeeping only)`);
   scratch.log(audit.lines.length > 0 ? `delta:\n${audit.lines.join('\n')}` : 'delta: none');
@@ -184,7 +185,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     });
   // One management action: the sheet read (its argv shown and screenshotted), confirmed, the row's words when it ended,
   // and the config home's delta beside the action's manifest.
-  const action = async (spec: { name: string; action: PluginsAction; scope: PluginsScope; source: string | null; fill: Record<string, string>; sheet: string; submit: string; acknowledge?: boolean; line: () => Locator; timeout?: number }, open: () => Promise<void>) => {
+  const action = async (spec: { name: string; action: PluginsAction; scope: PluginsScope; source: string | null; fill: Record<string, string>; uninstalls?: PluginsInstallation[]; sheet: string; submit: string; acknowledge?: boolean; line: () => Locator; timeout?: number }, open: () => Promise<void>) => {
     scratch.log(`--- ${spec.action}: ${spec.name}`);
     await untilQuiet(reads, { quietMs: QUIET_MS, timeoutMs: 180_000 }); // the baseline after any earlier read has landed
     const startedAt = Date.now();
@@ -195,8 +196,10 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     const argv = await sheet.locator('[data-plugins-argv]').innerText();
     const writes = await sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem').allInnerTexts();
     const then = /Reloads plugins in \d+ running sessions?|No running session to reload|Nothing to reload[^\n]*/.exec(await sheet.innerText())?.[0] ?? null;
+    const uninstalls = /Also uninstalls [^\n]*/.exec(await sheet.innerText())?.[0] ?? null;
     scratch.log(`sheet: ${argv}`);
     scratch.log(`sheet writes: ${writes.join(' · ')}`);
+    if (uninstalls) scratch.log(`sheet: ${uninstalls}`);
     scratch.log(`sheet then: ${then}`);
     await page.screenshot({ path: join(scratch.root, `live-${String(n).padStart(2, '0')}-${spec.name}-sheet.png`) });
     if (spec.acknowledge) await sheet.getByRole('checkbox', { name: 'I understand' }).check();
@@ -204,10 +207,10 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     await expect(sheet).toBeHidden();
     const result = await ended(spec.line(), spec.timeout);
     scratch.log(`row: ${result.text.replaceAll('\n', ' ⏎ ')}${result.failed ? '   [drawn as a failure]' : ''}`);
-    scratch.observe(spec.name, { argv, writes, then, row: result });
-    scratch.log(`(writesOf ${spec.action}, ${spec.scope}, ${spec.source ?? 'null'})`);
-    await audited(before, startedAt, manifestOf(spec.action, spec.scope, spec.source, spec.fill), spec.name);
-    return result;
+    scratch.observe(spec.name, { argv, writes, then, uninstalls, row: result });
+    scratch.log(`(writesOf ${spec.action}, ${spec.scope}, ${spec.source ?? 'null'}${spec.uninstalls ? `, uninstalling ${spec.uninstalls.map((u) => u.id).join(', ')}` : ''})`);
+    await audited(before, startedAt, manifestOf(spec.action, spec.scope, spec.source, spec.fill, spec.uninstalls ?? [], scratch.repo), spec.name);
+    return { ...result, uninstalls };
   };
 
   try {
@@ -391,15 +394,29 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       scratch.observe('error.code', result.text.split(' · ').at(-1));
     });
 
-    await step('remove-folder', 'Remove… e8-scratch: the row leaves, its result stays', async () => {
+    await step('reinstall', `Install ${PLUGIN} again, so the marketplace is removed with a plugin still installed`, async () => {
+      const w = page.locator('[data-widget="plugins"]');
+      const group = await openAvailableGroup(w, 'e8-scratch');
+      const row = group.locator(`[data-plugin-row="${PLUGIN}"]`);
+      const result = await action({ name: 'reinstall', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => availableLine(w, PLUGIN) }, () => row.getByRole('button', { name: 'Install…' }).click());
+      expect(result.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected');
+      await expect(installedRow(w)).toContainText('user · enabled · e8-scratch');
+    });
+
+    await step('remove-folder', 'Remove… e8-scratch with e8-probe installed: the sheet names the uninstall; the marketplace and the plugin leave; its result stays', async () => {
       const w = page.locator('[data-widget="plugins"]');
       const row = marketplaceRow(w, 'e8-scratch');
-      const result = await action({ name: 'remove-folder', action: 'marketplace-remove', scope: 'user', source: 'directory', fill: { name: 'e8-scratch' }, sheet: 'marketplace-remove', submit: 'Remove', acknowledge: true, line: () => w.locator('[data-marketplace-result="e8-scratch"]') }, () =>
+      const uninstalls = [{ id: PLUGIN, scope: 'user', projectPath: null }];
+      const result = await action({ name: 'remove-folder', action: 'marketplace-remove', scope: 'user', source: 'directory', fill: { name: 'e8-scratch' }, uninstalls, sheet: 'marketplace-remove', submit: 'Remove', acknowledge: true, line: () => w.locator('[data-marketplace-result="e8-scratch"]') }, () =>
         row.getByRole('button', { name: 'Remove…' }).click(),
       );
+      expect(result.uninstalls).toBe(`Also uninstalls 1 plugin: ${PLUGIN} (user)`);
       expect(result.text).toContain('Successfully removed marketplace: e8-scratch');
       await expect(row).toHaveCount(0);
       await expect(w.locator('[data-plugins-section="marketplaces"]')).toContainText('No marketplaces configured');
+      await expect(installedRow(w)).toHaveCount(0); // the engine uninstalled it with its marketplace
+      await expect(loaded(w)).not.toContainText('e8-probe', { timeout: 30_000 }); // and the reload after the removal dropped it
+      scratch.log(`loaded after the removal's reload: ${(await loaded(w).innerText()).replaceAll('\n', ' · ')}`);
     });
 
     scratch.observe('consoleErrors', maws.consoleErrors());

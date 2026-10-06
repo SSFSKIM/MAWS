@@ -108,6 +108,25 @@ describe('the plugin CLI stub', () => {
     expect(step(commandLine('marketplace-remove', { name: 'tools' }))).toMatchObject({ ok: false, error: { message: "Marketplace 'tools' not found", failureCode: 'not_configured' } });
   });
 
+  it('installs the dependencies a plugin declares with it, and a marketplace removal uninstalls what was installed from it', () => {
+    let state = base();
+    state.marketplaces[0].plugins.push({ name: 'e8-deps', version: '1.0.0', description: 'Needs e8-base', dependencies: ['e8-base'] }, { name: 'e8-base', version: '2.0.0', description: 'A dependency' });
+    state.marketplaces.push({ name: 'other', source: 'github', repo: 'acme/other', plugins: [{ name: 'x', version: '1.0.0', description: null }] });
+    const step = (argv: string[]) => {
+      const out = run(argv, state);
+      state = out.state;
+      return mutationOutcome(out);
+    };
+    expect(step(commandLine('install', { plugin: 'e8-deps@e8-scratch', scope: 'user' }))).toMatchObject({ ok: true, result: { message: 'Successfully installed plugin: e8-deps@e8-scratch (scope: user)' } });
+    expect(state.installed.map((p) => [p.id, p.version, p.scope, p.enabled])).toEqual([
+      ['e8-deps@e8-scratch', '1.0.0', 'user', true],
+      ['e8-base@e8-scratch', '2.0.0', 'user', true],
+    ]);
+    step(commandLine('install', { plugin: 'x@other', scope: 'user' }));
+    expect(step(commandLine('marketplace-remove', { name: 'e8-scratch' }))).toMatchObject({ ok: true, result: { message: 'Successfully removed marketplace: e8-scratch' } });
+    expect(state.installed.map((p) => p.id)).toEqual(['x@other']);
+  });
+
   it('fails on demand through the fail map; a shownCommand failure passes only with its --accept-command', () => {
     const state = base();
     state.fail.install = { failureCode: 'command_source_refused', message: 'This plugin runs a command its marketplace declares', shownCommand: { sha256: SHA, command: ['node', 'setup.js'] } };

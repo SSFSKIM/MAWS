@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ElectronApplication } from '@playwright/test';
-import { readTree, type InvokeTracker, type Tree } from '../../test/support/plugins-audit';
+import { bridgeTimedOut, readTree, type InvokeTracker, type SettledInvoke, type Tree } from '../../test/support/plugins-audit';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin';
 import { isolatedGitEnv } from '../../test/support/git-env';
 
@@ -91,15 +91,17 @@ export function pluginsScratch(): PluginsScratch {
 // ---- the CLI reads in flight --------------------------------------------------------------------------------------
 
 export interface PluginReads extends InvokeTracker {
-  settledSince(at: number): Promise<{ name: string; ms: number; ok: boolean }[]>; // the reads that settled since `at`
+  settledSince(at: number): Promise<{ name: string; ms: number; outcome: 'answered' | 'threw' | 'timed out at the bridge' | 'refused' }[]>; // the reads that settled since `at`
 }
 
-type ReadLog = { inflight: number; lastSettledAt: number; settled: { name: string; at: number; ms: number; ok: boolean }[] };
+type ReadLog = { inflight: number; lastSettledAt: number; settled: SettledInvoke[] };
 
 // Counts the `plugins.*` and `marketplaces.*` invokes main is answering. The page cannot do it: the preload's bridge is
 // frozen and read-only under contextIsolation (`window.maws` and its `invoke` are non-writable). So main's invoke
 // handlers for those channels (`maws:cmd:<name>`, one each, src/main/ipc/router.ts) are wrapped where Electron keeps
-// them (`ipcMain._invokeHandlers`, whose entry resolves once the reply is sent). Call it before the page issues any.
+// them (`ipcMain._invokeHandlers`, whose entry resolves once the reply is sent). Each settled invoke keeps its answer's
+// outcome (`ok` and the error's `code`, not its value), so a read the bridge answered `timeout` while the host's CLI ran
+// on fails the audit (`untilQuiet`) rather than closing a window. Call it before the page issues any.
 export async function trackPluginReads(app: ElectronApplication): Promise<PluginReads> {
   const wrapped = await app.evaluate(({ ipcMain }) => {
     const handlers = (ipcMain as unknown as { _invokeHandlers?: Map<string, (event: unknown, ...args: unknown[]) => Promise<unknown>> })._invokeHandlers;
@@ -112,15 +114,18 @@ export async function trackPluginReads(app: ElectronApplication): Promise<Plugin
       handlers.set(channel, async (event, ...args) => {
         const started = Date.now();
         log.inflight += 1;
-        let ok = false;
+        let threw = true;
+        let answer: unknown = null;
         try {
           const result = await handler(event, ...args);
-          ok = true;
+          threw = false;
+          const r = result as { ok?: unknown; error?: { code?: unknown } } | null;
+          answer = typeof r === 'object' && r !== null ? { ok: r.ok, error: r.ok === false ? { code: r.error?.code } : undefined } : null;
           return result;
         } finally {
           log.inflight -= 1;
           log.lastSettledAt = Date.now();
-          log.settled.push({ name: channel.slice('maws:cmd:'.length), at: log.lastSettledAt, ms: log.lastSettledAt - started, ok });
+          log.settled.push({ name: channel.slice('maws:cmd:'.length), at: log.lastSettledAt, ms: log.lastSettledAt - started, threw, answer });
         }
       });
     }
@@ -131,6 +136,10 @@ export async function trackPluginReads(app: ElectronApplication): Promise<Plugin
   return {
     inflight: async () => (await read()).inflight,
     lastSettledAt: async () => (await read()).lastSettledAt,
-    settledSince: async (at) => (await read()).settled.filter((s) => s.at >= at).map(({ name, ms, ok }) => ({ name, ms, ok })),
+    settled: async () => (await read()).settled,
+    settledSince: async (at) =>
+      (await read()).settled
+        .filter((s) => s.at >= at)
+        .map((s) => ({ name: s.name, ms: s.ms, outcome: s.threw ? 'threw' : bridgeTimedOut(s) ? 'timed out at the bridge' : (s.answer as { ok?: unknown } | null)?.ok === false ? 'refused' : 'answered' })),
   };
 }

@@ -4,7 +4,9 @@
 // argv over one state answers the stdout, stderr and exit code the engine's CLI would (the `--json` shapes of G0's probe,
 // `docs/doperpowers/evidence/p1-e8/g0-cli-probe.txt`) and the state the change leaves. The process half reads the state
 // beside the script, appends the argv to `calls.log`, holds a mutation while a `hold` file exists (printing one
-// progress line first, so a row's progress can be seen), and writes the state back.
+// progress line first, so a row's progress can be seen), and writes the state back. As the engine does (E8's
+// whole-branch review, 2.1.291): an install also installs the dependencies its plugin declares (`dependencies`, names in
+// the same marketplace), and a marketplace removal uninstalls every plugin installed from it.
 'use strict';
 const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { basename, isAbsolute, join, resolve } = require('node:path');
@@ -158,6 +160,7 @@ function run(argv, input, ctx) {
     }
     if (verb === 'remove') {
       state.marketplaces = state.marketplaces.filter((m) => m !== known);
+      state.installed = state.installed.filter((p) => splitId(p.id).marketplace !== target);
       say(json({ command, outcome: 'ok', marketplace: target, message: `Successfully removed marketplace: ${target}` }));
       return out;
     }
@@ -177,6 +180,11 @@ function run(argv, input, ctx) {
       if (!plugin) return failed(`Plugin "${name}" not found in marketplace "${marketplace}". Your local copy may be out of date — try \`claude plugin marketplace update ${marketplace}\`.`, 'not_found');
       if (installation) return failed(`Plugin "${target}" is already installed`, 'already_in_goal_state');
       state.installed.push({ id: target, version: plugin.version, scope, enabled: true, projectPath });
+      for (const dependency of plugin.dependencies || []) {
+        const id = `${dependency}@${marketplace}`;
+        const declared = state.marketplaces.find((m) => m.name === marketplace).plugins.find((p) => p.name === dependency);
+        if (declared && !state.installed.some((p) => p.id === id && p.scope === scope && (p.projectPath || null) === projectPath)) state.installed.push({ id, version: declared.version, scope, enabled: true, projectPath });
+      }
       return ok({}, `Successfully installed plugin: ${target} (scope: ${scope})`);
     }
     case 'update': {

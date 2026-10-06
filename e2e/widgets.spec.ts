@@ -884,7 +884,7 @@ test.describe('plugin management (E8)', () => {
     expect(argv).toEqual(['plugin', 'install', 'e8-probe@e8-scratch', '--scope', 'user', '--json']);
     await expect(sheet.locator('[data-plugins-argv]')).toHaveText('claude plugin install e8-probe@e8-scratch --scope user --json');
     const home = configHome(backend);
-    await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-probe/<version>/`]);
+    await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-probe/<version>/`, `${home}/plugins/cache/e8-scratch/<dependency>/`]);
     await expect(sheet).toContainText(`and keeps its own records in ${home}/.claude.json`);
     await expect(sheet).toContainText(/Reloads plugins in \d+ running sessions?|No running session to reload/);
     expect(mutations(backend)).toEqual([]); // nothing ran before the confirm
@@ -1088,6 +1088,43 @@ test.describe('plugin management (E8)', () => {
     await sheet.getByRole('button', { name: 'Remove', exact: true }).click();
     await expect(tools).toHaveCount(0);
     await expect(w.locator('[data-marketplace-result="tools"]')).toContainText('Successfully removed marketplace: tools');
+    expect(mutations(backend)).toEqual(shown);
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  test('a plugin that declares a dependency installs with it, the sheet announcing the dependency caches; removing the marketplace names the plugins it uninstalls and uninstalls them', async ({ backend }) => {
+    const { page } = backend;
+    const home = configHome(backend);
+    const state = backend.cli.state();
+    backend.cli.setState({ ...state, marketplaces: state.marketplaces.map((m) => ({ ...m, plugins: [...m.plugins, { name: 'e8-deps', version: '0.5.0', description: 'Needs e8-probe', dependencies: ['e8-probe'] }] })) });
+    const w = await openPlugins(backend);
+    const group = await openAvailable(w, MARKET, 3);
+    await group.locator('[data-plugin-row="e8-deps@e8-scratch"]').getByRole('button', { name: 'Install…' }).click();
+    const install = sheetOf(page, 'install');
+    await expect(install.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-deps/<version>/`, `${home}/plugins/cache/e8-scratch/<dependency>/`]);
+    await expect(install).toContainText('and the cache directories of any dependencies the marketplace declares, each enabled in the settings file above');
+    const shown = [await argvOf(install)];
+    await install.getByRole('button', { name: 'Install', exact: true }).click();
+    await expect(installedRow(w, 'e8-deps@e8-scratch')).toContainText('user · enabled · e8-scratch');
+    await expect(installedRow(w, 'e8-probe@e8-scratch')).toContainText('user · enabled · e8-scratch'); // the dependency came with it
+
+    // the marketplace removal uninstalls all three: the sheet names them and the files that writes
+    await marketplaceRow(w, MARKET).getByRole('button', { name: 'Remove…' }).click();
+    const remove = sheetOf(page, 'marketplace-remove');
+    shown.push(await argvOf(remove));
+    expect(shown.at(-1)).toEqual(['plugin', 'marketplace', 'remove', MARKET, '--json']);
+    await expect(remove).toContainText(/Also uninstalls 3 plugins: /);
+    for (const id of ['e8-tools@e8-scratch (user)', 'e8-deps@e8-scratch (user)', 'e8-probe@e8-scratch (user)']) await expect(remove).toContainText(id);
+    const writes = remove.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem');
+    await expect(writes).toHaveCount(7);
+    expect((await writes.allInnerTexts()).sort()).toEqual(
+      [`${home}/settings.json`, `${home}/plugins/known_marketplaces.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/`, `${home}/plugins/data/e8-tools@e8-scratch/`, `${home}/plugins/data/e8-deps@e8-scratch/`, `${home}/plugins/data/e8-probe@e8-scratch/`].sort(),
+    );
+    await expect(remove.getByRole('button', { name: 'Remove', exact: true })).toBeDisabled();
+    await remove.getByRole('checkbox', { name: 'I understand' }).check();
+    await remove.getByRole('button', { name: 'Remove', exact: true }).click();
+    await expect(w.locator('[data-marketplace-result="e8-scratch"]')).toContainText('Successfully removed marketplace: e8-scratch');
+    await expect(w.locator('[data-plugins-section="installed"]')).toContainText('No plugins installed');
     expect(mutations(backend)).toEqual(shown);
     expect(backend.consoleErrors()).toEqual([]);
   });
