@@ -282,6 +282,9 @@ export const TOOL_ERRORS = {
   deliverableNotFound: (id: string) => `show_pane: no deliverable "${id}" in this session`,
   deliverableUnreadable: (id: string, message: string) => `show_pane: could not read deliverable "${id}": ${message}`, // E2: main refused the read
   // E2 end
+  // E4a start: a target the browser refuses (not http or https; `validateBrowserUrl`); E4c's tools pass their own name
+  navigationRefused: (target: string, tool: MawsToolName = 'show_pane') => `${tool}: MAWS opens only http and https pages in its browser; refused "${target}"`,
+  // E4a end
 } as const;
 
 function issuesText(error: z.ZodError): string {

@@ -37,6 +37,9 @@ import * as side from './schema/side';
 // E2 start
 import * as deliverables from './schema/deliverables';
 // E2 end
+// E4a start
+import * as browser from './schema/browser';
+// E4a end
 
 export {
   HostPingSchema,
@@ -118,6 +121,9 @@ export const commands = {
   // E2 start
   ...deliverables.commands,
   // E2 end
+  // E4a start
+  ...browser.commands,
+  // E4a end
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -149,6 +155,9 @@ export const events = {
   // E2 start
   ...deliverables.events,
   // E2 end
+  // E4a start
+  ...browser.events,
+  // E4a end
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

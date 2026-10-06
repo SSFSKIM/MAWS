@@ -43,9 +43,12 @@ import * as scm from './schema/scm';
 // E2 start
 import * as deliverables from './schema/deliverables';
 // E2 end
+// E4a start
+import * as browser from './schema/browser';
+// E4a end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, browser /* E4a */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -575,10 +578,10 @@ describe('ipc schema validates both directions', () => {
     it('adds its six commands under existing namespaces with their owners, and no namespace or event', () => {
       const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'layout.captureChords': 'main', 'engine.configure': 'engine-host' } as const;
       // Every C11 command sits under a namespace that existed before C11 (C8c's `files`, E8's `plugins` and
-      // `marketplaces`, E9's `voice`, E1's `maws`, E6's `scm`, E3's `side` and E2's `deliverables` are the ones added since).
+      // `marketplaces`, E9's `voice`, E1's `maws`, E6's `scm`, E3's `side`, E2's `deliverables` and E4a's `browser` are the ones added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables']);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'browser']);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -1038,4 +1041,101 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E2 end
+  // E4a start: the browser view's commands and events (P1 ledger §5; E4a execution document, Interfaces "IPC")
+  describe('E4a entries', () => {
+    const TAB_ID = 'b_0123456789ab';
+    const tab = {
+      tabId: TAB_ID, appSessionId: 'a', partition: 'persist:maws-browser', url: 'https://example.com/', title: 'Example', favicon: null,
+      loading: false, canGoBack: false, canGoForward: false, zoom: 1, control: 'idle', controlSince: 't', suspended: true,
+      loadError: null, crashed: null, failed: null, unresponsive: false, blockedPopups: 0, find: null, denied: [], download: null,
+      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't',
+    };
+
+    it('adds the browser namespace, main-owned throughout, every name bridged', () => {
+      expect(Object.keys(browser.commands)).toEqual([
+        'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select', 'browser.tabs.navigate', 'browser.tabs.zoom',
+        'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload', 'browser.view.place',
+        'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
+      ]);
+      for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
+      expect(Object.keys(browser.events)).toEqual([
+        'browser.tabs.changed', 'browser.view.covered', 'browser.control.changed', 'browser.chrome.command', 'browser.download.refused', 'browser.notice',
+      ]);
+      expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
+      expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
+    });
+
+    it('takes only http and https URLs, with no whitespace, and only well-formed tab ids', () => {
+      const open = { appSessionId: 'a', url: 'https://example.com/', select: true };
+      expect(validateCommandInput('browser.tabs.open', open).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.open', { ...open, url: null, reuse: 'url', requestId: 'r1' }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.open', { ...open, url: 'http://localhost:3000/x' }).ok).toBe(true);
+      for (const url of ['http://example.com/a b', 'http://exa mple.com/', ' http://example.com/', 'file:///etc/hosts', 'javascript:1', 'about:blank', 'maws-deliverable://x/y/1', 'ftp://x/'])
+        expect(validateCommandInput('browser.tabs.open', { ...open, url }).ok, url).toBe(false);
+      expect(validateCommandInput('browser.tabs.open', { ...open, reuse: 'title' }).ok).toBe(false);
+      expect(validateCommandOutput('browser.tabs.open', { tab, reused: false }).ok).toBe(true);
+      expect(validateCommandOutput('browser.tabs.open', { tab: { ...tab, extra: 1 }, reused: false }).ok).toBe(false);
+      for (const tabId of ['b_0123', 'B_0123456789ab', 'b_0123456789AB', 'tab-1', ''])
+        expect(validateCommandInput('browser.tabs.close', { tabId }).ok, tabId).toBe(false);
+      expect(validateCommandInput('browser.tabs.close', { tabId: TAB_ID }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.navigate', { tabId: TAB_ID, to: { url: 'https://a.b/', typed: true } }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.navigate', { tabId: TAB_ID, to: 'reload' }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.navigate', { tabId: TAB_ID, to: { url: 'file:///x' } }).ok).toBe(false);
+      expect(validateCommandInput('browser.tabs.navigate', { tabId: TAB_ID, to: 'home' }).ok).toBe(false);
+      expect(validateCommandOutput('browser.tabs.navigate', { accepted: true }).ok).toBe(true);
+    });
+
+    it('validates the list, the chrome commands and the history and profile reads', () => {
+      expect(validateCommandInput('browser.tabs.list', {}).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.list', { appSessionId: 'a' }).ok).toBe(true);
+      expect(validateCommandOutput('browser.tabs.list', { tabs: [tab], selected: { a: TAB_ID, b: null } }).ok).toBe(true);
+      expect(validateCommandOutput('browser.tabs.list', { tabs: [], selected: { a: 'nope' } }).ok).toBe(false);
+      expect(validateCommandInput('browser.tabs.select', { appSessionId: 'a', tabId: TAB_ID }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.zoom', { tabId: TAB_ID, action: 'in' }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.zoom', { tabId: TAB_ID, action: 'max' }).ok).toBe(false);
+      expect(validateCommandOutput('browser.tabs.zoom', { zoom: 1.25 }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.find', { tabId: TAB_ID, text: 'needle', forward: true, findNext: false, matchCase: false }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.find', { tabId: TAB_ID, text: null }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.dismiss', { tabId: TAB_ID, notice: 'popups' }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.dismiss', { tabId: TAB_ID, notice: 'tabsCap' }).ok).toBe(false);
+      expect(validateCommandInput('browser.tabs.devtools', { tabId: TAB_ID }).ok).toBe(true);
+      expect(validateCommandOutput('browser.tabs.revealDownload', { revealed: false }).ok).toBe(true);
+      expect(validateCommandInput('browser.control.handBack', { tabId: TAB_ID }).ok).toBe(true);
+      expect(validateCommandInput('browser.history.suggest', { partition: 'persist:maws-browser', query: 'wiki' }).ok).toBe(true);
+      expect(validateCommandInput('browser.history.suggest', { partition: 'persist:maws-chrome-Profile 1', query: '' }).ok).toBe(true);
+      expect(validateCommandInput('browser.history.suggest', { partition: 'persist:maws-capture', query: 'wiki' }).ok).toBe(false);
+      expect(validateCommandOutput('browser.history.suggest', { suggestions: [{ url: 'https://a.b/', title: null }] }).ok).toBe(true);
+      expect(validateCommandInput('browser.profiles.list', undefined).ok).toBe(true);
+      expect(validateCommandOutput('browser.profiles.list', { profiles: [{ profileDir: 'Default', name: 'Work' }] }).ok).toBe(true);
+    });
+
+    it('takes a placement as an integer rect of at least one pixel, or null, from a named pane', () => {
+      const place = { tabId: TAB_ID, paneId: 'p1', surface: 'panel', rect: { x: 10, y: 20, width: 300, height: 200 }, claim: true };
+      expect(validateCommandInput('browser.view.place', place).ok).toBe(true);
+      expect(validateCommandInput('browser.view.place', { ...place, rect: null, claim: false }).ok).toBe(true);
+      expect(validateCommandInput('browser.view.place', { ...place, rect: { ...place.rect, x: 10.5 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.view.place', { ...place, rect: { ...place.rect, width: 0 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.view.place', { ...place, surface: 'sidebar' }).ok).toBe(false);
+      expect(validateCommandInput('browser.view.place', { ...place, paneId: '' }).ok).toBe(false);
+      expect(validateCommandInput('browser.view.cover', { covered: true }).ok).toBe(true);
+      expect(validateCommandInput('browser.view.cover', { covered: true, tabId: TAB_ID }).ok).toBe(false);
+    });
+
+    it('validates the events', () => {
+      expect(validateEventPayload('browser.tabs.changed', { appSessionId: 'a', tabs: [tab], selected: TAB_ID }).ok).toBe(true);
+      expect(validateEventPayload('browser.tabs.changed', { appSessionId: 'a', tabs: [], selected: null }).ok).toBe(true);
+      expect(validateEventPayload('browser.view.covered', { tabId: TAB_ID, placeholder: 'data:image/jpeg;base64,/9j/4AAQ' }).ok).toBe(true);
+      expect(validateEventPayload('browser.view.covered', { tabId: TAB_ID, placeholder: null }).ok).toBe(true);
+      expect(validateEventPayload('browser.view.covered', { tabId: TAB_ID, placeholder: 'https://example.com/x.jpg' }).ok).toBe(false);
+      expect(validateEventPayload('browser.view.covered', { tabId: TAB_ID, placeholder: `data:image/jpeg;base64,${'A'.repeat(560_000)}` }).ok).toBe(false);
+      expect(validateEventPayload('browser.control.changed', { tabId: TAB_ID, control: 'idle', controlSince: 't' }).ok).toBe(true);
+      expect(validateEventPayload('browser.chrome.command', { tabId: TAB_ID, command: 'openFind' }).ok).toBe(true);
+      expect(validateEventPayload('browser.chrome.command', { tabId: TAB_ID, command: 'print' }).ok).toBe(false);
+      expect(validateEventPayload('browser.download.refused', { tabId: TAB_ID, url: 'https://a.b/f.bin', filename: 'f.bin' }).ok).toBe(true);
+      expect(validateEventPayload('browser.notice', { appSessionId: 'a', tabId: null, kind: 'tabsCap', count: 12 }).ok).toBe(true);
+      expect(validateEventPayload('browser.notice', { appSessionId: 'a', tabId: TAB_ID, kind: 'profileMissing', name: 'Work' }).ok).toBe(true);
+      expect(validateEventPayload('browser.notice', { appSessionId: 'a', tabId: null, kind: 'urlCopied' }).ok).toBe(false);
+    });
+  });
+  // E4a end
 });
