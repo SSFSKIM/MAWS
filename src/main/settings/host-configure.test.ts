@@ -1,6 +1,7 @@
 // E10 Task 2.3b: main pushes the supervisor's idle time (`host.configure`) at every ready, as engine.configure is.
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandResult, HostState, Settings } from '@shared/ipc/schema';
+import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
 import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
 import { DEFAULT_IDLE_EXIT_MS, idleExitMsOf, startHostConfigure, type HostConfigureDeps } from './host-configure';
 
@@ -55,6 +56,12 @@ describe('the idle time main pushes', () => {
     expect(idleExitMsOf(withIdle(3), { MAWS_E2E: '1', MAWS_E2E_SUPERVISOR_IDLE_MS: '0' })).toBe(180_000);
     expect(warn).toHaveBeenCalledTimes(2);
     warn.mockRestore();
+  });
+
+  it('caps MAWS_E2E_SUPERVISOR_IDLE_MS at the wire’s 1440 minutes (host.configure refuses more)', () => {
+    expect(idleExitMsOf(withIdle(3), { MAWS_E2E: '1', MAWS_E2E_SUPERVISOR_IDLE_MS: String(MAX_IDLE_EXIT_MS + 1) })).toBe(MAX_IDLE_EXIT_MS);
+    expect(idleExitMsOf(withIdle(3), { MAWS_E2E: '1', MAWS_E2E_SUPERVISOR_IDLE_MS: String(2 ** 31) })).toBe(MAX_IDLE_EXIT_MS);
+    expect(idleExitMsOf(withIdle(3), { MAWS_E2E: '1', MAWS_E2E_SUPERVISOR_IDLE_MS: String(MAX_IDLE_EXIT_MS) })).toBe(MAX_IDLE_EXIT_MS);
   });
 });
 

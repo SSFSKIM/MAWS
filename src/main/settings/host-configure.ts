@@ -4,6 +4,7 @@
 // whenever the setting changes while it is. A supervisor never told keeps its own default of 10 minutes. Under the e2e
 // harness MAWS_E2E_SUPERVISOR_IDLE_MS takes the setting's place, so a test sees an idle exit in seconds.
 import type { CommandInput, CommandResult, HostState, Settings } from '@shared/ipc/schema';
+import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
 
 export const DEFAULT_IDLE_EXIT_MS = 10 * 60_000; // the setting's default (settings version 10), and the supervisor's own
 
@@ -22,7 +23,7 @@ export function idleExitMsOf(settings: Settings, env: Record<string, string | un
   const seam = env.MAWS_E2E === '1' ? env.MAWS_E2E_SUPERVISOR_IDLE_MS : undefined;
   if (seam !== undefined) {
     const ms = Number(seam);
-    if (Number.isInteger(ms) && ms > 0) return ms;
+    if (Number.isInteger(ms) && ms > 0) return Math.min(ms, MAX_IDLE_EXIT_MS); // host.configure refuses more
     console.warn(`[settings] MAWS_E2E_SUPERVISOR_IDLE_MS=${seam} is not a positive whole number of milliseconds; using the setting`);
   }
   const minutes = (settings as { supervisor?: { idleExitMinutes?: number | null } }).supervisor?.idleExitMinutes;
