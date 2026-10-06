@@ -16,7 +16,7 @@ import { HostCommandError, type HostEmit, type HostOn } from '@shared/host/runti
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS } from '@shared/ipc/schema/engine';
-import type { C3_SESSION_COMMANDS, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
+import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
@@ -46,6 +46,14 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { ModelCatalogue } from '@shared/sessions/models';
 import { catalogueKey, ModelsCache, modelsKey } from './models-cache';
 // C10 end
+// E8 start
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import type { ReloadPluginsResponse } from '@shared/wire/control';
+import { availableOf, installedOf, listing, marketplacesOf } from './plugins/cli-result';
+import { PluginsRunner, type Timers } from './plugins/runner';
+import { READ_LINES } from '@shared/plugins/cli';
+// E8 end
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
 type C3Command = (typeof C3_SESSION_COMMANDS)[number] | (typeof C3_ENGINE_COMMANDS)[number];
@@ -77,6 +85,10 @@ export const R2_DEADLINE_SHAPES: Record<R2Command, DeadlineShape> = {
   'session.ui.promptEdit': 'bounded', 'session.ui.answer': 'immediate',
 };
 
+// E8: `session.reloadSkills`, an operation like its plugins sibling. The `plugins.*` and `marketplaces.*` reads are one
+// CLI run each under the bridge's 10 s deadline (accepted, E8 M1); their mutations are operations of the plugin runner.
+export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.reloadSkills': 'operation' };
+
 // The longest wait before a live launch spawns: its three checks run in parallel, each under its own bound (W13: the
 // binary probe's covers a PATH lookup that waits for the capture before `--version`).
 export const PRE_SPAWN_BOUND_MS = Math.max(SHELL_CAPTURE_TIMEOUT_MS + SHELL_CAPTURE_GRACE_MS, PROBE_BOUND_MS, RELAY_HEALTH_TIMEOUT_MS);
@@ -103,10 +115,12 @@ export interface EngineIpcDeps {
   // W7: whether a foreign process holds the app session's engine session now, or held it at or after `since` (C4's
   // registry); absent, never
   heldElsewhere?: (appSessionId: AppSessionId, since: string | null) => boolean;
+  pluginsTimers?: Timers; // E8: the plugin runner's timers (its settle, its CLI ceiling); default the real ones
 }
 
 export interface EngineIpc {
   table: ProcessTable;
+  plugins: PluginsRunner; // E8
 }
 
 const unknownSession = (id: string) => new HostCommandError({ code: 'internal', message: `unknown session ${id}` });
@@ -131,10 +145,36 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   const store = deps.store ?? new FileSessionStateStore(deps.userData);
   const streams = new Map<AppSessionId, SessionStream>();
   const specs = new Map<AppSessionId, LaunchSpec>();
-  const operations = new OperationTable((event) => emit('session.operation', event));
+  const operations = new OperationTable((event) => {
+    // E8 (D-13): a successful reload_plugins answer is the session's plugins now, published before its completion
+    if (event.command === 'session.reloadPlugins' && event.outcome.ok && event.outcome.value !== null) table.get(event.appSessionId)?.noteReload(event.outcome.value as ReloadPluginsResponse);
+    emit('session.operation', event);
+  });
   const relayCheck = deps.checkRelay ?? ((force: boolean) => checkRelayHealth(RELAY_URL, undefined, { force }));
   const captureEnv = deps.captureEnv ?? (() => captureShellEnvironment());
   const binaryProbe = deps.binaryProbe ?? createBinaryProbe({ captureEnv }); // W13: the installed binary, per call
+  // E8 start: the engine's plugin CLI, run by the binary a launch would run under the captured environment; after a
+  // successful mutation it reloads every ready session, applying each answer to that session's status (D-4, D-13)
+  const plugins = new PluginsRunner({
+    binary: binaryProbe,
+    captureEnv,
+    timers: deps.pluginsTimers,
+    emit: (event) => emit('plugins.operation', event),
+    changed: () => emit('plugins.changed', {}),
+    reloadTargets: () =>
+      [...specs].flatMap(([id, spec]) => {
+        const session = table.get(id);
+        const client = session?.control;
+        if (!session || session.lifecycle !== 'ready' || !client) return [];
+        const reload = async () => {
+          const answer = await controls.reloadPlugins(client, {});
+          session.noteReload(answer);
+          return answer;
+        };
+        return [{ id, directory: spec.cwd, reload }];
+      }),
+  });
+  // E8 end
   // C10 start: the model catalogue, updated from every initialize response and every list_models answer, each under
   // its launch's key (binary version and route: debt wave 3; and the model environment its settings set: debt wave 5)
   const models = new ModelsCache(deps.userData, { warn: log });
@@ -192,7 +232,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('engine.binaryInfo', async () => binaryProbe()); // W13: resolved and probed per call, the version cached by file
   handle('engine.relayHealth', async ({ force }) => relayCheck(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
-  handle('engine.shutdown', async ({ graceMs }) => table.shutdown({ graceMs }));
+  handle('engine.shutdown', async ({ graceMs }) => {
+    plugins.stop(); // E8: a plugin CLI outlives nothing it should not (X13)
+    return table.shutdown({ graceMs });
+  });
   // C12 start: the memory budget (C12 execution document, Interfaces "X2 additions"). Both immediate: the policy is
   // evaluated at once against the previous sample (a release it makes is a stop the table starts, not awaited here),
   // and the state is the table's own; the event goes out whenever the state changes and at every release.
@@ -604,7 +647,33 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   });
   // R2 end
 
-  return { table };
+  // E8 start: plugin and marketplace management (E8 execution document, M1; Interfaces "X2: plugins.*, marketplaces.*,
+  // session.reloadSkills"). A read is one CLI run (about a second; the bridge's 10 s deadline is accepted) reduced to the
+  // fields the widget shows; every mutation is an operation completing on `plugins.operation`; `session.reloadSkills` is
+  // an operation beside `session.reloadPlugins`.
+  on('plugins.env', async () => {
+    const [check, env] = await Promise.all([binaryProbe(), captureEnv()]);
+    return { binary: check.ok ? check.path : null, configHome: env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), '.claude') };
+  });
+  on('plugins.list', async ({ cwd }) => ({ plugins: listing(await plugins.read(READ_LINES.installed, cwd), installedOf) }));
+  on('plugins.available', async ({ cwd }) => ({ plugins: listing(await plugins.read(READ_LINES.available, cwd), availableOf) }));
+  on('marketplaces.list', async ({ cwd }) => ({ marketplaces: listing(await plugins.read(READ_LINES.marketplaces, cwd), marketplacesOf) }));
+  on('plugins.install', async ({ cwd, plugin, scope, acceptCommand }) => plugins.start('install', { plugin, scope, acceptCommand }, cwd));
+  on('plugins.update', async ({ cwd, plugin, scope, acceptCommand }) => plugins.start('update', { plugin, scope, acceptCommand }, cwd));
+  on('plugins.uninstall', async ({ cwd, plugin, scope, keepData }) => plugins.start('uninstall', { plugin, scope, keepData }, cwd));
+  on('plugins.enable', async ({ cwd, plugin, scope }) => plugins.start('enable', { plugin, scope }, cwd));
+  on('plugins.disable', async ({ cwd, plugin, scope }) => plugins.start('disable', { plugin, scope }, cwd));
+  on('plugins.cancel', async ({ opId }) => ({ cancelled: plugins.cancel(opId) }));
+  on('marketplaces.add', async ({ cwd, source, scope }) => plugins.start('marketplace-add', { source, scope }, cwd));
+  on('marketplaces.update', async ({ cwd, name }) => plugins.start('marketplace-update', { name }, cwd));
+  on('marketplaces.remove', async ({ cwd, name, scope }) => plugins.start('marketplace-remove', { name, scope }, cwd));
+  on('session.reloadSkills', async ({ appSessionId }) => {
+    const { id, client } = operation(appSessionId);
+    return operations.start(id, 'session.reloadSkills', client, 'reload_skills', {});
+  });
+  // E8 end
+
+  return { table, plugins };
 }
 
 function throwing(error: Error): never {

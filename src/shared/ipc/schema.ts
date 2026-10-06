@@ -18,6 +18,10 @@ import * as settings from './schema/settings';
 // C8c start
 import * as files from './schema/files';
 // C8c end
+// E8 start
+import * as plugins from './schema/plugins';
+import * as marketplaces from './schema/marketplaces';
+// E8 end
 
 export {
   HostPingSchema,
@@ -82,6 +86,8 @@ export const commands = {
   // C8c start
   ...files.commands,
   // C8c end
+  ...plugins.commands, // E8
+  ...marketplaces.commands, // E8
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -96,6 +102,8 @@ export const events = {
   // C8c start
   ...files.events,
   // C8c end
+  ...plugins.events, // E8
+  ...marketplaces.events, // E8
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

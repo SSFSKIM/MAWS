@@ -27,6 +27,7 @@ import {
   ListPermissionRulesResponseSchema,
   McpStatusResponseSchema,
   ReloadPluginsResponseSchema,
+  ReloadSkillsResponseSchema,
   RenameSessionResponseSchema,
   RewindConversationResponseSchema,
   RewindFilesResponseSchema,
@@ -115,6 +116,8 @@ export const CONTROLS = {
   ui_scroll: control<C.UiScrollRequest, typeof UiScrollResponseSchema>(UiScrollResponseSchema, 'mutate'),
   ui_focus: control<C.UiFocusRequest, typeof UiFocusResponseSchema>(UiFocusResponseSchema, 'mutate'),
   ui_prompt_edit: control<C.UiPromptEditRequest, typeof UiPromptEditResponseSchema>(UiPromptEditResponseSchema, 'mutate'),
+  // E8: the skills reload, a long control like its plugins sibling (an operation, never awaited by a bounded command)
+  reload_skills: control<C.EmptyRequest, typeof ReloadSkillsResponseSchema>(ReloadSkillsResponseSchema, 'long'),
 } as const;
 
 export type OutboundSubtype = keyof typeof CONTROLS;
@@ -190,3 +193,5 @@ export const uiClose = fn('ui_close');
 export const uiScroll = fn('ui_scroll');
 export const uiFocus = fn('ui_focus');
 export const uiPromptEdit = fn('ui_prompt_edit');
+// E8
+export const reloadSkills = fn('reload_skills');

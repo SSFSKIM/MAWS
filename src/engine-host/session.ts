@@ -18,7 +18,7 @@ import type { QueueEntry, QueueState, SendContent, SessionStateStore } from '@sh
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SurfaceAnswer } from '@shared/engine/surface'; // R2
-import { HookCallbackRequestSchema, type GetStatusResponse, type InterruptResponse } from '@shared/wire/control';
+import { HookCallbackRequestSchema, type GetStatusResponse, type InterruptResponse, type ReloadPluginsResponse } from '@shared/wire/control';
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import { BashMode } from './bash-mode';
@@ -395,6 +395,12 @@ export class EngineSession {
   // set_cwd can succeed without another system/init (pass2/trust-no-attestation).
   noteCwd(cwd: string): void {
     this.tracker.engineCwd = cwd;
+    this.touch();
+  }
+
+  // E8 (D-13): a successful reload_plugins answer, published as the status an init frame would publish.
+  noteReload(answer: ReloadPluginsResponse): void {
+    this.tracker.applyReload(answer);
     this.touch();
   }
 

@@ -8,7 +8,7 @@ import { PERMISSION_MODES, type AutoModeRefusalCode, type PermissionMode } from 
 import type { EventId, TaskId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { InitializeResponse } from '@shared/wire/control';
+import type { InitializeResponse, ReloadPluginsResponse } from '@shared/wire/control';
 
 export const HELD_PEER_MESSAGE_TTL_MS = 5 * 60_000;
 
@@ -24,6 +24,8 @@ export type TrackedStatus = Pick<
 const FAST_MODE_STATES = ['off', 'cooldown', 'on'] as const;
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? (v.filter((x) => typeof x === 'object' && x !== null) as Record<string, unknown>[]) : []);
+// system/init's and reload_plugins' plugin items alike: `name`, `path`, `source`, `version` (E8: pass3/e8-plugins-reload seq 26, 31)
+const pluginsOf = (v: unknown): EngineSessionStatus['plugins'] => list(v).map((p) => ({ name: String(p.name), path: str(p.path) ?? '', source: str(p.source), version: str(p.version) }));
 
 export function isPermissionMode(mode: string): mode is PermissionMode {
   return (PERMISSION_MODES as readonly string[]).includes(mode);
@@ -118,6 +120,12 @@ export class SessionStatusTracker {
     this.gateway.localLane = null;
   }
 
+  // E8 (D-13): a successful reload_plugins answer is the session's plugins now, before the next turn's system/init; the
+  // answer carries only a count of errors, so the last init's errors and warnings stay.
+  applyReload(answer: ReloadPluginsResponse): void {
+    this.plugins = pluginsOf(answer.plugins);
+  }
+
   recordMemory(sample: EngineSessionStatus['memory']): void {
     this.memory = { ...sample };
     if (sample.treeRssKiB !== null) this.peakTreeRssKiB = Math.max(this.peakTreeRssKiB ?? 0, sample.treeRssKiB);
@@ -176,7 +184,7 @@ export class SessionStatusTracker {
     if (typeof frame.permissionMode === 'string') this.setMode(frame.permissionMode);
     if (Array.isArray(frame.mcp_servers)) this.mcpServers = list(frame.mcp_servers).map((s) => ({ name: String(s.name), status: String(s.status), source: str(s.source) }));
     this.setFastMode(frame);
-    this.plugins = list(frame.plugins).map((p) => ({ name: String(p.name), path: str(p.path) ?? '', source: str(p.source), version: str(p.version) }));
+    this.plugins = pluginsOf(frame.plugins);
     // omitted by the engine when empty (SPEC 45 §45.10.2)
     this.pluginErrors = list(frame.plugin_errors).map((e) => ({ plugin: String(e.plugin ?? ''), type: String(e.type ?? ''), message: String(e.message ?? ''), path: str(e.path) }));
     this.pluginWarnings = list(frame.plugin_warnings).map((w) => ({ plugin: String(w.plugin ?? ''), type: String(w.type ?? ''), message: String(w.message ?? '') }));

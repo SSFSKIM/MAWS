@@ -20,12 +20,17 @@ import { OPERATION_COMMANDS } from '../engine/operations';
 // C8c start
 import * as files from './schema/files';
 // C8c end
+// E8 start
+import * as plugins from './schema/plugins';
+import * as marketplaces from './schema/marketplaces';
+import { E8_SESSION_COMMANDS } from './schema/session';
+// E8 end
 // C11 start
 import { SETTINGS_DEFAULTS_V8 } from '../settings/defaults';
 // C11 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -315,7 +320,7 @@ describe('ipc schema validates both directions', () => {
       expect(C3_ATTENTION_COMMANDS).toEqual(['attention.list', 'attention.request']);
       expect(C3_ATTENTION_EVENTS).toEqual(['attention.changed']);
       expect(C3_ENGINE_COMMANDS).toEqual(['engine.binaryInfo', 'engine.relayHealth', 'engine.sessions', 'engine.shutdown']);
-      for (const name of OPERATION_COMMANDS) expect(C3_SESSION_COMMANDS).toContain(name);
+      for (const name of OPERATION_COMMANDS) expect([...C3_SESSION_COMMANDS, ...E8_SESSION_COMMANDS] /* E8: session.reloadSkills */).toContain(name);
     });
 
     it('every session.* command input names the session appSessionId (session.launch through its spec)', () => {
@@ -505,10 +510,11 @@ describe('ipc schema validates both directions', () => {
   describe('C11 entries', () => {
     it('adds its six commands under existing namespaces with their owners, and no namespace or event', () => {
       const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'layout.captureChords': 'main', 'engine.configure': 'engine-host' } as const;
-      // Every C11 command sits under a namespace that existed before C11 (C8c's `files` is the one added since).
+      // Every C11 command sits under a namespace that existed before C11 (C8c's `files` and E8's `plugins` and
+      // `marketplaces` are the ones added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files']);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces']);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -624,4 +630,52 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // C12 end
+  // E8 start: plugin management through the engine's CLI (E8 execution document, Interfaces "X2")
+  describe('E8 entries', () => {
+    const cwd = '/r';
+    it('adds plugins.* and marketplaces.*, every command owned by the engine host, and session.reloadSkills as an operation', () => {
+      expect(Object.keys(plugins.commands)).toEqual(['plugins.env', 'plugins.list', 'plugins.available', 'plugins.install', 'plugins.update', 'plugins.uninstall', 'plugins.enable', 'plugins.disable', 'plugins.cancel']);
+      expect(Object.keys(plugins.events)).toEqual(['plugins.operation', 'plugins.changed']);
+      expect(Object.keys(marketplaces.commands)).toEqual(['marketplaces.list', 'marketplaces.add', 'marketplaces.update', 'marketplaces.remove']);
+      expect(Object.keys(marketplaces.events)).toEqual([]);
+      for (const spec of [...Object.values(plugins.commands), ...Object.values(marketplaces.commands)]) expect(spec.owner).toBe('engine-host');
+      expect(E8_SESSION_COMMANDS).toEqual(['session.reloadSkills']);
+      expect(commands['session.reloadSkills'].owner).toBe('engine-host');
+      expect(OPERATION_COMMANDS).toContain('session.reloadSkills');
+      expect(validateCommandOutput('session.reloadSkills', { opId: 'r-1' }).ok).toBe(true);
+    });
+
+    it('takes an absolute cwd, a scope from the three, a sha256 to accept, and no value the CLI would read as an option', () => {
+      expect(validateCommandInput('plugins.install', { cwd, plugin: 'p@m' }).ok).toBe(true);
+      expect(validateCommandInput('plugins.install', { cwd, plugin: 'p@m', scope: 'project', acceptCommand: 'a'.repeat(64) }).ok).toBe(true);
+      expect(validateCommandInput('plugins.install', { cwd, plugin: 'p@m', acceptCommand: 'A'.repeat(64) }).ok).toBe(false);
+      expect(validateCommandInput('plugins.install', { cwd, plugin: 'p@m', scope: 'managed' }).ok).toBe(false);
+      expect(validateCommandInput('plugins.install', { cwd, plugin: '-y' }).ok).toBe(false);
+      expect(validateCommandInput('plugins.install', { cwd: 'relative', plugin: 'p@m' }).ok).toBe(false);
+      expect(validateCommandInput('plugins.uninstall', { cwd, plugin: 'p@m', keepData: true }).ok).toBe(true);
+      expect(validateCommandInput('plugins.enable', { cwd, plugin: 'p@m', acceptCommand: 'a'.repeat(64) }).ok).toBe(false);
+      expect(validateCommandInput('marketplaces.add', { cwd, source: 'owner/repo', scope: 'user' }).ok).toBe(true);
+      expect(validateCommandInput('marketplaces.add', { cwd, source: '--yes' }).ok).toBe(false);
+      expect(validateCommandInput('marketplaces.update', { cwd, name: 'm', scope: 'user' }).ok).toBe(false); // update takes no scope
+      expect(validateCommandInput('marketplaces.remove', { cwd, name: 'm', scope: 'local' }).ok).toBe(true);
+      expect(validateCommandInput('plugins.env', {}).ok).toBe(true);
+      expect(validateCommandOutput('plugins.cancel', { cancelled: true }).ok).toBe(true);
+    });
+
+    it('carries an operation’s phases, its outcome and its reload per session', () => {
+      const base = { opId: 'o', action: 'install', target: 'p@m' };
+      expect(validateEventPayload('plugins.operation', { ...base, phase: 'started' }).ok).toBe(true);
+      expect(validateEventPayload('plugins.operation', { ...base, phase: 'output', line: 'Cloning…' }).ok).toBe(true);
+      expect(validateEventPayload('plugins.operation', { ...base, phase: 'done', outcome: { ok: true, result: { command: 'install', outcome: 'ok' } }, reload: { sessions: [{ appSessionId: 'a', outcome: 'reflected', error: null }] } }).ok).toBe(true);
+      const failure = { ok: false, error: { code: 'cli_failed', message: 'Plugin "nope" not found', failureCode: 'not_found', shownCommand: null } };
+      expect(validateEventPayload('plugins.operation', { ...base, phase: 'done', outcome: failure }).ok).toBe(true);
+      expect(validateEventPayload('plugins.operation', { ...base, phase: 'done', outcome: { ...failure, error: { ...failure.error, code: 'refused' } } }).ok).toBe(false);
+      expect(validateEventPayload('plugins.operation', { ...base, action: 'marketplace-sync', phase: 'started' }).ok).toBe(false);
+      expect(validateEventPayload('plugins.changed', {}).ok).toBe(true);
+      const row = { id: 'p@m', name: 'p', marketplace: 'm', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/c', errors: [], notes: [] };
+      expect(validateCommandOutput('plugins.list', { plugins: [row] }).ok).toBe(true);
+      expect(validateCommandOutput('marketplaces.list', { marketplaces: [{ name: 'm', source: 'directory', locator: '/m', installLocation: '/m' }] }).ok).toBe(true);
+    });
+  });
+  // E8 end
 });

@@ -97,9 +97,10 @@ export type InitializeResponse = z.infer<typeof InitializeResponseSchema>;
 // C3 start: typed payloads for every control subtype the engine host uses (C3 execution document, Interfaces
 // "Control channel"; charter §4.2). Responses are `z.looseObject` and their required fields are those every fixture
 // instance carries (pass 1 `reads.jsonl` seq 52–90, pass 2 `auto-routed`, `prewarm`, `trust-no-attestation`, `rewind`);
-// a subtype the fixtures never answered (`get_session_cost`, `get_binary_version`, `side_question`, `reload_plugins`,
-// the MCP mutations) is typed from the SPEC's lower bound. Outbound requests are TypeScript types: the host authors
-// them and never parses them. Later children rebase over this block and never edit inside it.
+// a subtype the fixtures never answered (`get_session_cost`, `get_binary_version`, `side_question`, the MCP mutations)
+// is typed from the SPEC's lower bound (`reload_plugins` was too, until E8's fixture answered it: D-14, below).
+// Outbound requests are TypeScript types: the host authors them and never parses them. Later children rebase over this
+// block and never edit inside it.
 
 // --- inbound requests C1 did not type ---------------------------------------------------------------------------------
 
@@ -202,8 +203,11 @@ export type ClaimSessionResponse = z.infer<typeof ClaimSessionResponseSchema>;
 export const SideQuestionResponseSchema = z.looseObject({ text: z.string() });
 export type SideQuestionResponse = z.infer<typeof SideQuestionResponseSchema>;
 
-export const ReloadPluginsResponseSchema = VoidResponseSchema;
-export type ReloadPluginsResponse = VoidResponse;
+// E8 (D-14): replaced in place from the SPEC's lower bound by the fixture's answer, pass3/e8-plugins-reload seq 31
+// (summarised at 32; `held` only when `hold_on_cache_impact` was asked, seq 40-41). The plugins' items carry
+// system/init's four fields (seq 26).
+export const ReloadPluginsResponseSchema = z.looseObject({ commands: z.array(z.unknown()), agents: z.array(z.unknown()), plugins: z.array(z.looseObject({ name: z.string() })), mcpServers: z.array(z.unknown()).optional(), error_count: z.number(), held: z.boolean().optional(), cache_impact: z.unknown().optional() });
+export type ReloadPluginsResponse = z.infer<typeof ReloadPluginsResponseSchema>;
 
 export const GetUsageResponseSchema = z.looseObject({
   session: z.looseObject({ total_cost_usd: z.number(), total_api_duration_ms: z.number(), total_duration_ms: z.number(), model_usage: z.record(z.string(), z.unknown()) }),
@@ -425,3 +429,9 @@ export const SURFACE_REQUEST_SUBTYPES = ['ui_copy', 'ui_prompt_read', 'ui_prompt
 export type SurfaceRequestSubtype = (typeof SURFACE_REQUEST_SUBTYPES)[number];
 export const isSurfaceRequest = (subtype: string): subtype is SurfaceRequestSubtype => (SURFACE_REQUEST_SUBTYPES as readonly string[]).includes(subtype);
 // R2 end
+
+// E8 start: `reload_skills` (E8 execution document, Interfaces), a `long` control with an empty request, answered with
+// the skills the engine now offers (pass3/e8-plugins-reload seq 34, summarised at 35).
+export const ReloadSkillsResponseSchema = z.looseObject({ skills: z.array(z.looseObject({ name: z.string(), description: z.string().optional(), argumentHint: z.string().optional(), aliases: z.array(z.string()).optional() })) });
+export type ReloadSkillsResponse = z.infer<typeof ReloadSkillsResponseSchema>;
+// E8 end

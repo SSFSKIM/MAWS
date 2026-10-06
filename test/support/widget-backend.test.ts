@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { EngineSessionStatusSchema } from '../../src/shared/engine/status';
 import type { AppSessionId } from '../../src/shared/graph/ids';
+import { ReloadPluginsResponseSchema } from '../../src/shared/wire/control'; // E8
 import { loadScenario } from './scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, syntheticFixture, WidgetBackendError, WIDGET_BACKEND_COMMANDS } from './widget-backend';
 
@@ -92,7 +93,7 @@ describe('the widget backend', () => {
     expect(await bridge.invoke('session.getSandboxDialog', { appSessionId: READY })).toMatchObject({ ok: true, value: { mode: 'disabled', supported: true } });
     expect(await bridge.invoke('session.getStatus', { appSessionId: 'nobody' })).toEqual({ ok: false, error: { code: 'internal', message: 'unknown app session: nobody' } });
     expect(await bridge.invoke('session.bash', { appSessionId: READY, command: 'ls' })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
-    const event = { appSessionId: READY, opId: 'op-1', command: 'session.reloadPlugins' as const, late: false, outcome: { ok: true as const, value: {} } };
+    const event = { appSessionId: READY, opId: 'op-1', command: 'session.reloadPlugins' as const, late: false, outcome: { ok: true as const, value: { commands: [], agents: [], plugins: [], error_count: 0 } } }; // E8: the typed answer
     backend.emitOperation(event);
     off();
     backend.emitOperation(event);
@@ -238,6 +239,8 @@ describe('the widget backend', () => {
     for (const name of ['reload-plugins.json', 'mcp-reconnect.json', 'mcp-toggle.json', 'mcp-toggle-connect-failed.json', 'get-session-cost.json']) {
       expect(syntheticFixture(ROOT, name)._from, name).toMatch(/SPEC/);
     }
+    // E8: the synthetic reload answer has the recorded answer's shape (pass3/e8-plugins-reload seq 31)
+    expect(ReloadPluginsResponseSchema.safeParse(syntheticFixture(ROOT, 'reload-plugins.json').response).success).toBe(true);
     const failed = syntheticFixture(ROOT, 'mcp-toggle-connect-failed.json') as { operation: unknown; mcp_status: { mcpServers: { name: string; status: string; error?: string }[] } };
     expect(failed.operation).toEqual({ ok: false, error: { code: 'engine_error', message: 'Connection failed', engineCode: null } });
     expect(failed.mcp_status.mcpServers.find((s) => s.name === 'openaiDeveloperDocs')).toMatchObject({ status: 'failed', error: 'Connection failed' });
