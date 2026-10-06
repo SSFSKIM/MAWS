@@ -2,8 +2,9 @@
 // work's drill-in view. A header with the run's description, its line, the badge once ended or `Stop workflow` while it
 // runs and the session is live here; below, phases on the left (`All phases` first, each `<title>` with `<done>/<total>`
 // or `Queued` and a state mark) and the selected phase's agents on the right (glyph, label, model, state, time, tokens),
-// stacked below 360 px of width. A row with an agent id opens its transcript in the Subagents drill-in; one without is
-// inert. The same model draws a live run (each `workflow.progress`) and one from disk (each `fs.workflowChanged` read).
+// stacked below 520 px of width (at the panel's default 380 px, side by side left the five-column table some 230 px).
+// A row with an agent id opens its transcript in the Subagents drill-in; one without is inert. The same model draws a
+// live run (each `workflow.progress`) and one from disk (each `fs.workflowChanged` read).
 import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
@@ -79,7 +80,7 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
       {view.phases.length === 0 ? (
         <p className="px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.phasesPending}</p>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col @min-[360px]:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col @min-[520px]:flex-row">
           <PhaseList phases={view.phases} selection={selection} running={view.running} onSelect={handle.selectPhase} />
           <AgentTable phases={view.phases} selection={selection} onOpenAgent={openAgent} />
         </div>
@@ -110,7 +111,7 @@ function PhaseList({ phases, selection, running, onSelect }: { phases: RunPhase[
       aria-label={BACKGROUND_COPY.phasesLabel}
       aria-activedescendant={optionId(selection)}
       onKeyDown={onKeyDown}
-      className="flex shrink-0 flex-col border-b border-border py-1 outline-accent focus-visible:outline-2 @min-[360px]:w-2/5 @min-[360px]:max-w-60 @min-[360px]:border-r @min-[360px]:border-b-0"
+      className="flex shrink-0 flex-col border-b border-border py-1 outline-accent focus-visible:outline-2 @min-[520px]:w-2/5 @min-[520px]:max-w-60 @min-[520px]:border-r @min-[520px]:border-b-0"
     >
       <PhaseOption id={optionId('all')} selection="all" selected={selection === 'all'} title={BACKGROUND_COPY.allPhases} count="" mark={null} onSelect={onSelect} />
       {phases.map((phase) => (
