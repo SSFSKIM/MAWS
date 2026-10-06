@@ -18,8 +18,10 @@ import { SUPERVISOR_NOTICES } from './copy';
 
 export const SUPERVISOR_NOTICE_IDS = { updated: 'supervisor.updated', incompatible: 'supervisor.incompatible', crashed: 'supervisor.crashed' } as const;
 
-// The commands that start or resume an engine process: refused while waiting, they bring the banner back.
-const LAUNCHES: ReadonlySet<CommandName> = new Set<CommandName>(['session.start', 'session.send', 'session.launch']);
+// The renderer's commands that start or resume an engine process (a send resumes a released session, a fork launches
+// its new one, a take-over resumes the session here; `session.launch` is the dev-only Resume live launcher's): refused
+// while waiting, they bring the banner back.
+const LAUNCHES: ReadonlySet<CommandName> = new Set<CommandName>(['session.start', 'session.send', 'session.fork', 'session.takeOver', 'session.launch']);
 
 type Banner = 'updated' | 'incompatible';
 
