@@ -30,6 +30,7 @@ const only = process.argv.slice(2);
 const WS_NATIVES = ['bufferutil', 'utf-8-validate'];
 const variants = [
   { name: 'external-ws-natives-bundled', dependencies: { 'playwright-core': '1.63.0' }, copy: ['playwright-core'], extraExternal: [], note: 'the failure: ws bundled with its natives' },
+  { name: 'bundled-plain', dependencies: {}, extraExternal: WS_NATIVES, buildOnly: true, note: 'the failure: playwright-core bundled with nothing externalised (Rollup stops on kerberos)' },
   { name: 'bundled', dependencies: {}, extraExternal: ['kerberos', ...WS_NATIVES] },
   { name: 'external', dependencies: { 'playwright-core': '1.63.0' }, copy: ['playwright-core'], extraExternal: WS_NATIVES },
   { name: 'external-unpacked', dependencies: { 'playwright-core': '1.63.0' }, copy: ['playwright-core'], unpackDir: 'node_modules/playwright-core', extraExternal: WS_NATIVES },
@@ -61,7 +62,7 @@ async function runVariant(v) {
   const t0 = performance.now();
   const build = spawnSync(process.execPath, [electronVite, 'build', root, '-c', join(here, 'electron.vite.config.mjs'), '--outDir', 'out'], { cwd: root, encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined, PROBE_PACK_EXTERNAL: (v.extraExternal ?? []).join(',') }, timeout: 180000, killSignal: 'SIGKILL' });
   r.build = { ms: Math.round(performance.now() - t0), status: build.status, extraExternal: v.extraExternal ?? [], stdoutTail: (build.stdout ?? '').split('\n').filter(Boolean).slice(-12), stderr: (build.stderr ?? '').split('\n').filter((l) => l && !/^\s+at /.test(l)).slice(0, 30), bundleKB: kb(sizeOf(join(root, 'out', 'main', 'index.js'))) };
-  if (build.status !== 0) return r;
+  if (build.status !== 0 || v.buildOnly) return r;
   const bundle = readFileSync(join(root, 'out', 'main', 'index.js'), 'utf8');
   const builtins = new Set(require('node:module').builtinModules);
   r.build.requiresLeftInBundle = [...new Set([...bundle.matchAll(/\brequire\((['"])([^'"]+)\1\)/g)].map((m) => m[2]))].filter((s) => !s.startsWith('node:') && !builtins.has(s) && s !== 'electron').slice(0, 40);

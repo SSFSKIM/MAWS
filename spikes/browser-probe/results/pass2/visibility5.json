@@ -1,0 +1,196 @@
+{
+  "electron": "44.4.5",
+  "chrome": "152.0.7977.130",
+  "steps": [
+    {
+      "label": "A: window pinned on screen (floating, all Spaces), shell renderer",
+      "visibility": "visible",
+      "rafFires": true,
+      "framesPresented": 11,
+      "inMs": 1000,
+      "window": {
+        "isVisibleApi": true,
+        "onScreenByInvertedTest": false,
+        "isFocused": false,
+        "isAlwaysOnTop": true,
+        "bounds": {
+          "x": 80,
+          "y": 80,
+          "width": 700,
+          "height": 400
+        }
+      }
+    },
+    {
+      "label": "A: window pinned on screen, child view, nothing attached",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000,
+      "window": {
+        "isVisibleApi": true,
+        "onScreenByInvertedTest": false,
+        "isFocused": false,
+        "isAlwaysOnTop": true,
+        "bounds": {
+          "x": 80,
+          "y": 80,
+          "width": 700,
+          "height": 400
+        }
+      }
+    },
+    {
+      "label": "B: covered by another window, shell renderer",
+      "visibility": "visible",
+      "rafFires": true,
+      "framesPresented": 11,
+      "inMs": 1000,
+      "window": {
+        "isVisibleApi": true,
+        "onScreenByInvertedTest": false,
+        "isFocused": false,
+        "isAlwaysOnTop": true,
+        "bounds": {
+          "x": 80,
+          "y": 80,
+          "width": 700,
+          "height": 400
+        }
+      }
+    },
+    {
+      "label": "B: covered by another window, child view",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000,
+      "window": {
+        "isVisibleApi": true,
+        "onScreenByInvertedTest": false,
+        "isFocused": false,
+        "isAlwaysOnTop": true,
+        "bounds": {
+          "x": 80,
+          "y": 80,
+          "width": 700,
+          "height": 400
+        }
+      }
+    },
+    {
+      "label": "C: uncovered again, shell renderer",
+      "visibility": "visible",
+      "rafFires": true,
+      "framesPresented": 11,
+      "inMs": 1000,
+      "window": {
+        "isVisibleApi": true,
+        "onScreenByInvertedTest": false,
+        "isFocused": false,
+        "isAlwaysOnTop": true,
+        "bounds": {
+          "x": 80,
+          "y": 80,
+          "width": 700,
+          "height": 400
+        }
+      }
+    },
+    {
+      "label": "C: uncovered again, child view",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000,
+      "window": {
+        "isVisibleApi": true,
+        "onScreenByInvertedTest": false,
+        "isFocused": false,
+        "isAlwaysOnTop": true,
+        "bounds": {
+          "x": 80,
+          "y": 80,
+          "width": 700,
+          "height": 400
+        }
+      }
+    },
+    {
+      "label": "D: view.setVisible(false) while on screen, child view",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000,
+      "window": {
+        "isVisibleApi": true,
+        "onScreenByInvertedTest": false,
+        "isFocused": false,
+        "isAlwaysOnTop": true,
+        "bounds": {
+          "x": 80,
+          "y": 80,
+          "width": 700,
+          "height": 400
+        }
+      }
+    },
+    {
+      "label": "D: view.setVisible(true) again, child view",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000,
+      "window": {
+        "isVisibleApi": true,
+        "onScreenByInvertedTest": false,
+        "isFocused": false,
+        "isAlwaysOnTop": true,
+        "bounds": {
+          "x": 80,
+          "y": 80,
+          "width": 700,
+          "height": 400
+        }
+      }
+    },
+    {
+      "label": "E: after a navigation while on screen, child view",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000,
+      "window": {
+        "isVisibleApi": true,
+        "onScreenByInvertedTest": false,
+        "isFocused": false,
+        "isAlwaysOnTop": true,
+        "bounds": {
+          "x": 80,
+          "y": 80,
+          "width": 700,
+          "height": 400
+        }
+      }
+    },
+    {
+      "label": "F: app.focus({steal: true}) + show(): child view",
+      "visibility": "hidden",
+      "rafFires": false,
+      "framesPresented": 0,
+      "inMs": 1000,
+      "window": {
+        "isVisibleApi": true,
+        "onScreenByInvertedTest": false,
+        "isFocused": false,
+        "isAlwaysOnTop": true,
+        "bounds": {
+          "x": 80,
+          "y": 80,
+          "width": 700,
+          "height": 400
+        }
+      }
+    }
+  ]
+}

@@ -3,7 +3,8 @@
 // pane's rect over IPC, and a WebContentsView layered over it with win.contentView.addChildView. Three local origins on
 // three sites (localhost, 127.0.0.1, [::1]) serve the test pages, so cross-site navigations and cross-site iframes are
 // real process swaps and OOPIFs under Chromium's site isolation.
-// Launch: pass2/run.sh <input|layer|crosssite|oopif|snapshot|chips|all>. Results land in results/pass2/<scenario>.json.
+// Launch: pass2/run.sh <input|input2|layer|crosssite|oopif|snapshot|chips|all> [--front=1]. Results land in
+// results/pass2/<scenario>.json. --front=1 pins the window on screen above everything (no focus taken).
 import { app, BrowserWindow, WebContentsView, session, ipcMain, systemPreferences } from 'electron';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -132,6 +133,12 @@ async function makeWindow() {
   const placed = nextPlace(5000);
   await win.loadFile(join(here, 'shell.html'));
   win.showInactive();
+  // --front=1 (after review): pin the window above everything on the current Space, without taking focus, so the
+  // page is on screen and not occluded (the first runs' window sat on another Space behind the session's terminal)
+  if (args.front) {
+    win.setAlwaysOnTop(true, 'floating');
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
   await placed;
   return ses;
 }
@@ -260,15 +267,18 @@ async function inputScenario() {
   });
   const synthPhases = out.phases.filter((p) => /playwright|raw CDP/.test(p.label));
   const humanPhases = out.phases.filter((p) => /sendInputEvent/.test(p.label));
-  const bitsIn = (ps) => { const set = new Set(); for (const p of ps) for (const m of p.inputEvents) for (const b of m.bits) set.add(b); return [...set].sort((a, b) => a - b); };
-  const everyHas = (ps, bit) => ps.flatMap((p) => p.inputEvents).every((m) => m.bits.includes(bit));
+  // Only events that carry `_modifiers` can show a bit: mouse button events have no modifier field in Electron 44, and
+  // the gestureScroll* events Chromium derives from a wheel are not the injected event.
+  const carriesBits = (m) => typeof m._modifiers === 'number' && !/^gesture/.test(m.type);
+  const bitsIn = (ps) => { const set = new Set(); for (const p of ps) for (const m of p.inputEvents) if (carriesBits(m)) for (const b of m.bits) set.add(b); return [...set].sort((a, b) => a - b); };
+  const everyHas = (ps, bit) => ps.flatMap((p) => p.inputEvents).filter(carriesBits).every((m) => m.bits.includes(bit));
   const synthBits = bitsIn(synthPhases);
   const humanBits = bitsIn(humanPhases);
-  const signalBits = synthBits.filter((b) => !humanBits.includes(b) && everyHas(synthPhases.filter((p) => p.inputEvents.length), b));
+  const signalBits = synthBits.filter((b) => !humanBits.includes(b) && everyHas(synthPhases, b));
   out.analysis = {
     inputEventFiresForCdpInput: synthPhases.filter((p) => p.commands.some((c) => c.method === 'Input.dispatchMouseEvent' || c.method === 'Input.dispatchKeyEvent')).map((p) => ({ label: p.label, inputCommands: p.commands.filter((c) => /dispatch/.test(c.method)).length, inputEvents: p.inputEvents.length })),
     inputEventFiresForSendInputEvent: humanPhases.map((p) => ({ label: p.label, inputEvents: p.inputEvents.length, types: p.inputEvents.map((m) => m.type) })),
-    rawModifierBitsSeen: { synthesised: synthBits, humanStandIn: humanBits, candidateSignalBits: signalBits, note: 'a bit set on every CDP-dispatched event and on no sendInputEvent one; Blink names bit 24 kFromDebugger' },
+    rawModifierBitsSeen: { synthesised: synthBits, humanStandIn: humanBits, candidateSignalBits: signalBits, eventsCarryingModifiers: { synthesised: synthPhases.flatMap((p) => p.inputEvents).filter(carriesBits).length, humanStandIn: humanPhases.flatMap((p) => p.inputEvents).filter(carriesBits).length }, note: 'a bit set on every CDP-dispatched key or wheel event and on no sendInputEvent one; Chromium 152 names bit 23 kFromDebugger (results/pass2/web_input_event-modifiers-152.0.7977.130.txt)' },
     insideWindow: synthPhases.map((p) => ({ label: p.label, events: p.inputEvents.length, insideAny: p.inputEvents.filter((m) => m.insideAnyWindow).length, insideMatching: p.inputEvents.filter((m) => m.insideMatchingWindow).length })),
     humanInsideWindow: humanPhases.map((p) => ({ label: p.label, events: p.inputEvents.length, insideAny: p.inputEvents.filter((m) => m.insideAnyWindow).length })),
     commandWindowMs: stats(out.phases.flatMap((p) => p.commands.filter((c) => /dispatch/.test(c.method)).map((c) => c.durationMs))),
@@ -283,6 +293,107 @@ async function inputScenario() {
   };
   await detach(a);
   wc.removeListener('input-event', onInput);
+  wc.removeListener('before-input-event', onBefore);
+  return out;
+}
+
+// ---- (1), second pass after review: before-mouse-event, input inside a cross-site iframe, interleaved presses, zoom --
+async function input2Scenario() {
+  const wc = view.webContents;
+  const out = {};
+  await wc.loadURL(`${ORIGINS.A}/embed.html?frame=${encodeURIComponent(`${ORIGINS.B}/frame.html`)}`);
+  const mainEvents = [];
+  const beforeMouse = [];
+  const beforeInput = [];
+  let beforeMouseKeys = null;
+  const onInput = (_e, input) => mainEvents.push({ at: epoch(), type: input.type, x: input.x, y: input.y, globalX: input.globalX, globalY: input.globalY, _modifiers: input._modifiers });
+  const onBeforeMouse = (_e, input) => { if (!beforeMouseKeys) beforeMouseKeys = Object.keys(input); beforeMouse.push({ at: epoch(), type: input.type, x: input.x, y: input.y, globalX: input.globalX, globalY: input.globalY, _modifiers: input._modifiers, modifiers: input.modifiers }); };
+  const onBefore = (_e, input) => beforeInput.push({ at: epoch(), type: input.type, key: input.key });
+  wc.on('input-event', onInput);
+  wc.on('before-mouse-event', onBeforeMouse);
+  wc.on('before-input-event', onBefore);
+  const commands = [];
+  let interleave = null;
+  const a = await attach(wc, { onCommand: (c) => {
+    if (!c.method.startsWith('Input.')) return;
+    commands.push({ ...c, params: { type: c.params.type, x: c.params.x, y: c.params.y, key: c.params.key } });
+    // the human stand-in presses while the agent's mousePressed is in flight (inside its send..reply window)
+    if (interleave && c.phase === 'send' && c.method === 'Input.dispatchMouseEvent' && c.params.type === 'mousePressed') {
+      const p = interleave;
+      interleave = null;
+      const g = screenPoint(p.x, p.y);
+      wc.sendInputEvent({ type: 'mouseDown', x: p.x, y: p.y, globalX: g.x, globalY: g.y, button: 'left', clickCount: 1 });
+      wc.sendInputEvent({ type: 'mouseUp', x: p.x, y: p.y, globalX: g.x, globalY: g.y, button: 'left', clickCount: 1 });
+    }
+  } });
+  const page = await findProbePage(a.browser, ORIGINS.A);
+  if (!page) throw new Error('no page');
+  page.setDefaultTimeout(8000);
+  await page.frameLocator('#f').locator('#fbtn').waitFor({ state: 'visible' });
+  const centre = async (loc) => { const b = await loc.boundingBox(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) }; };
+  const top = await centre(page.locator('#top-btn'));
+  const frameBtn = await centre(page.frameLocator('#f').locator('#fbtn'));
+  const frameField = await centre(page.frameLocator('#f').locator('#ffield'));
+  const heading = await centre(page.locator('#origin'));
+  out.points = { top, frameBtn, frameField, heading, electronFrames: wc.mainFrame.framesInSubtree.map((f) => ({ url: f.url, processId: f.processId })) };
+  const standInClick = (p) => { const g = screenPoint(p.x, p.y); wc.sendInputEvent({ type: 'mouseMove', x: p.x, y: p.y, globalX: g.x, globalY: g.y }); wc.sendInputEvent({ type: 'mouseDown', x: p.x, y: p.y, globalX: g.x, globalY: g.y, button: 'left', clickCount: 1 }); wc.sendInputEvent({ type: 'mouseUp', x: p.x, y: p.y, globalX: g.x, globalY: g.y, button: 'left', clickCount: 1 }); };
+  const standInKey = (k) => { wc.sendInputEvent({ type: 'keyDown', keyCode: k.toUpperCase() }); wc.sendInputEvent({ type: 'char', keyCode: k }); wc.sendInputEvent({ type: 'keyUp', keyCode: k.toUpperCase() }); };
+
+  const CDP_TO_ELECTRON = { mouseMoved: 'mouseMove', mousePressed: 'mouseDown', mouseReleased: 'mouseUp', keyDown: 'keyDown', rawKeyDown: 'rawKeyDown', keyUp: 'keyUp', char: 'char', mouseWheel: 'mouseWheel' };
+  const windowsOf = (cmds) => { const byId = new Map(); for (const c of cmds) { const w = byId.get(c.id) ?? { id: c.id, method: c.method, params: c.params }; if (c.phase === 'send') w.send = c.at; else w.reply = c.at; byId.set(c.id, w); } return [...byId.values()]; };
+  // the rule as (1) states it: an input-event is the agent's iff an Input.dispatch* of the same type and rounded
+  // coordinates is in flight and not yet consumed by an earlier event
+  const classify = (events, windows) => {
+    const used = new Set();
+    return events.map((m) => {
+      const w = windows.find((x) => !used.has(x.id) && m.at >= x.send - 0.05 && (x.reply == null || m.at <= x.reply + 0.05) && CDP_TO_ELECTRON[x.params.type] === m.type && (x.params.x == null || (Math.round(x.params.x) === Math.round(m.x) && Math.round(x.params.y) === Math.round(m.y))));
+      if (w) used.add(w.id);
+      return { type: m.type, at: m.at, x: m.x, y: m.y, _modifiers: m._modifiers, attributed: w ? 'agent' : 'human' };
+    });
+  };
+  const phases = [];
+  async function phase(label, fn, expect) {
+    const before = { main: mainEvents.length, bm: beforeMouse.length, bi: beforeInput.length, cmd: commands.length };
+    const t0 = epoch();
+    let error = null;
+    try { await fn(); } catch (e) { error = firstLine(e); }
+    await sleep(300);
+    const main = mainEvents.slice(before.main);
+    const windows = windowsOf(commands.slice(before.cmd));
+    const classified = classify(main, windows).map((m) => ({ ...m, at: round(m.at - t0, 2) }));
+    const p = { label, error, expect, inputEvents: classified, inputEventTypes: main.map((m) => m.type), beforeMouseEvents: beforeMouse.slice(before.bm).map((b) => ({ ...b, at: round(b.at - t0, 2) })), beforeInputEvents: beforeInput.slice(before.bi).map((b) => ({ ...b, at: round(b.at - t0, 2) })), commands: windows.map((w) => ({ type: w.params.type, x: w.params.x, y: w.params.y, sendRel: round(w.send - t0, 2), replyRel: round((w.reply ?? NaN) - t0, 2) })), attributed: { agent: classified.filter((m) => m.attributed === 'agent').length, human: classified.filter((m) => m.attributed === 'human').length, humanPresses: classified.filter((m) => m.attributed === 'human' && (m.type === 'mouseDown' || m.type === 'rawKeyDown' || m.type === 'keyDown')).length } };
+    phases.push(p);
+    return p;
+  }
+  const topCount = () => page.locator('#top-count').textContent();
+  const frameCount = () => page.frameLocator('#f').locator('#fcount').textContent();
+
+  // before-mouse-event: agent vs stand-in, top frame
+  (await phase('agent click, top-frame button (CDP)', () => page.locator('#top-btn').click(), 'before-mouse-event fires?')).topCount = await topCount();
+  (await phase('stand-in click, top-frame button (sendInputEvent)', () => standInClick(top), 'before-mouse-event fires?')).topCount = await topCount();
+  // input inside the cross-site iframe
+  (await phase('agent click, button inside the cross-site iframe (CDP)', () => page.frameLocator('#f').locator('#fbtn').click(), 'does main see input-event / before-mouse-event for an OOPIF?')).frameCount = await frameCount();
+  (await phase('stand-in click, button inside the cross-site iframe (sendInputEvent at its page coordinates)', () => standInClick(frameBtn), 'the takeover case that matters: a human click into an iframe')).frameCount = await frameCount();
+  await phase('stand-in click into the iframe field, then stand-in key x', async () => { standInClick(frameField); await sleep(150); wc.focus(); standInKey('x'); }, 'does main see before-input-event / input-event for a key into an OOPIF?');
+  phases[phases.length - 1].frameFieldValue = await page.frameLocator('#f').locator('#ffield').inputValue().catch((e) => `error: ${firstLine(e)}`);
+  // interleaved: the stand-in presses while the agent's mousePressed is in flight
+  interleave = heading;
+  (await phase('interleaved: agent click on the top button while the stand-in presses at another pixel (the heading)', () => page.locator('#top-btn').click(), 'agent events attributed to the agent, the stand-in press to the human')).topCount = await topCount();
+  interleave = top;
+  (await phase('interleaved: agent click on the top button while the stand-in presses at the same pixel', () => page.locator('#top-btn').click(), 'one press consumes the window, the other is human: the takeover still fires')).topCount = await topCount();
+  // zoom: CDP coordinates are CSS px of the viewport; input-event x,y are widget DIPs
+  wc.setZoomFactor(1.25);
+  await sleep(300);
+  const topZoomed = await centre(page.locator('#top-btn'));
+  (await phase('agent click at zoom 1.25', () => page.locator('#top-btn').click(), 'do command x,y and input-event x,y still agree?')).pointAtZoom = topZoomed;
+  wc.setZoomFactor(1);
+  await sleep(200);
+  out.beforeMouseEventKeys = beforeMouseKeys;
+  out.phases = phases;
+  out.summary = phases.map((p) => ({ label: p.label, inputEvents: p.inputEventTypes.length, beforeMouse: p.beforeMouseEvents.length, beforeInput: p.beforeInputEvents.length, agent: p.attributed.agent, human: p.attributed.human, humanPresses: p.attributed.humanPresses, counts: { top: p.topCount, frame: p.frameCount, field: p.frameFieldValue } }));
+  await detach(a);
+  wc.removeListener('input-event', onInput);
+  wc.removeListener('before-mouse-event', onBeforeMouse);
   wc.removeListener('before-input-event', onBefore);
   return out;
 }
@@ -456,6 +567,7 @@ async function crosssiteScenario() {
   if (!page) throw new Error('no page');
   page.setDefaultTimeout(10000);
   const pwEvents = [];
+  const tStart = epoch();
   page.on('framenavigated', (f) => pwEvents.push({ at: epoch(), event: 'framenavigated', url: f.url(), main: f === page.mainFrame() }));
   page.on('crash', () => pwEvents.push({ at: epoch(), event: 'crash' }));
   page.on('close', () => pwEvents.push({ at: epoch(), event: 'close' }));
@@ -488,7 +600,7 @@ async function crosssiteScenario() {
   out.navigations.push(await navigate('A2 -> C (localhost -> [::1], cross-site)', () => page.goto(`${ORIGINS.C}/a.html`), ORIGINS.C));
   out.navigations.push(await navigate('C -> A by webContents.loadURL (the chrome address bar, cross-site)', async () => { await wc.loadURL(`${ORIGINS.A}/a.html`); return null; }, ORIGINS.A));
   out.navigations.push(await navigate('A reload', () => page.reload(), ORIGINS.A));
-  out.pwEvents = pwEvents.map((e) => ({ ...e, at: round(e.at - out.navigations[0].after.at ?? 0) }));
+  out.pwEvents = pwEvents.map((e) => ({ ...e, at: round(e.at - tStart) }));
   out.bridgeStats = { ...bridge.stats, unknownBrowserMethods: [...bridge.stats.unknownBrowserMethods], blocked: bridge.stats.blocked.slice(0, 20) };
   out.frameIdsStable = out.navigations.every((n) => n.frameIdAfter === out.frameIdBefore);
 
@@ -691,7 +803,9 @@ async function main() {
   await makeWindow();
   const meta = { scenario, electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, playwrightCore: require('playwright-core/package.json').version, platform: `${process.platform} ${process.arch} ${require('node:os').release()}`, startedAt: new Date().toISOString(), loadavg: require('node:os').loadavg().map((x) => round(x)), userData: app.getPath('userData'), origins: ORIGINS };
   const results = { meta };
-  const scenarios = { layer: layerScenario, input: inputScenario, crosssite: crosssiteScenario, oopif: oopifScenario, snapshot: snapshotScenario, chips: chipsScenario };
+  const scenarios = { layer: layerScenario, input: inputScenario, input2: input2Scenario, crosssite: crosssiteScenario, oopif: oopifScenario, snapshot: snapshotScenario, chips: chipsScenario };
+  meta.front = Boolean(args.front);
+  meta.windowIsVisibleApi = win.isVisible();
   const order = scenario === 'all' ? Object.keys(scenarios) : scenario.split(',');
   let failed = false;
   for (const name of order) {

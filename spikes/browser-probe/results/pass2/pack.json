@@ -3,7 +3,7 @@
   "asar": "3.4.1",
   "electron": "44.4.5",
   "playwrightCore": "1.63.0",
-  "startedAt": "2026-10-06T16:44:21.345Z",
+  "startedAt": "2026-10-06T17:11:48.766Z",
   "variants": [
     {
       "name": "external-ws-natives-bundled",
@@ -12,7 +12,7 @@
       },
       "note": "the failure: ws bundled with its natives",
       "build": {
-        "ms": 784,
+        "ms": 527,
         "status": 0,
         "extraExternal": [],
         "stdoutTail": [
@@ -21,7 +21,7 @@
           "✓ 42 modules transformed.",
           "rendering chunks...",
           "out/main/index.js  134.71 kB",
-          "✓ built in 391ms"
+          "✓ built in 190ms"
         ],
         "stderr": [
           "(!) renderer and preload config is missing"
@@ -35,13 +35,13 @@
         "bundlesPlaywrightCore": false
       },
       "pack": {
-        "ms": 113,
+        "ms": 93,
         "asarKB": 13300,
         "unpackedKB": null,
         "stagedNodeModulesKB": 13138
       },
       "run": {
-        "ms": 1162,
+        "ms": 736,
         "status": 1,
         "signal": null,
         "stderr": [],
@@ -50,7 +50,7 @@
           "steps": [
             {
               "name": "ready",
-              "at": 386,
+              "at": 153,
               "filename": "/private/tmp/maws-e4-0/pack/external-ws-natives-bundled/app.asar/out/main/index.js",
               "appPath": "/tmp/maws-e4-0/pack/external-ws-natives-bundled/app.asar",
               "isPackaged": false,
@@ -60,22 +60,22 @@
             },
             {
               "name": "load playwright-core",
-              "at": 538,
+              "at": 270,
               "ok": true,
-              "ms": 151,
+              "ms": 117,
               "resolvedAtRunTime": "/private/tmp/maws-e4-0/pack/external-ws-natives-bundled/app.asar/node_modules/playwright-core/index.js",
               "bufferutilAtRunTime": "not resolvable at run time: Cannot find module 'bufferutil'"
             },
             {
               "name": "window",
-              "at": 991,
+              "at": 644,
               "ok": true
             },
             {
               "name": "bridge start",
-              "at": 1005,
+              "at": 648,
               "ok": true,
-              "ms": 13.2
+              "ms": 3.8
             }
           ],
           "errors": [
@@ -85,10 +85,38 @@
       }
     },
     {
+      "name": "bundled-plain",
+      "dependencies": {},
+      "note": "the failure: playwright-core bundled with nothing externalised (Rollup stops on kerberos)",
+      "build": {
+        "ms": 2343,
+        "status": 1,
+        "extraExternal": [
+          "bufferutil",
+          "utf-8-validate"
+        ],
+        "stdoutTail": [
+          "vite v7.3.6 building ssr environment for production...",
+          "transforming...",
+          "✓ 44 modules transformed."
+        ],
+        "stderr": [
+          "(!) renderer and preload config is missing",
+          "✗ Build failed in 2.06s",
+          "error during build:",
+          "[vite]: Rollup failed to resolve import \"kerberos\" from \"/Users/new/Developer/GitHub/MAWS/node_modules/playwright-core/lib/utilsBundle.js\".",
+          "This is most likely unintended because it can break your application at runtime.",
+          "If you do want to externalize this module explicitly add it to",
+          "`build.rollupOptions.external`"
+        ],
+        "bundleKB": null
+      }
+    },
+    {
       "name": "bundled",
       "dependencies": {},
       "build": {
-        "ms": 5944,
+        "ms": 4699,
         "status": 0,
         "extraExternal": [
           "kerberos",
@@ -101,7 +129,7 @@
           "✓ 78 modules transformed.",
           "rendering chunks...",
           "out/main/index.js  6,742.18 kB",
-          "✓ built in 5.58s"
+          "✓ built in 4.41s"
         ],
         "stderr": [
           "(!) renderer and preload config is missing",
@@ -132,13 +160,13 @@
         "bundlesPlaywrightCore": true
       },
       "pack": {
-        "ms": 48,
+        "ms": 18,
         "asarKB": 6585,
         "unpackedKB": null,
         "stagedNodeModulesKB": null
       },
       "run": {
-        "ms": 40013,
+        "ms": 40010,
         "status": null,
         "signal": "SIGKILL",
         "stderr": [
@@ -166,7 +194,7 @@
         "playwright-core": "1.63.0"
       },
       "build": {
-        "ms": 462,
+        "ms": 450,
         "status": 0,
         "extraExternal": [
           "bufferutil",
@@ -178,7 +206,7 @@
           "✓ 38 modules transformed.",
           "rendering chunks...",
           "out/main/index.js  133.14 kB",
-          "✓ built in 188ms"
+          "✓ built in 184ms"
         ],
         "stderr": [
           "(!) renderer and preload config is missing"
@@ -194,13 +222,13 @@
         "bundlesPlaywrightCore": false
       },
       "pack": {
-        "ms": 90,
+        "ms": 85,
         "asarKB": 13299,
         "unpackedKB": null,
         "stagedNodeModulesKB": 13138
       },
       "run": {
-        "ms": 1158,
+        "ms": 796,
         "status": 0,
         "signal": null,
         "stderr": [],
@@ -209,7 +237,7 @@
           "steps": [
             {
               "name": "ready",
-              "at": 183,
+              "at": 150,
               "filename": "/private/tmp/maws-e4-0/pack/external/app.asar/out/main/index.js",
               "appPath": "/tmp/maws-e4-0/pack/external/app.asar",
               "isPackaged": false,
@@ -219,60 +247,60 @@
             },
             {
               "name": "load playwright-core",
-              "at": 307,
+              "at": 265,
               "ok": true,
-              "ms": 124,
+              "ms": 114,
               "resolvedAtRunTime": "/private/tmp/maws-e4-0/pack/external/app.asar/node_modules/playwright-core/index.js",
               "bufferutilAtRunTime": "not resolvable at run time: Cannot find module 'bufferutil'"
             },
             {
               "name": "window",
-              "at": 689,
+              "at": 610,
               "ok": true
             },
             {
               "name": "bridge start",
-              "at": 693,
+              "at": 616,
               "ok": true,
-              "ms": 4
+              "ms": 5.8
             },
             {
               "name": "connectOverCDP",
-              "at": 736,
+              "at": 661,
               "ok": true,
-              "ms": 42.2,
+              "ms": 44.5,
               "version": "152.0.7977.130"
             },
             {
               "name": "ariaSnapshot",
-              "at": 765,
+              "at": 683,
               "ok": true,
-              "ms": 29.5,
+              "ms": 21.6,
               "chars": 87,
               "text": "- generic [active] [ref=e1]:\n  - button \"Click me\" [ref=e2]\n  - textbox \"Name\" [ref=e3]"
             },
             {
               "name": "click by ref",
-              "at": 802,
+              "at": 693,
               "ok": true,
-              "ms": 35.1,
+              "ms": 9.2,
               "textAfter": "clicked"
             },
             {
               "name": "fill",
-              "at": 812,
+              "at": 699,
               "ok": true,
               "value": "packed"
             },
             {
               "name": "screenshot",
-              "at": 852,
+              "at": 723,
               "ok": true,
               "bytes": 7854
             },
             {
               "name": "evaluate",
-              "at": 854,
+              "at": 725,
               "ok": true,
               "title": "packed"
             }
@@ -287,7 +315,7 @@
         "playwright-core": "1.63.0"
       },
       "build": {
-        "ms": 477,
+        "ms": 458,
         "status": 0,
         "extraExternal": [
           "bufferutil",
@@ -299,7 +327,7 @@
           "✓ 38 modules transformed.",
           "rendering chunks...",
           "out/main/index.js  133.14 kB",
-          "✓ built in 201ms"
+          "✓ built in 196ms"
         ],
         "stderr": [
           "(!) renderer and preload config is missing"
@@ -315,13 +343,13 @@
         "bundlesPlaywrightCore": false
       },
       "pack": {
-        "ms": 91,
+        "ms": 74,
         "asarKB": 160,
         "unpackedKB": 13138,
         "stagedNodeModulesKB": 13138
       },
       "run": {
-        "ms": 849,
+        "ms": 799,
         "status": 0,
         "signal": null,
         "stderr": [],
@@ -330,7 +358,7 @@
           "steps": [
             {
               "name": "ready",
-              "at": 158,
+              "at": 138,
               "filename": "/private/tmp/maws-e4-0/pack/external-unpacked/app.asar/out/main/index.js",
               "appPath": "/tmp/maws-e4-0/pack/external-unpacked/app.asar",
               "isPackaged": false,
@@ -340,60 +368,60 @@
             },
             {
               "name": "load playwright-core",
-              "at": 287,
+              "at": 257,
               "ok": true,
-              "ms": 129,
+              "ms": 119,
               "resolvedAtRunTime": "/private/tmp/maws-e4-0/pack/external-unpacked/app.asar/node_modules/playwright-core/index.js",
               "bufferutilAtRunTime": "not resolvable at run time: Cannot find module 'bufferutil'"
             },
             {
               "name": "window",
-              "at": 657,
+              "at": 610,
               "ok": true
             },
             {
               "name": "bridge start",
-              "at": 661,
+              "at": 615,
               "ok": true,
-              "ms": 3.8
+              "ms": 3.5
             },
             {
               "name": "connectOverCDP",
-              "at": 697,
+              "at": 648,
               "ok": true,
-              "ms": 36.5,
+              "ms": 32.3,
               "version": "152.0.7977.130"
             },
             {
               "name": "ariaSnapshot",
-              "at": 721,
+              "at": 670,
               "ok": true,
-              "ms": 23.1,
+              "ms": 22,
               "chars": 87,
               "text": "- generic [active] [ref=e1]:\n  - button \"Click me\" [ref=e2]\n  - textbox \"Name\" [ref=e3]"
             },
             {
               "name": "click by ref",
-              "at": 746,
+              "at": 693,
               "ok": true,
-              "ms": 23.6,
+              "ms": 21.4,
               "textAfter": "clicked"
             },
             {
               "name": "fill",
-              "at": 752,
+              "at": 699,
               "ok": true,
               "value": "packed"
             },
             {
               "name": "screenshot",
-              "at": 781,
+              "at": 721,
               "ok": true,
               "bytes": 7854
             },
             {
               "name": "evaluate",
-              "at": 782,
+              "at": 723,
               "ok": true,
               "title": "packed"
             }
