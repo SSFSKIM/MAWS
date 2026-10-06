@@ -603,6 +603,10 @@ The executor replaces these lines with what actually ran and what it printed.
   Rationale: the architect's answer to the second interim hand-back.
   Date/Author: 2026-10-06, the E10 controller.
 
+- Decision: Task 3.1 as built (ef50c23e, 5b01076e; `src/main/lifecycle/{copy,engine-quit}.ts`). `shutdownEngine` calls `hosts.stopAllForQuit(5000)` in both modes (its utility branch sends `engine.shutdown` with the old error filter), so `index.ts` does not pick by mode; the engine host's quit dependencies live in `engine-quit.ts` so the wiring is testable. `keepOffered()` reads the transport actually built (`hosts.facts('engine-host').transport`). The keep offer reaches the question as a third argument (`KeepOffer | null`) that the unsaved-files question ignores, so E5's question comes first. The "N sessions kept" count is the sessions not exited at the answer; the e2e line reads `quit-guard: 1 mid-turn, auto-answered keep, 1 session kept`. With `keepRunningDefault: false` the default button is Quit (the setting reads "When quitting with work in flight: … Stop them"), where the old three-button question defaulted to Cancel; kept as §Design 5 states and listed for the owner. The interim hazard of Task 1.3 (an ordinary detached quit latching the supervisor) is closed.
+  Rationale: the executor's report (task 11).
+  Date/Author: 2026-10-06, the E10 controller.
+
 Residue decisions (the design above carries each with its reason; the architect folded them as A-29, which accepts every one and rules the three that were marked ★ (10, 11, 21) and the `[parent-impact]` items, overturnable by the owner):
 
 1. The supervisor is the engine-host bundle itself, run by the Electron binary as Node (`process.execPath`, `ELECTRON_RUN_AS_NODE=1`) in dev and packaged alike; the `runAsNode` fuse must stay enabled and M4 guards it. Rejected: a bundled Node, a second Electron instance, a separate supervisor entry.
