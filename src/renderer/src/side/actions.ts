@@ -1,9 +1,9 @@
-// What opens the Side pane and what the comment composer sends (E3 execution document, Design §1, §6, §8 and §9). The
-// pane never switches the main view (the panel rule): a thread opened from the composer is shown at once only when its
-// parent is the session the window shows, and otherwise added to the parent's panel without activation, with a toast
-// saying where it is; a summary row's Open activates it (the person clicked in the parent's transcript, so the parent is
-// shown). Main owns the sends: `side.thread.open` forks the parent with the anchored first message, `side.sendToMain`
-// steers or sends it the comment.
+// What opens the Side pane and what the comment composer sends (E3 execution document, Design §1, §6, §7, §8 and §9).
+// The pane never switches the main view (the panel rule): a thread opened from the composer, or the question view a
+// `/btw` opens, is shown at once only when its session is the one the window shows, and otherwise added to that
+// session's panel without activation, with a toast saying where it is; a summary row's Open activates it (the person
+// clicked in the parent's transcript, so the parent is shown). Main owns the sends: `side.thread.open` forks the parent
+// with the anchored first message (or the promoted side questions), `side.sendToMain` steers or sends it the comment.
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -14,7 +14,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab, sessionOfTab } from '../stores/layout-model';
 import { toast } from '../stores/notices';
 import { SIDE_COPY } from './copy';
-import { setSideView, type SideView } from './store';
+import { promotable, setSideView, sidePaneOf, useSidePane, type SideView } from './store';
 
 export const SIDE_TOOL_ID = 'side';
 
@@ -36,11 +36,35 @@ export function openSideThread(parent: AppSessionId, child: AppSessionId): void 
   openPane(parent, { kind: 'thread', childAppSessionId: child }, true);
 }
 
-// A thread the composer just opened: on screen when its parent is shown, else waiting in the parent's panel.
-export function revealNewThread(parent: AppSessionId, child: AppSessionId): void {
+// The parent's pane on `view`, on screen when the parent is shown; otherwise waiting in the parent's panel, with a toast
+// saying where (`elsewhere`, given the parent's title).
+function revealPane(parent: AppSessionId, view: SideView, elsewhere: (parentTitle: string) => string): void {
   const shown = shownSession() === parent;
-  openPane(parent, { kind: 'thread', childAppSessionId: child }, shown);
-  if (!shown) toast({ level: 'info', text: SIDE_COPY.composer.openedElsewhere(titleOf(parent)), actions: [], dismissible: true });
+  openPane(parent, view, shown);
+  if (!shown) toast({ level: 'info', text: elsewhere(titleOf(parent)), actions: [], dismissible: true });
+}
+
+// A thread the composer just opened.
+export function revealNewThread(parent: AppSessionId, child: AppSessionId): void {
+  revealPane(parent, { kind: 'thread', childAppSessionId: child }, SIDE_COPY.composer.openedElsewhere);
+}
+
+// The question view, where a `/btw` just asked shows its answer (typed in a composer whose session is not the shown one,
+// a side thread's own in the pane among them, it waits in that session's panel).
+export function revealSideQuestions(parent: AppSessionId): void {
+  revealPane(parent, { kind: 'btw' }, SIDE_COPY.btw.askedElsewhere);
+}
+
+// "Continue as a side thread": the answered exchanges (and what the person typed beside them) open a side thread of the
+// parent, adopted as C10's fork is, and the pane turns to it.
+export async function promoteSide(parent: AppSessionId, text: string | null, client: MawsBridge = ipc): Promise<{ ok: true } | { ok: false; error: string }> {
+  const exchanges = promotable(sidePaneOf(useSidePane.getState(), parent).exchanges ?? []);
+  const result = await client.invoke('side.thread.open', { appSessionId: parent, from: { kind: 'btw', exchanges, text } });
+  if (!result.ok) return { ok: false, error: result.error.message };
+  const adopted = await adoptFork(parent, result.value, null);
+  if (!adopted.ok) return adopted;
+  setSideView(parent, { kind: 'thread', childAppSessionId: adopted.appSessionId });
+  return { ok: true };
 }
 
 export type CommentDestination = 'thread' | 'main';
@@ -60,7 +84,10 @@ export async function sendComment(destination: CommentDestination, input: Commen
   delete anchor.screenshot; // the screenshot travels as its own field, the sheet's (M1's review)
   if (destination === 'main') {
     const result = await client.invoke('side.sendToMain', { appSessionId: parent, anchor, text, screenshot });
-    return result.ok ? { ok: true } : { ok: false, error: result.error.message };
+    if (!result.ok) return { ok: false, error: result.error.message };
+    // held by a paused or held app queue: it is not lost, and not sent yet either (M3's review)
+    if (result.value.disposition === 'queued') toast({ level: 'info', text: SIDE_COPY.composer.queued, actions: [], dismissible: true });
+    return { ok: true };
   }
   const result = await client.invoke('side.thread.open', { appSessionId: parent, from: { kind: 'comment', anchor, text, screenshot } });
   if (!result.ok) return { ok: false, error: result.error.message };

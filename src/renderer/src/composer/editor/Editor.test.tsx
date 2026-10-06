@@ -9,6 +9,7 @@ import { fakeClient } from '../../../../../test/support/fake-client';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore, useComposerStore } from '../../stores/composer';
+import { useNotices } from '../../stores/notices'; // E3
 import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
@@ -600,3 +601,80 @@ describe('the editor answers a plugin’s prompt read, fill and suggestion (R2)'
     expect(taken).toHaveBeenCalledTimes(1);
   });
 });
+
+// E3 start: `/btw` is a side question, never a prompt (E3 execution document, Design §7, M4's proofs): a draft the typed
+// seam would not take (several lines, pasted text) is asked through the registered `btw` widget with its whole text,
+// pasted text unframed; one with an attachment, or with no `btw` widget registered, is refused with a toast and kept.
+// Nothing of any of them reaches the session's submit (`session.send` or `session.steer`).
+describe('a `/btw` draft never reaches the conversation', () => {
+  const opened = () => useWidgetDialog.getState().open;
+  const offs: (() => void)[] = [];
+  const registerBtw = (apply: (id: AppSessionId, args: string, tooLate: AbortSignal) => Promise<boolean>) =>
+    offs.push(registerSlashWidget('btw', { title: 'Side question', component: () => <p data-test-widget>btw</p>, apply }));
+  const notices = () => useNotices.getState().notices.map((n) => n.text);
+  beforeEach(() => {
+    closeWidgetDialog();
+    useNotices.setState({ notices: [] });
+  });
+  afterEach(() => offs.splice(0).forEach((off) => off()));
+
+  async function mounted(doc: ReturnType<typeof docOf>) {
+    const onSubmit = vi.fn(async () => true);
+    const { port, saved } = drafts({ doc, attachments: [], updatedAt: '2026-10-06T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+    await waitFor(() => expect(handle.current?.serialize().empty).toBe(false));
+    return { onSubmit, handle, saved };
+  }
+
+  it('asks a two-line question through the widget’s apply, and sends nothing', async () => {
+    const apply = vi.fn(async () => true);
+    registerBtw(apply);
+    const { onSubmit, handle, saved } = await mounted(docOf([paragraph(textNode('/btw why is this')), paragraph(textNode('null-checked twice?'))]));
+    await act(async () => handle.current!.submit());
+    await waitFor(() => expect(apply).toHaveBeenCalledWith(APP, 'why is this\nnull-checked twice?', expect.any(AbortSignal)));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(opened()).toBeNull();
+    expect(handle.current?.serialize().empty).toBe(true);
+    expect(saved).toEqual([null]);
+  });
+
+  it('asks a question holding pasted text with the text itself, not its placeholder or framing', async () => {
+    const apply = vi.fn(async () => true);
+    registerBtw(apply);
+    const pasted = pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text', lines: 2, text: 'const a = 1;\nconst b = 2;' });
+    const { onSubmit, handle } = await mounted(docOf([paragraph(textNode('/btw what does '), pasted, textNode(' do?'))]));
+    await act(async () => handle.current!.submit());
+    await waitFor(() => expect(apply).toHaveBeenCalledWith(APP, 'what does const a = 1;\nconst b = 2; do?', expect.any(AbortSignal)));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('refuses a question with an attachment: a toast, the draft kept, nothing asked or sent', async () => {
+    const apply = vi.fn(async () => true);
+    registerBtw(apply);
+    const shot = { id: 'a1', kind: 'image' as const, name: 'shot.png', mediaType: 'image/png', bytes: 4, data: 'iVBO', persisted: true };
+    const { onSubmit, handle, saved } = await mounted(docOf([paragraph(textNode('/btw what is this?'))], [shot]));
+    await act(async () => handle.current!.submit());
+    expect(notices()).toEqual(['Side questions take text only; remove the attachment']);
+    expect(apply).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(handle.current?.serialize().display).toBe('/btw what is this? [Image #1]');
+    expect(saved).toEqual([]);
+  });
+
+  it('refuses even a one-line `/btw` when no `btw` widget is registered, rather than sending it as text', async () => {
+    const { onSubmit, handle } = await mounted(docOf([paragraph(textNode('/btw anything'))]));
+    await act(async () => handle.current!.submit());
+    expect(notices()).toEqual(['Side questions are not available here']);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(handle.current?.serialize().display).toBe('/btw anything');
+  });
+
+  it('a message that merely starts with "/btwx" is not a side question', async () => {
+    registerBtw(vi.fn(async () => true));
+    const { onSubmit, handle } = await mounted(docOf([paragraph(textNode('/btwx run it'))]));
+    await act(async () => handle.current!.submit());
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/btwx run it' })));
+  });
+});
+// E3 end

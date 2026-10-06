@@ -1,5 +1,6 @@
 // Every string E3's renderer shows (E3 execution document, Constraints: copy through `SIDE_COPY`): the comment
-// composer's sheet, the Side pane, and the transcript's side-thread row (its view and its markdown export).
+// composer's sheet, the Side pane and its question view, the `/btw` widget, the transcript's side-thread row (its view
+// and its markdown export), and the sidebar's lineage captions.
 import { SENDS_AT_NEXT_STEP } from '../composer/submit/submit-state';
 
 const turnsSuffix = (turns: number) => (turns > 1 ? ` (${turns} turns)` : '');
@@ -24,6 +25,8 @@ export const SIDE_COPY = {
     screenshot: (width: number, height: number) => `Screenshot · ${width} × ${height}`,
     removeScreenshot: 'Remove screenshot',
     openedElsewhere: (parentTitle: string) => `Side thread opened in the panel of ${parentTitle}`,
+    queued: 'Queued; it sends when the queue resumes',
+    refusedAfterClose: (error: string) => `The comment was not sent: ${error}`,
   },
   pane: {
     title: 'Side',
@@ -34,7 +37,27 @@ export const SIDE_COPY = {
     shownInMain: 'Shown in the main area',
     goToTab: 'Go to tab',
     openFile: (label: string) => `Open ${label}`,
-    gone: 'This side thread is no longer listed.',
+    questions: '/btw', // the question view's chip: the command that asks there (a promoted thread is titled "Side question")
+    questionsTitle: 'Side questions',
+  },
+  // `/btw`: the widget, the pane's question view, and the composer's refusals
+  btw: {
+    field: 'Ask a side question',
+    placeholder: 'Asked beside the running turn; nothing is added to the conversation',
+    ask: 'Ask',
+    notRunning: 'Start the session to ask a side question',
+    attachments: 'Side questions take text only; remove the attachment',
+    unavailable: 'Side questions are not available here',
+    askedElsewhere: (parentTitle: string) => `Side question asked in the panel of ${parentTitle}`,
+    empty: 'Ask about the conversation without adding to it. The model answers beside the running turn, with no tools.',
+    answering: 'Answering…',
+    synthetic: 'The engine substituted this answer',
+    noAnswer: 'The engine answered with no text',
+    retry: 'Retry',
+    clear: 'Clear',
+    promote: 'Continue as a side thread',
+    promoting: 'Starting…',
+    log: 'Side questions',
   },
   // A thread's name where it has no anchor label: a promoted `/btw` exchange, or one whose `opened` is not seen yet.
   label: (label: string | null, openedBy: 'comment' | 'btw' | 'fork' | null) => label ?? (openedBy === 'btw' ? 'Side question' : 'Side thread'),
@@ -44,6 +67,14 @@ export const SIDE_COPY = {
     failed: (text: string | null, turns: number) => `ended with an error${turnsSuffix(turns)}${text ? `: ${text}` : ''}`,
     lead: 'Side thread on',
     open: 'Open',
+  },
+  // A sidebar row's lineage: nested under its parent the row says nothing more than the anchor's label (when the title is
+  // not that already); a thread or fork whose parent is not listed above it says whose it is; the hover card always does.
+  lineage: {
+    of: (kind: 'side-thread' | 'fork', parentTitle: string | null) =>
+      `${kind === 'side-thread' ? 'Side thread' : 'Fork'}${parentTitle === null ? '' : ` of ${parentTitle}`}`,
+    orphan: (kind: 'side-thread' | 'fork', parentTitle: string | null) =>
+      `↳ ${kind === 'side-thread' ? 'side thread' : 'fork'}${parentTitle === null ? '' : ` of ${parentTitle}`}`,
   },
 } as const;
 

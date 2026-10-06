@@ -6,9 +6,15 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
+import { promotionMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
-import { record } from '../../../../test/support/builders';
+import type { SideExchange } from '@shared/side/question';
+import { record, status } from '../../../../test/support/builders';
+import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { rowsOf } from '../transcript/model/derive';
+import { applyEvents, createState } from '../transcript/model/reduce';
+import { builder, uuid } from '../transcript/model/test-events';
 import { instanceOf, panelHost } from '../panel/host';
 import type { PanelToolContext } from '../panel/tool';
 import { useLayout } from '../stores/layout';
@@ -18,8 +24,9 @@ import { useSessions } from '../stores/sessions';
 import { A, B, panelOf, resetPanelStores } from '../test-support/panel';
 import { openSideThread, revealNewThread, SIDE_TOOL_ID } from './actions';
 import { registerSidePane } from './register';
-import { sideChildrenShown, sidePaneOf, useSidePane } from './store';
+import { resetSideQuestions, setSideView, sideChildrenShown, sidePaneOf, useSidePane } from './store';
 import { sideThreadsOf, sideTool } from './SideTool';
+import { promotionQuestionOf } from './ThreadView';
 
 const ONE = 'side-one' as AppSessionId;
 const TWO = 'side-two' as AppSessionId;
@@ -89,7 +96,7 @@ describe('the Side pane', () => {
     withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'), thread(TWO, '2026-10-06T02:00:00.000Z', { anchor: undefined, openedBy: 'btw' }), fork, other);
     expect(sideThreadsOf(useSessions.getState().records, A).map((r) => r.appId)).toEqual([TWO, ONE]);
     mount();
-    const chips = [...document.querySelectorAll('[data-side-chip]')];
+    const chips = [...document.querySelectorAll('[data-side-chip]:not([data-side-chip="btw"])')];
     expect(chips.map((chip) => chip.textContent?.replace(/^\W+/, ''))).toEqual(['Side question', 'x.ts:42']);
     expect(chips[0].getAttribute('aria-current')).toBe('true'); // no view chosen: the newest
   });
@@ -122,5 +129,74 @@ describe('the Side pane', () => {
     mount();
     await userEvent.click(screen.getByRole('button', { name: 'Open x.ts:42' }));
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'file', path: '/work/app-a/x.ts', line: 42, appSessionId: A });
+  });
+});
+
+// E3 (M4): the question view (Design §7) and a promoted thread's header (M3's review)
+describe('the Side pane’s question view', () => {
+  const exchange = (over: Partial<SideExchange>): SideExchange => ({ id: 'op-1', question: 'What word?', state: 'answered', response: 'ZEBRA', synthetic: false, error: null, askedAt: '2026-10-06T10:00:00.000Z', answeredAt: '2026-10-06T10:00:02.000Z', ...over });
+  let fake: FakeClient;
+  const listing = (exchanges: SideExchange[]) => {
+    fake = fakeClient({ 'side.question.list': { exchanges } });
+    window.maws = fake.client;
+  };
+  beforeEach(() => resetSideQuestions());
+
+  it('leads the strip with its chip; choosing it lists the host’s log, an answer, a substituted one with its notice, a pending and a failed one', async () => {
+    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'));
+    listing([
+      exchange({}),
+      exchange({ id: 'op-2', question: 'Why?', response: 'I can only answer from the conversation.', synthetic: true }),
+      exchange({ id: 'op-3', question: 'And?', state: 'pending', response: null, answeredAt: null }),
+      exchange({ id: 'op-4', question: 'Again?', state: 'failed', response: null, error: 'Side question cancelled' }),
+    ]);
+    mount();
+    const chips = [...document.querySelectorAll('[data-side-chip]')];
+    expect(chips.map((chip) => chip.getAttribute('data-side-chip'))).toEqual(['btw', ONE]);
+    await userEvent.click(chips[0] as HTMLElement);
+    expect(sidePaneOf(useSidePane.getState(), A).view).toEqual({ kind: 'btw' });
+    await screen.findByText('ZEBRA');
+    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: A }]);
+    expect([...document.querySelectorAll('[data-side-exchange]')].map((el) => el.getAttribute('data-side-exchange'))).toEqual(['answered', 'answered', 'pending', 'failed']);
+    expect(document.querySelectorAll('[data-side-synthetic]')).toHaveLength(1);
+    expect(screen.getByText('The engine substituted this answer')).toBeTruthy();
+    expect(screen.getByText('Answering…')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('Side question cancelled');
+  });
+
+  it('without a ready process, Ask and Retry are disabled and it says why; continuing as a thread stays possible', async () => {
+    listing([exchange({}), exchange({ id: 'op-2', state: 'failed', response: null, error: 'The session ended' })]);
+    act(() => setSideView(A, { kind: 'btw' }));
+    mount();
+    await screen.findByText('ZEBRA');
+    expect(screen.getByText('Start the session to ask a side question')).toBeTruthy();
+    await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'More?');
+    expect((screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Continue as a side thread' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('with a ready process, Enter asks the field’s question; with nothing answered, continuing is disabled', async () => {
+    listing([]);
+    useSessions.setState({ engine: new Map([[A, status(A, { process: 'ready' } as never)]]) });
+    act(() => setSideView(A, { kind: 'btw' }));
+    mount();
+    await screen.findByText(/Ask about the conversation without adding to it/);
+    expect((screen.getByRole('button', { name: 'Continue as a side thread' }) as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'What word?{Enter}');
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'What word?' }]);
+    expect((screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement).value).toBe('');
+    expect(screen.getByText('What word?')).toBeTruthy(); // pending at once
+  });
+
+  it('a promoted thread’s header shows its opening question, read from the thread’s first prompt', () => {
+    const b = builder();
+    b.turn('u0', 'The parent’s copied history');
+    b.end(['u0']);
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: promotionMessage([{ question: 'Why is this null-checked twice?', response: 'Defensive.' }, { question: 'Second?', response: 'Yes.' }], null), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const rows = rowsOf(applyEvents(createState(null, null), b.events));
+    expect(promotionQuestionOf(rows)).toBe('Why is this null-checked twice?');
+    expect(promotionQuestionOf(rowsOf(applyEvents(createState(null, null), b.events.slice(0, 3))))).toBeNull();
   });
 });

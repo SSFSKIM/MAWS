@@ -4,7 +4,8 @@
 // holder notice, setup state and composer, no second implementation of any. One `SessionPane` per session: while a main
 // tab shows the thread (Open as tab), the pane says so with Go to tab instead, and closing that tab brings it back.
 // While the pane draws the thread on screen it is published as shown, so the thread's unread mark clears as a main
-// tab's would.
+// tab's would. A thread continued from side questions has no anchor to name: its header shows the opening question,
+// read from the thread's own first prompt (the promotion message, whose tag parses to the `none` anchor `btw`).
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
@@ -13,13 +14,26 @@ import { QUIET, SECONDARY } from '../sessions/ui';
 import { useLayout } from '../stores/layout';
 import { isOpen } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
+import { useTranscriptStore } from '../transcript';
+import type { Row } from '../transcript/model/rows';
 import { SIDE_COPY } from './copy';
 import { hideSideChild, showSideChild } from './store';
 
 const COPY = SIDE_COPY.pane;
 
+// The first question of a promoted thread: the first `Q:` line of its promotion prompt (the user row whose anchor is
+// the promotion's), wherever the prompt sits (a thread read from disk begins with the parent's copied history).
+export function promotionQuestionOf(rows: readonly Row[]): string | null {
+  const prompt = rows.find((row) => row.kind === 'user' && row.anchor?.kind === 'none' && row.anchor.locator === 'btw');
+  if (prompt?.kind !== 'user') return null;
+  const line = prompt.text.split('\n').find((l) => l.startsWith('Q: '));
+  return line === undefined ? null : line.slice(3).trim() || null;
+}
+
 export function ThreadView({ parent, child, visible }: { parent: AppSessionId; child: AppSessionId; visible: boolean }) {
   const lineage = useSessions((s) => s.records.get(child)?.lineage ?? null);
+  const promoted = lineage?.openedBy === 'btw';
+  const question = useTranscriptStore((s) => (promoted ? promotionQuestionOf(s.entries[child]?.rows ?? []) : null));
   const childTab = tabId({ kind: 'session', appSessionId: child });
   const inMain = useLayout((s) => isOpen(s.main, childTab));
   const drawn = visible && !inMain;
@@ -52,6 +66,11 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
             <p className="m-0 truncate font-mono text-ui-sm text-fg">{label}</p>
           )}
           {anchor?.pageUrl !== undefined && <p className="m-0 truncate text-ui-sm text-fg-muted" title={anchor.pageUrl}>{anchor.pageUrl}</p>}
+          {question !== null && (
+            <p data-side-question="" className="m-0 truncate text-ui-sm text-fg-muted" title={question}>
+              {question}
+            </p>
+          )}
         </div>
         {!inMain && (
           <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => useLayout.getState().openTab({ kind: 'session', appSessionId: child })}>
