@@ -1,0 +1,408 @@
+E0b: Electron probes for the in-app browser. Findings, 2026-10-05.
+Spec: docs/doperpowers/plans/2026-10-05-p1-extension.md §9 E0b (parent pin f11ae359af82c86831f052140683ed620dd25500), §3 D,
+§4 S1 and S2, §12 "Imported credentials". A spike: findings only, no product code, no change under src/.
+
+ENVIRONMENT AND METHOD
+  Electron 44.4.5 (MAWS's pin; Chromium 152.0.7977.130, Node 24.21.0), playwright-core 1.63.0, ws 8.22.0. macOS 26
+  (Darwin 25.6.0), arm64. The probe app is spikes/browser-probe/main.mjs: a BaseWindow holding a WebContentsView in the
+  persistent partition "persist:maws-probe", a local HTTP server on 127.0.0.1:17333 serving page/index.html (a form, a
+  list without ids, a login form) plus a cookie echo and a report sink, and a preload (preload.cjs) that names an
+  alt-clicked element with shared/locator.cjs. Scenarios: cdp-port, cdp-bridge, cdp-pipe (raw and through Playwright's
+  Electron launcher), import, extensions; `pnpm start` runs the four in-app scenarios in one process (results/all.json,
+  the run quoted below unless stated). Chrome data: the owner's Default profile stores were copied with cp into
+  /tmp/maws-e0b-chrome/Default (History, Cookies, Login Data, Login Data For Account, Local State, Extensions/), never
+  read in place; macOS allowed the copy (no "Operation not permitted"). The real Safe Storage key was never fetched;
+  every decrypt ran against a synthetic profile built by import/synthetic.mjs with a generated password. Only counts,
+  schemas and shapes of the real copies were read; no URL, cookie, user name or password value was printed or stored.
+  The copies and the probe's partition are deleted at hand-back.
+
+VERDICTS IN ONE LINE EACH
+  S2a attach  YES   connectOverCDP works over a --remote-debugging-port and over a webContents.debugger bridge (one
+                    page announced; the one-view boundary is enforced by an allowlist and a token, verified, because
+                    the debugger session itself is a trusted client that can reach every target); the raw
+                    --remote-debugging-pipe works but Playwright cannot consume it directly.
+  S2b act     YES   ariaSnapshot({mode:'ai'}) gives refs; click/fill/select/check by aria-ref=, read-only evaluate,
+                    page and element screenshots all work on the view.
+  S2c cost    YES   attach 37-46 ms cold (6-10 ms warm); click 16-17 ms, fill 2.6 ms, evaluate 0.7 ms, snapshot
+                    2.5 ms, screenshot 50-58 ms median; idle CPU 0% attached; +22 MB renderer working set.
+  S2d refs    PARTLY refs survive DOM mutation and repeated page snapshots (element-bound, monotonic), not a reload
+                    (new frame ordinal, "Invalid frame"), and a rooted snapshot drops refs outside its subtree.
+  S2e pick    YES   the human's alt-click maps to the agent's ref 4/4 (and back to the same CSS selector 4/4, one with
+                    a digit-leading id), through {css, role, name}; the ref itself must not be the stored anchor.
+  S1a history YES   plain SQLite (urls v70), 17,554 rows read in 185 ms; Electron has no history store, MAWS keeps one.
+  S1b cookies YES   decrypt (PBKDF2/AES-128-CBC, v10, SHA-256 host prefix required at store v24) ->
+                    session.cookies.set -> sent on a request, proved end to end on synthetic data; a partitioned
+                    (CHIPS) cookie imports through CDP Network.setCookie with its partition key; SameSite=None
+                    without Secure is rejected by Chromium and skipped with a reason.
+  S1c logins  PARTLY decrypt proved end to end; Electron has no consumer; a consumer is a child of its own; recommend
+                    holding passwords out of P1.
+  S1d exts    PARTLY session.extensions.loadExtension loads every one of the owner's 21 unpacked MV3 directories; 13
+                    service workers run, 8 die at evaluation on an unsupported chrome.* API; MV3 core works, UI
+                    surfaces and 21 permissions do not exist.
+  S1e consent -     a per-category sheet; the Keychain prompt gates cookies as well as passwords; the never-do list.
+
+[parent-impact] items are marked inline and collected at the end.
+
+======================================================================================================================
+S2 PLAYWRIGHT OVER CDP AGAINST A WebContentsView
+======================================================================================================================
+
+S2 (a) Attaching playwright-core's connectOverCDP. YES, both routes; the bridge is the one to build on.
+
+  Route 1, --remote-debugging-port (cdp/ in main.mjs cdpPortScenario).
+    app.commandLine.appendSwitch('remote-debugging-port', '9339') before ready; chromium.connectOverCDP('http://127.0.0.1:9339').
+    Attach 45.7 ms cold, 10.4 ms on a second connect (Playwright's first-connect setup dominates, not the transport).
+    Disconnect 8 ms; the view is untouched afterwards.
+    What it exposes: every WebContents in the process. The inventory listed 2 pages (the browser view and a second
+    WebContentsView standing in for MAWS's own renderer), 3 while DevTools was open (the DevTools frontend is a page
+    target too). Playwright attaches to all of them (Page/Runtime/Network/Log enabled in each). Any local process that
+    can reach 127.0.0.1:9339 drives the whole app, renderer included; Chromium's own token check is only on the
+    /json endpoints, and the port must be chosen before ready (a fixed port or stderr parsing for port 0).
+    webContents.debugger beside a connected Playwright: webContents.debugger.attach('1.3') succeeded while Playwright
+    was connected (Chromium multi-client), main's Runtime.evaluate returned the title, Playwright's evaluate and click
+    kept working during and after main's detach. No conflict observed.
+    DevTools beside Playwright: openDevTools succeeded, Playwright kept working.
+
+  Route 2, webContents.debugger bridged to a browser-level endpoint (cdp/bridge.mjs, about 190 lines).
+    The debugger is a page session; Playwright needs a browser target. The bridge answers exactly five browser-level
+    methods itself (Browser.getVersion, Target.setAutoAttach, Browser.setDownloadBehavior, Target.getTargetInfo,
+    Target.activateTarget; stats.unknownBrowserMethods stayed empty), announces the one view as an attached target
+    under a synthetic session id, and forwards every session-scoped command to webContents.debugger.sendCommand(method,
+    params, sessionId) with debugger events broadcast back. Child sessions (OOPIFs, workers) from the page's own
+    Target.setAutoAttach pass through with their real ids (declared, not exercised: the test page has no iframe).
+    Bridge start 0.9-11.6 ms; attach 36.5-46 ms cold (6 ms when Playwright is already warm); disconnect 1.5-4.5 ms.
+    Traffic for the whole driver plus the boundary test: 717 forwarded commands, 242 events, 6 browser-level calls,
+    7 errors of which 5 are the boundary test's own blocked calls and 2 are `Runtime.callFunctionOn: Could not find
+    object with given id` (Playwright's post-navigation cleanup, harmless).
+    One rule learned the hard way: the announced targetId must be the view's real main-frame id (Page.getFrameTree
+    frame.id). In CDP a page target's id is its main frame's id and Playwright keys its FrameSession on that equality;
+    with an invented id page.url() stayed "" and evaluate waited forever for an execution context.
+    What it announces: one page. inventory = 1 context, 1 page, the view's URL. browserContext.newPage() fails with
+    the bridge's own error (Target.createTarget is not available: tabs are MAWS's to create).
+    What it must enforce, because announcing is not isolating: Electron's webContents.debugger is a trusted CDP client,
+    so the page session's own Target domain reaches the whole process. Verified from main on the same session:
+    Target.getTargets listed 2 page targets (the view and the shell stand-in) and Target.attachToTarget + Runtime.evaluate
+    on the stand-in returned its title ("MAWS shell stand-in"). A bridge that forwarded Target.* unfiltered would hand a
+    client the same renderer exposure as the remote-debugging port. The bridge therefore forwards only session ids it
+    announced itself or that the debugger announced through an auto-attach event, allows on them only
+    Target.setAutoAttach, Target.detachFromTarget and Target.getTargetInfo (own target), and no Browser.*, Storage.*,
+    SystemInfo.* or Tethering.* method. Verified through a raw WebSocket client: Target.getTargets on the page session
+    -> blocked; Target.attachToTarget to the stand-in on the page session -> blocked; the same at browser level -> "no
+    target ... behind this bridge"; Runtime.evaluate on an invented session id -> "unknown session"; Storage.getCookies
+    -> blocked; Runtime.evaluate on the page session still works; the upgrade on a wrong path -> HTTP 404. Playwright's
+    full driver ran unchanged under the allowlist (717 commands forwarded, 4 blocked, all four the probe's own).
+    Endpoint: no port flag, no stderr line, no /json/version (it would publish the token); a WebSocket on 127.0.0.1 at
+    an ephemeral port whose path carries a 128-bit random token handed only to the bridge's owner. Origin is not
+    checked in the probe; a product bridge pins it as well.
+    Debugger beside the bridge: the debugger IS the transport. A second webContents.debugger.attach() throws
+    "Debugger is already attached to the target"; but main can call webContents.debugger.sendCommand on the shared
+    session while Playwright is connected (Runtime.evaluate returned the title and Playwright kept working), so MAWS's
+    own CDP needs (screenshot for a comment, Input events for takeover) ride the same attachment. DevTools opened
+    beside the bridge and Playwright kept working; the debugger stayed attached through open and close.
+
+  Route 3, --remote-debugging-pipe.
+    Raw (cdp/pipe-raw.mjs): Electron honours the switch; the parent owning fds 3/4 speaks NUL-framed JSON;
+    Browser.getVersion in 6.8 ms, Target.getTargets listed one page target, Target.attachToTarget + Runtime.evaluate +
+    Page.captureScreenshot (101,871 bytes) worked; nothing is printed to stderr. Playwright cannot use it directly:
+    chromium.connectOverCDP accepts only a ws:// or http:// endpoint, so a pipe needs a WebSocket adapter in the
+    launcher. Playwright's own _electron.launch does not use the pipe either: process.argv in the launched app showed
+    `--inspect=0 --remote-debugging-port=0` (results/cdp-pipe-playwright-electron.json). Either way the pipe belongs to
+    the process that spawned Electron, which is never MAWS's own main process: the pipe is an e2e route, not the
+    in-app route.
+    Through _electron.launch (launch-pipe.mjs): launch 391-1011 ms; electronApp.windows() listed the WebContentsView's
+    page as a window; the full driver passed with the same numbers; refs read `e20` for the first document and `f1e20`
+    after a reload (the frame prefix appears once a second document exists).
+
+  What E4's cut should take: the bridge, one per browser view, started lazily when a browser tool first targets the
+  tab (the attach is ~40 ms, the bridge itself ~1-12 ms), closed when the tab closes; its session allowlist, Target
+  filter and token path are part of it, plus an Origin check. playwright-core runs in the main process (where the
+  views live). Never ship --remote-debugging-port in the product: it exposes MAWS's own renderer and every other view
+  to any local process. MAWS's own CDP needs go through the same webContents.debugger attachment, not a second one.
+  The pipe route is the e2e harness's business (MAWS's e2e already uses Playwright's Electron launcher).
+  Open: OOPIF child sessions through the bridge (declared, untested); more than one connected client per bridge
+  (the WebSocket server accepts several; Playwright's semantics for shared pages were not tested); a token on the
+  bridge URL.
+
+S2 (b) Snapshot with refs, click and fill by ref, read-only evaluate, screenshot. YES.
+    page.ariaSnapshot({ mode: 'ai' }) is public in 1.63 (the MCP's `_snapshotForAI` path is now this option): YAML with
+    `[ref=f5e20]` on every interactive or named node, `[active]`, `[level=1]`, `[cursor=pointer]`, `/url:` children.
+    The test page gives 59 lines, 2,164 characters, 46 refs. Default mode has no refs (hasRefs false); `boxes: true`
+    appends `[box=37,275,87,32]` (viewport CSS pixels), useful for comment-mode crops.
+    page.locator('aria-ref=f5e20') resolves a ref (the selector engine still exists in 1.63). On the view: click x10
+    (count 0 -> 10), fill x10 ("Ada 9"), selectOption x3 ("coffee"), check (true), evaluate (title and count),
+    page.screenshot PNG 99,306 bytes at 1100x760, locator.screenshot 2,459 bytes, goto + goBack.
+    Read-only evaluate is a policy, not a mechanism: page.evaluate runs anything; `browser_eval` must enforce
+    read-only by its own means (an allow-list of expressions or a wrapper that rejects assignments; out of scope here).
+    What E4 should take: snapshot = ariaSnapshot({mode:'ai'}) on the tab's page; act = locator('aria-ref=<ref>')
+    with Playwright's actionability waits; screenshot = page.screenshot or locator.screenshot; `boxes: true` when the
+    snapshot feeds comment mode's overlay.
+
+S2 (c) Attach time and per-action latency. Medians over the full run, cold machine load 13-19.
+                        port          bridge
+    attach (cold/warm)  46-50 / 10-12 36.5-45.9 / 6.0-6.4 ms   (+ bridge start 0.9-11.6 ms)
+    first snapshot      30.5          20.1 ms   (installs the injected script; later snapshots 2.2-3.7 ms)
+    snapshot (repeat)   2.6           2.5 ms    (p95 3.4-3.7)
+    click by ref        17.0          16.4 ms   (p95 62.8 / 18.8; the port run had one 63 ms outlier)
+    fill by ref         2.6           2.7 ms
+    selectOption        2.4           1.8 ms
+    check               17.8          21.6 ms
+    evaluate            0.7           0.6 ms
+    page screenshot     57.6          49.1 ms   (99 KB PNG)
+    element screenshot  41.5          41.9 ms
+    goto + goBack       32.4          37.2 ms
+    disconnect          8.0           1.5 ms
+    Cost of staying attached (3 s idle windows, app.getAppMetrics): renderer CPU 0% before, 0% attached, 0.1-0.2%
+    after; a 3e7-iteration JS loop 187.5 -> 191.6 ms (port), 201.9 -> 199.6 ms (bridge): noise; page load of
+    index.html 12-16 ms unattached, 15-19 ms attached (+1-3 ms from Network and Page lifecycle instrumentation);
+    renderer working set 114.5 -> 137.1 MB on attach (+22 MB: Playwright's utility world and instrumentation). Keeping
+    the debugger attached between actions is cheap; the per-tab cost that matters is the +22 MB.
+    What E4 should take: attach lazily per tab and keep it while the agent holds the tab; a browser_act row can show
+    its own latency without hiding anything (everything is under 70 ms except screenshots).
+
+S2 (d) Do refs survive a reload and a DOM mutation. PARTLY: mutation yes, reload no, rooted snapshot partly.
+    Refs are `f<frameOrdinal>e<n>` and element-bound inside one document: the same element kept f5e20 across six page
+    snapshots (incrementRefStable true); inserting three sibling buttons before it gave them f5e47-49 and left
+    Increment at f5e20; the old ref resolved without a new snapshot (oldRefResolvesWithoutResnapshot = "increment").
+    Across a reload the old ref fails at once ("Invalid frame in aria-ref selector"); the new snapshot numbers the
+    same element f6e20 (the frame ordinal moved from 5 to 6; the `e20` part repeats only because traversal order is
+    the same, it is not identity). A rooted snapshot (locator.ariaSnapshot({mode:'ai'})) keeps the picked element's
+    ref (page-level f5e20 == rooted f5e20) but drops refs outside its subtree: "Insert siblings" timed out until the
+    next page-level snapshot. So Playwright keeps one ref table per frame, replaced by the most recent snapshot.
+    What E4 should take: a ref is valid for one document and until the next snapshot of that frame. browser_snapshot
+    returns the refs the agent may use; browser_act re-snapshots and returns a clear error naming the stale ref when
+    resolution fails; comment-mode anchors never store a bare ref (S2e). If MAWS takes rooted snapshots for mapping,
+    it follows them with a page-level one or does the mapping without a snapshot (the CSS route below).
+
+S2 (e) Mapping the human's pick to the agent's ref, or to a locator both agree on. YES.
+    The preload (sandbox off in the probe so it can require shared/locator.cjs; MAWS bundles) catches an alt-click in
+    the capture phase, takes document.elementFromPoint, and names the element with shared/locator.cjs:
+    cssPath (nearest unique id, then tag:nth-of-type steps), a11yPath (role "name" chain with a basic implicit-role
+    table), role, name, rect. It reports over IPC to main (6-9 ms end to end, picks counted 3 and 6) and through a
+    contextBridge getter for an external driver.
+    Four targets, both routes: button "Increment" (#increment), button "Act" inside an id-less list
+    (body > main > section:nth-of-type(2) > ul > li:nth-of-type(2) > button), textbox "Name" (#name), and link "local
+    link" inside a paragraph whose id is the digit "7" (`#\37  > a`, through CSS.escape; a naive escape makes `#7`,
+    which querySelectorAll rejects and the pick would have thrown).
+      human css -> agent ref: page.locator(css).ariaSnapshot({mode:'ai'}) first line's ref == the page-level ref  4/4 (1-2 ms)
+      agent ref -> human css: locator('aria-ref=<ref>').evaluate(cssPath) == the preload's css                       4/4
+      role and name agree                                                                                          4/4
+    The a11y paths do not agree textually: Playwright's chain is `generic > main > region > generic > button
+    "Increment"` (it emits `generic` nodes and omits the region's aria-labelledby name), the preload's is `main >
+    region "A form" > button "Increment"`. The a11y path is a human label, not the key.
+    Synthesizing the human's click: Playwright's mouse.click(x, y, {modifiers:['Alt']}) did NOT set altKey on the DOM
+    event in this Electron (the page logged `click alt=false`); keyboard.down('Alt') + mouse.click did (`alt=true`),
+    and was used for every pick. webContents.sendInputEvent with modifiers ['alt'] is wired as a third fallback and
+    was never needed, so it is unverified. A physical option-click is what the product gets, so this is a probe
+    quirk, not a product risk.
+    What E4 should take: the X10 browser-element locator is {css, role, name, pageUrl, box?} produced by a shared
+    module the preload and the tools both import; the agent's ref is resolved to it on demand (rooted snapshot or
+    evaluate), and the human's pick is resolved to a live ref the same way at the moment the agent needs it. Refs
+    are transport, locators are storage.
+    Open: the implicit-role table in shared/locator.cjs is small; adopt a maintained ARIA role computation (or ask
+    Playwright for role and name through a rooted snapshot and store its answer) before the anchor format binds.
+
+======================================================================================================================
+S1 CHROME PROFILE IMPORT BY COPY
+======================================================================================================================
+
+Where the stores are on this machine (Chrome Default profile, read from the copy; counts only).
+    Local State: profile.info_cache has 10 profiles; each entry carries name, gaia_name, user_name, avatar_icon (and
+    25 more fields); every profile has a name. The picker reads this file and shows name plus gaia_name.
+    Default/History: 38 MB, urls schema v70, 17,554 URLs, 34,411 visits, visit_count sum 33,346, 779 distinct hosts,
+    last_visit_time range 2024-07-30 .. 2026-10-05.
+    Default/Cookies (at Default/, not Default/Network/, on this Chrome 14x; an import checks both): schema v24, 5,112
+    rows, all encrypted (`v10` prefix 5,112, plain `value` 0), 1,005 partitioned (top_frame_site_key set, CHIPS),
+    1,170 distinct host_keys.
+    Default/Login Data (the local store): schema v43, 91 rows, all blacklisted_by_user = 1 ("never save"), 0 passwords.
+    Default/Login Data For Account (the Google-account store): 320 rows, 228 with an encrypted password (`v10`), 91
+    blocklist, 1 empty. The owner's saved passwords live here; an import that reads only "Login Data" finds none.
+    keychain_identifier is empty in both: no legacy per-item Keychain passwords remain.
+    Default/Extensions: 21 unpacked directories (20 ids; Claude has two versions), 602 MB copied.
+    Copying while Chrome ran worked with plain cp (take the -journal files too); SQLite opened the copies read-only.
+
+S1 (a) History. YES: plain SQLite; Electron keeps none, so MAWS keeps its own.
+    import/stores.mjs readHistory opens the copy read-only with node:sqlite (the same module src/main/index/db.ts
+    already uses; statements need setReadBigInts(true) because Chrome's microsecond timestamps exceed 2^53), reads
+    urls (url, title, visit_count, typed_count, last_visit_time, hidden) in 185 ms for 17,554 rows. Chrome time is
+    microseconds since 1601-01-01; crypto.mjs converts.
+    What MAWS keeps itself: Electron's session has no history store and no address-bar model; `webContents`
+    navigation history is per-view and dies with it. E4 adds a MAWS-owned `browser_history` table (url, title,
+    visit_count, typed_count, last_visit, source: 'imported' | 'maws', profile partition) in the app's index
+    database, fed by did-navigate and page-title-updated, read by the address bar's suggestions and by a future
+    history view; imported rows carry their source so they can be dropped with the profile. The agent sees history
+    only through a tool that is explicitly added later, never through browser_snapshot.
+    Open: `visits` (per-visit transitions) is not needed for suggestions; skip it.
+
+S1 (b) Cookies. YES, proved end to end on a synthetic store; the real key gates it.
+    Scheme (import/crypto.mjs): key = PBKDF2-HMAC-SHA1(password, "saltysalt", 1003, 16 bytes); AES-128-CBC with a
+    16-space IV; value = "v10" + ciphertext; at store version 24 (this profile; recent Chrome 13x) the plaintext is
+    SHA-256(host_key) (32 bytes) + value, so a decrypt verifies the domain hash and strips it (hashedPrefix 3 of 3);
+    older stores hold the bare value and decryptCookieValue accepts both.
+    The decoder takes the store version: at 24 and later the SHA-256(host_key) prefix is required and a mismatch is a
+    failed decrypt (a wrong key that happened to survive CBC padding cannot fall through as a bare value); only older
+    stores may yield a bare value.
+    Synthetic store (import/synthetic.mjs, the real CREATE TABLE statements): 5 rows -> 3 set through
+    session.cookies.set, 2 skipped by that path with a reason: the CHIPS cookie (cookies.set has no partition key) and a
+    SameSite=None cookie without Secure (Chromium rejects it on set: EXCLUDE_SAMESITE_NONE_INSECURE). cookies.set took
+    0.8 ms for 3; the jar showed hostOnly/domain, httpOnly, secure, sameSite (lax, unspecified, strict) and expiration
+    as mapped; a request to http://localhost:17333/echo-cookies carried `probe_session` (httpOnly) and `probe_pref`
+    with the right value; document.cookie read on that localhost page listed `probe_pref` and not `probe_session`.
+    Mapping (stores.mjs toElectronCookie): url = scheme://host_key-without-dot + path (https when is_secure or
+    source_scheme 2), domain = host_key only when it starts with '.', sameSite -1/0/1/2 ->
+    unspecified/no_restriction/lax/strict, expirationDate from expires_utc when has_expires.
+    A wrong key against the cookie store: 5 of 5 rows failed at decrypt (OpenSSL BAD_DECRYPT, the padding check), 0
+    decrypted; the host-hash requirement stands behind that as the second guard. Against the login store: 0 of 2.
+    The CHIPS cookie through CDP instead: webContents.debugger Network.setCookie with partitionKey {topLevelSite:
+    "https://example.test", hasCrossSiteAncestor: true} returned success, and Network.getAllCookies on the page session
+    listed it with that partitionKey beside the three unpartitioned cookies (Electron's cookies.get lists it too, without
+    partition data; Storage.getCookies on the page session reads the default context and saw none of the partition).
+    So partitioned cookies import through the debugger session the browser tools already hold; cookies.set is only
+    the path for unpartitioned ones.
+    The real key, expected shape (not observed: the probe never ran `security` and never fetched the real key):
+      security find-generic-password -s "Chrome Safe Storage" -a "Chrome" -w
+    macOS's standard Keychain consent for a generic password reads along the lines of `security wants to use your
+    confidential information stored in "Chrome Safe Storage" in your keychain` with Deny / Allow / Always Allow;
+    whether it appears at all depends on the item's access list (a prior "Always Allow" for `security` suppresses it).
+    E4 verifies the exact text and count on the owner's machine before the consent sheet binds. MAWS would run it once
+    per import, keep the password in memory for the import only, and tell the user beforehand what it is for and to
+    click Allow (not Always Allow, which grants the `security` binary standing access). Electron has no Keychain read
+    API for arbitrary items (safeStorage is MAWS's own item, "<app> Safe Storage"), so a child process is the way.
+    [parent-impact] §3 D reads "copies cookies and history from its on-disk stores, decrypts saved passwords with
+    Chrome's Safe Storage key after one Keychain consent": on this profile every cookie value is encrypted with that
+    same key (`value` is empty for all 5,112 rows), so the Keychain consent gates the cookies category too, not only
+    passwords. History and extensions need no key.
+    What E4 should take: the decrypt (with the version-gated hash requirement) and mapping as written here;
+    unpartitioned cookies through cookies.set, partitioned ones through Network.setCookie on the view's debugger
+    session; a per-cookie skip list in the import report ("N cookies, M skipped: rejected by Chromium"); the partition
+    is per imported profile (session.fromPartition('persist:chrome-<profile dir>')); expired rows dropped before set.
+    Open: whether a CHIPS cookie set through Network.setCookie is sent on a matching embedded request was not tested
+    (storage with the partition key was); the real Cookies file may be under Default/Network/ on other machines.
+
+S1 (c) Login Data. PARTLY: decrypt yes, consumer no.
+    Decrypt: same key, no hash prefix; the synthetic store's 2 credentials decrypted and matched, the blocklist row
+    was skipped, the wrong key failed 2 of 2. A credential is {origin_url, action_url, username_element,
+    username_value, password_element, password, signon_realm}. The real stores: see above, 228 passwords in the
+    account store, 0 in the local one.
+    What Electron offers a consumer: nothing. No password manager, no autofill (the CDP Autofill domain is absent
+    through webContents.debugger: "'Autofill.enable' wasn't found"; no chrome.autofill); the webContents 'login'
+    event is HTTP Basic/Digest only. Codex has a consumer because its Electron is a fork: the app ships "Codex
+    Framework" (sources under `owl/`), with `owl/browser/browser_profile_importer.cc`,
+    `browser_profile_importer_extensions.cc`, `electron_api_autocomplete.cc`, and Chromium's
+    components/password_manager and components/autofill compiled in (51 and 96 source-path strings in the binary); its
+    JS side (readable/chatgpt-26.928.40906/main-process/main-BvBtZhys.js:50729-50808) only calls
+    session.browserProfileImporter.list/getSignals/import. MAWS runs unmodified Electron.
+    What a consumer would need in MAWS: (1) a credential store in the profile's partition directory, encrypted with
+    Electron's safeStorage (MAWS's own Keychain item), keyed by signon_realm; (2) a login-form detector in the browser
+    preload (a password field plus the nearest username field, origin matched to signon_realm, honouring
+    autocomplete=username/current-password); (3) a fill affordance MAWS draws (a key icon in the field or the chrome's
+    address row, listing matching user names, filling on click, never on load, never auto-submitting), with the fill
+    done through the preload or Input.insertText; (4) a save prompt on submit for new or changed credentials;
+    (5) a settings surface to see, copy and delete entries. That is a child of its own, about the size of comment mode.
+    Recommendation: P1 imports cookies and history (and extensions, S1d); the consent sheet shows "Saved passwords"
+    disabled with "needs MAWS autofill, later"; nothing is decrypted that has no consumer. Importing passwords into a
+    store nothing reads adds risk and no capability. [parent-impact] §3 D's "decrypts saved passwords" is feasible
+    but has no consumer on unmodified Electron; §12 already anticipates holding passwords; the cut should make that
+    the plan, not a fallback.
+
+S1 (d) Extensions. PARTLY: MV3 core loads and runs; much of the API surface does not exist.
+    session.extensions.loadExtension(dir) (Electron 44; the old session.loadExtension is gone) needs a persistent
+    partition and must be repeated each boot; packed .crx is unsupported; unpacked Chrome Extensions/<id>/<ver>/
+    directories load as they are (names resolve through _locales: "Google Translate", "MetaMask").
+    The probe's MV3 extension (ext/test-ext): loaded in 3.5 ms; the background service worker ran
+    (session.serviceWorkers.getAllRunning listed it); the content script injected (DOM marker) and round-tripped a
+    message to the worker (fromTab 1); chrome.scripting.executeScript ran in the tab; an offscreen document was
+    created and ran. Present and working in the worker: runtime (messaging, getManifest, getURL), storage.local and
+    storage.session, tabs.query (WebContents appear as tabs with ids and urls), scripting, alarms, action.setTitle
+    (there is no toolbar to show it), declarativeNetRequest.getDynamicRules, webRequest.onBeforeRequest.addListener,
+    offscreen, management, i18n, extension. Absent (undefined): cookies, contextMenus, notifications, webNavigation,
+    sidePanel, windows, tabGroups, identity, history, bookmarks, downloads, commands, permissions, debugger, proxy,
+    privacy, sessions, favicon, topSites, webRequestAuthProvider, runtime.connectNative (nativeMessaging). Electron
+    logs "Permission 'x' is unknown" for each unsupported permission and loads anyway. No popup, options page, side
+    panel or omnibox surface exists; `action` has nowhere to appear.
+    The owner's 21 directories: 21 of 21 loaded (total 204 ms, 1-31 ms each); 13 service workers ran: Adblock Plus,
+    Infinity New Tab, Ona, Lyrics, GoFullPage, Office Editing, Google Docs Offline, Save to Google Drive, WEBZEN
+    Starter, ChatGPT, Application Launcher For Drive, Playwright Extension, MetaMask. 8 did not run: 7 workers died
+    at script evaluation ("Service worker registration failed. Status code: 15") because top-level code touches an
+    absent API: Google Translate (contextMenus.onClicked), Obsidian Web Clipper (commands.onCommand), Claude x2
+    (tabGroups .Color), NordVPN (webNavigation.onErrorOccurred), VeePN (proxy/privacy .network), iCloud Passwords
+    (webNavigation.onBeforeNavigate); Chrome Web Store Payments is MV2 without a worker. Five of the 13 running
+    workers logged uncaught errors on the same kind of gap (Adblock Plus webNavigation.onBeforeNavigate, Infinity
+    .contains, Ona .onRemoved, Save to Google Drive storage.sync, ChatGPT windows.onFocusChanged) and keep running
+    partially. results/extensions-stderr-digest.txt has the per-id digest.
+    What E4 should take: "loads" is not "works". The import report lists each extension as loaded / background
+    running / background failed on chrome.<api> / errors, from session.serviceWorkers state and the main-process
+    console lines after an actual load into the partition. The manifest predicts warnings, not failures: before the
+    import the consent sheet can list each extension's unsupported permissions as compatibility warnings, but whether
+    a background runs is only known by running it (the probe's own extension declares cookies, contextMenus and
+    webNavigation, and its worker runs because every call is guarded; the eight failures above are runtime facts of
+    those versions). Codex's allowUnverifiedExtensions confirmation (codex-extensions.txt §1) has its MAWS equivalent
+    here. Extensions with content scripts and storage only (clippers, formatters, Playwright Extension) are the
+    realistic win; anything needing a toolbar, side panel, context menu, cookies, webNavigation or native messaging
+    is not.
+    Open: whether Electron's extension storage survives removeExtension + reload (not tested); CSP and host
+    permission prompts for content scripts on arbitrary sites (not tested); loading from the Chrome directory in place
+    is never done, the directory is copied into the partition's own extensions folder first.
+
+S1 (e) The consent surface per category, and what the import must never do.
+    One sheet, one profile picked from Local State (name and gaia_name shown, nothing else), four categories each
+    with its own checkbox and its own line of consequence:
+      History:     "17,554 pages. Read from a copy; needs no password. Shown in the address bar's suggestions."
+      Cookies:     "5,112 cookies. macOS will ask once to read Chrome's Safe Storage password; click Allow. Nothing is
+                    written back to Chrome." (the prompt's exact text and count are E4's to verify, see S1b)
+      Passwords:   disabled in P1: "needs MAWS's autofill, not yet built" (the count can still be shown: 228).
+      Extensions:  "21 extensions; each listed with the permissions MAWS does not support (warnings from the manifest)"
+                    and the unverified-files confirmation; which backgrounds actually run is reported after the load.
+    Then the report row: "N cookies, M history entries, K extensions, J skipped: <reasons>" and a "Remove imported
+    profile" action that drops the partition and the imported history rows.
+    Never: log or display a cookie value, password or history URL during the import (counts and reasons only; the
+    probe's own output follows this rule); keep the Safe Storage password past the import, write it anywhere, or ask
+    with "Always Allow"; copy the stores anywhere but a temporary directory inside the app's data directory, deleted
+    when the import ends; import into the default partition or into another profile's partition; import `Web Data`
+    (payment methods) at all; read or write Chrome's directory while Chrome runs other than copying; drive Chrome or
+    modify any of its files; import passwords without a consumer; run imported extensions' service workers before the
+    user confirms the unverified-files sheet; expose imported data to the agent except through the tools that are
+    explicitly on the spine (browser_* act on the live page; no history or cookie tool exists in P1).
+
+======================================================================================================================
+WHAT E4'S CUT SHOULD TAKE, IN ONE PLACE
+======================================================================================================================
+  View and import child: WebContentsView per tab in a per-profile persistent partition; the copy-and-import pipeline
+    (History -> MAWS history table; Cookies -> cookies.set, partitioned ones through Network.setCookie on the view's
+    debugger, with the skip list; Extensions -> loadExtension per boot with the per-extension report); the Keychain
+    prompt once, for cookies; passwords held; the consent sheet above.
+  Comment mode child: the shared locator module (css, role, name, box) in the preload and in the tools; the anchor
+    stores the locator and the page URL, never a bare ref; the overlay crops from `boxes: true` or capturePage.
+  Browser tools child: one debugger bridge per tab (session allowlist, Target/Browser/Storage filter, token path,
+    Origin check), playwright-core in main, lazy attach (~40 ms), kept attached while
+    the agent holds the tab; browser_snapshot = ariaSnapshot({mode:'ai'}); browser_act by aria-ref with a stale-ref
+    error that names the ref; browser_eval read-only by policy; browser_screenshot by page or ref; new tabs through
+    browser_tabs, never Target.createTarget; the human's takeover rides the same attachment (Input events are not
+    needed to detect the human: the preload sees the real clicks).
+
+[parent-impact] COLLECTED
+  1. §3 D: the Keychain consent gates cookies as well as passwords (every cookie value in a current Chrome profile is
+     encrypted with the Safe Storage key). The sentence should bind the consent to the cookies category.
+  2. §3 D and §12: on unmodified Electron there is no consumer for imported passwords; Codex's consumer is its Electron
+     fork's compiled password manager and autofill. Recommend the cut holds passwords out of P1 and the design says so,
+     rather than a per-child fallback.
+  3. §3 D "playwright-core connected to the view's debugger, or the CDP protocol directly": both hold; the finding is
+     that the debugger route needs the small browser-level bridge (five methods, real frame id as target id), that the
+     bridge must filter Target/Browser/Storage methods and unknown sessions because the debugger session is a trusted
+     client that reaches every target in the process, and that the remote-debugging port must not ship. Not a
+     contradiction; a precision.
+
+ARTIFACTS
+  spikes/browser-probe/           package.json (electron 44.4.5, playwright-core 1.63.0, ws 8.22.0), pnpm-workspace.yaml
+  main.mjs                        the app and the scenarios; `pnpm start` = all four in-app scenarios
+  cdp/bridge.mjs                  the webContents.debugger -> browser-level CDP bridge
+  cdp/driver.mjs                  the S2 measurements shared by every route
+  cdp/pipe-raw.mjs                --remote-debugging-pipe over fds 3/4
+  launch-pipe.mjs                 Playwright's _electron.launch route (`pnpm run probe:cdp-pipe`)
+  preload.cjs, shared/locator.cjs the human's pick and the shared locator
+  import/crypto.mjs, synthetic.mjs, stores.mjs   Safe Storage scheme, synthetic profile builder, store readers
+  ext/test-ext/                   the MV3 probe extension
+  page/                           the test pages
+  results/all.json                the full run; results/cdp-bridge.json, cdp-pipe-playwright-electron.json,
+                                  cdp-pipe-raw.json, extensions-stderr-digest.txt
+  Scratch, deleted at hand-back: /tmp/maws-e0b-chrome (the copies), /tmp/maws-e0b-synth (synthetic stores),
+  ~/Library/Application Support/maws-spike-browser-probe (the probe's partition).

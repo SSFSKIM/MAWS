@@ -1,0 +1,21 @@
+{
+  "name": "maws-spike-browser-probe",
+  "private": true,
+  "type": "module",
+  "description": "E0b (docs/doperpowers/plans/2026-10-05-p1-extension.md §9, parent pin f11ae359): Electron probes for the in-app browser. S2: Playwright over CDP against a WebContentsView. S1: Chrome profile import by copy. Findings only, never product code.",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron . --scenario=all",
+    "probe:cdp-port": "electron . --scenario=cdp-port",
+    "probe:cdp-bridge": "electron . --scenario=cdp-bridge",
+    "probe:cdp-pipe": "node launch-pipe.mjs",
+    "probe:import": "electron . --scenario=import",
+    "probe:extensions": "electron . --scenario=extensions",
+    "synthetic": "node import/synthetic.mjs"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "playwright-core": "1.63.0",
+    "ws": "8.22.0"
+  }
+}

@@ -1,0 +1,1529 @@
+{
+  "scenario": "all",
+  "electron": "44.4.5",
+  "chrome": "152.0.7977.130",
+  "node": "24.21.0",
+  "startedAt": "2026-10-06T03:50:24.239Z",
+  "partitionPath": "/Users/new/Library/Application Support/maws-spike-browser-probe/Partitions/maws-probe",
+  "cdpPort": {
+    "route": "remote-debugging-port",
+    "endpoint": "http://127.0.0.1:9339",
+    "before": {
+      "idle": {
+        "rendererPercentCPU": 0,
+        "rendererWorkingSetKB": 114592,
+        "mainPercentCPU": 10.3
+      },
+      "jsLoopMs": 201.7,
+      "loadMs": [
+        14.7,
+        13,
+        14.3,
+        14.5,
+        12.4
+      ]
+    },
+    "attachMs": 47,
+    "inventory": {
+      "version": "152.0.7977.130",
+      "contexts": [
+        {
+          "pages": [
+            "data:text/html,<title>MAWS shell stand-in</title><body style=\"font:14px system-ui;margin:12px\">MAWS shell stand-in (a second WebContents in the same app)</body>",
+            "http://127.0.0.1:17333/index.html"
+          ]
+        }
+      ],
+      "pageCount": 2
+    },
+    "attached": {
+      "idle": {
+        "rendererPercentCPU": 0,
+        "rendererWorkingSetKB": 137184,
+        "mainPercentCPU": 10.7
+      },
+      "jsLoopMs": 186.7,
+      "loadMs": [
+        19.3,
+        15.6,
+        14.9,
+        14.6,
+        15.1
+      ]
+    },
+    "driver": {
+      "pageUrl": "http://127.0.0.1:17333/index.html",
+      "snapshot": {
+        "ms": 28.8,
+        "chars": 2193,
+        "lines": 59,
+        "head": "- generic [active] [ref=f5e1]:\n  - banner [ref=f5e2]:\n    - heading \"MAWS browser probe\" [level=1] [ref=f5e3]\n  - navigation \"Probe navigation\" [ref=f5e4]:\n    - link \"Second page\" [ref=f5e5] [cursor=pointer]:\n      - /url: /second.html\n    - text: ·\n    - link \"External link\" [ref=f5e6] [cursor=pointer]:\n      - /url: https://example.com/\n  - main [ref=f5e7]:\n    - region [ref=f5e8]:\n      - heading \"A form\" [level=2] [ref=f5e9]\n      - generic [ref=f5e10]:\n        - generic [ref=f5e11]: Name\n        - textbox \"Name\" [ref=f5e12]:\n          - /placeholder: Your name\n      - generic [ref=f5e13]:\n        - generic [ref=f5e14]: Flavour\n        - combobox \"Flavour\" [ref=f5e15]:\n          - option \"Vanilla\" [selected]\n          - option \"Mint\"\n          - option \"Coffee\"\n      - generic [ref=f5e16]:\n        - checkbox \"I agree\" [ref=f5e17]\n        - generic [ref=f5e18]: I agree\n      - generic [ref=f5e19]:\n        - button \"Increment\" [ref=f5e20]\n        - generic [ref=f5e21]:\n          - text: \"Count:\"\n          - strong [ref=f5e22]: \"0\"\n        - button \"Insert siblings\" [ref=f5e23]\n    - generic [ref=f5e24]:\n      - heading \"A list without ids\" [level=2] [ref=f5e25]\n      - list [ref=f5e26]:\n        - listitem [ref=f5e27]: First item\n        - listitem [ref=f5e28]:\n          - text: Second item\n          - button \"Act\" [ref=f5e29]\n        - listitem [ref=f5e30]: Third item\n      - paragraph [ref=f5e31]:"
+      },
+      "refCount": 46,
+      "refs": {
+        "increment": "f5e20",
+        "name": "f5e12",
+        "flavour": "f5e15",
+        "agree": "f5e17"
+      },
+      "click": {
+        "n": 10,
+        "min": 13.9,
+        "median": 16.9,
+        "p95": 75,
+        "max": 75,
+        "countAfter": "10"
+      },
+      "fill": {
+        "n": 10,
+        "min": 2.1,
+        "median": 3,
+        "p95": 6.2,
+        "max": 6.2,
+        "valueAfter": "Ada 9"
+      },
+      "selectOption": {
+        "n": 3,
+        "min": 1.6,
+        "median": 2.5,
+        "p95": 2.6,
+        "max": 2.6,
+        "last": [
+          "coffee"
+        ],
+        "valueAfter": "coffee"
+      },
+      "check": {
+        "ms": 14.2,
+        "checked": true
+      },
+      "evaluate": {
+        "n": 10,
+        "min": 0.4,
+        "median": 0.6,
+        "p95": 1.9,
+        "max": 1.9,
+        "last": {
+          "title": "MAWS browser probe",
+          "count": "10"
+        }
+      },
+      "screenshotPage": {
+        "n": 3,
+        "min": 49.6,
+        "median": 51.7,
+        "p95": 76.6,
+        "max": 76.6,
+        "bytes": 103568
+      },
+      "screenshotElement": {
+        "n": 3,
+        "min": 41.3,
+        "median": 43.2,
+        "p95": 57,
+        "max": 57,
+        "bytes": 2459
+      },
+      "snapshotRepeat": {
+        "n": 5,
+        "min": 2.3,
+        "median": 2.4,
+        "p95": 3.8,
+        "max": 3.8,
+        "incrementRefStable": true
+      },
+      "snapshotDefault": {
+        "ms": 1.9,
+        "hasRefs": false
+      },
+      "snapshotBoxes": {
+        "ms": 3.1,
+        "sampleLine": "- button \"Increment\" [ref=f5e20] [box=37,275,87,32]"
+      },
+      "mutation": {
+        "refBefore": "f5e20",
+        "oldRefResolvesWithoutResnapshot": "increment",
+        "refAfterResnapshot": "f5e20",
+        "insertedRefs": [
+          "Inserted 1=f5e47",
+          "Inserted 2=f5e48",
+          "Inserted 3=f5e49"
+        ],
+        "sameRef": true
+      },
+      "reload": {
+        "refBefore": "f5e20",
+        "oldRefResolvesWithoutResnapshot": "error: locator.evaluate: Invalid frame in aria-ref selector \"aria-ref=f5e20\"",
+        "refAfterResnapshot": "f6e20",
+        "sameNumber": false,
+        "note": "after a reload the DOM is new; equal numbers mean numbering is deterministic (traversal order), not that identity survived"
+      },
+      "pick": [
+        {
+          "target": "button \"Increment\"",
+          "agentRef": "f6e20",
+          "agentA11yPath": "generic > main > region > generic > button \"Increment\"",
+          "humanPick": {
+            "css": "#increment",
+            "a11y": "main > region \"A form\" > button \"Increment\"",
+            "role": "button",
+            "name": "Increment"
+          },
+          "refViaHumanCss": "f6e20",
+          "rootedSnapshotFirstLine": "- button \"Increment\" [active] [ref=f6e20]",
+          "cssViaAgentRef": "#increment",
+          "pageRefAfterRootedSnapshot": {
+            "picked": "increment",
+            "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+          },
+          "agree": {
+            "ref": true,
+            "css": true,
+            "roleName": true
+          },
+          "pickMs": 22.9,
+          "mapMs": 1.9,
+          "pickDebug": {
+            "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+            "exposed": "object",
+            "pageLogTail": [
+              "mousedown alt=false button=0",
+              "click alt=false at 80,291 on BUTTON#increment",
+              "mousedown alt=true button=0",
+              "click alt=true at 80,291 on BUTTON#increment"
+            ]
+          }
+        },
+        {
+          "target": "button \"Act\"",
+          "agentRef": "f6e29",
+          "agentA11yPath": "generic > main > generic > list > listitem > button \"Act\"",
+          "humanPick": {
+            "css": "body > main > section:nth-of-type(2) > ul > li:nth-of-type(2) > button",
+            "a11y": "main > region \"A list without ids First item Second item Act Third item A paragraph (id \"7\", a digit-leading id) with a local link and emphasis.\" > list > listitem > button \"Act\"",
+            "role": "button",
+            "name": "Act"
+          },
+          "refViaHumanCss": "f6e29",
+          "rootedSnapshotFirstLine": "- button \"Act\" [active] [ref=f6e29]",
+          "cssViaAgentRef": "body > main > section:nth-of-type(2) > ul > li:nth-of-type(2) > button",
+          "pageRefAfterRootedSnapshot": {
+            "picked": "BUTTON",
+            "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+          },
+          "agree": {
+            "ref": true,
+            "css": true,
+            "roleName": true
+          },
+          "pickMs": 5.4,
+          "mapMs": 1.4,
+          "pickDebug": {
+            "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+            "exposed": "object",
+            "pageLogTail": [
+              "mousedown alt=false button=0",
+              "click alt=false at 185,452 on BUTTON#",
+              "mousedown alt=true button=0",
+              "click alt=true at 185,452 on BUTTON#"
+            ]
+          }
+        },
+        {
+          "target": "textbox \"Name\"",
+          "agentRef": "f6e12",
+          "agentA11yPath": "generic > main > region > generic > textbox \"Name\"",
+          "humanPick": {
+            "css": "#name",
+            "a11y": "main > region \"A form\" > textbox \"Name\"",
+            "role": "textbox",
+            "name": "Name"
+          },
+          "refViaHumanCss": "f6e12",
+          "rootedSnapshotFirstLine": "- textbox \"Name\" [active] [ref=f6e12]:",
+          "cssViaAgentRef": "#name",
+          "pageRefAfterRootedSnapshot": {
+            "picked": "name",
+            "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+          },
+          "agree": {
+            "ref": true,
+            "css": true,
+            "roleName": true
+          },
+          "pickMs": 8.3,
+          "mapMs": 1.5,
+          "pickDebug": {
+            "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+            "exposed": "object",
+            "pageLogTail": [
+              "mousedown alt=false button=0",
+              "click alt=false at 160,201 on INPUT#name",
+              "mousedown alt=true button=0",
+              "click alt=true at 160,201 on INPUT#name"
+            ]
+          }
+        },
+        {
+          "target": "link \"local link\"",
+          "agentRef": "f6e32",
+          "agentA11yPath": "generic > main > generic > paragraph > link \"local link\"",
+          "humanPick": {
+            "css": "#\\37  > a",
+            "a11y": "main > region \"A list without ids First item Second item Act Third item A paragraph (id \"7\", a digit-leading id) with a local link and emphasis.\" > paragraph \"A paragraph (id \"7\", a digit-leading id) with a local link and emphasis.\" > link \"local link\"",
+            "role": "link",
+            "name": "local link"
+          },
+          "refViaHumanCss": "f6e32",
+          "rootedSnapshotFirstLine": "- link \"local link\" [active] [ref=f6e32] [cursor=pointer]:",
+          "cssViaAgentRef": "#\\37  > a",
+          "pageRefAfterRootedSnapshot": {
+            "picked": "A",
+            "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+          },
+          "agree": {
+            "ref": true,
+            "css": true,
+            "roleName": true
+          },
+          "pickMs": 10.3,
+          "mapMs": 1.4,
+          "pickDebug": {
+            "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+            "exposed": "object",
+            "pageLogTail": [
+              "mousedown alt=false button=0",
+              "click alt=false at 355,511 on A#",
+              "mousedown alt=true button=0",
+              "click alt=true at 355,511 on A#"
+            ]
+          }
+        }
+      ],
+      "navigate": {
+        "ms": 35.1,
+        "urlAfterBack": "http://127.0.0.1:17333/index.html#anchor"
+      }
+    },
+    "ipcPicks": 4,
+    "debuggerBeside": {
+      "attach": "ok",
+      "evaluateFromMain": "MAWS browser probe",
+      "playwrightStillWorks": "MAWS browser probe",
+      "playwrightClickStillWorks": "ok",
+      "playwrightAfterDetach": 2
+    },
+    "devtoolsBeside": {
+      "opened": true,
+      "playwrightEvaluate": "MAWS browser probe",
+      "inventoryWhileOpen": 3
+    },
+    "disconnectMs": 5.4,
+    "viewAliveAfterDisconnect": "MAWS browser probe",
+    "after": {
+      "idle": {
+        "rendererPercentCPU": 0,
+        "rendererWorkingSetKB": 181424,
+        "mainPercentCPU": 10.7
+      },
+      "jsLoopMs": 189.4
+    },
+    "reattachMs": 11.8,
+    "totalMs": 12784.7
+  },
+  "cdpBridge": {
+    "route": "webContents.debugger bridge",
+    "before": {
+      "idle": {
+        "rendererPercentCPU": 0,
+        "rendererWorkingSetKB": 182624,
+        "mainPercentCPU": 10.6
+      },
+      "jsLoopMs": 209.3,
+      "loadMs": [
+        16,
+        15.6,
+        19.2,
+        18.7,
+        17.7
+      ]
+    },
+    "bridgeStartMs": 0.9,
+    "endpoint": "ws://127.0.0.1:51440/devtools/browser/1fd0ee569d534abc4e3ae3799d2cf16c",
+    "attachMs": 6.3,
+    "inventory": {
+      "version": "152.0.7977.130",
+      "contexts": [
+        {
+          "pages": [
+            "http://127.0.0.1:17333/index.html"
+          ]
+        }
+      ],
+      "pageCount": 1
+    },
+    "attached": {
+      "idle": {
+        "rendererPercentCPU": 0.1,
+        "rendererWorkingSetKB": 153584,
+        "mainPercentCPU": 10.5
+      },
+      "jsLoopMs": 200.3,
+      "loadMs": [
+        17.8,
+        18.8,
+        19.2,
+        17.2,
+        17
+      ]
+    },
+    "pageLookup": [],
+    "clientUrlTracking": {
+      "atLookup": "http://127.0.0.1:17333/index.html",
+      "lastNavigatedEvent": "http://127.0.0.1:17333/index.html#anchor"
+    },
+    "driver": {
+      "pageUrl": "http://127.0.0.1:17333/index.html",
+      "snapshot": {
+        "ms": 20.7,
+        "chars": 2193,
+        "lines": 59,
+        "head": "- generic [active] [ref=f5e1]:\n  - banner [ref=f5e2]:\n    - heading \"MAWS browser probe\" [level=1] [ref=f5e3]\n  - navigation \"Probe navigation\" [ref=f5e4]:\n    - link \"Second page\" [ref=f5e5] [cursor=pointer]:\n      - /url: /second.html\n    - text: ·\n    - link \"External link\" [ref=f5e6] [cursor=pointer]:\n      - /url: https://example.com/\n  - main [ref=f5e7]:\n    - region [ref=f5e8]:\n      - heading \"A form\" [level=2] [ref=f5e9]\n      - generic [ref=f5e10]:\n        - generic [ref=f5e11]: Name\n        - textbox \"Name\" [ref=f5e12]:\n          - /placeholder: Your name\n      - generic [ref=f5e13]:\n        - generic [ref=f5e14]: Flavour\n        - combobox \"Flavour\" [ref=f5e15]:\n          - option \"Vanilla\" [selected]\n          - option \"Mint\"\n          - option \"Coffee\"\n      - generic [ref=f5e16]:\n        - checkbox \"I agree\" [ref=f5e17]\n        - generic [ref=f5e18]: I agree\n      - generic [ref=f5e19]:\n        - button \"Increment\" [ref=f5e20]\n        - generic [ref=f5e21]:\n          - text: \"Count:\"\n          - strong [ref=f5e22]: \"0\"\n        - button \"Insert siblings\" [ref=f5e23]\n    - generic [ref=f5e24]:\n      - heading \"A list without ids\" [level=2] [ref=f5e25]\n      - list [ref=f5e26]:\n        - listitem [ref=f5e27]: First item\n        - listitem [ref=f5e28]:\n          - text: Second item\n          - button \"Act\" [ref=f5e29]\n        - listitem [ref=f5e30]: Third item\n      - paragraph [ref=f5e31]:"
+      },
+      "refCount": 46,
+      "refs": {
+        "increment": "f5e20",
+        "name": "f5e12",
+        "flavour": "f5e15",
+        "agree": "f5e17"
+      },
+      "click": {
+        "n": 10,
+        "min": 11.5,
+        "median": 16.8,
+        "p95": 24.4,
+        "max": 24.4,
+        "countAfter": "10"
+      },
+      "fill": {
+        "n": 10,
+        "min": 2.2,
+        "median": 2.9,
+        "p95": 3.1,
+        "max": 3.1,
+        "valueAfter": "Ada 9"
+      },
+      "selectOption": {
+        "n": 3,
+        "min": 2.2,
+        "median": 2.3,
+        "p95": 4.2,
+        "max": 4.2,
+        "last": [
+          "coffee"
+        ],
+        "valueAfter": "coffee"
+      },
+      "check": {
+        "ms": 18,
+        "checked": true
+      },
+      "evaluate": {
+        "n": 10,
+        "min": 0.4,
+        "median": 0.5,
+        "p95": 1.2,
+        "max": 1.2,
+        "last": {
+          "title": "MAWS browser probe",
+          "count": "10"
+        }
+      },
+      "screenshotPage": {
+        "n": 3,
+        "min": 48.8,
+        "median": 49.3,
+        "p95": 49.4,
+        "max": 49.4,
+        "bytes": 103568
+      },
+      "screenshotElement": {
+        "n": 3,
+        "min": 41.7,
+        "median": 42,
+        "p95": 46.3,
+        "max": 46.3,
+        "bytes": 2459
+      },
+      "snapshotRepeat": {
+        "n": 5,
+        "min": 2.5,
+        "median": 2.9,
+        "p95": 3.9,
+        "max": 3.9,
+        "incrementRefStable": true
+      },
+      "snapshotDefault": {
+        "ms": 2.1,
+        "hasRefs": false
+      },
+      "snapshotBoxes": {
+        "ms": 3.4,
+        "sampleLine": "- button \"Increment\" [ref=f5e20] [box=37,275,87,32]"
+      },
+      "mutation": {
+        "refBefore": "f5e20",
+        "oldRefResolvesWithoutResnapshot": "increment",
+        "refAfterResnapshot": "f5e20",
+        "insertedRefs": [
+          "Inserted 1=f5e47",
+          "Inserted 2=f5e48",
+          "Inserted 3=f5e49"
+        ],
+        "sameRef": true
+      },
+      "reload": {
+        "refBefore": "f5e20",
+        "oldRefResolvesWithoutResnapshot": "error: locator.evaluate: Invalid frame in aria-ref selector \"aria-ref=f5e20\"",
+        "refAfterResnapshot": "f6e20",
+        "sameNumber": false,
+        "note": "after a reload the DOM is new; equal numbers mean numbering is deterministic (traversal order), not that identity survived"
+      },
+      "pick": [
+        {
+          "target": "button \"Increment\"",
+          "agentRef": "f6e20",
+          "agentA11yPath": "generic > main > region > generic > button \"Increment\"",
+          "humanPick": {
+            "css": "#increment",
+            "a11y": "main > region \"A form\" > button \"Increment\"",
+            "role": "button",
+            "name": "Increment"
+          },
+          "refViaHumanCss": "f6e20",
+          "rootedSnapshotFirstLine": "- button \"Increment\" [active] [ref=f6e20]",
+          "cssViaAgentRef": "#increment",
+          "pageRefAfterRootedSnapshot": {
+            "picked": "increment",
+            "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+          },
+          "agree": {
+            "ref": true,
+            "css": true,
+            "roleName": true
+          },
+          "pickMs": 6.1,
+          "mapMs": 1.7,
+          "pickDebug": {
+            "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+            "exposed": "object",
+            "pageLogTail": [
+              "mousedown alt=false button=0",
+              "click alt=false at 80,291 on BUTTON#increment",
+              "mousedown alt=true button=0",
+              "click alt=true at 80,291 on BUTTON#increment"
+            ]
+          }
+        },
+        {
+          "target": "button \"Act\"",
+          "agentRef": "f6e29",
+          "agentA11yPath": "generic > main > generic > list > listitem > button \"Act\"",
+          "humanPick": {
+            "css": "body > main > section:nth-of-type(2) > ul > li:nth-of-type(2) > button",
+            "a11y": "main > region \"A list without ids First item Second item Act Third item A paragraph (id \"7\", a digit-leading id) with a local link and emphasis.\" > list > listitem > button \"Act\"",
+            "role": "button",
+            "name": "Act"
+          },
+          "refViaHumanCss": "f6e29",
+          "rootedSnapshotFirstLine": "- button \"Act\" [active] [ref=f6e29]",
+          "cssViaAgentRef": "body > main > section:nth-of-type(2) > ul > li:nth-of-type(2) > button",
+          "pageRefAfterRootedSnapshot": {
+            "picked": "BUTTON",
+            "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+          },
+          "agree": {
+            "ref": true,
+            "css": true,
+            "roleName": true
+          },
+          "pickMs": 11.3,
+          "mapMs": 2.1,
+          "pickDebug": {
+            "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+            "exposed": "object",
+            "pageLogTail": [
+              "mousedown alt=false button=0",
+              "click alt=false at 185,452 on BUTTON#",
+              "mousedown alt=true button=0",
+              "click alt=true at 185,452 on BUTTON#"
+            ]
+          }
+        },
+        {
+          "target": "textbox \"Name\"",
+          "agentRef": "f6e12",
+          "agentA11yPath": "generic > main > region > generic > textbox \"Name\"",
+          "humanPick": {
+            "css": "#name",
+            "a11y": "main > region \"A form\" > textbox \"Name\"",
+            "role": "textbox",
+            "name": "Name"
+          },
+          "refViaHumanCss": "f6e12",
+          "rootedSnapshotFirstLine": "- textbox \"Name\" [active] [ref=f6e12]:",
+          "cssViaAgentRef": "#name",
+          "pageRefAfterRootedSnapshot": {
+            "picked": "name",
+            "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+          },
+          "agree": {
+            "ref": true,
+            "css": true,
+            "roleName": true
+          },
+          "pickMs": 6.3,
+          "mapMs": 1,
+          "pickDebug": {
+            "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+            "exposed": "object",
+            "pageLogTail": [
+              "mousedown alt=false button=0",
+              "click alt=false at 160,201 on INPUT#name",
+              "mousedown alt=true button=0",
+              "click alt=true at 160,201 on INPUT#name"
+            ]
+          }
+        },
+        {
+          "target": "link \"local link\"",
+          "agentRef": "f6e32",
+          "agentA11yPath": "generic > main > generic > paragraph > link \"local link\"",
+          "humanPick": {
+            "css": "#\\37  > a",
+            "a11y": "main > region \"A list without ids First item Second item Act Third item A paragraph (id \"7\", a digit-leading id) with a local link and emphasis.\" > paragraph \"A paragraph (id \"7\", a digit-leading id) with a local link and emphasis.\" > link \"local link\"",
+            "role": "link",
+            "name": "local link"
+          },
+          "refViaHumanCss": "f6e32",
+          "rootedSnapshotFirstLine": "- link \"local link\" [active] [ref=f6e32] [cursor=pointer]:",
+          "cssViaAgentRef": "#\\37  > a",
+          "pageRefAfterRootedSnapshot": {
+            "picked": "A",
+            "outsideSubtree": "error: locator.evaluate: Timeout 1000ms exceeded."
+          },
+          "agree": {
+            "ref": true,
+            "css": true,
+            "roleName": true
+          },
+          "pickMs": 6.2,
+          "mapMs": 1.1,
+          "pickDebug": {
+            "synthesizedBy": "playwright keyboard.down(Alt) + mouse.click",
+            "exposed": "object",
+            "pageLogTail": [
+              "mousedown alt=false button=0",
+              "click alt=false at 355,511 on A#",
+              "mousedown alt=true button=0",
+              "click alt=true at 355,511 on A#"
+            ]
+          }
+        }
+      ],
+      "navigate": {
+        "ms": 36.2,
+        "urlAfterBack": "http://127.0.0.1:17333/index.html#anchor"
+      }
+    },
+    "ipcPicks": 8,
+    "newPage": "error: browserContext.newPage: Protocol error (Target.createTarget): Target.createTarget is not available through the MAWS debugger bridge (one view, owned by the app)",
+    "boundary": {
+      "pageSessionSeesTargets": [
+        {
+          "type": "page",
+          "url": "http://127.0.0.1:17333/index.html#anchor"
+        },
+        {
+          "type": "page",
+          "url": "data:text/html,<title>MAWS shell stand-in</title><body style"
+        }
+      ],
+      "pageSessionCanAttachToOtherTarget": {
+        "title": "MAWS shell stand-in"
+      },
+      "viaBridge": {
+        "getTargetsOnPageSession": "error: Target.getTargets is not available through the MAWS debugger bridge (one view, owned by the app)",
+        "attachToOtherOnPageSession": "error: Target.attachToTarget is not available through the MAWS debugger bridge (one view, owned by the app)",
+        "attachToOtherBrowserLevel": "error: no target 78F4992CE1CAB3F12042130E3698097A behind this bridge",
+        "commandOnUnknownSession": "error: unknown session ABCDEF0123456789: the MAWS bridge forwards only sessions it announced",
+        "storageGetCookiesOnPageSession": "error: Storage.getCookies is not available through the MAWS debugger bridge (one view, owned by the app)",
+        "evaluateOnPageSessionStillWorks": "ok: {\"result\":{\"type\":\"string\",\"value\":\"MAWS browser probe\"}}",
+        "wrongPathUpgrade": "upgrade rejected: HTTP 404"
+      }
+    },
+    "debuggerBeside": {
+      "secondAttach": "throws: Debugger is already attached to the target",
+      "mainSendCommandSharesSession": "MAWS browser probe",
+      "playwrightStillWorks": "MAWS browser probe"
+    },
+    "devtoolsBeside": {
+      "opened": true,
+      "playwrightEvaluate": "MAWS browser probe",
+      "debuggerStillAttached": true,
+      "afterClose": {
+        "playwrightEvaluate": 2,
+        "debuggerStillAttached": true
+      }
+    },
+    "bridgeStats": {
+      "forwarded": 717,
+      "browserLevel": 6,
+      "events": 242,
+      "errors": 7,
+      "blocked": [
+        "Target.getTargets",
+        "Target.attachToTarget",
+        "Runtime.evaluate on unknown session",
+        "Storage.getCookies"
+      ],
+      "rejectedUpgrades": 1,
+      "unknownBrowserMethods": []
+    },
+    "disconnectMs": 2,
+    "viewAliveAfterClose": "MAWS browser probe",
+    "after": {
+      "idle": {
+        "rendererPercentCPU": 0,
+        "rendererWorkingSetKB": 169888,
+        "mainPercentCPU": 10.7
+      },
+      "jsLoopMs": 205.9
+    },
+    "totalMs": 12742.6
+  },
+  "import": {
+    "synthetic": {
+      "dir": "/tmp/maws-e0b-synth",
+      "note": "key derived from a generated password written beside the stores as the Keychain stand-in; neither is printed"
+    },
+    "cookies": {
+      "storeVersion": 24,
+      "rows": 5,
+      "set": 3,
+      "skipped": [
+        "localhost/probe_none_insecure: SameSite=None without Secure: Chromium rejects it on set (EXCLUDE_SAMESITE_NONE_INSECURE)",
+        ".embed.test/__Host-part: partitioned (CHIPS) cookie: Electron cookies.set has no partition key"
+      ],
+      "errors": [],
+      "hashedPrefix": 3,
+      "setMs": 0.8,
+      "inJar": [
+        {
+          "domain": "localhost",
+          "name": "probe_session",
+          "hostOnly": true,
+          "secure": false,
+          "httpOnly": true,
+          "sameSite": "lax",
+          "session": false,
+          "hasExpiration": true
+        },
+        {
+          "domain": "localhost",
+          "name": "probe_pref",
+          "hostOnly": true,
+          "secure": false,
+          "httpOnly": false,
+          "sameSite": "unspecified",
+          "session": true,
+          "hasExpiration": false
+        },
+        {
+          "domain": ".example.test",
+          "name": "sid",
+          "hostOnly": false,
+          "secure": true,
+          "httpOnly": true,
+          "sameSite": "strict",
+          "session": false,
+          "hasExpiration": true
+        }
+      ],
+      "sentOnRequest": {
+        "names": [
+          "probe_session",
+          "probe_pref"
+        ],
+        "httpOnlyIncluded": true,
+        "valueMatches": true
+      },
+      "documentCookieOnLocalhost": {
+        "names": [
+          "probe_pref"
+        ],
+        "seesNonHttpOnly": true,
+        "hidesHttpOnly": true
+      },
+      "wrongKey": {
+        "attempted": 5,
+        "failed": 5,
+        "decrypted": 0,
+        "failures": {
+          "error:1e000065:Cipher functions:OPENSSL_internal:BAD_DECRYPT": 5
+        }
+      },
+      "chipsViaCdp": {
+        "networkSetCookie": {
+          "success": true
+        },
+        "networkGetAllCookies": [
+          {
+            "name": "probe_session",
+            "domain": "localhost",
+            "partitionKey": null,
+            "partitionKeyOpaque": null
+          },
+          {
+            "name": "probe_pref",
+            "domain": "localhost",
+            "partitionKey": null,
+            "partitionKeyOpaque": null
+          },
+          {
+            "name": "sid",
+            "domain": ".example.test",
+            "partitionKey": null,
+            "partitionKeyOpaque": null
+          },
+          {
+            "name": "__Host-part",
+            "domain": "embed.test",
+            "partitionKey": {
+              "hasCrossSiteAncestor": true,
+              "topLevelSite": "https://example.test"
+            },
+            "partitionKeyOpaque": null
+          }
+        ],
+        "electronCookiesGetSees": [
+          {
+            "domain": "embed.test",
+            "name": "__Host-part"
+          }
+        ]
+      }
+    },
+    "logins": {
+      "storeVersion": 43,
+      "total": 3,
+      "blocklist": 1,
+      "decrypted": 2,
+      "failed": 0,
+      "allMatchSynthetic": true,
+      "shapePerCredential": [
+        "origin_url",
+        "action_url",
+        "username_element",
+        "username_value",
+        "password_element",
+        "password",
+        "signon_realm"
+      ],
+      "wrongKey": {
+        "decrypted": 0,
+        "failed": 2,
+        "matchesSynthetic": false
+      }
+    },
+    "electronConsumerSurface": {
+      "passwordManager": "none (Chromium password manager is not compiled into Electron)",
+      "autofillApi": "preload scripts only; no chrome.autofill, no Autofill CDP domain exposed through webContents",
+      "httpAuthLogin": "webContents \"login\" event handles HTTP Basic/Digest auth only",
+      "debuggerDomains": "Autofill.enable: 'Autofill.enable' wasn't found"
+    },
+    "realCopies": {
+      "history": {
+        "version": "70",
+        "schema": "CREATE TABLE urls(id INTEGER PRIMARY KEY AUTOINCREMENT,url LONGVARCHAR,title LONGVARCHAR,visit_count INTEGER DEFAULT 0 NOT NULL,typed_count INTEGER DEFAULT 0 NOT NULL,last_visit_time INTEGER NOT NULL,hidden INTEGER DEFAULT 0 NOT NULL)",
+        "counts": {
+          "urls": 17554,
+          "visits": 34411,
+          "visit_sum": 33346,
+          "oldest": 1722335399,
+          "newest": 1791253986
+        },
+        "rowShape": {
+          "url": "string",
+          "title": "string",
+          "visit_count": "number",
+          "typed_count": "number",
+          "last_visit_time": "bigint",
+          "hidden": "number"
+        },
+        "distinctHosts": 779,
+        "readMs": 193.3
+      },
+      "cookies": {
+        "storeVersion": 24,
+        "rows": 5112,
+        "prefixes": {
+          "v10": 5112
+        },
+        "partitioned": 1005,
+        "plainValues": 0,
+        "distinctHosts": 1170,
+        "readMs": 27.7,
+        "decrypted": "not attempted (real key never fetched)"
+      },
+      "Login Data": {
+        "storeVersion": 43,
+        "total": 91,
+        "blocklist": 91,
+        "withEncryptedPassword": 0,
+        "emptyPassword": 0,
+        "keychainIdentifierRows": 0
+      },
+      "Login Data For Account": {
+        "storeVersion": 43,
+        "total": 320,
+        "blocklist": 91,
+        "withEncryptedPassword": 228,
+        "emptyPassword": 1,
+        "keychainIdentifierRows": 0
+      },
+      "localState": {
+        "profiles": 10,
+        "fieldsOfFirst": [
+          "active_time",
+          "ai_subscription_tier",
+          "avatar_icon",
+          "background_apps",
+          "default_avatar_fill_color",
+          "default_avatar_stroke_color",
+          "enterprise_label",
+          "force_signin_profile_locked",
+          "gaia_given_name",
+          "gaia_id",
+          "gaia_name",
+          "gaia_picture_file_name",
+          "hosted_domain",
+          "is_consented_primary_account",
+          "is_ephemeral",
+          "is_glic_eligible",
+          "is_managed",
+          "is_using_default_avatar",
+          "is_using_default_name",
+          "is_using_new_placeholder_avatar_icon",
+          "last_downloaded_gaia_picture_url_with_size",
+          "managed_user_id",
+          "metrics_bucket_index",
+          "name",
+          "profile_color_seed",
+          "profile_highlight_color",
+          "signin.with_credential_provider",
+          "user_accepted_account_management",
+          "user_name"
+        ],
+        "everyProfileHasName": true
+      }
+    },
+    "totalMs": 430.4
+  },
+  "extensions": {
+    "testExtension": {
+      "loadMs": 4.2,
+      "id": "cddgipniephaglaopjjeihjehogcpggh",
+      "name": "MAWS probe extension",
+      "version": "1.0",
+      "url": "chrome-extension://cddgipniephaglaopjjeihjehogcpggh/",
+      "manifestKeys": [
+        "action",
+        "background",
+        "content_scripts",
+        "description",
+        "host_permissions",
+        "manifest_version",
+        "name",
+        "permissions",
+        "version"
+      ],
+      "serviceWorkersRunning": [
+        {
+          "scope": "chrome-extension://cddgipniephaglaopjjeihjehogcpggh/",
+          "scriptUrl": "chrome-extension://cddgipniephaglaopjjeihjehogcpggh/sw.js"
+        }
+      ],
+      "contentScriptMarker": "1",
+      "executeScriptMarker": "1",
+      "reports": [
+        {
+          "from": "offscreen",
+          "trigger": "offscreen-document",
+          "present": {
+            "runtime": "object",
+            "storage": "undefined"
+          },
+          "results": []
+        },
+        {
+          "from": "sw",
+          "trigger": "startup",
+          "present": {
+            "runtime": "object",
+            "storage": "object",
+            "tabs": "object",
+            "scripting": "object",
+            "action": "object",
+            "alarms": "object",
+            "cookies": "undefined",
+            "webRequest": "object",
+            "declarativeNetRequest": "object",
+            "webNavigation": "undefined",
+            "contextMenus": "undefined",
+            "notifications": "undefined",
+            "offscreen": "object",
+            "sidePanel": "undefined",
+            "windows": "undefined",
+            "tabGroups": "undefined",
+            "identity": "undefined",
+            "history": "undefined",
+            "bookmarks": "undefined",
+            "downloads": "undefined",
+            "commands": "undefined",
+            "management": "object",
+            "i18n": "object",
+            "permissions": "undefined",
+            "debugger": "undefined",
+            "proxy": "undefined",
+            "privacy": "undefined",
+            "extension": "object",
+            "webRequestAuthProvider": "undefined",
+            "sessions": "undefined",
+            "favicon": "undefined",
+            "search": "undefined",
+            "topSites": "undefined"
+          },
+          "results": [
+            {
+              "name": "storage.local.set+get",
+              "ok": true,
+              "value": "string"
+            },
+            {
+              "name": "storage.session.set+get",
+              "ok": true,
+              "value": 1
+            },
+            {
+              "name": "tabs.query",
+              "ok": true,
+              "value": [
+                {
+                  "id": 2,
+                  "url": "about:blank",
+                  "active": false
+                }
+              ]
+            },
+            {
+              "name": "scripting.executeScript",
+              "ok": false,
+              "error": "no probe tab in tabs.query"
+            },
+            {
+              "name": "alarms.create",
+              "ok": true,
+              "value": 1
+            },
+            {
+              "name": "cookies.getAll",
+              "ok": false,
+              "error": "Cannot read properties of undefined (reading 'getAll')"
+            },
+            {
+              "name": "action.setTitle",
+              "ok": true,
+              "value": "set"
+            },
+            {
+              "name": "contextMenus.create",
+              "ok": false,
+              "error": "Cannot read properties of undefined (reading 'create')"
+            },
+            {
+              "name": "declarativeNetRequest.getDynamicRules",
+              "ok": true,
+              "value": 0
+            },
+            {
+              "name": "webNavigation.getAllFrames",
+              "ok": false,
+              "error": "no probe tab"
+            },
+            {
+              "name": "webRequest.onBeforeRequest.addListener",
+              "ok": true,
+              "value": "added"
+            },
+            {
+              "name": "notifications.create",
+              "ok": false,
+              "error": "Cannot read properties of undefined (reading 'create')"
+            },
+            {
+              "name": "offscreen.createDocument",
+              "ok": true,
+              "value": "created"
+            },
+            {
+              "name": "sidePanel.setOptions",
+              "ok": false,
+              "error": "Cannot read properties of undefined (reading 'setOptions')"
+            },
+            {
+              "name": "runtime.getManifest",
+              "ok": true,
+              "value": "MAWS probe extension"
+            },
+            {
+              "name": "runtime.getURL",
+              "ok": true,
+              "value": "chrome-extension://cddgipniephaglaopjjeihjehogcpggh/x"
+            },
+            {
+              "name": "runtime.connectNative",
+              "ok": false,
+              "error": "chrome.runtime.connectNative is not a function"
+            }
+          ]
+        },
+        {
+          "from": "cs",
+          "trigger": "content-script",
+          "present": {
+            "runtime": "object",
+            "storage": "object",
+            "i18n": "object",
+            "tabs": "undefined",
+            "scripting": "object"
+          },
+          "results": [
+            {
+              "name": "runtime.sendMessage -> sw",
+              "ok": true,
+              "value": {
+                "echo": {
+                  "type": "hello",
+                  "from": "content-script"
+                },
+                "fromTab": 2,
+                "swSawMessage": true
+              }
+            },
+            {
+              "name": "storage.local.set (content)",
+              "ok": true,
+              "value": 1
+            }
+          ]
+        },
+        {
+          "from": "sw",
+          "trigger": "message-after-page",
+          "present": {
+            "runtime": "object",
+            "storage": "object",
+            "tabs": "object",
+            "scripting": "object",
+            "action": "object",
+            "alarms": "object",
+            "cookies": "undefined",
+            "webRequest": "object",
+            "declarativeNetRequest": "object",
+            "webNavigation": "undefined",
+            "contextMenus": "undefined",
+            "notifications": "undefined",
+            "offscreen": "object",
+            "sidePanel": "undefined",
+            "windows": "undefined",
+            "tabGroups": "undefined",
+            "identity": "undefined",
+            "history": "undefined",
+            "bookmarks": "undefined",
+            "downloads": "undefined",
+            "commands": "undefined",
+            "management": "object",
+            "i18n": "object",
+            "permissions": "undefined",
+            "debugger": "undefined",
+            "proxy": "undefined",
+            "privacy": "undefined",
+            "extension": "object",
+            "webRequestAuthProvider": "undefined",
+            "sessions": "undefined",
+            "favicon": "undefined",
+            "search": "undefined",
+            "topSites": "undefined"
+          },
+          "results": [
+            {
+              "name": "storage.local.set+get",
+              "ok": true,
+              "value": "string"
+            },
+            {
+              "name": "storage.session.set+get",
+              "ok": true,
+              "value": 1
+            },
+            {
+              "name": "tabs.query",
+              "ok": true,
+              "value": [
+                {
+                  "id": 5,
+                  "url": "chrome-extension://cddgipniephaglaopjjeihjehogcpggh/offscreen.html",
+                  "active": false
+                },
+                {
+                  "id": 2,
+                  "url": "http://127.0.0.1:17333/index.html",
+                  "active": false
+                }
+              ]
+            },
+            {
+              "name": "scripting.executeScript",
+              "ok": true,
+              "value": [
+                "MAWS browser probe"
+              ]
+            },
+            {
+              "name": "alarms.create",
+              "ok": true,
+              "value": 1
+            },
+            {
+              "name": "cookies.getAll",
+              "ok": false,
+              "error": "Cannot read properties of undefined (reading 'getAll')"
+            },
+            {
+              "name": "action.setTitle",
+              "ok": true,
+              "value": "set"
+            },
+            {
+              "name": "contextMenus.create",
+              "ok": false,
+              "error": "Cannot read properties of undefined (reading 'create')"
+            },
+            {
+              "name": "declarativeNetRequest.getDynamicRules",
+              "ok": true,
+              "value": 0
+            },
+            {
+              "name": "webNavigation.getAllFrames",
+              "ok": false,
+              "error": "Cannot read properties of undefined (reading 'getAllFrames')"
+            },
+            {
+              "name": "webRequest.onBeforeRequest.addListener",
+              "ok": true,
+              "value": "added"
+            },
+            {
+              "name": "notifications.create",
+              "ok": false,
+              "error": "Cannot read properties of undefined (reading 'create')"
+            },
+            {
+              "name": "offscreen.createDocument",
+              "ok": false,
+              "error": "Only a single offscreen document may be created."
+            },
+            {
+              "name": "sidePanel.setOptions",
+              "ok": false,
+              "error": "Cannot read properties of undefined (reading 'setOptions')"
+            },
+            {
+              "name": "runtime.getManifest",
+              "ok": true,
+              "value": "MAWS probe extension"
+            },
+            {
+              "name": "runtime.getURL",
+              "ok": true,
+              "value": "chrome-extension://cddgipniephaglaopjjeihjehogcpggh/x"
+            },
+            {
+              "name": "runtime.connectNative",
+              "ok": false,
+              "error": "chrome.runtime.connectNative is not a function"
+            }
+          ]
+        }
+      ],
+      "removed": 0
+    },
+    "realExtensions": [
+      {
+        "id": "aapbdbdomjkkjkaonfhkkikfgjllcleb",
+        "version": "2.0.17_1",
+        "manifestVersion": 3,
+        "rawName": "__MSG_8969005060131950570__",
+        "background": "service_worker",
+        "contentScripts": 1,
+        "ok": true,
+        "loadMs": 12.9,
+        "resolvedName": "Google Translate",
+        "serviceWorkerRunning": false
+      },
+      {
+        "id": "cfhdojbkjhnklbpkdaibdccddilifddb",
+        "version": "4.45.0_0",
+        "manifestVersion": 3,
+        "rawName": "__MSG_name_releasebuild__",
+        "background": "service_worker",
+        "contentScripts": 13,
+        "ok": true,
+        "loadMs": 17.6,
+        "resolvedName": "Adblock Plus - free ad blocker",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "cnjifjpddelmedmihgijeibhnjfabmlf",
+        "version": "1.7.1_0",
+        "manifestVersion": 3,
+        "rawName": "Obsidian Web Clipper",
+        "background": "service_worker",
+        "contentScripts": 1,
+        "ok": true,
+        "loadMs": 15.6,
+        "resolvedName": "Obsidian Web Clipper",
+        "serviceWorkerRunning": false
+      },
+      {
+        "id": "dbfmnekepjoapopniengjbcpnbljalfg",
+        "version": "11.0.43_0",
+        "manifestVersion": 3,
+        "rawName": "__MSG_name__",
+        "background": "service_worker",
+        "contentScripts": 0,
+        "ok": true,
+        "loadMs": 18.8,
+        "resolvedName": "Infinity New Tab",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "dodmmooeoklaejobgleioelladacbeki",
+        "version": "2.5.6_0",
+        "manifestVersion": 3,
+        "rawName": "Ona",
+        "background": "service_worker",
+        "contentScripts": 2,
+        "ok": true,
+        "loadMs": 3.7,
+        "resolvedName": "Ona",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "fcoeoabgfenejglbffodgkkbkcdhcgfn",
+        "version": "1.0.98_0",
+        "manifestVersion": 3,
+        "rawName": "Claude",
+        "background": "service_worker",
+        "contentScripts": 3,
+        "ok": true,
+        "loadMs": 5.4,
+        "resolvedName": "Claude",
+        "serviceWorkerRunning": false
+      },
+      {
+        "id": "fcoeoabgfenejglbffodgkkbkcdhcgfn",
+        "version": "1.0.99_0",
+        "manifestVersion": 3,
+        "rawName": "Claude",
+        "background": "service_worker",
+        "contentScripts": 3,
+        "ok": true,
+        "loadMs": 7.6,
+        "resolvedName": "Claude",
+        "serviceWorkerRunning": false
+      },
+      {
+        "id": "fdpanfmdmcblgkecobjdhkgdnfilncfg",
+        "version": "3.0.2_0",
+        "manifestVersion": 3,
+        "rawName": "__MSG_manifest_for_name__",
+        "background": "service_worker",
+        "contentScripts": 1,
+        "ok": true,
+        "loadMs": 9.9,
+        "resolvedName": "Lyrics ( Youtube / Youtube Music )",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "fdpohaocaechififmbbbbbknoalclacl",
+        "version": "8.9_0",
+        "manifestVersion": 3,
+        "rawName": "GoFullPage - Full Page Screen Capture",
+        "background": "service_worker",
+        "contentScripts": 0,
+        "ok": true,
+        "loadMs": 15.3,
+        "resolvedName": "GoFullPage - Full Page Screen Capture",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "fjoaledfpmneenckfbpdfhkmimnjocfa",
+        "version": "6.1.1_0",
+        "manifestVersion": 3,
+        "rawName": "VPN for Chrome: NordVPN proxy protection",
+        "background": "service_worker",
+        "contentScripts": 3,
+        "ok": true,
+        "loadMs": 3,
+        "resolvedName": "VPN for Chrome: NordVPN proxy protection",
+        "serviceWorkerRunning": false
+      },
+      {
+        "id": "gbkeegbaiigmenfmjfclcdgdpimamgkj",
+        "version": "155.236.240_1",
+        "manifestVersion": 3,
+        "rawName": "__MSG_extension_name__",
+        "background": "service_worker",
+        "contentScripts": 0,
+        "ok": true,
+        "loadMs": 20.3,
+        "resolvedName": "Office Editing for Docs, Sheets & Slides",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "ghbmnnjooekpmoecnnnilnnbdlolhkhi",
+        "version": "1.110.1_0",
+        "manifestVersion": 3,
+        "rawName": "__MSG_extName__",
+        "background": "service_worker",
+        "contentScripts": 0,
+        "ok": true,
+        "loadMs": 15.5,
+        "resolvedName": "Google Docs Offline",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "gmbmikajjgmnabiglmofipeabaddhgne",
+        "version": "3.0.9_0",
+        "manifestVersion": 3,
+        "rawName": "__MSG_CHROME_EXTENSION_NAME__",
+        "background": "service_worker",
+        "contentScripts": 0,
+        "ok": true,
+        "loadMs": 6.7,
+        "resolvedName": "Save to Google Drive",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "hbhjcmcbihinkdghhbhcgoediddnimdp",
+        "version": "1.8.0_0",
+        "manifestVersion": 3,
+        "rawName": "WEBZEN Starter",
+        "background": "service_worker",
+        "contentScripts": 1,
+        "ok": true,
+        "loadMs": 2.2,
+        "resolvedName": "WEBZEN Starter",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "hehggadaopoacecdllhhajmbjkdcmajg",
+        "version": "1.26.901.11451_0",
+        "manifestVersion": 3,
+        "rawName": "ChatGPT",
+        "background": "service_worker",
+        "contentScripts": 2,
+        "ok": true,
+        "loadMs": 29.1,
+        "resolvedName": "ChatGPT",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "lmjegmlicamnimmfhcmpkclmigmmcbeh",
+        "version": "3.10_1",
+        "manifestVersion": 3,
+        "rawName": "__MSG_extensionName__",
+        "background": "service_worker",
+        "contentScripts": 0,
+        "ok": true,
+        "loadMs": 8.2,
+        "resolvedName": "Application Launcher For Drive (by Google)",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "majdfhpaihoncoakbjgbdhglocklcgno",
+        "version": "5.0.2_0",
+        "manifestVersion": 3,
+        "rawName": "__MSG_app_name_chrome__",
+        "background": "service_worker",
+        "contentScripts": 2,
+        "ok": true,
+        "loadMs": 11,
+        "resolvedName": "Free VPN for Chrome - VPN Proxy VeePN",
+        "serviceWorkerRunning": false
+      },
+      {
+        "id": "mmlmfjhmonkocbjadbfplnigmagldckm",
+        "version": "0.4.0_0",
+        "manifestVersion": 3,
+        "rawName": "Playwright Extension",
+        "background": "service_worker",
+        "contentScripts": 0,
+        "ok": true,
+        "loadMs": 1.2,
+        "resolvedName": "Playwright Extension",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "nkbihfbeogaeaoehlefnkodbefgpgknn",
+        "version": "13.48.0.0_0",
+        "manifestVersion": 3,
+        "rawName": "__MSG_appName__",
+        "background": "service_worker",
+        "contentScripts": 3,
+        "ok": true,
+        "loadMs": 20.7,
+        "resolvedName": "MetaMask",
+        "serviceWorkerRunning": true
+      },
+      {
+        "id": "nmmhkkegccagdldgiimedpiccmgmieda",
+        "version": "1.0.0.6_1",
+        "manifestVersion": 2,
+        "rawName": "__MSG_APP_NAME__",
+        "background": "none",
+        "contentScripts": 0,
+        "ok": true,
+        "loadMs": 4.1,
+        "resolvedName": "Chrome Web Store Payments",
+        "serviceWorkerRunning": false
+      },
+      {
+        "id": "pejdijmoenmkgeppbflobdenhhabjlaj",
+        "version": "3.4.0_0",
+        "manifestVersion": 3,
+        "rawName": "__MSG_extName__",
+        "background": "service_worker",
+        "contentScripts": 1,
+        "ok": true,
+        "loadMs": 5.6,
+        "resolvedName": "iCloud Passwords",
+        "serviceWorkerRunning": false
+      }
+    ],
+    "totalMs": 27773.8
+  }
+}

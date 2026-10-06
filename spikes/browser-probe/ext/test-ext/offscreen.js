@@ -1,0 +1,1 @@
+fetch('http://127.0.0.1:17333/ext-report?from=offscreen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ trigger: 'offscreen-document', present: { runtime: typeof chrome.runtime, storage: typeof chrome.storage }, results: [] }) }).catch(() => {});

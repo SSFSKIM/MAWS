@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MAWS browser probe</title>
+<style>
+  body { font: 14px/1.4 -apple-system, system-ui, sans-serif; margin: 24px; color: #222; }
+  main { max-width: 640px; }
+  .row { display: flex; gap: 12px; align-items: center; margin: 8px 0; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 12px 0; }
+  button { padding: 6px 12px; }
+  #log { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; background: #f6f6f6; padding: 8px; min-height: 48px; }
+</style>
+</head>
+<body>
+<header><h1>MAWS browser probe</h1></header>
+<nav aria-label="Probe navigation"><a href="/second.html">Second page</a> · <a href="https://example.com/">External link</a></nav>
+<main>
+  <section class="card" aria-labelledby="form-title">
+    <h2 id="form-title">A form</h2>
+    <div class="row">
+      <label for="name">Name</label>
+      <input id="name" type="text" placeholder="Your name" autocomplete="off">
+    </div>
+    <div class="row">
+      <label for="flavour">Flavour</label>
+      <select id="flavour">
+        <option value="vanilla">Vanilla</option>
+        <option value="mint">Mint</option>
+        <option value="coffee">Coffee</option>
+      </select>
+    </div>
+    <div class="row">
+      <input id="agree" type="checkbox"><label for="agree">I agree</label>
+    </div>
+    <div class="row">
+      <button id="increment" type="button">Increment</button>
+      <span>Count: <strong id="count">0</strong></span>
+      <button id="mutate" type="button">Insert siblings</button>
+    </div>
+  </section>
+  <section class="card">
+    <h2>A list without ids</h2>
+    <ul>
+      <li>First item</li>
+      <li>Second item <button type="button">Act</button></li>
+      <li>Third item</li>
+    </ul>
+    <p class="para" id="7">A paragraph (id "7", a digit-leading id) with a <a href="#anchor">local link</a> and <em>emphasis</em>.</p>
+  </section>
+  <section class="card">
+    <h2>Login form (for the autofill question)</h2>
+    <form id="login" action="/login" method="post" onsubmit="return false">
+      <div class="row"><label for="user">Username</label><input id="user" name="username" type="text" autocomplete="username"></div>
+      <div class="row"><label for="pass">Password</label><input id="pass" name="password" type="password" autocomplete="current-password"></div>
+      <button type="submit">Sign in</button>
+    </form>
+  </section>
+  <section class="card">
+    <h2>Log</h2>
+    <div id="log"></div>
+  </section>
+</main>
+<script>
+  const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
+  document.getElementById('increment').addEventListener('click', () => {
+    const c = document.getElementById('count');
+    c.textContent = String(Number(c.textContent) + 1);
+  });
+  document.getElementById('mutate').addEventListener('click', () => {
+    const row = document.getElementById('increment').parentElement;
+    for (let i = 0; i < 3; i++) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = `Inserted ${i + 1}`;
+      row.insertBefore(b, document.getElementById('increment'));
+    }
+  });
+  document.getElementById('name').addEventListener('input', (e) => log('name=' + e.target.value));
+  window.addEventListener('click', (e) => { log(`click alt=${e.altKey} at ${e.clientX},${e.clientY} on ${e.target.tagName}#${e.target.id}`); }, true);
+  window.addEventListener('mousedown', (e) => { log(`mousedown alt=${e.altKey} button=${e.button}`); }, true);
+  log('cookie=' + document.cookie);
+  log('probeContentScript=' + (document.documentElement.dataset.probeContentScript || 'absent'));
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+Extension stderr digest from the full run (pnpm start, 2026-10-05), Electron 44.4.5 / Chromium 152.0.7977.130.
+Electron logs these to the main process stderr while loadExtension runs; nothing here is a cookie, password or page value.
+
+Permissions Electron reports as unknown (ignored, extension still loads): background, bookmarks, commands, contentSettings, contextMenus, cookies, debugger, declarativeContent, downloads, favicon, history, identity, notifications, pageCapture, privacy, search, sessions, sidePanel, tabGroups, topSites, webNavigation
+
+aapbdbdomjkkjkaonfhkkikfgjllcleb
+    Uncaught TypeError: Cannot read properties of undefined (reading 'onClicked')  <- chrome-extension://aapbdbdomjkkjkaonfhkkikfgjllcleb/main_compiled.js
+cfhdojbkjhnklbpkdaibdccddilifddb
+    Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'onBeforeNavigate')  <- chrome-extension://cfhdojbkjhnklbpkdaibdccddilifddb/background.js
+cnjifjpddelmedmihgijeibhnjfabmlf
+    Uncaught TypeError: Cannot read properties of undefined (reading 'onCommand')  <- chrome-extension://cnjifjpddelmedmihgijeibhnjfabmlf/background.js
+dbfmnekepjoapopniengjbcpnbljalfg
+    Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'contains')  <- chrome-extension://dbfmnekepjoapopniengjbcpnbljalfg/serviceworker.js
+dodmmooeoklaejobgleioelladacbeki
+    Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'onRemoved')  <- chrome-extension://dodmmooeoklaejobgleioelladacbeki/static/background/index.js
+fcoeoabgfenejglbffodgkkbkcdhcgfn
+    Uncaught TypeError: Cannot read properties of undefined (reading 'Color')  <- chrome-extension://fcoeoabgfenejglbffodgkkbkcdhcgfn/assets/mcpPermissions-7tN0KmUi.js
+    Uncaught TypeError: Cannot read properties of undefined (reading 'Color')  <- chrome-extension://fcoeoabgfenejglbffodgkkbkcdhcgfn/assets/mcpPermissions-Dvpkli6y.js
+fjoaledfpmneenckfbpdfhkmimnjocfa
+    Uncaught TypeError: Cannot read properties of undefined (reading 'onErrorOccurred')  <- chrome-extension://fjoaledfpmneenckfbpdfhkmimnjocfa/background.bundle.js
+gmbmikajjgmnabiglmofipeabaddhgne
+    Uncaught (in promise) Error: "sync" is not available in this instance of Chrome  <- chrome-extension://gmbmikajjgmnabiglmofipeabaddhgne/js/backgroundpagebootstrap.js
+hehggadaopoacecdllhhajmbjkdcmajg
+    Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'onFocusChanged')  <- chrome-extension://hehggadaopoacecdllhhajmbjkdcmajg/background.js
+majdfhpaihoncoakbjgbdhglocklcgno
+    Uncaught TypeError: Cannot read properties of undefined (reading 'network')  <- chrome-extension://majdfhpaihoncoakbjgbdhglocklcgno/assets/app-CiqjVmrv.js
+pejdijmoenmkgeppbflobdenhhabjlaj
+    Uncaught TypeError: Cannot read properties of undefined (reading 'onBeforeNavigate')  <- chrome-extension://pejdijmoenmkgeppbflobdenhhabjlaj/background.js
