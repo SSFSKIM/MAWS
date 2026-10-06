@@ -206,6 +206,46 @@ describe('shell event subscription', () => {
     expect(reads()).toBe(3);
   });
 
+  // E10: as main does (C12, `hostEventSource`), the page forgets the statuses a host generation sent when the host leaves
+  // ready, so a session the crashed supervisor ran reads not live even when the successor no longer lists it.
+  const RESTARTING = { state: 'restarting', pid: null, restarts: 0, revision: 2 } as const;
+  const READY = { state: 'ready', pid: 4242, restarts: 0, revision: 3 } as const;
+  it('a session the crashed supervisor ran reads not live once the host left ready, and stays so when the successor lists nothing', async () => {
+    const { fake, stores } = setup();
+    await fake.reply('engine.sessions', [status('a', { engineState: 'running' })]);
+    expect(stores.sessions.getState().engine.get(A)?.process).toBe('ready');
+    fake.event('engine.hostState', RESTARTING);
+    expect(stores.sessions.getState().engine.has(A)).toBe(false);
+    fake.event('engine.hostState', READY);
+    await fake.reply('engine.sessions', []);
+    expect(stores.sessions.getState().engine.has(A)).toBe(false);
+  });
+
+  it('a reconnect to the same supervisor: the burst’s status keeps the session live whichever side of the re-read it lands', async () => {
+    for (const burstFirst of [true, false]) {
+      const { fake, stores, disconnect } = setup();
+      await fake.reply('engine.sessions', [status('a')]);
+      fake.event('engine.hostState', RESTARTING);
+      fake.event('engine.hostState', READY);
+      const burst = () => fake.event('session.status', { appSessionId: 'a', status: status('a', { engineState: 'running' }) });
+      if (burstFirst) burst();
+      await fake.reply('engine.sessions', [status('a', { engineState: 'running' })]);
+      if (!burstFirst) burst();
+      expect(stores.sessions.getState().engine.get(A)).toMatchObject({ process: 'ready', engineState: 'running' });
+      disconnect();
+    }
+  });
+
+  it('applies no engine table read before the host last left ready (the departed host’s answer)', async () => {
+    const { fake, stores } = setup(); // the connect-time read, still unanswered
+    fake.event('engine.hostState', RESTARTING);
+    await fake.reply('engine.sessions', [status('a')]);
+    expect(stores.sessions.getState().engine.has(A)).toBe(false);
+    fake.event('engine.hostState', READY);
+    await fake.reply('engine.sessions', [status('b')]);
+    expect([...stores.sessions.getState().engine.keys()]).toEqual(['b']);
+  });
+
   it('applies no re-read answer that lands after disconnect', async () => {
     const { fake, stores, disconnect } = setup();
     await fake.reply('engine.sessions', []);

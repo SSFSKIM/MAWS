@@ -44,6 +44,7 @@ export interface SessionsState {
   applyDigest(digest: SessionDigest): void;
   applyStatus(event: EventPayload<'session.status'>): void;
   applyStatuses(statuses: EngineSessionStatus[]): void; // C3's process table (`engine.sessions`) at connect
+  forgetStatuses(): void; // E10: the engine host left ready, so no status it sent still holds
   setLoaded(): void;
   addUnstarted(appSessionId: AppSessionId, entry: UnstartedSession): void;
   dropUnstarted(appSessionId: AppSessionId): void;
@@ -188,6 +189,11 @@ export function createSessionsStore() {
         const engine = new Map(get().engine);
         for (const status of statuses) engine.set(status.appSessionId, status);
         set({ engine });
+      },
+      // E10, as main forgets them (C12, `hostEventSource`): a host that left ready took its processes' statuses along; the
+      // next generation's table and burst say again what is live.
+      forgetStatuses() {
+        if (get().engine.size > 0) set({ engine: new Map() });
       },
       setLoaded() {
         set({ loaded: true });
