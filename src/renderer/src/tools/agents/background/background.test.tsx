@@ -677,6 +677,9 @@ describe('task checklist', () => {
   it('the heading’s Open opens the Tasks panel on the session', async () => {
     await mount({ status: live({ taskListId: 'sess-1' }) });
     await waitFor(() => expect(heading('tasks')).toBe('Tasks · 2/4'));
+    // the action sits beside the heading, not in it: the heading's accessible name is its own text
+    expect(within(checklist()).getByRole('heading', { level: 3 }).textContent).toBe('Tasks · 2/4');
+    expect(within(checklist()).getByRole('heading', { name: 'Tasks · 2/4' })).toBeTruthy();
     fireEvent.click(within(checklist()).getByRole('button', { name: 'Open the Tasks panel' }));
     expect(openTool).toHaveBeenCalledWith('tasks', { appSessionId: A, params: { appSessionId: A } });
   });

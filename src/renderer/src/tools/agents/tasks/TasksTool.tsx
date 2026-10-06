@@ -35,6 +35,7 @@ export class TasksHandle {
   private readonly listeners = new Set<() => void>();
   // The last target came without a session (E1's `{ target }`): it belongs to the session the tab is shown for next,
   // which for a pinned tab still on another session is the one `show_pane` named, brought on screen by the same call.
+  // That relies on the host's `retarget` calling `open` then `activateIn` in one synchronous call (`panel/host.ts`).
   private carry = false;
   private revealed = 0; // the last reveal the body acted on, kept here so a remount does not scroll to it again
 

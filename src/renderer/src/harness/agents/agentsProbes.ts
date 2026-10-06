@@ -159,7 +159,7 @@ function background(): BackgroundView | null {
       unavailable: notes.find((note) => note.startsWith('Tasks unavailable')) ?? null,
     },
     notes: [...body.querySelectorAll('p')].filter((p) => !body.contains(p.parentElement?.closest('section, article, [data-shell], [data-monitor], [data-view="run"]') ?? null)).map(text),
-    headings: [...body.querySelectorAll('section[data-section] > h3 > button')].map(text),
+    headings: [...body.querySelectorAll('section[data-section] h3 > button')].map(text),
   };
 }
 

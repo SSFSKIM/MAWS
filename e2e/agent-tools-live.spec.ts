@@ -165,7 +165,7 @@ function installProbes(): void {
     const body = tabpanel();
     const tasks = body?.querySelector('section[data-section="tasks"]');
     return {
-      headings: all(body, 'section[data-section] > h3').map(text),
+      headings: all(body, 'section[data-section] h3').map(text),
       notes: all(body, 'p').map(text).filter(Boolean),
       workflows: all<HTMLElement>(body, '[data-workflow]').map((card) => ({
         taskId: card.dataset.workflow!,

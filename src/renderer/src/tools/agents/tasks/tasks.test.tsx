@@ -20,7 +20,10 @@ import { setAgentWorkClient } from '../client';
 import { fakeAgentWorkClient } from '../fake-work-client';
 import { registerAgentTools } from '../index';
 import { useTaskGraph } from '../store';
-import type { TasksHandle } from './TasksTool';
+import type { TasksHandle, TasksParams } from './TasksTool';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from '../../../ipc/query';
+import type { PanelToolContext } from '../../../panel/tool';
 
 const task = (id: string, taskStatus: PersistedTask['status'], subject: string, activeForm?: string): PersistedTask => ({
   id, subject, description: '', status: taskStatus, blocks: [], blockedBy: [], ...(activeForm ? { activeForm } : {}),
@@ -230,5 +233,44 @@ describe('the target', () => {
     expect(handle.snapshot()).toMatchObject({ appSessionId: B, selected: '1' });
     handle.follow(A); // a session the params did not name: the selection was B's
     expect(handle.snapshot()).toMatchObject({ appSessionId: A, selected: null });
+  });
+});
+
+// The body as the host renders it, with a context the test sets (M5 review follow-up): the view with no session shown,
+// and the `own` gate that keeps one session's selection, fold and scroll off another's list until the follow lands.
+describe('the body', () => {
+  const tasksTool = () => panelHost.tools().find((t) => t.id === 'tasks')!;
+  const createHandle = (appSessionId: AppSessionId | null, params?: TasksParams) =>
+    tasksTool().createState({ appSessionId, session: null, instanceId: 'tasks:body', params }) as TasksHandle;
+  function Body({ handle, appSessionId }: { handle: TasksHandle; appSessionId: AppSessionId | null }) {
+    const session = useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId) ?? null)));
+    const engine = useSessions((s) => (appSessionId === null ? null : (s.engine.get(appSessionId) ?? null)));
+    const ctx: PanelToolContext = { appSessionId, session, status: engine, pinned: true, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: () => {} };
+    const Render = tasksTool().render;
+    return (
+      <QueryClientProvider client={queryClient}>
+        <Render state={handle} ctx={ctx} />
+      </QueryClientProvider>
+    );
+  }
+
+  it('with no session shown (a pinned tab over the Overview) says to open one and reads nothing', () => {
+    render(<Body handle={createHandle(null)} appSessionId={null} />);
+    expect(body()!.textContent).toBe('Open a session to see its tasks');
+    expect(body()!.querySelector('[data-task], button')).toBeNull();
+    expect(tasksCalls).toEqual([]);
+  });
+
+  it('shows another session’s list with nothing of the state’s own session over it until the follow lands', async () => {
+    const handle = createHandle(A, { target: '4' });
+    handle.setShowCompleted(true);
+    expect(handle.snapshot()).toMatchObject({ appSessionId: A, selected: '4', showCompleted: true });
+    handle.follow = () => {}; // the follow has not landed yet
+    render(<Body handle={handle} appSessionId={B} />);
+    await waitFor(() => expect(rows()).toEqual(['Write the parser'])); // B's list, its completed fold closed
+    expect(within(body()!).getByRole('button', { name: '1 earlier task completed' }).getAttribute('aria-expanded')).toBe('false');
+    expect(selectedRows()).toEqual([]);
+    expect(scrolled).toEqual([]); // A's pending reveal is not spent on B's list
+    expect(handle.snapshot()).toMatchObject({ appSessionId: A, selected: '4', showCompleted: true });
   });
 });
