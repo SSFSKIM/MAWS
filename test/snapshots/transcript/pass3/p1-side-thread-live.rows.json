@@ -132,6 +132,13 @@
     "turnId": "turn:f0f8bab2-dd91-4659-842b-beee9d2c28ed"
   },
   {
+    "anchor": {
+      "kind": "file-line",
+      "label": "probe.txt:1",
+      "line": 1,
+      "locator": "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt#L1",
+      "path": "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt"
+    },
     "at": "2026-10-06T11:03:57.322Z",
     "attachments": [
       {
@@ -147,11 +154,11 @@
     "editable": true,
     "id": "user:2aad8c48-5d8d-4cf5-971c-5870b3509fc6",
     "kind": "user",
-    "lines": 4,
+    "lines": 1,
     "messageUuid": "2aad8c48-5d8d-4cf5-971c-5870b3509fc6",
     "placeholders": [],
     "steer": true,
-    "text": "Comment on \"probe.txt:1\" (file /private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt, line 1). A screenshot of it is attached:\nWhen the command has finished, end your reply with the word I asked you to remember.\n\n<maws_anchor kind=\"file-line\" label=\"probe.txt:1\" locator=\"/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt#L1\" path=\"/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt\" line=\"1\"/>",
+    "text": "When the command has finished, end your reply with the word I asked you to remember.",
     "turnId": "turn:f0f8bab2-dd91-4659-842b-beee9d2c28ed"
   },
   {

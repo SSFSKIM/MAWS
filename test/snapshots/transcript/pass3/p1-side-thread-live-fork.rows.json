@@ -7,17 +7,24 @@
     "turnId": "turn:93dbd800-b5c2-4097-9e9d-64cbb84b9747"
   },
   {
+    "anchor": {
+      "kind": "file-line",
+      "label": "probe.txt:1",
+      "line": 1,
+      "locator": "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt#L1",
+      "path": "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt"
+    },
     "at": "2026-10-06T11:03:55.694Z",
     "attachments": [],
     "dropped": false,
     "editable": true,
     "id": "user:93dbd800-b5c2-4097-9e9d-64cbb84b9747",
     "kind": "user",
-    "lines": 6,
+    "lines": 1,
     "messageUuid": "93dbd800-b5c2-4097-9e9d-64cbb84b9747",
     "placeholders": [],
     "steer": false,
-    "text": "Comment on \"probe.txt:1\" (file /private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt, line 1):\nWhat word did I ask you to remember? Answer with just the word.\n\nYou are in a side thread forked from the main conversation to handle this one comment. Address it here; the main conversation continues separately and is not waiting on you.\n\n<maws_anchor kind=\"file-line\" label=\"probe.txt:1\" locator=\"/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt#L1\" path=\"/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt\" line=\"1\"/>",
+    "text": "What word did I ask you to remember? Answer with just the word.",
     "turnId": "turn:93dbd800-b5c2-4097-9e9d-64cbb84b9747"
   },
   {

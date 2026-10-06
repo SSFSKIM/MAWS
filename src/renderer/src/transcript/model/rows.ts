@@ -7,6 +7,10 @@ import type { ContentBlock, Question, TokenUsage } from '@shared/graph/events';
 import type { AgentId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import type { AskCancelReason } from '@shared/maws/ask'; // E1
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // E1
+// E3 start
+import type { Anchor, AnchorKind } from '@shared/anchor/anchor';
+import type { AppSessionId } from '@shared/graph/ids';
+// E3 end
 
 export type TurnId = string & z.$brand<'TurnId'>; // `turn:<userMessageUuid>`; `turn:e<eventId>` for engine-initiated turns or a user message without uuid
 export type RowId = string & z.$brand<'RowId'>; // formats in keys.ts
@@ -39,6 +43,10 @@ export type Row = RowBase &
     | {
         kind: 'user'; messageUuid: MessageUuid | null; text: string; attachments: Attachment[]; placeholders: number[]; lines: number; editable: boolean; steer: boolean; dropped: boolean;
         pending?: 'next' | 'held'; // W1: not taken yet, a dimmed tail bubble: 'next' a steer the engine delivers at the running turn's next step, 'held' in MAWS's queue until the turn ends
+        // E3 start: what the prompt is about, when MAWS framed it as an anchored comment (X10; parsed from its own text by
+        // `userTextOf`, which strips the framing from `text`); absent on every other prompt
+        anchor?: Anchor;
+        // E3 end
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null }
     | {
@@ -70,6 +78,15 @@ export type Row = RowBase &
     | { kind: 'ask'; toolUseId: ToolUseId; askId: string; title: string | null; context: string | null; blocking: boolean; questions: AskQuestion[]; state: 'pending' | 'asked' | 'answered' | 'cancelled' | 'error'; answers: AskAnswer[] | null; error: string | null; cancelReason: AskCancelReason | null /* why a cancelled ask was cancelled, when an event said; else null */ }
     | { kind: 'delivery'; toolUseId: ToolUseId; files: { path: string; name: string; id: string | null }[]; caption: string | null; urgency: 'normal' | 'high'; error: string | null }
     // E1 end
+    // E3 start: a side thread opened from this session (E3 execution document, Design §5 and §6): one row per child, in
+    // the turn or loose block its first event landed in, updated in place by each summary. `label`, `anchorKind` and
+    // `openedBy` are null until the thread's `opened` event is seen (a summary can arrive first); `turns` counts the
+    // thread's ended turns, and `state` and `text` are the latest one's
+    | {
+        kind: 'side_thread'; childAppSessionId: AppSessionId; label: string | null; anchorKind: AnchorKind | null; openedBy: 'comment' | 'btw' | null;
+        state: 'opened' | 'finished' | 'failed'; text: string | null; turns: number;
+      }
+    // E3 end
   );
 
 // E1: an ask as its capsule holds it, without the row base: what the Question sheet shows when the capsule reopens it

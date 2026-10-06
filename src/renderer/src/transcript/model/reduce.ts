@@ -5,6 +5,7 @@
 // id lands in `seen`, which is the hydration deduplication and the retraction index.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, EventId, MessageUuid, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids'; // E3
 import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
 import type { CellDetail, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
@@ -146,7 +147,15 @@ export interface TranscriptState {
   index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string> };
   memo: Map<TurnId, MemoEntry>;
   lineage: { latest: TranscriptState | null };
+  // E3 start: where each side thread's row lives (Design §5): the turn its first event landed in, or, for one that
+  // landed outside any turn, that event (whose placement says where). Created on the first side-thread event and shared
+  // along the lineage, append-only, like `index`.
+  sideThreads?: Map<AppSessionId, SideThreadOwner>;
+  // E3 end
 }
+
+// E3
+export type SideThreadOwner = { turn: TurnId } | { loose: EventId };
 
 // R1: a plugin's pinned line and when it was set.
 export interface PluginStatus {
@@ -709,6 +718,11 @@ function apply(batch: Batch, event: SessionEvent): void {
       return;
     }
     // E1 end
+    // E3 start
+    case 'side.thread.opened':
+    case 'side.thread.summarised':
+      return applySideThread(batch, event);
+    // E3 end
     default:
       return; // session lifecycle, accounting, snapshots and unknown frames: nothing the transcript shows
   }
@@ -732,6 +746,31 @@ function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
   turn.version += 1;
 }
 // E1 end
+
+// E3 start: a side thread's events (app-synthesised by main, `seq: null`) keep to the block where the thread's first
+// event landed, so its one row is updated in place (derive.ts, sideThreadRow) rather than drawn again wherever a later
+// summary arrives: a summary for a thread opened in an earlier turn goes to that turn and bumps it, so it re-derives; one
+// for a thread opened between turns goes loose beside that first event. The first event lands like a notice: in the
+// current turn, else loose after the last.
+function applySideThread(batch: Batch, event: Event<'side.thread.opened'> | Event<'side.thread.summarised'>): void {
+  const { state } = batch;
+  const owners = (state.sideThreads ??= new Map());
+  const owner = owners.get(event.childAppSessionId);
+  if (owner !== undefined && 'turn' in owner && state.turns.has(owner.turn)) return batch.push(batch.touch(owner.turn), event);
+  if (owner !== undefined && 'loose' in owner && state.placement.has(owner.loose)) {
+    batch.loose(event, false);
+    state.placement.set(event.id, state.placement.get(owner.loose)!);
+    return;
+  }
+  const current = batch.current();
+  if (current) {
+    owners.set(event.childAppSessionId, { turn: current.id });
+    return batch.push(current, event);
+  }
+  owners.set(event.childAppSessionId, { loose: event.id });
+  batch.loose(event);
+}
+// E3 end
 
 // Interrupt evidence a turn retains: the engine's interrupt marker, or a call the human rejected.
 const wasInterrupted = (turn: TurnState) =>

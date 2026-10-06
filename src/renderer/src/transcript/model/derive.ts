@@ -6,7 +6,7 @@ import { stripAnsi } from '@shared/wire/ansi';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
@@ -21,7 +21,7 @@ import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } fr
 import { isEngineOrigin, originOf, RECEIPT_APPLIED, runningTurn, type ReceiptUndo } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
-import { isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf } from './user-text';
+import { isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -111,13 +111,13 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')));
+  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')));
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
 export function heldRow(entry: Pick<QueueEntry, 'queueId' | 'content' | 'createdAt'>): RowOf<'user'> {
   const text = userTextOf(entry.content);
-  return { id: rowId.held(entry.queueId), turnId: null, at: entry.createdAt, kind: 'user', messageUuid: null, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: false, steer: false, dropped: false, pending: 'held' };
+  return { id: rowId.held(entry.queueId), turnId: null, at: entry.createdAt, kind: 'user', messageUuid: null, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: false, steer: false, dropped: false, pending: 'held', ...anchorOf(text) /* E3 */ };
 }
 
 // W1: what the session's transcript shows around its derived rows: no bubble for a prompt held back into MAWS's queue
@@ -250,6 +250,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const pendingRows = new Map<ToolUseId, Pending>();
   const asks = new Map<ToolUseId, AskRecord>(); // E1
   const deliveries = new Map<ToolUseId, DeliveryRecord>(); // E1
+  const sideThreads = new Map<AppSessionId, RowOf<'side_thread'>>(); // E3
   const retracted = new Set<string>();
   const superseded = new Set<string>();
   const byMarker = new Map<string, LiveBlock>();
@@ -283,6 +284,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     return {
       id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable, steer, dropped: !steer && openerDropped,
       ...(waiting && !steer && { pending: 'next' as const }),
+      ...anchorOf(text), // E3
     };
   };
 
@@ -568,6 +570,14 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       }
       // E1 end
+      // E3 start: a side thread's row, one per child (reduce.ts routes every later event of the thread to this turn)
+      case 'side.thread.opened':
+      case 'side.thread.summarised': {
+        const row = sideThreadRow(sideThreads, event, turn.id);
+        if (row) items.push({ kind: 'row', row });
+        break;
+      }
+      // E3 end
       default:
         break;
     }
@@ -998,6 +1008,7 @@ function withBashOutput(row: RowOf<'bash'>, output: Event<'user.message'>): RowO
 function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
   const rows: Row[] = [];
   let episode: { index: number; id: RowId } | null = null; // the open reconnect episode: its row updates in place until it ends
+  const sideThreads = new Map<AppSessionId, RowOf<'side_thread'>>(); // E3
   for (const event of events) {
     switch (event.kind) {
       case 'user.message': {
@@ -1068,6 +1079,14 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
       case 'elicitation.requested':
         if (state.pending.has(event.requestId)) rows.push(slotRow(event, null, 'toolUseId' in event ? event.toolUseId : null));
         break;
+      // E3 start
+      case 'side.thread.opened':
+      case 'side.thread.summarised': {
+        const row = sideThreadRow(sideThreads, event, null);
+        if (row) rows.push(row);
+        break;
+      }
+      // E3 end
       default:
         break;
     }
@@ -1076,3 +1095,34 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
 }
 
 export { isEngineOrigin };
+
+// E3 start: the anchored prompt's anchor, carried only when the prompt has one (the user row's field is optional, so
+// every other row reads as before)
+function anchorOf(text: UserText): { anchor?: NonNullable<UserText['anchor']> } {
+  return text.anchor === null ? {} : { anchor: text.anchor };
+}
+
+// A side thread's events within one block (a turn's, or the loose events after one turn): the first creates the
+// child's row, at that event's position, and is returned to be placed; a later one updates that row in place and
+// returns null. The `opened` names the thread (a summary may come first); a summary with more turns than the row's is
+// the thread's latest, and a summary with no text keeps the text the row has.
+function sideThreadRow(rows: Map<AppSessionId, RowOf<'side_thread'>>, event: Event<'side.thread.opened'> | Event<'side.thread.summarised'>, turnId: TurnId | null): RowOf<'side_thread'> | null {
+  const existing = rows.get(event.childAppSessionId);
+  const row: RowOf<'side_thread'> = existing ?? {
+    id: rowId.sideThread(event.childAppSessionId), turnId, at: event.at, kind: 'side_thread', childAppSessionId: event.childAppSessionId,
+    label: null, anchorKind: null, openedBy: null, state: 'opened', text: null, turns: 0,
+  };
+  if (event.kind === 'side.thread.opened') {
+    row.label = event.anchor?.label ?? null;
+    row.anchorKind = event.anchor?.kind ?? null;
+    row.openedBy = event.openedBy;
+  } else if (event.turns >= row.turns) {
+    row.turns = event.turns;
+    row.state = event.isError ? 'failed' : 'finished';
+    row.text = event.text ?? row.text;
+  }
+  if (existing) return null;
+  rows.set(event.childAppSessionId, row);
+  return row;
+}
+// E3 end

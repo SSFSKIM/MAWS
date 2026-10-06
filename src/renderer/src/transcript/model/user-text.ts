@@ -1,10 +1,14 @@
 // User-message text handling: the one place the reducer turns a `user.message`'s content into the user row's text
 // and attachments, before anything markdown-shaped sees the text (C6 execution document, *Pasted content* under
 // Derivation, C7's contract verbatim: extraction before the markdown stage, which shows raw tags as written since W1).
-// The engine's record of a slash command folds to the one line the human typed here too.
+// The engine's record of a slash command folds to the one line the human typed here too. E3: an anchored comment
+// (X10's framing, `@shared/anchor/message`) is recognised here, so the live prompt, the engine's queued steer on disk and
+// a held entry draw its anchor chip from the text alone, and the row's text is the comment as typed.
 import { slashCommandLine } from '@shared/wire/local-command';
 export { slashCommandLine } from '@shared/wire/local-command';
 import { PASTED_BLOCK, PASTED_PLACEHOLDER, pastedPlaceholder } from '@shared/composer/pasted-content';
+import type { Anchor } from '@shared/anchor/anchor';
+import { parseAnchoredText } from '@shared/anchor/message';
 import type { ContentBlock } from '@shared/graph/events';
 import type { Attachment } from './rows';
 
@@ -15,6 +19,7 @@ export interface UserText {
   attachments: Attachment[];
   placeholders: number[]; // where each pasted block's placeholder was put in `text`, the n-th block's at [n - 1]
   lines: number;
+  anchor: Anchor | null; // E3: what an anchored comment is about; null for every other message
 }
 
 // The n-th match becomes a `text` attachment; its place in the text is `[Pasted text #n +L lines]`, keeping one
@@ -94,9 +99,11 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
     });
   }
   const joined = texts.join('\n\n');
-  const split = splitPastedSegments(slashCommandLine(joined) ?? joined);
+  const anchored = parseAnchoredText(joined); // E3: the framing is MAWS's, not the human's words
+  const body = anchored?.text ?? joined;
+  const split = splitPastedSegments(slashCommandLine(body) ?? body);
   const text = split.text;
-  return { text, attachments: [...split.attachments, ...attachments], placeholders: split.placeholders, lines: text.length === 0 ? 0 : text.split('\n').length };
+  return { text, attachments: [...split.attachments, ...attachments], placeholders: split.placeholders, lines: text.length === 0 ? 0 : text.split('\n').length, anchor: anchored?.anchor ?? null };
 }
 
 // The engine's local-command echo (`/model`, `/status` and the like arrive as replayed user frames wrapped in these
