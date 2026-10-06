@@ -180,6 +180,7 @@ export class PluginsRunner {
   private readonly groups = new Set<OwnedGroup>(); // every process group a read or a mutation still owns
   private closed = false; // `stop` ran: nothing new runs
   private queue: Promise<void> = Promise.resolve();
+  private readonly idleListeners = new Set<() => void>(); // E10
 
   constructor(private readonly deps: PluginsRunnerDeps) {
     this.spawn = deps.spawn ?? nodeSpawn;
@@ -220,6 +221,28 @@ export class PluginsRunner {
   // for the connect burst: a client that was away learns where each stands (the renderer keeps the last line, not a log).
   running(): PluginsOperationEvent[] {
     return [...this.operations.values()].flatMap((op) => (op.latest ? [op.latest] : []));
+  }
+
+  // E10: whether the runner holds anything (a queued or running operation, a process group a read or a mutation still
+  // owns), which the supervisor's idle exit and exit-when-idle wait for; listeners hear each time it holds nothing again.
+  busy(): boolean {
+    return this.operations.size > 0 || this.groups.size > 0;
+  }
+
+  onIdle(listener: () => void): () => void {
+    this.idleListeners.add(listener);
+    return () => this.idleListeners.delete(listener);
+  }
+
+  private settledOne(): void {
+    if (this.busy()) return;
+    for (const listener of this.idleListeners) {
+      try {
+        listener();
+      } catch (error) {
+        console.warn(`[engine-host] plugins idle listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   // The host stops: nothing new runs, every queued operation is dropped, every operation still preparing completes
@@ -266,6 +289,7 @@ export class PluginsRunner {
     op.state = 'ended';
     this.operations.delete(op.opId);
     this.deps.emit({ opId: op.opId, action: op.action, target: op.target, phase: 'done', outcome, ...(reload && { reload }) });
+    this.settledOne(); // E10
   }
 
   // One CLI run. `onLine` hears every non-empty line the CLI prints but a result line; `op` is told of the group it owns.
@@ -346,6 +370,7 @@ export class PluginsRunner {
         this.groups.delete(group);
         if (op) op.group = null;
         resolve(ended);
+        this.settledOne(); // E10: a read's group was the last thing held
       };
       child.on('error', (error) => {
         if (child.pid === undefined) settle({ failed: 'spawn_failed', message: error.message }); // the spawn itself failed

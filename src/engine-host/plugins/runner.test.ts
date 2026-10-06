@@ -350,6 +350,30 @@ describe('PluginsRunner mutations', () => {
     await done(queued.opId);
     expect(runner.running()).toEqual([]);
   });
+
+  // E10: the supervisor's idle exit and exit-when-idle wait for the runner: a queued or running operation, or a process
+  // group a read still owns, keeps it busy; its listeners hear when it holds nothing again
+  it('is busy while an operation is queued or running or a read owns a group, and tells its listeners once it is idle', async () => {
+    behave(`if [ "$2" = "list" ]; then while [ ! -f "${fake}/read" ]; do sleep 0.02; done; echo '[]'; exit 0; fi\nwhile [ ! -f "${fake}/go" ]; do sleep 0.02; done\n${INSTALLED}\n`);
+    const { runner } = make();
+    let idles = 0;
+    runner.onIdle(() => (idles += 1));
+    expect(runner.busy()).toBe(false);
+    const first = await runner.start('install', { plugin: 'e8-probe@e8-scratch' }, cwd, bin);
+    await runner.start('enable', { plugin: 'e8-probe@e8-scratch' }, cwd, bin);
+    expect(runner.busy()).toBe(true);
+    writeFileSync(join(fake, 'go'), '');
+    await until(() => idles === 1, 'idle after both operations');
+    expect(runner.busy()).toBe(false);
+    expect(runner.running().some((e) => e.opId === first.opId)).toBe(false);
+    const read = runner.read(READ_LINES.installed, cwd);
+    await until(() => calls().some((line) => line.startsWith('plugin list')), 'the read spawned');
+    expect(runner.busy()).toBe(true);
+    writeFileSync(join(fake, 'read'), '');
+    await read;
+    expect(runner.busy()).toBe(false);
+    expect(idles).toBe(2);
+  });
 });
 
 describe('PluginsRunner reads', () => {

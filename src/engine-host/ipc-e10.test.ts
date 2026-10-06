@@ -14,6 +14,7 @@ import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
 import type { CommandInput, CommandName, CommandOutput, EventName } from '@shared/ipc/schema';
+import type { SupervisorStatus } from '@shared/ipc/schema/host';
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin';
@@ -21,6 +22,7 @@ import { TESTED_ENGINE_VERSION } from './engine-compat';
 import { registerEngineIpc, type EngineIpcDeps } from './ipc';
 import { RELAY_URL } from './launch';
 import { KILL_GRACE_MS, SETTLE_MS } from './plugins/runner';
+import { Supervision, type SupervisorExit } from './supervision';
 
 const REPO_ROOT = resolve(__dirname, '../..');
 const OK_RELAY = { url: RELAY_URL, ok: true, status: 200, latencyMs: 2, checkedAt: '2026-10-06T10:00:00.000Z', error: null };
@@ -169,5 +171,44 @@ describe('the engine host’s connect burst (E10)', () => {
     writeFileSync(join(fake, 'go'), '');
     await until(() => host.emitted.some((e) => e.name === 'plugins.operation' && (e.payload as PluginsOperationEvent).phase === 'done'), 'done');
     await host.ipc.plugins.stop(100);
+  });
+});
+
+// E10 Task 2.3: the supervisor's life over the real engine ipc and process table (supervision.ts), as the detached
+// entry composes them: with no client, a replay row that holds nothing is released as `idle` after the idle time, and
+// the supervisor then idles out; its status follows each step.
+describe('the supervisor’s clocks over the engine host (E10)', () => {
+  it('releases an idle kept row as idle with no client, then exits after the idle time', async () => {
+    const IDLE_MS = 200;
+    const host = engineHost();
+    const identity = { pid: process.pid, startedAt: '2026-10-06T10:00:00.000Z', buildId: 'b', protocol: 1, wire: 'w', socketPath: '/s', logPath: '/l' };
+    const statuses: SupervisorStatus[] = [];
+    const supervision = new Supervision({
+      mode: 'detached', identity, table: host.ipc.table, plugins: host.ipc.plugins, shutdown: host.ipc.shutdown,
+      emit: (status) => statuses.push(status) > 0, log: () => {},
+    });
+    const commands = new Map<string, (input: unknown) => Promise<unknown>>();
+    supervision.register((name, handler) => void commands.set(name, handler as (input: unknown) => Promise<unknown>), { onConnect: () => {} });
+    const exits: { reason: SupervisorExit; at: number }[] = [];
+    supervision.started(identity, (reason) => void exits.push({ reason, at: Date.now() }));
+    supervision.clientChanged(true);
+    await commands.get('host.configure')!({ idleExitMs: IDLE_MS }); // main's push
+    await host.call('session.launch', { spec: spec('app-idle') });
+    await until(() => host.statuses('app-idle').some((s) => s.process === 'ready'), 'ready');
+    await new Promise((r) => setTimeout(r, 3 * IDLE_MS));
+    expect(host.ipc.table.get('app-idle' as AppSessionId)!.lifecycle).toBe('ready'); // a client is connected: kept
+    expect(statuses.at(-1)).toMatchObject({ liveSessions: 1, rows: 1, idleExitMs: IDLE_MS, idleExitAt: null });
+
+    const left = Date.now();
+    supervision.clientChanged(false); // the app quits, keeping its session
+    await until(() => host.ipc.table.get('app-idle' as AppSessionId)!.lifecycle === 'exited', 'the idle release', 5 * IDLE_MS);
+    const exited = host.ipc.table.get('app-idle' as AppSessionId)!.status();
+    expect(exited.exit).toMatchObject({ reason: 'idle', release: null });
+    expect(Date.parse(exited.exit!.at) - left).toBeGreaterThanOrEqual(IDLE_MS - 5);
+    expect(exits).toEqual([]);
+    expect(statuses.at(-1)).toMatchObject({ liveSessions: 0, rows: 1, idleExitAt: expect.any(String) });
+    await until(() => exits.length === 1, 'the idle exit', 5 * IDLE_MS);
+    expect(exits[0]!.reason).toBe('idle');
+    expect(exits[0]!.at - Date.parse(exited.exit!.at)).toBeGreaterThanOrEqual(IDLE_MS - 5);
   });
 });

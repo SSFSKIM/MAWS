@@ -6,7 +6,8 @@ import type { HostEmit } from '@shared/host/runtime';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { connectLines, type LineClient } from '../../test/support/socket-lines';
-import { START_EXIT_ABORTED, START_EXIT_HELD, startSupervisor, type DetachedOptions, type RunningSupervisor } from './detached';
+import { START_EXIT_ABORTED, START_EXIT_HELD, startSupervisor, type DetachedOptions, type RunningSupervisor, type SupervisorLife } from './detached';
+import { Supervision, type SupervisorExit } from './supervision';
 import { readLive, writeLive } from './live-ledger';
 import { buildIdOf, procStartOf, readLock } from './supervisor-files';
 
@@ -42,30 +43,38 @@ function harness(over: Partial<DetachedOptions> = {}) {
   const lines: string[] = [];
   const exit = vi.fn<(code: number) => void>();
   const shutdown = vi.fn<(graceMs: number) => Promise<void>>(async () => {});
+  // the engine host's Supervision in the real entry; here what the entry tells it is recorded, and `leave` exits
+  let leave: ((reason: SupervisorExit) => void) | null = null;
+  const life = {
+    started: vi.fn<SupervisorLife['started']>((_identity, exit) => void (leave = exit)),
+    clientChanged: vi.fn<SupervisorLife['clientChanged']>(),
+    exitWhenIdle: vi.fn<SupervisorLife['exitWhenIdle']>(),
+  };
   let emit!: HostEmit;
   const options: DetachedOptions = {
     dir,
     modulePath,
-    idleExitMs: 60_000,
     log: (line) => void lines.push(line),
     counts: () => ({ ...counts }),
     shutdown,
+    life,
     ...over,
   };
-  const start = async (aborted?: () => boolean) => {
+  const start = async (aborted?: () => boolean, register?: Parameters<typeof startSupervisor>[1]) => {
     const supervisor = await startSupervisor(
       'test',
-      (on, e) => {
-        on('engine.ping', async () => ({ pid: process.pid, uptimeMs: 1, hostVersion: 'test' }));
-        emit = e;
-      },
+      register ??
+        ((on, e) => {
+          on('engine.ping', async () => ({ pid: process.pid, uptimeMs: 1, hostVersion: 'test' }));
+          emit = e;
+        }),
       options,
       { exit, aborted },
     );
     if (supervisor) running.push(supervisor);
     return supervisor;
   };
-  return { counts, lines, exit, shutdown, start, emit: () => emit('session.brokerItems', { appSessionId: 'app-1', items: [] } as never) };
+  return { counts, lines, exit, shutdown, life, leave: (reason: SupervisorExit) => leave!(reason), start, emit: () => emit('session.brokerItems', { appSessionId: 'app-1', items: [] } as never) };
 }
 
 async function connect(): Promise<LineClient> {
@@ -212,35 +221,71 @@ describe('the detached entry', () => {
     expect(host.lines.some((line) => line.includes('cannot listen'))).toBe(true);
   });
 
-  describe('the idle exit', () => {
-    it('exits after idleExitMs with no client and no live row', async () => {
-      const host = harness({ idleExitMs: 50 });
+  // The clocks are the engine host's (supervision.ts); the entry tells it when it serves, who connects and what the
+  // client asks, and hands it the exit order.
+  describe('the supervisor’s life', () => {
+    it('is told once it serves (its identity) and of each client; the exit it is handed runs the exit order with that reason', async () => {
+      const host = harness();
+      expect(host.life.started).not.toHaveBeenCalled();
       await host.start();
+      const lock = readLock(dir)!;
+      expect(host.life.started).toHaveBeenCalledExactlyOnceWith(
+        { pid: process.pid, startedAt: lock.startedAt, buildId: lock.buildId, protocol: SOCKET_PROTOCOL, wire: wireFingerprint(), socketPath: lock.socketPath, logPath: join(dir, 'host.log') },
+        expect.any(Function),
+      );
+      const client = await connect();
+      await client.next();
+      await until(() => host.life.clientChanged.mock.calls.length === 1);
+      expect(host.life.clientChanged).toHaveBeenLastCalledWith(true);
+      client.send({ t: 'exit', when: 'idle' });
+      await until(() => host.life.exitWhenIdle.mock.calls.length === 1);
+      expect(host.exit).not.toHaveBeenCalled();
+      client.socket.destroy();
+      await until(() => host.life.clientChanged.mock.calls.length === 2);
+      expect(host.life.clientChanged).toHaveBeenLastCalledWith(false);
+      host.leave('idle');
       await until(() => host.exit.mock.calls.length === 1);
       expect(host.exit).toHaveBeenCalledWith(0);
       expect(host.lines.some((line) => line.includes('exiting (idle)'))).toBe(true);
       expect(existsSync(join(dir, 'host.lock'))).toBe(false);
     });
 
-    it('waits while a client is connected and starts the clock when it leaves', async () => {
-      const host = harness({ idleExitMs: 80 });
-      await host.start();
-      const client = await connect();
-      await client.next();
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(host.exit).not.toHaveBeenCalled();
-      client.socket.destroy();
-      await until(() => host.exit.mock.calls.length === 1);
+    it('a start that never served tells its life nothing', async () => {
+      const host = harness();
+      expect(await host.start(() => true)).toBeNull();
+      expect(host.life.started).not.toHaveBeenCalled();
     });
 
-    it('waits while a row is live', async () => {
-      const host = harness({ idleExitMs: 40 });
-      host.counts.liveSessions = 1;
-      await host.start();
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      expect(host.exit).not.toHaveBeenCalled();
-      host.counts.liveSessions = 0;
+    // the engine host's Supervision over the socket: host.stopAll's answer reaches the client before the exit order closes it
+    it('host.stopAll answers the client, then the supervisor exits as stopAll', async () => {
+      const rows: { lifecycle: 'ready' | 'exited' }[] = [{ lifecycle: 'ready' }];
+      let supervision!: Supervision;
+      const host = harness({
+        life: { started: (identity, exit) => supervision.started(identity, exit), clientChanged: (connected) => supervision.clientChanged(connected), exitWhenIdle: () => supervision.armExitWhenIdle(true) },
+      });
+      await host.start(undefined, (on, emit, client) => {
+        supervision = new Supervision({
+          mode: 'detached', identity: { pid: process.pid, startedAt: 'now', buildId: 'b', protocol: SOCKET_PROTOCOL, wire: 'w', socketPath: null, logPath: null },
+          table: { list: () => rows, onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {} } as never,
+          plugins: { busy: () => false, onIdle: () => () => {} },
+          shutdown: async () => {
+            for (const row of rows) row.lifecycle = 'exited';
+            return { stopped: 1, forced: 0 };
+          },
+          emit: (status) => emit('host.supervisorStatus', status),
+          log: () => {},
+        });
+        supervision.register(on, client);
+      });
+      const client = await connect();
+      await client.next();
+      client.send({ t: 'req', id: 's1', name: 'host.stopAll', input: { graceMs: 0 } });
+      expect(await client.next((line) => (line as { t: string }).t === 'res')).toEqual({ t: 'res', id: 's1', ok: true, value: { stopped: 1, forced: 0 } });
+      await client.closed;
       await until(() => host.exit.mock.calls.length === 1);
+      expect(host.exit).toHaveBeenCalledWith(0);
+      expect(host.lines.some((line) => line.includes('exiting (stopAll)'))).toBe(true);
+      expect(existsSync(join(dir, 'host.lock'))).toBe(false);
     });
   });
 

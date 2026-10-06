@@ -8,6 +8,9 @@
 // still owns it; (4) the socket file and the lock are unlinked if the lock still names this process (a successor that
 // replaced a stale lock keeps its files); (5) the client is closed; (6) exit 0. A fatal error exits 1 and skips (3)
 // and (4), so the successor's staleness check finds the lock and the ledger.
+//
+// When to exit is not decided here: the engine host's Supervision (supervision.ts) holds the idle exit, exit-when-idle
+// and host.stopAll, and this entry tells it (`life`) when it serves, who connects and what a client asks.
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -20,20 +23,28 @@ import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { clearLive, type Owner } from './live-ledger';
 import { buildIdOf, isAlive, procStartOf, readLock, socketPathFor, START_EXIT_HELD, SUPERVISOR_FILES, takeLock } from './supervisor-files';
+import type { SupervisorExit, SupervisorIdentity } from './supervision';
 
 export { BREAK_STALE_MS, buildIdOf, socketPathFor, START_EXIT_HELD, takeLock, type LockDeps, type LockFile } from './supervisor-files';
 
 export interface DetachedOptions {
   dir: string; // <userData>/supervisor
   modulePath: string; // this bundle's entry file, hashed into the build id
-  idleExitMs: number; // exit after this long with no client and no live row; not finite or ≤ 0: never
   log: (line: string) => void;
-  // How the entry reaches the engine's process table (the welcome's counts, the idle clock, the exit order's ladder).
+  // How the entry reaches the engine's process table (the welcome's counts, the exit order's ladder).
   counts(): { liveSessions: number; rows: number };
-  shutdown(graceMs: number): Promise<void>; // engine.shutdown's body: every live row's ladder and the plugin runner
+  shutdown(graceMs: number): Promise<unknown>; // engine.shutdown's body: every live row's ladder and the plugin runner
+  life: SupervisorLife;
 }
 
-export type ExitReason = 'idle' | 'stopAll' | 'exit' | 'exitWhenIdle' | 'fatal' | 'signal';
+// The supervisor's own life as the engine host decides it (supervision.ts), told what only this entry knows.
+export interface SupervisorLife {
+  started(identity: SupervisorIdentity, exit: (reason: SupervisorExit) => void): void; // serving; `exit` runs the exit order
+  clientChanged(connected: boolean): void; // a client was welcomed, or the client left
+  exitWhenIdle(): void; // a client's `exit {when: 'idle'}`
+}
+
+export type ExitReason = SupervisorExit | 'exit' | 'fatal' | 'signal';
 
 export interface RunningSupervisor {
   socketPath: string;
@@ -121,7 +132,6 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
   const runtime = createHostRuntime(register);
   const server = createServer();
   let stopping: Promise<void> | null = null;
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   const clients = serveSocketClients(server, {
     runtime,
@@ -130,34 +140,15 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
     token: () => token,
     onExit: (when) => {
       if (when === 'now') void stop('exit');
-      else log('exit when idle asked; not served until the idle clocks land (E10 M2)');
+      else opts.life.exitWhenIdle();
     },
-    onClient: (connected) => (connected ? clearIdle() : armIdle()),
+    onClient: (connected) => opts.life.clientChanged(connected),
     log,
   });
-
-  function clearIdle(): void {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = null;
-  }
-
-  // The idle clock: no client and no live row for idleExitMs. Checked when it fires, not trusted blindly; a live row
-  // re-arms it (M2 starts it at the last row's exit and adds the idle-row release and exit-when-idle).
-  function armIdle(): void {
-    clearIdle();
-    if (stopping || !Number.isFinite(opts.idleExitMs) || opts.idleExitMs <= 0) return;
-    idleTimer = setTimeout(() => {
-      idleTimer = null;
-      if (clients.connected()) return;
-      if (opts.counts().liveSessions > 0) return armIdle();
-      void stop('idle');
-    }, opts.idleExitMs);
-  }
 
   function stop(reason: ExitReason, code: 0 | 1 = 0): Promise<void> {
     stopping ??= (async () => {
       log(`exiting (${reason})`);
-      clearIdle();
       server.close(); // (1) no new client; the callback would wait for the client, which (5) closes
       try {
         await Promise.race([opts.shutdown(EXIT_GRACE_MS), new Promise((resolve) => setTimeout(resolve, EXIT_SHUTDOWN_BOUND_MS).unref())]); // (2)
@@ -191,7 +182,7 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
   }
   fs.chmodSync(socketPath, 0o600);
   log(`listening on ${socketPath}`);
-  armIdle();
+  opts.life.started({ pid, startedAt, buildId, protocol: SOCKET_PROTOCOL, wire: wireFingerprint(), socketPath, logPath: join(dir, SUPERVISOR_FILES.log) }, (reason) => void stop(reason));
   return { socketPath, stop };
 }
 

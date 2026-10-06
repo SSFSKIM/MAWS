@@ -15,7 +15,11 @@ import { JOURNAL_KEEP_PER_SESSION, JOURNAL_MAX_AGE_DAYS, pruneJournals } from '.
 import { registerFs } from './fs/register';
 // C4 end
 // E10 start
+import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { runDetached } from './detached';
+import { Supervision } from './supervision';
+import { buildIdOf } from './supervisor-files';
 import { openSupervisorLog } from './supervisor-log';
 // E10 end
 
@@ -28,7 +32,18 @@ const userData = process.env.MAWS_USER_DATA;
 if (!userData) throw new Error('the engine host needs MAWS_USER_DATA (main forwards app.getPath("userData"))');
 // C3 end
 
-let ipc: EngineIpc | null = null; // E10: the detached entry reaches the table through it
+// E10 start: the mode, decided at load. `process.parentPort` is Electron's, present only in a utility process; under
+// ELECTRON_RUN_AS_NODE it is undefined.
+const detachedAt = process.argv.indexOf('--detached');
+const supervisorDir = detachedAt === -1 ? undefined : process.argv[detachedAt + 1];
+const mode = (process as { parentPort?: unknown }).parentPort ? 'utility' : supervisorDir ? 'detached' : null;
+if (mode === null) throw new Error('the engine host runs as a utility process (process.parentPort) or detached (--detached <supervisorDir>)');
+// This bundle's entry file, whose bytes are the build id: the detached spawn names it as the script; a utility process
+// is forked from it, so it is this module's own file.
+const entryFile = mode === 'detached' ? process.argv[1] : __filename;
+let ipc: EngineIpc | null = null; // the detached entry reaches the table through it
+let supervision: Supervision | null = null; // the host.* commands and the supervisor's clocks
+// E10 end
 
 const register: HostRegister = (on, emit, client) => {
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing)
@@ -51,21 +66,25 @@ const register: HostRegister = (on, emit, client) => {
   ({ table } = ipc);
   table.startSampling();
   // C3 end
+  // E10: registered after the engine ipc, so the status ends the connect burst
+  supervision = new Supervision({
+    mode,
+    identity: { pid: process.pid, startedAt: new Date().toISOString(), buildId: buildIdOf(entryFile), protocol: SOCKET_PROTOCOL, wire: wireFingerprint(), socketPath: null, logPath: null },
+    table, plugins: ipc.plugins, shutdown: ipc.shutdown,
+    emit: (status) => emit('host.supervisorStatus', status),
+    log: (line) => console.log(`[supervisor] ${line}`),
+  });
+  supervision.register(on, client);
 };
 
 // E10 start
-const DEFAULT_IDLE_EXIT_MS = 10 * 60_000; // until main's host.configure (M2) says otherwise
-const detachedAt = process.argv.indexOf('--detached');
-
-// `process.parentPort` is Electron's, present only in a utility process; under ELECTRON_RUN_AS_NODE it is undefined.
-if ((process as { parentPort?: unknown }).parentPort) {
+if (mode === 'utility') {
   runHost(HOST_VERSION, register);
-} else if (detachedAt !== -1 && process.argv[detachedAt + 1]) {
-  const dir = process.argv[detachedAt + 1];
+} else {
+  const dir = supervisorDir!;
   runDetached(HOST_VERSION, register, {
     dir,
-    modulePath: process.argv[1],
-    idleExitMs: DEFAULT_IDLE_EXIT_MS,
+    modulePath: entryFile,
     log: openSupervisorLog(dir),
     counts: () => {
       const rows = ipc?.table.list() ?? [];
@@ -74,8 +93,12 @@ if ((process as { parentPort?: unknown }).parentPort) {
     shutdown: async (graceMs) => {
       await ipc?.shutdown(graceMs); // engine.shutdown's body
     },
+    // the register has run by the time the entry serves, so the Supervision exists for every call
+    life: {
+      started: (identity, exit) => supervision?.started(identity, exit),
+      clientChanged: (connected) => supervision?.clientChanged(connected),
+      exitWhenIdle: () => supervision?.armExitWhenIdle(true),
+    },
   });
-} else {
-  throw new Error('the engine host runs as a utility process (process.parentPort) or detached (--detached <supervisorDir>)');
 }
 // E10 end
