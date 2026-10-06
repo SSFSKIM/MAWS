@@ -1,6 +1,7 @@
 node_modules/
 dist/
 out/
+build/voice-helper/
 .DS_Store
 *.log
 spikes/**/fixtures/private/

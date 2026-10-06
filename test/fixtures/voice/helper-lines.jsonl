@@ -1,0 +1,8 @@
+{"type":"ready","protocol":1}
+{"type":"probe","locales":["en-GB","en-US","ja-JP","ko-KR","zh-CN"],"systemLocale":"ko-KR","locale":"en-US","supportsOnDevice":true,"permission":{"microphone":"authorized","speech":"notDetermined"}}
+{"type":"permission","id":"3f2b8c1e-6d4a-4f7b-9a1e-2c5d8e7f6a90","microphone":"authorized","speech":"authorized"}
+{"type":"started","id":"3f2b8c1e-6d4a-4f7b-9a1e-2c5d8e7f6a90","locale":"en-US"}
+{"type":"partial","id":"3f2b8c1e-6d4a-4f7b-9a1e-2c5d8e7f6a90","text":"hello world"}
+{"type":"final","id":"3f2b8c1e-6d4a-4f7b-9a1e-2c5d8e7f6a90","text":"Hello world.","timedOut":false}
+{"type":"cancelled","id":"3f2b8c1e-6d4a-4f7b-9a1e-2c5d8e7f6a90"}
+{"type":"error","id":"3f2b8c1e-6d4a-4f7b-9a1e-2c5d8e7f6a90","code":"microphone_denied","message":"Microphone access is denied for this app."}

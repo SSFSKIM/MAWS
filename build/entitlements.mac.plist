@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  E9 (Design §4): named by electron-builder.yml as mac.entitlements and mac.entitlementsInherit, so it replaces
+  electron-builder's template for the app and for every nested binary, the voice helper included. It applies only
+  when the build is signed with the hardened runtime. The first three keys are that template's, kept so Electron
+  still runs under the hardened runtime; audio-input is what lets the helper open the microphone there.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>
