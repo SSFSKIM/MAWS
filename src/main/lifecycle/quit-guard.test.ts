@@ -601,6 +601,7 @@ describe('an engine-host crash during a wait', () => {
     const hosts = {
       onEvent: (name: string, listener: (payload: unknown) => void) => (events.set(name, listener), () => void events.delete(name)),
       onState: (_owner: string, listener: (state: { state: string }) => void) => (states.add(listener), () => void states.delete(listener)),
+      setResync: () => {}, // E10
     };
     const model = new SessionReadModel('index');
     model.register({ start: (writer) => (writer.observeRecord(record('bg')), () => {}) });

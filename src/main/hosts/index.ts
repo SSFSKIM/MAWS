@@ -20,9 +20,8 @@ export function createHosts(): HostSupervisor {
     },
     emit,
   });
-  // E10: the engine host is told ready after main's resync (X13); M2's resync (sessions/index.ts) replaces this one,
-  // which pulls nothing yet.
-  supervisor.setResync('engine-host', async () => {});
+  // E10: the engine host is told ready after main's resync (X13), which the session read side registers
+  // (sessions/index.ts `hostEventSource`); with none registered (launch mode scenario) it is told at once.
   registerMainHandler('engine.hostState', () => supervisor.snapshot('engine-host'));
   registerMainHandler('pty.hostState', () => supervisor.snapshot('pty-host'));
   supervisor.onState('engine-host', (state) => emit('engine.hostState', state));
