@@ -615,6 +615,10 @@ The executor replaces these lines with what actually ran and what it printed.
   Rationale: Task 2.6's review rounds 1 and 2 (a trust-card start misread as a quit; a touched kept session stopped by a later start's rollback); §Design 5's rule that a kept session is never failed, removed or set up over.
   Date/Author: 2026-10-06, the E10 controller.
 
+- Decision: Task 3.2 as built (5404d4b8..7086414b; `src/renderer/src/settings-tab/SupervisorSettings.tsx`). Settings version 10 with `fromV9`/`case 9`; `SETTINGS_DEFAULTS_V9` renamed `V10` across its importers (one identifier in `src/main/sessions/main-wiring.test.ts`); the interim casts in `engine-quit.ts` and `host-configure.ts` replaced by the typed setting. The status line shows the idle time the supervisor reports (the e2e seam reads in seconds; an armed exit-when-idle reads "exits when its last session ends"); further states the document did not name: "Restarting", "Runs inside MAWS · pid · N sessions · stops when MAWS quits" (utility), "Reading…" until main first answers. Restart now (`host.restart {stopSessions: true}`, no confirm, as the banner's) shows whenever the state is `crashed` (waiting, held lock, crash limit); Stop all keeps its inline confirm and is enabled only while `ready`. The group is a `role=group` headed by an `h4` inside the Engine section. The hosts store's `supervisor` keeps its own freshness (an event wins over a snapshot asked before it, since `HostStatus` has no revision).
+  Rationale: the executor's report (task 12).
+  Date/Author: 2026-10-06, the E10 controller.
+
 Residue decisions (the design above carries each with its reason; the architect folded them as A-29, which accepts every one and rules the three that were marked ★ (10, 11, 21) and the `[parent-impact]` items, overturnable by the owner):
 
 1. The supervisor is the engine-host bundle itself, run by the Electron binary as Node (`process.execPath`, `ELECTRON_RUN_AS_NODE=1`) in dev and packaged alike; the `runAsNode` fuse must stay enabled and M4 guards it. Rejected: a bundled Node, a second Electron instance, a separate supervisor entry.
