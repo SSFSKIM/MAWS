@@ -18,7 +18,7 @@ Every stopping point is recorded here with a timestamp; the executor splits a ta
 - [x] (2026-10-06 12:05) M0 — Probes: `spikes/supervisor-probe/findings.txt` with the five verdicts.
 - [x] (2026-10-06 14:40) M1 — The transport and the two modes: the socket protocol, the detached entry, main's connect-or-start, `MAWS_HOST_MODE`.
 - [x] (2026-10-06 22:50) M2 — Catch-up and host state: the delivered cursor and the connect burst, main's resync fold, `host.*`, idle exit, Stop all, the build handshake and exit-when-idle, the orphan sweep, the fail-fast bridges.
-- [ ] M3 — The app's surfaces: the quit answer and settings version 10, Settings and Diagnostics rows, the update banner, the crash notice, the lost-terminal state.
+- [x] (2026-10-06 16:31) M3 — The app's surfaces: the quit answer and settings version 10, Settings and Diagnostics rows, the update banner, the crash notice, the lost-terminal state.
 - [ ] M4 — Proof: `pnpm e2e:supervisor`, the live reconnect probe, the packaged check, evidence in both themes, gates, the whole-branch review, Outcomes.
 
 ## Terms
