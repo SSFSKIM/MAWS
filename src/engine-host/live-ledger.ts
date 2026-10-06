@@ -32,7 +32,7 @@ const ledgerPath = (dir: string) => join(dir, SUPERVISOR_FILES.live);
 export function writeLive(dir: string, owner: Owner, rows: readonly LiveRow[]): void {
   const path = ledgerPath(dir);
   const temporary = `${path}.${owner.pid}.tmp`;
-  writeFileSync(temporary, JSON.stringify({ owner, rows } satisfies Ledger), { mode: 0o600 });
+  writeFileSync(temporary, JSON.stringify({ owner, rows: [...rows] } satisfies Ledger), { mode: 0o600 });
   renameSync(temporary, path);
 }
 
