@@ -312,6 +312,13 @@ describe('the detached entry', () => {
     const host = harness();
     await host.start();
     vi.mocked(invalidateShellEnvironment).mockClear();
+    const stranger = await connectLines(readLock(dir)!.socketPath); // a connection whose token does not check out is never a client
+    clients.push(stranger);
+    stranger.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: 'not the token', buildId: buildIdOf(modulePath), wire: wireFingerprint(), appPid: 1 });
+    expect(await stranger.next()).toMatchObject({ t: 'refuse', reason: 'token' });
+    await stranger.closed;
+    expect(invalidateShellEnvironment).not.toHaveBeenCalled();
+    expect(host.life.clientChanged).not.toHaveBeenCalled();
     const client = await connect();
     await client.next();
     await until(() => host.life.clientChanged.mock.calls.length === 1);

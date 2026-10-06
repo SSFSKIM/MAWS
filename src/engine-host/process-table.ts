@@ -207,6 +207,7 @@ export class ProcessTable {
       let procStart = this.procStarts.get(session);
       if (procStart === undefined) {
         procStart = this.procStartOf(status.pid) ?? ''; // '' is never swept: a start time that cannot be compared
+        if (procStart === '') this.log(`the orphan ledger records ${status.appSessionId} (pid ${status.pid}) with no start time (ps could not read it): a successor's sweep will not stop it`);
         this.procStarts.set(session, procStart);
       }
       rows.push({ appSessionId: status.appSessionId, pid: status.pid, procStart, launchId: status.launchId });

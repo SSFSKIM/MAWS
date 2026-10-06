@@ -103,24 +103,37 @@ describe('sweepOrphans', () => {
     expect(lines.some((line) => line.includes('alive'))).toBe(true);
   });
 
-  it('never signals a row whose start time was not recorded or cannot be read now', async () => {
-    const { signals, deps } = world({ 603: { start: 'T603', endsOn: 'SIGTERM' }, 604: { start: 'T604', endsOn: 'SIGTERM' } });
+  it('never signals a row whose start time was not recorded or cannot be read now, and logs the one it cannot compare', async () => {
+    const { signals, deps, lines } = world({ 603: { start: 'T603', endsOn: 'SIGTERM' }, 604: { start: 'T604', endsOn: 'SIGTERM' } });
     deps.procStartOf = (pid) => (pid === 604 ? null : (pid === 603 ? 'T603' : null));
     writeLive(dir, OWNER, [row(603, ''), row(604, 'T604')]);
     expect(await sweepOrphans(dir, deps)).toBe(0);
     expect(signals).toEqual([]);
+    expect(lines.filter((line) => line.includes('app-603'))).toEqual([expect.stringContaining('no start time was recorded')]); // the '' row leaves a trace
   });
 
-  it('stops waiting once every orphan is gone, and never SIGKILLs a pid that was reused meanwhile', async () => {
-    const { alive, signals, slept, deps } = world({ 603: { start: 'T603', endsOn: 'never' }, 604: { start: 'T604', endsOn: 'SIGTERM' } });
-    deps.sleep = async (ms) => {
-      slept.push(ms);
-      alive.set(603, { start: 'a newer process', endsOn: 'never' }); // 603 died and its pid was taken
-    };
+  it('stops waiting once every orphan is gone', async () => {
+    const { signals, slept, deps } = world({ 603: { start: 'T603', endsOn: 'SIGTERM' }, 604: { start: 'T604', endsOn: 'SIGTERM' } });
     writeLive(dir, OWNER, [row(603, 'T603'), row(604, 'T604')]);
     expect(await sweepOrphans(dir, deps)).toBe(2);
     expect(signals).toEqual([[603, 'SIGTERM'], [604, 'SIGTERM']]);
     expect(slept.reduce((sum, ms) => sum + ms, 0)).toBeLessThan(5_000);
+  });
+
+  // The grace is polled with isAlive alone (a `ps` per orphan per poll would block the new supervisor's event loop while
+  // it answers hello and the resync); the start time is read once more, just before the SIGKILL
+  it('never SIGKILLs a pid that was reused meanwhile, and polls without reading start times', async () => {
+    const { alive, signals, deps } = world({ 603: { start: 'T603', endsOn: 'never' }, 604: { start: 'T604', endsOn: 'SIGTERM' } });
+    const procStartOf = vi.fn(deps.procStartOf);
+    deps.procStartOf = procStartOf;
+    let polls = 0;
+    deps.sleep = async () => {
+      if (++polls === 3) alive.set(603, { start: 'a newer process', endsOn: 'never' }); // 603 died and its pid was taken
+    };
+    writeLive(dir, OWNER, [row(603, 'T603'), row(604, 'T604')]);
+    expect(await sweepOrphans(dir, deps)).toBe(2);
+    expect(signals).toEqual([[603, 'SIGTERM'], [604, 'SIGTERM']]);
+    expect(procStartOf.mock.calls.map(([pid]) => pid)).toEqual([603, 604, 603]); // the two rows at the start, 603 before its SIGKILL; none per poll
   });
 
   it('skips with a log line when the ledger is unreadable, and quietly when there is none', async () => {

@@ -875,6 +875,7 @@ describe('process table (E10): the orphan ledger', () => {
     });
     const a = await launch('a', 701);
     expect(logs.some((line) => line.includes('disk full'))).toBe(true);
+    expect(logs.filter((line) => line.includes('start time'))).toEqual([expect.stringContaining('pid 701')]); // the '' leaves a trace
     fail = false;
     const b = await launch('b', 702);
     expect(writes.at(-1)!.map((r) => [r.appSessionId, r.procStart])).toEqual([[a.session.status().appSessionId, ''], [b.session.status().appSessionId, 'T702']]);

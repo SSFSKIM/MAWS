@@ -123,6 +123,9 @@ export function sweepOrphans(dir: string, deps: SweepDeps): Promise<number> {
 async function stopOrphans(ledger: Ledger, deps: SweepDeps): Promise<number> {
   // strict where isSameProcess is lenient: a start time that cannot be compared never gets a process signalled
   const isOrphan = (row: LiveRow) => row.procStart !== '' && deps.isAlive(row.pid) && deps.procStartOf(row.pid) === row.procStart;
+  for (const row of ledger.rows) {
+    if (row.procStart === '' && deps.isAlive(row.pid)) deps.log(`orphan sweep skips ${row.appSessionId} (pid ${row.pid}): no start time was recorded, so it cannot be told from a reused pid`);
+  }
   const signal = (row: LiveRow, name: 'SIGTERM' | 'SIGKILL'): boolean => {
     try {
       deps.signal(row.pid, name);
@@ -137,12 +140,14 @@ async function stopOrphans(ledger: Ledger, deps: SweepDeps): Promise<number> {
     return signal(row, 'SIGTERM');
   });
   const graceMs = deps.graceMs ?? SWEEP_GRACE_MS;
+  // polled with isAlive alone: a synchronous `ps` per orphan per poll would block this supervisor's event loop while it
+  // answers its first client; the start time is read once more, just before the SIGKILL, against a reused pid
   let remaining = orphans;
   for (let waited = 0; remaining.length > 0 && waited < graceMs; waited += SWEEP_POLL_MS) {
     await deps.sleep(Math.min(SWEEP_POLL_MS, graceMs - waited));
-    remaining = remaining.filter(isOrphan);
+    remaining = remaining.filter((row) => deps.isAlive(row.pid));
   }
-  for (const row of remaining) {
+  for (const row of remaining.filter(isOrphan)) {
     deps.log(`orphan ${row.appSessionId} (pid ${row.pid}) still running after ${graceMs} ms: SIGKILL`);
     signal(row, 'SIGKILL');
   }
