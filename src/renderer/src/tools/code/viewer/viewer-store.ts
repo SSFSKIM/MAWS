@@ -13,15 +13,24 @@
 //
 // No CodeMirror here: this module is in the main chunk. The editor state a CodeView leaves behind is kept opaque in
 // `viewState(tabId)`, beside the scroll offsets, where rendering never reads it.
+//
+// E5 (E5 execution document, Interfaces *The entry's editing fields* and *The editing state machine*): a complete,
+// losslessly decoded code text read with its hash is editable. The entry holds the baseline (`text` with `hash`, what
+// the tab believes is on disk); the document itself is the code view's, read through `viewState(tabId).docOf`. Every
+// read of a load asks for the file's hash, and a load's answer is committed by the state the entry is in when it
+// completes: while clean it replaces the text as before (unless its hash is the baseline's: an own save, a spurious
+// event), while dirty it becomes `theirs` and the document stands. A save writes the document captured at invocation
+// through `files.write` with the baseline's hash (the merge view's `theirs.hash` once the owner has seen theirs).
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
-import { FILES_READ_DEFAULT_LENGTH, type FilesChanged, type FilesReadOutput } from '@shared/ipc/schema/files';
+import { FILES_READ_DEFAULT_LENGTH, FILES_READ_MAX_LENGTH, type FilesChanged, type FilesReadOutput } from '@shared/ipc/schema/files';
 import { ipc } from '../../../ipc/client';
 import { useLayout } from '../../../stores/layout';
 import { allTabs } from '../../../stores/layout-model';
 import { useFiles, type WatchHold } from '../files/store';
 import { dirname, sameFile } from '../files/tree';
+import { EDITOR_COPY } from '../copy';
 import { CODE_CAP, kindOf, type ViewerKind } from './kinds';
 
 export const VIEWER_ENTRIES_MAX = 20;
@@ -47,16 +56,39 @@ export interface ViewerEntry {
   line: number | null; // the tab's line as last seen
   pendingJump: number | null; // a line the code view has yet to land on
   loadingMore: boolean;
+  // E5 start: the editing fields
+  hash: string | null; // the baseline's hash: the last hashed read's, or the last save's; null until one answers
+  editable: boolean; // derived at each load: a complete, losslessly decoded utf8 code (or markdown) text with a hash
+  dirty: boolean; // the editor's document differs from `text`
+  saving: boolean;
+  saveError: string | null; // the last save's failure, word for word; cleared by the next edit or save
+  theirs: Theirs | null; // the disk's content past the baseline while dirty
+  baseline: number; // bumped when `text` and `hash` move while the document stands (a save, Keep mine)
+  // E5 end
 }
+
+// E5: what the disk holds past the baseline, shown as the notice (Changed on disk) or, once compared or a save found
+// it, as the merge view.
+export interface Theirs {
+  text: string;
+  hash: string;
+  view: 'notice' | 'merge';
+}
+
+export type SaveResult = 'ok' | 'conflict' | 'error' | 'noop';
 
 // What a view leaves behind when it unmounts; never rendered, so never reactive.
 export interface ViewState {
   editor: unknown; // CodeMirror's EditorState, opaque here
-  editorAt: { epoch: number; length: number } | null; // the text it holds
+  editorAt: { epoch: number; baseline: number; length: number } | null; // the text it holds (E5: and the baseline it compares against)
   codeScroll: number;
   renderedScroll: number;
   ratio: number | null; // the last view's scroll ratio, for the Source toggle
   ratioPending: boolean; // the next view to mount takes `ratio` rather than its own offset
+  // E5 start
+  docOf: (() => string) | null; // the document as the file's text (the baseline's line breaks); the view's, live or left behind
+  clean: unknown; // the view's own: CodeMirror's Text equal to the entry's `text`, never written here
+  // E5 end
 }
 
 export interface ViewerStore {
@@ -69,6 +101,14 @@ export interface ViewerStore {
   jumped(tabId: string): void; // the code view landed (or gave up on) the pending line
   applyChanged(event: FilesChanged): void;
   reset(): void; // tests: forget every entry, release every hold
+  // E5 start
+  save(tabId: string): Promise<SaveResult>;
+  reload(tabId: string): void; // take theirs
+  keepMine(tabId: string): void; // adopt theirs as the baseline, the document standing
+  compare(tabId: string): void; // the notice becomes the merge view
+  setDirty(tabId: string, dirty: boolean): void; // the code view's report
+  setSaveError(tabId: string, message: string | null): void;
+  // E5 end
 }
 
 const views = new Map<string, ViewState>();
@@ -76,11 +116,55 @@ export const existingViewState = (tabId: string): ViewState | undefined => views
 
 export function viewState(tabId: string): ViewState {
   let view = views.get(tabId);
-  if (!view) views.set(tabId, (view = { editor: null, editorAt: null, codeScroll: 0, renderedScroll: 0, ratio: null, ratioPending: false }));
+  if (!view) views.set(tabId, (view = { editor: null, editorAt: null, codeScroll: 0, renderedScroll: 0, ratio: null, ratioPending: false, docOf: null, clean: null }));
   return view;
 }
 
-async function settled<N extends 'files.read'>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
+// E5: the UTF-8 length of a decoded text, without encoding it; a lone surrogate counts as U+FFFD's three bytes.
+export function utf8Length(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code < 0xdc00 && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+      bytes += 4;
+      i += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+// E5: the line break a document is written back with: the text's dominant one, CRLF when more than half its breaks are
+// (VS Code's rule). CodeMirror splits a document at every break and joins it with this, so a CRLF file stays CRLF and a
+// file of mixed breaks is written with its dominant one once edited.
+export function lineBreakOf(text: string): '\n' | '\r\n' {
+  let breaks = 0;
+  let crlf = 0;
+  for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) {
+    breaks += 1;
+    if (i > 0 && text.charCodeAt(i - 1) === 13) crlf += 1;
+  }
+  return crlf * 2 > breaks ? '\r\n' : '\n';
+}
+
+// E5: whether a loaded text is the file's bytes exactly, so writing it back changes nothing the owner did not change: a
+// complete utf8 code (or markdown) text, read with its hash, whose UTF-8 length is the file's size (a lossy decode
+// replaced bytes with U+FFFD and differs). Markdown is edited only in its Source view, the one that shows an editor.
+export const isEditable = (entry: Pick<ViewerEntry, 'kind' | 'complete' | 'encoding' | 'hash' | 'text' | 'bytes'>): boolean =>
+  (entry.kind === 'code' || entry.kind === 'markdown') && entry.complete && entry.encoding === 'utf8' && entry.hash !== null && utf8Length(entry.text) === entry.bytes;
+
+// E5: why a code view is read-only, shown as its content's title; null when it is editable or no reason is the owner's
+// to know (an svg's source).
+export function readOnlyReason(entry: ViewerEntry): 'head' | 'encoding' | 'loading' | null {
+  if (entry.editable) return null;
+  if (entry.kind === 'head') return 'head';
+  if (entry.kind !== 'code' && entry.kind !== 'markdown') return null;
+  if (entry.complete && entry.hash !== null && entry.encoding === 'utf8') return 'encoding';
+  return 'loading';
+}
+
+async function settled<N extends 'files.read' | 'files.write'>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
   try {
     return await call;
   } catch (error) {
@@ -89,6 +173,9 @@ async function settled<N extends 'files.read'>(call: Promise<CommandResult<N>>):
 }
 
 const isNotFound = (message: string) => message.startsWith('not found:');
+
+// What a load read, committed whole at its end (a `change` load) or patched as it goes (an `open` load).
+type LoadedFile = Pick<ViewerEntry, 'kind' | 'mime' | 'encoding' | 'bytes' | 'text' | 'base64' | 'loaded' | 'complete' | 'hash'>;
 
 export function createViewerStore(client: MawsBridge) {
   const holds = new Map<string, WatchHold>();
@@ -109,6 +196,9 @@ export function createViewerStore(client: MawsBridge) {
         return entry ? { entries: new Map(s.entries).set(tabId, { ...entry, ...next }) } : s;
       });
 
+    // A newer generation: every read in flight for the tab lands nowhere.
+    const supersede = (tabId: string) => generations.set(tabId, ++lastGeneration);
+
     const remove = (tabId: string) => {
       holds.get(tabId)?.release();
       holds.delete(tabId);
@@ -124,24 +214,61 @@ export function createViewerStore(client: MawsBridge) {
       });
     };
 
-    // Entries of tabs the layout no longer holds go; past the bound, the least recently used unmounted ones go.
+    // Entries of tabs the layout no longer holds go; past the bound, the least recently used unmounted ones go. E5: the
+    // bound passes over an entry with unsaved edits or a save in flight; a closed tab's goes (its close guard asked).
     const prune = () => {
       const open = new Set(allTabs(useLayout.getState().main).map((tab) => tab.id)); // W12: every project's tab set
       for (const tabId of get().entries.keys()) if (!open.has(tabId) && !mounted.get(tabId)) remove(tabId);
       for (const tabId of views.keys()) if (!get().entries.has(tabId)) views.delete(tabId);
-      const idle = [...get().entries.keys()].filter((tabId) => !mounted.get(tabId)).sort((a, b) => (used.get(a) ?? 0) - (used.get(b) ?? 0));
+      const idle = [...get().entries.values()]
+        .filter((entry) => !mounted.get(entry.tabId) && !entry.dirty && !entry.saving)
+        .map((entry) => entry.tabId)
+        .sort((a, b) => (used.get(a) ?? 0) - (used.get(b) ?? 0));
       while (get().entries.size > VIEWER_ENTRIES_MAX && idle.length > 0) remove(idle.shift()!);
     };
+
+    // E5: an entry with unsaved edits, or with the disk's newer version still on offer.
+    const unsaved = (entry: ViewerEntry | undefined) => entry !== undefined && (entry.dirty || entry.theirs !== null);
 
     const fail = (tabId: string, message: string, reason: 'open' | 'change') => {
       const entry = get().entries.get(tabId);
       if (reason === 'change' && isNotFound(message) && entry?.status === 'ready') return patch(tabId, { removed: true, loadingMore: false });
-      patch(tabId, { status: 'error', error: message, kind: null, text: '', base64: null, loaded: 0, complete: false, epoch: (entry?.epoch ?? 0) + 1, loadingMore: false });
+      // E5: unsaved edits keep their baseline and their document (the view's) under a refusal, which shows over them; a
+      // later read lands as any change load does.
+      if (unsaved(entry)) return patch(tabId, { status: 'error', error: message, loadingMore: false });
+      patch(tabId, {
+        status: 'error', error: message, kind: null, text: '', base64: null, loaded: 0, complete: false, epoch: (entry?.epoch ?? 0) + 1, loadingMore: false, hash: null, editable: false,
+      });
+    };
+
+    // E5: a `change` load is judged by the entry as it is when the load completes (the editing state machine's
+    // commit-time rule). Clean: the text is replaced as before, unless the read is the baseline itself (an own save, a
+    // spurious event), which lands nothing. Unsaved edits: the document stands, and a read that is neither the baseline
+    // nor the theirs already shown becomes theirs, when it is a text the editor could take.
+    const commitChange = (tabId: string, read: LoadedFile) => {
+      const entry = get().entries.get(tabId);
+      if (!entry) return;
+      const ready = { status: 'ready' as const, error: null, removed: false, loadingMore: false };
+      const settledAlready = entry.status === 'ready' && !entry.removed && !entry.loadingMore;
+      if (unsaved(entry)) {
+        const differs = read.hash !== null && read.hash !== entry.hash && read.hash !== entry.theirs?.hash;
+        if (differs && isEditable(read)) return patch(tabId, { ...ready, theirs: { text: read.text, hash: read.hash!, view: entry.theirs?.view ?? 'notice' } });
+        if (!settledAlready) patch(tabId, ready);
+        return;
+      }
+      if (read.hash !== null && read.hash === entry.hash) {
+        if (!settledAlready) patch(tabId, ready);
+        return;
+      }
+      patch(tabId, { ...ready, ...read, editable: isEditable(read), epoch: entry.epoch + 1, updated: entry.updated + 1 });
     };
 
     // One load per tab at a time: a newer one (or the entry's removal) makes an older one's answers land nowhere. A
-    // follow-the-file re-read (`change`) keeps the shown content until the new one is complete, then swaps it whole.
+    // follow-the-file re-read (`change`) keeps the shown content until the new one is complete, then commits it whole.
     // Whatever a load patches ends a Load more it superseded (`loadingMore` false), whose answer then lands nowhere.
+    // E5: every read of a text the editor could take asks for the file's hash; a continuation answering another hash
+    // than the first chunk's means the file changed mid-load, and the load ends there (an open load shows what it has,
+    // read-only; a change load lands nothing): the change's own `files.changed` re-reads it.
     const load = async (tabId: string, reason: 'open' | 'change') => {
       const entry = get().entries.get(tabId);
       if (!entry) return;
@@ -151,55 +278,88 @@ export function createViewerStore(client: MawsBridge) {
       // A re-read of a head covers what Load more had reached, not only the first chunk.
       const extent = reason === 'change' && entry.kind === 'head' ? Math.min(CODE_CAP, entry.loaded) : 0;
       const { appSessionId, path } = entry;
-      const read = (offset: number, length: number) => settled(client.invoke('files.read', { appSessionId, path, offset, length }));
+      const read = (offset: number, length: number, hash: boolean) =>
+        settled(client.invoke('files.read', { appSessionId, path, offset, length, ...(hash ? { hash: true } : {}) }));
 
-      const first = await read(0, FILES_READ_DEFAULT_LENGTH);
+      const first = await read(0, FILES_READ_DEFAULT_LENGTH, true);
       if (!live()) return;
       if (!first.ok) return fail(tabId, first.error.message, reason);
       const head = first.value;
       const kind = kindOf({ name: path, mime: head.mime, bytes: head.bytes, encoding: head.encoding });
-      const epoch = (get().entries.get(tabId)?.epoch ?? 0) + 1;
-      const updated = (get().entries.get(tabId)?.updated ?? 0) + (reason === 'change' ? 1 : 0);
-      const base = { status: 'ready' as const, error: null, kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes, removed: false, epoch, updated, loadingMore: false };
+      const file = { kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes };
+      const opened = { status: 'ready' as const, error: null, removed: false, loadingMore: false, epoch: (get().entries.get(tabId)?.epoch ?? 0) + 1, dirty: false, theirs: null, saveError: null };
+      const commit = (loaded: LoadedFile) => (reason === 'change' ? commitChange(tabId, loaded) : patch(tabId, { ...opened, ...loaded, editable: isEditable(loaded) }));
       // A markdown file opened at a line is shown as its source, where the line exists.
       const sourceView = kind === 'markdown' && get().entries.get(tabId)?.pendingJump != null ? true : undefined;
 
-      if (kind === 'external') return patch(tabId, { ...base, text: '', base64: null, loaded: 0, complete: true });
+      if (kind === 'external') return commit({ ...file, text: '', base64: null, loaded: 0, complete: true, hash: null });
       if (kind === 'image') {
         let whole = head;
         if (head.truncated) {
-          const all = await read(0, head.bytes);
+          const all = await read(0, head.bytes, false);
           if (!live()) return;
           if (!all.ok) return fail(tabId, all.error.message, reason);
           whole = all.value;
         }
         const utf8 = whole.encoding === 'utf8';
-        return patch(tabId, { ...base, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true });
+        return commit({ ...file, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true, hash: null });
       }
 
+      const hash = kind === 'head' ? null : head.hash;
       let text = head.content;
       let loaded = head.offset + head.length;
       const wanted = () => kind !== 'head' || loaded < extent;
       let more = head.truncated && wanted();
-      if (reason === 'open') patch(tabId, { ...base, text, base64: null, loaded, complete: !head.truncated, ...(sourceView ? { sourceView } : {}) });
+      if (reason === 'open') patch(tabId, { ...opened, ...file, text, base64: null, loaded, complete: !head.truncated, hash: null, editable: false, ...(sourceView ? { sourceView } : {}) });
       while (more && loaded < CODE_CAP) {
-        const next = await read(loaded, kind === 'head' ? Math.min(FILES_READ_DEFAULT_LENGTH, extent - loaded) : FILES_READ_DEFAULT_LENGTH);
+        const next = await read(loaded, kind === 'head' ? Math.min(FILES_READ_DEFAULT_LENGTH, extent - loaded) : FILES_READ_DEFAULT_LENGTH, hash !== null);
         if (!live()) return;
         // Mid-file: nothing of either version stays, except that a file gone during a re-read keeps its last content.
         if (!next.ok) return fail(tabId, next.error.message, reason);
         if (next.value.length === 0) break; // the file shrank under the read
+        if (hash !== null && next.value.hash !== hash) return; // changed mid-load: its files.changed re-reads it
         text += next.value.content;
         loaded = next.value.offset + next.value.length;
         more = next.value.truncated && wanted();
         if (reason === 'open') patch(tabId, { text, loaded, complete: !more });
       }
-      if (reason === 'change') patch(tabId, { ...base, text, base64: null, loaded, complete: kind !== 'head' });
-      else patch(tabId, { complete: kind !== 'head' });
+      commit({ ...file, text, base64: null, loaded, complete: kind !== 'head', hash });
     };
 
-    const reload = (tabId: string) => {
+    const refresh = (tabId: string) => {
       if (mounted.get(tabId)) void load(tabId, 'change');
       else stale.add(tabId); // read when next shown
+    };
+
+    // E5: the editor's document as the file's text, or undefined when no code view ever showed the tab.
+    const documentOf = (tabId: string): string | undefined => views.get(tabId)?.docOf?.();
+
+    // E5: the tab now believes `text` is on disk while its document stands (a save, Keep mine): `baseline` tells the
+    // view to keep its document and compare against the new text; `dirty` is settled here too, for a view not mounted.
+    const moveBaseline = (tabId: string, next: { text: string; hash: string } & Partial<ViewerEntry>) => {
+      const entry = get().entries.get(tabId);
+      if (!entry) return;
+      const bytes = utf8Length(next.text);
+      patch(tabId, { ...next, bytes, loaded: bytes, theirs: null, baseline: entry.baseline + 1 });
+      const document = documentOf(tabId);
+      if (document !== undefined) patch(tabId, { dirty: document !== next.text });
+    };
+
+    // E5: a save's conflict answered with a hash the tab has not seen: the file is read whole (one hashed read within the
+    // editor's caps) and shown as theirs in the merge view; a read answering yet another hash is newer and wins.
+    const conflicted = async (tabId: string, entry: ViewerEntry, hash: string): Promise<void> => {
+      if (entry.theirs?.hash === hash) return patch(tabId, { saving: false, theirs: { ...entry.theirs, view: 'merge' } });
+      const answer = await settled(client.invoke('files.read', { appSessionId: entry.appSessionId, path: entry.path, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true }));
+      if (!get().entries.has(tabId)) return;
+      if (!answer.ok) return patch(tabId, { saving: false, saveError: answer.error.message });
+      const read = answer.value;
+      const file: LoadedFile = {
+        kind: kindOf({ name: entry.path, mime: read.mime, bytes: read.bytes, encoding: read.encoding }), mime: read.mime, encoding: read.encoding, bytes: read.bytes,
+        text: read.content, base64: null, loaded: read.length, complete: !read.truncated, hash: read.hash,
+      };
+      // A file that is no longer a text the editor could take (grown past its cap, binary, a lossy decode) is not offered.
+      if (!isEditable(file)) return patch(tabId, { saving: false, saveError: EDITOR_COPY.conflictOnSave });
+      patch(tabId, { saving: false, theirs: { text: file.text, hash: file.hash!, view: 'merge' } });
     };
 
     return {
@@ -210,22 +370,34 @@ export function createViewerStore(client: MawsBridge) {
         used.set(tabId, ++clock);
         if (!unsubscribe) unsubscribe = useLayout.subscribe((state, prev) => state.main !== prev.main && prune());
         const entry = get().entries.get(tabId);
-        if (!entry || entry.appSessionId !== appSessionId || entry.path !== path) {
-          holds.get(tabId)?.release();
-          views.delete(tabId);
-          stale.delete(tabId);
-          generations.set(tabId, ++lastGeneration); // an older load lands nowhere
-          const fresh: ViewerEntry = {
-            tabId, appSessionId, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
-            text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
-          };
-          set((s) => ({ entries: new Map(s.entries).set(tabId, fresh) }));
+        const watchThenRead = (reason: 'open' | 'change') => {
           // The watch first, then the read: a change made while main's watcher restarts is read, not missed (M1 Surprises).
           const hold = useFiles.getState().watch(appSessionId, dirname(path));
           holds.set(tabId, hold);
           void hold.ready.then(() => {
-            if (holds.get(tabId) === hold) void load(tabId, 'open');
+            if (holds.get(tabId) === hold) void load(tabId, reason);
           });
+        };
+        if (entry && entry.path === path && entry.appSessionId !== appSessionId && (unsaved(entry) || entry.saving)) {
+          // E5: unsaved edits survive the tab's move to another session: the old session's hold goes, and the file is
+          // watched and re-read under the new one, the read committing as any change load does.
+          holds.get(tabId)?.release();
+          stale.delete(tabId);
+          supersede(tabId);
+          patch(tabId, { appSessionId, ...(line !== entry.line ? { line, pendingJump: line } : {}) });
+          watchThenRead('change');
+        } else if (!entry || entry.appSessionId !== appSessionId || entry.path !== path) {
+          holds.get(tabId)?.release();
+          views.delete(tabId);
+          stale.delete(tabId);
+          supersede(tabId); // an older load lands nowhere
+          const fresh: ViewerEntry = {
+            tabId, appSessionId, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
+            text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
+            hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, baseline: 0,
+          };
+          set((s) => ({ entries: new Map(s.entries).set(tabId, fresh) }));
+          watchThenRead('open');
         } else {
           if (line !== entry.line) patch(tabId, { line, pendingJump: line, ...(line !== null && entry.kind === 'markdown' ? { sourceView: true } : {}) });
           if (stale.delete(tabId)) void load(tabId, 'change');
@@ -274,11 +446,66 @@ export function createViewerStore(client: MawsBridge) {
           if (event.kind === 'invalidated') {
             // The Files store re-watches the directory (the boundary runs again); the file is re-read once that answered.
             const hold = holds.get(tabId);
-            if (hold && sameFile(event.path, directory)) void hold.ready.then(() => holds.get(tabId) === hold && reload(tabId));
+            if (hold && sameFile(event.path, directory)) void hold.ready.then(() => holds.get(tabId) === hold && refresh(tabId));
           } else if (sameFile(event.path, entry.path) || (event.kind === 'changed' && sameFile(event.path, directory))) {
-            reload(tabId); // an event naming only the directory may be the file's, coalesced; a re-read absorbs a spurious one
+            refresh(tabId); // an event naming only the directory may be the file's, coalesced; a re-read absorbs a spurious one
           }
         }
+      },
+
+      // E5: the document captured now is what is written, and what `text` becomes on `ok`; typing during the save stays
+      // dirty against it. From the notice the stale baseline's hash is sent on purpose (an unseen change is never
+      // overwritten: the answer is `conflict`); from the merge view, the hash of what it shows.
+      async save(tabId) {
+        const entry = get().entries.get(tabId);
+        const expectedHash = entry?.theirs?.view === 'merge' ? entry.theirs.hash : (entry?.hash ?? null);
+        if (!entry || entry.saving || !unsaved(entry) || expectedHash === null) return 'noop';
+        const content = documentOf(tabId);
+        if (content === undefined) return 'noop';
+        patch(tabId, { saving: true, saveError: null });
+        const answer = await settled(client.invoke('files.write', { appSessionId: entry.appSessionId, path: entry.path, content, expectedHash }));
+        const now = get().entries.get(tabId);
+        if (!answer.ok) {
+          patch(tabId, { saving: false, saveError: answer.error.message });
+          return 'error';
+        }
+        if (answer.value.status === 'conflict') {
+          if (now) await conflicted(tabId, now, answer.value.hash);
+          return 'conflict';
+        }
+        supersede(tabId); // a read issued before the write lands nowhere
+        moveBaseline(tabId, { text: content, hash: answer.value.hash, saving: false });
+        return 'ok';
+      },
+
+      reload(tabId) {
+        const entry = get().entries.get(tabId);
+        if (!entry?.theirs || entry.saving) return;
+        supersede(tabId);
+        const { text, hash } = entry.theirs;
+        const bytes = utf8Length(text);
+        // The document is replaced whole (`epoch`); the owner's own act, so no Updated notice.
+        patch(tabId, { text, hash, bytes, loaded: bytes, complete: true, theirs: null, dirty: false, saveError: null, status: 'ready', error: null, removed: false, epoch: entry.epoch + 1 });
+      },
+
+      keepMine(tabId) {
+        const entry = get().entries.get(tabId);
+        if (!entry?.theirs || entry.saving) return;
+        moveBaseline(tabId, { text: entry.theirs.text, hash: entry.theirs.hash });
+      },
+
+      compare(tabId) {
+        const theirs = get().entries.get(tabId)?.theirs;
+        if (theirs?.view === 'notice') patch(tabId, { theirs: { ...theirs, view: 'merge' } });
+      },
+
+      setDirty(tabId, dirty) {
+        if (get().entries.get(tabId)?.dirty === !dirty) patch(tabId, { dirty });
+      },
+
+      setSaveError(tabId, message) {
+        const entry = get().entries.get(tabId);
+        if (entry && entry.saveError !== message) patch(tabId, { saveError: message });
       },
 
       reset() {

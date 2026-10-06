@@ -63,4 +63,10 @@ describe('keymap: chords unique and single-sink', () => {
     expect(ACTIONS['gateway.openClaudeUsage']).toEqual({ title: 'Open ClaudeUsage', chord: null, sink: 'renderer', menu: null, scope: 'app' });
   });
   // C11 end
+
+  // E5 start: the editor's save (E5 execution document, Interfaces *The close guard and the action*)
+  it('carries file.save in the File menu at ⌘S, where macOS gives the chord to the menu', () => {
+    expect(ACTIONS['file.save']).toEqual({ title: 'Save file', chord: 'Cmd+S', sink: 'menu', menu: 'file', scope: 'app' });
+  });
+  // E5 end
 });

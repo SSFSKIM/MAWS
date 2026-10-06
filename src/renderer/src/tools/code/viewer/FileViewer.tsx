@@ -2,12 +2,16 @@
 // the renderer): a thin static shell over the viewer store that draws a file by its kind, read-only. CodeMirror loads
 // on first use behind React.lazy (ruled 2026-09-29, O2), under the `Loading` notice. A tab with no session (or one main
 // does not know) can only say so, since the allowlist is per session.
+//
+// E5: a code view of an editable entry edits; the bar carries the editor's controls (`editor/EditorControls.tsx`), and
+// the viewer says what it holds as data attributes (`data-editable`, `data-dirty`, `data-theirs`).
 import { lazy, Suspense, useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { VIEWER_COPY } from '../copy';
 import '../code.css';
+import { EditorControls } from '../editor/EditorControls';
 import { ExternalRow, OpenExternally } from './ExternalRow';
 import { ImageView } from './ImageView';
 import { CODE_CAP } from './kinds';
@@ -54,12 +58,21 @@ function SessionFile({ tabId, appSessionId, path, line }: { tabId: string; appSe
 
   if (entry?.status === 'error' && entry.error?.startsWith('unknown app session')) return <NoSession path={path} />;
   return (
-    <div data-file-viewer data-path={path} data-kind={entry?.kind ?? ''} className="flex h-full min-h-0 flex-col bg-bg">
+    <div
+      data-file-viewer
+      data-path={path}
+      data-kind={entry?.kind ?? ''}
+      data-editable={String(entry !== null && entry.editable && showsCode(entry))}
+      data-dirty={String(entry?.dirty ?? false)}
+      data-theirs={entry?.theirs?.view ?? ''}
+      className="flex h-full min-h-0 flex-col bg-bg"
+    >
       <div className={bar}>
         <span className="min-w-0 flex-1 truncate font-mono text-fg-muted" title={path}>
           {path}
         </span>
         {entry ? <Notices entry={entry} /> : null}
+        {entry ? <EditorControls entry={entry} /> : null}
         {entry ? <Controls entry={entry} wrap={wrap} /> : null}
       </div>
       <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} /> : <Loading />}</div>

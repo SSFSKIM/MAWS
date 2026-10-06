@@ -60,6 +60,9 @@ import { connectQuitWait } from './lifecycle/quit-wait';
 // W6 start
 import { registerUsage } from './usage';
 // W6 end
+// E5 start
+import { EditorDialogs } from './tools/code';
+// E5 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -180,6 +183,9 @@ export function App() {
       {/* C12 start: the memory budget's blocked sessions and stop sheets */}
       <BudgetSheets />
       {/* C12 end */}
+      {/* E5 start: the editor's close sheet (registerEditor's guard, registered by C8c's registerCodeTools) */}
+      <EditorDialogs />
+      {/* E5 end */}
     </QueryClientProvider>
   );
 }

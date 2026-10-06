@@ -53,6 +53,10 @@ export const ACTIONS = {
   'accounts.open':           { title: 'Usage',                    chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'gateway.openClaudeUsage': { title: 'Open ClaudeUsage',         chord: null,           sink: 'renderer', menu: null, scope: 'app' },
   // C11 end
+  // E5 start: the editor's save (E5 execution document, Interfaces *The close guard and the action*). A menu action
+  // because macOS registers ⌘S in the menu and the page never sees it (as ⌘W); it saves the focused pane's file tab.
+  'file.save':               { title: 'Save file',                chord: 'Cmd+S',        sink: 'menu', menu: 'file', scope: 'app' },
+  // E5 end
 } as const satisfies Record<string, ActionSpec>;
 
 export type ActionId = keyof typeof ACTIONS;
