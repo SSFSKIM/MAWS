@@ -305,7 +305,7 @@ describe('dispatcher holds and releases a hold action', () => {
     cleanup();
     run.mockClear();
     release.mockClear();
-    keymap = {};
+    keymap = { 'composer.dictate': 'Alt+Space' }; // unbound by default (the owner's ruling, 2026-10-06); bound as Settings › Keyboard would
     disconnect();
     disconnect = connectKeys(window, () => keymap);
     render(<Hold />);

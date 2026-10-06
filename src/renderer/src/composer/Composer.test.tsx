@@ -8,6 +8,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
+import type { TabSet } from '@shared/ipc/schema/layout'; // E9
 import { digest, humanTurn, record, status } from '../../../../test/support/builders'; // C12: digest
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { connectKeys } from '../keymap/dispatcher';
@@ -900,7 +901,8 @@ describe('a released session resumes on Send', () => {
 // C12 end
 
 // E9 start: push-to-talk dictation through the composer (E9 execution document, Design §6 to §8): the one app-level hold
-// resolves the focused pane's session, writes into that composer only, and shows its state in that toolbar.
+// resolves the focused pane's session, writes into that composer only, and shows its state in that toolbar; the
+// toolbar's microphone toggles a capture for its own session on click (the owner's ruling, 2026-10-06).
 describe('dictation into the focused pane’s composer', () => {
   const focusTabs = (focusedPane: 0 | 1, ids: AppSessionId[]) =>
     useLayout.setState((s) => ({
@@ -909,7 +911,7 @@ describe('dictation into the focused pane’s composer', () => {
         current: 'none',
         sets: {
           none: {
-            panes: ids.map((id) => ({ tabs: [{ id: `session:${id}`, kind: 'session' as const, appSessionId: id, pinned: false }], activeTabId: `session:${id}` })),
+            panes: ids.map((id) => ({ tabs: [{ id: `session:${id}`, kind: 'session' as const, appSessionId: id, pinned: false }], activeTabId: `session:${id}` })) as TabSet['panes'], // one or two
             focusedPane,
             splitRatio: 0.5,
           },
@@ -923,7 +925,12 @@ describe('dictation into the focused pane’s composer', () => {
   const dictationStatus = (index: 0 | 1) => within(composerOf(index)).queryByRole('status', { name: 'Dictation' });
   const trustCard = () => <DockedCardFrame appSessionId={A} title="Trust this folder?" onAccept={() => {}} onDecline={null}>Trust?</DockedCardFrame>;
 
-  beforeEach(() => resetDictationStore());
+  beforeEach(() => {
+    resetDictationStore();
+    // `composer.dictate` ships unbound (the owner's ruling, 2026-10-06); the hold cases bind ⌥Space as Settings › Keyboard would
+    disconnect();
+    disconnect = connectKeys(window, () => ({ 'composer.dictate': 'Alt+Space' }));
+  });
   afterEach(() => resetDictationStore());
 
   it('holding ⌥Space in pane 1 writes greyed partials there only, and the release settles the final', async () => {
@@ -980,8 +987,9 @@ describe('dictation into the focused pane’s composer', () => {
     expect(useDictationStore.getState().capture).toBeNull();
   });
 
-  // Loss of input ends a capture whatever started it (Design §8): a pointer released over another app or under a native
-  // permission dialog never reaches the button, so the window's blur and a hidden document cancel the pointer's hold too.
+  // Loss of input ends a capture whatever started it (Design §8): a click-started capture has no key whose release the
+  // dispatcher could report, so the window's blur and a hidden document cancel it under a native permission dialog or
+  // after a switch to another app.
   const blurWindow = () => act(() => void window.dispatchEvent(new Event('blur')));
   const hideDocument = () =>
     act(() => {
@@ -992,38 +1000,66 @@ describe('dictation into the focused pane’s composer', () => {
         delete (document as { visibilityState?: unknown }).visibilityState;
       }
     });
-  const holdMic = () => {
-    const mic = within(composerOf(0)).getByRole('button', { name: 'Dictate' });
-    fireEvent.pointerDown(mic, { button: 0 });
-    return mic;
-  };
+  const micOf = (index: 0 | 1) => within(composerOf(index)).getByRole('button', { name: 'Dictate' });
+  const clickMic = (index: 0 | 1 = 0) => fireEvent.click(micOf(index));
 
-  it('a pointer hold still asking for permission ends when the window loses focus, and its late start is dropped', async () => {
+  it('a click on a pane’s microphone dictates into that pane, not the focused one, and a second click settles the final', async () => {
+    live(A);
+    live(B);
+    focusTabs(1, [A, B]);
+    mount([{ index: 0, id: A }, { index: 1, id: B }], <DictationKeys />);
+    act(() => editorOf(1).focus());
+    clickMic(0);
+    expect(invoked('voice.start')).toEqual([{ captureId: expect.any(String), locale: null }]);
+    expect(dictationStatus(0)?.textContent).toBe('Asking for permission…');
+    expect(micOf(0).getAttribute('aria-pressed')).toBe('true');
+    expect(micOf(1).getAttribute('aria-pressed')).toBe('false');
+
+    voice({ kind: 'started', captureId: captureId(), locale: 'en-US' });
+    voice({ kind: 'partial', captureId: captureId(), text: 'hello' });
+    expect(editorOf(0).editor.getText()).toBe('hello');
+    expect(editorOf(1).editor.getText()).toBe('');
+
+    clickMic(0);
+    expect(invoked('voice.stop')).toEqual([{ captureId: captureId() }]);
+    expect(dictationStatus(0)?.textContent).toBe('Finishing…');
+    clickMic(0); // finishing: ignored
+    expect(invoked('voice.start')).toHaveLength(1);
+    expect(invoked('voice.stop')).toHaveLength(1);
+    voice({ kind: 'final', captureId: captureId(), text: 'Hello world.', timedOut: false });
+    expect(editorOf(0).editor.getText()).toBe('Hello world.');
+    expect(dictationStatus(0)).toBeNull();
+    expect(micOf(0).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('a click-started capture still asking for permission ends when the window loses focus; its late start is dropped and the next click starts afresh', async () => {
     live(A);
     focusTabs(0, [A]);
     mount([{ index: 0, id: A }], <DictationKeys />);
     act(() => editorOf(0).focus());
-    const mic = holdMic();
+    clickMic();
     expect(invoked('voice.start')).toHaveLength(1);
+    const first = captureId();
     blurWindow();
-    expect(invoked('voice.cancel')).toEqual([{ captureId: captureId() }]);
+    expect(invoked('voice.cancel')).toEqual([{ captureId: first }]);
     expect(dictationStatus(0)).toBeNull();
-    voice({ kind: 'started', captureId: captureId(), locale: 'en-US' });
-    voice({ kind: 'partial', captureId: captureId(), text: 'hello' });
-    fireEvent.pointerUp(mic, { button: 0 });
+    voice({ kind: 'started', captureId: first, locale: 'en-US' });
+    voice({ kind: 'partial', captureId: first, text: 'hello' });
     expect(dictationStatus(0)).toBeNull();
     expect(editorOf(0).editor.getText()).toBe('');
     expect(invoked('voice.stop')).toEqual([]);
     expect(invoked('voice.cancel')).toHaveLength(1);
+    clickMic(); // idle again: a click starts a new capture rather than stopping the cancelled one
+    expect(invoked('voice.start')).toEqual([{ captureId: first, locale: null }, { captureId: expect.not.stringMatching(first), locale: null }]);
   });
 
   for (const [name, lose] of [['the window loses focus', blurWindow], ['the document is hidden', hideDocument]] as const) {
-    it(`a listening pointer hold ends when ${name}: cancelled on main and its words removed`, async () => {
+    it(`a listening click-started capture ends when ${name}: cancelled on main and its words removed`, async () => {
       live(A);
       focusTabs(0, [A]);
       mount([{ index: 0, id: A }], <DictationKeys />);
       act(() => editorOf(0).focus());
-      holdMic();
+      clickMic();
       voice({ kind: 'started', captureId: captureId(), locale: 'en-US' });
       voice({ kind: 'partial', captureId: captureId(), text: 'hello' });
       expect(editorOf(0).editor.getText()).toBe('hello');

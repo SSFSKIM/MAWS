@@ -1,5 +1,5 @@
 // The toolbar's microphone (E9 execution document, Design §8): its session's capture state and notice only, the denial's
-// System Settings button, the chord in its title, and the pointer's press and hold.
+// System Settings button, the click that toggles a capture (the owner's ruling, 2026-10-06), and a bound chord in its title.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -81,39 +81,86 @@ describe('the microphone control', () => {
     expect(within(note).queryByRole('button', { name: 'Open System Settings' })).toBeNull();
   });
 
-  it('names the effective chord in its title, an override included', () => {
+  it('says a click dictates, and names a bound chord in its title, an override included', () => {
     const { a } = renderBoth();
-    expect(a.getByRole('button', { name: 'Dictate' }).title).toBe('Hold ⌥Space to dictate · on this Mac');
+    expect(a.getByRole('button', { name: 'Dictate' }).title).toBe('Click to dictate · on this Mac'); // unbound by default
+    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V9, keymap: { 'composer.dictate': 'Alt+Space' } }, resolvedTheme: 'light' } }));
+    expect(a.getByRole('button', { name: 'Dictate' }).title).toBe('Click to dictate · on this Mac · or hold ⌥Space');
     act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V9, keymap: { 'composer.dictate': 'Cmd+D' } }, resolvedTheme: 'light' } }));
-    expect(a.getByRole('button', { name: 'Dictate' }).title).toBe('Hold ⌘D to dictate · on this Mac');
+    expect(a.getByRole('button', { name: 'Dictate' }).title).toBe('Click to dictate · on this Mac · or hold ⌘D');
   });
 
-  it('presses for its session under the pointer and releases on up or on leaving; never a capture it did not start', () => {
-    const press = vi.fn((appSessionId: AppSessionId) => capture(appSessionId, 'requesting', `c-${press.mock.calls.length}`));
+  it('reads pressed only while its own session’s capture runs', () => {
+    const { a, b } = renderBoth();
+    const micA = a.getByRole('button', { name: 'Dictate' });
+    const micB = b.getByRole('button', { name: 'Dictate' });
+    expect(micA.getAttribute('aria-pressed')).toBe('false');
+    for (const phase of ['requesting', 'listening', 'finishing'] as const) {
+      act(() => capture(A, phase));
+      expect(micA.getAttribute('aria-pressed'), phase).toBe('true');
+      expect(micB.getAttribute('aria-pressed'), phase).toBe('false');
+    }
+    act(() => useDictationStore.setState({ capture: null }));
+    expect(micA.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  // The owner's ruling (2026-10-06): a click starts recording for the button's own session and a second click stops it.
+  it('toggles by its session’s phase: idle presses for its own session, requesting and listening release, finishing does nothing', () => {
+    const press = vi.fn((appSessionId: AppSessionId) => capture(appSessionId, 'requesting'));
     const release = vi.fn();
     const withdraw = provideDictation({ press, release } as unknown as DictationController);
     try {
-      const { a, b } = renderBoth();
+      const { a } = renderBoth();
+      const mic = a.getByRole('button', { name: 'Dictate' });
+      fireEvent.click(mic);
+      expect(press.mock.calls).toEqual([[A]]);
+      expect(release).not.toHaveBeenCalled();
+
+      fireEvent.click(mic); // still asking for permission: the second click cancels
+      expect(release.mock.calls).toEqual([['keyup']]);
+
+      act(() => capture(A, 'listening'));
+      fireEvent.click(mic); // listening: the second click stops, and the final lands
+      expect(release.mock.calls).toEqual([['keyup'], ['keyup']]);
+
+      act(() => capture(A, 'finishing'));
+      fireEvent.click(mic); // the stop is on its way
+      expect(release).toHaveBeenCalledTimes(2);
+      expect(press).toHaveBeenCalledOnce();
+    } finally {
+      withdraw();
+    }
+  });
+
+  it('presses for its own session while another session’s capture runs, and never ends that capture', () => {
+    const press = vi.fn();
+    const release = vi.fn();
+    const withdraw = provideDictation({ press, release } as unknown as DictationController);
+    try {
+      const { b } = renderBoth();
+      act(() => capture(A, 'listening', 'from-key'));
+      fireEvent.click(b.getByRole('button', { name: 'Dictate' }));
+      expect(press.mock.calls).toEqual([[B]]); // the controller ignores it while A's capture runs
+      expect(release).not.toHaveBeenCalled();
+    } finally {
+      withdraw();
+    }
+  });
+
+  it('has no press-and-hold: the pointer’s down, up and leaving do nothing, and the mouse never takes focus', () => {
+    const press = vi.fn();
+    const release = vi.fn();
+    const withdraw = provideDictation({ press, release } as unknown as DictationController);
+    try {
+      const { a } = renderBoth();
       const mic = a.getByRole('button', { name: 'Dictate' });
       fireEvent.pointerDown(mic, { button: 0 });
-      expect(press).toHaveBeenCalledWith(A);
+      act(() => capture(A, 'listening'));
       fireEvent.pointerUp(mic, { button: 0 });
-      expect(release.mock.calls).toEqual([['keyup']]);
       fireEvent.pointerLeave(mic);
-      expect(release).toHaveBeenCalledOnce(); // released once
-
-      fireEvent.pointerDown(mic, { button: 0 });
-      fireEvent.pointerLeave(mic); // dragged off the button
-      expect(release).toHaveBeenCalledTimes(2);
-
-      // a capture the key started (B's) is not this button's to end
-      release.mockClear();
-      act(() => capture(B, 'listening', 'from-key'));
-      const other = b.getByRole('button', { name: 'Dictate' });
-      fireEvent.pointerLeave(other);
-      fireEvent.pointerDown(other, { button: 2 }); // not the primary button
-      fireEvent.pointerUp(other, { button: 2 });
+      expect(press).not.toHaveBeenCalled();
       expect(release).not.toHaveBeenCalled();
+      expect(fireEvent.mouseDown(mic)).toBe(false); // default prevented: focus stays in the editor
     } finally {
       withdraw();
     }

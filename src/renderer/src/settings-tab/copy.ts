@@ -109,11 +109,11 @@ export const KEYBOARD = {
 
 // E9 start: Settings › Voice (E9 execution document, Design §9; M4): the hold that dictates, the recognition language
 // (settings version 9), and what main's probe reports. Recognition is on-device only, so a language without a model on
-// this Mac is refused at the hold and said so here.
+// this Mac is refused when dictation starts and said so here.
 export const VOICE = {
   shortcut: 'Shortcut',
   changeInKeyboard: 'Change in Keyboard',
-  shortcutNote: "Hold it anywhere in the window to dictate into the focused composer; the microphone in the composer's toolbar does the same.",
+  shortcutNote: "Click the microphone in the composer's toolbar to start dictating and again to stop. A shortcut, once bound, dictates into the focused composer while you hold it.",
   language: 'Language',
   system: (locale: string | null) => (locale === null ? 'System' : `System (${locale})`),
   noOnDeviceMark: 'no on-device model',
@@ -129,7 +129,7 @@ export const VOICE = {
   speech: 'Speech recognition',
   permission: {
     authorized: 'Allowed',
-    notDetermined: 'Not asked yet · macOS asks on the first hold',
+    notDetermined: 'Not asked yet · macOS asks the first time you dictate',
     denied: 'Off for MAWS',
     restricted: 'Off for MAWS and cannot be turned on here',
   },

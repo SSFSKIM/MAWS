@@ -65,8 +65,10 @@ describe('keymap: chords unique and single-sink', () => {
   // C11 end
 
   // E9 start: the hold action (E9 execution document, Interfaces "Keymap")
-  it('carries composer.dictate: an app-scoped hold at ⌥Space, out of the menu', () => {
-    expect(ACTIONS['composer.dictate']).toEqual({ title: 'Hold to dictate', chord: 'Alt+Space', sink: 'renderer', menu: null, scope: 'app', hold: true });
+  // The owner's ruling (2026-10-06): the toolbar's microphone is the primary control, so the hold ships unbound and a
+  // chord is the person's choice in Settings › Keyboard.
+  it('carries composer.dictate: an app-scoped hold with no default chord, out of the menu', () => {
+    expect(ACTIONS['composer.dictate']).toEqual({ title: 'Hold to dictate', chord: null, sink: 'renderer', menu: null, scope: 'app', hold: true });
     for (const [id, spec] of specs) if (id !== 'composer.dictate') expect((spec as ActionSpec).hold, id).toBeUndefined();
   });
   // E9 end

@@ -4,6 +4,10 @@
 import type { VoicePermission, VoiceErrorCode, VoiceStartResult } from '@shared/ipc/schema/voice';
 import type { DictationNoticeKind } from './store';
 
+// The toolbar microphone's tooltip: a click is the primary way (the owner's ruling, 2026-10-06), and a chord bound to
+// `composer.dictate` in Settings › Keyboard is named as the hold that does the same.
+export const micTitle = (chord: string | null): string => `Click to dictate · on this Mac${chord === null ? '' : ` · or hold ${chord}`}`;
+
 export interface NoticeCopy {
   kind: DictationNoticeKind;
   message: string;

@@ -360,12 +360,15 @@ describe('settings view lists Voice', () => {
     expect(b.sets).toEqual([]); // the binding is edited where every binding is
   });
 
-  it('the default shortcut reads ⌥Space, and an unbound one says so', () => {
+  // The owner's ruling (2026-10-06): the toolbar's microphone is the primary control and the hold ships unbound.
+  it('the shortcut is unbound by default and says so, points at the microphone, and still offers Change in Keyboard', () => {
     renderView();
-    expect(within(row('Shortcut')).getByText('⌥Space')).toBeTruthy();
-    cleanup();
-    renderView({ ...SETTINGS_DEFAULTS_V9, keymap: { 'composer.dictate': null } });
     expect(within(row('Shortcut')).getByText('Unbound')).toBeTruthy();
+    expect(within(row('Shortcut')).getByRole('button', { name: 'Change in Keyboard' })).toBeTruthy();
+    expect(row('Shortcut').textContent).toContain("Click the microphone in the composer's toolbar to start dictating and again to stop.");
+    cleanup();
+    renderView({ ...SETTINGS_DEFAULTS_V9, keymap: { 'composer.dictate': 'Alt+Space' } });
+    expect(within(row('Shortcut')).getByText('⌥Space')).toBeTruthy();
   });
 
   it('the Language select lists System first, then the locales by name, and writes the choice as one field', async () => {
@@ -403,7 +406,7 @@ describe('settings view lists Voice', () => {
 
   it('granted and not-yet-asked permissions read as such, with no button, and an on-device language says so', async () => {
     renderView(SETTINGS_DEFAULTS_V9, null, { 'voice.status': status({ permission: { microphone: 'authorized', speech: 'notDetermined' } }) });
-    await vi.waitFor(() => expect(row('Speech recognition').textContent).toContain('Not asked yet · macOS asks on the first hold'));
+    await vi.waitFor(() => expect(row('Speech recognition').textContent).toContain('Not asked yet · macOS asks the first time you dictate'));
     expect(row('Microphone').textContent).toContain('Allowed');
     expect(screen.queryByRole('button', { name: 'Open System Settings' })).toBeNull();
     expect(row('Recognition').textContent).toContain('On this Mac');

@@ -1,15 +1,18 @@
-// The composer toolbar's microphone (E9 execution document, Design §8, G1): a button to press and hold as a second way to
-// dictate (the pointer's down presses for this session, its up, cancel or leaving the button releases), the capture's
-// state while one of this session runs, and this session's notice with, for a denial, the button that opens the System
-// Settings pane granting it. The button keeps focus where it is (dictation writes at the editor's caret) and sits
-// outside the editor's key sink, so it never takes typing.
-import { useRef, type PointerEvent } from 'react';
+// The composer toolbar's microphone (E9 execution document, Design §8, G1): the primary way to dictate (the owner's
+// ruling, 2026-10-06). A click toggles this session's capture: idle starts one for this session (whichever pane is
+// focused), a second click while asking for permission cancels and while listening stops so the final lands, and a
+// click while finishing waits for that final. No press-and-hold: a hold and a click on one control fight each other, and
+// a chord bound to `composer.dictate` carries the hold. Beside it, the capture's state while one of this session runs,
+// and this session's notice with, for a denial, the button that opens the System Settings pane granting it. The button
+// keeps focus where it is (dictation writes at the editor's caret) and sits outside the editor's key sink, so it never
+// takes typing.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { VoicePrivacyPane } from '@shared/ipc/schema/voice';
 import { Icon, useChordHint } from '../../app/IconButton';
 import { ipc } from '../../ipc/client';
 import { mountedDictation } from './controller';
+import { micTitle } from './copy';
 import { dismissDictationNotice, useDictationStore, type DictationNoticeKind, type DictationPhase } from './store';
 
 const STATUS: Record<DictationPhase, string> = { requesting: 'Asking for permission…', listening: 'Listening…', finishing: 'Finishing…' };
@@ -26,33 +29,24 @@ const MicIcon = () => (
 export function MicControl({ appSessionId, client = ipc }: { appSessionId: AppSessionId; client?: MawsBridge }) {
   const phase = useDictationStore((s) => (s.capture?.appSessionId === appSessionId ? s.capture.phase : null));
   const chord = useChordHint('composer.dictate');
-  // The capture this button's press started, so leaving the button never ends a capture the key started.
-  const held = useRef<string | null>(null);
 
-  const press = (event: PointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0) return;
-    const before = useDictationStore.getState().capture?.captureId ?? null;
-    mountedDictation()?.press(appSessionId);
-    const after = useDictationStore.getState().capture?.captureId ?? null;
-    held.current = after !== before ? after : null;
-  };
-  const release = () => {
-    const id = held.current;
-    held.current = null;
-    if (id !== null && useDictationStore.getState().capture?.captureId === id) mountedDictation()?.release('keyup');
+  // The phase is read from the store at the click, not from the render, so the toggle acts on the capture as it is now.
+  const toggle = () => {
+    const capture = useDictationStore.getState().capture;
+    const own = capture?.appSessionId === appSessionId ? capture.phase : null;
+    if (own === null) mountedDictation()?.press(appSessionId); // ignored by the controller while another session's capture runs
+    else if (own !== 'finishing') mountedDictation()?.release('keyup');
   };
   return (
     <>
       <button
         type="button"
         aria-label="Dictate"
-        title={chord ? `Hold ${chord} to dictate · on this Mac` : 'Hold to dictate · on this Mac'}
-        className={`inline-flex size-7 shrink-0 items-center justify-center rounded-sm outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 ${phase ? 'text-accent' : 'text-fg-muted'}`}
+        aria-pressed={phase !== null}
+        title={micTitle(chord)}
+        className={`inline-flex size-7 shrink-0 items-center justify-center rounded-sm outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 aria-pressed:bg-bg-active ${phase ? 'text-accent' : 'text-fg-muted'}`}
         onMouseDown={(event) => event.preventDefault()} // focus stays in the editor, whose caret the words go to
-        onPointerDown={press}
-        onPointerUp={release}
-        onPointerCancel={release}
-        onPointerLeave={release}
+        onClick={toggle}
       >
         <MicIcon />
       </button>

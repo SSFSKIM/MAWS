@@ -1,8 +1,9 @@
-// The Voice section (E9 execution document, Design §9; M4): the hold that dictates as the keymap has it (edited in
-// Keyboard, where every binding is), the recognition language (`voice.locale`, settings version 9; null follows the
-// system's), and what main's non-prompting probe (`voice.status`) reports for that language: the helper, the two macOS
-// permissions with the pane that grants each, and whether the language has an on-device model, without which the hold
-// is refused (recognition never leaves this Mac).
+// The Voice section (E9 execution document, Design §9; M4): the hold that dictates as the keymap has it (unbound by
+// default, the toolbar's microphone being the primary control; edited in Keyboard, where every binding is), the
+// recognition language (`voice.locale`, settings version 9; null follows the system's), and what main's non-prompting
+// probe (`voice.status`) reports for that language: the helper, the two macOS permissions with the pane that grants
+// each, and whether the language has an on-device model, without which dictation is refused (recognition never leaves
+// this Mac).
 import type { Settings } from '@shared/ipc/schema';
 import type { PermissionState, VoicePrivacyPane, VoiceStatus } from '@shared/ipc/schema/voice';
 import { effectiveChord } from '@shared/keymap/actions';

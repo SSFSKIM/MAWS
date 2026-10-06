@@ -183,7 +183,7 @@ export function App() {
       {/* C12 start: the memory budget's blocked sessions and stop sheets */}
       <BudgetSheets />
       {/* C12 end */}
-      {/* E9 start: push-to-talk dictation, the one ⌥Space hold into the focused pane's composer */}
+      {/* E9 start: dictation's one controller, for the composer microphone's clicks and the composer.dictate hold once bound */}
       <DictationKeys />
       {/* E9 end */}
     </QueryClientProvider>

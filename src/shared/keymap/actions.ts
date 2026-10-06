@@ -57,8 +57,10 @@ export const ACTIONS = {
   'gateway.openClaudeUsage': { title: 'Open ClaudeUsage',         chord: null,           sink: 'renderer', menu: null, scope: 'app' },
   // C11 end
   // E9 start: push-to-talk dictation into the focused pane's composer (E9 execution document, Design §5): app-scoped like
-  // ⌘L, so it works wherever focus is; ⌥Space, not ⌃Space, which switches input sources on a multi-language Mac
-  'composer.dictate':        { title: 'Hold to dictate',          chord: 'Alt+Space',    sink: 'renderer', menu: null, scope: 'app', hold: true },
+  // ⌘L, so it works wherever focus is. Unbound by default (the owner's ruling, 2026-10-06): the composer toolbar's
+  // microphone is the primary control; a chord bound in Settings › Keyboard holds to dictate (⌥Space suits; ⌃Space
+  // switches input sources on a multi-language Mac)
+  'composer.dictate':        { title: 'Hold to dictate',          chord: null,           sink: 'renderer', menu: null, scope: 'app', hold: true },
   // E9 end
 } as const satisfies Record<string, ActionSpec>;
 

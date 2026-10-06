@@ -5,8 +5,8 @@
 // its effort, whose chip opens the model selector (W3), then the session's context ring (C3: a started session's, the
 // composer passes it), the outermost control (W10, C10). No `@` button (typing `@` opens the same menu) and no `+ dir`
 // chip (W10: Add directory… is the "+" menu's). R2: after the permission mode, a plugin's SessionMode drawing, while one
-// draws it (PluginSites.tsx). E9: after that, the microphone (press and hold to dictate) with the capture's state and
-// the session's dictation notice, small text in the same row.
+// draws it (PluginSites.tsx). E9: after that, the microphone (a click starts dictating, a second click stops) with the
+// capture's state and the session's dictation notice, small text in the same row.
 import type { ReactNode, RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EditorHandle } from '../editor/controller';
