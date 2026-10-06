@@ -1012,7 +1012,9 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       expect(disabled).toHaveLength(0); // C8b, C8c and C11: every summary row's tool is registered
 
       await panel.getByRole('button', { name: 'Add a tool' }).click();
-      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info']); // by MENU_ORDER; Log is menu: false
+      // E6 (a C8a test amended by E6): Source control registers from App.tsx's E6 block; outside MENU_ORDER, it follows the
+      // ranked tools.
+      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Source control']); // by MENU_ORDER; Log is menu: false
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
