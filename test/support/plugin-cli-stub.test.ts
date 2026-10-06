@@ -127,6 +127,18 @@ describe('the plugin CLI stub', () => {
     expect(state.installed.map((p) => p.id)).toEqual(['x@other']);
   });
 
+  it('installs a dependency from another marketplace, named name@marketplace, from that marketplace', () => {
+    const state = base();
+    state.marketplaces[0].plugins.push({ name: 'e8-cross', version: '0.1.0', description: null, dependencies: ['dep@review-deps'] });
+    state.marketplaces.push({ name: 'review-deps', source: 'github', repo: 'acme/review-deps', plugins: [{ name: 'dep', version: '1.0.0', description: null }] });
+    const out = run(commandLine('install', { plugin: 'e8-cross@e8-scratch', scope: 'user' }), state);
+    expect(mutationOutcome(out)).toMatchObject({ ok: true });
+    expect(out.state.installed.map((p) => [p.id, p.version])).toEqual([
+      ['e8-cross@e8-scratch', '0.1.0'],
+      ['dep@review-deps', '1.0.0'],
+    ]);
+  });
+
   it('fails on demand through the fail map; a shownCommand failure passes only with its --accept-command', () => {
     const state = base();
     state.fail.install = { failureCode: 'command_source_refused', message: 'This plugin runs a command its marketplace declares', shownCommand: { sha256: SHA, command: ['node', 'setup.js'] } };

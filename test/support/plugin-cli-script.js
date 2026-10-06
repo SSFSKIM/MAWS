@@ -5,8 +5,9 @@
 // `docs/doperpowers/evidence/p1-e8/g0-cli-probe.txt`) and the state the change leaves. The process half reads the state
 // beside the script, appends the argv to `calls.log`, holds a mutation while a `hold` file exists (printing one
 // progress line first, so a row's progress can be seen), and writes the state back. As the engine does (E8's
-// whole-branch review, 2.1.291): an install also installs the dependencies its plugin declares (`dependencies`, names in
-// the same marketplace), and a marketplace removal uninstalls every plugin installed from it.
+// whole-branch review, 2.1.291): an install also installs the dependencies its plugin declares (`dependencies`: a name
+// in the same marketplace, or `name@marketplace` for one the root allowlists), and a marketplace removal uninstalls every
+// plugin installed from it.
 'use strict';
 const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { basename, isAbsolute, join, resolve } = require('node:path');
@@ -181,8 +182,10 @@ function run(argv, input, ctx) {
       if (installation) return failed(`Plugin "${target}" is already installed`, 'already_in_goal_state');
       state.installed.push({ id: target, version: plugin.version, scope, enabled: true, projectPath });
       for (const dependency of plugin.dependencies || []) {
-        const id = `${dependency}@${marketplace}`;
-        const declared = state.marketplaces.find((m) => m.name === marketplace).plugins.find((p) => p.name === dependency);
+        const named = splitId(dependency);
+        const from = named.marketplace || marketplace;
+        const id = `${named.name}@${from}`;
+        const declared = state.marketplaces.find((m) => m.name === from)?.plugins.find((p) => p.name === named.name);
         if (declared && !state.installed.some((p) => p.id === id && p.scope === scope && (p.projectPath || null) === projectPath)) state.installed.push({ id, version: declared.version, scope, enabled: true, projectPath });
       }
       return ok({}, `Successfully installed plugin: ${target} (scope: ${scope})`);

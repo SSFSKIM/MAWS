@@ -110,16 +110,16 @@ export interface Manifest {
 
 // The manifest of one action as patterns over the tree's paths: the scope's settings file and `writesOf`'s others under
 // `config/plugins/`, the segments the action names filled in, any other `<…>` one segment; a trailing `/` covers the
-// directory and everything under it. A marketplace removal's `uninstalls` add the settings of each scope its plugins
-// are at: the config home's, and `project`'s (the audited project) where one is installed there; another project's
-// files lie outside the audited trees.
+// directory and everything under it. A marketplace removal's `uninstalls` add every settings file that may hold its
+// plugins or an override for them: the config home's, and `project`'s (the audited project, the session's directory);
+// another project's files lie outside the audited trees.
 export function manifestOf(action: PluginsAction, scope: PluginsScope, source: string | null, fill: Record<string, string>, uninstalls: readonly PluginsInstallation[] = [], project: string | null = null): Manifest {
-  const writes = writesOf(action, scope, source, uninstalls);
-  const filled = (path: string) => path.replace(/<([a-z]+)>/g, (whole, name: string) => fill[name] ?? whole);
+  const writes = writesOf(action, scope, source, uninstalls, project);
+  const filled = (path: string) => path.replace(/<([a-z-]+)>/g, (whole, name: string) => fill[name] ?? whole);
   const scopeSettings = writes.scopeSettings.flatMap((entry) => (entry.project === null ? [`config/${entry.file}`] : entry.project === project ? [`project/${entry.file}`] : []));
   const paths = [...new Set([scope === 'user' ? `config/${writes.settings}` : `project/${writes.settings}`, ...writes.others.map((other) => `config/plugins/${filled(other)}`), ...scopeSettings])];
   const patterns = paths.map((path) => {
-    const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/<[a-z]+>/g, '[^/]+');
+    const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/<[a-z-]+>/g, '[^/]+');
     return new RegExp(path.endsWith('/') ? `^${escaped}` : `^${escaped}$`);
   });
   return { paths, covers: (path) => patterns.some((re) => re.test(path)) };

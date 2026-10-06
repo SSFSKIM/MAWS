@@ -884,7 +884,7 @@ test.describe('plugin management (E8)', () => {
     expect(argv).toEqual(['plugin', 'install', 'e8-probe@e8-scratch', '--scope', 'user', '--json']);
     await expect(sheet.locator('[data-plugins-argv]')).toHaveText('claude plugin install e8-probe@e8-scratch --scope user --json');
     const home = configHome(backend);
-    await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-probe/<version>/`, `${home}/plugins/cache/e8-scratch/<dependency>/`]);
+    await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-probe/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`]);
     await expect(sheet).toContainText(`and keeps its own records in ${home}/.claude.json`);
     await expect(sheet).toContainText(/Reloads plugins in \d+ running sessions?|No running session to reload/);
     expect(mutations(backend)).toEqual([]); // nothing ran before the confirm
@@ -1101,8 +1101,8 @@ test.describe('plugin management (E8)', () => {
     const group = await openAvailable(w, MARKET, 3);
     await group.locator('[data-plugin-row="e8-deps@e8-scratch"]').getByRole('button', { name: 'Install…' }).click();
     const install = sheetOf(page, 'install');
-    await expect(install.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-deps/<version>/`, `${home}/plugins/cache/e8-scratch/<dependency>/`]);
-    await expect(install).toContainText('and the cache directories of any dependencies the marketplace declares, each enabled in the settings file above');
+    await expect(install.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-deps/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`]);
+    await expect(install).toContainText('and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above');
     const shown = [await argvOf(install)];
     await install.getByRole('button', { name: 'Install', exact: true }).click();
     await expect(installedRow(w, 'e8-deps@e8-scratch')).toContainText('user · enabled · e8-scratch');
@@ -1116,10 +1116,21 @@ test.describe('plugin management (E8)', () => {
     await expect(remove).toContainText(/Also uninstalls 3 plugins: /);
     for (const id of ['e8-tools@e8-scratch (user)', 'e8-deps@e8-scratch (user)', 'e8-probe@e8-scratch (user)']) await expect(remove).toContainText(id);
     const writes = remove.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem');
-    await expect(writes).toHaveCount(7);
+    await expect(writes).toHaveCount(9);
     expect((await writes.allInnerTexts()).sort()).toEqual(
-      [`${home}/settings.json`, `${home}/plugins/known_marketplaces.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/`, `${home}/plugins/data/e8-tools@e8-scratch/`, `${home}/plugins/data/e8-deps@e8-scratch/`, `${home}/plugins/data/e8-probe@e8-scratch/`].sort(),
+      [
+        `${home}/settings.json`,
+        `${home}/plugins/known_marketplaces.json`,
+        `${home}/plugins/installed_plugins.json`,
+        `${home}/plugins/cache/e8-scratch/`,
+        `${home}/plugins/data/e8-tools@e8-scratch/`,
+        `${home}/plugins/data/e8-deps@e8-scratch/`,
+        `${home}/plugins/data/e8-probe@e8-scratch/`,
+        `${backend.project}/.claude/settings.json`, // where an enable or disable override for them may sit
+        `${backend.project}/.claude/settings.local.json`,
+      ].sort(),
     );
+    await expect(remove).toContainText('and any enable or disable override for them in these settings files');
     await expect(remove.getByRole('button', { name: 'Remove', exact: true })).toBeDisabled();
     await remove.getByRole('checkbox', { name: 'I understand' }).check();
     await remove.getByRole('button', { name: 'Remove', exact: true }).click();

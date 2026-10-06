@@ -56,13 +56,17 @@ describe('the plugins audit', () => {
     expect(auditOf(before, stray, manifest).unannounced).toEqual(['added config/plugins/known_marketplaces.json']);
   });
 
-  it('lets an install write the cache of a dependency the marketplace declares, and nothing of another marketplace', () => {
+  it('lets an install write the cache of a dependency the marketplace declares, in it or in an allowlisted marketplace', () => {
     const manifest = manifestOf('install', 'user', null, { marketplace: 'e8-scratch', plugin: 'e8-probe', id: 'e8-probe@e8-scratch' });
     const before = tree({ 'config/settings.json': 'a' });
     const after = tree({ 'config/settings.json': 'b', 'config/plugins/installed_plugins.json': 'i', 'config/plugins/cache/e8-scratch/e8-probe/0.1.0/': 'dir', 'config/plugins/cache/e8-scratch/e8-base/1.0.0/': 'dir' });
     expect(auditOf(before, after, manifest)).toMatchObject({ unannounced: [], unclassified: [] });
-    const elsewhere = tree({ ...after.files, 'config/plugins/cache/other/x/1.0.0/': 'dir' });
-    expect(auditOf(before, elsewhere, manifest).unannounced).toEqual(['added config/plugins/cache/other/x/1.0.0/']);
+    // a dependency from a marketplace the root one allowlists (allowCrossMarketplaceDependenciesOn) lands in that one's cache
+    const crossMarketplace = tree({ ...after.files, 'config/plugins/cache/review-deps/dep/1.0.0/': 'dir' });
+    expect(auditOf(before, crossMarketplace, manifest)).toMatchObject({ unannounced: [], unclassified: [] });
+    // anything else under plugins/ is still the manifest's to name
+    const stray = tree({ ...after.files, 'config/plugins/data/e8-probe@e8-scratch/x': 'd' });
+    expect(auditOf(before, stray, manifest).unannounced).toEqual(['added config/plugins/data/e8-probe@e8-scratch/x']);
   });
 
   it('lets a marketplace removal write what uninstalling its plugins writes: registry, its cache, their data, each scope’s settings', () => {
@@ -79,7 +83,12 @@ describe('the plugins audit', () => {
       'config/plugins/data/e8-probe@e8-scratch/',
       'config/plugins/data/e8-tools@e8-scratch/',
       'project/.claude/settings.json',
+      'project/.claude/settings.local.json',
     ]);
+    // a user-scoped plugin disabled with --scope local in the audited project: the removal clears that override too
+    const localOverride = manifestOf('marketplace-remove', 'user', 'directory', { name: 'e8-scratch' }, uninstalls.slice(0, 1), '/tmp/repo');
+    const overridden = tree({ 'config/settings.json': 'a', 'project/.claude/settings.local.json': 'disabled' });
+    expect(auditOf(overridden, tree({ 'config/settings.json': 'b', 'project/.claude/settings.local.json': '{}' }), localOverride)).toMatchObject({ unannounced: [], unclassified: [] });
     const before = tree({ 'config/settings.json': 'a', 'config/plugins/installed_plugins.json': 'i', 'config/plugins/cache/e8-scratch/e8-probe/0.1.0/': 'dir', 'project/.claude/settings.json': 'p' });
     const after = tree({ 'config/settings.json': 'b', 'config/plugins/installed_plugins.json': 'j', 'project/.claude/settings.json': 'q' });
     expect(auditOf(before, after, manifest)).toMatchObject({ unannounced: [], unclassified: [] });
