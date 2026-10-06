@@ -250,6 +250,9 @@ export class SessionStore {
       // the previous summary: a branch the engine stopped naming (a non-repository's `HEAD`, a detached checkout) must not
       // outlive it, and migration 3 cleared the `HEAD` an earlier summary stored.
       const branch = branchName(summary.gitBranch);
+      // E3: a summary stored before migration 4 (re-upserted unvalidated by a rebind) has no root fields; its transcript
+      // is left unknown in size so the next scan reads it again and fills them
+      const preV4 = summary.birthtimeMs === undefined;
       const facts: Record<string, Value> = {
         project_id: projectId,
         directory: location.realpath ?? summary.relocatedCwd ?? summary.directory ?? existing?.directory ?? '',
@@ -262,14 +265,14 @@ export class SessionStore {
         first_prompt: summary.firstPrompt ?? existing?.first_prompt ?? null,
         engine_version: summary.engineVersion ?? existing?.engine_version ?? null,
         transcript_path: summary.transcriptPath,
-        transcript_size: summary.size,
-        transcript_mtime_ms: summary.mtimeMs,
+        transcript_size: preV4 ? null : summary.size,
+        transcript_mtime_ms: preV4 ? null : summary.mtimeMs,
         first_record_at: summary.firstRecordAt,
         last_record_at: summary.lastRecordAt,
         last_assistant_text: summary.lastAssistantText,
         summary: JSON.stringify(summary),
-        root_uuid: summary.rootUuid, // E3 (A-16)
-        transcript_birthtime_ms: summary.birthtimeMs, // E3
+        root_uuid: summary.rootUuid ?? null, // E3 (A-16)
+        transcript_birthtime_ms: summary.birthtimeMs ?? null, // E3
       };
 
       if (!existing) {

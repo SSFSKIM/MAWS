@@ -203,6 +203,26 @@ describe('lineage in the index (X11)', () => {
     expect(lineageOf(thread.appId)).toEqual(lineage);
   });
 
+  // M2's review: a summary stored before migration 4 has neither field; a /clear rebind re-upserts it unvalidated
+  it('a /clear rebind re-upserts a summary stored before v4 without its root fields, and leaves it for the next scan', () => {
+    const lineage: Lineage = { kind: 'fork', parentAppSessionId: seen(1, 1_000).appId, parentEngineSessionId: sessionIdFor(1), openedBy: 'fork' };
+    const fork = launch(lineage);
+    const first = sessionIdFor(2);
+    index.sessions.bindEngineId(fork.appId, first);
+    index.sessions.upsertFromSummary(summary({ sessionId: first, directory: project.path, rootUuid: ROOT, birthtimeMs: 2_000 }));
+    const writer = new DatabaseSync(join(dir.path, 'index.sqlite'));
+    try {
+      writer.exec("UPDATE sessions SET summary = json_remove(summary, '$.rootUuid', '$.birthtimeMs') WHERE engine_session_id = '" + first + "'");
+    } finally {
+      writer.close();
+    }
+    expect(() => index.sessions.bindEngineId(fork.appId, sessionIdFor(3))).not.toThrow();
+    const old = index.sessions.getByEngineId(first)!;
+    expect(old.lineage).toBeNull(); // no root read yet: in no family
+    expect(index.sessions.bindings().find((b) => b.appSessionId === old.appId)).toMatchObject({ size: null, mtimeMs: null }); // re-read at the next scan
+    expect(lineageOf(fork.appId)).toEqual(lineage);
+  });
+
   it('deleting the original re-points its forks at the next-born member', () => {
     const a = seen(1, 1_000);
     const b = seen(2, 2_000);
