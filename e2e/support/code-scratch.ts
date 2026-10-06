@@ -30,7 +30,24 @@ export function generatedLine(i: number): string {
 const APP_LINES = Array.from({ length: 30 }, (_, i) => (i % 5 === 0 ? `export function f${i + 1}(): number {` : i % 5 === 4 ? '}' : `  const v${i + 1} = ${i + 1};`));
 export const APP_INSERTED = { 5: '// added at line 5', 14: '// added at line 14', 25: '// added at line 25' } as const;
 
-const README = ['# Scratch readme', '', 'A list:', '', '- one', '- two', '', '```ts', 'export const answer: number = 42;', '```', ''].join('\n');
+// E5 start: conflicts/merge.ts, ten lines holding one conflict block with a diff3 base, committed with the first commit
+// so no working-tree count moves (E5 execution document, Interfaces *Scratch additions*).
+export const CONFLICT_BLOCK = { mine: "export const value = 'mine';", base: "export const value = 'base';", theirs: "export const value = 'theirs';" } as const;
+export const MERGE_LINES = [
+  'export const before = 1;',
+  '<<<<<<< HEAD',
+  CONFLICT_BLOCK.mine,
+  '||||||| base',
+  CONFLICT_BLOCK.base,
+  '=======',
+  CONFLICT_BLOCK.theirs,
+  '>>>>>>> feature',
+  'export const after = 2;',
+  'export const last = 3;',
+];
+// E5 end
+
+const README =['# Scratch readme', '', 'A list:', '', '- one', '- two', '', '```ts', 'export const answer: number = 42;', '```', ''].join('\n');
 export const BIG_LOG_BYTES = 20 * 1024 * 1024;
 
 export interface CodeScratch {
@@ -70,6 +87,7 @@ export function buildCodeScratch(): CodeScratch {
   write('doc.pdf', '%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n');
   write('data.bin', Buffer.from([0x4d, 0x41, 0x00, 0x57, 0x53, 0x00, 0x01, 0x02, 0x00, 0xff, 0xfe, 0x00]));
   write('.editorconfig', 'root = true\n'); // a dotfile, which the tree shows
+  write('conflicts/merge.ts', `${MERGE_LINES.join('\n')}\n`); // E5
   git(dir, 'add', '-A');
   git(dir, 'commit', '--quiet', '-m', 'scratch');
   write('notes/guide.md', '# Guide\n\nRead the readme first, then the notes.\n');
