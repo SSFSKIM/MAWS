@@ -440,6 +440,25 @@ describe('source control store applies no status of its own and resumes a run fr
     release();
   });
 
+  it('says once when a run it follows ends, so the PR state is asked again; never for a run that had ended before', async () => {
+    const ended = vi.fn();
+    const main = scmMain((name) => (name === 'scm.remote.last' ? ok(snapshot({ running: false, exitCode: 0 })) : ok()));
+    const store = createScmStore(validated(main.bridge), { onRunEnded: ended });
+    const release = store.getState().resume(A);
+    await tick();
+    expect(store.getState().runs.get(A)).toMatchObject({ running: false });
+    expect(ended).not.toHaveBeenCalled(); // the snapshot's run ended before this mount
+    store.getState().started(A, planOf({ token: OTHER_TOKEN, kind: 'pr' }));
+    main.emit('scm.remote.output', out(1, 'https://github.com/o/r/pull/7\n', OTHER_TOKEN));
+    expect(ended).not.toHaveBeenCalled();
+    main.emit('scm.remote.output', exit(2, 0, OTHER_TOKEN));
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(ended).toHaveBeenCalledWith(A);
+    main.emit('scm.remote.output', exit(2, 0, OTHER_TOKEN)); // a repeat is no new end
+    expect(ended).toHaveBeenCalledTimes(1);
+    release();
+  });
+
   it('keeps another session’s events of the snapshot’s run that came before it, past its seq', async () => {
     let answer!: (value: unknown) => void;
     const main = scmMain(async (name) => (name === 'scm.remote.last' ? ok(await new Promise((resolve) => (answer = resolve))) : ok()));

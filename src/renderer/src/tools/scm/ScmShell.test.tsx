@@ -12,7 +12,7 @@ import { REVIEW_FILE_LINES_CAP, REVIEW_SCOPE_BYTES_CAP } from '../code/review/re
 import { useGit } from '../../stores/git';
 import { useLayout } from '../../stores/layout';
 import { fail, ok } from '../../test-support/code';
-import { A, DIR, refusal, SCRATCH_FILES, scmFile, scmMain, scmStatusOf, scmUntracked, statusOf, stubCanvas } from '../../test-support/scm';
+import { A, DIR, planOf, prOf, prStateOf, refusal, SCRATCH_FILES, scmFile, scmMain, scmStatusOf, scmUntracked, statusOf, stubCanvas, TOKEN } from '../../test-support/scm';
 import { useViewer } from '../code/viewer/viewer-store';
 import { ScmShell } from './ScmShell';
 import { SCM_REFRESH_MS, useScm } from './store';
@@ -276,6 +276,82 @@ describe('source control tool renders groups, selects a file and draws its hunks
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(rowsOf('Untracked')).toEqual([]);
+  });
+});
+
+describe('the header’s Push and Open PR open their sheets, and the Output follows the session’s run', () => {
+  const remoteAction = (name: string) => document.querySelector<HTMLButtonElement>(`[data-scm-remote-action="${name}"]`);
+
+  it('offers Push for the commits ahead and Open PR only once pushed, each opening its sheet', async () => {
+    renderShell();
+    await waitFor(() => expect(remoteAction('push')?.disabled).toBe(false));
+    expect(remoteAction('push')?.textContent).toBe('Push');
+    expect(remoteAction('push')?.title).toBe('Push 1 commit to origin/main');
+    expect(remoteAction('pr')).toMatchObject({ disabled: true, title: 'Push first' });
+    fireEvent.click(remoteAction('push')!);
+    const sheet = await screen.findByRole('dialog', { name: 'Push' });
+    await waitFor(() => expect(sheet.querySelector('[data-scm-plan-command]')?.textContent).toBe('/usr/bin/git push --progress origin refs/heads/main:refs/heads/main'));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    main.change(statusOf({ files: SCRATCH_FILES, ahead: 0 }));
+    await waitFor(() => expect(remoteAction('pr')?.disabled).toBe(false));
+    expect(remoteAction('push')).toMatchObject({ disabled: true, title: 'Nothing to push' });
+    fireEvent.click(remoteAction('pr')!);
+    expect(await screen.findByRole('dialog', { name: 'Open pull request' })).toBeTruthy();
+  });
+
+  it('reads Publish for a branch with no upstream of its own', async () => {
+    main.state.status = statusOf({ files: SCRATCH_FILES, branch: 'feature', upstream: 'origin/main', ahead: 2 });
+    renderShell();
+    await waitFor(() => expect(remoteAction('push')?.textContent).toBe('Publish'));
+    expect(remoteAction('push')).toMatchObject({ disabled: false, title: 'Publish feature' });
+  });
+
+  it('links the branch’s open PR in place of Open PR, from the PR state the summary’s row shares', async () => {
+    main.state.status = statusOf({ files: SCRATCH_FILES, ahead: 0 });
+    main.state.answers['scm.pr.state'] = () => ok(prStateOf({ pr: prOf() }));
+    renderShell();
+    const link = await screen.findByRole('button', { name: 'Open PR #7 on GitHub' });
+    expect(link.textContent).toBe('PR #7 ↗');
+    expect(remoteAction('pr')).toBeNull();
+    expect(main.callsOf('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }]);
+    fireEvent.click(link);
+    await waitFor(() => expect(main.callsOf('layout.openExternal')).toEqual([{ url: 'https://github.com/o/r/pull/7' }]));
+  });
+
+  it('reads the PR state again when the head or refs move, not on an index change', async () => {
+    renderShell();
+    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(1));
+    main.change(statusOf({ files: SCRATCH_FILES.slice(1), ahead: 1 })); // reason: index
+    await wait(20);
+    expect(main.callsOf('scm.pr.state')).toHaveLength(1);
+    const status = statusOf({ files: SCRATCH_FILES, ahead: 0 });
+    act(() => main.emit('git.changed', { repoRoot: DIR, status, reason: 'refs' }));
+    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(2));
+  });
+
+  it('asks nothing of gh and offers neither action in an untrusted checkout', async () => {
+    main.state.scm = scmStatusOf({ trusted: false });
+    renderShell();
+    await waitFor(() => expect(remoteAction('push')?.title).toBe('Trust the folder to push'));
+    expect(remoteAction('push')?.disabled).toBe(true);
+    expect(remoteAction('pr')).toMatchObject({ disabled: true, title: 'Trust the folder to open a pull request' });
+    await wait(20);
+    expect(main.callsOf('scm.pr.state')).toEqual([]);
+  });
+
+  it('resumes the session’s run below the commit form, and reads the PR state again when it ends', async () => {
+    main.state.answers['scm.remote.last'] = () =>
+      ok({ token: TOKEN, kind: 'push', plan: planOf(), running: true, exitCode: null, signal: null, output: 'Enumerating objects: 3, done.\n', truncated: false, seq: 1, startedAt: '2026-10-06T10:00:00.000Z' });
+    renderShell();
+    const output = await screen.findByRole('region', { name: 'Output' });
+    expect(main.callsOf('scm.remote.last')).toEqual([{ appSessionId: A }]);
+    expect(document.querySelector('[data-scm-commit]')?.compareDocumentPosition(output)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    await waitFor(() => expect(output.querySelector('[data-scm-output-text]')?.textContent).toBe('Enumerating objects: 3, done.'));
+    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(1));
+    act(() => main.emit('scm.remote.output', { appSessionId: A, token: TOKEN, seq: 2, kind: 'exit', exitCode: 0, signal: null }));
+    await waitFor(() => expect(main.callsOf('scm.pr.state')).toHaveLength(2));
   });
 });
 

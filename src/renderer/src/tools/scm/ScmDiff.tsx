@@ -29,9 +29,9 @@ const Note = ({ children, role }: { children: ReactNode; role?: 'status' }) => (
   </p>
 );
 
-// What the selection reads: null for a conflict and for a directory entry, which have no diff to draw.
 const NOT_UNTRACKED = 'not an untracked file:'; // C4's refusal of the `untracked` scope (src/main/git/service.ts)
 
+// What the selection reads: null for a conflict and for a directory entry, which have no diff to draw.
 export function diffTarget(directory: string, group: ScmGroupName, path: string): ScmDiffTarget | null {
   if (group === 'staged') return { directory, scope: 'staged' };
   if (group === 'unstaged') return { directory, scope: 'worktree' };

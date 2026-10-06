@@ -1,5 +1,6 @@
 // Every sentence the Source control tool shows (E6 execution document, Design §5 and §8; exact strings are decisions).
-// M3 holds the body's, the commit form's and the Discard sheet's; M4 adds the Push and PR sheets' and `shellWords`.
+// M3 holds the body's, the commit form's and the Discard sheet's; M4 the header's remote actions, the Push and PR
+// sheets', the Output's, and the display helpers `shellWords` and `destinationLabel`.
 import type { ScmChange, ScmGroupName } from './groups';
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -112,4 +113,80 @@ export const SCM_COPY = {
   deleteAck: (n: number) => `Delete ${plural(n, 'file')}; this cannot be undone`,
   discardSubmit: 'Discard',
   deleteSubmit: 'Delete',
+  // The header's remote actions (M4's decisions)
+  push: 'Push',
+  publish: 'Publish',
+  openPr: 'Open PR',
+  pushCommits: (n: number, upstream: string) => `Push ${plural(n, 'commit')} to ${upstream}`,
+  publishBranch: (branch: string) => `Publish ${branch}`,
+  nothingToPush: 'Nothing to push',
+  trustToPush: 'Trust the folder to push',
+  checkOutToPush: 'Check out a branch to push',
+  openPrFor: (branch: string) => `Open a pull request for ${branch}`,
+  pushFirst: 'Push first',
+  trustToOpenPr: 'Trust the folder to open a pull request',
+  checkOutToOpenPr: 'Check out a branch to open a pull request',
+  prLink: (n: number) => `PR #${n} ↗`,
+  prLinkLabel: (n: number) => `Open PR #${n} on GitHub`,
+  // The Push and PR sheets (Design §8)
+  pushSheetTitle: 'Push',
+  prSheetTitle: 'Open pull request',
+  planning: 'Preparing the command…',
+  remote: 'Remote',
+  destination: 'Destination',
+  branchRow: 'Branch',
+  branchTo: (branch: string, upstream: string) => `${branch} → ${upstream}`,
+  setsUpstream: 'sets upstream',
+  repointsUpstream: (from: string) => `sets upstream, re-pointing it from ${from}`,
+  commitsRow: 'Commits',
+  commits: (n: number) => plural(n, 'commit'),
+  command: 'Command',
+  runsIn: (cwd: string) => `Runs in ${cwd} with your login shell's environment and credential helpers.`,
+  pushSubmit: 'Push',
+  titleField: 'Title',
+  bodyField: 'Body',
+  baseField: 'Base',
+  draftField: 'Draft',
+  repository: 'Repository',
+  headRow: 'Head',
+  needTitle: 'Write a title',
+  needBase: 'Name the base branch',
+  prSubmit: 'Create pull request',
+  installGh: 'Install the GitHub CLI ↗',
+  ghInstallUrl: 'https://cli.github.com',
+  signInGh: 'Sign in',
+  ghLoginCommand: 'gh auth login', // typed into a Terminal tool exactly (M4's decision)
+  // The Output disclosure (Design §5)
+  output: 'Output',
+  runKind: { push: 'Push', pr: 'Pull request' },
+  remoteCommand: 'Remote command',
+  running: 'Running…',
+  done: 'Done',
+  exited: (code: number) => `Exited with code ${code}`,
+  stopped: (signal: string) => `Stopped (${signal})`,
+  notStarted: 'Did not start',
+  truncated: 'Output past 1 MiB was dropped',
+  cancelRun: 'Cancel',
+  cancelRunLabel: 'Cancel the running command',
+  openCreatedPr: (n: number) => `Open PR #${n} ↗`,
 } as const;
+
+// A command as a POSIX shell would read it, for display only: main spawns the plan's argv with no shell (Design §4), so
+// this is the sheet's rendering of exactly those words. A word of only safe characters stays bare; anything else,
+// the empty word included, is single-quoted whole (a `'` as `'\''`).
+const BARE_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+const shellWord = (word: string) => (BARE_WORD.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
+export function shellWords(program: string, argv: readonly string[]): string {
+  return [program, ...argv].map(shellWord).join(' ');
+}
+
+// A push destination as the sheet names it (Design §8): a URL as host and path without its scheme and `.git`
+// (`github.com/o/r`), an scp-like `user@host:path` the same way, a `file://` URL as its path, and a local path as it is.
+// Main has stripped any user-info already (`withoutUserInfo`).
+export function destinationLabel(url: string): string {
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\/(.*)$/i.exec(url);
+  if (scheme) return scheme[1]!.toLowerCase() === 'file' ? scheme[2]! : scheme[2]!.replace(/\/$/, '').replace(/\.git$/, '');
+  const scp = /^(?:[^@/]+@)?([^:/]+):(.+)$/.exec(url);
+  if (scp) return `${scp[1]}/${scp[2]!.replace(/\.git$/, '')}`;
+  return url;
+}

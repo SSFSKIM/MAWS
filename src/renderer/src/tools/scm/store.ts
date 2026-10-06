@@ -13,10 +13,10 @@ import type { StoreApi } from 'zustand/vanilla';
 import { create, type UseBoundStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
-import type { GitDiff, GitDiffInput } from '@shared/ipc/schema/git';
-import type { RemotePlan, ScmDiscardInput, ScmMutation, ScmRemoteOutput } from '@shared/ipc/schema/scm';
+import type { GitDiff, GitDiffInput, GitStatus } from '@shared/ipc/schema/git';
+import type { RemotePlan, ScmDiscardInput, ScmMutation, ScmRemoteOutput, ScmStatus } from '@shared/ipc/schema/scm';
 import { ipc } from '../../ipc/client';
-import { useCommand } from '../../ipc/query';
+import { queryClient, useCommand } from '../../ipc/query';
 import { useGit } from '../../stores/git';
 import { REVIEW_SCOPE_BYTES_CAP, splitPatch } from '../code/review/review-model';
 import type { FileDiff, ScopeDiff } from '../code/review/review-store';
@@ -60,7 +60,7 @@ function answered(diff: GitDiff): ScopeDiff {
 }
 
 // A bridge that throws (not a command's failure answer) is a failure too, so nothing stays in flight.
-async function settled<N extends CommandName>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
+export async function settled<N extends CommandName>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
   try {
     return await call;
   } catch (error) {
@@ -89,7 +89,12 @@ function mapWithout<K, V>(map: ReadonlyMap<K, V>, drop: (key: K) => boolean): Ma
   return new Map([...map].filter(([key]) => !drop(key)));
 }
 
-export function createScmStore(client: MawsBridge, options: { git?: typeof useGit } = {}): UseBoundStore<StoreApi<ScmStore>> {
+export interface ScmStoreOptions {
+  git?: typeof useGit; // C8a's store, whose new statuses re-read the held diffs
+  onRunEnded?(appSessionId: AppSessionId): void; // a run the session follows ended live (not one a snapshot found ended)
+}
+
+export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}): UseBoundStore<StoreApi<ScmStore>> {
   const held = new Map<string, Held>();
   const fileLoads = new Map<string, symbol>();
   const resumed = new Map<AppSessionId, Resumed>();
@@ -230,7 +235,10 @@ export function createScmStore(client: MawsBridge, options: { git?: typeof useGi
           entry.off = client.on('scm.remote.output', (event) => {
             if (entry.pending) return void entry.pending.push(event);
             const run = get().runs.get(appSessionId) ?? null;
-            if (event.appSessionId === appSessionId || event.token === run?.token) setRun(appSessionId, advanceRun(run, event));
+            if (event.appSessionId !== appSessionId && event.token !== run?.token) return;
+            const next = advanceRun(run, event);
+            setRun(appSessionId, next);
+            if (!next.running && (run === null || run.token !== next.token || run.running)) options.onRunEnded?.(appSessionId);
           });
           void settled(client.invoke('scm.remote.last', { appSessionId })).then((result) => {
             if (resumed.get(appSessionId) !== entry) return; // released meanwhile
@@ -286,10 +294,30 @@ export function createScmStore(client: MawsBridge, options: { git?: typeof useGi
   return store;
 }
 
-export const useScm = createScmStore(ipc, { git: useGit });
+// A push moves the upstream and a PR run creates the PR, and main drops its PR cache for the checkout when a run ends
+// (Design §6): every shown PR state is read again then.
+export const useScm = createScmStore(ipc, { git: useGit, onRunEnded: () => void queryClient.invalidateQueries({ queryKey: ['maws', 'scm.pr.state'] }) });
 
 // The checkout's trust, remotes and gh state (Design §6): a read query, so the tool's header and the summary's row
 // share one answer.
 export function useScmStatus(appSessionId: AppSessionId) {
   return useCommand('scm.status', { appSessionId });
+}
+
+// The branch's PR and its checks (Design §6): one query per session, which the tool's header and the summary's row
+// share (two surfaces cost one poll), polled every 2 minutes only while one of them is mounted and the window is shown,
+// and asked only for a branch of a trusted checkout with a remote.
+export const PR_STATE_POLL = { staleTime: 60_000, refetchInterval: 120_000, refetchIntervalInBackground: false } as const;
+export function prStateEnabled(status: GitStatus | null, scm: ScmStatus | undefined): boolean {
+  return status !== null && status.branch !== null && scm !== undefined && scm.trusted && scm.remotes.length > 0;
+}
+export function usePrState(appSessionId: AppSessionId, enabled: boolean) {
+  return useCommand('scm.pr.state', { appSessionId, refresh: false }, { ...PR_STATE_POLL, enabled });
+}
+
+// A link out of the app (a PR, gh's install page) through main's `layout.openExternal`.
+export function openLink(url: string): void {
+  void settled(ipc.invoke('layout.openExternal', { url })).then((result) => {
+    if (!result.ok) console.error('[scm] layout.openExternal failed', result.error);
+  });
 }

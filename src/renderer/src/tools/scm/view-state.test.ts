@@ -41,6 +41,7 @@ describe('source control view state', () => {
       sheet: { kind: 'push' },
       lastCommit: { sha: 'abc', subject: 'x' },
       notice: { kind: 'git_failed', text: 'hook failed', output: 'nope' },
+      output: true,
     });
     store.setState(forSession(store.getState(), B));
     expect(store.getState()).toMatchObject({
@@ -53,6 +54,7 @@ describe('source control view state', () => {
       sheet: null,
       lastCommit: null,
       notice: null,
+      output: false, // the Output was the other checkout's run
       mode: 'split', // the tool's, not the session's
     });
     expect([...store.getState().collapsed]).toEqual(['untracked']);

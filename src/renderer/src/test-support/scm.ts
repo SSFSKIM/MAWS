@@ -2,7 +2,7 @@
 // reads it (`scmMain`). Imported only by happy-dom suites.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitDiff, GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
-import type { RemotePlan, ScmRefusal, ScmStatus } from '@shared/ipc/schema/scm';
+import type { RemotePlan, ScmPrState, ScmRefusal, ScmStatus } from '@shared/ipc/schema/scm';
 import { fail, installFakeMain, ok } from './code';
 
 type Answer = ReturnType<typeof ok> | ReturnType<typeof fail>;
@@ -61,7 +61,24 @@ export const STAGED_PATCH = 'diff --git a/src/staged.ts b/src/staged.ts\nnew fil
 export const UNTRACKED_PATCH = 'diff --git a/untracked.txt b/untracked.txt\nnew file mode 100644\nindex 0000000..4444444\n--- /dev/null\n+++ b/untracked.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n';
 const diffFile = (path: string, insertions: number, deletions = 0) => ({ path, oldPath: null, insertions, deletions, binary: false });
 
-type ScmCommand = 'scm.stage' | 'scm.unstage' | 'scm.discard' | 'scm.commit' | 'scm.status' | 'git.diff';
+type ScmCommand =
+  | 'scm.stage'
+  | 'scm.unstage'
+  | 'scm.discard'
+  | 'scm.commit'
+  | 'scm.status'
+  | 'git.diff'
+  // M4: the remote commands, the PR state, and the reads the PR sheet's title default makes
+  | 'scm.push.plan'
+  | 'scm.push'
+  | 'scm.pr.plan'
+  | 'scm.pr.create'
+  | 'scm.remote.cancel'
+  | 'scm.remote.last'
+  | 'scm.pr.state'
+  | 'git.log'
+  | 'git.worktree.branch'
+  | 'layout.openExternal';
 
 // Main as the Source control body reads it: C4's watch and diffs over a scripted status, `scm.status`, and the four
 // mutations (each `{ ok: true }` with the current status unless the case scripts an answer). `change` replaces the
@@ -106,6 +123,26 @@ export function scmMain(init: { status?: GitStatus; scm?: ScmStatus } = {}) {
       case 'scm.discard':
       case 'scm.commit':
         return state.answers[name]?.(input) ?? ok({ ok: true, status: state.status, output: '' });
+      // M4: no run held, no PR, and plans as main issues them for the scripted status unless a case scripts otherwise
+      case 'scm.remote.last':
+        return state.answers[name]?.(input) ?? ok(null);
+      case 'scm.remote.cancel':
+        return state.answers[name]?.(input) ?? ok();
+      case 'scm.push.plan':
+        return state.answers[name]?.(input) ?? ok(planOf());
+      case 'scm.pr.plan':
+        return state.answers[name]?.(input) ?? ok(prPlanOf());
+      case 'scm.push':
+      case 'scm.pr.create':
+        return state.answers[name]?.(input) ?? ok({ started: true, token: input.token });
+      case 'scm.pr.state':
+        return state.answers[name]?.(input) ?? ok(prStateOf());
+      case 'git.log':
+        return state.answers[name]?.(input) ?? ok({ commits: [] });
+      case 'git.worktree.branch':
+        return state.answers[name]?.(input) ?? ok(null);
+      case 'layout.openExternal':
+        return state.answers[name]?.(input) ?? ok();
       default:
         return fail(`no answer for ${name} in the source control suites`);
     }
@@ -140,6 +177,38 @@ export function planOf(over: Partial<RemotePlan> = {}): RemotePlan {
     head: '0123456789abcdef0123456789abcdef01234567',
     upstream: 'origin/main',
     expiresAt: '2026-10-06T10:05:00.000Z',
+    ...over,
+  };
+}
+
+// A PR plan as main issues it for the scratch's `main` (M4): gh's repository bound with `--repo`.
+export function prPlanOf(over: Partial<RemotePlan> = {}): RemotePlan {
+  return planOf({
+    kind: 'pr',
+    program: '/opt/homebrew/bin/gh',
+    argv: ['pr', 'create', '--repo', 'o/r', '--head', 'main', '--base', 'main', '--title=main', '--body='],
+    repository: 'o/r',
+    ...over,
+  });
+}
+
+// `scm.pr.state` with no PR for the branch (M4); a case passes `pr` to show one.
+export function prStateOf(over: Partial<ScmPrState> = {}): ScmPrState {
+  return { checkedAt: '2026-10-06T10:00:00.000Z', branch: 'main', gh: { state: 'ready', path: '/opt/homebrew/bin/gh', version: '2.97.0' }, pr: null, error: null, ...over };
+}
+
+export function prOf(over: Partial<NonNullable<ScmPrState['pr']>> = {}): NonNullable<ScmPrState['pr']> {
+  return {
+    number: 7,
+    url: 'https://github.com/o/r/pull/7',
+    title: 'Panel PR',
+    state: 'OPEN',
+    isDraft: false,
+    reviewDecision: null,
+    baseRefName: 'main',
+    headRefName: 'feature',
+    mergeStateStatus: null,
+    checks: { summary: 'none', items: [] },
     ...over,
   };
 }

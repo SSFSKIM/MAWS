@@ -1,14 +1,16 @@
-// The Source control tool's body (E6 execution document, Design §5), top to bottom: the branch line (where M4's Push
-// and Open PR buttons go), the notice, the four groups as collapsible sections with their row and group actions, the
-// selected file's diff, the commit form (and below it M4's Output disclosure). The status is C4's through C8a's
-// `useGit`, whose watch this body holds while mounted; the lists move only when the watcher's `git.changed` arrives
-// (main refreshes the watcher after every mutation, Design §1). The trust comes from `scm.status`: an untrusted
-// checkout is listed and read, and every git action is disabled. A non-repository shows C8a's sentence alone.
+// The Source control tool's body (E6 execution document, Design §5), top to bottom: the branch line with the Push and
+// Open PR actions, the notice, the four groups as collapsible sections with their row and group actions, the selected
+// file's diff, the commit form, and the Output disclosure of the latest remote run. The status is C4's through C8a's
+// `useGit`, whose watch this body holds while mounted, as it holds the session's latest run (seeded from
+// `scm.remote.last`, so a run outlives a reload); the lists move only when the watcher's `git.changed` arrives (main
+// refreshes the watcher after every mutation, Design §1). The trust comes from `scm.status`: an untrusted checkout is
+// listed and read, and every git action is disabled. A non-repository shows C8a's sentence alone.
 import { useEffect, useLayoutEffect, useMemo } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { ipc } from '../../ipc/client';
 import { queryClient } from '../../ipc/query';
 import { NOT_A_REPOSITORY } from '../../sessions/branch-label';
@@ -20,6 +22,10 @@ import { DiscardSheet } from './DiscardSheet';
 import { FileRow, type RowActions } from './FileRow';
 import { checkoutPath, groupsOf, SCM_GROUPS, type ScmEntry, type ScmGroupName, type ScmGroups } from './groups';
 import { Notice } from './Notice';
+import { Output } from './Output';
+import { PrSheet } from './PrSheet';
+import { PushSheet } from './PushSheet';
+import { RemoteActions } from './RemoteActions';
 import { ScmDiff } from './ScmDiff';
 import { useScm, useScmStatus } from './store';
 import { applyRequest, followSelection, selectFile, toggleCollapsed, type ScmUi } from './view-state';
@@ -38,6 +44,7 @@ const Message = ({ children, role }: { children: string; role?: 'status' }) => (
 
 export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
   useEffect(() => useGit.getState().watch(directory), [directory]);
+  useEffect(() => useScm.getState().resume(appSessionId), [appSessionId]);
   const entry = useGit((s) => s.entries.get(directory));
   const status = entry?.status ?? null;
   const gitError = status === null ? (entry?.error ?? null) : null;
@@ -46,8 +53,8 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
   const trusted = scm.data ? scm.data.trusted : scm.isError ? false : null;
   // Trust is recorded in main by a session's setup (C10's Trust and start, the `trusting` phase), which the renderer
   // learns of only through `session.setup`: every phase re-reads `scm.status` (its query is shared with the summary's
-  // row), so the untrusted notice clears without a remount. Window focus and a re-shown tool (the host remounts it)
-  // re-read it too, as TanStack's defaults do for a stale query.
+  // row), so the untrusted notice clears without a remount. A re-shown tool (the host remounts it) and the window coming
+  // back into view (TanStack v5 listens to `visibilitychange`, not to window focus) re-read a stale query too.
   useEffect(() => ipc.on('session.setup', () => void queryClient.invalidateQueries({ queryKey: ['maws', 'scm.status'] })), []);
   const groups = useMemo(() => groupsOf(status), [status]);
 
@@ -90,7 +97,7 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
         <p data-scm-header className="m-0 min-w-0 flex-1 truncate text-ui-sm text-fg">
           {headerOf(status)}
         </p>
-        {/* M4: the Push and Open PR buttons (and the gh state when it matters) go here, beside the branch line. */}
+        <RemoteActions appSessionId={appSessionId} ui={ui} status={status} scm={scm.data} trusted={trusted} />
       </div>
       {scm.data && !scm.data.trusted ? (
         <p role="status" data-scm-untrusted className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-ui-sm text-warning">
@@ -117,8 +124,8 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
         </div>
       )}
       <CommitForm appSessionId={appSessionId} ui={ui} groups={groups} trusted={trusted} />
-      {/* M4: the Output disclosure for the latest remote run goes here, below the commit form. */}
-      <Sheets appSessionId={appSessionId} ui={ui} />
+      <Output appSessionId={appSessionId} ui={ui} />
+      <Sheets appSessionId={appSessionId} ui={ui} status={status} scm={scm.data} directory={directory} />
     </div>
   );
 }
@@ -191,9 +198,11 @@ function GroupSection({ name, groups, ui, selected, enabled, actions }: { name: 
   );
 }
 
-// The open sheet of this tool: M3's Discard sheet (M4 adds Push and PR beside it).
-function Sheets({ appSessionId, ui }: { appSessionId: AppSessionId; ui: StoreApi<ScmUi> }) {
+// The open sheet of this tool: Discard, Push or Open PR.
+function Sheets({ appSessionId, ui, status, scm, directory }: { appSessionId: AppSessionId; ui: StoreApi<ScmUi>; status: GitStatus; scm: ScmStatus | undefined; directory: string }) {
   const sheet = useStore(ui, (s) => s.sheet);
   if (sheet?.kind === 'discard') return <DiscardSheet appSessionId={appSessionId} ui={ui} entries={sheet.entries} />;
+  if (sheet?.kind === 'push') return <PushSheet appSessionId={appSessionId} ui={ui} status={status} scm={scm} />;
+  if (sheet?.kind === 'pr') return <PrSheet appSessionId={appSessionId} ui={ui} status={status} scm={scm} directory={directory} />;
   return null;
 }

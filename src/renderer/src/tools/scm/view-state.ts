@@ -43,6 +43,7 @@ export interface ScmUi {
   sheet: ScmSheet;
   lastCommit: { sha: string; subject: string } | null;
   notice: ScmNotice | null;
+  output: boolean; // the Output disclosure of the latest remote run is open (M4: it opens itself when a run starts)
   request: ScmParams | null; // an open() not yet applied against the shown session's status
 }
 
@@ -61,13 +62,14 @@ export function createScmUi(init: { session: AppSessionId | null; params?: ScmPa
     sheet: null,
     lastCommit: null,
     notice: null,
+    output: false,
     request: init.params ?? null,
   }));
 }
 
-// A pinned tool shown for another session starts over there, as Review does: the selection, the sheet, the last commit
-// and the notice were the other checkout's. The draft is put aside for the session it was written in and the new
-// session's own draft comes back; the mode and the collapsed groups are the tool's.
+// A pinned tool shown for another session starts over there, as Review does: the selection, the sheet, the last commit,
+// the notice and the Output's run were the other checkout's. The draft is put aside for the session it was written in
+// and the new session's own draft comes back; the mode and the collapsed groups are the tool's.
 export function forSession(ui: ScmUi, session: AppSessionId | null): Partial<ScmUi> {
   if (ui.session === session) return {};
   const drafts = new Map(ui.drafts);
@@ -85,6 +87,7 @@ export function forSession(ui: ScmUi, session: AppSessionId | null): Partial<Scm
     sheet: null,
     lastCommit: null,
     notice: null,
+    output: false,
     message: draft?.message ?? '',
     noVerify: draft?.noVerify ?? false,
     drafts,
