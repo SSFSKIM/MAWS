@@ -512,6 +512,9 @@ The executor replaces these lines with what actually ran and what it printed.
 - Observation (Task 2.6): a gap §Design 5 did not foresee: a start of an intent that recovery has not yet reached (recovery waiting because `engine.sessions` cannot be read) reconciles the existing record first, and while the host cannot be read such a start fails with "reconciliation failed: …" and keeps the record, rather than racing recovery's destructive steps.
   Evidence: task 10's report; `src/main/sessions/service.ts` (20d3f3e7).
 
+- Observation (Task 4.2, live, engine 2.1.292): Q6 a reconnect mid-turn delivers exactly the undelivered tail: 34 events on the first connection, 3 in the burst, 32 live, together equal to the launch's 69-event `session.events` list with no duplicate or gap, the burst starting right after the first connection's last event. Q7 after `kill -9` of the supervisor mid-turn, a fresh supervisor broke the stale lock and served 1.1 s later, its sweep reported `orphansKilled: 1` (the engine exited on SIGTERM within 2.4 s, its Bash tool's `sleep` in its own group stopped too), and `session.launch` with `resume` of the engine session reached ready and the model recalled the interrupted command from the disk transcript. US$0.052.
+  Evidence: `spikes/supervisor-probe/findings.txt` Q6, Q7; `results/q6-reconnect.json`, `results/q7-crash-resume.json` (78a81981).
+
 ## Decision Log
 
 - Decision: verification. One `doperpowers:adversarial-reviewer` round on this document before the executor starts (buildability against §9 E10, X13 and the code); `doperpowers:task-reviewer` per task with fix waves by separate workers, two rounds at most per task; the whole-branch review at `doperpowers:reviewer-high` against master, two rounds at most, tiny findings to `docs/tech-debt-tracker.md`; every reviewer on `model: "opus"` while A-22 holds.
