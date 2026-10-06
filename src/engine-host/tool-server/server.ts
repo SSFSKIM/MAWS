@@ -10,8 +10,8 @@
 // blocking ask, whose answer must be committed only once its write settled: residue 12); the tool settling after that
 // writes nothing more. Nothing here builds an event: the normaliser maps the `tools/call` rows and their answers.
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
-import { MAWS_SERVER_NAME, mawsServerInfo, mawsToolList, TOOL_ERRORS, type MawsToolName } from '@shared/maws/tools';
-import { McpMessageRequestSchema } from '@shared/wire/control';
+import { readMcpMessage, toolCallOf, type RpcId } from '@shared/maws/rpc';
+import { mawsServerInfo, mawsToolList, TOOL_ERRORS, type MawsToolName } from '@shared/maws/tools';
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { WriteOptions } from '../outbound-writer';
 
@@ -54,8 +54,6 @@ export const JSONRPC_INVALID_REQUEST = -32600;
 export const JSONRPC_METHOD_NOT_FOUND = -32601;
 const FALLBACK_PROTOCOL_VERSION = '2025-11-25'; // what 2.1.290 offers (E0a seq 5), for a client that names none
 
-type RpcId = string | number;
-type RpcMessage = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown };
 
 export interface MawsToolServerDeps {
   tools: McpToolDefinition[];
@@ -79,26 +77,25 @@ export class MawsToolServer {
     return this.calls.size;
   }
 
-  // Every `mcp_message` the engine sends; answered through `respond`, a call once its tool settles.
+  // Every `mcp_message` the engine sends, read as the normaliser reads it (src/shared/maws/rpc.ts); answered through
+  // `respond`, a call once its tool settles.
   accept(req: ControlRequestFrame): void {
     const requestId = req.request_id as RequestId;
-    const parsed = McpMessageRequestSchema.safeParse(req.request);
-    const message = (parsed.success && isObject(parsed.data.message) ? parsed.data.message : null) as RpcMessage | null;
-    const id = message !== null && (typeof message.id === 'string' || typeof message.id === 'number') ? message.id : null;
-    if (parsed.success && parsed.data.server_name !== MAWS_SERVER_NAME) {
+    const message = readMcpMessage(req.request);
+    if (message.kind === 'other_server') {
       // the engine addresses only servers the host declared; a stray name (E0a's probe-only `maws2`) is still answered
-      this.error(requestId, id ?? 0, JSONRPC_METHOD_NOT_FOUND, `MAWS serves no MCP server named "${parsed.data.server_name}"`);
+      this.error(requestId, message.id ?? 0, JSONRPC_METHOD_NOT_FOUND, `MAWS serves no MCP server named "${message.serverName}"`);
       return;
     }
-    if (message === null || message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
-      this.error(requestId, id, JSONRPC_INVALID_REQUEST, 'Invalid Request: not a JSON-RPC 2.0 message');
+    if (message.kind === 'invalid') {
+      this.error(requestId, message.id, JSONRPC_INVALID_REQUEST, 'Invalid Request: not a JSON-RPC 2.0 message');
       return;
     }
-    if (id === null) {
+    if (message.kind === 'notification') {
       this.write(requestId, { jsonrpc: '2.0', result: {}, id: 0 }); // a notification: the official SDK's answer (E0a seq 11)
       return;
     }
-    const params = isObject(message.params) ? (message.params as Record<string, unknown>) : {};
+    const { id, params } = message;
     switch (message.method) {
       case 'initialize': {
         const protocolVersion = typeof params.protocolVersion === 'string' ? params.protocolVersion : FALLBACK_PROTOCOL_VERSION;
@@ -145,21 +142,19 @@ export class MawsToolServer {
   }
 
   private async call(requestId: RequestId, id: RpcId, params: Record<string, unknown>): Promise<void> {
-    const name = params.name;
+    const { name, args, toolUseId } = toolCallOf(params);
     const tool = typeof name === 'string' ? this.tools.get(name) : undefined;
     if (!tool) {
       this.result(requestId, id, toolError(TOOL_ERRORS.unknownTool(String(name))));
       return;
     }
-    const meta = isObject(params._meta) ? (params._meta as Record<string, unknown>) : {};
-    const toolUseId = typeof meta['claudecode/toolUseId'] === 'string' ? (meta['claudecode/toolUseId'] as ToolUseId) : null;
     const controller = new AbortController();
     const call = { id, controller, answered: false };
     this.calls.set(requestId, call);
     this.deps.onChange?.();
     let result: McpToolResult;
     try {
-      result = await tool.call(params.arguments, { appSessionId: this.deps.appSessionId, cwd: this.deps.cwd(), toolUseId, requestId, signal: controller.signal });
+      result = await tool.call(args, { appSessionId: this.deps.appSessionId, cwd: this.deps.cwd(), toolUseId, requestId, signal: controller.signal });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.deps.log(`${tool.name} ${requestId} failed: ${message}`);
@@ -183,8 +178,4 @@ export class MawsToolServer {
   private write(requestId: RequestId, rpc: Record<string, unknown>): void {
     this.deps.respond(requestId, { mcp_response: rpc }).catch((error: unknown) => this.deps.log(`mcp_message ${requestId} not answered: ${error instanceof Error ? error.message : String(error)}`));
   }
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -9,9 +9,9 @@ import { QuestionSchema } from '@shared/graph/events';
 import type { AgentId, ParentToolUseId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { CanUseToolRequestSchema, ElicitationRequestSchema, HookCallbackRequestSchema, RequestUserDialogRequestSchema, UiCopyRequestSchema, UiPromptFillRequestSchema, UiPromptReadRequestSchema, UiPromptSuggestRequestSchema } from '@shared/wire/control';
 // E1 start
-import { McpMessageRequestSchema } from '@shared/wire/control';
 import { withQuestionIds } from '@shared/maws/ask';
-import { AskAnswerSchema, AskResultSchema, isMawsToolName, MAWS_SERVER_NAME, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
+import { readMcpMessage, toolCallOf } from '@shared/maws/rpc';
+import { AskAnswerSchema, AskResultSchema, isMawsToolName, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
 // E1 end
 import type { ControlRequestFrame, ControlResponseFrame } from '@shared/wire/frames';
 import { compact, stringOrNull, type Attribution, type EventSink } from './normalizer-support';
@@ -125,21 +125,19 @@ export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFr
       out.emit({ kind: 'plugin.ask', requestId, ask: 'prompt_suggest', plugin: null, text: req.text, mode: null }, attribution);
       return;
     }
-    // E1 start: the engine's JSON-RPC traffic for the `maws` server. Only a `tools/call` is remembered (its answer
-    // makes the event); the handshake (`initialize`, `notifications/*`, `ping`, `tools/list`) and another server's
-    // messages make nothing: they are not unknown, they are protocol
+    // E1 start: the engine's JSON-RPC traffic for the `maws` server. Only a `tools/call` the server serves is remembered
+    // (its answer makes the event), read exactly as the server reads it (src/shared/maws/rpc.ts: another server, a
+    // malformed envelope or a notification-like id is never served); the handshake (`initialize`, `notifications/*`,
+    // `ping`, `tools/list`) and another server's messages make nothing: they are not unknown, they are protocol
     case 'mcp_message': {
-      const req = McpMessageRequestSchema.parse(request);
-      const message = (req.message ?? {}) as { id?: unknown; method?: unknown; params?: unknown };
-      if (req.server_name !== MAWS_SERVER_NAME || message.method !== 'tools/call' || message.id === undefined) return;
-      const params = (typeof message.params === 'object' && message.params !== null ? message.params : {}) as { name?: unknown; arguments?: unknown; _meta?: Record<string, unknown> };
-      const tool = typeof params.name === 'string' ? params.name : '';
-      const correlator = params._meta?.['claudecode/toolUseId'];
-      const toolUseId = typeof correlator === 'string' ? (correlator as ToolUseId) : null;
-      const admitted = isMawsToolName(tool) && parseToolArguments(tool, params.arguments).ok;
-      const ask = admitted && tool === 'ask' ? parseToolArguments('ask', params.arguments) : null;
+      const message = readMcpMessage(request);
+      if (message.kind !== 'request' || message.method !== 'tools/call') return;
+      const { name, args, toolUseId } = toolCallOf(message.params);
+      const tool = typeof name === 'string' ? name : '';
+      const admitted = isMawsToolName(tool) && parseToolArguments(tool, args).ok;
+      const ask = admitted && tool === 'ask' ? parseToolArguments('ask', args) : null;
       const askId = ask?.ok ? (toolUseId ?? requestId) : null;
-      remember({ kind: 'mcp', toolUseId, callbackId: null, mcp: { tool, askId, toolUseId, args: params.arguments, admitted } });
+      remember({ kind: 'mcp', toolUseId, callbackId: null, mcp: { tool, askId, toolUseId, args, admitted } });
       if (ask?.ok && askId !== null) {
         // M2: the ask opens at the call, as the host holds it (question ids filled)
         const { title, context, blocking, questions } = ask.data;
