@@ -1,0 +1,15 @@
+E8 repository-source add probe · 2026-10-06T04:53:53Z · CLAUDE_CONFIG_DIR=/tmp/e8-g0/run1/claude-config
+{"command":"marketplace-add","outcome":"ok","marketplace":"claude-plugins-official","message":"SSH not configured, cloning via HTTPS: https://github.com/anthropics/claude-plugins-official.git\nRefreshing marketplace cache (timeout: 120s)…\nCloning repository (timeout: 120s): https://github.com/anthropics/claude-plugins-official.git\nClone complete, validating marketplace…\nCleaning up old marketplace cache…\nSuccessfully added marketplace: claude-plugins-official (declared in user settings)"}
+add exit 0 in 17 s
+[
+  {
+    "name": "claude-plugins-official",
+    "source": "github",
+    "repo": "anthropics/claude-plugins-official",
+    "installLocation": "/tmp/e8-g0/run1/claude-config/plugins/marketplaces/claude-plugins-official"
+  }
+]
+ 23M	/tmp/e8-g0/run1/claude-config/plugins/marketplaces/claude-plugins-official
+{"command":"marketplace-remove","outcome":"ok","marketplace":"claude-plugins-official","message":"Successfully removed marketplace: claude-plugins-official"}
+remove exit 0 in 9 s
+[]
