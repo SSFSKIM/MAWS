@@ -12,7 +12,7 @@ import { validateEventPayload } from '@shared/ipc/validate';
 import { READ_LINES } from '@shared/plugins/cli';
 import type { BinaryCheck } from '../binary-info';
 import type { ReloadTarget } from './reload-after';
-import { CLI_TIMEOUT_MS, KILL_GRACE_MS, PluginsRunner, pluginsEnvironment, SETTLE_MS, type PluginsRunnerDeps } from './runner';
+import { CLI_TIMEOUT_MS, KILL_GRACE_MS, PluginsRunner, pluginsEnvironment, SETTLE_MS, SHUTDOWN_KILL_GRACE_MS, type PluginsRunnerDeps } from './runner';
 
 let root: string;
 let fake: string; // the fake CLI's own directory: its behaviour, its call log, what it saw
@@ -236,14 +236,35 @@ describe('PluginsRunner mutations', () => {
 
   it('a stop while the environment is still being captured never spawns', async () => {
     let release!: (env: Record<string, string>) => void;
+    let entered!: () => void;
+    const capturing = new Promise<void>((r) => (entered = r)); // the capture stage itself, not just `started`
     const spawn = vi.fn(nodeSpawn);
-    const { runner, done, events } = make({ captureEnv: () => new Promise((r) => (release = r)), spawn: spawn as unknown as typeof nodeSpawn });
+    const captureEnv = () => {
+      entered();
+      return new Promise<Record<string, string>>((r) => (release = r));
+    };
+    const { runner, done } = make({ captureEnv, spawn: spawn as unknown as typeof nodeSpawn });
     const { opId } = await runner.start('install', { plugin: 'p@m' }, cwd);
-    await until(() => events.some((e) => e.opId === opId && e.phase === 'started'), 'started');
+    await capturing;
     await runner.stop();
     release({ PATH: '/usr/bin:/bin' });
     expect((await done(opId)).outcome).toMatchObject({ ok: false, error: { code: 'cancelled', message: 'stopped with the engine host' } });
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('a stop with the shutdown grace advances a cancel’s longer SIGKILL deadline, and the outcome stays cancelled', async () => {
+    behave(`trap '' TERM\nsleep 30\n`);
+    // the cancel's grace stays real (5 s); the shutdown's is shortened, so only an advanced deadline ends it in time
+    const { runner, done } = make({ timers: shortened({ [SHUTDOWN_KILL_GRACE_MS]: 200 }) });
+    const { opId } = await runner.start('install', { plugin: 'p@m' }, cwd);
+    await until(() => existsSync(join(fake, 'pid')) && readFileSync(join(fake, 'pid'), 'utf8').trim(), 'the pid');
+    const pid = Number(readFileSync(join(fake, 'pid'), 'utf8'));
+    expect(runner.cancel(opId)).toBe(true);
+    const started = Date.now();
+    await runner.stop(SHUTDOWN_KILL_GRACE_MS);
+    expect(Date.now() - started).toBeLessThan(2_000); // well before the cancel's 5 s
+    expect(alive(pid)).toBe(false);
+    expect((await done(opId)).outcome).toMatchObject({ ok: false, error: { code: 'cancelled', message: 'cancelled before the CLI finished' } });
   });
 
   it('a cancel kills a TERM-ignoring helper the CLI started with its output redirected, after the CLI itself exited', async () => {

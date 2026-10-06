@@ -80,6 +80,10 @@ class OwnedGroup {
   reason: StopReason | null = null;
   private leaderExited = false;
   private gone: Promise<void> | null = null;
+  private readonly handles = new Set<unknown>(); // every timer a stop scheduled
+  private killTimer: unknown = null; // the pending SIGKILL, until it is sent
+  private killDue = Infinity; // when it is due (Date.now() in ms)
+  private finish: () => void = () => {}; // resolves `gone`, once a stop began
 
   constructor(
     private readonly child: ChildProcess,
@@ -88,26 +92,50 @@ class OwnedGroup {
     child.once('exit', () => (this.leaderExited = true));
   }
 
+  // A later stop with a shorter grace (the host stopping during a cancel or a timeout) advances the pending SIGKILL to
+  // its own deadline, the give-up following it; the first stop's reason, and so the operation's outcome, stays.
   stop(reason: StopReason, graceMs: number): Promise<void> {
-    if (this.gone) return this.gone;
+    if (this.gone) {
+      this.advanceKill(graceMs);
+      return this.gone;
+    }
     this.reason = reason;
     this.signal('SIGTERM');
     this.gone = new Promise<void>((resolve) => {
-      const handles = new Set<unknown>();
-      const later = (fn: () => void, ms: number) => void handles.add(this.timers.setTimeout(fn, ms));
       const finish = () => {
-        for (const handle of handles) this.timers.clearTimeout(handle);
-        handles.clear();
+        for (const handle of this.handles) this.timers.clearTimeout(handle);
+        this.handles.clear();
+        this.killTimer = null;
         resolve();
       };
-      later(() => {
-        this.signal('SIGKILL');
-        later(finish, REAP_GIVE_UP_MS);
-      }, graceMs);
-      const poll = () => (this.alive() ? later(poll, REAP_POLL_MS) : finish());
+      this.finish = finish;
+      this.scheduleKill(graceMs);
+      const poll = () => (this.alive() ? this.later(poll, REAP_POLL_MS) : finish());
       poll();
     });
     return this.gone;
+  }
+
+  private later(fn: () => void, ms: number): unknown {
+    const handle = this.timers.setTimeout(fn, ms);
+    this.handles.add(handle);
+    return handle;
+  }
+
+  private scheduleKill(graceMs: number): void {
+    this.killDue = Date.now() + graceMs;
+    this.killTimer = this.later(() => {
+      this.killTimer = null;
+      this.signal('SIGKILL');
+      this.later(() => this.finish(), REAP_GIVE_UP_MS);
+    }, graceMs);
+  }
+
+  private advanceKill(graceMs: number): void {
+    if (this.killTimer === null || Date.now() + graceMs >= this.killDue) return; // already sent, settled, or sooner
+    this.timers.clearTimeout(this.killTimer);
+    this.handles.delete(this.killTimer);
+    this.scheduleKill(graceMs);
   }
 
   private signal(sig: NodeJS.Signals): void {
