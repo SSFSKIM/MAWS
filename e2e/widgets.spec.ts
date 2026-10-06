@@ -158,6 +158,8 @@ async function openAvailable(w: Locator, marketplace: string, count: number): Pr
 }
 // A row's own status line (the widget holds several).
 const lineOf = (row: Locator) => row.getByRole('status');
+// The engine's `--available` leaves out what is installed: an install's row leaves Available, its result stays beneath.
+const availableResult = (w: Locator, id: string) => lineOf(w.locator(`[data-plugins-section="available"] [data-plugin-result="${id}"]`));
 
 test.describe('interactive', () => {
   test('every name opens a widget from the palette, none listed as unavailable', async ({ backend }) => {
@@ -846,11 +848,11 @@ test.describe('plugin management (E8)', () => {
     expect(reads()).toContainEqual(['plugin', 'list', '--json']);
     expect(reads()).toContainEqual(['plugin', 'marketplace', 'list', '--json']);
     expect(reads().filter((argv) => argv.includes('--available'))).toEqual([]); // not before the section opens
-    const group = await openAvailable(w, MARKET, 3);
+    const group = await openAvailable(w, MARKET, 2); // the installed e8-tools is not offered
     expect(reads()).toContainEqual(['plugin', 'list', '--json', '--available']);
     await expect(group.locator('[data-plugin-row="e8-probe@e8-scratch"]').getByRole('button', { name: 'Install…' })).toBeVisible();
-    await expect(group.locator('[data-plugin-row="e8-tools@e8-scratch"]')).toContainText('installed');
-    await expect(group.locator('[data-plugin-row="e8-tools@e8-scratch"]').getByRole('button', { name: 'Install…' })).toHaveCount(0);
+    await expect(group.locator('[data-plugin-row="e8-extra@e8-scratch"]').getByRole('button', { name: 'Install…' })).toBeVisible();
+    await expect(group.locator('[data-plugin-row="e8-tools@e8-scratch"]')).toHaveCount(0);
     expect(mutations(backend)).toEqual([]);
     expect(backend.consoleErrors()).toEqual([]);
   });
@@ -858,7 +860,7 @@ test.describe('plugin management (E8)', () => {
   test('install at user scope: the sheet names the command and the writes; the row shows the CLI’s progress, then its result; the CLI ran the sheet’s argv', async ({ backend }) => {
     const { page } = backend;
     const w = await openPlugins(backend);
-    const group = await openAvailable(w, MARKET, 3);
+    const group = await openAvailable(w, MARKET, 2);
     const row = group.locator('[data-plugin-row="e8-probe@e8-scratch"]');
     await row.getByRole('button', { name: 'Install…' }).click();
     const sheet = sheetOf(page, 'install');
@@ -878,9 +880,9 @@ test.describe('plugin management (E8)', () => {
     await expect(lineOf(row)).toHaveText('Holding install e8-probe@e8-scratch --scope user (plugin CLI stub)'); // the CLI's progress line
     await expect(row.getByRole('button', { name: 'Stop' })).toBeVisible();
     backend.cli.hold(false);
-    await expect(lineOf(row)).toHaveText('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · No running session to reload');
     await expect(installedRow(w, 'e8-probe@e8-scratch')).toContainText('user · enabled · e8-scratch'); // plugins.changed reread the list
-    await expect(row).toContainText('installed');
+    await expect(row).toHaveCount(0); // and Available, which no longer offers it
+    await expect(availableResult(w, 'e8-probe@e8-scratch')).toHaveText('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · No running session to reload');
     expect(mutations(backend)).toEqual([argv]); // G4: exactly the argument list the sheet showed
     expect(backend.consoleErrors()).toEqual([]);
   });
@@ -888,7 +890,7 @@ test.describe('plugin management (E8)', () => {
   test('install at project and at local scope: the argv carries the scope and the sheet names the project’s settings file', async ({ backend }) => {
     const { page, project } = backend;
     const w = await openPlugins(backend);
-    const group = await openAvailable(w, MARKET, 3);
+    const group = await openAvailable(w, MARKET, 2);
     const shown: string[][] = [];
     for (const [plugin, scope, label, file] of [
       ['e8-probe', 'project', 'Project', '.claude/settings.json'],
@@ -904,8 +906,9 @@ test.describe('plugin management (E8)', () => {
       await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem').first()).toHaveText(`${project}/${file}`);
       shown.push(argv);
       await sheet.getByRole('button', { name: 'Install', exact: true }).click();
-      await expect(lineOf(row)).toHaveText(`Successfully installed plugin: ${plugin}@e8-scratch (scope: ${scope}) · No running session to reload`);
       await expect(installedRow(w, `${plugin}@e8-scratch`, scope)).toContainText(`${scope} · enabled · e8-scratch`);
+      await expect(row).toHaveCount(0);
+      await expect(availableResult(w, `${plugin}@e8-scratch`)).toHaveText(`Successfully installed plugin: ${plugin}@e8-scratch (scope: ${scope}) · No running session to reload`);
     }
     expect(mutations(backend)).toEqual(shown);
     expect(backend.consoleErrors()).toEqual([]);
@@ -949,7 +952,7 @@ test.describe('plugin management (E8)', () => {
     backend.cli.setState({ ...state, marketplaces: state.marketplaces.map((m) => ({ ...m, plugins: m.plugins.map((p) => (p.name === 'e8-tools' ? { ...p, version: '1.1.0' } : p)) })) });
     await row.getByRole('button', { name: 'Update' }).click();
     await confirm('update', 'Update', ['plugin', 'update', id, '--scope', 'user', '--json']);
-    await expect(lineOf(row)).toHaveText('Successfully updated plugin: e8-tools from 1.0.0 to 1.1.0 (scope: user) · 1.0.0 → 1.1.0 · No running session to reload');
+    await expect(lineOf(row)).toHaveText('Plugin "e8-tools" updated from 1.0.0 to 1.1.0 for scope user. Restart to apply changes. · 1.0.0 → 1.1.0 · No running session to reload');
     await expect(row).toContainText('1.1.0');
 
     // Uninstall: destructive, so the default button waits for the acknowledgement; the row leaves, its result stays
@@ -970,7 +973,7 @@ test.describe('plugin management (E8)', () => {
   test('an engine error is the engine’s words and code in red; a marketplace-declared command opens a second sheet and Run it accepts it by its sha256, never -y', async ({ backend }) => {
     const { page } = backend;
     const w = await openPlugins(backend);
-    const group = await openAvailable(w, MARKET, 3);
+    const group = await openAvailable(w, MARKET, 2);
 
     // not_found: the catalogue the section read still offers e8-extra, which the marketplace no longer has
     const state = backend.cli.state();
@@ -978,9 +981,9 @@ test.describe('plugin management (E8)', () => {
     const extra = group.locator('[data-plugin-row="e8-extra@e8-scratch"]');
     await extra.getByRole('button', { name: 'Install…' }).click();
     await sheetOf(page, 'install').getByRole('button', { name: 'Install', exact: true }).click();
-    await expect(group.locator('summary')).toHaveText('e8-scratch · 2 plugins'); // read again once the CLI ended: no longer offered
+    await expect(group.locator('summary')).toHaveText('e8-scratch · 1 plugin'); // read again once the CLI ended: no longer offered
     await expect(extra).toHaveCount(0);
-    const failure = lineOf(w.locator('[data-plugins-section="available"] [data-plugin-result="e8-extra@e8-scratch"]')); // the result outlives its row
+    const failure = availableResult(w, 'e8-extra@e8-scratch'); // the result outlives its row
     await expect(failure).toHaveText('Plugin "e8-extra" not found in marketplace "e8-scratch". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`. · not_found');
     await expect(failure).toHaveClass(/text-danger/);
 
@@ -997,7 +1000,8 @@ test.describe('plugin management (E8)', () => {
     const accepted = await argvOf(declared);
     expect(accepted).toEqual(['plugin', 'install', 'e8-probe@e8-scratch', '--scope', 'user', '--accept-command', sha256, '--json']);
     await declared.getByRole('button', { name: 'Run it' }).click();
-    await expect(lineOf(probe)).toHaveText('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · No running session to reload');
+    await expect(probe).toHaveCount(0);
+    await expect(availableResult(w, 'e8-probe@e8-scratch')).toHaveText('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · No running session to reload');
     expect(mutations(backend)).toEqual([
       ['plugin', 'install', 'e8-extra@e8-scratch', '--scope', 'user', '--json'],
       ['plugin', 'install', 'e8-probe@e8-scratch', '--scope', 'user', '--json'],

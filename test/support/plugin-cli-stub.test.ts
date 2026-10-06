@@ -38,7 +38,8 @@ describe('the plugin CLI stub', () => {
       { id: 'e8-probe@e8-scratch', name: 'e8-probe', marketplace: 'e8-scratch', version: '0.1.0', scope: 'user', enabled: true, projectPath: null, installPath: '/tmp/e8/config/plugins/cache/e8-scratch/e8-probe/0.1.0', errors: [], notes: [] },
     ]);
     expect(marketplacesOf(run(['plugin', 'marketplace', 'list', '--json'], state).stdout)).toEqual([{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8/market', installLocation: '/tmp/e8/market' }]);
-    expect(availableOf(run(['plugin', 'list', '--json', '--available'], state).stdout)).toEqual([
+    expect(availableOf(run(['plugin', 'list', '--json', '--available'], state).stdout)).toEqual([]); // the engine leaves out what is installed
+    expect(availableOf(run(['plugin', 'list', '--json', '--available'], base()).stdout)).toEqual([
       { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'One skill and one command, for the probe', version: '0.1.0' },
     ]);
   });
@@ -63,7 +64,7 @@ describe('the plugin CLI stub', () => {
 
     expect(step(commandLine('update', { plugin: 'e8-probe@e8-scratch', scope: 'user' })).outcome).toMatchObject({ ok: true, result: { message: 'e8-probe is already at the latest version (0.1.0).', updateOutcome: 'up_to_date', oldVersion: '0.1.0', newVersion: '0.1.0' } });
     state.marketplaces[0].plugins[0].version = '0.2.0';
-    expect(step(commandLine('update', { plugin: 'e8-probe@e8-scratch', scope: 'user' })).outcome).toMatchObject({ ok: true, result: { updateOutcome: 'updated', oldVersion: '0.1.0', newVersion: '0.2.0' } });
+    expect(step(commandLine('update', { plugin: 'e8-probe@e8-scratch', scope: 'user' })).outcome).toMatchObject({ ok: true, result: { message: 'Plugin "e8-probe" updated from 0.1.0 to 0.2.0 for scope user. Restart to apply changes.', updateOutcome: 'updated', oldVersion: '0.1.0', newVersion: '0.2.0' } });
     expect(state.installed[0].version).toBe('0.2.0');
 
     expect(step(commandLine('uninstall', { plugin: 'e8-probe@e8-scratch', scope: 'user' })).outcome).toMatchObject({ ok: true, result: { keptData: false, message: 'Successfully uninstalled plugin: e8-probe (scope: user)' } });

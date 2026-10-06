@@ -97,7 +97,12 @@ function run(argv, input, ctx) {
     const { name, marketplace } = splitId(p.id);
     return { id: p.id, version: p.version, scope: p.scope, enabled: p.enabled, installPath: `${ctx.configHome}/plugins/cache/${marketplace}/${name}/${p.version}`, ...(p.projectPath ? { projectPath: p.projectPath } : {}) };
   };
-  const available = () => state.marketplaces.flatMap((m) => m.plugins.map((p) => ({ pluginId: `${p.name}@${m.name}`, name: p.name, description: p.description, marketplaceName: m.name, ...(p.version ? { version: p.version } : {}) })));
+  // the engine's `--available` leaves out what is installed (the E8 live run on 2.1.291)
+  const installedIds = new Set(state.installed.map((p) => p.id));
+  const available = () =>
+    state.marketplaces.flatMap((m) =>
+      m.plugins.filter((p) => !installedIds.has(`${p.name}@${m.name}`)).map((p) => ({ pluginId: `${p.name}@${m.name}`, name: p.name, description: p.description, marketplaceName: m.name, ...(p.version ? { version: p.version } : {}) })),
+    );
 
   // the reads
   if (!marketplaceVerb && verb === 'list') {
@@ -180,7 +185,7 @@ function run(argv, input, ctx) {
       const to = offered()?.version || from;
       if (from === to) return ok({ updateOutcome: 'up_to_date', oldVersion: from, newVersion: to }, `${name} is already at the latest version (${from}).`);
       installation.version = to;
-      return ok({ updateOutcome: 'updated', oldVersion: from, newVersion: to }, `Successfully updated plugin: ${name} from ${from} to ${to} (scope: ${scope})`);
+      return ok({ updateOutcome: 'updated', oldVersion: from, newVersion: to }, `Plugin "${name}" updated from ${from} to ${to} for scope ${scope}. Restart to apply changes.`); // the engine's words (live run, 2.1.291)
     }
     case 'uninstall':
       if (!installation) return failed(`Plugin "${target}" not found in installed plugins`, 'not_installed');
