@@ -93,7 +93,7 @@ export const resultSummary=r=>r?{subtype:r.subtype,is_error:r.is_error,num_turns
 // Handlers answer every engine→host request the protocol can send besides the ones a scenario registers itself, so a
 // recording never leaves one open. Throws when the scenario body failed, the engine exited non-zero or the owner-file
 // delta is not empty.
-export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[]}={},body){
+export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[],debugFile=run.debugFile}={},body){
  const env=engineEnv(run.home,vars);
  const {configHome,globalConfig}=assertScratch(env);
  await relayReady();
@@ -109,8 +109,8 @@ export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance
   p.on('ui_prompt_fill',()=>({filled:false}));
   p.on('ui_prompt_suggest',()=>({shown:false}));
   try{await body(p,{sessionId,run});}catch(e){failure=e;throw e;}
-  finally{noteDebug(p,run.debugFile);p.note({event:'spend',result:resultSummary(lastResult(p))});}
- },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,'--session-id',sessionId,'--max-budget-usd',SPEND_CAP,'--debug-file',run.debugFile,...flags]});
+  finally{noteDebug(p,debugFile);p.note({event:'spend',result:resultSummary(lastResult(p))});}
+ },{cwd:run.cwd,env,bin:BIN,dir:'fixtures/pass3/',model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,'--session-id',sessionId,'--max-budget-usd',SPEND_CAP,'--debug-file',debugFile,...flags]});
  const exit=await p.closed;
  const after=ownerTmpKeys();
  const same=JSON.stringify(after)===JSON.stringify(before);

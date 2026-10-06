@@ -1,0 +1,73 @@
+[
+  {
+    "at": "2026-10-06T03:29:44.959Z",
+    "id": "time:turn:dd4771e3-a95a-4e15-8ef7-d3ff34e9690a",
+    "kind": "time",
+    "label": "Oct 6, 2026 3:29 AM",
+    "turnId": "turn:dd4771e3-a95a-4e15-8ef7-d3ff34e9690a"
+  },
+  {
+    "at": "2026-10-06T03:29:44.959Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:dd4771e3-a95a-4e15-8ef7-d3ff34e9690a",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "dd4771e3-a95a-4e15-8ef7-d3ff34e9690a",
+    "placeholders": [],
+    "steer": false,
+    "text": "Call the AskUserQuestion tool exactly once with one question \"Which layout?\" (header \"Layout\", multiSelect false) and two options. Option 1: label \"A\", description \"Plain\", and a preview field whose value is exactly: Layout A in plain text. Option 2: label \"B\", description \"Markup\", and a preview field whose value is exactly: <pre style=\"margin:0\">Layout B</pre>. If the tool returns an error, do not call it again: reply with exactly the error text. Otherwise reply with exactly the chosen label.",
+    "turnId": "turn:dd4771e3-a95a-4e15-8ef7-d3ff34e9690a"
+  },
+  {
+    "answers": null,
+    "at": "2026-10-06T03:29:48.069Z",
+    "id": "question:toolu_01JMPB2qnkU9UWNh7yYcXhi7",
+    "kind": "question",
+    "questions": [
+      {
+        "header": "Layout",
+        "multiSelect": false,
+        "options": [
+          {
+            "description": "Plain",
+            "label": "A",
+            "preview": "Layout A in plain text"
+          },
+          {
+            "description": "Markup",
+            "label": "B",
+            "preview": "<pre style=\"margin:0\">Layout B</pre>"
+          }
+        ],
+        "question": "Which layout?"
+      }
+    ],
+    "toolUseId": "toolu_01JMPB2qnkU9UWNh7yYcXhi7",
+    "turnId": "turn:dd4771e3-a95a-4e15-8ef7-d3ff34e9690a"
+  },
+  {
+    "at": "2026-10-06T03:29:49.289Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfkGveBemG3uLomEn9zsn:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Option \"A\" in question \"Which layout?\": preview must contain HTML (previewFormat is set to \"html\"). Wrap content in a tag like <div> or <pre>.",
+    "messageUuid": "851efa19-7ee7-4d7b-b8b3-a0d249094df6",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:dd4771e3-a95a-4e15-8ef7-d3ff34e9690a"
+  },
+  {
+    "at": "2026-10-06T03:29:49.817Z",
+    "attempt": null,
+    "id": "error:replay:journal:104:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

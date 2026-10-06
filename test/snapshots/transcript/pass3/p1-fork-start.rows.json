@@ -1,0 +1,46 @@
+[
+  {
+    "at": "2026-10-06T03:29:35.798Z",
+    "id": "time:turn:b1277739-a5e8-440b-99de-90dd59edf04f",
+    "kind": "time",
+    "label": "Oct 6, 2026 3:29 AM",
+    "turnId": "turn:b1277739-a5e8-440b-99de-90dd59edf04f"
+  },
+  {
+    "at": "2026-10-06T03:29:35.798Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:b1277739-a5e8-440b-99de-90dd59edf04f",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "b1277739-a5e8-440b-99de-90dd59edf04f",
+    "placeholders": [],
+    "steer": false,
+    "text": "Remember the word ZEBRA. Reply with exactly OK.",
+    "turnId": "turn:b1277739-a5e8-440b-99de-90dd59edf04f"
+  },
+  {
+    "at": "2026-10-06T03:29:36.898Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfkGujeHQL15cUgBc7Fx1:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "6e08bace-ee22-4b84-8836-f6f697d1b07e",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:b1277739-a5e8-440b-99de-90dd59edf04f"
+  },
+  {
+    "at": "2026-10-06T03:29:39.165Z",
+    "attempt": null,
+    "id": "error:replay:journal:46:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

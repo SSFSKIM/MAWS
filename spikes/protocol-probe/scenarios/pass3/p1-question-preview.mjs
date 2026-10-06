@@ -10,9 +10,10 @@
 import {launch,scratchRun,removeRun,initPayload,success,check,endAsStop,initFrame,answer,toolResults,toolUses,resultSummary} from './p1-common.mjs';
 
 const PROMPT='Call the AskUserQuestion tool exactly once with one question "Which layout?" (header "Layout", multiSelect false) and two options. Option 1: label "A", description "Plain", and a preview field whose value is exactly: Layout A in plain text. Option 2: label "B", description "Markup", and a preview field whose value is exactly: <pre style="margin:0">Layout B</pre>. If the tool returns an error, do not call it again: reply with exactly the error text. Otherwise reply with exactly the chosen label.';
+// `validates`: whether the engine is expected to refuse option A's plain-text preview before any permission request.
 const ARMS=[
- {name:'p1-question-preview-unset',vars:{},arm:'unset (MAWS\'s launch: CLAUDE_CODE_ENTRYPOINT=sdk-ts, no CLAUDE_CODE_QUESTION_PREVIEW_FORMAT)'},
- {name:'p1-question-preview-html',vars:{CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:'html'},arm:'CLAUDE_CODE_QUESTION_PREVIEW_FORMAT=html'},
+ {name:'p1-question-preview-unset',vars:{},arm:'unset (MAWS\'s launch: CLAUDE_CODE_ENTRYPOINT=sdk-ts, no CLAUDE_CODE_QUESTION_PREVIEW_FORMAT)',validates:false},
+ {name:'p1-question-preview-html',vars:{CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:'html'},arm:'CLAUDE_CODE_QUESTION_PREVIEW_FORMAT=html',validates:true},
 ];
 // Every key or string value of a frame that contains "preview", with its path, so a hit is attributable.
 function previewMentions(o,path='',out=[]){
@@ -23,7 +24,7 @@ function previewMentions(o,path='',out=[]){
 }
 
 export default async()=>{
- for(const {name,vars,arm} of ARMS){
+ for(const {name,vars,arm,validates} of ARMS){
   const run=scratchRun('qp');
   try{
    await launch(name,run,{vars,provenance:{question:'Q4: an AskUserQuestion preview-format declaration in the handshake or a control; the one client knob',arm}},async p=>{
@@ -36,14 +37,22 @@ export default async()=>{
      return {behavior:'allow',updatedInput:{...r.input,answers:{[q.question]:'A'}}};
     });
     const init=success(await p.init(initPayload(run.cwd)),'initialize');
-    p.note({event:'handshake_preview_scan',where:'initialize answer',keys:Object.keys(init).sort(),mentions:previewMentions(init,'initialize')});
+    const initMentions=previewMentions(init,'initialize');
+    p.note({event:'handshake_preview_scan',where:'initialize answer',keys:Object.keys(init).sort(),mentions:initMentions});
     const r=await p.turn(PROMPT);
     const sysInit=initFrame(p);
-    p.note({event:'handshake_preview_scan',where:'system/init',keys:Object.keys(sysInit??{}).sort(),mentions:previewMentions(sysInit??{},'init')});
+    const sysMentions=previewMentions(sysInit??{},'init');
+    p.note({event:'handshake_preview_scan',where:'system/init',keys:Object.keys(sysInit??{}).sort(),mentions:sysMentions});
     const uses=toolUses(p).filter(t=>t.name==='AskUserQuestion');
-    p.note({event:'question_turn',arm,questionsSeenByHost:seen,toolUses:uses,toolResults:toolResults(p),answer:answer(p),result:resultSummary(r)});
+    const results=toolResults(p).filter(t=>uses.some(u=>u.id===t.tool_use_id));
+    p.note({event:'question_turn',arm,questionsSeenByHost:seen,toolUses:uses,toolResults:results,answer:answer(p),result:resultSummary(r)});
     check(p,'the model called AskUserQuestion with a preview on an option',uses.some(u=>(u.input?.questions?.[0]?.options??[]).some(o=>o.preview!==undefined)),uses);
     check(p,'the turn ended without an error',r.subtype==='success'&&!r.is_error,resultSummary(r));
+    check(p,'neither the initialize answer nor system/init mentions a preview format',initMentions.length===0&&sysMentions.length===0,{initMentions,sysMentions});
+    // the arm's distinguishing outcome: validation before the permission request (html), or the previews delivered to
+    // the host and the question answered (unset)
+    if(validates)check(p,'the engine refused the plain-text preview before any permission request',seen.length===0&&results.length>0&&results.every(t=>t.is_error)&&results.some(t=>/preview must contain HTML/.test(JSON.stringify(t.content))),{seen,results});
+    else check(p,'the host received both previews in can_use_tool and the answer reached the model',seen.length===1&&seen[0].previews.every(o=>typeof o.preview==='string')&&results.length>0&&results.every(t=>!t.is_error),{seen,results});
     await endAsStop(p);
    });
   }finally{removeRun(run);}

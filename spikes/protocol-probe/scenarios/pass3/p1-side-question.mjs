@@ -54,8 +54,12 @@ export default async()=>{
 
    // 4. The transcript.
    const recs=records(transcriptPath(run,sessionId));
-   const marks=recs.filter(r=>{const s=JSON.stringify(r);return /side_question|forkOrigin|btw|lowercase|While the main conversation/i.test(s);});
-   p.note({event:'jsonl_side_question_records',path:transcriptPath(run,sessionId),count:recs.length,keys:topLevelKeys(recs),querySources:[...new Set(recs.map(r=>r.querySource??null))],forkOrigins:[...new Set(recs.map(r=>r.forkOrigin??null))],matches:marks.map(summarise),summaries:recs.map(summarise)});
+   // every side question's own words (the planting prompt and its answers also say ZEBRA, so the questions' phrasings
+   // are the marks), plus the keys SPEC 11 names for the terminal's /btw fork
+   const marks=recs.filter(r=>{const s=JSON.stringify(r);return /side_question|forkOrigin|btw|Answer with just the word|lowercase letters|While the main conversation/i.test(s);});
+   const querySources=[...new Set(recs.map(r=>r.querySource??null))],forkOrigins=[...new Set(recs.map(r=>r.forkOrigin??null))];
+   p.note({event:'jsonl_side_question_records',path:transcriptPath(run,sessionId),count:recs.length,keys:topLevelKeys(recs),querySources,forkOrigins,matches:marks.map(summarise),summaries:recs.map(summarise)});
+   check(p,'the transcript holds no record of the three side questions',marks.length===0&&querySources.every(v=>v===null)&&forkOrigins.every(v=>v===null),{matches:marks.map(summarise),querySources,forkOrigins});
   });
  }finally{removeRun(run);}
 };

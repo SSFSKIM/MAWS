@@ -4,7 +4,7 @@
 // title, with a target uuid, with a bad type and empty, and the project directory before and after) and
 // p1-fork-session-flag (`--resume X --fork-session --session-id Y`, a recall turn, fork_conversation again, then the
 // parent's and the child's JSONL: every record summarised, the child's records in full, the lineage keys present).
-import {launch,scratchRun,removeRun,initPayload,success,check,endAsStop,initFrame,answer,records,transcriptPath,projectFiles,summarise,topLevelKeys,stat,randomUUID,delay} from './p1-common.mjs';
+import {launch,scratchRun,removeRun,initPayload,success,check,endAsStop,initFrame,answer,records,transcriptPath,projectFiles,summarise,topLevelKeys,stat,randomUUID,delay,join} from './p1-common.mjs';
 
 const REMEMBER='Remember the word ZEBRA. Reply with exactly OK.';
 const RECALL='What word did I ask you to remember? Reply with just that word.';
@@ -36,7 +36,8 @@ export default async()=>{
    p.note({event:'parent_jsonl',path:transcriptPath(run,X),count:recs.length,keys:topLevelKeys(recs),summaries:recs.map(summarise)});
   });
   const xBefore=stat(transcriptPath(run,X));
-  await launch('p1-fork-session-flag',run,{sessionId:Y,flags:['--resume',X,'--fork-session'],provenance:{question:'Q2: the --fork-session launch MAWS uses (C10), for comparison: the child id, the recall, the lineage the JSONL records'}},async p=>{
+  // the second launch shares the config home and repository (it resumes X) but gets its own debug log
+  await launch('p1-fork-session-flag',run,{sessionId:Y,flags:['--resume',X,'--fork-session'],debugFile:join(run.root,'debug-fork.log'),provenance:{question:'Q2: the --fork-session launch MAWS uses (C10), for comparison: the child id, the recall, the lineage the JSONL records'}},async p=>{
    p.note({event:'fork_paths',source:X,pinned:Y,repo:run.cwd});
    success(await p.init(initPayload(run.cwd)),'initialize');
    const r=await p.turn(RECALL);
@@ -55,6 +56,10 @@ export default async()=>{
    p.note({event:'jsonl_snapshot',label:'fork-child',records:yRecs});
    check(p,'the fork transcript exists under the pinned id',yRecs.length>0);
    check(p,'the source transcript is unchanged',JSON.stringify(xBefore)===JSON.stringify(xAfter),{xBefore,xAfter});
+   // the negative facts the findings rest on (X11's disk path): a re-probe on an engine that starts writing a lineage
+   // field must fail here rather than pass silently
+   check(p,'no record of the fork child carries forkedFrom, forkedFromSessionId or parentSessionId',lineage.forkedFrom===0&&lineage.forkedFromSessionId===0&&lineage.parentSessionId===0,lineage);
+   check(p,'the child re-writes the parent history under its own id with the parent record uuids',lineage.uuidsSharedWithParent>0&&lineage.sessionIds.filter(Boolean).every(id=>id===Y),lineage);
   });
  }finally{removeRun(run);}
 };
