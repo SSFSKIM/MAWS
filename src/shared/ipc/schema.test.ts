@@ -21,11 +21,14 @@ import { OPERATION_COMMANDS } from '../engine/operations';
 import * as files from './schema/files';
 // C8c end
 // C11 start
-import { SETTINGS_DEFAULTS_V8 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V9 } from '../settings/defaults';
 // C11 end
+// E9 start
+import * as voice from './schema/voice';
+// E9 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, voice /* E9 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -250,7 +253,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V8, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V9, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -285,7 +288,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V8, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V9, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -505,16 +508,16 @@ describe('ipc schema validates both directions', () => {
   describe('C11 entries', () => {
     it('adds its six commands under existing namespaces with their owners, and no namespace or event', () => {
       const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'layout.captureChords': 'main', 'engine.configure': 'engine-host' } as const;
-      // Every C11 command sits under a namespace that existed before C11 (C8c's `files` is the one added since).
+      // Every C11 command sits under a namespace that existed before C11 (C8c's `files` and E9's `voice` are added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files']);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'voice']);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
 
     it('settings.get and settings.changed carry the whole version 3 state', () => {
-      const state = { settings: { ...SETTINGS_DEFAULTS_V8, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      const state = { settings: { ...SETTINGS_DEFAULTS_V9, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -624,4 +627,72 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // C12 end
+  // E9 start: push-to-talk dictation (E9 execution document, Interfaces "X2 `voice.*`")
+  describe('E9 entries', () => {
+    const captureId = '3f2b8c1e-6d4a-4f7b-9a1e-2c5d8e7f6a90';
+    const permission = { microphone: 'authorized', speech: 'notDetermined' };
+    const status = { helper: { state: 'ready', path: '/x/maws-voice-helper' }, backend: 'helper', permission, systemLocale: 'ko-KR', locale: 'en-US', supportsOnDevice: true, locales: ['en-US', 'ko-KR'] };
+
+    it('adds the voice namespace: five commands owned by main, one event, every name bridged', () => {
+      expect(Object.keys(voice.commands)).toEqual(['voice.status', 'voice.start', 'voice.stop', 'voice.cancel', 'voice.openPrivacySettings']);
+      for (const spec of Object.values(voice.commands)) expect(spec.owner).toBe('main');
+      expect(Object.keys(voice.events)).toEqual(['voice.event']);
+      expect([...NAMES.voice.commands]).toEqual(Object.keys(voice.commands));
+    });
+
+    it('voice.status takes a bounded locale or null and answers the helper, the permissions and the locales', () => {
+      expect(validateCommandInput('voice.status', { locale: null }).ok).toBe(true);
+      expect(validateCommandInput('voice.status', { locale: 'en-US' }).ok).toBe(true);
+      expect(validateCommandInput('voice.status', { locale: 'e' }).ok).toBe(false);
+      expect(validateCommandInput('voice.status', {}).ok).toBe(false);
+      expect(validateCommandOutput('voice.status', status)).toEqual({ ok: true, value: status });
+      const unprobed = { ...status, helper: { state: 'missing', path: '/x' }, permission: null, systemLocale: null, supportsOnDevice: null, locales: [] };
+      expect(validateCommandOutput('voice.status', unprobed).ok).toBe(true);
+      expect(validateCommandOutput('voice.status', { ...status, helper: { state: 'failed', path: '/x', message: 'no ready line' } }).ok).toBe(true);
+      expect(validateCommandOutput('voice.status', { ...status, helper: { state: 'failed', path: '/x' } }).ok).toBe(false); // a failure says why
+      expect(validateCommandOutput('voice.status', { ...status, backend: 'helper-probe-only' }).ok).toBe(false);
+      expect(validateCommandOutput('voice.status', { ...status, permission: { ...permission, speech: 'granted' } }).ok).toBe(false);
+    });
+
+    it('voice.start takes a UUID capture id and answers accepted, or refused with a reason and a path', () => {
+      expect(validateCommandInput('voice.start', { captureId, locale: null }).ok).toBe(true);
+      expect(validateCommandInput('voice.start', { captureId: 'capture-1', locale: null }).ok).toBe(false);
+      expect(validateCommandInput('voice.start', { captureId, locale: 'x'.repeat(33) }).ok).toBe(false);
+      expect(validateCommandOutput('voice.start', { accepted: true }).ok).toBe(true);
+      expect(validateCommandOutput('voice.start', { accepted: true, reason: 'busy' }).ok).toBe(false);
+      for (const reason of ['busy', 'helper_missing', 'helper_failed', 'e2e_refused', 'cancelled']) {
+        expect(validateCommandOutput('voice.start', { accepted: false, reason, path: null }).ok, reason).toBe(true);
+      }
+      expect(validateCommandOutput('voice.start', { accepted: false, reason: 'denied', path: null }).ok).toBe(false);
+      expect(validateCommandOutput('voice.start', { accepted: false, reason: 'busy' }).ok).toBe(false);
+    });
+
+    it('voice.stop, voice.cancel and voice.openPrivacySettings take exactly their fields and answer nothing', () => {
+      for (const name of ['voice.stop', 'voice.cancel'] as const) {
+        expect(validateCommandInput(name, { captureId }).ok).toBe(true);
+        expect(validateCommandInput(name, { captureId, reason: 'keyup' }).ok).toBe(false);
+      }
+      expect(validateCommandInput('voice.openPrivacySettings', { pane: 'microphone' }).ok).toBe(true);
+      expect(validateCommandInput('voice.openPrivacySettings', { pane: 'speech' }).ok).toBe(true);
+      expect(validateCommandInput('voice.openPrivacySettings', { pane: 'camera' }).ok).toBe(false);
+      expect(validateCommandOutput('voice.openPrivacySettings', undefined).ok).toBe(true);
+    });
+
+    it('voice.event carries each kind with its capture id and refuses an unknown kind, code or key', () => {
+      const valid = [
+        { kind: 'permission', captureId, permission },
+        { kind: 'started', captureId, locale: 'en-US' },
+        { kind: 'partial', captureId, text: 'hello' },
+        { kind: 'final', captureId, text: 'Hello.', timedOut: false },
+        { kind: 'cancelled', captureId },
+        { kind: 'error', captureId, code: 'helper_crashed', message: 'the helper exited' },
+      ];
+      for (const event of valid) expect(validateEventPayload('voice.event', event)).toEqual({ ok: true, value: event });
+      expect(validateEventPayload('voice.event', { kind: 'ready', captureId }).ok).toBe(false);
+      expect(validateEventPayload('voice.event', { kind: 'error', captureId, code: 'teapot', message: '' }).ok).toBe(false);
+      expect(validateEventPayload('voice.event', { kind: 'final', captureId, text: 'x' }).ok).toBe(false);
+      expect(validateEventPayload('voice.event', { kind: 'partial', captureId, text: 'x', id: captureId }).ok).toBe(false);
+    });
+  });
+  // E9 end
 });

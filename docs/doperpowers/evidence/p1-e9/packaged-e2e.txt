@@ -1,0 +1,22 @@
+E9 M5 packaged e2e on the build:app output of 3869830a, 2026-10-06 00:38 KST:
+/tmp/maws-review/waitload20.sh && MAWS_E2E_EXECUTABLE=dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e e2e/voice.spec.ts
+The scripted cases skip on a packaged build by design (they need the harness build); the packaged case runs.
+
+slot slot.1 acquired at 00:38:45 load { 12.05 14.03 15.36 }
+  -   1 e2e/voice.spec.ts:167:1 › a hold shows Listening…, draws the partials greyed in place, settles the final on release, and ⌘Z removes it whole
+  -   2 e2e/voice.spec.ts:199:1 › dictation lands at a mid-paragraph caret with a leading space, and after a selection without replacing it
+  -   3 e2e/voice.spec.ts:229:1 › a release before the recognizer started cancels at once: no text, the control idle, nothing heard later
+  -   4 e2e/voice.spec.ts:251:1 › letting go of ⌥ first ends the hold, and the still-held Space types nothing
+  -   5 e2e/voice.spec.ts:274:1 › typing inside the greyed words keeps them and the letter, and ends the capture; the next partial changes nothing
+  -   6 e2e/voice.spec.ts:299:1 › the toolbar microphone toggles: a click starts listening, a second settles the final; a click while asking cancels
+  -   7 e2e/voice.spec.ts:337:1 › Enter while finishing sends the greyed words as they stand, and the late final changes nothing
+  -   8 e2e/voice.spec.ts:366:1 › with two composers the words land in the focused pane's only
+  -   9 e2e/voice.spec.ts:382:1 › a card docked over the composer refuses the hold with a notice and no start
+  -  10 e2e/voice.spec.ts:399:1 › the window losing focus mid-hold cancels and removes the interim words
+  -  11 e2e/voice.spec.ts:421:1 › a denied microphone shows the notice whose button records the pane and opens nothing
+  -  12 e2e/voice.spec.ts:440:1 › a missing helper refuses the hold with the path it looked at
+  -  13 e2e/voice.spec.ts:454:1 › a partial arriving after the final leaves the settled text unchanged
+  -  14 e2e/voice.spec.ts:482:1 › Settings › Voice reads the status from main and writes the language to settings version 9
+  ✓  15 e2e/voice.spec.ts:504:1 › packaged: the bundled helper answers voice.status from Contents/Resources and voice.start is refused under the harness (2.0s)
+  14 skipped
+  1 passed (2.4s)

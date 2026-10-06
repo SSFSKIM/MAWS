@@ -1,0 +1,224 @@
+E9 (voice) M5 gate log. Each entry: the command, the one-minute load when it started (from /tmp/maws-review/waitload20.sh
+and the slot's own line), and the tail of its output. Every heavy command ran through /tmp/maws-review/with-slot.sh
+after the load gate printed `eligible`. MAWS_E2E was unset in the shell; the e2e launcher sets it for the app.
+
+Pre-gate targeted checks (light, outside the slot), 2026-10-05 22:50 KST, load 369:
+  pnpm exec eslint e2e/voice.spec.ts src/renderer/src/harness/composer/ComposerHarness.tsx src/renderer/src/harness/composer/api.ts
+    -> no output, exit 0
+  pnpm exec tsc --noEmit -p tsconfig.e2e.json --composite false
+    -> no output, exit 0
+
+Load-gate history: three waits armed between 22:56 and 23:10 KST at a one-minute load of 375 to 390 were stopped
+before any opened (the controller paused M5 for M6); the gates below ran on 082a69e8 (M6's head 05c77377 plus M5's
+spec update).
+
+== typecheck   2026-10-05 23:33 KST
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> typecheck
+   start: eligible: load 14.32 after 0s · slot slot.2 acquired at 23:33:24 load { 14.32 31.95 147.30 }
+   tail:
+     $ tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false
+     (no diagnostics; exit 0)
+
+== lint   2026-10-05 23:34 KST
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> lint
+   start: eligible: load 17.63 after 0s · slot slot.2 acquired at 23:34:29 load { 17.63 29.41 137.85 }
+   tail:
+     $ eslint .
+     (no findings; exit 0)
+
+== unit suite   2026-10-05 23:34 KST
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> test --maxWorkers=4
+   start: eligible: load 15.25 after 0s · slot slot.1 acquired at 23:34:53 load { 15.25 27.90 134.17 }
+   tail:
+     Test Files  458 passed | 1 skipped (459)
+          Tests  6046 passed | 1 skipped (6047)
+     Type Errors  no errors
+       Duration  136.53s
+     (exit 0; one Node DEP0137 FileHandle deprecation warning printed by the run)
+
+== e2e:voice run 1   2026-10-05 23:36 KST   (exit 1: 12 passed, 2 failed, 1 skipped = the packaged case)
+   command: /tmp/maws-review/waitload20.sh && MAWS_E9_SHOTS=docs/doperpowers/evidence/p1-e9 /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:voice
+   start: eligible: load 17.40 after 0s
+   failures (full text in e2e-voice.txt):
+     - mid-paragraph caret: interim read `alpha be hello worldta` (expected `alpha hello world beta`): the caret placed by
+       eleven ArrowLefts was three positions behind when the hold began
+     - click toggle: the 300 ms window of the first partial `hello` had passed before the assertion (test timing; the
+       case now asserts its one partial)
+
+== e2e:voice run 2   2026-10-05 23:39 KST   (exit 1: 13 passed, 1 failed, 1 skipped = the packaged case)
+   command: as run 1
+   start: eligible: load 16.50 after 0s · slot slot.1 acquired at 23:39:09 load { 16.50 22.50 104.24 }
+   failure:
+     - mid-paragraph caret, now placed by Meta+ArrowUp then five ArrowRights: interim read `alph hello worlda beta`;
+       the caret one position behind. A PRODUCT DEFECT, not timing alone: `beginDictation` reads ProseMirror's
+       `state.selection`, but the hold's keydown is handled by C5's capture-phase dispatcher before ProseMirror's own
+       keydown (which flushes the DOM observer), so a caret moved by arrow keys whose `selectionchange` has not yet
+       been read is stale. The arrows' default action had already moved the DOM selection.
+   Gates stopped here at the controller's rule (a product defect is reported, a fixer takes it).
+   Screenshots from run 2: dictation-listening.png, dictation-denied.png, settings-voice.png.
+
+Unrun on this head: e2e:c7, build:app, the packaged checks, the packaged e2e.
+
+---- Rerun of the whole sequence on 47dfa1b2 (code tree 7d0442ac: the stale-caret fix) ----
+
+== typecheck   2026-10-05 23:47 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> typecheck
+   start: eligible: load 10.27 after 0s · slot slot.1 acquired at 23:47:47 load { 10.27 12.67 61.62 }
+   tail: $ tsc --noEmit -p tsconfig.node.json … && tsc … tsconfig.web.json … && tsc … tsconfig.e2e.json …   (no diagnostics)
+
+== lint   2026-10-05 23:48 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> lint
+   start: eligible: load 12.90 after 0s · slot slot.1 acquired at 23:48:22 load { 12.90 13.06 59.78 }
+   tail: $ eslint .   (no findings)
+
+== unit suite   2026-10-05 23:48 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> test --maxWorkers=4
+   start: eligible: load 13.56 after 0s · slot slot.1 acquired at 23:48:44 load { 13.56 13.21 58.75 }
+   tail:
+     Tests  6047 passed | 1 skipped (6048)
+     Type Errors  no errors
+     Duration  136.78s
+     (Node printed MODULE_TYPELESS_PACKAGE_JSON warnings for test/support/engine-pin.ts, pre-existing and not E9's)
+
+== e2e:voice run 3   2026-10-05 23:51 KST   (exit 0: 14 passed, 1 skipped = the packaged case, which runs below)
+   command: /tmp/maws-review/waitload20.sh && MAWS_E9_SHOTS=docs/doperpowers/evidence/p1-e9 /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:voice
+   start: eligible: load 18.97 after 0s · slot slot.1 acquired at 23:51:07 load { 18.97 16.08 52.78 }
+   tail: 14 passed (25.2s), 1 skipped; every case listed in e2e-voice.txt; screenshots refreshed
+
+== e2e:c7 run 1   2026-10-05 23:52 KST   (exit 1: 28 passed, 1 failed)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:c7
+   start: eligible: load 12.55 after 0s · slot slot.1 acquired at 23:52:24 load { 12.55 14.79 49.20 }
+   failure: e2e/composer.spec.ts:771 "W2: the shared column…" pins the toolbar's buttons exactly as C2 left them
+     ("no @, no mic"); E9's microphone now sits after the permission mode (Design §8, M3):
+       - StringMatching /^Model /
+       + "Dictate"
+       + "Model sonnet"
+     Not a product defect: a stale pin of C7's. The spec line gains 'Dictate' between the mode and the model (and its
+     comment says why); that edit is uncommitted, held for the next head.
+
+== e2e:c7 run 2   2026-10-05 23:54 KST   (exit 0: 29 passed, 1.1m; with the pin updated)
+   command: as run 1
+   start: eligible: load 9.39 after 0s · slot slot.1 acquired at 23:54:08 load { 9.39 13.23 44.60 }
+
+Paused here at the controller's request (a second stale-caret fix lands first; the whole sequence reruns on its head).
+Unrun on 7d0442ac: build:app, the packaged checks, the packaged e2e.
+
+---- The acceptance sequence on e196298e (code tree 26b2fc53: the second stale-caret fix; plus C7's W2 pin) ----
+
+== typecheck   2026-10-06 00:03 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> typecheck
+   start: eligible: load 18.87 after 30s · slot slot.2 acquired at 00:03:12 load { 18.87 17.34 31.67 }
+   tail: $ tsc --noEmit -p tsconfig.node.json … && tsc … tsconfig.web.json … && tsc … tsconfig.e2e.json …   (no diagnostics)
+
+== lint   2026-10-06 00:04 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> lint
+   start: eligible: load 15.88 after 60s · slot slot.1 acquired at 00:04:52 load { 15.88 17.42 30.16 }
+   tail: $ eslint .   (no findings)
+
+== unit suite   2026-10-06 00:05 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> test --maxWorkers=4
+   start: eligible: load 14.84 after 0s · slot slot.1 acquired at 00:05:15 load { 14.84 17.08 29.74 }
+   tail:
+      Test Files  458 passed | 1 skipped (459)
+           Tests  6053 passed | 1 skipped (6054)
+     Type Errors  no errors
+        Duration  116.07s
+
+== e2e:voice   2026-10-06 00:07 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && MAWS_E9_SHOTS=docs/doperpowers/evidence/p1-e9 /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:voice
+   start: eligible: load 16.36 after 0s · slot slot.1 acquired at 00:07:17 load { 16.36 17.29 28.11 }
+   tail: 14 passed (25.6s), 1 skipped (the packaged case); every case in e2e-voice.txt; screenshots refreshed
+
+== e2e:c7   2026-10-06 00:08 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:c7
+   start: eligible: load 17.16 after 0s · slot slot.1 acquired at 00:08:09 load { 17.16 17.11 27.41 }
+   tail: 29 passed (1.0m); every case in e2e-c7.txt
+
+== build:app   2026-10-06 00:10 KST   (exit 0; unsigned)
+   command: /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> build:app
+   start: eligible: load 15.44 after 0s · slot slot.1 acquired at 00:10:00 load { 15.44 17.16 26.22 }
+   tail:
+     $ scripts/build-voice-helper.sh
+     ✓ built in 19.85s
+     • packaging       platform=darwin arch=arm64 electron=44.4.5 appOutDir=dist/mac-arm64
+     • default Electron icon is used  reason=application icon is not set
+     • skipped macOS code signing  reason=identity explicitly is set to null
+
+== packaged e2e   2026-10-06 00:11 KST   (exit 0)
+   command: /tmp/maws-review/waitload20.sh && MAWS_E2E_EXECUTABLE=dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e -- e2e/voice.spec.ts
+   start: eligible: load 17.81 after 0s · slot slot.1 acquired at 00:10:59 load { 17.81 17.00 25.51 }
+   tail:
+     ✓  122 e2e/voice.spec.ts:504:1 › packaged: the bundled helper answers voice.status from Contents/Resources and voice.start is refused under the harness (825ms)
+     97 skipped
+     41 passed (3.8m)
+   note: the literal `--` reached Playwright, which ran its whole default suite on the packaged app, not the one file;
+     all 41 cases that run on a packaged build passed (packaged-e2e.txt lists them).
+
+== packaged checks   2026-10-06 00:12 KST   (light, outside the slot; full transcript in packaged-helper.txt)
+   ls -l: -rwxr-xr-x 144272 bytes, Contents/Resources/voice-helper/maws-voice-helper
+   codesign -dv: CodeDirectory v=20400 size=1226 flags=0x20002(adhoc,linker-signed) · Signature=adhoc
+   plutil: NSMicrophoneUsageDescription and NSSpeechRecognitionUsageDescription carry MAWS's two reasons
+   probe: {"type":"ready","protocol":1} then {"type":"probe","locales":[63 entries],"systemLocale":"ko-KR",
+          "locale":"ko-KR","supportsOnDevice":true,"permission":{"microphone":"authorized","speech":"notDetermined"}}
+
+All gates of Acceptance items 1 to 5 have run green on e196298e.
+
+== Acceptance item 1's named suites   2026-10-06 00:17 KST   (targeted, light: Concrete Steps' form, maxWorkers=2)
+   The full suite's default reporter prints only totals, so the named suites were listed by a verbose run of their files:
+   command: pnpm --dir <W> exec vitest run --maxWorkers=2 --reporter=verbose src/main/voice src/shared/settings/defaults.test.ts src/shared/ipc/schema.test.ts src/shared/keymap src/renderer/src/keymap src/renderer/src/composer/editor src/renderer/src/composer/dictation src/renderer/src/settings-tab/SettingsView.test.tsx
+   tail: Test Files 24 passed (24) · Tests 434 passed (434); every suite present, with its count of passing tests:
+     voice helper protocol lines parse (6) · voice service owns one capture and drops late events (19) ·
+     helper backend spawns, times out, and reports a crash (27) · scripted backend follows MAWS_E2E_VOICE (16) ·
+     settings v8 → v9 adds voice and keeps every earlier version (4) · chord Space matches on code (2) ·
+     dispatcher holds and releases a hold action (10) · editor dictation replaces interim text and settles the final (27) ·
+     dictation controller state machine (29) · settings view lists Voice (9) · ipc schema validates both directions (77)
+
+---- The final sequence on 3869830a (the final code tree: the whole-branch review's fix wave 77f72029, 94bd0874, 3869830a) ----
+Every heavy command ran as /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm --dir <W> <script>.
+
+== typecheck   2026-10-06 00:31 KST   (exit 0)
+   start: eligible: load 12.06 after 0s · slot slot.2 acquired at 00:31:09 load { 12.06 10.54 15.17 }
+   tail: $ tsc --noEmit -p tsconfig.node.json … ; tsc … tsconfig.web.json … ; tsc … tsconfig.e2e.json …   (no diagnostics)
+
+== lint   2026-10-06 00:31 KST   (exit 0)
+   start: eligible: load 10.73 after 0s · slot slot.2 acquired at 00:31:45 load { 10.73 10.37 14.92 }
+   tail: $ eslint .   (no findings)
+
+== unit suite (test --maxWorkers=4)   2026-10-06 00:32 KST   (exit 0)
+   start: eligible: load 15.69 after 0s · slot slot.2 acquired at 00:32:12 load { 15.69 11.53 15.20 }
+   tail:
+      Test Files  458 passed | 1 skipped (459)
+           Tests  6061 passed | 1 skipped (6062)
+     Type Errors  no errors
+        Duration  135.79s
+
+== e2e:voice (MAWS_E9_SHOTS=docs/doperpowers/evidence/p1-e9)   2026-10-06 00:34 KST   (exit 0)
+   start: eligible: load 18.08 after 30s · slot slot.2 acquired at 00:34:59 load { 18.08 14.60 15.80 }
+   tail: 14 passed (26.7s), 1 skipped (the packaged case); every case in e2e-voice.txt; screenshots refreshed
+
+== e2e:c7   2026-10-06 00:35 KST   (exit 0)
+   start: eligible: load 19.45 after 0s · slot slot.2 acquired at 00:35:53 load { 19.45 15.63 16.11 }
+   tail: 29 passed (1.0m); every case in e2e-c7.txt
+
+== build:app   2026-10-06 00:37 KST   (exit 0; unsigned)
+   start: eligible: load 12.88 after 0s · slot slot.2 acquired at 00:37:18 load { 12.88 14.56 15.66 }
+   tail:
+     ✓ built in 20.25s
+     • packaging       platform=darwin arch=arm64 electron=44.4.5 appOutDir=dist/mac-arm64
+     • skipped macOS code signing  reason=identity explicitly is set to null
+
+== packaged checks   2026-10-06 00:38 KST   (light, outside the slot; full transcript in packaged-helper.txt)
+   ls -l: -rwxr-xr-x 144272 bytes, Contents/Resources/voice-helper/maws-voice-helper
+   codesign -dv: CodeDirectory v=20400 size=1226 flags=0x20002(adhoc,linker-signed) · Signature=adhoc
+   plutil: NSMicrophoneUsageDescription and NSSpeechRecognitionUsageDescription carry MAWS's two reasons
+   probe: {"type":"ready","protocol":1} then {"type":"probe","locales":[63 entries],"systemLocale":"ko-KR",…}
+
+== packaged e2e   2026-10-06 00:38 KST   (exit 0)
+   command: MAWS_E2E_EXECUTABLE=dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS with the slot: pnpm --dir <W> e2e e2e/voice.spec.ts
+   start: eligible: load 14.04 after 0s · slot slot.1 acquired at 00:38:45 load { 12.05 14.03 15.36 }
+   tail:
+     ✓  15 e2e/voice.spec.ts:504:1 › packaged: the bundled helper answers voice.status from Contents/Resources and voice.start is refused under the harness (2.0s)
+     14 skipped
+     1 passed (2.4s)
+
+All gates of Acceptance items 1 to 5 have run green on 3869830a, the final code tree.

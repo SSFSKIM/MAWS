@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Embedded as the helper's __TEXT,__info_plist section by scripts/build-voice-helper.sh (E9 Design §1). -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>dev.maws.voice-helper</string>
+	<key>CFBundleName</key>
+	<string>MAWS Voice Helper</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MAWS uses the microphone to dictate into the composer while you hold the dictation key.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>MAWS transcribes your dictation on this Mac with Apple's speech recognition.</string>
+</dict>
+</plist>

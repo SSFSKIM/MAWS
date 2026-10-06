@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { IpcCommandError, QUERY_COMMANDS, useCommand } from './query';
-import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -21,7 +21,7 @@ describe('useCommand', () => {
   });
 
   it('resolves to the validated command output', async () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V8, theme: 'dark' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V9, theme: 'dark' }, resolvedTheme: 'dark' };
     answer({ ok: true, value: state });
     const { result } = renderHook(() => useCommand('settings.get', undefined), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -44,7 +44,8 @@ describe('useCommand is for reads only', () => {
     // C11: the widgets', Session info's and the Settings tab's reads (fs.state: its config home, M5), and C10's model catalogue
     const c11 = ['engine.binaryInfo', 'engine.models', 'engine.relayHealth', 'session.exportConversation', 'session.getHooksListing', 'session.getSandboxDialog', 'session.getSettings', 'session.getSkillsDialog', 'session.getStatus', 'session.getWorkspaceDiff', 'session.mcpStatus', 'settings.claudeUsage.status', 'fs.state'];
     const w3 = ['settings.userEngineDefaults']; // W3: an unstarted tab's model chip, the model selector
-    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11, ...w3].sort());
+    const e9 = ['voice.status']; // E9: Settings › Voice (a non-prompting probe)
+    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11, ...w3, ...e9].sort());
   });
 
   // Compile-time: writes and void-output commands are not queries (checked by `pnpm typecheck`); they go through

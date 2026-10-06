@@ -1,0 +1,29 @@
+E9 M5 packaged-helper checks on the build:app output of 3869830a (unsigned build; 2026-10-06 00:38 KST). The probe is
+the helper non-prompting self-report; no start command is ever sent. Run from a shell it reports the terminal TCC states.
+
+$ ls -l dist/mac-arm64/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper
+-rwxr-xr-x@ 1 new  staff  144272 10월  6 00:37 dist/mac-arm64/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper
+
+$ codesign -dv dist/mac-arm64/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper
+Executable=/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a73ed40e0ec0b7d29/dist/mac-arm64/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper
+Identifier=maws-voice-helper
+Format=Mach-O thin (arm64)
+CodeDirectory v=20400 size=1226 flags=0x20002(adhoc,linker-signed) hashes=35+0 location=embedded
+Signature=adhoc
+Info.plist=not bound
+TeamIdentifier=not set
+Sealed Resources=none
+Internal requirements=none
+
+$ plutil -p dist/mac-arm64/MAWS.app/Contents/Info.plist | grep -i UsageDescription
+  "NSAudioCaptureUsageDescription" => "This app needs access to audio capture"
+  "NSBluetoothAlwaysUsageDescription" => "This app needs access to Bluetooth"
+  "NSBluetoothPeripheralUsageDescription" => "This app needs access to Bluetooth"
+  "NSCameraUsageDescription" => "This app needs access to the camera"
+  "NSMicrophoneUsageDescription" => "MAWS uses the microphone to dictate into the composer while you hold the dictation key."
+  "NSSpeechRecognitionUsageDescription" => "MAWS transcribes your dictation on this Mac with Apple's speech recognition."
+
+$ printf '{"cmd":"probe"}\n{"cmd":"quit"}\n' | dist/mac-arm64/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper
+{"type":"ready","protocol":1}
+{"type":"probe","locales":["ar-SA","ca-ES","cs-CZ","da-DK","de-AT","de-CH","de-DE","el-GR","en-AE","en-AU","en-CA","en-GB","en-ID","en-IE","en-IN","en-NZ","en-PH","en-SA","en-SG","en-US","en-ZA","es-419","es-CL","es-CO","es-ES","es-MX","es-US","fi-FI","fr-BE","fr-CA","fr-CH","fr-FR","he-IL","hi-IN","hi-IN-translit","hi-Latn","hr-HR","hu-HU","id-ID","it-CH","it-IT","ja-JP","ko-KR","ms-MY","nb-NO","nl-BE","nl-NL","pl-PL","pt-BR","pt-PT","ro-RO","ru-RU","sk-SK","sv-SE","th-TH","tr-TR","uk-UA","vi-VN","wuu-CN","yue-CN","zh-CN","zh-HK","zh-TW"],"systemLocale":"ko-KR","locale":"ko-KR","supportsOnDevice":true,"permission":{"microphone":"authorized","speech":"notDetermined"}}
+(exit 0)

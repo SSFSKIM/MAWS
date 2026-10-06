@@ -13,6 +13,9 @@ export interface ActionSpec {
   sink: Sink;
   menu: 'app' | 'file' | 'view' | 'go' | 'help' | null; // 'app' is the application menu (MAWS › Settings… ⌘,), for C11's settings.open
   scope: 'app' | 'pane' | 'composer';
+  // E9: a hold action: its binding runs on the accepted keydown and is told when the hold ends (the key or a modifier
+  // of its chord let go, or the window losing the keyboard); `keymap/dispatcher.ts`, "Hold semantics"
+  hold?: true;
 }
 
 export const ACTIONS = {
@@ -53,6 +56,12 @@ export const ACTIONS = {
   'accounts.open':           { title: 'Usage',                    chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'gateway.openClaudeUsage': { title: 'Open ClaudeUsage',         chord: null,           sink: 'renderer', menu: null, scope: 'app' },
   // C11 end
+  // E9 start: push-to-talk dictation into the focused pane's composer (E9 execution document, Design §5): app-scoped like
+  // ⌘L, so it works wherever focus is. Unbound by default (the owner's ruling, 2026-10-06): the composer toolbar's
+  // microphone is the primary control; a chord bound in Settings › Keyboard holds to dictate (⌥Space suits; ⌃Space
+  // switches input sources on a multi-language Mac)
+  'composer.dictate':        { title: 'Hold to dictate',          chord: null,           sink: 'renderer', menu: null, scope: 'app', hold: true },
+  // E9 end
 } as const satisfies Record<string, ActionSpec>;
 
 export type ActionId = keyof typeof ACTIONS;

@@ -3,7 +3,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
 import { item, project, record } from '../../../test/support/builders';
-import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
 
 // A stand-in for Electron's Notification: records every instance, and lets a test fire its events.
 const electron = vi.hoisted(() => {
@@ -42,7 +42,7 @@ type Writer = import('../sessions/read-model').ReadModelWriter;
 const CHARTER = 'app-charter' as AppSessionId;
 const LOOSE = 'app-loose' as AppSessionId;
 const T = '2026-09-28T10:00:00Z';
-const SETTINGS: Settings = SETTINGS_DEFAULTS_V8;
+const SETTINGS: Settings = SETTINGS_DEFAULTS_V9;
 
 function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Writer) => void } = {}) {
   const model = new SessionReadModel('index');

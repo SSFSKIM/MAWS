@@ -37,4 +37,7 @@ export interface CardsHarnessApi {
   // failure); the rewind state machine's window, shortened for a run (null restores C3's 60 s).
   failNextSend(appSessionId: string): void;
   rewindWindow(ms: number | null): void;
+  // E9 (M5): reads of the dictation store, so a test asserts the capture's phase and the notice without parsing copy.
+  dictation(): { phase: string; appSessionId: string } | null;
+  voiceNotice(): { kind: string; message: string } | null;
 }

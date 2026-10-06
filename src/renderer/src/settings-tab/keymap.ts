@@ -12,9 +12,9 @@ const PUNCTUATION: Record<string, string> = {
   Backslash: '\\', Slash: '/', Comma: ',', Period: '.', Semicolon: ';', Quote: "'",
   BracketLeft: '[', BracketRight: ']', Minus: '-', Equal: '=', Backquote: '`',
 };
-// KeyboardEvent.key → accelerator token for named keys.
+// KeyboardEvent.key → accelerator token for named keys (Space is read by its code: E9, Option+Space types a no-break space).
 const NAMED: Record<string, string> = {
-  Tab: 'Tab', Enter: 'Enter', Escape: 'Escape', ' ': 'Space', Backspace: 'Backspace', Delete: 'Delete',
+  Tab: 'Tab', Enter: 'Enter', Escape: 'Escape', Backspace: 'Backspace', Delete: 'Delete',
   ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
 };
 const MODIFIER_KEYS = new Set(['Meta', 'Control', 'Alt', 'Shift', 'CapsLock', 'Fn', 'OS']);
@@ -26,6 +26,7 @@ function tokenOf(event: KeyEventLike): string {
   const digit = /^Digit([0-9])$/.exec(event.code);
   if (digit) return digit[1]!;
   if (PUNCTUATION[event.code]) return PUNCTUATION[event.code]!;
+  if (event.code === 'Space') return 'Space'; // E9
   if (NAMED[event.key]) return NAMED[event.key]!;
   if (FUNCTION_KEY.test(event.key)) return event.key;
   return event.code || event.key; // outside the vocabulary: parseChord refuses it with its own message

@@ -21,6 +21,7 @@ import { SlashPalette } from '../mentions/SlashPalette';
 import { MentionView } from './nodes/Mention';
 import { PastedView } from './nodes/Pasted';
 import { handlesPlainText, plainTextSlice } from './clipboard';
+import { DictationInterim } from './dictation-plugin'; // E9
 import type { EditorEnv } from './env';
 import { PASTED } from './doc';
 import { ComposerDocument, MentionNode, PastedNode } from './schema';
@@ -123,5 +124,6 @@ export function composerExtensions(env: () => EditorEnv): AnyExtension[] {
     }),
     TextPaste(env),
     PastedNumbers,
+    DictationInterim, // E9: the interim range of a dictation (dictation-plugin.ts)
   ];
 }

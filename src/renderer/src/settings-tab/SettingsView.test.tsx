@@ -5,12 +5,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
 import { useAttention } from '../stores/attention';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
-import { BINARY, settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
+import { BINARY, settingsBridge, VOICE_HELPER, type SettingsBridge } from '../test-support/settings-bridge';
 import { SettingsView } from './SettingsView';
 // C12 start
 import type { AppSessionId } from '@shared/graph/ids';
@@ -21,8 +21,9 @@ import { useSessions } from '../stores/sessions';
 
 let b: SettingsBridge;
 
-function renderView(initial: Settings = SETTINGS_DEFAULTS_V8, section: Parameters<typeof SettingsView>[0]['section'] = null) {
+function renderView(initial: Settings = SETTINGS_DEFAULTS_V9, section: Parameters<typeof SettingsView>[0]['section'] = null, answers: SettingsBridge['answers'] = {}) {
   b = settingsBridge(initial);
+  Object.assign(b.answers, answers); // before the first render, so the sections' first reads see them
   window.maws = b.bridge;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -47,12 +48,12 @@ afterEach(() => {
 });
 
 describe('settings tab writes one field per row', () => {
-  it('has the five sections, the index and its footer', () => {
+  it('has the six sections, the index and its footer', () => {
     renderView();
     const index = screen.getByRole('navigation', { name: 'Settings sections' });
-    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Appearance', 'Notifications']);
+    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications']); // E9: Voice after Keyboard
     expect(index.textContent).toContain("Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.");
-    for (const name of ['Engine', 'Gateway', 'Keyboard', 'Appearance', 'Notifications']) expect(screen.getByRole('region', { name })).toBeTruthy();
+    for (const name of ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications']) expect(screen.getByRole('region', { name })).toBeTruthy();
   });
 
   it('Engine: the binary, the config home, and the subagent model as one field', async () => {
@@ -206,7 +207,7 @@ describe('settings tab writes one field per row', () => {
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
       scrolled.push(this.getAttribute('aria-labelledby') ?? '');
     });
-    renderView(SETTINGS_DEFAULTS_V8, 'keyboard');
+    renderView(SETTINGS_DEFAULTS_V9, 'keyboard');
     expect(scrolled.at(-1)).toMatch(/keyboard/);
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
   });
@@ -260,7 +261,7 @@ describe('settings tab: the memory budget rows', () => {
   });
 
   it('Memory budget: a value below 0.5 GB or not a number is refused in words and the field goes back', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine, memoryBudgetMiB: 6144 } });
+    renderView({ ...SETTINGS_DEFAULTS_V9, engine: { ...SETTINGS_DEFAULTS_V9.engine, memoryBudgetMiB: 6144 } });
     const field = within(row('Limit')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
     expect(field.value).toBe('6.0');
     for (const typed of ['0.4', 'lots']) {
@@ -274,7 +275,7 @@ describe('settings tab: the memory budget rows', () => {
 
   // W7: the switch (settings version 7), on by default; off hides the limit and the stateful servers
   it('Memory budget: a switch, on by default, writes the switch whole; off hides the limit and the stateful servers and says what off means', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V8, engine: { ...SETTINGS_DEFAULTS_V8.engine, memoryBudgetMiB: 6144 } });
+    renderView({ ...SETTINGS_DEFAULTS_V9, engine: { ...SETTINGS_DEFAULTS_V9.engine, memoryBudgetMiB: 6144 } });
     const toggle = within(row('Memory budget')).getByRole('switch', { name: 'Release idle sessions to stay under a memory limit' });
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     expect(row('Limit')).toBeTruthy();
@@ -321,3 +322,111 @@ it('keyboard section selection places focus in Appearance, so Tab enters its con
   await user.tab();
   expect(screen.getByRole('region', { name: 'Appearance' }).contains(document.activeElement)).toBe(true);
 });
+
+// E9 start: Settings › Voice (E9 execution document, M4 pins): the shortcut as the keymap has it, the recognition
+// language as one field, and the status main's probe reports, with the System Settings pane for a denial.
+describe('settings view lists Voice', () => {
+  const status =
+    (over: Record<string, unknown> = {}) =>
+    (input: unknown) => ({
+      helper: { state: 'ready', path: VOICE_HELPER },
+      backend: 'helper',
+      permission: { microphone: 'authorized', speech: 'authorized' },
+      systemLocale: 'ko-KR',
+      locale: (input as { locale: string | null }).locale ?? 'ko-KR',
+      supportsOnDevice: true,
+      locales: ['ko-KR', 'en-US', 'fr-FR'],
+      ...over,
+    });
+  const language = () => within(row('Language')).getByRole('combobox', { name: 'Language' }) as HTMLSelectElement;
+  const optionTexts = () => [...language().options].map((o) => o.textContent);
+
+  it('renders the Voice heading right after Keyboard', () => {
+    renderView();
+    const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.getAttribute('aria-label'));
+    expect(headings.indexOf('Voice')).toBe(headings.indexOf('Keyboard') + 1);
+  });
+
+  it('the shortcut row shows the effective chord, and Change in Keyboard shows the Keyboard section', () => {
+    const scrolled: string[] = [];
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
+      scrolled.push(this.getAttribute('aria-labelledby') ?? '');
+    });
+    renderView({ ...SETTINGS_DEFAULTS_V9, keymap: { 'composer.dictate': 'Cmd+D' } });
+    expect(within(row('Shortcut')).getByText('⌘D')).toBeTruthy();
+    fireEvent.click(within(row('Shortcut')).getByRole('button', { name: 'Change in Keyboard' }));
+    expect(scrolled.at(-1)).toBe('settings-keyboard');
+    expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
+    expect(b.sets).toEqual([]); // the binding is edited where every binding is
+  });
+
+  // The owner's ruling (2026-10-06): the toolbar's microphone is the primary control and the hold ships unbound.
+  it('the shortcut is unbound by default and says so, points at the microphone, and still offers Change in Keyboard', () => {
+    renderView();
+    expect(within(row('Shortcut')).getByText('Unbound')).toBeTruthy();
+    expect(within(row('Shortcut')).getByRole('button', { name: 'Change in Keyboard' })).toBeTruthy();
+    expect(row('Shortcut').textContent).toContain("Click the microphone in the composer's toolbar to start dictating and again to stop.");
+    cleanup();
+    renderView({ ...SETTINGS_DEFAULTS_V9, keymap: { 'composer.dictate': 'Alt+Space' } });
+    expect(within(row('Shortcut')).getByText('⌥Space')).toBeTruthy();
+  });
+
+  it('the Language select lists System first, then the locales by name, and writes the choice as one field', async () => {
+    renderView();
+    await vi.waitFor(() => expect(optionTexts()).toEqual(['System (ko-KR)', 'English (United States)', 'French (France)', 'Korean (South Korea)']));
+    expect(language().value).toBe('');
+    expect(row('Language').textContent).toContain("Dictation runs on this Mac through Apple's speech recognition; MAWS stores no audio and no transcript.");
+    fireEvent.change(language(), { target: { value: 'en-US' } });
+    await vi.waitFor(() => expect(b.sets).toEqual([{ voice: { locale: 'en-US' } }]));
+    expect(language().value).toBe('en-US');
+    await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'voice.status', input: { locale: 'en-US' } })); // re-probed for the choice
+    fireEvent.change(language(), { target: { value: '' } });
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ voice: { locale: null } }));
+    expect(settings().voice).toEqual({ locale: null });
+  });
+
+  it('keeps a saved language the probe does not list, and offers System alone when the helper could not be probed', async () => {
+    renderView({ ...SETTINGS_DEFAULTS_V9, voice: { locale: 'de-DE' } }, null, {
+      'voice.status': status({ helper: { state: 'missing', path: VOICE_HELPER }, permission: null, systemLocale: null, supportsOnDevice: null, locales: [] }),
+    });
+    await vi.waitFor(() => expect(row('Helper').textContent).toContain('Not found'));
+    expect(optionTexts()).toEqual(['System', 'German (Germany)']);
+    expect(language().value).toBe('de-DE');
+  });
+
+  it('a denied microphone shows the denial with a button that opens its System Settings pane', async () => {
+    renderView(SETTINGS_DEFAULTS_V9, null, { 'voice.status': status({ permission: { microphone: 'denied', speech: 'restricted' } }) });
+    await vi.waitFor(() => expect(row('Microphone').textContent).toContain('Off for MAWS'));
+    expect(row('Speech recognition').textContent).toContain('Off for MAWS and cannot be turned on here');
+    fireEvent.click(within(row('Microphone')).getByRole('button', { name: 'Open System Settings' }));
+    await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'voice.openPrivacySettings', input: { pane: 'microphone' } }));
+    fireEvent.click(within(row('Speech recognition')).getByRole('button', { name: 'Open System Settings' }));
+    await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'voice.openPrivacySettings', input: { pane: 'speech' } }));
+  });
+
+  it('granted and not-yet-asked permissions read as such, with no button, and an on-device language says so', async () => {
+    renderView(SETTINGS_DEFAULTS_V9, null, { 'voice.status': status({ permission: { microphone: 'authorized', speech: 'notDetermined' } }) });
+    await vi.waitFor(() => expect(row('Speech recognition').textContent).toContain('Not asked yet · macOS asks the first time you dictate'));
+    expect(row('Microphone').textContent).toContain('Allowed');
+    expect(screen.queryByRole('button', { name: 'Open System Settings' })).toBeNull();
+    expect(row('Recognition').textContent).toContain('On this Mac');
+    expect(row('Helper').textContent).toContain(VOICE_HELPER);
+  });
+
+  it('a missing helper shows its path and how to build it', async () => {
+    renderView(SETTINGS_DEFAULTS_V9, null, {
+      'voice.status': status({ helper: { state: 'missing', path: '/repo/build/voice-helper/maws-voice-helper' }, permission: null, supportsOnDevice: null }),
+    });
+    await vi.waitFor(() => expect(row('Helper').textContent).toContain('/repo/build/voice-helper/maws-voice-helper'));
+    expect(row('Helper').textContent).toContain('pnpm build:helper'); // import.meta.env.DEV holds under vitest
+    expect(row('Microphone').textContent).toContain('Unknown until the helper answers');
+  });
+
+  it('a language without an on-device model is marked in the select and refused in words', async () => {
+    renderView({ ...SETTINGS_DEFAULTS_V9, voice: { locale: 'fr-FR' } }, null, { 'voice.status': status({ supportsOnDevice: false }) });
+    await vi.waitFor(() => expect(row('Recognition').textContent).toContain('No on-device model · download it in System Settings › Keyboard › Dictation'));
+    expect(language().selectedOptions[0]!.textContent).toBe('French (France) · no on-device model');
+    expect(optionTexts().filter((text) => text!.includes('no on-device model'))).toHaveLength(1);
+  });
+});
+// E9 end

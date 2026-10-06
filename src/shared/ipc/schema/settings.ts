@@ -3,7 +3,8 @@
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
 // memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
 // auto. Version 7 (W7): the memory budget's switch. Version 8 (W13): the engine's pin retired (MAWS runs the installed
-// Claude Code). Migrations live in `src/shared/settings/defaults.ts`, run by main's store; the schema never defaults.
+// Claude Code). Version 9 (E9): the dictation recognizer's locale. Migrations live in `src/shared/settings/defaults.ts`,
+// run by main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
 import { CHORD_PATTERN } from '../../keymap/chord';
@@ -66,9 +67,13 @@ const NotificationSettingsSchema = z.strictObject({ enabled: z.boolean(), sound:
 export const AutoFallbackSchema = PermissionModeSchema.exclude(['auto']);
 export type AutoFallback = z.infer<typeof AutoFallbackSchema>;
 const PermissionsSettingsSchema = z.strictObject({ autoFallback: AutoFallbackSchema });
+// E9 start: version 9, push-to-talk dictation (E9 execution document, Interfaces "Settings version 9"). The recognizer's
+// locale as a BCP-47 identifier (`en-US`); null = the system's current locale, which the helper resolves at each capture.
+export const VoiceSettingsSchema = z.strictObject({ locale: z.string().min(2).max(32).nullable() });
+// E9 end
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(8), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed)
+  version: z.literal(9), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.
@@ -81,6 +86,7 @@ export const SettingsSchema = z.strictObject({
   appearance: AppearanceSettingsSchema,
   // C11 end
   permissions: PermissionsSettingsSchema, // W3
+  voice: VoiceSettingsSchema, // E9
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -96,6 +102,7 @@ export const SettingsPatchSchema = z.strictObject({
   usage: UsageSettingsSchema.partial().optional(),
   appearance: AppearanceSettingsSchema.partial().optional(),
   permissions: PermissionsSettingsSchema.partial().optional(), // W3
+  voice: VoiceSettingsSchema.partial().optional(), // E9
 });
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
 

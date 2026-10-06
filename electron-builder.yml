@@ -27,3 +27,18 @@ mac:
   identity: null
   hardenedRuntime: false
   category: public.app-category.developer-tools
+  # E9 start (E9 execution document, M1; Design §4 and §10): the dictation helper and its permissions.
+  # Both usage descriptions are the reasons macOS shows in the Microphone and Speech Recognition dialogs.
+  extendInfo:
+    NSMicrophoneUsageDescription: MAWS uses the microphone to dictate into the composer while you hold the dictation key.
+    NSSpeechRecognitionUsageDescription: MAWS transcribes your dictation on this Mac with Apple's speech recognition.
+  # Applied only when the build is signed (MAWS_SIGN_IDENTITY); osx-sign signs the helper with the app's identity.
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+# `pnpm build:helper` (chained first in `pnpm build:app`) writes build/voice-helper/maws-voice-helper.
+extraResources:
+  - from: build/voice-helper
+    to: voice-helper
+    filter:
+      - maws-voice-helper
+# E9 end

@@ -4,7 +4,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V8 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V9 } from '@shared/settings/defaults';
 import { useSettings } from '../stores/settings';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { KeymapSection } from './KeymapSection';
@@ -15,7 +15,7 @@ function Live() {
   return <KeymapSection keymap={keymap} />;
 }
 function renderSection(keymap = {}) {
-  b = settingsBridge({ ...SETTINGS_DEFAULTS_V8, keymap });
+  b = settingsBridge({ ...SETTINGS_DEFAULTS_V9, keymap });
   window.maws = b.bridge;
   render(<Live />);
 }
@@ -66,6 +66,15 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
     expect(chordOf('Next Needs-you')).toBe('Unbound');
     fireEvent.keyDown(record('Next Needs-you'), { key: 'J', code: 'KeyJ', metaKey: true, shiftKey: true });
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ keymap: {} }));
+  });
+
+  // E9 M6: the owner's ruling (2026-10-06) ships the hold to dictate unbound; this row is where a chord is bound
+  it('Hold to dictate is unbound by default and records ⌥Space by its code', async () => {
+    renderSection();
+    expect(chordOf('Hold to dictate')).toBe('Unbound');
+    fireEvent.keyDown(record('Hold to dictate'), { key: ' ', code: 'Space', altKey: true }); // Option+Space types a no-break space
+    await vi.waitFor(() => expect(b.sets).toEqual([{ keymap: { 'composer.dictate': 'Alt+Space' } }]));
+    expect(chordOf('Hold to dictate')).toBe('⌥Space');
   });
 
   it('Reset to defaults clears every override after a confirm', async () => {

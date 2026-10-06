@@ -847,7 +847,8 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   await page.keyboard.press('Backspace');
   await expect.poll(async () => (await box.boundingBox())!.height).toBe(44);
 
-  // C2: nothing above the box at rest, one toolbar row below it: + · location · mode … model (no @, no mic; W10: no + dir)
+  // C2: nothing above the box at rest, one toolbar row below it: + · location · mode … model (no @; W10: no + dir; E9: the
+  // dictation microphone after the mode, where C2 left the mic's place until dictation existed)
   const frameBox = (await p.locator('[data-composer-frame]').boundingBox())!;
   const boxAtRest = (await box.boundingBox())!;
   const toolbar = p.getByRole('toolbar', { name: 'Composer tools' });
@@ -857,7 +858,7 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   expect(frameBox.y + frameBox.height).toBe(tools.y + tools.height);
   console.log(`W2 composer at rest: box ${boxAtRest.height}px, toolbar ${tools.height}px, frame ${frameBox.height}px, ${frameBox.width}px wide`);
   const labels = await toolbar.getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label') ?? ''));
-  expect(labels).toEqual(['Add files, photos or commands', expect.stringMatching(/^Location /), expect.stringMatching(/^Permission mode /), expect.stringMatching(/^Model /)]);
+  expect(labels).toEqual(['Add files, photos or commands', expect.stringMatching(/^Location /), expect.stringMatching(/^Permission mode /), 'Dictate', expect.stringMatching(/^Model /)]);
   await expect(toolbar.getByRole('button', { name: 'Mention a file or agent' })).toHaveCount(0);
   await expect(toolbar.getByRole('button', { name: 'Voice input' })).toHaveCount(0);
   expect(editor.consoleErrors()).toEqual([]);

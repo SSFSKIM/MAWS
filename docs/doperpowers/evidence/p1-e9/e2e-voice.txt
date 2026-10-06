@@ -1,0 +1,23 @@
+E9 M5 e2e:voice, the acceptance run on 3869830a (the final code tree, after the whole-branch review fix wave):
+/tmp/maws-review/waitload20.sh && MAWS_E9_SHOTS=docs/doperpowers/evidence/p1-e9 /tmp/maws-review/with-slot.sh pnpm --dir <W> e2e:voice
+The build step (MAWS_HARNESS=1 electron-vite build) ran first; the one skipped case is the packaged one, run in packaged-e2e.txt.
+Earlier runs (082a69e8, 47dfa1b2, e196298e) are recorded in gates.txt.
+
+slot slot.2 acquired at 00:34:59 load { 18.08 14.60 15.80 }
+  ✓   1 e2e/voice.spec.ts:167:1 › a hold shows Listening…, draws the partials greyed in place, settles the final on release, and ⌘Z removes it whole (3.1s)
+  ✓   2 e2e/voice.spec.ts:199:1 › dictation lands at a mid-paragraph caret with a leading space, and after a selection without replacing it (1.5s)
+  ✓   3 e2e/voice.spec.ts:229:1 › a release before the recognizer started cancels at once: no text, the control idle, nothing heard later (1.9s)
+  ✓   4 e2e/voice.spec.ts:251:1 › letting go of ⌥ first ends the hold, and the still-held Space types nothing (1.6s)
+  ✓   5 e2e/voice.spec.ts:274:1 › typing inside the greyed words keeps them and the letter, and ends the capture; the next partial changes nothing (5.9s)
+  ✓   6 e2e/voice.spec.ts:299:1 › the toolbar microphone toggles: a click starts listening, a second settles the final; a click while asking cancels (2.1s)
+  ✓   7 e2e/voice.spec.ts:337:1 › Enter while finishing sends the greyed words as they stand, and the late final changes nothing (1.5s)
+  ✓   8 e2e/voice.spec.ts:366:1 › with two composers the words land in the focused pane's only (1.1s)
+  ✓   9 e2e/voice.spec.ts:382:1 › a card docked over the composer refuses the hold with a notice and no start (963ms)
+  ✓  10 e2e/voice.spec.ts:399:1 › the window losing focus mid-hold cancels and removes the interim words (1.2s)
+  ✓  11 e2e/voice.spec.ts:421:1 › a denied microphone shows the notice whose button records the pane and opens nothing (1.1s)
+  ✓  12 e2e/voice.spec.ts:440:1 › a missing helper refuses the hold with the path it looked at (1.0s)
+  ✓  13 e2e/voice.spec.ts:454:1 › a partial arriving after the final leaves the settled text unchanged (2.0s)
+  ✓  14 e2e/voice.spec.ts:482:1 › Settings › Voice reads the status from main and writes the language to settings version 9 (1.3s)
+  -  15 e2e/voice.spec.ts:504:1 › packaged: the bundled helper answers voice.status from Contents/Resources and voice.start is refused under the harness
+  1 skipped
+  14 passed (26.7s)

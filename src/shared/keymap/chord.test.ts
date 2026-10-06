@@ -53,3 +53,19 @@ describe('chord parser', () => {
     expect(formatChord('Escape')).toBe('⎋');
   });
 });
+
+// E9 start: Option+Space types a no-break space on macOS, so `Space` chords match the physical key (Design §5)
+describe('chord Space matches on code', () => {
+  it('matches Alt+Space by KeyboardEvent.code whatever the key types', () => {
+    const altSpace = parseChord('Alt+Space');
+    expect(matchesChord(key({ code: 'Space', key: ' ', altKey: true }), altSpace)).toBe(true);
+    expect(matchesChord(key({ code: 'Space', key: '\u00a0', altKey: true }), altSpace)).toBe(true);
+    expect(matchesChord(key({ code: 'KeyA', key: ' ', altKey: true }), altSpace)).toBe(false);
+    expect(matchesChord(key({ code: 'Space', key: ' ' }), altSpace)).toBe(false);
+  });
+
+  it('formats Space as a word', () => {
+    expect(formatChord('Alt+Space')).toBe('⌥Space');
+  });
+});
+// E9 end

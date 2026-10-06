@@ -1,6 +1,6 @@
 // The Settings tab (C11 execution document, Interfaces "Settings tab"; mockup 06 vignette 04; D-20: Codex's settings
 // framework, research/codex-shell-ux.md §6): one screen, a section index at the left whose active entry follows the
-// scroll position, and five sections of `label · value · note` rows over settings v3. Every row writes one field
+// scroll position, and six sections of `label · value · note` rows over settings v3 (E9: Voice, settings v9). Every row writes one field
 // through `settings.set` and re-renders from `settings.changed`; MAWS's settings live in its own folder, never in
 // ~/.claude.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -12,9 +12,10 @@ import { GatewaySection } from './GatewaySection';
 import { KeymapSection } from './KeymapSection';
 import { NotificationsSection } from './NotificationsSection';
 import { useSettingsValue } from './parts';
+import { VoiceSection } from './VoiceSection'; // E9
 
 export type SettingsSection = NonNullable<Extract<TabRef, { kind: 'settings' }>['section']>;
-const ORDER: SettingsSection[] = ['engine', 'gateway', 'keyboard', 'appearance', 'notifications'];
+const ORDER: SettingsSection[] = ['engine', 'gateway', 'keyboard', 'voice', 'appearance', 'notifications']; // E9: Voice after Keyboard
 const HINTS: Partial<Record<SettingsSection, string>> = { keyboard: KEYBOARD.hint }; // W9 (H4): no charter labels in the UI
 const headingId = (section: SettingsSection) => `settings-${section}`;
 
@@ -91,6 +92,9 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
               </Section>
               <Section id="keyboard">
                 <KeymapSection keymap={settings.keymap} />
+              </Section>
+              <Section id="voice">
+                <VoiceSection settings={settings} showKeyboard={() => show('keyboard')} />
               </Section>
               <Section id="appearance">
                 <AppearanceSection settings={settings} />

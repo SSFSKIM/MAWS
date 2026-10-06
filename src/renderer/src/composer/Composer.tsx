@@ -35,6 +35,7 @@ import { toast } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { gitAnswerOf } from '../sessions/branch-label'; // W9 (H2)
+import { DictationNotice } from './dictation/MicControl'; // E9
 import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
@@ -198,7 +199,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // ---- focus: the one app-level ⌘L and the docked frame's return go through this -----------------------------------------
   const rootRef = useRef<HTMLElement>(null);
   // R2: what the engine's prompt requests read, as of the latest render
-  const promptState = useRef({ docked: false, readOnly: false, busy: false });
+  const promptState = useRef({ docked: false, readOnly: false, busy: false, disabled: false /* E9: the editor itself is read-only */ });
   useEffect(
     () =>
       registerFocusTarget(appSessionId, {
@@ -225,6 +226,16 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
             if (busy || text.trim() === '' || !(handle.current?.serialize().empty ?? false)) return false; // the box holds text, or a turn runs
             setSuggestion(text);
             return true;
+          },
+        },
+        // E9: dictation at the editor's caret (composer/dictation/). An unstarted session takes it (a first prompt is the
+        // common case to dictate); a card over the box or a read-only editor does not, and the editor refuses itself
+        // while a submission is in flight.
+        dictation: {
+          begin: (onEnded) => {
+            const { docked: covered, disabled } = promptState.current;
+            if (covered || disabled || !handle.current) return null;
+            return handle.current.beginDictation(onEnded);
           },
         },
       }),
@@ -342,8 +353,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // R2: the prompt requests' view of the composer, and a suggestion gone once a turn runs or the box holds text
   const working = isBusy(status, queue.entries);
   useLayoutEffect(() => {
-    promptState.current = { docked, readOnly: editorDisabled !== null || setup !== null, busy: working };
+    promptState.current = { docked, readOnly: editorDisabled !== null || setup !== null, busy: working, disabled: editorDisabled !== null };
   });
+  // E9: a card taking the box's place mid-dictation keeps the words heard so far and ends the capture
+  useEffect(() => {
+    if (docked) handle.current?.settleDictation();
+  }, [docked]);
   if (suggestion !== null && (working || !draft.empty)) setSuggestion(null); // typed over, or a turn started: gone
   useEffect(() => handle.current?.refreshPlaceholder(), [suggestion]);
   const sessionId = status?.engineSessionId ?? record?.engineSessionId ?? null;
@@ -371,6 +386,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {swap.notice && <RequestCard key={swap.notice.id} item={swap.notice} request={null} placement="docked" paneIndex={paneIndex} />}
       {/* R2: a plugin's band above the frame, only while a plugin draws one */}
       {!unstarted && <PluginBand appSessionId={appSessionId} working={working} />}
+      {/* E9: the dictation notice is the toolbar's; while a card hides the toolbar it shows here */}
+      {docked && <DictationNotice appSessionId={appSessionId} client={client} />}
       <Frame
         appSessionId={appSessionId}
         docked={

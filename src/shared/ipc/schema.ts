@@ -18,6 +18,9 @@ import * as settings from './schema/settings';
 // C8c start
 import * as files from './schema/files';
 // C8c end
+// E9 start
+import * as voice from './schema/voice';
+// E9 end
 
 export {
   HostPingSchema,
@@ -82,6 +85,9 @@ export const commands = {
   // C8c start
   ...files.commands,
   // C8c end
+  // E9 start
+  ...voice.commands,
+  // E9 end
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -96,6 +102,9 @@ export const events = {
   // C8c start
   ...files.events,
   // C8c end
+  // E9 start
+  ...voice.events,
+  // E9 end
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

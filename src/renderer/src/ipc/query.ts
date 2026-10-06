@@ -51,6 +51,7 @@ export const QUERY_COMMANDS = [
   'fs.state', // M5: the Settings tab's config home, as the engine host resolves it
   // C11 end
   'settings.userEngineDefaults', // W3: what an unstarted tab's model chip and the mode seed show
+  'voice.status', // E9: the dictation helper, its permissions and locales (Settings › Voice; never prompts)
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
 

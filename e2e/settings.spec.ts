@@ -43,9 +43,9 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       // Main migrated C5's file to version 3 on load, keeping its theme, override and notification choices. C12: to
       // version 4, with the memory budget's defaults. W2: to version 5, with the transcript's default width. W3: to
       // version 6, with acceptEdits as the auto fallback. W7: to version 7, with the memory budget on. W13: to version 8,
-      // with no engine pin.
+      // with no engine pin. E9: to version 9, with the system locale for dictation.
       expect(readSettings(userData)).toMatchObject({
-        version: 8, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8
+        version: 9, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
         notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
@@ -54,6 +54,7 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
         usage: { nearLimitPercent: 90 },
         appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
         permissions: { autoFallback: 'acceptEdits' }, // W3
+        voice: { locale: null }, // E9
       });
       expect(readSettings(userData).engine).not.toHaveProperty('pinnedVersion'); // W13
 

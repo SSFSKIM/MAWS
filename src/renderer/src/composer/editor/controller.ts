@@ -19,6 +19,7 @@ import { slashWidget } from '../mentions/widgets';
 import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
 import { atomId, attachmentsOf, docOf, emptyDoc, hardBreak, isMultiline, mentionNode, paragraph, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
+import { closeInterim, dictationStart, inlineFragment, interimOf, needsLeadingSpace, openInterim, replaceInterim, settleFinal, syncSelectionFromDOM } from './dictation-plugin'; // E9
 import { createDraftWriter, docOfDraft, isEmptyDoc, registerLiveDraft, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
@@ -56,6 +57,18 @@ export interface EditorHandle {
   promptBox(): { text: string; cursor: number };
   fill(text: string, mode: 'replace' | 'append' | 'insert'): boolean; // false while the draft is locked or disabled
   refreshPlaceholder(): void;
+  // E9: a dictation's words at the caret (Design §7); null while busy or disabled. `onEnded` fires once when the editor
+  // ends the sink itself (an edit inside the words, a submission, a replaced document, disabled, unmounted, or
+  // `settleDictation`); the sink's own `final` and `cancel` do not fire it.
+  beginDictation(onEnded: () => void): DictationSink | null;
+  settleDictation(): void; // the interim words become ordinary text where they stand and the sink ends (a card covered the box)
+}
+
+// E9: what one capture writes through; every method is a no-op once the sink ended.
+export interface DictationSink {
+  partial(text: string): void;
+  final(text: string): void;
+  cancel(): void;
 }
 
 // What the controller reads from the component, refreshed after every render.
@@ -118,6 +131,9 @@ export const TYPED_DECIDE_MS = 300;
 interface Submission { doc: ComposerDoc; done: Promise<boolean> }
 const submissions = new Map<AppSessionId, Submission>();
 
+// E9: the open dictation sink's bookkeeping.
+interface Dictation { ended: boolean; onEnded(): void }
+
 export class EditorController {
   private inputs: ControllerInputs;
   private editor: TiptapEditor | null = null;
@@ -132,6 +148,7 @@ export class EditorController {
   private nav: HistoryNav = { index: null, draft: null };
   private recalls: Recall[] = [];
   private listed: HistoryEntry[] = [];
+  private dictation: Dictation | null = null; // E9: the open sink, if any
 
   constructor(
     private readonly client: MawsBridge,
@@ -179,6 +196,8 @@ export class EditorController {
   // ---- Tiptap's callbacks ---------------------------------------------------------------------------------------
 
   updated(editor: TiptapEditor, transaction: Transaction): void {
+    // E9: the human edited inside the interim words: they stay as typed over, and the sink ends
+    if (this.dictation && interimOf(editor.state)?.settledByEdit) this.endDictation(null);
     const doc = editor.getJSON();
     const mode = modeOf(doc);
     this.view.setMode(mode);
@@ -238,6 +257,7 @@ export class EditorController {
     });
     void this.refreshHistory();
     return () => {
+      this.endDictation('remove'); // E9: before the flush, so the draft keeps no provisional words
       this.live = false;
       this.attachmentEpoch += 1;
       off();
@@ -257,6 +277,7 @@ export class EditorController {
   }
 
   setDisabled(disabled: string | null): void {
+    if (disabled !== null) this.endDictation('keep'); // E9: the words heard so far stay
     if (!this.busy) this.editor?.setEditable(disabled === null);
   }
 
@@ -266,6 +287,8 @@ export class EditorController {
     const editor = this.editor;
     const { appSessionId, sessionId, cwd, disabled } = this.inputs;
     if (!editor || disabled !== null || this.busy || submissions.has(appSessionId)) return;
+    // E9: what is on screen is what is sent (and what a refused send keeps): the interim words settle first
+    this.endDictation('keep');
     const s = serializeDraft(editor.getJSON(), { sessionId, cwd });
     if (s.empty) return;
     this.revision += 1;
@@ -361,6 +384,7 @@ export class EditorController {
   private setDoc(doc: ComposerDoc, options: { silently: boolean; caret: 'start' | 'end' | null }): void {
     const editor = this.editor;
     if (!editor) return;
+    this.endDictation('keep'); // E9: the document is replaced; the range goes with it
     this.silent = options.silently;
     try {
       editor.commands.setContent(doc, { emitUpdate: true });
@@ -470,6 +494,56 @@ export class EditorController {
     }
   }
 
+  // ---- E9: dictation (E9 execution document, Design §7) -----------------------------------------------------------
+
+  // Opens the interim range at the caret (the editor takes focus first: at its selection, read from the DOM, when
+  // focused, else at the end), deleting nothing: a selection stays and the words go after it, inside its last text
+  // block, so a refused or cancelled capture leaves the document exactly as it was. Whether the words get a leading
+  // space is decided once, here.
+  private beginDictation(onEnded: () => void): DictationSink | null {
+    const editor = this.editor;
+    if (!editor || editor.isDestroyed || this.busy || submissions.has(this.inputs.appSessionId) || this.inputs.disabled !== null) return null;
+    this.endDictation('remove'); // one sink at a time
+    if (editor.isFocused) syncSelectionFromDOM(editor.view); // the selection the arrow keys moved, which ProseMirror may not have read
+    else editor.commands.focus('end');
+    editor.view.focus();
+    const at = dictationStart(editor.state);
+    const space = needsLeadingSpace(editor.state, at);
+    openInterim(editor.view, at);
+    const session: Dictation = { ended: false, onEnded };
+    this.dictation = session;
+    const words = (text: string) => inlineFragment(editor.schema, inlineContent(text === '' || !space ? text : ` ${text}`));
+    const closing = () => {
+      if (session.ended) return false;
+      session.ended = true;
+      this.dictation = null;
+      return true;
+    };
+    return {
+      partial: (text) => {
+        if (!session.ended) replaceInterim(editor.view, words(text));
+      },
+      final: (text) => {
+        if (closing()) settleFinal(editor.view, words(text));
+      },
+      cancel: () => {
+        if (closing()) closeInterim(editor.view, true);
+      },
+    };
+  }
+
+  // The editor ends the open sink itself and says so: the words kept as ordinary text (`keep`), removed (`remove`), or
+  // left as an edit already settled them (null).
+  private endDictation(words: 'keep' | 'remove' | null): void {
+    const session = this.dictation;
+    if (!session) return;
+    session.ended = true;
+    this.dictation = null;
+    const editor = this.editor;
+    if (words !== null && editor && !editor.isDestroyed) closeInterim(editor.view, words === 'remove');
+    session.onEnded();
+  }
+
 
   handle(): EditorHandle {
     const editor = () => this.editor!;
@@ -518,6 +592,8 @@ export class EditorController {
         const view = editor().view;
         view.dispatch(view.state.tr.setMeta('placeholder', true)); // the placeholder's decoration is read again
       },
+      beginDictation: (onEnded) => this.beginDictation(onEnded), // E9
+      settleDictation: () => this.endDictation('keep'), // E9
     };
   }
 }
