@@ -1,16 +1,18 @@
 // Available (E8 execution document, M2; D-7, D-12): closed by default, and only its opening issues the
 // `claude plugin list --json --available` read, since that listing refreshes the engine's catalogue cache. Inside, a
 // filter and, per marketplace, a collapsed group `<marketplace> · N plugins` whose rows (drawn only while it is open:
-// the built-in directory alone lists hundreds) offer Install…; the built-in directory is listed like any other.
+// the built-in directory alone lists hundreds) offer Install…; the built-in directory is listed like any other. An install
+// whose plugin the next read no longer offers keeps its result beneath the groups (M3: the widgets gate).
 import { useMemo, useState } from 'react';
 import type { AvailablePlugin } from '@shared/ipc/schema/plugins';
 import { FRAME, PLUGIN_MANAGEMENT as W } from '../copy';
 import { Row, Rows, TextButton } from '../parts';
-import { OperationLine, useManage } from './manage';
+import { Gone, OperationLine, useManage } from './manage';
 import { availableGroups, requestFor, type AvailableGroup } from './present';
 import { usePluginsRead } from './read';
 
-const availableKey = (id: string) => `available:${id}`;
+const PREFIX = 'available:';
+const availableKey = (id: string) => `${PREFIX}${id}`;
 
 function AvailableRow({ plugin, installed }: { plugin: AvailablePlugin; installed: boolean }) {
   const { ops, ask } = useManage();
@@ -59,12 +61,15 @@ function MarketplaceGroup({ group, filtering, installed }: { group: AvailableGro
 export function AvailableSection({ cwd, installed }: { cwd: string; installed: ReadonlySet<string> }) {
   // the read runs only while the section is open: its opening reads (again, once the last answer is 10 s old), and a
   // change rereads it only then; a collapsed section keeps its last answer
+  const { ops } = useManage();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('');
   const read = usePluginsRead('plugins.available', cwd, open);
   const plugins = read.data?.plugins;
   const groups = useMemo(() => availableGroups(plugins ?? [], filter), [plugins, filter]);
   const filtering = filter.trim() !== '';
+  const listed = new Set((plugins ?? []).map((p) => availableKey(p.pluginId)));
+  const gone = plugins ? [...ops.entries.keys()].filter((key) => key.startsWith(PREFIX) && !listed.has(key)) : [];
   return (
     <section data-plugins-section="available" aria-label={W.available} className="mt-3">
       <details onToggle={(event) => setOpen(event.currentTarget.open)}>
@@ -92,6 +97,9 @@ export function AvailableSection({ cwd, installed }: { cwd: string; installed: R
                 ) : (
                   groups.map((group) => <MarketplaceGroup key={group.marketplace} group={group} filtering={filtering} installed={installed} />)
                 )}
+                {gone.map((key) => (
+                  <Gone key={key} opKey={key} name={key.slice(PREFIX.length)} data={{ 'data-plugin-result': key.slice(PREFIX.length) }} />
+                ))}
               </>
             )}
           </div>

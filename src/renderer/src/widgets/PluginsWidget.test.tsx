@@ -315,6 +315,28 @@ describe('plugins widget: management', () => {
     expect(line.className).toContain('text-danger');
   });
 
+  it('an install whose plugin left the catalogue keeps the engine’s failure under Available after the row leaves (M3: the widgets gate)', async () => {
+    await ready();
+    fireEvent.click(within(section('available')).getByText('Available'));
+    fireEvent.click(await waitFor(() => within(section('available')).getByText('e8-scratch · 2 plugins')));
+    const other = await waitFor(() => section('available').querySelector<HTMLElement>('[data-plugin-row="e8-other@e8-scratch"]')!);
+    fireEvent.click(within(other).getByRole('button', { name: 'Install…' }));
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+    await waitFor(() => expect(invoked('plugins.install')).toHaveLength(1));
+    // the catalogue read again after the CLI ended no longer offers it (a folder marketplace is read in place)
+    backend.script('plugins.available', () => ({ plugins: [{ pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'The probe', version: '0.1.0' }] }));
+    act(() => emit('plugins.changed', {}));
+    await waitFor(() => expect(within(section('available')).getByText('e8-scratch · 1 plugin')).toBeTruthy());
+    expect(section('available').querySelector('[data-plugin-row="e8-other@e8-scratch"]')).toBeNull();
+    const message = 'Plugin "e8-other" not found in marketplace "e8-scratch". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`.';
+    act(() => emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message, failureCode: 'not_found', shownCommand: null } } })));
+    const gone = section('available').querySelector<HTMLElement>('[data-plugin-result="e8-other@e8-scratch"]')!;
+    expect(gone).toBeTruthy();
+    const line = within(gone).getByRole('status');
+    expect(line.textContent).toBe(`${message} · not_found`);
+    expect(line.className).toContain('text-danger');
+  });
+
   it('refreshes and removes a marketplace through its sheet, the removal behind the acknowledgement', async () => {
     await ready();
     const market = () => section('marketplaces').querySelector<HTMLElement>('[data-marketplace-row="e8-scratch"]')!;
