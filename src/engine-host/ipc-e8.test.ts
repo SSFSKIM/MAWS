@@ -136,7 +136,7 @@ describe('E8 operations', () => {
     const id = await readySession(host, transport, 'app-e8', project);
     expect(statusOf(host, id).plugins).toEqual([]);
 
-    const { opId } = await host.call('plugins.install', { cwd: project, plugin: 'e8-probe@e8-scratch' });
+    const { opId } = await host.call('plugins.install', { cwd: project, binary: join(fake, 'claude'), plugin: 'e8-probe@e8-scratch' });
     const done = await host.done(opId);
     expect(calls()).toEqual(['plugin install e8-probe@e8-scratch --json']);
     expect(host.operations().filter((e) => e.opId === opId).map((e) => e.phase)).toEqual(['started', 'reloading', 'done']);
@@ -156,20 +156,20 @@ describe('E8 operations', () => {
   it('marketplace verbs and the remaining plugin verbs run their argv; cancel answers whether it stopped anything', async () => {
     behave(`case "$2" in marketplace) ${RESULT({ command: 'marketplace-add', outcome: 'ok', message: 'ok' })};; *) sleep 30;; esac\n`);
     const host = engineHost();
-    const added = await host.call('marketplaces.add', { cwd: project, source: '/m', scope: 'user' });
+    const added = await host.call('marketplaces.add', { cwd: project, binary: join(fake, 'claude'), source: '/m', scope: 'user' });
     expect((await host.done(added.opId)).reload).toBeUndefined();
-    const updating = await host.call('plugins.update', { cwd: project, plugin: 'p@m', scope: 'project' });
+    const updating = await host.call('plugins.update', { cwd: project, binary: join(fake, 'claude'), plugin: 'p@m', scope: 'project' });
     await until(() => calls().length === 2, 'the update');
     expect(await host.call('plugins.cancel', { opId: updating.opId })).toEqual({ cancelled: true });
     expect((await host.done(updating.opId)).outcome).toMatchObject({ ok: false, error: { code: 'cancelled' } });
     expect(await host.call('plugins.cancel', { opId: updating.opId })).toEqual({ cancelled: false });
     behave(RESULT({ command: 'x', outcome: 'ok', message: 'ok' }));
     for (const [name, input] of [
-      ['plugins.uninstall', { cwd: project, plugin: 'p@m', keepData: true }],
-      ['plugins.enable', { cwd: project, plugin: 'p@m', scope: 'local' }],
-      ['plugins.disable', { cwd: project, plugin: 'p@m' }],
-      ['marketplaces.update', { cwd: project, name: 'm' }],
-      ['marketplaces.remove', { cwd: project, name: 'm', scope: 'project' }],
+      ['plugins.uninstall', { cwd: project, binary: join(fake, 'claude'), plugin: 'p@m', keepData: true }],
+      ['plugins.enable', { cwd: project, binary: join(fake, 'claude'), plugin: 'p@m', scope: 'local' }],
+      ['plugins.disable', { cwd: project, binary: join(fake, 'claude'), plugin: 'p@m' }],
+      ['marketplaces.update', { cwd: project, binary: join(fake, 'claude'), name: 'm' }],
+      ['marketplaces.remove', { cwd: project, binary: join(fake, 'claude'), name: 'm', scope: 'project' }],
     ] as const) await host.done((await host.call(name, input as never)).opId);
     expect(calls()).toEqual([
       'plugin marketplace add /m --scope user --json',
@@ -185,7 +185,7 @@ describe('E8 operations', () => {
   it('engine.shutdown with no session answers only once a TERM-ignoring CLI is dead', async () => {
     behave(`trap '' TERM\nsleep 30\n`);
     const host = engineHost();
-    const { opId } = await host.call('plugins.install', { cwd: project, plugin: 'p@m' });
+    const { opId } = await host.call('plugins.install', { cwd: project, binary: join(fake, 'claude'), plugin: 'p@m' });
     await until(() => existsSync(join(fake, 'pid')) && readFileSync(join(fake, 'pid'), 'utf8').trim(), 'the pid');
     const pid = Number(readFileSync(join(fake, 'pid'), 'utf8'));
     expect(await host.call('engine.shutdown', { graceMs: 5_000 })).toEqual({ stopped: 0, forced: 0 });
@@ -196,7 +196,7 @@ describe('E8 operations', () => {
   it('engine.shutdown stops a running CLI with the host', async () => {
     behave('sleep 30\n');
     const host = engineHost();
-    const { opId } = await host.call('plugins.install', { cwd: project, plugin: 'p@m' });
+    const { opId } = await host.call('plugins.install', { cwd: project, binary: join(fake, 'claude'), plugin: 'p@m' });
     await until(() => existsSync(join(fake, 'pid')) && readFileSync(join(fake, 'pid'), 'utf8').trim(), 'the pid');
     await host.call('engine.shutdown', { graceMs: 0 });
     expect((await host.done(opId)).outcome).toMatchObject({ ok: false, error: { code: 'cancelled', message: 'stopped with the engine host' } });

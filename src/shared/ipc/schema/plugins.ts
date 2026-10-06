@@ -14,6 +14,9 @@ export const PluginsCwdSchema = z.string().refine((path) => path.startsWith('/')
 // A plugin id, a marketplace source or name: never something the CLI would read as an option.
 export const PluginsArgumentSchema = z.string().max(4096).refine(isPluginsArgument, 'a value, not an option');
 export const PluginsScopeSchema = z.enum(PLUGINS_SCOPES);
+// The engine binary a mutation's sheet named (`plugins.env`'s `binary`): the host runs nothing when its probe now
+// resolves to another (Settings › Engine changed meanwhile).
+export const PluginsBinarySchema = z.string().refine((path) => path.startsWith('/'), 'the absolute path plugins.env answered');
 export const AcceptCommandSchema = z.string().regex(/^[0-9a-f]{64}$/, 'the sha256 the CLI reported as shownCommand.sha256');
 
 export const InstalledPluginSchema = z.strictObject({
@@ -41,7 +44,7 @@ export type AvailablePlugin = z.infer<typeof AvailablePluginSchema>;
 
 export const PluginsActionSchema = z.enum(PLUGINS_ACTIONS);
 
-export const PLUGINS_ERROR_CODES = ['cli_failed', 'no_result', 'spawn_failed', 'timeout', 'cancelled'] as const;
+export const PLUGINS_ERROR_CODES = ['cli_failed', 'no_result', 'spawn_failed', 'timeout', 'cancelled', 'output_overflow'] as const; // output_overflow: the CLI's output passed the runner's bound
 export const PluginsOutcomeSchema = z.union([
   z.strictObject({ ok: z.literal(true), result: z.record(z.string(), z.unknown()) }), // the CLI's --json object
   z.strictObject({
@@ -75,7 +78,7 @@ export const PluginsOperationEventSchema = z.strictObject({
 export type PluginsOperationEvent = z.infer<typeof PluginsOperationEventSchema>;
 
 const cwd = { cwd: PluginsCwdSchema };
-const plugin = { ...cwd, plugin: PluginsArgumentSchema, scope: PluginsScopeSchema.optional() };
+const plugin = { ...cwd, binary: PluginsBinarySchema, plugin: PluginsArgumentSchema, scope: PluginsScopeSchema.optional() };
 
 export const commands = {
   // reads

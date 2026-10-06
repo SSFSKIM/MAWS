@@ -664,15 +664,15 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   on('plugins.list', async ({ cwd }) => ({ plugins: listing(await plugins.read(READ_LINES.installed, cwd), installedOf) }));
   on('plugins.available', async ({ cwd }) => ({ plugins: listing(await plugins.read(READ_LINES.available, cwd), availableOf) }));
   on('marketplaces.list', async ({ cwd }) => ({ marketplaces: listing(await plugins.read(READ_LINES.marketplaces, cwd), marketplacesOf) }));
-  on('plugins.install', async ({ cwd, plugin, scope, acceptCommand }) => plugins.start('install', { plugin, scope, acceptCommand }, cwd));
-  on('plugins.update', async ({ cwd, plugin, scope, acceptCommand }) => plugins.start('update', { plugin, scope, acceptCommand }, cwd));
-  on('plugins.uninstall', async ({ cwd, plugin, scope, keepData }) => plugins.start('uninstall', { plugin, scope, keepData }, cwd));
-  on('plugins.enable', async ({ cwd, plugin, scope }) => plugins.start('enable', { plugin, scope }, cwd));
-  on('plugins.disable', async ({ cwd, plugin, scope }) => plugins.start('disable', { plugin, scope }, cwd));
+  on('plugins.install', async ({ cwd, binary, plugin, scope, acceptCommand }) => plugins.start('install', { plugin, scope, acceptCommand }, cwd, binary));
+  on('plugins.update', async ({ cwd, binary, plugin, scope, acceptCommand }) => plugins.start('update', { plugin, scope, acceptCommand }, cwd, binary));
+  on('plugins.uninstall', async ({ cwd, binary, plugin, scope, keepData }) => plugins.start('uninstall', { plugin, scope, keepData }, cwd, binary));
+  on('plugins.enable', async ({ cwd, binary, plugin, scope }) => plugins.start('enable', { plugin, scope }, cwd, binary));
+  on('plugins.disable', async ({ cwd, binary, plugin, scope }) => plugins.start('disable', { plugin, scope }, cwd, binary));
   on('plugins.cancel', async ({ opId }) => ({ cancelled: plugins.cancel(opId) }));
-  on('marketplaces.add', async ({ cwd, source, scope }) => plugins.start('marketplace-add', { source, scope }, cwd));
-  on('marketplaces.update', async ({ cwd, name }) => plugins.start('marketplace-update', { name }, cwd));
-  on('marketplaces.remove', async ({ cwd, name, scope }) => plugins.start('marketplace-remove', { name, scope }, cwd));
+  on('marketplaces.add', async ({ cwd, binary, source, scope }) => plugins.start('marketplace-add', { source, scope }, cwd, binary));
+  on('marketplaces.update', async ({ cwd, binary, name }) => plugins.start('marketplace-update', { name }, cwd, binary));
+  on('marketplaces.remove', async ({ cwd, binary, name, scope }) => plugins.start('marketplace-remove', { name, scope }, cwd, binary));
   on('session.reloadSkills', async ({ appSessionId }) => {
     const { id, client } = operation(appSessionId);
     return operations.start(id, 'session.reloadSkills', client, 'reload_skills', {});

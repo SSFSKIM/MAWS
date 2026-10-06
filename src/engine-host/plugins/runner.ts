@@ -7,9 +7,11 @@
 // Reads run freely and answer the whole output; mutations are serialised in one queue and run as operations: a receipt
 // `{ opId }` at once, then `started`, the CLI's `output` lines, `reloading` and `done`, with `plugins.changed` as soon as
 // the CLI has ended. A child runs in its own process group, which the runner owns until the group is empty: at
-// CLI_TIMEOUT_MS, on `cancel` and on `stop` (the host stopping) the group gets SIGTERM and, at the grace, SIGKILL, and the
-// run ends only once no member remains, so a clone or helper the CLI started dies with it even after the CLI itself
-// exited. A cancel or stop that arrives while an operation is still resolving the binary or capturing the environment
+// CLI_TIMEOUT_MS, on `cancel`, on `stop` (the host stopping), when its output passes OUTPUT_LIMIT_BYTES (or one line
+// LINE_LIMIT_BYTES) and when the CLI exits on its own leaving a member behind, the group gets SIGTERM and, at the grace,
+// SIGKILL, and the run ends only once no member remains, so a clone or helper the CLI started dies with it even after
+// the CLI itself exited. A mutation names the binary its sheet showed; one the probe no longer resolves to fails without
+// spawning. A cancel or stop that arrives while an operation is still resolving the binary or capturing the environment
 // completes it `cancelled` without spawning; after `stop` nothing new runs.
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -28,6 +30,10 @@ export const KILL_GRACE_MS = 5_000;
 export const SHUTDOWN_KILL_GRACE_MS = 2_000;
 const REAP_POLL_MS = 50; // how often a stopping group is probed for remaining members
 const REAP_GIVE_UP_MS = 1_000; // after SIGKILL, how long a member that still answers the probe is waited for
+// The output a CLI run retains (stdout and stderr together; the largest legitimate answer, `--available` on an empty
+// home, is about 1.5 MB) and the longest line a mutation's progress reader holds before its newline.
+export const OUTPUT_LIMIT_BYTES = 8 * 1024 * 1024;
+export const LINE_LIMIT_BYTES = 64 * 1024;
 
 // MAWS's and the engine's nesting variables: the CLI must not think it runs inside a Claude Code session or Electron.
 const DROPPED = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT', 'ELECTRON_RUN_AS_NODE', 'ELECTRON_RENDERER_URL', 'NODE_OPTIONS'];
@@ -58,7 +64,9 @@ export interface PluginsRunnerDeps {
 
 type Failure = Extract<PluginsOutcome, { ok: false }>['error']['code'];
 type Ended = { run: CliRun } | { failed: Failure; message: string };
-type StopReason = 'timeout' | 'cancelled' | 'stopped';
+// why the runner stopped a group: the first three end the run with FAILED_WORDS, `overflow` with output_overflow, and
+// `leftover` (members left after the CLI's own exit) keeps the CLI's result
+type StopReason = 'timeout' | 'cancelled' | 'stopped' | 'overflow' | 'leftover';
 
 interface Operation {
   opId: string;
@@ -67,6 +75,7 @@ interface Operation {
   argv: string[];
   cwd: string;
   target: string;
+  binary: string; // the engine binary the sheet named: the probe's real path when the owner confirmed
   state: 'queued' | 'running' | 'ended';
   abort: 'cancelled' | 'stopped' | null; // asked while running, whether or not its CLI was spawned yet
   group: OwnedGroup | null; // while its CLI's process group is owned
@@ -110,7 +119,7 @@ class OwnedGroup {
       };
       this.finish = finish;
       this.scheduleKill(graceMs);
-      const poll = () => (this.alive() ? this.later(poll, REAP_POLL_MS) : finish());
+      const poll = () => (this.hasMembers() ? this.later(poll, REAP_POLL_MS) : finish());
       poll();
     });
     return this.gone;
@@ -150,7 +159,8 @@ class OwnedGroup {
     }
   }
 
-  private alive(): boolean {
+  // Whether the group still holds a process: the unreaped leader, or any member it started.
+  hasMembers(): boolean {
     if (this.child.pid === undefined) return false; // never spawned
     if (!this.leaderExited) return true; // an unreaped leader still holds the group
     try {
@@ -183,11 +193,11 @@ export class PluginsRunner {
   }
 
   // Queued behind the running mutation; the receipt answers before any of its events.
-  async start<A extends PluginsAction>(action: A, input: PluginsActionInputs[A], cwd: string): Promise<{ opId: string }> {
+  async start<A extends PluginsAction>(action: A, input: PluginsActionInputs[A], cwd: string, binary: string): Promise<{ opId: string }> {
     if (this.closed) throw new Error('the engine host is stopping: no plugin operation starts');
     const argv = commandLine(action, input);
     const i = input as { plugin?: string; source?: string; name?: string };
-    const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', state: 'queued', abort: null, group: null };
+    const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', binary, state: 'queued', abort: null, group: null };
     this.operations.set(op.opId, op);
     this.queue = this.queue
       .then(() => new Promise<void>((resolve) => this.timers.setTimeout(resolve, 0))) // after the receipt's answer is posted
@@ -260,6 +270,8 @@ export class PluginsRunner {
     const afterBinary = aborted();
     if (afterBinary) return afterBinary;
     if (!check.ok) return { failed: 'spawn_failed', message: check.error ?? `no engine binary at ${check.path}` };
+    // the owner confirmed a command naming one binary; Settings › Engine may have chosen another since
+    if (op && op.binary !== check.path) return { failed: 'spawn_failed', message: `the engine binary changed since the sheet named it (${op.binary} → ${check.path}); open the sheet again` };
     const isDirectory = await stat(cwd).then((s) => s.isDirectory(), () => false);
     const afterStat = aborted();
     if (afterStat) return afterStat;
@@ -281,6 +293,12 @@ export class PluginsRunner {
       const ceiling = this.timers.setTimeout(() => void group.stop('timeout', KILL_GRACE_MS), CLI_TIMEOUT_MS);
       const out: string[] = [];
       const err: string[] = [];
+      let retained = 0; // bytes of output read, both streams
+      let overflow: string | null = null; // the words, once the output passed a bound and the group was stopped
+      const overflowed = (words: string) => {
+        overflow = words;
+        void group.stop('overflow', KILL_GRACE_MS);
+      };
       const lineReader = (sink: string[]) => {
         let partial = '';
         const hear = (line: string) => {
@@ -289,13 +307,20 @@ export class PluginsRunner {
         };
         return {
           data: (text: string) => {
+            if (overflow !== null) return;
+            retained += Buffer.byteLength(text);
+            if (retained > OUTPUT_LIMIT_BYTES) return overflowed(`the CLI printed more than ${OUTPUT_LIMIT_BYTES / 1024 / 1024} MiB (${retained} bytes) and was stopped`);
             sink.push(text);
             if (!onLine) return;
             const parts = (partial + text).split('\n');
             partial = parts.pop()!;
             parts.forEach(hear);
+            const long = Buffer.byteLength(partial);
+            if (long > LINE_LIMIT_BYTES) overflowed(`the CLI printed a line longer than ${LINE_LIMIT_BYTES / 1024} KiB (${long} bytes) and was stopped`);
           },
-          end: () => hear(partial),
+          end: () => {
+            if (overflow === null) hear(partial);
+          },
         };
       };
       const stdout = lineReader(out);
@@ -319,9 +344,18 @@ export class PluginsRunner {
         stdout.end();
         stderr.end();
         const reason = group.reason;
-        if (reason === null) return settle({ run: { stdout: out.join(''), stderr: err.join(''), code } }); // its own end: ownership ends
+        if (reason === null) {
+          // its own end: the result is the CLI's; a member it left running (a helper with its streams redirected) is
+          // stopped first, so ownership ends only with the group
+          const run: Ended = { run: { stdout: out.join(''), stderr: err.join(''), code } };
+          if (!group.hasMembers()) return settle(run);
+          void group.stop('leftover', KILL_GRACE_MS).then(() => settle(run));
+          return;
+        }
         // stopped: the group stays owned, and its SIGKILL due, until no member remains
-        void group.stop(reason, KILL_GRACE_MS).then(() => settle({ failed: reason === 'timeout' ? 'timeout' : 'cancelled', message: FAILED_WORDS[reason] }));
+        // (`leftover` is set only below a close, so never seen here)
+        const ended: Ended = reason === 'overflow' ? { failed: 'output_overflow', message: overflow ?? '' } : { failed: reason === 'timeout' ? 'timeout' : 'cancelled', message: FAILED_WORDS[reason as keyof typeof FAILED_WORDS] };
+        void group.stop(reason, KILL_GRACE_MS).then(() => settle(ended));
       });
     });
   }

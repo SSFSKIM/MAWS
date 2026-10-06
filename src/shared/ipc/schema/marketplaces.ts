@@ -5,7 +5,7 @@
 import * as z from 'zod';
 import { OperationReceiptSchema } from '../../engine/operations';
 import type { CommandSpec } from './common';
-import { PluginsArgumentSchema, PluginsCwdSchema, PluginsScopeSchema } from './plugins';
+import { PluginsArgumentSchema, PluginsBinarySchema, PluginsCwdSchema, PluginsScopeSchema } from './plugins';
 
 const host = <I extends z.ZodType, O extends z.ZodType>(i: I, o: O) => ({ input: i, output: o, owner: 'engine-host' as const });
 
@@ -19,9 +19,9 @@ export type Marketplace = z.infer<typeof MarketplaceSchema>;
 
 export const commands = {
   'marketplaces.list': host(z.strictObject({ cwd: PluginsCwdSchema }), z.strictObject({ marketplaces: z.array(MarketplaceSchema) })),
-  'marketplaces.add': host(z.strictObject({ cwd: PluginsCwdSchema, source: PluginsArgumentSchema, scope: PluginsScopeSchema.optional() }), OperationReceiptSchema),
-  'marketplaces.update': host(z.strictObject({ cwd: PluginsCwdSchema, name: PluginsArgumentSchema }), OperationReceiptSchema),
-  'marketplaces.remove': host(z.strictObject({ cwd: PluginsCwdSchema, name: PluginsArgumentSchema, scope: PluginsScopeSchema.optional() }), OperationReceiptSchema),
+  'marketplaces.add': host(z.strictObject({ cwd: PluginsCwdSchema, binary: PluginsBinarySchema, source: PluginsArgumentSchema, scope: PluginsScopeSchema.optional() }), OperationReceiptSchema),
+  'marketplaces.update': host(z.strictObject({ cwd: PluginsCwdSchema, binary: PluginsBinarySchema, name: PluginsArgumentSchema }), OperationReceiptSchema),
+  'marketplaces.remove': host(z.strictObject({ cwd: PluginsCwdSchema, binary: PluginsBinarySchema, name: PluginsArgumentSchema, scope: PluginsScopeSchema.optional() }), OperationReceiptSchema),
 } as const satisfies Record<`marketplaces.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {} as const satisfies Record<`marketplaces.${string}`, z.ZodType>;

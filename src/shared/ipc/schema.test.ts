@@ -645,19 +645,22 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('session.reloadSkills', { opId: 'r-1' }).ok).toBe(true);
     });
 
-    it('takes an absolute cwd, a scope from the three, a sha256 to accept, and no value the CLI would read as an option', () => {
-      expect(validateCommandInput('plugins.install', { cwd, plugin: 'p@m' }).ok).toBe(true);
-      expect(validateCommandInput('plugins.install', { cwd, plugin: 'p@m', scope: 'project', acceptCommand: 'a'.repeat(64) }).ok).toBe(true);
-      expect(validateCommandInput('plugins.install', { cwd, plugin: 'p@m', acceptCommand: 'A'.repeat(64) }).ok).toBe(false);
-      expect(validateCommandInput('plugins.install', { cwd, plugin: 'p@m', scope: 'managed' }).ok).toBe(false);
-      expect(validateCommandInput('plugins.install', { cwd, plugin: '-y' }).ok).toBe(false);
-      expect(validateCommandInput('plugins.install', { cwd: 'relative', plugin: 'p@m' }).ok).toBe(false);
-      expect(validateCommandInput('plugins.uninstall', { cwd, plugin: 'p@m', keepData: true }).ok).toBe(true);
-      expect(validateCommandInput('plugins.enable', { cwd, plugin: 'p@m', acceptCommand: 'a'.repeat(64) }).ok).toBe(false);
-      expect(validateCommandInput('marketplaces.add', { cwd, source: 'owner/repo', scope: 'user' }).ok).toBe(true);
-      expect(validateCommandInput('marketplaces.add', { cwd, source: '--yes' }).ok).toBe(false);
-      expect(validateCommandInput('marketplaces.update', { cwd, name: 'm', scope: 'user' }).ok).toBe(false); // update takes no scope
-      expect(validateCommandInput('marketplaces.remove', { cwd, name: 'm', scope: 'local' }).ok).toBe(true);
+    it('takes an absolute cwd, the binary the sheet named, a scope from the three, a sha256 to accept, and no value the CLI would read as an option', () => {
+      const binary = '/opt/claude/2.1.291';
+      expect(validateCommandInput('plugins.install', { cwd, plugin: 'p@m' }).ok).toBe(false); // a mutation names the binary its sheet showed
+      expect(validateCommandInput('marketplaces.remove', { cwd, binary: 'claude', name: 'm' }).ok).toBe(false);
+      expect(validateCommandInput('plugins.install', { cwd, binary, plugin: 'p@m' }).ok).toBe(true);
+      expect(validateCommandInput('plugins.install', { cwd, binary, plugin: 'p@m', scope: 'project', acceptCommand: 'a'.repeat(64) }).ok).toBe(true);
+      expect(validateCommandInput('plugins.install', { cwd, binary, plugin: 'p@m', acceptCommand: 'A'.repeat(64) }).ok).toBe(false);
+      expect(validateCommandInput('plugins.install', { cwd, binary, plugin: 'p@m', scope: 'managed' }).ok).toBe(false);
+      expect(validateCommandInput('plugins.install', { cwd, binary, plugin: '-y' }).ok).toBe(false);
+      expect(validateCommandInput('plugins.install', { cwd: 'relative', binary, plugin: 'p@m' }).ok).toBe(false);
+      expect(validateCommandInput('plugins.uninstall', { cwd, binary, plugin: 'p@m', keepData: true }).ok).toBe(true);
+      expect(validateCommandInput('plugins.enable', { cwd, binary, plugin: 'p@m', acceptCommand: 'a'.repeat(64) }).ok).toBe(false);
+      expect(validateCommandInput('marketplaces.add', { cwd, binary, source: 'owner/repo', scope: 'user' }).ok).toBe(true);
+      expect(validateCommandInput('marketplaces.add', { cwd, binary, source: '--yes' }).ok).toBe(false);
+      expect(validateCommandInput('marketplaces.update', { cwd, binary, name: 'm', scope: 'user' }).ok).toBe(false); // update takes no scope
+      expect(validateCommandInput('marketplaces.remove', { cwd, binary, name: 'm', scope: 'local' }).ok).toBe(true);
       expect(validateCommandInput('plugins.env', {}).ok).toBe(true);
       expect(validateCommandOutput('plugins.cancel', { cancelled: true }).ok).toBe(true);
     });
@@ -669,6 +672,7 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('plugins.operation', { ...base, phase: 'done', outcome: { ok: true, result: { command: 'install', outcome: 'ok' } }, reload: { sessions: [{ appSessionId: 'a', outcome: 'reflected', error: null }] } }).ok).toBe(true);
       const failure = { ok: false, error: { code: 'cli_failed', message: 'Plugin "nope" not found', failureCode: 'not_found', shownCommand: null } };
       expect(validateEventPayload('plugins.operation', { ...base, phase: 'done', outcome: failure }).ok).toBe(true);
+      expect(validateEventPayload('plugins.operation', { ...base, phase: 'done', outcome: { ...failure, error: { ...failure.error, code: 'output_overflow', failureCode: null } } }).ok).toBe(true);
       expect(validateEventPayload('plugins.operation', { ...base, phase: 'done', outcome: { ...failure, error: { ...failure.error, code: 'refused' } } }).ok).toBe(false);
       expect(validateEventPayload('plugins.operation', { ...base, action: 'marketplace-sync', phase: 'started' }).ok).toBe(false);
       expect(validateEventPayload('plugins.changed', {}).ok).toBe(true);
