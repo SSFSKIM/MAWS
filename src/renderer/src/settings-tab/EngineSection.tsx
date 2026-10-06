@@ -4,7 +4,7 @@
 // path reaches the engine host through `engine.configure`, which main alone pushes, and this section awaits
 // `settings.engineApplied`), the engine's config home (read-only to MAWS), the subagent model new sessions launch with,
 // and (W3) the mode a session takes when the engine refuses auto. W7: the memory budget's switch, whose rows show only
-// while it is on. R1: one information line on what MAWS shows of a plugin.
+// while it is on. R1: one information line on what MAWS shows of a plugin. E10: the Background supervisor group last.
 import { useQueryClient } from '@tanstack/react-query';
 import { useId } from 'react';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
@@ -22,6 +22,7 @@ import { ENGINE } from './copy';
 import { openEngineUpdate } from './engine-update'; // W13
 import { Chip, INPUT, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 import { BudgetSwitch, MemoryBudget, StatefulServers } from './BudgetSettings'; // C12; W7: the switch
+import { SupervisorSettings } from './SupervisorSettings'; // E10
 
 const BINARY_INFO_KEY = ['maws', 'engine.binaryInfo', undefined];
 // W13: the host resolves the binary per call, so the row follows an update made in a terminal while it is shown
@@ -100,6 +101,7 @@ export function EngineSection({ settings }: { settings: Settings }) {
         </>
       )}
       {/* C12 end */}
+      <SupervisorSettings settings={settings} /> {/* E10: settings version 10 */}
     </>
   );
 }

@@ -221,8 +221,9 @@ describe('settings tab writes one field per row', () => {
     expect(root.classList.contains('@container/settings')).toBe(true);
     const classes = (el: Element) => [...el.classList];
     const fixed = [...root.querySelectorAll('*')].filter((el) => classes(el).some((c) => /^grid-cols-\[.*\d+px/.test(c)));
-    // the index beside the body, every Setting row, every key binding row
-    expect(fixed.length).toBe(1 + screen.getAllByRole('group').length + screen.getAllByRole('row').filter((r) => r.querySelector('[role="cell"]')).length);
+    // the index beside the body, every Setting row (E10: the Background supervisor group is a group of them, not one), every key binding row
+    const rows = screen.getAllByRole('group').filter((g) => !g.querySelector(':scope > h4'));
+    expect(fixed.length).toBe(1 + rows.length + screen.getAllByRole('row').filter((r) => r.querySelector('[role="cell"]')).length);
     for (const el of fixed) expect(classes(el).some((c) => c.startsWith('@max-lg/settings:grid-cols-'))).toBe(true);
     for (const el of root.querySelectorAll('.col-start-2')) expect(el.classList.contains('@max-lg/settings:col-start-1')).toBe(true);
     // label, control, note in reading order, so one column reads label over control over note

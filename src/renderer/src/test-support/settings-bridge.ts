@@ -56,6 +56,13 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V10): Setti
     }),
     'voice.openPrivacySettings': () => undefined,
     // E9 end
+    // E10 start: Settings › Engine › Background supervisor connects the hosts store (the engine host in the app, as under
+    // the harness); a test replaces these to show a detached supervisor
+    'engine.hostState': () => ({ state: 'ready', pid: 1111, restarts: 0, revision: 1 }),
+    'pty.hostState': () => ({ state: 'ready', pid: 2222, restarts: 0, revision: 1 }),
+    'host.status': () => ({ transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', matches: null, reason: null, waitingLiveSessions: null, lastExit: null }),
+    'host.restart': () => undefined,
+    // E10 end
   };
   const bridge = {
     invoke: vi.fn(async (name: string, input: unknown) => {
