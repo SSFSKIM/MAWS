@@ -242,3 +242,147 @@ Every process these probes started was killed, and every scratch directory was r
     deleted.
   - No supervisor (the real one does not exist until M1) was started. The owner's running MAWS app (pid 44903) was
     never signalled.
+
+
+E10 M4 Task 4.2 — the live reconnect probe (Q6, Q7)
+====================================================
+
+Run 2026-10-06 15:55-15:57 local, worktree agent-a452e5ed4f062b383 at 99e9b2f5, after `pnpm build` through the slot
+script (/tmp/maws-review/gates/e10-t42-build.log, "built in 23.93s"). Engine: the installed Claude Code, now 2.1.292
+(~/.local/share/claude/versions/2.1.292; M0 ran 2.1.291), resolved by the supervisor itself (binary-info.ts), model
+haiku, through ClaudeUsage's relay (GET /api/hello answered 200 first), `maxBudgetUsd: 0.15` per launch as the cap.
+
+Script:
+  /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh \
+    node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON spikes/supervisor-probe/reconnect-streaming.mjs --run reconnect|crash
+It starts the supervisor the way main's detached transport does: W/node_modules/electron's binary with
+ELECTRON_RUN_AS_NODE=1, the engine-host chunk of the build (out/main/index-BOX184sL.js), `--detached
+<scratch userData>/supervisor`, detached, stdio on host.log, argv0 maws-supervisor, cwd W. Its environment is built from
+nothing: the base keys, SHELL=/bin/zsh with a scratch ZDOTDIR and HISTFILE (so the host's login-shell capture reads no
+owner zsh file), CLAUDE_CONFIG_DIR = a scratch home seeded by p1-common's scratchRun (assertScratch passed), and
+MAWS_USER_DATA = a scratch directory. The client speaks the socket layer: the token from host.token, the build id from
+host.lock (it equals the SHA-1 of the chunk's bytes, 90059eef880c4dbc, as main computes it in identity.ts), and the wire
+fingerprint from the supervisor. A first hello with a placeholder wire is refused `wire`, the refuse carries the
+supervisor's fingerprint (ea3bd7913e54d017), and that connection is dropped without an `exit`. Each launch is a real
+`session.launch` (gateway, haiku, permissionMode default, trust attested for the scratch repository). No permission
+request came up in either run: 2.1.292, like 2.1.291, runs `sleep` and `echo` without asking.
+
+
+Q6 — Reconnect mid-turn: is the connect burst's tail exact?
+-----------------------------------------------------------
+VERDICT: yes. The first connection's events, then the burst's, then the live ones, concatenate to exactly the
+launch's own `session.events {afterSeq: null}` list: 69 events, no duplicate, no gap. The burst begins at the event
+right after the last one the first connection received.
+
+Setup (results/q6-reconnect.json). The prompt asks for two Bash calls in sequence: `sleep 6 && echo q6-one`, then
+`sleep 10 && echo q6-two`, then the reply "finished". C1 sends `ready` at once (no row exists yet), launches, and sends
+the prompt (t = 0.76 s from the probe's start). C1 closes once 5 s have passed and `sleep 6` runs under the engine. It
+closes the way main's SocketPort.close does: `end`, then it reads until the peer's close. 5 s later C2 connects and
+sends `ready` at once, with no pull before it. The burst is every line from that ready up to and including the
+host.supervisorStatus that ends it (supervision.ts registers its onConnect hook after the engine ipc's). The burst's
+lines were, in order: session.status, session.queue, session.brokerItems, session.catalogChanged, session.eventBatch,
+engine.budget, plugins.changed, host.supervisorStatus. That is §Design 3's order.
+
+Timeline (ms from the probe's start; event ids shown as seq:i):
+   757  prompt sent (disposition "sent")
+  3178  C1's last batch: the first model call's stream ends with tool.use 65:1 (Bash `sleep 6`)
+  4460  `sleep 6` seen under the engine
+  5762  C1 `end` (5.0 s after the send; the turn open; 0 events arrived after the end)
+        absence of 5.06 s; the engine stayed alive under the supervisor (PPID 2711)
+ 10822  C2 `ready` → burst: one batch of 3 events, 69:0 task.started, 70:0 task.notification, 71:0 tool.result
+        (the end of the first Bash call, all of which happened while no client was connected)
+ 11381  live: the second model call streams (first live event 75:0 assistant.block.delta)
+ 22800  turn.ended 116:0; the snapshot answers 69 events, complete, lastSeq 123
+  Counts: C1 34, burst 3, live 32, snapshot 69. expectedBurstFirst = F[34] = 69:0 = burstFirst. All five checks true:
+  burstNotEmpty, burstBeginsRightAfterFirstConnection, noDuplicate, concatenationEqualsSnapshot,
+  firstConnectionIsPrefix. Every id carries this launch's `<appSessionId>:<launchId>:` prefix.
+
+Notes:
+  - The absence held the end of a tool call, not a model call: the first sleep ran from about 4.4 s to 10.4 s, and
+    the second model call began just after the reconnect. So the burst carried 3 events, and the seam between the burst
+    and the live batches was exercised too (69..71 in the burst, 75.. live, no event between them missing). Seqs 72-74
+    produce no event: journal rows without an X1 event. That is why contiguity is checked against the launch's own list,
+    not by consecutive seqs.
+  - 0 events arrived after C1's `end`, so this run did not exercise the "written is not read" window of §Design 3. The
+    window exists in main: main's SocketPort.close() marks the port dead before the peer has finished the close, and
+    `receive` then drops any line still in flight, while the host has already counted that line as delivered. A batch
+    the host writes in the instant between main's `end` and the host's processing of it would therefore reach no
+    listener of main's. It would still reach the renderer, which re-hydrates from `session.events`. The design accepts
+    this (§Design 3: "a client that dies with bytes in flight loses them for its derived listeners the same way"). On a
+    deliberate close (the keep-quit) it could be avoided by reading until the close. This is a hairline and was not
+    observed; it is recorded only.
+  - host.stopAll at the end answered {stopped: 1, forced: 0}, and the supervisor exited 0 with its lock and socket
+    unlinked.
+
+
+Q7 — kill -9 of the supervisor mid-turn, a fresh supervisor, and a resume from the disk transcript
+--------------------------------------------------------------------------------------------------
+VERDICT: yes. After a SIGKILL of the supervisor mid-turn, a fresh supervisor over the same directory broke the stale
+lock, served 1.1 s after the kill, and swept the orphaned engine: host.supervisorStatus.orphansKilled = 1, and the engine
+went within 2.4 s of the SIGTERM, with no SIGKILL needed. Then `session.launch` with `resume {sessionId: <the same
+engine session>, fork: false}` and the same app session id launched and reached `ready` on the same engine session id.
+Asked for the shell command it had run earlier, the model answered "sleep 20 && echo q7-done". That command exists only
+in the interrupted turn's transcript on disk.
+
+Setup and timeline (results/q7-crash-resume.json; ms from the probe's start):
+   843  prompt sent: "Run exactly this shell command with the Bash tool, nothing else: sleep 20 && echo q7-done ..."
+  3636  `sleep 20` seen (pid 17662, PGID 17658: the tool's own group). One second later, before the kill: the engine is
+        16806 (PPID = supervisor 16601), status ready with the turn open (keepAlive ["turn"]), live.json
+        {owner: 16601, rows: [the engine, its procStart, launch 6txwgsp6]}, the transcript at 21 lines, the registry row
+        present
+  4684  kill -9 of supervisor 16601 (exit: signal SIGKILL); C1's socket closed 7 ms later
+        +500 ms: the engine is alive with PPID 1 and `sleep 20` runs. host.lock still names 16601 (stale) and the socket
+        file is left. live.json is unchanged and the registry row is present.
+  5808  fresh supervisor 18657 serving (spawned at once, 1.1 s after the kill): its own lock, the same socket path,
+        the same build id
+        host.log: "orphan d328… (pid 16806, launch 6txwgsp6) of the dead supervisor pid 16601: SIGTERM" at 31.575,
+        "orphan sweep: 1 engine(s) of the dead supervisor pid 16601 stopped" at 33.997
+        after the sweep: orphansKilled 1, the engine gone, `sleep 20` gone (it had about 13 s left), the registry row
+        gone, live.json {owner: 18657, rows: []}, engine.sessions []
+  8989  the resume launch ready (launch ccbfy4xx, engine 19370, engineSessionId 9d08e807-… = the first launch's)
+        the prompt "Earlier in this conversation you ran one shell command with the Bash tool. Reply with exactly that
+        command and nothing else." → reply "sleep 20 && echo q7-done". The transcript went from 30 lines to 39, in the
+        same file. The resume launch's events: session.reconnect, plugin.panes, notice.posted, user.message, …,
+        turn.ended, usage.sample (25).
+  11002  host.stopAll answered {stopped: 1, forced: 0}; the fresh supervisor exited 0, its lock and socket unlinked
+  All six checks true: supervisorKilledMidTurn, freshSupervisorStarted, orphanSwept, resumeLaunched,
+  sameEngineSession, replyFromDiskTranscript.
+
+Findings beside the verdict:
+  - The engine's SIGTERM handler stops its tool's process group. M0 Q1 left this open: the Bash tool's shell runs in its
+    own group, so a group kill of the engine does not reach it. Here the sweep's SIGTERM to the engine pid took `sleep
+    20` (pid 17662, PGID 17658, a different group from the engine's) down with it. So the sweep's SIGTERM-first order
+    leaves no tool orphan in the common case. Only the SIGKILL fallback, after a 5 s grace, could.
+  - The state file survived the crash. On the fresh supervisor, `session.queue.list` answered the first prompt's entry
+    from the state file, in state "released" (no recovery transition; nothing was re-sent).
+  - `session.events` for the app session on the fresh supervisor, before the resume, answered `internal`: "unknown app
+    session: <id>". This is the probe's gap, not a defect. A session with no stream answers from C4's diskEvents
+    (fs/service.ts eventsSnapshot), which maps the app session id to the engine session through the bindings main
+    pushes (`fs.bind`, re-synced by main's index source at every `ready`). The probe plays no index and pushed no
+    binding, so C4's disk path was not exercised here. The resume itself is the engine reading its own transcript
+    (`--resume`), and that is what Q7 proves.
+  - The window D-12 describes (M0 Q1: an orphan's live registry row reads as foreign-live until the sweep removes it)
+    lasted, here, from the kill to the sweep's end: about 5.3 s, sweep included. The resume came after it and was not
+    refused.
+
+
+Cost (Q6, Q7)
+-------------
+Estimated from the transcripts' usage at Haiku 4.5 list prices: Q6 US$0.0351 (3 model messages; a cache write of 22.8k
+tokens dominates), Q7 US$0.0168 (3 messages, both launches). Total about US$0.052, against a budget of about US$0.05.
+One run each; no attempt was repeated.
+
+
+Owner-file check (A-15), processes and scratch (Q6, Q7)
+-------------------------------------------------------
+The /tmp and /private/tmp project keys of ~/.claude.json: 25 keys before and after each run, nothing added or removed
+(the script's p1-common check and its python3 check both report `same`). The Concrete Steps' python3 command was also
+written before the first run (15:54) and after the last (15:57), and `cmp` found the two identical.
+Every process started was stopped. Each run ends with host.stopAll, which stopped the session's engine and exited the
+supervisor with code 0 and its lock and socket unlinked. Every recorded pid (the supervisors, the engines, their tool
+shells and sleeps) is then checked: `stillAlive: []` and `survivorsAfterStop: []` in both results files. Q7's
+SIGKILLed supervisor 16601 was reaped by the probe. Its orphaned engine was stopped by the successor's sweep and checked
+gone. Both scratch roots (/tmp/maws-e0a-e10-q6-*, -q7-*) were removed (`scratchRemoved: true`). Final check at 15:57:
+`ps -axo pid,ppid,command | grep -E "maws-supervisor|reconnect-streaming|maws-e0a-e10|ELECTRON_RUN_AS_NODE"` matched
+nothing. No /tmp/maws-e0a-e10-* remained, and no slot under /tmp/maws-review was held. The owner's running MAWS app and
+the ClaudeUsage relay were never signalled.
