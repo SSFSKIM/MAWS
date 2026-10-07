@@ -89,8 +89,9 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
     register,
   });
 
-  // Per boot (Decision Log 32): a partition prepared loads its record's enabled extensions; a page created in it before
-  // those loads are done waits for them, so its content scripts are registered before it loads (the boot race).
+  // Per boot (Decision Log 32): a partition prepared loads its record's enabled extensions; a page created in it while
+  // those loads are pending has its first load held until its loadExtension calls have settled, at most
+  // FIRST_LOAD_HOLD_MS (the boot race; the loader's header says what that does and does not guarantee).
   const onPartitionPrepared = (ses: Electron.Session, partition: string) => extensions.onPartitionPrepared(ses, partition);
   const unregister = browser.partitions.registerPreparer(onPartitionPrepared);
   const stopHold = browser.store.onViewCreated((entry) => extensions.holdNewView(entry));

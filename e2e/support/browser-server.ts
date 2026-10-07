@@ -120,6 +120,19 @@ export async function startBrowserServer(): Promise<BrowserServer> {
     }
     if (path === '/drop') return request.socket.destroy();
     if (path === '/slow') return void held.add(response); // never answered; ended at close
+    // E4b start: `/echo-cookies` answers the request's Cookie header as JSON, `{ header, cookies }` with the pairs by
+    // name, so a case reads which cookies the partition sent (E4b execution document, Interfaces "Test support and e2e").
+    // The JSON is the text of `#echo` in an HTML page, so the imported probe extension's content script (which marks the
+    // page) runs on it as on any page, whatever Chromium does with a bare JSON document.
+    if (path === '/echo-cookies') {
+      const header = request.headers.cookie ?? null;
+      const pairs = (header ?? '').split(';').map((pair) => pair.trim()).filter(Boolean);
+      const cookies = Object.fromEntries(pairs.map((pair) => (pair.includes('=') ? [pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1)] : [pair, ''])));
+      const json = JSON.stringify({ header, cookies }).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      return response.end(page('Echo cookies', `<pre id="echo">${json}</pre>`));
+    }
+    // E4b end
     response.writeHead(404, { 'content-type': 'text/plain' });
     response.end('not found');
   });

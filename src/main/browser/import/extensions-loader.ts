@@ -3,9 +3,10 @@
 // `<staging>/extensions/<id>/` (a symlink anywhere in the tree fails that copy) and renamed into
 // `<partitionFolder>/extensions/<id>/`, so a half-copied extension can never be loaded. The enabled ones (a wallet
 // arrives off, P-21) load with `allowFileAccess: false`, and an extension Electron says it loaded from anywhere but the
-// partition folder is unloaded and refused. One settle of 1.5 s after the loads reads each background: `running` when a
-// worker of the extension is running, `failed` when its worker logged an error (or stopped) during the settle, `stopped`
-// otherwise, `none` without a background (E0b: "loads is not works").
+// partition folder is unloaded and refused. One settle of 1.5 s after the loads reads each background: `failed` when its
+// worker threw while it evaluated (even if Chromium keeps it alive), else `running` when a worker of the extension is
+// running, `failed` when its worker logged an error (or stopped) during the settle, `stopped` otherwise, `none` without a
+// background (E0b: "loads is not works").
 //
 // Per boot, `onPartitionPrepared` (registered through `Partitions.registerPreparer`) starts loading the enabled
 // extensions of the record whose partition was just prepared, and writes the statuses it observes back to the record.
@@ -295,19 +296,24 @@ export class ExtensionsLoader {
 interface BackgroundWatch {
   running(url: string): boolean;
   error(url: string): string | null;
+  evaluationError(url: string): string | null; // an uncaught error while the version was starting, before it ran
   stopped(url: string): boolean;
   stop(): void;
 }
 
 // What the session's workers report while extensions load and settle: errors (`console-message` at level 3, the
 // worker's uncaught error naming the absent `chrome.*` member) and versions that stopped (`running-status-changed`, an
-// experimental signal; a version's scope is learnt while it is still known, since a stopped one may no longer be).
+// experimental signal; a version's scope is learnt while it is still known, since a stopped one may no longer be). An
+// error logged while its version was reported `starting` and not yet `running` was thrown as the worker evaluated: its
+// listeners never registered, whether or not Chromium then keeps the worker alive (Electron 44.4.5 does when a debugger
+// is attached to the session's targets, as Playwright's is; without one it stops the worker).
 function watchBackgrounds(workers: Workers): BackgroundWatch {
-  const errors: { url: string; message: string }[] = [];
+  const errors: { url: string; message: string; evaluating: boolean }[] = [];
   const scopes = new Map<number, string>();
   const stopped = new Set<number>();
+  const status = new Map<number, string>();
   const onConsole = (_event: unknown, details: Electron.MessageDetails) => {
-    if (details.level === 3) errors.push({ url: details.sourceUrl, message: details.message });
+    if (details.level === 3) errors.push({ url: details.sourceUrl, message: details.message, evaluating: status.get(details.versionId) === 'starting' });
   };
   const onStatus = ({ versionId, runningStatus }: ServiceWorkersRunningStatusChangedEventParams) => {
     if (!scopes.has(versionId)) {
@@ -318,12 +324,14 @@ function watchBackgrounds(workers: Workers): BackgroundWatch {
       }
     }
     if (runningStatus === 'stopped') stopped.add(versionId);
+    status.set(versionId, runningStatus);
   };
   workers.on('console-message', onConsole);
   workers.on('running-status-changed', onStatus);
   return {
     running: (url) => Object.values(workers.getAllRunning()).some((worker) => worker.scope.startsWith(url)),
     error: (url) => errors.find((entry) => entry.url.startsWith(url))?.message ?? null,
+    evaluationError: (url) => errors.find((entry) => entry.evaluating && entry.url.startsWith(url))?.message ?? null,
     stopped: (url) => [...stopped].some((versionId) => scopes.get(versionId)?.startsWith(url) ?? false),
     stop: () => {
       workers.off('console-message', onConsole);
@@ -337,6 +345,8 @@ const hasBackground = (extension: Extension) => Boolean((extension.manifest as {
 function backgroundOf(extension: Extension, watch: BackgroundWatch, unsupported: readonly string[]): Pick<ImportedExtension, 'background' | 'backgroundError'> {
   if (!hasBackground(extension)) return { background: 'none', backgroundError: null };
   const url = extension.url.endsWith('/') ? extension.url : `${extension.url}/`;
+  const thrown = watch.evaluationError(url);
+  if (thrown !== null) return { background: 'failed', backgroundError: describeBackgroundError(thrown, unsupported) };
   if (watch.running(url)) return { background: 'running', backgroundError: null };
   const error = watch.error(url);
   if (error !== null) return { background: 'failed', backgroundError: describeBackgroundError(error, unsupported) };

@@ -16,7 +16,9 @@ import { ImportRefused, type ChosenExtension } from './service';
 
 // How the fake session's loaded extension behaves, by Chrome's directory id.
 interface Behaviour {
-  background?: 'running' | 'error' | 'stopped' | 'silent';
+  // `evaluationErrorKept`: the worker threw while it evaluated, then was kept running (Electron 44.4.5 under an attached
+  // debugger, as Playwright's is); `laterError`: a worker that started, then logged an uncaught error while running
+  background?: 'running' | 'error' | 'stopped' | 'silent' | 'evaluationErrorKept' | 'laterError';
   throws?: string;
   id?: string; // Electron's id when it differs from the directory's
   path?: string; // where Electron says it loaded from
@@ -50,6 +52,20 @@ function fakeSession(behaviours: Record<string, Behaviour> = {}) {
       versions.set(versionId, url);
       if (behaviour.background === 'running') running[versionId] = { scope: url, scriptUrl: `${url}sw.js`, renderProcessId: 1, versionId };
       if (behaviour.background === 'error') workers.emit('console-message', {}, { message: WORKER_ERROR, versionId, source: 'javascript', level: 3, sourceUrl: `${url}sw.js`, lineNumber: 1 });
+      const keep = () => (running[versionId] = { scope: url, scriptUrl: `${url}sw.js`, renderProcessId: 1, versionId });
+      const error = () => workers.emit('console-message', {}, { message: WORKER_ERROR, versionId, source: 'javascript', level: 3, sourceUrl: `${url}sw.js`, lineNumber: 1 });
+      if (behaviour.background === 'evaluationErrorKept') {
+        workers.emit('running-status-changed', { versionId, runningStatus: 'starting' });
+        error();
+        workers.emit('running-status-changed', { versionId, runningStatus: 'running' });
+        keep();
+      }
+      if (behaviour.background === 'laterError') {
+        workers.emit('running-status-changed', { versionId, runningStatus: 'starting' });
+        workers.emit('running-status-changed', { versionId, runningStatus: 'running' });
+        keep();
+        error();
+      }
       if (behaviour.background === 'stopped') {
         workers.emit('running-status-changed', { versionId, runningStatus: 'starting' });
         versions.delete(versionId); // a stopped version is no longer known by id: the loader keeps what it learnt at the start
@@ -142,6 +158,15 @@ describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () =>
       const records = await run(loader(), ses, chosen('probe', 'disabled'));
       expect(records.find((record) => record.id === disabled.id)).toMatchObject({ status: 'loaded', background: 'none' });
       expect(records.find((record) => record.id === probe.id)).toMatchObject({ status: 'loaded', background: 'stopped', backgroundError: null });
+    });
+
+    it('reads a worker that threw while it evaluated as failed even when Electron keeps it running; an error logged after it ran leaves it running', async () => {
+      const { probe, fails } = fixture.extensions;
+      const ses = fakeSession({ [probe.id]: { background: 'laterError' }, [fails.id]: { background: 'evaluationErrorKept' } });
+      const records = await run(loader(), ses, chosen('probe', 'fails'));
+      const byId = Object.fromEntries(records.map((record) => [record.id, record]));
+      expect(byId[fails.id]).toMatchObject({ background: 'failed', backgroundError: 'chrome.contextMenus.onClicked is not available in MAWS' });
+      expect(byId[probe.id]).toMatchObject({ background: 'running', backgroundError: null });
     });
 
     it('reads a worker that stopped within the settle as failed, with no error text', async () => {
