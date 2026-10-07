@@ -12,6 +12,8 @@ import {
   BROWSER_DIALOG_EXCERPT_MAX_CHARS,
   BROWSER_DIALOG_MESSAGE_MAX_CHARS,
   BROWSER_DIALOGS_MAX,
+  BROWSER_ERROR_DETAIL_MAX_CHARS,
+  BROWSER_ERROR_MAX_CHARS,
   BROWSER_EVAL_MAX_CHARS,
   BROWSER_LOCATE_MS,
   BROWSER_SCREENSHOT_MAX_BYTES,
@@ -331,6 +333,32 @@ describe('the browser tools\' error texts', () => {
     expect(e.browserTimeout('browser_navigate')).toBe('browser_navigate: MAWS did not answer within 30 s');
     expect(e.pageCovered('browser_act', 60)).toBe('browser_act: the page has been covered by a MAWS sheet or notice for 60 s; nothing was done; call it again once the page is shown');
     expect(e.interrupted('browser_act')).toBe('browser_act: cancelled, the turn was interrupted');
+  });
+
+  it('cuts each piece MAWS did not write (a page\'s message, a URL, a name, an argument echoed) at BROWSER_ERROR_DETAIL_MAX_CHARS, so every text fits BROWSER_ERROR_MAX_CHARS', () => {
+    const e = BROWSER_TOOL_ERRORS;
+    const long = 'x'.repeat(50_000);
+    const cut = `${'x'.repeat(BROWSER_ERROR_DETAIL_MAX_CHARS - 1)}…`;
+    expect(e.evalFailed(long)).toBe(`browser_eval: ${cut}`);
+    expect(e.evalFailed('x'.repeat(BROWSER_ERROR_DETAIL_MAX_CHARS))).toBe(`browser_eval: ${'x'.repeat(BROWSER_ERROR_DETAIL_MAX_CHARS)}`); // at the bound: whole
+    expect(e.downloadRefused('browser_act', long, long)).toBe(`browser_act: ${cut} started a download (${cut}), which MAWS refuses for the agent; the user downloads files`);
+    // the schema's longest locator, every character escaped, and a page's accessible name: still bounded
+    const locator = { css: '"'.repeat(2_000), role: '"'.repeat(64), name: '"'.repeat(500) };
+    const texts = [
+      e.tabNotLoaded('browser_act', TAB, long),
+      e.staleRef('browser_act', `e${'1'.repeat(50_000)}`, 'missing'),
+      e.targetNotFound('browser_act', locator),
+      e.targetNotFound('browser_act', locator, { role: long, name: long }),
+      e.navigationFailed('browser_navigate', long, 'dns', long),
+      e.downloadRefused('browser_act', long, long),
+      e.actionTimeout('browser_act', 'click', long, 10_000),
+      e.actionFailed('browser_act', 'click', long, long),
+      e.evalFailed(long),
+      e.rootNotFound(long),
+      e.screenshotFailed(long),
+    ];
+    for (const text of texts) expect(text.length).toBeLessThanOrEqual(BROWSER_ERROR_MAX_CHARS);
+    expect(Math.max(...texts.map((text) => text.length))).toBeGreaterThan(3 * BROWSER_ERROR_DETAIL_MAX_CHARS); // the bound is not slack
   });
 
   it('joins TOOL_ERRORS beside E4a\'s refusal and E10\'s appNotOpen, widened to the browser tools (Decision Log 31)', () => {

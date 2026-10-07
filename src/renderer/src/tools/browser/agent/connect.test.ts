@@ -21,7 +21,8 @@ let fake: FakeClient;
 let disconnect: () => void;
 let main: ReturnType<typeof installFakeMain>;
 const browserTabs = (id: AppSessionId) => (panelOf(id)?.tabs ?? []).filter((t) => t.toolId === browserTool.id);
-const acting = (appSessionId: AppSessionId, tabId = T1) => fake.event('browser.agent.acting', { appSessionId, tabId });
+const acting = (appSessionId: AppSessionId, tabId = T1, actingSessionId = appSessionId) => fake.event('browser.agent.acting', { appSessionId, tabId, actingSessionId });
+const THREAD = 'App-Thread' as AppSessionId; // a side thread of A, acting in A's tab (Decision Log 29)
 const busy = (id: AppSessionId, value: boolean) =>
   useSessions.setState((s) => ({ engine: new Map(s.engine).set(id, { appSessionId: id, busy: value } as unknown as EngineSessionStatus) }));
 
@@ -103,6 +104,34 @@ describe('the Browser tool follows the agent', () => {
     useLayout.setState({ main: mainShowing(B) });
     acting(B);
     expect(browserTabs(B)).toHaveLength(1);
+  });
+
+  it("a side thread acting in its shown parent's tab opens the parent's tool once per the thread's turn; a close holds until it ends", async () => {
+    busy(A, false); // the parent is idle; its thread is in a turn
+    busy(THREAD, true);
+    acting(A, T1, THREAD);
+    expect(browserTabs(A)).toHaveLength(1);
+    await panelHost.closeTab(browserTabs(A)[0]!.id);
+    acting(A, T1, THREAD);
+    expect(browserTabs(A)).toHaveLength(0); // the person's close holds for the rest of the thread's turn
+    busy(THREAD, false);
+    busy(THREAD, true);
+    acting(A, T1, THREAD);
+    expect(browserTabs(A)).toHaveLength(1);
+  });
+
+  it("the thread's turn and the parent's are counted apart: each opens the parent's tool at most once", async () => {
+    busy(THREAD, true);
+    acting(A); // the parent's own turn
+    await panelHost.closeTab(browserTabs(A)[0]!.id);
+    acting(A);
+    expect(browserTabs(A)).toHaveLength(0);
+    acting(A, T1, THREAD); // the thread's first action in the parent's tab this turn
+    expect(browserTabs(A)).toHaveLength(1);
+    await panelHost.closeTab(browserTabs(A)[0]!.id);
+    acting(A, T1, THREAD);
+    acting(A);
+    expect(browserTabs(A)).toHaveLength(0);
   });
 
   it('opens nothing once disconnected', () => {

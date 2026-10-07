@@ -257,7 +257,8 @@ export const events = {
   'browser.import.changed': z.strictObject({ profiles: z.array(ImportedProfileSchema) }),
   // E4b end
   // E4c start: an agent's action targets this tab (E4c Design §6 step 1); a window showing the session opens the Browser
-  // tool on it once
-  'browser.agent.acting': z.strictObject({ appSessionId: AppSessionIdSchema, tabId: BrowserTabIdSchema }),
+  // tool on it once per turn. `appSessionId` owns the tab; `actingSessionId` made the call (a side thread acting in its
+  // parent's tab, Decision Log 29; else the owner), so the once counts the turn that acts
+  'browser.agent.acting': z.strictObject({ appSessionId: AppSessionIdSchema, tabId: BrowserTabIdSchema, actingSessionId: AppSessionIdSchema }),
   // E4c end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;

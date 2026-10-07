@@ -6,7 +6,7 @@ import type { WebContentsView } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
-import { BROWSER_ACTION_TIMEOUT_MS, BROWSER_COVER_WAIT_MAX_MS, BROWSER_EVAL_MAX_CHARS, BROWSER_SCREENSHOT_MAX_BYTES, BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT, BROWSER_TOOL_ERRORS, BrowserScreenshotResultSchema, type BrowserDialog, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
+import { BROWSER_ACTION_TIMEOUT_MS, BROWSER_COVER_WAIT_MAX_MS, BROWSER_ERROR_DETAIL_MAX_CHARS, BROWSER_EVAL_MAX_CHARS, BROWSER_SCREENSHOT_MAX_BYTES, BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT, BROWSER_TOOL_ERRORS, BrowserScreenshotResultSchema, type BrowserDialog, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
 import { cutSnapshot } from '@shared/browser/snapshot';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { MawsBrowserAnswerResultSchema } from '@shared/ipc/schema/maws';
@@ -266,7 +266,7 @@ describe('browser_act (Design §6: show, resolve, wait without input, the pause 
     expect(h.page.calls.find((call) => call.method === 'waitFor visible')!.args).toEqual([{ state: 'visible', timeout: BROWSER_ACTION_TIMEOUT_MS, signal: expect.any(AbortSignal) }]);
     expect(h.page.calls.some((call) => JSON.stringify(call.args).includes('trial'))).toBe(false);
     expect(h.store.list(A).selected[A]).toBe(tabId); // the acting tab comes forward
-    expect(h.acting()).toEqual([{ appSessionId: A, tabId }]);
+    expect(h.acting()).toEqual([{ appSessionId: A, tabId, actingSessionId: A }]);
   });
 
   it.each([
@@ -631,7 +631,7 @@ describe('browser_eval (an action: Design §6, Decision Log 5)', () => {
     expect(answer).toEqual({ ok: true, result: { status: 'ok', tabId, url: 'https://a.test/', title: 'Page A', ms: 250, value: { heading: 'Example', count: 2 }, truncated: false } });
     expect(h.page.calls).toEqual([{ method: 'evaluate', selector: null, args: ['document.title'] }]);
     expect(h.log).toEqual(['pause', 'acting', 'ended']);
-    expect(h.acting()).toEqual([{ appSessionId: A, tabId }]);
+    expect(h.acting()).toEqual([{ appSessionId: A, tabId, actingSessionId: A }]);
   });
 
   it('never waits for a cover: script runs in a hidden page, so a covered tab evaluates at once (A-47 holds trivially)', async () => {
@@ -662,6 +662,16 @@ describe('browser_eval (an action: Design §6, Decision Log 5)', () => {
     };
     expect(await h.run('browser_eval', { tabId, expression: 'nope' })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.evalFailed('ReferenceError: nope is not defined') });
     expect(h.log).toEqual(['pause', 'acting', 'ended']);
+  });
+
+  it("cuts a page's long exception message, so the answer and its journaled row stay bounded", async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.onEvaluate = async () => {
+      throw new Error(`page.evaluate: Error: ${'x'.repeat(50_000)}\n    at eval`);
+    };
+    const answer = await h.run('browser_eval', { tabId, expression: 'throw new Error("x".repeat(50000))' });
+    expect(answer).toEqual({ ok: false, error: `browser_eval: Error: ${'x'.repeat(BROWSER_ERROR_DETAIL_MAX_CHARS - 'Error: '.length - 1)}…` });
   });
 
   it('waits for the person at the pause point, and never evaluates when aborted there', async () => {

@@ -52,6 +52,9 @@ import * as browser from './schema/browser';
 // E4b start
 import { DONE_REPORT, PROBE_EXTENSION } from '../../../test/support/import-reports';
 // E4b end
+// E4c start
+import { BROWSER_ERROR_MAX_CHARS } from '../maws/browser';
+// E4c end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
 const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */ } satisfies Record<
@@ -1379,6 +1382,8 @@ describe('ipc schema validates both directions', () => {
       expect(answer({ ok: true, result: { status: 'ok' }, image: { path: `/u/${UUID}.jpg`, mimeType: 'image/jpeg', width: 1280, height: 800, bytes: 90_000 } })).toBe(true);
       expect(answer({ ok: true, result: { status: 'ok' }, image: { path: '/u/x.webp', mimeType: 'image/webp', width: 1, height: 1, bytes: 1 } })).toBe(false);
       expect(answer({ ok: false, error: 'browser_act: tab "b_000000000001" was closed during the action' })).toBe(true);
+      expect(answer({ ok: false, error: 'x'.repeat(BROWSER_ERROR_MAX_CHARS) })).toBe(true); // bounded: it is journaled
+      expect(answer({ ok: false, error: 'x'.repeat(BROWSER_ERROR_MAX_CHARS + 1) })).toBe(false);
       expect(answer({ ok: false })).toBe(false);
       expect(answer({ ok: true })).toBe(false);
       expect(validateCommandOutput('maws.browser.answer', { outcome: 'not_pending' }).ok).toBe(true);
@@ -1393,8 +1398,10 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('maws.browser.progress', progress).ok).toBe(true);
       expect(validateEventPayload('maws.browser.progress', { ...progress, toolUseId: null, waiting: null }).ok).toBe(true);
       expect(validateEventPayload('maws.browser.progress', { ...progress, tabId: 'tab-1' }).ok).toBe(false);
-      expect(validateEventPayload('browser.agent.acting', { appSessionId: 'a', tabId: TAB_ID }).ok).toBe(true);
-      expect(validateEventPayload('browser.agent.acting', { appSessionId: 'a', tabId: 'nope' }).ok).toBe(false);
+      const acting = { appSessionId: 'a', tabId: TAB_ID, actingSessionId: 'thread' };
+      expect(validateEventPayload('browser.agent.acting', acting).ok).toBe(true);
+      expect(validateEventPayload('browser.agent.acting', { ...acting, tabId: 'nope' }).ok).toBe(false);
+      expect(validateEventPayload('browser.agent.acting', { appSessionId: 'a', tabId: TAB_ID }).ok).toBe(false); // who acts is named
     });
 
     it('adds the notice for a page dialog MAWS answered on a tab nobody had placed (A-42): its type and a short plain excerpt', () => {

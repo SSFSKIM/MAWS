@@ -13,7 +13,7 @@ import type { CommandSpec } from './common';
 // E4c start
 import { ToolUseIdSchema } from '../../graph/ids';
 import { BrowserTabIdSchema } from '../../browser/tab';
-import { BROWSER_TOOL_NAMES, BrowserWaitReasonSchema } from '../../maws/browser';
+import { BROWSER_ERROR_MAX_CHARS, BROWSER_TOOL_NAMES, BrowserWaitReasonSchema } from '../../maws/browser';
 // E4c end
 
 export const MawsPaneShowSchema = z.strictObject({
@@ -94,7 +94,7 @@ export const MawsBrowserAnswerResultSchema = z.discriminatedUnion('ok', [
       .strictObject({ path: z.string(), mimeType: z.enum(['image/png', 'image/jpeg']), width: z.number().int().min(0), height: z.number().int().min(0), bytes: z.number().int().min(0) })
       .optional(),
   }),
-  z.strictObject({ ok: z.literal(false), error: z.string() }),
+  z.strictObject({ ok: z.literal(false), error: z.string().max(BROWSER_ERROR_MAX_CHARS) }), // main cuts the pieces it did not write
 ]);
 export type MawsBrowserAnswerResult = z.infer<typeof MawsBrowserAnswerResultSchema>;
 // E4c end

@@ -169,7 +169,7 @@ describe('browser_tabs open (a load: Design §6 "Loads", A-31)', () => {
     const tabId = h.store.list(A).tabs[0].tabId;
     expect(h.entry(tabId).tab.control).toBe('agent'); // the same tick as the open: E4a's will-download refuses for the agent
     expect(h.calls).toEqual([`acting ${tabId}`]); // a load's pause point is vacuous
-    expect(h.acting()).toEqual([{ appSessionId: A, tabId }]);
+    expect(h.acting()).toEqual([{ appSessionId: A, tabId, actingSessionId: A }]);
     h.commit(tabId, 'https://example.com/', { title: 'Example Domain' });
     expect(await answer).toEqual({
       ok: true,
@@ -255,6 +255,13 @@ describe('browser_tabs close and select', () => {
     expect((await h.run(THREAD, 'browser_tabs', { action: 'close', tabId: parent }))?.ok).toBe(true);
   });
 
+  it("names the acting session beside the tab's owner when a side thread selects its parent's tab (the follower keys on the thread's turn)", async () => {
+    const h = harness();
+    const parent = h.open(A);
+    expect((await h.run(THREAD, 'browser_tabs', { action: 'select', tabId: parent }))?.ok).toBe(true);
+    expect(h.acting()).toEqual([{ appSessionId: A, tabId: parent, actingSessionId: THREAD }]);
+  });
+
   it('selects a loaded tab without loading it', async () => {
     const h = harness();
     const first = h.open(A, 'https://a.test/');
@@ -262,7 +269,7 @@ describe('browser_tabs close and select', () => {
     const answer = await h.run(A, 'browser_tabs', { action: 'select', tabId: first });
     expect(answer).toMatchObject({ ok: true, result: { action: 'select', tabId: first } });
     expect(h.store.list(A).selected[A]).toBe(first);
-    expect(h.acting()).toEqual([{ appSessionId: A, tabId: first }]);
+    expect(h.acting()).toEqual([{ appSessionId: A, tabId: first, actingSessionId: A }]);
     expect(h.control.markActing).not.toHaveBeenCalled();
   });
 
@@ -298,7 +305,7 @@ describe('browser_navigate (Design §6)', () => {
     await flush();
     expect(h.calls).toEqual([`pause ${tabId}`, `acting ${tabId}`]);
     expect(h.wc(tabId).loadURL).toHaveBeenLastCalledWith('https://example.com/');
-    expect(h.acting()).toEqual([{ appSessionId: A, tabId }]);
+    expect(h.acting()).toEqual([{ appSessionId: A, tabId, actingSessionId: A }]);
     h.commit(tabId, 'https://example.com/', { stop: false, title: 'Example Domain' });
     await flush();
     let settled = false;
@@ -469,6 +476,6 @@ describe('browser_navigate (Design §6)', () => {
     h.commit(acted, 'https://c.test/');
     await answer;
     expect(h.store.list(A).selected[A]).toBe(held);
-    expect(h.acting()).toEqual([{ appSessionId: A, tabId: acted }]);
+    expect(h.acting()).toEqual([{ appSessionId: A, tabId: acted, actingSessionId: A }]);
   });
 });

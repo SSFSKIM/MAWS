@@ -41,6 +41,7 @@ import {
   type BrowserTabSummary,
   type BrowserToolName,
   type BrowserWaitReason,
+  clipErrorDetail,
 } from '@shared/maws/browser';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import type { NavigateTo, Navigator } from '../navigation';
@@ -201,7 +202,7 @@ export class BrowserHandlers {
         // session's selected tab; E4a has started the load by the time `open` returns
         const { tab } = store.open({ appSessionId, url, select: !this.personHoldsSelection(appSessionId) });
         const entry = store.require(tab.tabId);
-        this.deps.emit('browser.agent.acting', { appSessionId, tabId: tab.tabId });
+        this.deps.emit('browser.agent.acting', { appSessionId, tabId: tab.tabId, actingSessionId: appSessionId });
         await this.loaded(entry, 'browser_tabs', ctx);
         return ok(answer(entry.tab));
       }
@@ -214,7 +215,7 @@ export class BrowserHandlers {
       }
       case 'select': {
         const entry = this.reach('browser_tabs', appSessionId, args.tabId!);
-        this.show(entry);
+        this.show(entry, appSessionId);
         // a suspended tab is loaded, so a following snapshot works (Decision Log 15)
         if (!entry.view && entry.tab.url !== '') {
           if (this.deps.navigator.navigate(entry.tab.tabId, 'reload')) await this.loaded(entry, 'browser_tabs', ctx);
@@ -247,7 +248,7 @@ export class BrowserHandlers {
       to = { url: this.checkedUrl(args.url, tool), typed: false };
     }
     const [action, target] = describeCall(call);
-    this.show(entry);
+    this.show(entry, appSessionId);
 
     let waited: Waited = { waitedFor: null, waitedMs: null };
     if (!entry.view) {
@@ -299,7 +300,7 @@ export class BrowserHandlers {
     const refs = this.refsOf(entry);
     const downloads = this.watchDownloads(entry, tool);
     try {
-      this.show(entry);
+      this.show(entry, appSessionId);
       const { page } = await this.driverOf(entry, tool, args.action, target, ctx.signal);
       const { locator, resolved } = await locate(page, args.target, { tool, signal: ctx.signal, refs });
       let coveredMs = 0;
@@ -355,7 +356,7 @@ export class BrowserHandlers {
     this.requirePage(entry, tool);
     const downloads = this.watchDownloads(entry, tool);
     try {
-      this.show(entry);
+      this.show(entry, appSessionId);
       const { page } = await this.driverOf(entry, tool, 'eval', '', ctx.signal);
       await this.pause(entry, ctx);
       control.markActing(entry);
@@ -485,16 +486,17 @@ export class BrowserHandlers {
   // Main refuses again what the schema refused (Design §12), and loads the normalised URL.
   private checkedUrl(url: string, tool: BrowserToolName): string {
     const checked = validateBrowserUrl(url);
-    if (!checked.ok) throw new BrowserToolError(TOOL_ERRORS.navigationRefused(url, tool));
+    if (!checked.ok) throw new BrowserToolError(TOOL_ERRORS.navigationRefused(clipErrorDetail(url), tool)); // E4a's text quotes it whole
     return checked.url;
   }
 
   // Design §6 step 1: the acting tab comes forward in its session's panel, unless the person is using the selected tab
-  // (moving the panel would send their keys to a hidden page); the renderer opens the Browser tool once.
-  private show(entry: TabEntry): void {
+  // (moving the panel would send their keys to a hidden page); the renderer opens the Browser tool once. The event names
+  // the tab's owner and the session acting (a side thread in its parent's tab), whose turn the renderer's once counts.
+  private show(entry: TabEntry, actingSessionId: AppSessionId): void {
     const { appSessionId, tabId } = entry.tab;
     if (this.selectedOf(appSessionId) !== tabId && !this.personHoldsSelection(appSessionId)) this.deps.store.select(appSessionId, tabId);
-    this.deps.emit('browser.agent.acting', { appSessionId, tabId });
+    this.deps.emit('browser.agent.acting', { appSessionId, tabId, actingSessionId });
   }
 
   // The pause point (Design §6 step 3): the abort checked before it and again right before dispatch (Decision Log 3).

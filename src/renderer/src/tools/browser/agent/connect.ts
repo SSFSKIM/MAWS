@@ -5,9 +5,11 @@
 // never switches the main view or the shown session. No tab id goes with the open: main's selection stands, so the tool
 // shows the acting tab, or the one the person is using, and a page they are typing in is never swapped from here.
 //
-// Once per turn: the first action of a turn the window shows decides, and nothing opens or activates again until the
-// session's turn ends (`busy` leaves true), so a person who moved to another panel tab, or closed the tool, is not
-// pulled back on every action. An action in a session the window does not show opens nothing and uses nothing up.
+// Once per turn: the first action of a turn the window shows decides, and nothing opens or activates that session's tool
+// again until the turn ends (`busy` leaves true), so a person who moved to another panel tab, or closed the tool, is not
+// pulled back on every action. The turn is the acting session's (a side thread acting in its parent's tab: the thread's
+// turn, the parent being idle), else the tab owner's. An action in a session the window does not show opens nothing and
+// uses nothing up.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../../ipc/client';
@@ -22,17 +24,23 @@ const hasBrowserTool = (appSessionId: AppSessionId) => useLayout.getState().pane
 const inTurn = (appSessionId: AppSessionId) => useSessions.getState().engine.get(appSessionId)?.busy === true;
 
 export function connectBrowserAgent(client: MawsBridge = ipc): () => void {
-  const followed = new Set<AppSessionId>(); // sessions whose turn has had its one open (or found the tool open)
+  // a session in a turn → the sessions whose Browser tool that turn has had its one open of (or found open)
+  const followed = new Map<AppSessionId, Set<AppSessionId>>();
 
   const offs = [
-    client.on('browser.agent.acting', ({ appSessionId }) => {
-      if (followed.has(appSessionId) || shownSession() !== appSessionId) return;
-      if (inTurn(appSessionId)) followed.add(appSessionId);
+    client.on('browser.agent.acting', ({ appSessionId, actingSessionId }) => {
+      if (shownSession() !== appSessionId) return;
+      const turn = [actingSessionId, appSessionId].find(inTurn);
+      if (turn !== undefined) {
+        const opened = followed.get(turn) ?? new Set<AppSessionId>();
+        if (opened.has(appSessionId)) return;
+        followed.set(turn, opened.add(appSessionId));
+      }
       if (hasBrowserTool(appSessionId) || !usePanelHost.getState().tools.has(browserTool.id)) return;
       panelHost.addTool<BrowserParams>(browserTool.id, { appSessionId, params: { appSessionId }, activate: true });
     }),
     useSessions.subscribe(() => {
-      for (const appSessionId of followed) if (!inTurn(appSessionId)) followed.delete(appSessionId);
+      for (const turn of followed.keys()) if (!inTurn(turn)) followed.delete(turn);
     }),
   ];
   return () => {

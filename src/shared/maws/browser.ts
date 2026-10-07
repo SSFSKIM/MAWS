@@ -29,6 +29,14 @@ export const BROWSER_COVER_WAIT_MAX_MS = 60_000; // A-47 (Decision Log 82): a ca
 export const BROWSER_LOCATE_MS = 2_000; // how long a locator with no match waits before targetNotFound
 export const BROWSER_AGENT_IDLE_MS = 10_000; // `control: 'agent'` lapses to idle this long after the last action
 export const BROWSER_BRIDGE_IDLE_MS = 300_000; // a driver with no command for this long closes
+// An error text's pieces MAWS did not write itself (a page's exception or load error, a page URL, a download's file name,
+// an element's accessible name, an argument echoed back) are cut at BROWSER_ERROR_DETAIL_MAX_CHARS with an ellipsis, so
+// the answer, the tool result and the journaled `maws.browser.action` stay bounded whatever the page throws; a text holds
+// at most three such pieces, and the answer's schema refuses anything past BROWSER_ERROR_MAX_CHARS.
+export const BROWSER_ERROR_DETAIL_MAX_CHARS = 1_000;
+export const BROWSER_ERROR_MAX_CHARS = 4_000;
+export const clipErrorDetail = (text: string): string =>
+  text.length <= BROWSER_ERROR_DETAIL_MAX_CHARS ? text : `${text.slice(0, BROWSER_ERROR_DETAIL_MAX_CHARS - 1)}…`;
 // Decision Log 33 and A-42: the page dialogs MAWS answered during a call, reported in its result as plain text (and the
 // excerpt a hidden tab's notice carries); defined in a leaf module the notice schema imports too
 export { BROWSER_DIALOG_EXCERPT_MAX_CHARS, BROWSER_DIALOG_MESSAGE_MAX_CHARS, BROWSER_DIALOGS_MAX } from '../browser/dialog';
@@ -218,7 +226,8 @@ export function browserTargetText(target: BrowserTarget): string {
   return typeof target === 'string' ? target : locatorText(target);
 }
 
-const on = (action: string, target: string) => (target === '' ? action : `${action} on ${target}`);
+const on = (action: string, target: string) => (target === '' ? action : `${action} on ${clipErrorDetail(target)}`);
+const clip = clipErrorDetail;
 
 const SNAPSHOT_AGAIN = '; call browser_snapshot again and use a ref from it';
 
@@ -226,7 +235,7 @@ const SNAPSHOT_AGAIN = '; call browser_snapshot again and use a ref from it';
 export type NamedBrowserLocator = BrowserLocator & ({ role: string } | { name: string });
 // What such a locator wanted, as the disagreement names it: an empty name is printed as `""`, never dropped.
 const wantedText = (locator: NamedBrowserLocator) =>
-  [locator.role, locator.name === undefined ? undefined : JSON.stringify(locator.name)].filter((part) => part !== undefined).join(' ');
+  clip([locator.role, locator.name === undefined ? undefined : JSON.stringify(locator.name)].filter((part) => part !== undefined).join(' '));
 
 // No element; or (Decision Log 30) css alone matched exactly one element, `found`, whose role or name is not the
 // locator's, so nothing was acted on. Several matches are never an error (the result's `matches`). Only a locator with
@@ -235,29 +244,29 @@ function targetNotFound(tool: BrowserToolName, locator: BrowserLocator): string;
 function targetNotFound(tool: BrowserToolName, locator: NamedBrowserLocator, found: { role: string; name: string }): string;
 function targetNotFound(tool: BrowserToolName, locator: BrowserLocator, found?: { role: string; name: string }): string {
   return found === undefined
-    ? `${tool}: no element matches ${locatorText(locator)} (0 matches)`
-    : `${tool}: ${locatorText({ css: locator.css })} matches one element, ${roleNameText(found)}, not ${wantedText(locator as NamedBrowserLocator)}`;
+    ? `${tool}: no element matches ${clip(locatorText(locator))} (0 matches)`
+    : `${tool}: ${clip(locatorText({ css: locator.css }))} matches one element, ${clip(roleNameText(found))}, not ${wantedText(locator as NamedBrowserLocator)}`;
 }
 
 export const BROWSER_TOOL_ERRORS = {
   tabNotFound: (tool: BrowserToolName, tabId: string) => `${tool}: no tab "${tabId}" in this session; call browser_tabs {action: "list"}`,
-  tabNotLoaded: (tool: BrowserToolName, tabId: string, url: string) => `${tool}: tab "${tabId}" is not loaded (${url}); call browser_navigate {tabId, url: "reload"} first`,
+  tabNotLoaded: (tool: BrowserToolName, tabId: string, url: string) => `${tool}: tab "${tabId}" is not loaded (${clip(url)}); call browser_navigate {tabId, url: "reload"} first`,
   tabClosed: (tool: BrowserToolName, tabId: string) => `${tool}: tab "${tabId}" was closed during the action`,
   tabCrashed: (tool: BrowserToolName, tabId: string) => `${tool}: the page in tab "${tabId}" crashed; call browser_navigate {tabId, url: "reload"} to revive it`,
   staleRef: (tool: BrowserToolName, ref: string, reason: 'previous-document' | 'missing') =>
-    `${tool}: ref "${ref}" ${reason === 'previous-document' ? 'is stale: it belongs to a previous document' : 'is stale or missing in the current snapshot'}${SNAPSHOT_AGAIN}`,
+    `${tool}: ref "${clip(ref)}" ${reason === 'previous-document' ? 'is stale: it belongs to a previous document' : 'is stale or missing in the current snapshot'}${SNAPSHOT_AGAIN}`,
   targetNotFound,
   // Internal (an abort): the action was cancelled while the person held the page; nothing is written.
   humanHasPage: (tool: BrowserToolName) => `${tool}: the user has the page; the action was cancelled before they handed it back`,
   // `kind`: E4a's classification; `code`: Chromium's error description (its number when the description is empty).
-  navigationFailed: (tool: BrowserToolName, url: string, kind: LoadErrorKind, code: string | number) => `${tool}: ${url} failed to load (${kind}, ${code})`,
-  downloadRefused: (tool: BrowserToolName, url: string, filename: string) => `${tool}: ${url} started a download (${filename}), which MAWS refuses for the agent; the user downloads files`,
+  navigationFailed: (tool: BrowserToolName, url: string, kind: LoadErrorKind, code: string | number) => `${tool}: ${clip(url)} failed to load (${kind}, ${clip(String(code))})`,
+  downloadRefused: (tool: BrowserToolName, url: string, filename: string) => `${tool}: ${clip(url)} started a download (${clip(filename)}), which MAWS refuses for the agent; the user downloads files`,
   // `target`: `browserTargetText` of it, or '' when the action has none (back, forward)
   actionTimeout: (tool: BrowserToolName, action: string, target: string, ms: number) => `${tool}: ${on(action, target)} was not actionable within ${ms / 1000} s (the element must be visible and enabled)`,
-  actionFailed: (tool: BrowserToolName, action: string, target: string, message: string) => `${tool}: ${on(action, target)} failed: ${message}`,
-  evalFailed: (message: string) => `browser_eval: ${message}`,
-  rootNotFound: (root: string) => `browser_snapshot: no element for root "${root}"`,
-  screenshotFailed: (message: string) => `browser_screenshot: could not capture: ${message}`,
+  actionFailed: (tool: BrowserToolName, action: string, target: string, message: string) => `${tool}: ${on(action, target)} failed: ${clip(message)}`,
+  evalFailed: (message: string) => `browser_eval: ${clip(message)}`,
+  rootNotFound: (root: string) => `browser_snapshot: no element for root "${clip(root)}"`,
+  screenshotFailed: (message: string) => `browser_screenshot: could not capture: ${clip(message)}`,
   screenshotTooLarge: (bytes: number) => `browser_screenshot: the picture is ${bytes} bytes after the JPEG fallback and exceeds ${BROWSER_SCREENSHOT_MAX_BYTES / (1024 * 1024)} MiB; screenshot a target instead of fullPage`,
   // A-47 (Decision Log 82): a call held by covers (a sheet, the palette, a notice over the pane) past BROWSER_COVER_WAIT_MAX_MS
   pageCovered: (tool: BrowserToolName, seconds: number) => `${tool}: the page has been covered by a MAWS sheet or notice for ${seconds} s; nothing was done; call it again once the page is shown`,
