@@ -6,8 +6,9 @@
 // events exactly (ids and seq included) because every event derives from a journal row; a rebuilt page stops at its
 // limit and the next page resumes where it stopped. The originating `*.requested` event of each live broker item is
 // kept aside for `session.pendingRequest`, whatever the ring has evicted since, and dropped once its item has left the
-// list, or without a listing when the broker retired the request unlisted (a re-delivered retired id; the exit). C12: once the launch has exited, its
-// ring keeps only the last EXITED_RING events (the budget's exited-history cap); older ranges rebuild from the journal.
+// list, or without a listing when the broker retired the request unlisted (a re-delivered retired id; the exit). C12:
+// once the launch has exited, its ring keeps only the last EXITED_RING events (the budget's exited-history cap); older
+// ranges rebuild from the journal.
 import { createReadStream } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { createInterface } from 'node:readline';

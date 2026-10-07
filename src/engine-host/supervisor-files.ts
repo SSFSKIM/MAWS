@@ -2,8 +2,9 @@
 // "The lock", §Design 6 "Build id"). Everything lives under `<userData>/supervisor/` (mode 0700): `host.sock`,
 // `host.lock`, `host.token`, `host.log`, `live.json`. The lock is the candidate supervisor's, never main's: it is
 // created atomically with its content (`link` of a pre-written `host.lock.<pid>`), a live pid is never stale, and a
-// stale lock is broken under `host.lock.break` (taken the same way) so two breakers cannot unlink each other's fresh locks. Main reads the
-// lock (pid, procStart, socketPath) and the token from here too; nothing in this module touches the engine.
+// stale lock is broken under `host.lock.break` (taken the same way) so two breakers cannot unlink each other's fresh
+// locks. Main reads the lock (pid, procStart, socketPath) and the token from here too; nothing in this module touches
+// the engine.
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import * as nodeFs from 'node:fs';

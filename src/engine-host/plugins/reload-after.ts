@@ -1,11 +1,11 @@
 // The reload after a plugin mutation (E8 execution document, M1 decisions; D-4): the engine applies nothing on its own,
 // and a reload sent right after the CLI's write answers from its previous settings snapshot (G0: the settings watcher
-// lags ~1.3 s), so MAWS waits SETTLE_MS, then reloads plugins in every session whose process is ready, in parallel. Each
-// reload settles independently: its answer is compared with what the change should mean for that session (the plugin
-// present after install and enable, absent after uninstall and disable, at the result's new version after an update,
-// nothing to check after a marketplace verb), which applies to every session at user scope and only to the session in the operation's directory
-// at project and local scope; a disagreeing session is reloaded once more after another settle, then reported
-// `not_reflected`; a rejected reload is that session's `failed`, never the mutation's.
+// lags ~1.3 s), so MAWS waits SETTLE_MS, then reloads plugins in every session whose process is ready, in parallel.
+// Each reload settles independently: its answer is compared with what the change should mean for that session (the
+// plugin present after install and enable, absent after uninstall and disable, at the result's new version after an
+// update, nothing to check after a marketplace verb), which applies to every session at user scope and only to the
+// session in the operation's directory at project and local scope; a disagreeing session is reloaded once more after
+// another settle, then reported `not_reflected`; a rejected reload is that session's `failed`, never the mutation's.
 import { realpath } from 'node:fs/promises';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionReload } from '@shared/ipc/schema/plugins';
