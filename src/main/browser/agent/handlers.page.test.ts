@@ -700,7 +700,6 @@ describe('dialogs (Decision Log 33, 35, 37; the seam Task 2.4 fills)', () => {
 
 describe('browser_screenshot (a read: Design §7, Decision Log 5, 23, 43, 44 (b), 47)', () => {
   const ID = '6f1c2a4e-3b5d-4c7e-8f90-a1b2c3d4e5f6';
-  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   const shotsOf = (h: ReturnType<typeof harness>) => screenshotsDir(h.userData, A);
 
   it('captures the viewport, writes it at the path main derives, and answers the result and the image, touching nothing', async () => {
@@ -740,18 +739,17 @@ describe('browser_screenshot (a read: Design §7, Decision Log 5, 23, 43, 44 (b)
     h.page.counts.set('css=.card', 3);
     h.page.onScreenshot = (selector) => (selector === 'page' ? pngBytes(1, 1) : pngBytes(120, 40));
     expect(resultOf(await h.run('browser_screenshot', { tabId, target: 'e5' }, { deliverableId: ID }))).toMatchObject({ target: { ref: 'e5', role: 'button', name: 'Submit' }, width: 120, height: 40, fullPage: false });
-    expect(resultOf(await h.run('browser_screenshot', { tabId, target: { css: '.card' } }))).toMatchObject({ target: { css: '.card', matches: 3 } });
+    expect(resultOf(await h.run('browser_screenshot', { tabId, target: { css: '.card' } }, { deliverableId: ID }))).toMatchObject({ target: { css: '.card', matches: 3 } });
     expect(h.page.calls.filter((call) => call.method === 'screenshot').map((call) => call.selector)).toEqual(['aria-ref=e5', 'css=.card >> first']);
   });
 
-  it('mints the record id when the request carries none (the e2e seam has no host)', async () => {
+  it('answers screenshotFailed, capturing and writing nothing, when the request carries no record id (Decision Log 77 (d))', async () => {
     const h = harness();
     const tabId = h.open();
     h.page.onScreenshot = () => pngBytes(10, 10);
-    const result = resultOf(await h.run('browser_screenshot', { tabId }));
-    expect(result.deliverableId).toMatch(UUID);
-    expect(result.path).toBe(screenshotPath(h.userData, A, result.deliverableId as string, 'png'));
-    expect(existsSync(result.path as string)).toBe(true);
+    expect(await h.run('browser_screenshot', { tabId })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.screenshotFailed('the request carries no deliverable id') });
+    expect(h.page.calls.filter((call) => call.method === 'screenshot')).toEqual([]);
+    expect(existsSync(screenshotsDir(h.userData, A))).toBe(false);
   });
 
   it('writes the JPEG retake of an oversize full page as .jpg', async () => {
@@ -795,7 +793,7 @@ describe('browser_screenshot (a read: Design §7, Decision Log 5, 23, 43, 44 (b)
     h.page.counts.set('css=#chart', 1);
     h.page.onScreenshot = () => pngBytes(300, 200);
     h.cover(tabId, true);
-    const answer = h.run('browser_screenshot', { tabId, target: { css: '#chart' } });
+    const answer = h.run('browser_screenshot', { tabId, target: { css: '#chart' } }, { deliverableId: ID });
     await vi.advanceTimersByTimeAsync(3_000);
     expect(h.waits).toEqual([[tabId, 'cover']]);
     h.cover(tabId, false);

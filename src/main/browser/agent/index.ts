@@ -16,6 +16,7 @@
 //
 // Under MAWS_E2E=1 the e2e's seam gains `agent` (`run`, `cancel`, `driverState`, `control`, `lastInputs`, `sendInput`,
 // `cursorMessages`) on `globalThis.__maws_browser`, so the e2e drives the handlers without an engine.
+import { randomUUID } from 'node:crypto';
 import type { KeyboardInputEvent, MouseInputEvent, MouseWheelInputEvent } from 'electron';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import { BROWSER_TOOL_ERRORS, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
@@ -304,8 +305,12 @@ export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
 
   let seamRequests = 0;
   const seam: BrowserAgentSeam = {
+    // a screenshot's record id is the host's to mint; the seam has no host, so it mints one (Decision Log 77 (d))
     run: (appSessionId, tool, args, options = {}) =>
-      requests.accept({ appSessionId, requestId: (options.requestId ?? `seam-${++seamRequests}`) as RequestId, toolUseId: (options.toolUseId ?? null) as never, tool, args }, 'seam'),
+      requests.accept({
+        appSessionId, requestId: (options.requestId ?? `seam-${++seamRequests}`) as RequestId, toolUseId: (options.toolUseId ?? null) as never, tool, args,
+        ...(tool === 'browser_screenshot' && { deliverableId: randomUUID() }),
+      }, 'seam'),
     cancel: (appSessionId, requestId) => requests.cancel(appSessionId, requestId),
     driverState: (tabId) => drivers.state(tabId),
     control: (tabId) => {

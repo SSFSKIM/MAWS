@@ -394,6 +394,22 @@ describe('startBrowserAgent', () => {
     await w.agent.stop();
   });
 
+  it('a seam screenshot carries a record id the seam minted; a host request without one is refused (Decision Log 77 (d))', async () => {
+    const w = wired();
+    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
+    w.drivers.for.mockRejectedValue(new Error('no page'));
+    // past the id check: the handler went on to the driver, which failed
+    expect(await w.agent.seam.run(A, 'browser_screenshot', { tabId })).toEqual({
+      ok: false, error: BROWSER_TOOL_ERRORS.actionFailed('browser_screenshot', 'screenshot', '', 'MAWS could not attach to the tab: no page'),
+    });
+    w.send('maws.browser.request', request(1, 'browser_screenshot', { tabId }));
+    await vi.waitFor(() => expect(w.dispatched).toEqual([
+      ['maws.browser.answer', { appSessionId: A, requestId: rid(1), result: { ok: false, error: BROWSER_TOOL_ERRORS.screenshotFailed('the request carries no deliverable id') } }],
+    ]));
+    expect(w.drivers.for).toHaveBeenCalledTimes(1);
+    await w.agent.stop();
+  });
+
   it('a request held at the pause point by the person reports the wait, and answers tabClosed when the tab closes (Design §8)', async () => {
     const w = wired();
     const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;

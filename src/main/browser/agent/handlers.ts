@@ -12,7 +12,6 @@
 // reads (snapshot, screenshot) touch neither control nor the selection and pass no pause point (Decision Log 5, 6, 15). An aborted request answers nothing (null).
 // A page dialog MAWS answered for the agent (dialogs.ts, the `-run-dialog` wrap) reaches the next successful result naming its
 // tab (Decision Log 33, 35, 37): `run` drains the tab's dialogs into it.
-import { randomUUID } from 'node:crypto';
 import type { WebContents } from 'electron';
 import type { Locator } from 'playwright-core';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -94,7 +93,7 @@ interface CallBase {
   appSessionId: AppSessionId;
   requestId: string;
   toolUseId: string | null;
-  deliverableId?: string; // browser_screenshot: the record's id the host minted (main mints one for the e2e seam's call)
+  deliverableId?: string; // browser_screenshot: the record's id the host minted (the e2e seam mints its own, index.ts)
   path?: string; // the host's own derivation, unused: main derives the path from the id (Design §7)
 }
 
@@ -394,8 +393,10 @@ export class BrowserHandlers {
   // A read: no pause point, no control change, no selection change (Decision Log 5); an unplaced tab is parked for it
   // while its request is pending (visible.ts).
   private async screenshot(call: CallOf<'browser_screenshot'>, ctx: CallContext): Promise<MawsBrowserAnswerResult> {
-    const { appSessionId, args } = call;
+    const { appSessionId, args, deliverableId } = call;
     const tool = 'browser_screenshot';
+    // the record's id is the host's (the seam mints its own, index.ts): without one the file would have no record
+    if (deliverableId === undefined) throw new BrowserToolError(BROWSER_TOOL_ERRORS.screenshotFailed('the request carries no deliverable id'));
     const target = args.target === undefined ? '' : browserTargetText(args.target);
     const fullPage = args.fullPage === true;
     const entry = this.reach(tool, appSessionId, args.tabId);
@@ -411,7 +412,6 @@ export class BrowserHandlers {
       hideCursor: () => this.deps.cursor?.hide(entry),
     });
     ctx.signal.throwIfAborted(); // a withdrawn call leaves no file
-    const deliverableId = call.deliverableId ?? randomUUID();
     let path: string;
     try {
       path = await saveScreenshot(this.deps.userData, appSessionId, deliverableId, picture);
