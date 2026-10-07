@@ -438,20 +438,21 @@ describe('the detached transport: a served connection ends', () => {
   });
 
   // E11 (E10 keep-quit drain, W-A row 128 follow-up): main's shutdown waits on this before the process exits
-  it('stop() answers once the drained connection has closed, and at once when nothing is served', async () => {
+  // Decision Log 28 (W-B review): nothing to drain answers nothing, so an ordinary quit keeps Electron's own path
+  it('stop() answers once the drained connection has closed, and nothing when nothing is served', async () => {
     const fake = await startFake();
     await supervisor.start();
     await until(() => fake.emit('session.brokerItems', { appSessionId: 'app-before', items: [] } as never)); // main's ready reached it
     let closed = false;
-    const stopping = supervisor.stop().then(() => (closed = true));
+    const stopping = supervisor.stop()!.then(() => (closed = true));
     expect(closed).toBe(false);
     expect(fake.emit('session.brokerItems', { appSessionId: 'app-in-flight', items: [] } as never)).toBe(true);
     await stopping;
     expect(emit.mock.calls.some(([name, payload]) => name === 'session.brokerItems' && (payload as { appSessionId: string }).appSessionId === 'app-in-flight')).toBe(true);
     expect(fake.connected()).toBe(false);
-    await expect(supervisor.stop()).resolves.toBeUndefined(); // stopped already
+    expect(supervisor.stop()).toBeUndefined(); // stopped already
     const idle = makeSupervisor();
-    await expect(idle.stop()).resolves.toBeUndefined(); // never started: nothing to drain
+    expect(idle.stop()).toBeUndefined(); // never started: nothing to drain
   });
 });
 

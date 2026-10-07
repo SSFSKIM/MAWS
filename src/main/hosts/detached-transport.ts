@@ -138,9 +138,9 @@ export interface DetachedTransport {
   killHeld(): Promise<boolean>;
   // E10 end
   // terminal: the socket closed with no `exit` sent; the supervisor keeps serving; nothing restarts. E11: answers once
-  // the draining close has ended (the supervisor closed its side, or the port's grace destroyed the socket), at once
-  // when nothing is served, so the quit can wait for the last lines before the process exits
-  stop(): Promise<void>;
+  // the draining close has ended (the supervisor closed its side, or the port's grace destroyed the socket), so the
+  // quit can wait for the last lines before the process exits; nothing when nothing is served (Decision Log 28)
+  stop(): Promise<void> | undefined;
 }
 
 interface Proc {
@@ -617,12 +617,12 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     },
     // E10 end
     stop() {
-      if (stopped) return Promise.resolve();
+      if (stopped) return undefined;
       stopped = true;
       cancelAttempt();
       const connection = served;
       served = null;
-      if (!connection) return Promise.resolve();
+      if (!connection) return undefined;
       const drained = new Promise<void>((resolve) => connection.port.onClose(() => resolve())); // E11
       connection.port.close({ drain: true }); // no `exit`: the supervisor keeps serving its sessions; what it wrote before it saw the end is still read (E11)
       return drained;

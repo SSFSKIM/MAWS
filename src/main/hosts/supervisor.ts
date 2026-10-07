@@ -56,8 +56,9 @@ export interface HostSupervisor {
   start(): Promise<void>; // idempotent: forks once; resolves when each host's first launch is ready or has given up
   // terminal: kills a utility host (E10: closes a detached engine host's socket with no exit, so its supervisor keeps
   // serving), fails what is pending and held, never restarts; a later start() starts nothing. E11: answers once a
-  // detached host's draining close has ended (bounded by the socket port's grace), at once otherwise
-  stop(): Promise<void>;
+  // detached host's draining close has ended (bounded by the socket port's grace); nothing when nothing drains, so an
+  // ordinary quit is not held and keeps Electron's own path (Decision Log 28)
+  stop(): Promise<void> | undefined;
   dispatch: HostDispatch;
   snapshot(owner: HostOwner): HostState;
   onState(owner: HostOwner, listener: (state: HostState) => void): () => void;
@@ -579,7 +580,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       return started;
     },
     stop() {
-      if (stopped) return Promise.resolve();
+      if (stopped) return undefined;
       stopped = true;
       const drains: Promise<void>[] = []; // E11
       for (const host of Object.values(hosts)) {
@@ -587,13 +588,14 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
         host.restartTimer = null;
         cancelResync(host, 'transition'); // E10
         const child = host.child;
-        if (host.transport) drains.push(host.transport.stop()); // E10: closes the socket without an exit; the supervisor keeps its sessions
+        const drain = host.transport?.stop(); // E10: closes the socket without an exit; the supervisor keeps its sessions
+        if (drain) drains.push(drain);
         detach(host, 'was stopped');
         failHeld(host, 'was stopped');
         child?.kill();
         host.settleFirstLaunch();
       }
-      return Promise.all(drains).then(() => undefined);
+      return drains.length === 0 ? undefined : Promise.all(drains).then(() => undefined);
     },
     dispatch,
     snapshot: (owner) => hosts[owner].state,
