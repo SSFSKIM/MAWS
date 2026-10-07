@@ -1,7 +1,8 @@
 // E10's packaged check (E10 execution document, M4 Task 4.3 and Task 4.4; §Design 1 "The binary"): the packaged app,
 // launched through the launcher with the engine host detached, runs its supervisor from its own binary in Node mode
 // (`ELECTRON_RUN_AS_NODE=1`, which needs the `runAsNode` fuse enabled), named `maws-supervisor` in `ps`, with the
-// engine-host chunk read from inside `app.asar`. It writes `docs/doperpowers/evidence/p1-e10/packaged.txt`.
+// engine-host chunk read from inside `app.asar`. It writes `docs/doperpowers/evidence/p1-e10/packaged.txt` whole, so a
+// rerun changes only the run's own values (the gate results belong in the execution document's Concrete Steps).
 // Runs only over a packaged executable with the supervisor gate on, so neither the plain smoke, nor `pnpm e2e:packaged`,
 // nor `pnpm e2e:supervisor` (which names its own spec) runs it:
 //   pnpm build:app && pnpm e2e:supervisor:packaged
@@ -122,6 +123,7 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
       join(EVIDENCE, 'packaged.txt'),
       [
         'E10 Task 4.3: the packaged check (e2e/supervisor-packaged.spec.ts, pnpm e2e:supervisor:packaged; unsigned build:app).',
+        "Written whole by the spec on every run; the gate results are in the execution document's Concrete Steps.",
         `Executable: ${exe}`,
         '',
         `electron-fuses read --app ${bundle}:`,

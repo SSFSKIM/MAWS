@@ -1,4 +1,5 @@
 E10 Task 4.3: the packaged check (e2e/supervisor-packaged.spec.ts, pnpm e2e:supervisor:packaged; unsigned build:app).
+Written whole by the spec on every run; the gate results are in the execution document's Concrete Steps.
 Executable: /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS
 
 electron-fuses read --app /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/dist/mac-arm64/MAWS.app:
@@ -18,8 +19,8 @@ The packaged app launched through launchMaws with MAWS_HOST_MODE=detached (scrat
   host.status.transport: detached
   host.status.supervisor.mode: detached
   host.status.state: ready; matches: same
-  supervisor pid (host.status and supervisor/host.lock): 46755; app pid 46449; pgid 46755
-  ps -o command=: maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/dist/mac-arm64/MAWS.app/Contents/Resources/app.asar/out/main/index-SOFFzgbF.js --detached /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-packaged-uh3g4D/ud/supervisor
+  supervisor pid (host.status and supervisor/host.lock): 15520; app pid 15141; pgid 15520
+  ps -o command=: maws-supervisor /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/dist/mac-arm64/MAWS.app/Contents/Resources/app.asar/out/main/index-SOFFzgbF.js --detached /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-packaged-1heTEs/ud/supervisor
   ps -o comm= (follows argv0): maws-supervisor
   ps -o ucomm= (the kernel's name, the executable's): MAWS
   executable (lsof -d txt, realpath): /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a452e5ed4f062b383/dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS
@@ -31,10 +32,3 @@ Results (every assertion held):
   the executable lies inside MAWS.app/Contents/MacOS/ and is the app binary itself
   the supervisor leads its own process group; no console error
   an unbusy quit stopped the supervisor (pid gone)
-
-Runs (2026-10-06, worktree head 22c5e70b plus this task's change; logs under /tmp/maws-review/gates/):
-  pnpm build:app (no MAWS_SIGN_IDENTITY: "skipped macOS code signing  reason=identity explicitly is set to null"), exit 0   e10-task43-build-app.log
-  pnpm verify:fuses: "RunAsNode is Enabled", exit 0   e10-task43-verify-fuses.log
-  pnpm e2e:supervisor:packaged: "1 passed (4.0s)"   e10-task43-packaged-supervisor.log
-  pnpm e2e:packaged (plain): "124 skipped, 49 passed (3.5m)", both supervisor specs skipped by their gate   e10-task43-e2e-packaged.log
-  verify:fuses against an APFS clone of a packaged app with RunAsNode written off: "RunAsNode is Disabled", exit 1
