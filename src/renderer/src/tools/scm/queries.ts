@@ -21,10 +21,17 @@ export const prStateKey = (appSessionId: AppSessionId) => [...PR_STATE_QUERIES, 
 export const PR_STATE_POLL = { staleTime: 60_000, refetchInterval: 120_000, refetchIntervalInBackground: false } as const; // main keeps an answer 60 s
 
 // The scm queries of the sessions `which` picks, every one of `prefixes` (both reads by default). The keys' third part
-// names the session.
+// names the session; a key without one names none and is passed over.
 export function invalidateScmQueries(which: (appSessionId: AppSessionId) => boolean, prefixes: readonly (readonly unknown[])[] = [SCM_STATUS_QUERIES, PR_STATE_QUERIES]): void {
+  const sessionOf = (queryKey: readonly unknown[]) => (queryKey[2] as { appSessionId?: AppSessionId } | undefined)?.appSessionId;
   for (const queryKey of prefixes) {
-    void queryClient.invalidateQueries({ queryKey, predicate: (query) => which((query.queryKey[2] as { appSessionId: AppSessionId }).appSessionId) });
+    void queryClient.invalidateQueries({
+      queryKey,
+      predicate: (query) => {
+        const appSessionId = sessionOf(query.queryKey);
+        return appSessionId !== undefined && which(appSessionId);
+      },
+    });
   }
 }
 
