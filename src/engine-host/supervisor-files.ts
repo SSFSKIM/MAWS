@@ -2,10 +2,10 @@
 // "The lock", §Design 6 "Build id"). Everything lives under `<userData>/supervisor/` (mode 0700): `host.sock`,
 // `host.lock`, `host.token`, `host.log`, `live.json`. The lock is the candidate supervisor's, never main's: it is
 // created atomically with its content (`link` of a pre-written `host.lock.<pid>`), a live pid is never stale, and a
-// stale lock is broken under `host.lock.break` so two breakers cannot unlink each other's fresh locks. Main reads the
+// stale lock is broken under `host.lock.break` (taken the same way) so two breakers cannot unlink each other's fresh locks. Main reads the
 // lock (pid, procStart, socketPath) and the token from here too; nothing in this module touches the engine.
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as nodeFs from 'node:fs';
 import { join } from 'node:path';
 import * as z from 'zod';
@@ -47,7 +47,7 @@ const LockFileSchema = z.looseObject({
 });
 
 export interface LockDeps {
-  fs: Pick<typeof nodeFs, 'writeFileSync' | 'linkSync' | 'unlinkSync' | 'readFileSync' | 'statSync' | 'openSync' | 'closeSync'>;
+  fs: Pick<typeof nodeFs, 'writeFileSync' | 'linkSync' | 'unlinkSync' | 'readFileSync' | 'statSync' | 'renameSync'>;
   isAlive(pid: number): boolean;
   procStartOf(pid: number): string | null;
   now(): number;
@@ -114,33 +114,89 @@ export async function takeLock(dir: string, mine: Omit<LockFile, 'pid' | 'procSt
 
   // Unlinks the stale lock whose content was `staleRaw`, serialised under the break file; false when another candidate
   // holds the break file (the caller waits and retries). The socket file is never touched here.
+  //
+  // E11 (the stale-break race): the break file is taken as the lock is, by linking a pre-written per-candidate file
+  // naming its writer (pid, start time, a nonce), and it is stale once its writer is gone or it is older than
+  // BREAK_STALE_MS. A stale one is moved onto a per-candidate name before it is removed, and removed only if what moved
+  // is what was judged stale: a fresh file another candidate put there meanwhile is linked back and waited for, so two
+  // candidates that judged one dead breaker's file stale together never both break.
   function breakStale(staleRaw: string): boolean {
     const breakPath = join(dir, SUPERVISOR_FILES.breaker);
+    const ownBreak = `${breakPath}.${pid}`;
+    const moved = `${breakPath}.${pid}.stale`;
+    const own = JSON.stringify({ pid, procStart: lock.procStart, nonce: randomUUID() });
+    fs.writeFileSync(ownBreak, own, { mode: 0o600 });
     try {
-      if (deps.now() - fs.statSync(breakPath).mtimeMs > BREAK_STALE_MS) fs.unlinkSync(breakPath);
-    } catch (error) {
-      if (errnoOf(error) !== 'ENOENT') throw error;
+      for (;;) {
+        try {
+          fs.linkSync(ownBreak, breakPath);
+          break;
+        } catch (error) {
+          if (errnoOf(error) !== 'EEXIST') throw error;
+        }
+        const judged = readIfPresent(breakPath);
+        if (judged === null) continue; // its breaker finished meanwhile: link again
+        if (!breakIsStale(judged, breakPath)) return false;
+        try {
+          fs.renameSync(breakPath, moved);
+        } catch (error) {
+          if (errnoOf(error) === 'ENOENT') continue; // another candidate moved it first
+          throw error;
+        }
+        if (fs.readFileSync(moved, 'utf8') !== judged) {
+          // a live breaker's fresh file took the stale one's place: put it back (unless a third candidate's is already
+          // there) and wait for it
+          try {
+            fs.linkSync(moved, breakPath);
+          } catch (error) {
+            if (errnoOf(error) !== 'EEXIST') throw error;
+          }
+          fs.unlinkSync(moved);
+          return false;
+        }
+        fs.unlinkSync(moved);
+      }
+      try {
+        if (readIfPresent(lockPath) === staleRaw) fs.unlinkSync(lockPath); // still the same stale lock, not a fresh one another took
+      } finally {
+        if (readIfPresent(breakPath) === own) fs.unlinkSync(breakPath);
+      }
+      return true;
+    } finally {
+      fs.unlinkSync(ownBreak);
     }
-    let fd: number;
+  }
+
+  // A break file is stale when its writer is gone, or once it is older than BREAK_STALE_MS (a stuck breaker, or one an
+  // earlier build left empty).
+  function breakIsStale(raw: string, path: string): boolean {
+    const writer = parseBreaker(raw);
+    if (writer && !isSameProcess(writer, deps)) return true;
     try {
-      fd = fs.openSync(breakPath, 'wx');
+      return deps.now() - fs.statSync(path).mtimeMs > BREAK_STALE_MS;
     } catch (error) {
-      if (errnoOf(error) === 'EEXIST') return false;
+      if (errnoOf(error) === 'ENOENT') return false; // gone meanwhile: the next link decides
       throw error;
     }
+  }
+
+  function readIfPresent(path: string): string | null {
     try {
-      let current: string | null = null;
-      try {
-        current = fs.readFileSync(lockPath, 'utf8');
-      } catch (error) {
-        if (errnoOf(error) !== 'ENOENT') throw error;
-      }
-      if (current === staleRaw) fs.unlinkSync(lockPath); // still the same stale lock, not a fresh one another took
-    } finally {
-      fs.closeSync(fd);
-      fs.unlinkSync(breakPath);
+      return fs.readFileSync(path, 'utf8');
+    } catch (error) {
+      if (errnoOf(error) === 'ENOENT') return null;
+      throw error;
     }
-    return true;
+  }
+}
+
+const BreakerSchema = z.looseObject({ pid: z.number().int().positive(), procStart: z.string() });
+function parseBreaker(raw: string): { pid: number; procStart: string } | null {
+  try {
+    const parsed = BreakerSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
   }
 }
 
