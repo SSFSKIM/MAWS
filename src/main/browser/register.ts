@@ -8,9 +8,11 @@ import type { CommandName } from '@shared/ipc/schema';
 import { CommandFailure, type MainHandler, type registerMainHandler } from '../ipc/router';
 import type { BrowserProfile } from './partition';
 import { UnknownTabError, type TabStore } from './tabs';
+import type { ViewManager } from './view';
 
 export interface BrowserHandlerDeps {
   store: TabStore;
+  views: Pick<ViewManager, 'place' | 'cover'>;
   profiles(): BrowserProfile[];
   register: typeof registerMainHandler;
 }
@@ -29,10 +31,13 @@ function knownTabs<N extends CommandName>(handler: MainHandler<N>): MainHandler<
 
 const session = (id: string) => id as AppSessionId; // the schema checked it; the wire carries no brand
 
-export function registerBrowserHandlers({ store, profiles, register }: BrowserHandlerDeps): void {
+export function registerBrowserHandlers({ store, views, profiles, register }: BrowserHandlerDeps): void {
   register('browser.tabs.list', ({ appSessionId }) => store.list(appSessionId === undefined ? undefined : session(appSessionId)));
   register('browser.tabs.open', (request) => store.open({ ...request, appSessionId: session(request.appSessionId) }));
   register('browser.tabs.close', knownTabs(({ tabId }) => store.close(tabId)));
   register('browser.tabs.select', knownTabs(({ appSessionId, tabId }) => store.select(session(appSessionId), tabId)));
   register('browser.profiles.list', () => ({ profiles: profiles().map(({ profileDir, name }) => ({ profileDir, name })) }));
+  // The sender's window places and covers; the cover answers at once, its placeholders follow as browser.view.covered.
+  register('browser.view.place', knownTabs((input, { sender }) => views.place(input, sender)));
+  register('browser.view.cover', ({ covered }, { sender }) => void views.cover(covered, sender));
 }

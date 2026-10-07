@@ -4,16 +4,18 @@
 // tab whose session the index does not know is dropped from the file. Main never waits on the renderer.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { session } from 'electron';
+import { BrowserWindow, session } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { BROWSER_SETTINGS_DEFAULTS } from '@shared/browser/tab';
 import type { Index } from '../index/index';
 import type { registerMainHandler } from '../ipc/router';
+import { isAppWindow } from '../windows';
 import { choosePartition, Partitions, preparePartition, readProfiles } from './partition';
 import { readTabsFile, TabsFileWriter, type TabsFile } from './persist';
 import { registerBrowserHandlers } from './register';
 import { TabStore, type BrowserEmit } from './tabs';
-import { createTabView } from './view';
+import { createTabView, ViewManager } from './view';
+import { FOCUS_EMULATION } from './visibility';
 
 export type BrowserSettings = typeof BROWSER_SETTINGS_DEFAULTS;
 
@@ -28,6 +30,7 @@ export interface BrowserDeps {
 
 export interface Browser {
   store: TabStore;
+  views: ViewManager;
   stop(): void; // at will-quit: tabs.json written, every view closed
 }
 
@@ -54,16 +57,27 @@ export function startBrowser({ userData, settings, index, register, emit }: Brow
     onDirty: () => writer.markDirty(),
   });
   if (restored.tabs.length !== file.tabs.length) writer.markDirty();
+  const views = new ViewManager({
+    store,
+    emit,
+    windowOf: (sender) => {
+      const win = BrowserWindow.fromWebContents(sender);
+      return win && isAppWindow(win) && !win.isDestroyed() ? win : null;
+    },
+    focusEmulation: FOCUS_EMULATION,
+  });
 
-  registerBrowserHandlers({ store, profiles: () => readProfiles(profilesFile), register });
+  registerBrowserHandlers({ store, views, profiles: () => readProfiles(profilesFile), register });
   const stopSessions = index.sessions.onChange((record, cause) => {
     if (cause === 'removed') store.removeSession(record.appId);
   });
 
   return {
     store,
+    views,
     stop: () => {
       stopSessions();
+      views.dispose();
       writer.flushSync();
       for (const { view } of store.all()) if (view && !view.webContents.isDestroyed()) view.webContents.close();
     },

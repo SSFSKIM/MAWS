@@ -20,18 +20,32 @@ function setup() {
     schedule: () => {},
   });
   const handlers = new Map<CommandName, (input: unknown, context?: unknown) => unknown>();
+  const views = { place: vi.fn(), cover: vi.fn(async () => {}) };
   registerBrowserHandlers({
     store,
+    views,
     profiles: () => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't' }],
     register: (name, handler) => void handlers.set(name, handler as (input: unknown) => unknown),
   });
   const call = (name: CommandName, input: unknown) => handlers.get(name)!(input, { sender: {} });
-  return { store, handlers, call };
+  return { store, views, handlers, call };
 }
 
 describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
   it('registers the tab store\'s commands and the profile list', () => {
-    expect([...setup().handlers.keys()]).toEqual(['browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select', 'browser.profiles.list']);
+    expect([...setup().handlers.keys()]).toEqual([
+      'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select', 'browser.profiles.list', 'browser.view.place', 'browser.view.cover',
+    ]);
+  });
+
+  it('hands placement and cover to the view manager with the sender, without waiting on the placeholders', () => {
+    const { views, handlers } = setup();
+    const sender = {};
+    const place = { tabId: 'b_aaaaaaaaaaaa', paneId: 'p', surface: 'panel', rect: null, claim: true };
+    handlers.get('browser.view.place')!(place, { sender });
+    expect(views.place).toHaveBeenCalledWith(place, sender);
+    expect(handlers.get('browser.view.cover')!({ covered: true }, { sender })).toBeUndefined();
+    expect(views.cover).toHaveBeenCalledWith(true, sender);
   });
 
   it('opens, lists, selects and closes through the store', () => {
