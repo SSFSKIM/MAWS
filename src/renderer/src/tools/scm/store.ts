@@ -145,22 +145,25 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
 
     // A mutation's answer is for the session it was asked for: a pinned tool that moved on meanwhile keeps its own, and
     // only `elsewhere` (the commit's parked draft) touches the state then. `ok` clears the last notice; a refusal or a
-    // failed call becomes it.
+    // failed call becomes it, unless a sheet that stays open shows it (`sheetShows`: the discard's, E11 W-D).
     type Landed = Extract<ScmMutation, { ok: true }>;
     const mutate = async (
       ui: StoreApi<ScmUi>,
       appSessionId: AppSessionId,
       call: Promise<CommandResult<'scm.stage'>>,
       landed?: { here(answer: Landed): Partial<ScmUi>; elsewhere(): Partial<ScmUi> },
+      sheetShows = false,
     ) => {
       const result = await settled(call);
       if (ui.getState().session !== appSessionId) {
         if (landed && result.ok && !('refused' in result.value)) ui.setState(landed.elsewhere());
         return result;
       }
-      if (!result.ok) ui.setState({ notice: { kind: 'error', text: result.error.message, output: '' } });
-      else if ('refused' in result.value) ui.setState({ notice: { kind: result.value.refused, text: result.value.detail, output: result.value.output } });
-      else ui.setState({ notice: null, ...landed?.here(result.value) });
+      if (!result.ok) {
+        if (!sheetShows) ui.setState({ notice: { kind: 'error', text: result.error.message, output: '' } });
+      } else if ('refused' in result.value) {
+        if (!sheetShows) ui.setState({ notice: { kind: result.value.refused, text: result.value.detail, output: result.value.output } });
+      } else ui.setState({ notice: null, ...landed?.here(result.value) });
       return result;
     };
 
@@ -227,7 +230,7 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
 
       stage: (ui, appSessionId, paths) => moving(paths, () => mutate(ui, appSessionId, client.invoke('scm.stage', { appSessionId, paths }))),
       unstage: (ui, appSessionId, paths) => mutate(ui, appSessionId, client.invoke('scm.unstage', { appSessionId, paths })),
-      discard: (ui, appSessionId, entries) => moving(entries.map((entry) => entry.path), () => mutate(ui, appSessionId, client.invoke('scm.discard', { appSessionId, entries }))),
+      discard: (ui, appSessionId, entries) => moving(entries.map((entry) => entry.path), () => mutate(ui, appSessionId, client.invoke('scm.discard', { appSessionId, entries }), undefined, true)),
 
       // The commit takes the session's draft; once it lands the draft is cleared, unless it was edited meanwhile, and
       // Skip hooks goes back off (it is a decision per commit, as `--no-verify` is in a terminal).

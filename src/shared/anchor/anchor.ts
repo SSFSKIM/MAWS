@@ -29,7 +29,7 @@ export interface AnchorFieldOptions {
 // `src/shared/browser/describe.ts` keeps its own copy: the browser preload bundles it without zod.
 export function anchorField(text: string, max: number, options: AnchorFieldOptions = {}): string {
   const { control = 'space', keep = 'head', ellipsis = true } = options;
-  const line = control === 'space' ? text.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim() : text.replace(CONTROL, control === 'mark' ? '�' : '');
+  const line = control === 'space' ? text.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim() : text.replace(CONTROL, control === 'mark' ? '\uFFFD' : '');
   if (line.length <= max) return line;
   const mark = ellipsis ? '…' : '';
   const room = Math.max(0, max - mark.length);

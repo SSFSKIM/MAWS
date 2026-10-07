@@ -317,8 +317,13 @@ describe('source control store applies no status of its own and resumes a run fr
     await store.getState().commit(ui, A);
     expect(ui.getState()).toMatchObject({ notice: { kind: 'git_failed', text: 'pre-commit hook failed', output: 'nope\n' }, message: 'Fix', lastCommit: null });
     answer = { ok: false, error: { code: 'timeout', message: 'git timed out' } };
-    await store.getState().discard(ui, A, [{ path: 'a.ts', group: 'unstaged' }]);
+    await store.getState().unstage(ui, A, ['a.ts']);
     expect(ui.getState().notice).toEqual({ kind: 'error', text: 'git timed out', output: '' });
+    // E11 W-D: a discard's refusal or failure is its sheet's to show (the sheet stays open), not the notice behind it
+    answer = ok(refusal('unmerged', '"a.ts" has a merge conflict'));
+    ui.setState({ notice: null });
+    await store.getState().discard(ui, A, [{ path: 'a.ts', group: 'unstaged' }]);
+    expect(ui.getState().notice).toBeNull();
     expect(main.callsOf('scm.discard')).toEqual([{ appSessionId: A, entries: [{ path: 'a.ts', group: 'unstaged' }] }]);
   });
 

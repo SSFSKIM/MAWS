@@ -9,7 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { SUMMARY_COPY } from '../../panel/copy';
-import { prLine } from '../../panel/summary/pr-line';
+import { GH_INSTALL_URL, GH_SIGN_IN, INLINE_LINK, prLine } from '../../panel/summary/pr-line';
 import { openTerminal } from '../terminal';
 import { SCM_COPY } from './copy';
 import { usePrState } from './queries';
@@ -18,7 +18,6 @@ import { openLink } from './store';
 import type { ScmUi } from './view-state';
 
 const BUTTON = 'rounded-sm border border-border-strong px-2 py-0.5 text-ui-sm whitespace-nowrap text-fg hover:bg-bg-hover disabled:cursor-default disabled:text-fg-faint disabled:hover:bg-transparent';
-const LINK = 'rounded-sm text-accent outline-accent hover:underline focus-visible:outline-2';
 
 interface Props {
   appSessionId: AppSessionId;
@@ -46,14 +45,14 @@ export function RemoteActions({ appSessionId, ui, status, directory, scm, truste
       {line?.kind === 'gh_missing' ? (
         <span data-scm-gh-note className="mr-1 text-ui-sm whitespace-nowrap text-fg-muted">
           {`${SUMMARY_COPY.ghMissing} · `}
-          <button type="button" className={LINK} onClick={() => openLink(SCM_COPY.ghInstallUrl)}>
+          <button type="button" className={INLINE_LINK} onClick={() => openLink(GH_INSTALL_URL)}>
             {SUMMARY_COPY.install}
           </button>
         </span>
       ) : line?.kind === 'gh_unauthenticated' ? (
         <span data-scm-gh-note title={line.detail} className="mr-1 text-ui-sm whitespace-nowrap text-fg-muted">
           {`${SUMMARY_COPY.ghSignedOut} · `}
-          <button type="button" className={LINK} onClick={() => openTerminal({ appSessionId, cwd: directory, command: SCM_COPY.ghLoginCommand })}>
+          <button type="button" className={INLINE_LINK} onClick={() => openTerminal({ appSessionId, cwd: directory, command: GH_SIGN_IN })}>
             {SUMMARY_COPY.signIn}
           </button>
         </span>

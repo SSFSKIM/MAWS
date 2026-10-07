@@ -364,7 +364,7 @@ describe('the header’s Push and Open PR open their sheets, and the Output foll
     main.state.status = statusOf({ files: SCRATCH_FILES, upstream: null, ahead: 0 });
     renderShell();
     await waitFor(() => expect(remoteAction('push')).toMatchObject({ disabled: true, title: 'No remote to push to' }));
-    expect(remoteAction('pr')).toMatchObject({ disabled: true, title: 'No remote to push to' });
+    expect(remoteAction('pr')).toMatchObject({ disabled: true, title: 'No remote to open a pull request on' });
 
     main.state.scm = scmStatusOf(); // git remote add origin …
     main.change(statusOf({ files: SCRATCH_FILES.slice(1), upstream: null, ahead: 0 })); // reason: index

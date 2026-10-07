@@ -276,7 +276,7 @@ describe('scm service', () => {
       const scm = service();
       const first = scm.stage({ appSessionId: ID, paths: ['a.txt'] });
       const second = scm.stage({ appSessionId: ID, paths: ['u.txt'] });
-      await vi.waitFor(() => expect(order).toContain('mutate :(top,literal)a.txt'), { timeout: 5_000 }); // 1 s is not enough under load
+      await vi.waitFor(() => expect(order).toContain('mutate :(top,literal)a.txt'));
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(order).toEqual(['status 1', 'mutate :(top,literal)a.txt']);
       release();

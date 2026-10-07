@@ -17,15 +17,10 @@ import { openTerminal } from '../../tools/terminal';
 import { SUMMARY_COPY } from '../copy';
 import { panelHost, usePanelHost } from '../host';
 import { githubUrl, pushState } from './derive';
-import { prLine, prStateBehind } from './pr-line';
+import { GH_INSTALL_URL, GH_SIGN_IN, INLINE_LINK, prLine, prStateBehind } from './pr-line';
 import { actionClass, Row, Section } from './Section';
 
 const SCM_TOOL_ID = 'source-control'; // E6's tool id (the tool's module stays out of the summary's graph)
-const GH_INSTALL_URL = 'https://cli.github.com';
-const GH_SIGN_IN = 'gh auth login';
-
-// Inline actions read as links within the row's sentence (`PR #12`, `Install`, `Sign in`).
-const linkClass = 'rounded-sm text-accent outline-accent hover:underline focus-visible:outline-2';
 
 export function PushState({ directory, appSessionId }: { directory: string; appSessionId: AppSessionId }) {
   const status = useGit((s) => s.entries.get(directory)?.status ?? null);
@@ -118,7 +113,7 @@ function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId
         {line.kind === 'gh_missing' && (
           <>
             {`${SUMMARY_COPY.ghMissing} · `}
-            <button type="button" className={linkClass} onClick={() => openExternal(GH_INSTALL_URL)}>
+            <button type="button" className={INLINE_LINK} onClick={() => openExternal(GH_INSTALL_URL)}>
               {SUMMARY_COPY.install}
             </button>
           </>
@@ -126,7 +121,7 @@ function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId
         {line.kind === 'gh_unauthenticated' && (
           <>
             {`${SUMMARY_COPY.ghSignedOut} · `}
-            <button type="button" className={linkClass} onClick={() => openTerminal({ appSessionId, cwd: directory, command: GH_SIGN_IN })}>
+            <button type="button" className={INLINE_LINK} onClick={() => openTerminal({ appSessionId, cwd: directory, command: GH_SIGN_IN })}>
               {SUMMARY_COPY.signIn}
             </button>
           </>
@@ -134,7 +129,7 @@ function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId
         {line.kind === 'no_pr' && SUMMARY_COPY.noPr(line.branch)}
         {line.kind === 'pr' && (
           <>
-            <button type="button" className={linkClass} onClick={() => openExternal(line.url)}>
+            <button type="button" className={INLINE_LINK} onClick={() => openExternal(line.url)}>
               {SUMMARY_COPY.prNumber(line.number)}
             </button>
             {` ${line.details}`}
