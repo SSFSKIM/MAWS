@@ -468,11 +468,13 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     const row = await showSession(second.page, id);
     await expect(glyphOf(row), 'the sidebar shows the tail’s error item, which outranks the pending request').toHaveAttribute('aria-label', 'Needs you: error');
     // E11 W-E: the liveness G2's glyph showed before the error item outranked it, read from main's digest after the
-    // resync: a turn open (working, or waiting on its request) with the one request pending
+    // resync: the turn open with the one request pending. The phase is `working` (the fold's `turn.started`), never
+    // `waiting`: that reading needs an engine `requires_action` state (a `session.state` event or the status's
+    // `engineState`), and both come only from `session_state_changed` frames, which permission-roundtrip.jsonl lacks
     const digestOf = async () => value(await invoke(second.page, 'session.digests', undefined)).digests.find((d) => d.appSessionId === id);
     await expect.poll(async () => (await digestOf())?.pendingRequests, { message: 'the digest counts the request raised while away' }).toBe(1);
     const digest = (await digestOf())!;
-    expect(['working', 'waiting'], `the digest reads the turn open after the resync (phase ${digest.phase})`).toContain(digest.phase);
+    expect(digest.phase, 'the digest reads the turn open after the resync').toBe('working');
     await expect(submitOf(second.page), 'the renderer reads the turn open').toHaveAttribute('data-submit-state', 'stop');
     await new Promise((r) => setTimeout(r, 1_000));
     const items = await pendingPermissions(second.page, id);
