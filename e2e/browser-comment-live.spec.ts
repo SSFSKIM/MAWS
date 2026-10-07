@@ -7,14 +7,16 @@
 // commented tab** (P-24: a side thread reaches its parent's tabs). The tab is asserted by id and its page read by `webContents.id`, never by URL: an agent that opens its own
 // tab at the anchor's `pageUrl` and clicks there is a finding (Task 5.2), not a pass. Every permission is allowed once
 // through the request card docked in the thread's Side pane. The owner's ~/.claude.json is read only, for the A-15
-// delta before the launch and after the app closed. Writes docs/doperpowers/evidence/p1-e4d/live-proof.txt.
+// delta before the launch and after the app closed. Writes `live-proof.txt` into the directory MAWS_E4D_LIVE_OUT names
+// (E11, scale review E scalpel-1#2: a re-run records into its own directory, E4d's committed proof untouched),
+// docs/doperpowers/evidence/p1-e4d/ when it is unset; a run skipped for the relay writes nothing.
 // It spends money; run on purpose only, after a harness build:
 //   MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 MAWS_E4D_LIVE=1 pnpm exec playwright test e2e/browser-comment-live.spec.ts
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { expect, test, type Locator } from '@playwright/test';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
@@ -34,7 +36,7 @@ import { launchMaws, REPO_ROOT } from './support/launch';
 test.skip(process.env.MAWS_E4D_LIVE !== '1', 'the E4d live proof runs only under MAWS_E4D_LIVE=1');
 test.describe.configure({ timeout: 900_000 });
 
-const EVIDENCE = join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e4d');
+const EVIDENCE = process.env.MAWS_E4D_LIVE_OUT ? resolve(process.env.MAWS_E4D_LIVE_OUT) : join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e4d'); // E11
 const EVIDENCE_FILE = join(EVIDENCE, 'live-proof.txt');
 const THREAD_MS = 300_000;
 const INCREMENT_LABEL = 'button “Increment”';
@@ -125,13 +127,10 @@ const seqOfCall = (rows: JournalRow[], requestId: string) =>
 // ---- the proof -------------------------------------------------------------------------------------------------------
 
 test('G2 live: a Side thread’s agent clicks the commented element through browser_act {target: {css}} on the commented tab', async () => {
+  const relay = relaySkipReason(RELAY_URL);
+  test.skip(relay !== null, `${relay}; G2's live half stays open`); // E11: before the first note, so a skip leaves the record as it was
   mkdirSync(EVIDENCE, { recursive: true });
   note(`E4d live proof (M5, Acceptance G2's live half), ${new Date().toISOString()}`);
-  const relay = relaySkipReason(RELAY_URL);
-  if (relay !== null) {
-    note(`skipped: ${relay}; G2's live half stays open`);
-    test.skip(true, relay);
-  }
   const engine = installedEngine();
   expect(engine.version).toMatch(/^\d+\.\d+\.\d+$/);
   const removed = withoutInheritedClaude();
