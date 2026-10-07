@@ -398,6 +398,18 @@ describe('navigation: a navigation that never lands (Stop, Esc, a download, an a
     expect(h.history.setTitle).toHaveBeenLastCalledWith(DEFAULT_PARTITION, 'https://a.test/', 'Page A');
   });
 
+  it('a title raised for the error page after a failed load relabels no history row', () => {
+    const h = harness();
+    const id = h.open('https://a.test/');
+    const wc = h.wc(id);
+    commit(wc, 'https://a.test/');
+    wc.emit('page-title-updated', {}, 'Page A', true);
+    h.navigator.navigate(id, { url: 'https://b.test/' });
+    fail(wc, 'https://b.test/', -105, 'ERR_NAME_NOT_RESOLVED');
+    wc.emit('page-title-updated', {}, 'b.test', true); // Chromium's error document titles itself
+    expect(h.history.setTitle.mock.calls).toEqual([[DEFAULT_PARTITION, 'https://a.test/', 'Page A']]);
+  });
+
   it('a same-document move reads loading from the view; a typed fragment counts as typed, a page\'s pushState does not', () => {
     const h = harness();
     const id = h.open('https://a.test/');

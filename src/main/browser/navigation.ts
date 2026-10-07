@@ -218,10 +218,11 @@ export class Navigator {
     wc.on('page-title-updated', (_event, title) => {
       if (!live()) return;
       store.update(tabId, { title });
-      // the title is the committed document's, never a pending navigation's target (whose row it would mislabel)
+      // the title is the committed document's, never a pending navigation's target (whose row it would mislabel), nor
+      // an error page's raised after a failed load (`committed` false), which would relabel the last good page's row
       const { partition } = entry.tab;
       const url = entry.committedUrl;
-      if (url !== null && validateBrowserUrl(url).ok) this.safely(() => this.deps.history.setTitle(partition, url, title));
+      if (entry.committed && url !== null && validateBrowserUrl(url).ok) this.safely(() => this.deps.history.setTitle(partition, url, title));
     });
     wc.on('page-favicon-updated', (_event, favicons) => {
       if (!live()) return;
