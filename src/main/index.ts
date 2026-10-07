@@ -416,6 +416,9 @@ void startWithProfileLock(app, () => {
     register: registerMainHandler,
     emit,
     env: process.env,
+    // E4c start: the browser tools answer the engine host's requests (E4c Design §4; Decision Log 36)
+    hosts,
+    // E4c end
   });
   app.on('will-quit', browser.stop);
   // E4a end

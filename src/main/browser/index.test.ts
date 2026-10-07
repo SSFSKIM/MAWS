@@ -262,3 +262,44 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     on.stop();
   });
 });
+
+// E4c start: the browser tools started inside startBrowser (E4c Design §4; Decision Log 36)
+describe('startBrowser: the browser tools (E4c)', () => {
+  const fakeHosts = () => {
+    const events = new Map<string, unknown>();
+    return {
+      events,
+      hosts: {
+        onEvent: vi.fn((name: string, listener: unknown) => {
+          events.set(name, listener);
+          return () => void events.delete(name);
+        }),
+        dispatch: vi.fn(async () => ({ ok: true })),
+        onState: vi.fn(() => () => {}),
+      },
+    };
+  };
+
+  it("subscribes to the engine host's browser requests only when it is given the hosts, and stops at stop", () => {
+    start(fakeIndex([A]).index).stop(); // E4a alone: nothing to subscribe to
+    const { hosts, events } = fakeHosts();
+    const browser = start(fakeIndex([A]).index, { hosts: hosts as never });
+    expect([...events.keys()]).toEqual(['maws.browser.request', 'maws.browser.cancel']);
+    expect(hosts.onState).toHaveBeenCalledWith('engine-host', expect.any(Function));
+    browser.stop();
+    expect(events.size).toBe(0);
+  });
+
+  it('under MAWS_E2E=1 mints deterministic tab ids and adds the agent to the seam', async () => {
+    const { hosts } = fakeHosts();
+    const e2e = start(fakeIndex([A]).index, { env: { MAWS_E2E: '1' }, hosts: hosts as never });
+    expect(e2e.store.open({ appSessionId: A, url: null, select: true }).tab.tabId).toBe('b_000000000001');
+    const answer = await globalThis.__maws_browser!.agent!.run(A, 'browser_tabs', { action: 'list' });
+    expect(answer).toMatchObject({ ok: true, result: { tabs: [{ tabId: 'b_000000000001' }] } });
+    e2e.stop();
+    const plain = start(fakeIndex([A]).index, { hosts: hosts as never });
+    expect(plain.store.open({ appSessionId: A, url: null, select: true }).tab.tabId).not.toBe('b_000000000001');
+    plain.stop();
+  });
+});
+// E4c end

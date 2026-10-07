@@ -45,6 +45,9 @@ export class Downloads {
     if (entry.tab.control === 'agent') {
       item.cancel();
       emit('browser.download.refused', { tabId, url: item.getURL(), filename });
+      // E4c start: told in main too, beside the IPC emission: the agent's call that started it answers downloadRefused
+      this.notifyRefused({ tabId, url: item.getURL(), filename });
+      // E4c end
       emit('browser.notice', { appSessionId, tabId, kind: 'downloadRefusedAgent' });
       return;
     }
@@ -71,4 +74,24 @@ export class Downloads {
     this.deps.reveal(download.path);
     return { revealed: true };
   }
+
+  // E4c start: the in-process hook for `browser.download.refused` (E4c execution document, Design §6; Decision Log 36,
+  // 43): main's browser tools listen for the refusal of the tab they act on and turn it into their call's error.
+  private readonly refusedListeners = new Set<(refused: { tabId: string; url: string; filename: string }) => void>();
+
+  onRefused(listener: (refused: { tabId: string; url: string; filename: string }) => void): () => void {
+    this.refusedListeners.add(listener);
+    return () => void this.refusedListeners.delete(listener);
+  }
+
+  private notifyRefused(refused: { tabId: string; url: string; filename: string }): void {
+    for (const listener of [...this.refusedListeners]) {
+      try {
+        listener(refused);
+      } catch (error) {
+        console.error('[browser] a download-refusal listener failed:', error);
+      }
+    }
+  }
+  // E4c end
 }

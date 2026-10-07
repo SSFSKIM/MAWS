@@ -30,6 +30,10 @@ import { TabStore, type BrowserEmit } from './tabs';
 import { createTabView, tabWebPreferences, ViewManager } from './view';
 import { attachFocusEmulation, focusEmulationMode, setFocusEmulation } from './visibility';
 import { attachWindowOpen } from './window-open';
+// E4c start
+import type { HostSupervisor } from '../hosts/supervisor';
+import { e2eTabIds, startBrowserAgent } from './agent';
+// E4c end
 
 export interface BrowserDeps {
   userData: string;
@@ -43,6 +47,10 @@ export interface BrowserDeps {
   // The imported Chrome profiles, for a new tab's partition and `browser.profiles.list` alike: `profiles.json` read
   // from disk by default; E4b's block hands its in-memory owner here (Decision Log 40).
   profiles?(): BrowserProfile[];
+  // E4c start: the engine host's events and commands, for the browser tools (E4c Design §4; Decision Log 36); without
+  // them (E4a's own tests) the tools are not started
+  hosts?: Pick<HostSupervisor, 'onEvent' | 'dispatch' | 'onState'>;
+  // E4c end
 }
 
 export interface Browser {
@@ -51,7 +59,7 @@ export interface Browser {
   stop(): void; // at will-quit: tabs.json written, every view closed
 }
 
-export function startBrowser({ userData, settings, index, register, emit, env, profiles: listProfiles }: BrowserDeps): Browser {
+export function startBrowser({ userData, settings, index, register, emit, env, profiles: listProfiles, /* E4c */ hosts }: BrowserDeps): Browser {
   const dir = join(userData, 'browser');
   mkdirSync(dir, { recursive: true });
   const tabsFile = join(dir, 'tabs.json');
@@ -79,6 +87,9 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     restored,
     fileBroken: broken,
     onDirty: () => writer.markDirty(),
+    // E4c start: deterministic tab ids under MAWS_E2E=1 (E4c Design §13 (b); Decision Log 36)
+    newTabId: e2eTabIds(env, restored.tabs),
+    // E4c end
   });
   if (restored.tabs.length !== file.tabs.length) writer.markDirty();
   const focusEmulation = focusEmulationMode(env);
@@ -124,6 +135,12 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   });
   const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
   if (inspector) globalThis.__maws_browser = inspector;
+  // E4c start: the browser tools (E4c Design §4), here because the Navigator and the store are; the seam gains `agent`
+  const agent = hosts
+    ? startBrowserAgent({ store, navigator, onDownloadRefused: (listener) => downloads.onRefused(listener), sessions: index.sessions, hosts, emit, env })
+    : null;
+  if (inspector && agent) inspector.agent = agent.seam;
+  // E4c end
 
   return {
     store,
@@ -131,6 +148,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     // At will-quit, before the hosts stop: nothing more is sampled or placed, tabs.json is written, every page closed.
     stop: () => {
       if (inspector && globalThis.__maws_browser === inspector) delete globalThis.__maws_browser;
+      void agent?.stop(); // E4c: nothing more is answered; every driver's socket closed
       app.removeListener('select-client-certificate', refuseUnownedCertificate);
       stopSessions();
       memory.stop();
