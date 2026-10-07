@@ -79,6 +79,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       const command = args.join(' ');
       if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`; // the trust key's read
       if (command === 'remote') return remotes;
+      if (command === 'remote -v') return remotes.split('\n').filter(Boolean).map((name) => `${name}\thttps://github.com/o/r.git (fetch)\n${name}\thttps://github.com/o/r.git (push)\n`).join(''); // E11: status's one read
       if (command === UPSTREAM_FORMAT) return '*\0origin\0refs/heads/main\n';
       if (command === 'for-each-ref --format=%(HEAD)%00%(upstream:remotename) refs/heads') return '*\0origin\n';
       if (command === 'remote get-url --push --all origin') return pushUrls.map((url) => `${url}\n`).join('');

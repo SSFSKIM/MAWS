@@ -12,7 +12,8 @@ import { GitCommandError, GitTimeoutError, NotARepositoryError } from '../git/ru
 import { ScmService, type ScmServiceDeps } from './service';
 
 // `realpath` as node answers it, except that a test may hold the first call for one path until it releases it.
-const fsGate = vi.hoisted(() => ({ path: null as string | null, held: null as Promise<void> | null }));
+// E11: every file `readFile` was asked for, so a test can say what trust read
+const fsGate = vi.hoisted(() => ({ path: null as string | null, held: null as Promise<void> | null, reads: [] as string[] }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   return {
@@ -25,6 +26,10 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       }
       return actual.realpath(path);
     },
+    readFile: (async (path: string, options?: unknown) => {
+      fsGate.reads.push(String(path));
+      return actual.readFile(path, options as never);
+    }) as typeof actual.readFile,
   };
 });
 
@@ -73,7 +78,7 @@ describe('scm service', () => {
     read = vi.fn<ScmServiceDeps['read']>(async (directory, args) => {
       if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`; // the trust key's read
       if (args[0] === 'log') return `${'f'.repeat(40)}\0From the panel\n`;
-      if (args.join(' ') === 'remote') return ''; // scm.status: no remote
+      if (args.join(' ') === 'remote -v') return ''; // scm.status: no remote (E11: one `remote -v`)
       throw new Error(`unexpected read: git ${args.join(' ')}`);
     });
     readStatus = vi.fn<ScmServiceDeps['status']>(async (directory) => statusOf(directory));
@@ -232,6 +237,17 @@ describe('scm service', () => {
       }
     });
 
+    // E11 (tracker row E6 "small per-call costs in scm.*"): the gate reads the trust key and the store, never the files
+    // trust would load (`.claude/settings*.json`, `.mcp.json`), which only the session's trust card shows
+    it('reads the trust key and the store only, on a mutation and on status', async () => {
+      const scm = service();
+      fsGate.reads = [];
+      expect(await scm.stage({ appSessionId: ID, paths: ['a.txt'] })).toMatchObject({ ok: true });
+      expect(await scm.status(ID)).toMatchObject({ trusted: true });
+      expect(fsGate.reads.filter((path) => path.startsWith(root))).toEqual([]);
+      expect(fsGate.reads.length).toBeGreaterThan(0); // the store was read
+    });
+
     it('reads trust again on every command', async () => {
       const scm = service();
       expect(await scm.stage({ appSessionId: ID, paths: ['a.txt'] })).toMatchObject({ ok: true });
@@ -326,9 +342,8 @@ describe('scm service', () => {
       read.mockImplementation(async (directory, args) => {
         const command = args.join(' ');
         if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`;
-        if (command === 'remote') return 'origin\nupstream\n';
-        if (command === 'remote get-url origin') return 'https://user:token@github.com/o/r.git\n';
-        if (command === 'remote get-url upstream') throw new GitCommandError('git remote failed: no url', 'error: no URL\n', 2, '');
+        // E11 (tracker row E6 "small per-call costs in scm.*"): one `remote -v`; a remote with no URL lists none
+        if (command === 'remote -v') return 'origin\thttps://user:token@github.com/o/r.git (fetch)\norigin\thttps://user:token@github.com/o/r.git (push)\nupstream\t\n';
         if (command === 'for-each-ref --format=%(HEAD)%00%(upstream:remotename) refs/heads') return ' \0\n*\0upstream\n';
         if (command === 'symbolic-ref -q refs/remotes/upstream/HEAD') return 'refs/remotes/upstream/trunk\n';
         throw new Error(`unexpected read: git ${command}`);
@@ -339,6 +354,7 @@ describe('scm service', () => {
         defaultRemote: 'upstream', defaultBase: 'trunk', gh: { state: 'missing' }, checkedAt: '2026-10-06T12:00:00.000Z',
       });
       expect(readStatus).not.toHaveBeenCalled();
+      expect(read.mock.calls.filter(([, args]) => args[0] === 'remote').map(([, args]) => args.join(' '))).toEqual(['remote -v']);
     });
 
     it('falls back to origin, then the sole remote, and answers no base when the remote has no HEAD', async () => {
@@ -346,8 +362,7 @@ describe('scm service', () => {
       read.mockImplementation(async (directory, args) => {
         const command = args.join(' ');
         if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`;
-        if (command === 'remote') return remotes;
-        if (args[0] === 'remote') return `/srv/${args[2]}.git\n`;
+        if (command === 'remote -v') return remotes.split('\n').filter(Boolean).map((name) => `${name}\t/srv/${name}.git (fetch)\n${name}\t/srv/${name}.git (push)\n`).join('');
         if (args[0] === 'for-each-ref') return '*\0\n'; // the current branch has no upstream
         if (args[0] === 'symbolic-ref') throw new GitCommandError('git symbolic-ref failed: x', '', 1, '');
         throw new Error(`unexpected read: git ${command}`);
@@ -359,6 +374,30 @@ describe('scm service', () => {
       expect(await service().status(ID)).toMatchObject({ defaultRemote: null, defaultBase: null });
       remotes = '';
       expect(await service().status(ID)).toMatchObject({ remotes: [], defaultRemote: null });
+    });
+
+    // E11 (tracker row E6 "small per-call costs in scm.*"): the gh probe's failure is not kept, and rejects nothing unhandled
+    it('drops a gh probe that failed, so the next status probes again', async () => {
+      let calls = 0;
+      const scm = new ScmService({
+        records: (id) => records.get(id) ?? null,
+        read: async (directory, args) => {
+          if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`;
+          if (args.join(' ') === 'remote -v') return '';
+          throw new Error(`unexpected read: git ${args.join(' ')}`);
+        },
+        status: readStatus, mutate, refresh,
+        captured: async () => {
+          calls += 1;
+          if (calls === 2) throw new Error('the login shell did not answer'); // the gh probe's read (the trust read is the first)
+          return captured;
+        },
+        env: {},
+        emit: () => {},
+        now: () => Date.parse('2026-10-06T12:00:00.000Z'),
+      });
+      await expect(scm.status(ID)).rejects.toThrow('the login shell did not answer');
+      expect(await scm.status(ID)).toMatchObject({ gh: { state: 'missing' } });
     });
 
     it('answers a directory outside any repository without reading remotes', async () => {
