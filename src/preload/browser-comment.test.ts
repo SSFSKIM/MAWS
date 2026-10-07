@@ -92,6 +92,15 @@ function click(at: Pointer) {
   mouse('click', at);
 }
 
+type Wheel = { x: number; y: number; deltaX?: number; deltaY?: number; deltaMode?: number; ctrlKey?: boolean };
+function wheelAt(at: Wheel) {
+  const event = trusted(new (win().WheelEvent)('wheel', { bubbles: true, cancelable: true, deltaX: at.deltaX ?? 0, deltaY: at.deltaY ?? 0, deltaMode: at.deltaMode ?? 0 }));
+  // happy-dom's WheelEvent is a UIEvent, not a MouseEvent: no coordinates, no modifier keys
+  Object.defineProperties(event, { clientX: { value: at.x }, clientY: { value: at.y }, ctrlKey: { value: at.ctrlKey ?? false } });
+  shield()!.dispatchEvent(event);
+  return event;
+}
+
 const PAGE = `
   <main>
     <section aria-label="A form"><button id="increment">Increment</button></section>
@@ -244,7 +253,7 @@ describe('the shield keeps the page from seeing anything', () => {
 
   it('no page listener, on the element, the document or the window, sees a trusted pointer event', () => {
     const seen = vi.fn();
-    const types = ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'click', 'contextmenu', 'dblclick', 'auxclick'];
+    const types = ['pointerdown', 'pointerup', 'pointermove', 'pointerrawupdate', 'mousedown', 'mouseup', 'click', 'contextmenu', 'dblclick', 'auxclick'];
     for (const type of types) {
       byId('increment').addEventListener(type, seen);
       doc().addEventListener(type, seen);
@@ -252,6 +261,7 @@ describe('the shield keeps the page from seeing anything', () => {
       win().addEventListener(type, seen);
       win().addEventListener(type, seen, true);
     }
+    pointer('pointerrawupdate', { x: 250, y: 40 });
     pointer('pointermove', { x: 250, y: 40 });
     click({ x: 250, y: 40 });
     mouse('dblclick', { x: 250, y: 40 });
@@ -299,12 +309,7 @@ describe('the shield keeps the page from seeing anything', () => {
     const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
     const seen = vi.fn();
     win().addEventListener('wheel', seen, true);
-    const wheel = (x: number, y: number, deltaY: number) => {
-      const event = trusted(new (win().WheelEvent)('wheel', { bubbles: true, cancelable: true, deltaY }));
-      Object.defineProperties(event, { clientX: { value: x }, clientY: { value: y } }); // happy-dom's WheelEvent is no MouseEvent
-      shield()!.dispatchEvent(event);
-      return event;
-    };
+    const wheel = (x: number, y: number, deltaY: number) => wheelAt({ x, y, deltaY });
     const inScroller = wheel(600, 50, 40);
     expect(inScroller.defaultPrevented).toBe(true);
     expect(scrollBy).toHaveBeenCalledWith(0, 40);
@@ -314,6 +319,47 @@ describe('the shield keeps the page from seeing anything', () => {
     wheel(250, 40, 25); // no scrollable ancestor: the document
     expect(windowScroll).toHaveBeenLastCalledWith(0, 25);
     expect(seen).not.toHaveBeenCalled();
+  });
+
+  it('a scroller within a pixel of its end (a fractional scrollTop at DPR 2) is at its end: the document scrolls', () => {
+    const scroller = byId('scroller');
+    Object.defineProperties(scroller, { scrollHeight: { value: 1000 }, clientHeight: { value: 100 }, scrollTop: { value: 899.5 } });
+    const scrollBy = vi.fn();
+    (scroller as unknown as { scrollBy: typeof scrollBy }).scrollBy = scrollBy;
+    const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
+    wheelAt({ x: 600, y: 50, deltaY: 40 });
+    expect(scrollBy).not.toHaveBeenCalled();
+    expect(windowScroll).toHaveBeenCalledWith(0, 40);
+  });
+
+  it('a page whose body is its scroller (the viewport does not scroll) scrolls the body', () => {
+    const body = doc().body; // the one body every case shares: restored below
+    const scrollBy = vi.fn();
+    body.setAttribute('style', 'overflow-y: auto');
+    Object.defineProperties(body, { scrollHeight: { value: 2000, configurable: true }, clientHeight: { value: 768, configurable: true }, scrollTop: { value: 0, configurable: true }, scrollBy: { value: scrollBy, configurable: true } });
+    try {
+      const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
+      expect(doc().scrollingElement).toBe(doc().documentElement); // standards mode: the root is the viewport's scroller
+      wheelAt({ x: 250, y: 40, deltaY: 30 });
+      expect(scrollBy).toHaveBeenCalledWith(0, 30);
+      expect(windowScroll).not.toHaveBeenCalled();
+    } finally {
+      body.removeAttribute('style');
+      for (const key of ['scrollHeight', 'clientHeight', 'scrollTop', 'scrollBy']) delete (body as unknown as Record<string, unknown>)[key];
+    }
+  });
+
+  it('a ctrl+wheel (a trackpad pinch) is taken from the page and scrolls nothing', () => {
+    const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
+    const event = wheelAt({ x: 250, y: 40, deltaY: 12, ctrlKey: true });
+    expect(event.defaultPrevented).toBe(true);
+    expect(windowScroll).not.toHaveBeenCalled();
+  });
+
+  it('a wheel in pages scales each axis by the viewport’s own extent', () => {
+    const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
+    wheelAt({ x: 250, y: 40, deltaX: 1, deltaY: 1, deltaMode: 2 });
+    expect(windowScroll).toHaveBeenCalledWith(win().innerWidth, win().innerHeight);
   });
 });
 
@@ -396,6 +442,24 @@ describe('the pick', () => {
     frame();
     frame();
     expect(ipc.sent()[0]).toMatchObject({ rect: { x: 22, y: 72, width: 178, height: 108 }, scroll: { x: 0, y: 50 } });
+  });
+
+  it('an element detached during the wait is reported at its rect from the pointer-up', () => {
+    const picked = byId('increment');
+    click({ x: 250, y: 40 });
+    picked.remove();
+    place(picked, { left: 0, top: 0, width: 0, height: 0 }); // what a detached element measures
+    frame();
+    frame();
+    expect(ipc.sent()[0]).toMatchObject({ description: { css: '#increment' }, rect: { x: 248, y: 32, width: 96, height: 30 } });
+  });
+
+  it('an element whose re-measured rect is empty (display: none meanwhile) is reported at its pointer-up rect', () => {
+    click({ x: 250, y: 40 });
+    place(byId('increment'), { left: 0, top: 0, width: 0, height: 0 });
+    frame();
+    frame();
+    expect(ipc.sent()[0]).toMatchObject({ rect: { x: 248, y: 32, width: 96, height: 30 } });
   });
 
   it('a frame is picked as its element', () => {

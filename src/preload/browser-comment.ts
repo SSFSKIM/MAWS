@@ -8,12 +8,14 @@
 // it, re-measures, and sends main one report of geometry and names; main decides whether it counts (A-33). Esc is
 // main's (`before-input-event`), and so is the URL; the crosshair is main's `insertCSS`, repeated on the shield.
 //
-// What the page sees of it: two nodes it can observe or remove, and nothing else. Every trusted pointer and mouse event
-// while armed is taken at the window's capture phase, where this listener is the first (a preload runs before any page
-// script), so no page listener, on an element, the document or the window, receives one, even when the page has raised
-// something above the shield. The wheel is the one exception: its listener exists only while armed (a non-passive wheel
-// listener would hold every page's scrolling on its main thread), so a page's own capture listener on the window or the
-// document can see a wheel before it is forwarded. An event the page dispatches itself is never acted on
+// What the page sees of it: two nodes it can observe or remove, and nothing else. The shield carries no listener: it is
+// a hit-test sink, so the pointer is over a MAWS node and never over a page element, frame or shadow host. Every trusted
+// pointer and mouse event (`pointerrawupdate` included) while armed is taken at the window's capture phase, where this
+// listener is the first (it is registered at install, and a preload runs before any page script), so no page listener,
+// on an element, the document or the window, receives one, even when the page has raised something above the shield.
+// The wheel is the one exception: its listener is registered at each arm (a non-passive wheel listener would hold every
+// page's scrolling on its main thread), so only a window capture listener the page registered before the arm sees a
+// wheel; every listener on the document or below is stopped. An event the page dispatches itself is never acted on
 // (`isTrusted`). Nothing is posted to the page and no page string becomes markup (the badge is `textContent`). Styles
 // are inline `!important` CSSOM writes, which a page's CSP does not govern.
 //
@@ -41,6 +43,7 @@ interface PageRect {
 }
 interface PageElement extends DomElement {
   readonly parentElement: PageElement | null;
+  readonly isConnected: boolean;
   readonly scrollTop: number;
   readonly scrollLeft: number;
   readonly scrollHeight: number;
@@ -61,7 +64,7 @@ interface OwnNode {
 }
 interface PageDocument extends DomDocument {
   readonly documentElement: (PageElement & { appendChild(child: OwnNode): unknown }) | null;
-  readonly body: PageElement | null;
+  readonly scrollingElement: PageElement | null; // the viewport's scroller: the root in standards mode, the body in quirks
   createElement(tagName: string): OwnNode;
   elementsFromPoint(x: number, y: number): ArrayLike<PageElement>;
 }
@@ -81,6 +84,7 @@ interface PageWheelEvent extends PagePointerEvent {
   readonly deltaX: number;
   readonly deltaY: number;
   readonly deltaMode: number;
+  readonly ctrlKey: boolean;
 }
 type Listener = (event: PageEvent) => void;
 type ListenerOptions = { capture: boolean; passive?: boolean };
@@ -134,11 +138,12 @@ const BADGE_GAP = 4;
 
 // Every pointer event a page could hear while armed (wheel apart: it is forwarded, and listened to only while armed, so
 // an unarmed page keeps its scrolling off the main thread). Keys are untouched: the shield takes no focus.
-const TAKEN = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerover', 'pointerout', 'pointerenter', 'pointerleave', 'gotpointercapture', 'lostpointercapture', 'mousedown', 'mousemove', 'mouseup', 'mouseover', 'mouseout', 'mouseenter', 'mouseleave', 'click', 'auxclick', 'dblclick', 'contextmenu'];
+const TAKEN = ['pointerdown', 'pointermove', 'pointerrawupdate', 'pointerup', 'pointercancel', 'pointerover', 'pointerout', 'pointerenter', 'pointerleave', 'gotpointercapture', 'lostpointercapture', 'mousedown', 'mousemove', 'mouseup', 'mouseover', 'mouseout', 'mouseenter', 'mouseleave', 'click', 'auxclick', 'dblclick', 'contextmenu'];
 const CAPTURE: ListenerOptions = { capture: true };
 const WHEEL: ListenerOptions = { capture: true, passive: false };
 const SCROLLABLE = new Set(['auto', 'scroll', 'overlay']);
 const LINE_PX = 16; // a wheel delta in lines (`deltaMode` 1)
+const SCROLL_SLACK_PX = 1; // a scroller within a pixel of its end is at it (a fractional scrollTop at DPR 2)
 
 type Point = { x: number; y: number };
 // The press, in viewport and document coordinates, so a marquee survives a scroll during the drag.
@@ -165,14 +170,14 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
   let pointer: Point | null = null;
   let press: Press | null = null;
 
+  const set = (node: OwnNode, styles: Record<string, string>) => {
+    for (const [name, value] of Object.entries(styles)) node.style.setProperty(name, value, 'important');
+  };
   const own = (tag: string, styles: Record<string, string>): OwnNode => {
     const node = doc.createElement(tag);
     node.setAttribute(COMMENT_NODES.marker, '');
-    for (const [name, value] of Object.entries(styles)) node.style.setProperty(name, value, 'important');
+    set(node, styles);
     return node;
-  };
-  const set = (node: OwnNode, styles: Record<string, string>) => {
-    for (const [name, value] of Object.entries(styles)) node.style.setProperty(name, value, 'important');
   };
 
   // The page element under a point: the top of the hit-test stack, MAWS's own nodes skipped. A shadow tree answers its
@@ -269,12 +274,18 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     // the marquee kept in document coordinates and re-derived after the wait, so a page that scrolled meanwhile is
     // still cropped where the person pointed
     const kept = area === null ? null : { ...area, x: area.x + page.scrollX, y: area.y + page.scrollY };
+    // a clicked element that went away (or out of layout) during the wait measures 0 x 0: its pointer-up rect stands
+    const atUp = rectOf(element.getBoundingClientRect());
+    const remeasured = () => {
+      const now = rectOf(element.getBoundingClientRect());
+      return element.isConnected && now.width > 0 && now.height > 0 ? now : atUp;
+    };
     const report = { epoch, requestId: null, mode: area === null ? ('click' as const) : ('area' as const) };
     const mine = generation;
     page.requestAnimationFrame(() =>
       page.requestAnimationFrame(() => {
         if (mine !== generation) return; // disarmed or re-armed meanwhile: main would drop it
-        const rect = kept === null ? rectOf(element.getBoundingClientRect()) : { ...kept, x: kept.x - page.scrollX, y: kept.y - page.scrollY };
+        const rect = kept === null ? remeasured() : { ...kept, x: kept.x - page.scrollX, y: kept.y - page.scrollY };
         sendPicked(report, described, rect);
       }),
     );
@@ -353,11 +364,13 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
   };
 
   // A wheel over the shield would scroll only the viewport; it goes to the nearest ancestor of the element under the
-  // pointer that can still scroll its way (the document when none), so nested panes scroll while the person looks.
+  // pointer that can still scroll its way (the viewport when none: `scrollingElement` is the viewport's scroller, so a
+  // body that scrolls by itself is an ancestor like any other), so nested panes scroll while the person looks.
   const canScroll = (element: PageElement, dx: number, dy: number) => {
     const style = page.getComputedStyle(element);
-    const vertical = dy !== 0 && SCROLLABLE.has(style.overflowY) && (dy > 0 ? element.scrollTop + element.clientHeight < element.scrollHeight : element.scrollTop > 0);
-    const horizontal = dx !== 0 && SCROLLABLE.has(style.overflowX) && (dx > 0 ? element.scrollLeft + element.clientWidth < element.scrollWidth : element.scrollLeft > 0);
+    const room = (position: number, view: number, extent: number, delta: number) => (delta > 0 ? position + view < extent - SCROLL_SLACK_PX : position > SCROLL_SLACK_PX);
+    const vertical = dy !== 0 && SCROLLABLE.has(style.overflowY) && room(element.scrollTop, element.clientHeight, element.scrollHeight, dy);
+    const horizontal = dx !== 0 && SCROLLABLE.has(style.overflowX) && room(element.scrollLeft, element.clientWidth, element.scrollWidth, dx);
     return vertical || horizontal;
   };
   const onWheel: Listener = (event) => {
@@ -365,10 +378,11 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     event.stopImmediatePropagation();
     event.preventDefault();
     const wheel = event as PageWheelEvent;
-    const unit = wheel.deltaMode === 1 ? LINE_PX : wheel.deltaMode === 2 ? page.innerHeight : 1;
-    const dx = wheel.deltaX * unit;
-    const dy = wheel.deltaY * unit;
-    for (let element = hit(wheel.clientX, wheel.clientY); element !== null && element !== doc.body && element !== doc.documentElement; element = element.parentElement) {
+    if (wheel.ctrlKey) return; // a trackpad pinch (or ctrl+wheel) is a zoom, not a scroll: taken, nothing moves
+    const dx = wheel.deltaX * (wheel.deltaMode === 1 ? LINE_PX : wheel.deltaMode === 2 ? page.innerWidth : 1);
+    const dy = wheel.deltaY * (wheel.deltaMode === 1 ? LINE_PX : wheel.deltaMode === 2 ? page.innerHeight : 1);
+    const viewport = doc.scrollingElement ?? doc.documentElement;
+    for (let element = hit(wheel.clientX, wheel.clientY); element !== null && element !== viewport && element !== doc.documentElement; element = element.parentElement) {
       if (canScroll(element, dx, dy)) return element.scrollBy(dx, dy);
     }
     page.scrollBy(dx, dy);
