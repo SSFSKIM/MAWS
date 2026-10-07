@@ -30,6 +30,9 @@ import { TabStore, type BrowserEmit } from './tabs';
 import { createTabView, registerBrowserPreload, tabWebPreferences, ViewManager } from './view';
 import { attachFocusEmulation, focusEmulationMode, setFocusEmulation } from './visibility';
 import { attachWindowOpen } from './window-open';
+// E4d start
+import { startCommentMode } from './comment';
+// E4d end
 // E4c start
 import type { HostSupervisor } from '../hosts/supervisor';
 import { e2eTabIds, startBrowserAgent } from './agent';
@@ -136,6 +139,10 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   });
   const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
   if (inspector) globalThis.__maws_browser = inspector;
+  // E4d start: comment mode (E4d execution document, Interfaces "Main"; Decision Log 26(b)): the toggle's command, the
+  // preload's report gate, the crop, the context menu's Comment and the e2e seam, over this store
+  const commentMode = startCommentMode({ store, emit, register, userData, env });
+  // E4d end
   // E4c start: the browser tools (E4c Design §4), here because the Navigator and the store are; the seam gains `agent`
   const agent = hosts
     ? startBrowserAgent({ store, navigator, onDownloadRefused: (listener) => downloads.onRefused(listener), sessions: index.sessions, hosts, emit, env, views, userData })
@@ -148,6 +155,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     views,
     // At will-quit, before the hosts stop: nothing more is sampled or placed, tabs.json is written, every page closed.
     stop: () => {
+      commentMode.stop(); // E4d
       if (inspector && globalThis.__maws_browser === inspector) delete globalThis.__maws_browser;
       void agent?.stop(); // E4c: nothing more is answered; every driver's connection closed
       app.removeListener('select-client-certificate', refuseUnownedCertificate);

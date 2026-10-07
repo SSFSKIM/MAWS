@@ -4,7 +4,7 @@
 // self-closing `<maws_anchor …/>` tag carrying the anchor's fields. The parse recovers the anchor from the tag alone and
 // strips the lead and the preamble only on an exact match, so the transcript draws the same row from the live prompt,
 // the queued steer and the engine's JSONL, and nothing a human typed in that shape is taken for MAWS's framing.
-import { AnchorSchema, type Anchor } from './anchor';
+import { AnchorSchema, type Anchor, type AnchorBox /* E4d */ } from './anchor';
 
 export type Destination = 'thread' | 'main';
 
@@ -52,13 +52,22 @@ const unescapeAttribute = (value: string) => value.replace(/&(amp|quot|lt|gt);/g
 
 // The tag's attributes, in the order they are written (Interfaces): the tag is byte-stable, and the parse accepts it
 // only when re-writing the anchor it read gives the same bytes.
-const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber'] as const;
+const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box' /* E4d */] as const;
 const NUMERIC_FIELDS: ReadonlySet<string> = new Set(['line', 'prNumber']);
+
+// E4d start: the browser-element box (E4d execution document, Design §6) is one attribute, `x,y,width,height`; any other
+// form is handed to the schema as the string it is, which refuses it, so such a tag stays text
+const tagValue = (value: string | number | AnchorBox) => (typeof value === 'object' ? `${value.x},${value.y},${value.width},${value.height}` : String(value));
+function parseBox(value: string): AnchorBox | string {
+  const match = /^(-?\d+),(-?\d+),(\d+),(\d+)$/.exec(value);
+  return match ? { x: Number(match[1]), y: Number(match[2]), width: Number(match[3]), height: Number(match[4]) } : value;
+}
+// E4d end
 
 export function anchorTag(anchor: Anchor): string {
   const attributes = TAG_FIELDS.flatMap((field) => {
     const value = anchor[field];
-    return value === undefined ? [] : [` ${field}="${escapeAttribute(String(value))}"`];
+    return value === undefined ? [] : [` ${field}="${escapeAttribute(tagValue(value) /* E4d: was String(value) */)}"`];
   });
   return `<maws_anchor${attributes.join('')}/>`;
 }
@@ -76,17 +85,19 @@ export function promotionMessage(exchanges: { question: string; response: string
   return [PROMOTION_HEAD, ...pairs, typed, anchorTag(PROMOTION_ANCHOR)].join('\n\n');
 }
 
-const TAG_LINE = /^<maws_anchor((?: [A-Za-z]+="[^"]*")+)\/>$/;
-const TAG_ATTRIBUTE = / ([A-Za-z]+)="([^"]*)"/g;
+// E4d (2026-10-06): attribute names widened from `[A-Za-z]+` to `[A-Za-z][A-Za-z0-9]*` so X10's `a11y` parses (E4d
+// execution document, Decision Log 21; a §6 exception); every older tag still matches.
+const TAG_LINE = /^<maws_anchor((?: [A-Za-z][A-Za-z0-9]*="[^"]*")+)\/>$/;
+const TAG_ATTRIBUTE = / ([A-Za-z][A-Za-z0-9]*)="([^"]*)"/g;
 
 function parseTag(line: string): Anchor | null {
   const match = TAG_LINE.exec(line);
   if (!match) return null;
-  const fields: Record<string, string | number> = {};
+  const fields: Record<string, string | number | AnchorBox /* E4d */> = {};
   for (const [, name, raw] of match[1]!.matchAll(TAG_ATTRIBUTE)) {
     const value = unescapeAttribute(raw!);
     if (Object.hasOwn(fields, name!)) return null;
-    fields[name!] = NUMERIC_FIELDS.has(name!) ? (/^[1-9][0-9]*$/.test(value) ? Number(value) : Number.NaN) : value;
+    fields[name!] = name === 'box' ? parseBox(value) /* E4d */ : NUMERIC_FIELDS.has(name!) ? (/^[1-9][0-9]*$/.test(value) ? Number(value) : Number.NaN) : value;
   }
   const parsed = AnchorSchema.omit({ screenshot: true }).safeParse(fields);
   if (!parsed.success) return null;

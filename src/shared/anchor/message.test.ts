@@ -126,6 +126,64 @@ describe('the anchored message (X10)', () => {
     expect(parseAnchoredText(message)).toEqual({ anchor: { kind: 'none', label: 'Side question', locator: 'btw' }, text: message.slice(0, message.lastIndexOf('\n\n')), destination: null });
   });
 
+  // E4d start: the browser-element fields in the tag (E4d execution document, Design §6): appended in X10's order, the
+  // box as one `x,y,width,height` attribute, `a11y` read back through the widened attribute-name grammar
+  describe('browser-element (E4d)', () => {
+    const element: Anchor = {
+      kind: 'browser-element',
+      locator: '#increment',
+      label: 'button “Increment”',
+      pageUrl: 'http://127.0.0.1:4321/comment.html',
+      css: '#increment',
+      role: 'button',
+      name: 'Increment',
+      a11y: 'main > region “A form” > button “Increment”',
+      box: { x: 248, y: 312, width: 96, height: 30 },
+    };
+    const TAG = '<maws_anchor kind="browser-element" label="button “Increment”" locator="#increment" pageUrl="http://127.0.0.1:4321/comment.html" css="#increment" role="button" name="Increment" a11y="main &gt; region “A form” &gt; button “Increment”" box="248,312,96,30"/>';
+
+    it('writes the design’s tag, byte for byte, and the lead unchanged', () => {
+      expect(anchorTag(element)).toBe(TAG);
+      expect(anchoredMessage({ anchor: { ...element, screenshot: { path: '/u/browser/crops/b.png', width: 192, height: 60 } }, text: 'Make this the primary button.', destination: 'thread', screenshot: true })).toBe(
+        [
+          'Comment on "button “Increment”" (element #increment on http://127.0.0.1:4321/comment.html). A screenshot of it is attached:',
+          'Make this the primary button.',
+          '',
+          SIDE_THREAD_PREAMBLE,
+          '',
+          TAG,
+        ].join('\n'),
+      );
+    });
+
+    it('a tag carrying `a11y` parses (the attribute-name grammar admits a digit after the first letter)', () => {
+      expect(parseAnchoredText(`hello\n\n${TAG}`)?.anchor).toEqual(element);
+    });
+
+    it('round-trips a full anchor, a child-combinator css and a negative box, both destinations, with and without a screenshot', () => {
+      const anchors: Anchor[] = [
+        element,
+        { ...element, locator: 'body > main > section:nth-of-type(2) > ul', css: 'body > main > section:nth-of-type(2) > ul', role: 'list', name: undefined, label: 'list', a11y: 'main > list', box: { x: -4, y: 0, width: 640, height: 1 } },
+        { kind: 'browser-element', locator: '#\\37  > a', label: 'a', css: '#\\37  > a' },
+      ].map((anchor) => AnchorSchema.parse(anchor));
+      for (const anchor of anchors)
+        for (const destination of ['thread', 'main'] as Destination[])
+          for (const screenshot of [false, true]) {
+            const message = anchoredMessage({ anchor: screenshot ? { ...anchor, screenshot: { path: '/u/s.png', width: 4, height: 4 } } : anchor, text: 'Why so wide?', destination, screenshot });
+            expect(parseAnchoredText(message), `${anchor.css} ${destination} ${screenshot}`).toEqual({ anchor, text: 'Why so wide?', destination });
+          }
+    });
+
+    it('keeps a malformed or reordered tag as text', () => {
+      for (const box of ['1,2,3', 'a,b,c,d', '1,2,3,4,5', '1, 2,3,4', '1,2,0,4', '1,2,-3,4', '01,2,3,4', '1.5,2,3,4', ''])
+        expect(parseAnchoredText(`hello\n\n${TAG.replace('box="248,312,96,30"', `box="${box}"`)}`), box).toBeNull();
+      expect(parseAnchoredText(`hello\n\n${TAG.replace(' css="#increment" role="button"', ' role="button" css="#increment"')}`)).toBeNull(); // not the written order
+      expect(parseAnchoredText(`hello\n\n${TAG.replace(' a11y=', ' a1y=')}`)).toBeNull(); // an unknown attribute
+      expect(parseAnchoredText(`hello\n\n${TAG.replace(' a11y=', ' 1ally=')}`)).toBeNull(); // an attribute name starts with a letter
+    });
+  });
+  // E4d end
+
   it('names the preamble the side thread’s prompt carries', () => {
     expect(anchoredMessage({ anchor: fileLine, text: 'x', destination: 'thread', screenshot: false })).toContain(`\n\n${SIDE_THREAD_PREAMBLE}\n\n<maws_anchor`);
     expect(anchoredMessage({ anchor: fileLine, text: 'x', destination: 'main', screenshot: false })).not.toContain(SIDE_THREAD_PREAMBLE);

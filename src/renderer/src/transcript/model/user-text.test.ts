@@ -1,6 +1,8 @@
 // The *Pasted content* rule (C7's contract, verbatim in the C6 execution document): extraction with the engine's own
 // grammar before anything markdown-shaped sees the text; the C4-backfill half of C7's test is in disk.test.ts.
 import { framePasted, PASTED_BLOCK } from '@shared/composer/pasted-content';
+import type { Anchor } from '@shared/anchor/anchor'; // E4d
+import { anchoredMessage } from '@shared/anchor/message'; // E4d
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -91,6 +93,31 @@ describe('pasted content', () => {
     expect(markdown).toContain(`only ${typed}`);
   });
 });
+
+// E4d start: a browser comment as the engine records it (E4d execution document, Design §10): `[image, text]`, the tag's
+// five browser-element fields recovered (`&gt;` unescaped), the picture an image attachment
+describe('a browser-element comment', () => {
+  it('draws from the recorded message with its anchor and its crop', () => {
+    const anchor: Anchor = {
+      kind: 'browser-element',
+      locator: '#\\37  > a',
+      label: 'link “local link”',
+      pageUrl: 'http://127.0.0.1:4321/comment.html',
+      css: '#\\37  > a',
+      role: 'link',
+      name: 'local link',
+      a11y: 'main > paragraph > link “local link”',
+      box: { x: 120, y: 940, width: 61, height: 19 },
+    };
+    const text = anchoredMessage({ anchor, text: 'Where does this go?', destination: 'thread', screenshot: true });
+    expect(text).toContain('a11y="main &gt; paragraph &gt; link “local link”"');
+    const out = userTextOf([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }, { type: 'text', text }]);
+    expect(out.anchor).toEqual(anchor);
+    expect(out.text).toBe('Where does this go?');
+    expect(out.attachments.map((attachment) => attachment.kind)).toEqual(['image']);
+  });
+});
+// E4d end
 
 // W1 (A3): the engine's record of a slash command folds to the line the human typed (shot 03's two-line "/compact
 // compact" bubble). The exact record is pass3/compact's disk line 31.

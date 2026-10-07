@@ -6,6 +6,7 @@
 //   (`navigate 'stop'`, which main turns into a kill and reload, Decision Log 42), the pop-ups the gate blocked;
 // - the session's transient notices from the store, main's `browser.notice` and the chrome's own (Copy URL, a refused
 //   address), routed by session (Decision Log 44 (f)) and gone after 4 s or on Dismiss.
+//   E4d: comment mode's refused pick and unconfirmed arm come this way too (E4d execution document, Decision Log 35).
 //
 // Each line sits on whole px (a 24 px text line in 4 px padding, Decision Log 48), so the pane under the chrome starts on
 // an integral edge.
@@ -17,6 +18,9 @@ import { dismiss, navigate, revealDownload } from '../actions';
 import { BROWSER_COPY } from '../copy';
 import { CloseIcon } from '../icons';
 import { dismissNotice, useBrowser, type ChromeNotice } from '../store';
+// E4d start
+import { COMMENT_COPY } from '../comment/copy';
+// E4d end
 
 type Edge = 'info' | 'warning' | 'danger';
 const EDGE: Record<Edge, string> = { info: 'border-l-info', warning: 'border-l-warning', danger: 'border-l-danger' };
@@ -49,6 +53,10 @@ const NOTICE_EDGE: Record<ChromeNotice['kind'], Edge> = {
   tabsFileBroken: 'warning',
   refusedScheme: 'danger',
   urlCopied: 'info',
+  // E4d start: comment mode's lines (E4d execution document, Decision Log 35)
+  commentUnavailable: 'warning',
+  commentCannotName: 'warning',
+  // E4d end
   dialogAnswered: 'info', // E4c
 };
 
@@ -68,6 +76,12 @@ export function noticeText(notice: Pick<ChromeNotice, 'kind' | 'name' | 'count' 
       return BROWSER_COPY.refusedScheme(notice.name ?? '');
     case 'urlCopied':
       return BROWSER_COPY.urlCopied;
+    // E4d start: comment mode's sentences live in its own copy (E4d execution document, Design §14)
+    case 'commentUnavailable':
+      return COMMENT_COPY.unavailable;
+    case 'commentCannotName':
+      return COMMENT_COPY.cannotName;
+    // E4d end
     // E4c start
     case 'dialogAnswered':
       return BROWSER_COPY.dialogAnswered(notice.dialogType ?? 'alert', notice.excerpt ?? '');

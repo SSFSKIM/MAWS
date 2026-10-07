@@ -26,7 +26,13 @@ import { openSideThread, revealNewThread, SIDE_TOOL_ID } from './actions';
 import { registerSidePane } from './register';
 import { resetSideQuestions, setInlineQuestions, setSideView, sideChildrenShown, sidePaneOf, useSidePane } from './store';
 import { sideThreadsOf, sideTool } from './SideTool';
-import { promotionQuestionOf } from './ThreadView';
+import { promotionQuestionOf, ThreadView } from './ThreadView';
+// E4d start
+import { registerPanelTool } from '../panel/host';
+import { installFakeMain, ok } from '../test-support/code';
+import { browserTab, T1 } from '../test-support/browser';
+import { browserTool } from '../tools/browser/BrowserTool';
+// E4d end
 
 const ONE = 'side-one' as AppSessionId;
 const TWO = 'side-two' as AppSessionId;
@@ -130,6 +136,39 @@ describe('the Side pane', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Open x.ts:42' }));
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'file', path: '/work/app-a/x.ts', line: 42, appSessionId: A });
   });
+
+  // E4d start: a page element thread's header opens the page in the parent's browser (E4d execution document, Design §10)
+  it('a page element thread’s header shows its URL as a button opening the page in the parent’s browser; another kind’s URL stays text', async () => {
+    const url = 'http://127.0.0.1:4000/comment.html';
+    const page: Anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: url, css: '#increment' };
+    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: page }));
+    registerPanelTool(browserTool);
+    const main = installFakeMain((name, input) => (name === 'browser.tabs.open' ? ok({ tab: browserTab(T1, input.appSessionId as AppSessionId, { url }), reused: false }) : ok()));
+    act(() => openSideThread(A, ONE));
+    mount();
+    await userEvent.click(screen.getByRole('button', { name: url }));
+    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: A, url, select: true, reuse: 'url' }]);
+    expect(panelOf(A)!.tabs.some((t) => t.toolId === browserTool.id)).toBe(true);
+    expect(panelOf(ONE)).toBeUndefined();
+    cleanup();
+    const pr: Anchor = { kind: 'pr-line', locator: 'https://github.com/o/r/pull/7/files#diff-1R3', label: 'x.ts:3 · PR #7', pageUrl: 'https://github.com/o/r/pull/7/files', path: 'x.ts', line: 3, side: 'new', prNumber: 7 };
+    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: pr }));
+    mount();
+    expect(screen.queryByRole('button', { name: pr.pageUrl })).toBeNull();
+    expect(screen.getByText(pr.pageUrl!)).toBeDefined();
+  });
+
+  it('a thread nested in a thread opens its page in its own parent’s browser, as the chip in its transcript does', async () => {
+    const url = 'http://127.0.0.1:4000/comment.html';
+    const page: Anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: url, css: '#increment' };
+    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'), thread(TWO, '2026-10-06T02:00:00.000Z', { parentAppSessionId: ONE, anchor: page }));
+    registerPanelTool(browserTool);
+    const main = installFakeMain((name, input) => (name === 'browser.tabs.open' ? ok({ tab: browserTab(T1, input.appSessionId as AppSessionId, { url }), reused: false }) : ok()));
+    render(<ThreadView parent={ONE} child={TWO} visible={false} />);
+    await userEvent.click(screen.getByRole('button', { name: url }));
+    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: ONE, url, select: true, reuse: 'url' }]);
+  });
+  // E4d end
 });
 
 // E3 (M4): the question view (Design §7) and a promoted thread's header (M3's review)
