@@ -75,4 +75,23 @@ describe('serializeRows', () => {
       '- Message from a1: note\n  > note\n  > more',
     ].join('\n\n'));
   });
+
+  // E4c start
+  it('renders a browser action as its line and its time, a refusal with its reason, a cancelled call as such', () => {
+    const b = builder();
+    b.turn('u1');
+    const page = { status: 'ok', tabId: 'b_000000000001', url: 'https://example.com/', title: 'Example' };
+    b.toolUse('o1', 'mcp__maws__browser_tabs', { action: 'open', url: 'https://example.com/' });
+    b.result('o1', [{ type: 'text', text: JSON.stringify({ ...page, action: 'open', tabs: [], ms: 120 }) }]);
+    b.toolUse('a1', 'mcp__maws__browser_act', { tabId: 'b_000000000001', action: 'fill', target: 'e2', value: 'secret' });
+    b.result('a1', 'browser_act: ref "e2" is stale or missing in the current snapshot; call browser_snapshot again and use a ref from it', { isError: true });
+    b.toolUse('a2', 'mcp__maws__browser_act', { tabId: 'b_000000000001', action: 'click', target: 'e3' });
+    b.end(['u1'], { terminalReason: 'aborted_streaming' });
+    expect(serializeRows(rows(b.events).filter((row) => row.kind === 'browser_action'))).toBe([
+      '- Opened example.com · 120ms',
+      '- Could not fill e2\n  *Ref "e2" is stale or missing in the current snapshot; call browser_snapshot again and use a ref from it*',
+      '- Clicking e3 · Cancelled, the turn was interrupted',
+    ].join('\n\n'));
+  });
+  // E4c end
 });

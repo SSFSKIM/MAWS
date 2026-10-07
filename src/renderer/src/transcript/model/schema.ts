@@ -7,6 +7,7 @@ import { ContentBlockSchema, QuestionSchema, TokenUsageSchema } from '@shared/gr
 import { AskCancelReasonSchema } from '@shared/maws/ask'; // E1
 import { AskAnswerSchema, AskQuestionSchema } from '@shared/maws/tools'; // E1
 import { ANCHOR_KINDS, AnchorSchema } from '@shared/anchor/anchor'; // E3
+import { BROWSER_TOOL_NAMES, BrowserWaitReasonSchema } from '@shared/maws/browser'; // E4c
 import { TOOL_CATEGORIES } from './rows';
 
 const nullable = <T extends z.ZodType>(schema: T) => schema.nullable();
@@ -129,4 +130,12 @@ export const RowSchema = z.discriminatedUnion('kind', [
     deliverableId: nullable(z.string()), version: nullable(z.number()), error: nullable(z.string()), answered: z.boolean(),
   }),
   // E2 end
+  // E4c start
+  z.strictObject({
+    ...base, kind: z.literal('browser_action'), toolUseId: z.string(), tool: z.enum(BROWSER_TOOL_NAMES), action: z.string(), tabId: nullable(z.string()), target: nullable(z.string()),
+    targetRole: nullable(z.string()), targetName: nullable(z.string()), value: nullable(z.string()), url: nullable(z.string()), title: nullable(z.string()), ms: nullable(z.number()),
+    deliverableId: nullable(z.string()), error: nullable(z.string()), waitedFor: nullable(BrowserWaitReasonSchema), waitedMs: nullable(z.number()), chars: nullable(z.number()),
+    tabCount: nullable(z.number()), state: z.enum(['running', 'done', 'error', 'cancelled']), detail: nullable(z.string()), answered: z.boolean(),
+  }),
+  // E4c end
 ]);

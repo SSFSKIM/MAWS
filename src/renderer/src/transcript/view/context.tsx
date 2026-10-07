@@ -34,6 +34,9 @@ export interface TranscriptActions {
   // E4d start: a page element comment's chip (tools/browser/comment/actions.ts, registered from App.tsx's E4d block)
   openBrowserUrl(appSessionId: AppSessionId, url: string): void; // the in-app browser on the page: the session's, a side thread's parent's
   // E4d end
+  // E4c start: a browser action row's Open tab (tools/browser/agent/actions.ts, registered from App.tsx's E4c block)
+  openBrowserTab(appSessionId: AppSessionId, tabId: string): void; // the Browser tool on that tab
+  // E4c end
 }
 
 // E7 start: who a Reply or a Message goes to, and what became of the last one to that address (E7 execution document,
@@ -73,6 +76,9 @@ export const NO_ACTIONS: TranscriptActions = {
   // E4d start
   openBrowserUrl: noop,
   // E4d end
+  // E4c start
+  openBrowserTab: noop,
+  // E4c end
 };
 // What a Transcript does for an action its caller did not supply: the two X2 commands C6 can call itself (a spilled
 // result through fs.readSpill, a link through layout.openExternal); the rest belong to C5, C7 and C8 and do nothing.

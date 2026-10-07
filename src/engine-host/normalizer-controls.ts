@@ -14,18 +14,7 @@ import { readMcpMessage, toolCallOf } from '@shared/maws/rpc';
 import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema, AskAnswerSchema, AskResultSchema, isMawsToolName, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
 // E1 end
 // E4c start
-import {
-  browserToolResultSchemaOf,
-  isBrowserToolName,
-  type BrowserActInput,
-  type BrowserNavigateInput,
-  type BrowserScreenshotInput,
-  type BrowserSnapshotInput,
-  type BrowserTabsInput,
-  type BrowserTarget,
-  type BrowserToolName,
-  type BrowserWaitReason,
-} from '@shared/maws/browser';
+import { browserCallOf, browserToolResultSchemaOf, isBrowserToolName, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
 // E4c end
 import type { ControlRequestFrame, ControlResponseFrame } from '@shared/wire/frames';
 import { compact, stringOrNull, type Attribution, type EventSink } from './normalizer-support';
@@ -310,40 +299,6 @@ interface BrowserResultFields {
   deliverableId?: string;
   waitedFor?: BrowserWaitReason | null;
   waitedMs?: number | null;
-}
-
-// A target as the row names it: a ref, or a locator's css.
-const targetOf = (target: BrowserTarget): string => (typeof target === 'string' ? target : target.css);
-
-// The action is `args.action` for tabs and act, back/forward/reload or `url` for navigate, else the tool's noun; the
-// target is the act's (or screenshot's) ref or css, the URL navigated to or opened, the snapshot's root, the
-// screenshot's `page` or `fullPage`.
-function browserCallOf(tool: BrowserToolName, input: unknown): { action: string; tabId: string | null; target: string | null } {
-  switch (tool) {
-    case 'browser_tabs': {
-      const args = input as BrowserTabsInput;
-      return { action: args.action, tabId: args.tabId ?? null, target: args.url ?? null };
-    }
-    case 'browser_navigate': {
-      const args = input as BrowserNavigateInput;
-      const named = args.url === 'back' || args.url === 'forward' || args.url === 'reload';
-      return { action: named ? args.url : 'url', tabId: args.tabId, target: named ? null : args.url };
-    }
-    case 'browser_snapshot': {
-      const args = input as BrowserSnapshotInput;
-      return { action: 'snapshot', tabId: args.tabId, target: args.root ?? null };
-    }
-    case 'browser_act': {
-      const args = input as BrowserActInput;
-      return { action: args.action, tabId: args.tabId, target: targetOf(args.target) };
-    }
-    case 'browser_eval':
-      return { action: 'eval', tabId: (input as { tabId: string }).tabId, target: null };
-    case 'browser_screenshot': {
-      const args = input as BrowserScreenshotInput;
-      return { action: 'screenshot', tabId: args.tabId, target: args.target !== undefined ? targetOf(args.target) : args.fullPage === true ? 'fullPage' : 'page' };
-    }
-  }
 }
 // E4c end
 

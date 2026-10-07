@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { BrowserLocatorSchema } from '../browser/locator';
 import {
+  browserCallOf,
   BROWSER_ACTION_TIMEOUT_MS,
   BROWSER_AGENT_IDLE_MS,
   BROWSER_ANSWER_MS,
@@ -343,5 +344,37 @@ describe('the browser tools\' error texts', () => {
     expect(browserTargetText('e12')).toBe('e12');
     expect(browserTargetText({ css: '#save' })).toBe('{css: "#save"}');
     expect(browserTargetText({ css: '.x', role: 'button', name: 'Go' })).toBe('{css: ".x", role: "button", name: "Go"}');
+  });
+});
+
+describe('browserCallOf (Design §10, Decision Log 48)', () => {
+  const TAB = 'b_000000000001';
+  it('names each call’s action, tab and target as the event and the row read them', () => {
+    expect([
+      browserCallOf('browser_tabs', { action: 'open', url: 'https://example.com/' }),
+      browserCallOf('browser_tabs', { action: 'list' }),
+      browserCallOf('browser_navigate', { tabId: TAB, url: 'back' }),
+      browserCallOf('browser_navigate', { tabId: TAB, url: 'https://example.com/a' }),
+      browserCallOf('browser_snapshot', { tabId: TAB, root: 'main' }),
+      browserCallOf('browser_act', { tabId: TAB, action: 'click', target: { css: '#save', role: 'button' } }),
+      browserCallOf('browser_eval', { tabId: TAB, expression: '1' }),
+      browserCallOf('browser_screenshot', { tabId: TAB, fullPage: true }),
+      browserCallOf('browser_screenshot', { tabId: TAB, target: 'e4' }),
+    ]).toEqual([
+      { action: 'open', tabId: null, target: 'https://example.com/' },
+      { action: 'list', tabId: null, target: null },
+      { action: 'back', tabId: TAB, target: null },
+      { action: 'url', tabId: TAB, target: 'https://example.com/a' },
+      { action: 'snapshot', tabId: TAB, target: 'main' },
+      { action: 'click', tabId: TAB, target: '#save' },
+      { action: 'eval', tabId: TAB, target: null },
+      { action: 'screenshot', tabId: TAB, target: 'fullPage' },
+      { action: 'screenshot', tabId: TAB, target: 'e4' },
+    ]);
+  });
+
+  it('reads arguments the schema refused leniently', () => {
+    expect(browserCallOf('browser_act', { tabId: 7, action: 'drag', target: { css: 3 } })).toEqual({ action: 'drag', tabId: null, target: null });
+    expect(browserCallOf('browser_tabs', null)).toEqual({ action: 'tabs', tabId: null, target: null });
   });
 });

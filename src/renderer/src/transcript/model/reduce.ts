@@ -736,6 +736,12 @@ function apply(batch: Batch, event: SessionEvent): void {
       return;
     }
     // E2 end
+    // E4c start: what the host said of a browser tool call goes to the turn of its call, as E2's events do
+    case 'maws.browser.action': {
+      if (!pushRouted(event.toolUseId === null ? undefined : index.toolUses.get(event.toolUseId))) batch.loose(event, false);
+      return;
+    }
+    // E4c end
     default:
       return; // session lifecycle, accounting, snapshots and unknown frames: nothing the transcript shows
   }

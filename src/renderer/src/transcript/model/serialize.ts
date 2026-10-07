@@ -6,6 +6,7 @@ import { ASK, askAnswerCopy, DELIVERY } from './copy'; // E1
 import { agentListCopy } from './copy'; // E7
 import { previewHidesBody } from './rows'; // E7
 import { artifactHeading } from './copy'; // E2
+import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from './copy'; // E4c
 import type { Cell, Row } from './rows';
 import { untaggedUserText } from './user-text';
 import { SIDE_COPY, sideRowStatus } from '../../side/copy'; // E3
@@ -49,6 +50,7 @@ function partOf(row: Row): string | null {
     case 'side_thread': return `*${SIDE_COPY.row.lead} \`${SIDE_COPY.label(row.label, row.openedBy)}\` ${sideRowStatus(row)}*`; // E3
     case 'agent_list': return listPart(row); // E7
     case 'artifact': return `**${artifactHeading(row)}**`; // E2
+    case 'browser_action': return browserActionPart(row); // E4c
   }
 }
 
@@ -66,6 +68,14 @@ function listPart(row: Extract<Row, { kind: 'agent_list' }>): string {
   return `- ${agentListCopy.serialized(count('Subagents'), count('Teammates'), count('Peer sessions'))}`;
 }
 // E7 end
+
+// E4c start: a browser action as its line, its time once done (or that it was cancelled), and a refusal's reason under it
+function browserActionPart(row: Extract<Row, { kind: 'browser_action' }>): string {
+  const tail = row.state === 'done' && row.ms !== null ? ` · ${took(row.ms)}` : row.state === 'cancelled' ? ` · ${BROWSER_ACTION.cancelled}` : '';
+  const line = `- ${browserActionHeading(row)}${tail}`;
+  return row.state === 'error' && row.error !== null ? `${line}\n  *${browserActionError(row.error)}*` : line;
+}
+// E4c end
 
 export function serializeRows(rows: Row[]): string {
   return rows.map(partOf).filter((part): part is string => part !== null).join('\n\n');

@@ -258,6 +258,9 @@ function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) =>
       // E4d start
       openBrowserUrl: (_appSessionId, url) => say(`openBrowserUrl ${url}`),
       // E4d end
+      // E4c start
+      openBrowserTab: (_appSessionId, tabId) => say(`openBrowserTab ${tabId}`),
+      // E4c end
       loadSpill: (spill) => {
         say(`loadSpill ${spill.path}`);
         return Promise.resolve(`(the harness has no spill content for ${spill.path})`);

@@ -42,6 +42,9 @@ export function spyActions(): TranscriptActions {
     // E4d start
     openBrowserUrl: vi.fn(),
     // E4d end
+    // E4c start
+    openBrowserTab: vi.fn(),
+    // E4c end
   };
 }
 

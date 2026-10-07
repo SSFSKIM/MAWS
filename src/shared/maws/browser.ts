@@ -262,3 +262,41 @@ export const BROWSER_TOOL_ERRORS = {
   // Internal: never written (the engine abandoned the call); the row reads it.
   interrupted: (tool: BrowserToolName) => `${tool}: cancelled, the turn was interrupted`,
 } as const;
+
+// ---------------------------------------------------------------------------------------------------------------------
+// One call as its transcript row and `maws.browser.action` name it (Design §10, Decision Log 48)
+
+// What a call does and to what, from its arguments alone, so the normaliser's event and the renderer's row (which on the
+// disk path has the call and its result, no event) name it the same way. The action is `action` for tabs and act,
+// back/forward/reload or `url` for navigate, else the tool's noun; the target is the act's (or a targeted screenshot's)
+// ref or css, the URL navigated to or opened, the snapshot's root, an untargeted screenshot's `page` or `fullPage`.
+// Read leniently: arguments the schema refused (the host answered invalidArguments) still name what they can.
+export interface BrowserCallSummary {
+  action: string;
+  tabId: string | null;
+  target: string | null;
+}
+
+export function browserCallOf(tool: BrowserToolName, input: unknown): BrowserCallSummary {
+  const args: Record<string, unknown> = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {};
+  const text = (value: unknown) => (typeof value === 'string' ? value : null);
+  const targetOf = (target: unknown) => text(target) ?? (typeof target === 'object' && target !== null ? text((target as { css?: unknown }).css) : null);
+  const tabId = text(args.tabId);
+  switch (tool) {
+    case 'browser_tabs':
+      return { action: text(args.action) ?? 'tabs', tabId, target: text(args.url) };
+    case 'browser_navigate': {
+      const url = text(args.url);
+      const named = url === 'back' || url === 'forward' || url === 'reload';
+      return { action: named ? url : 'url', tabId, target: named ? null : url };
+    }
+    case 'browser_snapshot':
+      return { action: 'snapshot', tabId, target: text(args.root) };
+    case 'browser_act':
+      return { action: text(args.action) ?? 'act', tabId, target: targetOf(args.target) };
+    case 'browser_eval':
+      return { action: 'eval', tabId, target: null };
+    case 'browser_screenshot':
+      return { action: 'screenshot', tabId, target: args.target !== undefined ? targetOf(args.target) : args.fullPage === true ? 'fullPage' : 'page' };
+  }
+}

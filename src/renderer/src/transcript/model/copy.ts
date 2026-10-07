@@ -508,3 +508,122 @@ export const ARTIFACT_CELL = {
   screenshotFailed: (error: string) => `Could not screenshot: ${error}`,
 } as const;
 // E2 end
+
+// ---------------------------------------------------------------------------------------------------------------------
+// E4c start: the browser tools' row (E4c execution document, Design §10). One line naming what the agent did to which
+// page or element: past tense once done ("Clicked button "Submit""), the present while it runs or when the turn
+// stopped it ("Clicking e12"), "Could not …" with the reason under it on a refusal. An element is named by its role and
+// name when the result or the locator carries them, else by its ref or css; a page by its host. A fill never shows what
+// it typed.
+
+// One action's phrase in its three tenses: done, running (also a cancelled row's), and the infinitive "Could not" takes.
+interface BrowserPhrase {
+  done: string;
+  running: string;
+  base: string;
+}
+const phrase = (done: string, running: string, base: string): BrowserPhrase => ({ done, running, base });
+
+const ELEMENT_MAX = 60;
+const cut = (text: string) => (text.length > ELEMENT_MAX ? `${text.slice(0, ELEMENT_MAX - 1)}…` : text);
+
+interface BrowserActionFacts {
+  tool: string;
+  action: string;
+  target: string | null;
+  targetRole: string | null;
+  targetName: string | null;
+  value: string | null;
+  url: string | null;
+  chars: number | null;
+  tabCount: number | null;
+  detail: string | null;
+}
+
+// The element an act or a targeted screenshot aimed at: `button "Submit"`, else the ref or the css as given.
+function elementOf(row: BrowserActionFacts): string {
+  if (row.targetRole !== null || row.targetName !== null) {
+    return cut([row.targetRole, row.targetName !== null ? `"${row.targetName}"` : null].filter((part) => part !== null).join(' '));
+  }
+  return row.target === null ? 'the element' : cut(row.target);
+}
+
+function browserPhrase(row: BrowserActionFacts): BrowserPhrase {
+  const page = row.url ?? (row.action === 'open' || row.action === 'url' ? row.target : null);
+  const host = page === null ? null : hostOf(page);
+  const on = host === null ? '' : ` ${host}`;
+  const el = elementOf(row);
+  switch (`${row.tool}:${row.action}`) {
+    case 'browser_tabs:open': return phrase(`Opened${on}`, `Opening${on}`, `open${on}`);
+    case 'browser_tabs:close': return phrase('Closed tab', 'Closing tab', 'close the tab');
+    case 'browser_tabs:select': return phrase(`Selected tab${on}`, 'Selecting tab', 'select the tab');
+    case 'browser_tabs:list': return phrase(row.tabCount === null ? 'Listed tabs' : `Listed ${plural(row.tabCount, 'tab')}`, 'Listing tabs', 'list tabs');
+    case 'browser_navigate:url': return phrase(`Navigated to${on}`, `Navigating to${on}`, `navigate to${on}`);
+    case 'browser_navigate:back': return phrase('Went back', 'Going back', 'go back');
+    case 'browser_navigate:forward': return phrase('Went forward', 'Going forward', 'go forward');
+    case 'browser_navigate:reload': return phrase(`Reloaded${on}`, 'Reloading', 'reload');
+    case 'browser_snapshot:snapshot': {
+      const of = `${row.target === null ? '' : ` ${cut(row.target)} on`}${on}`;
+      const size = row.chars === null ? '' : ` (${row.detail !== null && row.detail.length < row.chars ? `${row.detail.length.toLocaleString('en-US')} of ` : ''}${row.chars.toLocaleString('en-US')} chars)`;
+      return phrase(`Snapshot${of === '' ? '' : ` of${of}`}${size}`, 'Taking a snapshot', 'take a snapshot');
+    }
+    case 'browser_act:click': return phrase(`Clicked ${el}`, `Clicking ${el}`, `click ${el}`);
+    case 'browser_act:fill': return phrase(`Filled ${el}`, `Filling ${el}`, `fill ${el}`);
+    case 'browser_act:select': {
+      const option = row.value === null ? 'an option' : `"${cut(row.value)}"`;
+      return phrase(`Selected ${option} in ${el}`, `Selecting ${option} in ${el}`, `select ${option} in ${el}`);
+    }
+    case 'browser_act:check':
+      return row.value === 'false' ? phrase(`Unchecked ${el}`, `Unchecking ${el}`, `uncheck ${el}`) : phrase(`Checked ${el}`, `Checking ${el}`, `check ${el}`);
+    case 'browser_act:press': {
+      const key = row.value === null ? 'a key' : cut(row.value);
+      return phrase(`Pressed ${key}`, `Pressing ${key}`, `press ${key}`);
+    }
+    case 'browser_act:hover': return phrase(`Hovered over ${el}`, `Hovering over ${el}`, `hover over ${el}`);
+    case 'browser_act:scroll':
+      return row.value === null ? phrase(`Scrolled ${el} into view`, `Scrolling ${el} into view`, `scroll ${el} into view`) : phrase(`Scrolled ${el} by ${row.value} px`, `Scrolling ${el} by ${row.value} px`, `scroll ${el} by ${row.value} px`);
+    case 'browser_eval:eval': return phrase('Evaluated an expression', 'Evaluating an expression', 'evaluate an expression');
+    case 'browser_screenshot:screenshot': {
+      const of = row.target === 'page' || row.target === 'fullPage' ? on : ` ${el}`;
+      return phrase(`${row.target === 'fullPage' ? 'Full-page screenshot' : 'Screenshot'}${of === '' ? '' : ` of${of}`}`, 'Taking a screenshot', 'take a screenshot');
+    }
+    default: { // arguments the host refused: what the call was, by its tool
+      const noun = `browser ${row.tool.replace(/^browser_/, '')}`;
+      return phrase(capitalise(noun), capitalise(noun), `run ${noun}`);
+    }
+  }
+}
+
+export const BROWSER_ACTION = {
+  failed: (base: string) => `Could not ${base}`,
+  cancelled: 'Cancelled, the turn was interrupted',
+  waitingHuman: (elapsed: string) => `Waiting · you have the page · ${elapsed}`,
+  waitingCover: (elapsed: string) => `Waiting · a sheet covers the page · ${elapsed}`,
+  waited: (reason: 'human' | 'cover', ms: number) => (reason === 'human' ? `waited ${took(ms)} for you` : `waited ${took(ms)} under a sheet`),
+  openTab: 'Open tab',
+  open: 'Open',
+  show: (tool: string) => (tool === 'browser_eval' ? 'Show value' : 'Show snapshot'),
+  hide: (tool: string) => (tool === 'browser_eval' ? 'Hide value' : 'Hide snapshot'),
+} as const;
+
+// How long an action took: browser actions are often under a second, which `duration` would round to 0s.
+export function took(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 10_000) return `${(Math.floor(ms / 100) / 10).toFixed(1)}s`;
+  return duration(ms);
+}
+
+// The row's one line, by its state.
+export function browserActionHeading(row: BrowserActionFacts & { state: 'running' | 'done' | 'error' | 'cancelled' }): string {
+  const words = browserPhrase(row);
+  switch (row.state) {
+    case 'done': return words.done;
+    case 'running':
+    case 'cancelled': return words.running;
+    case 'error': return BROWSER_ACTION.failed(words.base);
+  }
+}
+
+// A refusal as the person reads it: without the tool's name, which the model's text opens with.
+export const browserActionError = (error: string) => capitalise(error.replace(/^browser_[a-z]+: /, ''));
+// E4c end

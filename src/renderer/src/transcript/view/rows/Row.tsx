@@ -16,6 +16,7 @@ import { DeliveryRowView } from './Delivery'; // E1
 import { SideThreadRow } from './SideThread'; // E3
 import { AgentListRow } from './AgentList'; // E7
 import { ArtifactRowView } from './Artifact'; // E2
+import { BrowserActionRow } from './BrowserAction'; // E4c
 import { FoldedAssistantProbes, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
@@ -55,6 +56,7 @@ function body(row: Row) {
     case 'side_thread': return <SideThreadRow row={row} />; // E3
     case 'agent_list': return <AgentListRow row={row} />; // E7
     case 'artifact': return <ArtifactRowView row={row} />; // E2
+    case 'browser_action': return <BrowserActionRow row={row} />; // E4c
   }
 }
 
