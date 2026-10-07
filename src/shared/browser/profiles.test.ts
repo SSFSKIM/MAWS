@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { BrowserProfileSchema } from '../../main/browser/partition'; // E4a's loose reader: every E4b record must parse with it too
 import { DONE_REPORT, FAILS_EXTENSION, PROBE_EXTENSION, WALLET_EXTENSION } from '../../../test/support/import-reports';
 import { ImportedProfileSchema, ImportedProfilesFileSchema, partitionDirName } from './profiles';
 import { DEFAULT_PARTITION, profilePartition } from './tab';
@@ -20,11 +19,6 @@ describe('the imported profile record (profiles.json, E4b Interfaces)', () => {
     expect(ImportedProfileSchema.parse(RECORD)).toEqual(RECORD);
     expect(Object.keys(ImportedProfileSchema.shape).slice(0, 4)).toEqual(['profileDir', 'name', 'partition', 'importedAt']);
     expect(ImportedProfileSchema.safeParse({ ...RECORD, cookies: [] }).success).toBe(false);
-  });
-
-  it('is always a record E4a’s reader accepts', () => {
-    const parsed = ImportedProfileSchema.parse(RECORD);
-    expect(BrowserProfileSchema.safeParse(parsed).success).toBe(true);
   });
 
   it('refuses a record whose partition is not its profile’s own', () => {

@@ -16,8 +16,15 @@ export function allRows(db: DatabaseSync, sql: string): Record<string, unknown>[
 
 // The store's `meta.version`; a store without one is not a Chrome store this import can read (Design §4).
 export function storeVersion(db: DatabaseSync): number {
-  const version = Number(allRows(db, "SELECT value FROM meta WHERE key = 'version'")[0]?.value);
-  if (!Number.isInteger(version)) throw Object.assign(new Error('the store has no meta version'), { code: 'NO_META_VERSION' });
+  const missing = () => Object.assign(new Error('the store has no meta version'), { code: 'NO_META_VERSION' });
+  let rows;
+  try {
+    rows = allRows(db, "SELECT value FROM meta WHERE key = 'version'");
+  } catch (error) {
+    throw (error as { errcode?: unknown }).errcode === 1 ? missing() : error; // SQLITE_ERROR: no `meta` table; a corrupt file keeps its own code
+  }
+  const version = Number(rows[0]?.value);
+  if (!Number.isInteger(version)) throw missing();
   return version;
 }
 

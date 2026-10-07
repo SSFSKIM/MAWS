@@ -130,3 +130,43 @@ describe('BrowserHistoryStore', () => {
     expect(index.browserHistory.suggest(P, 'a')).toEqual([]);
   });
 });
+
+// E4b start
+describe('BrowserHistoryStore.removeImportedExcept (E4b Design §14: the boot sweep’s history pattern)', () => {
+  let dir: ReturnType<typeof tempDir>;
+  let index: Index;
+  beforeEach(() => {
+    dir = tempDir();
+    index = new Index(join(dir.path, 'index.sqlite'));
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    index.close();
+    dir.dispose();
+  });
+
+  it('removes every row of a prefixed partition no record lists, whatever its source, and nothing else', () => {
+    const history = index.browserHistory;
+    const LISTED = 'persist:maws-chrome-Profile 1';
+    const ORPHAN = 'persist:maws-chrome-Default';
+    for (const partition of [P, LISTED, ORPHAN]) history.visit(partition, 'https://a.example/', { typed: false, at: 1 });
+    history.visit(ORPHAN, 'https://b.example/', { typed: false, at: 2 });
+    expect(history.removeImportedExcept('persist:maws-chrome-', [LISTED])).toBe(2);
+    expect(history.suggest(ORPHAN, '')).toEqual([]);
+    expect(history.suggest(LISTED, '')).toHaveLength(1);
+    expect(history.suggest(P, '')).toHaveLength(1);
+    expect(history.removeImportedExcept('persist:maws-chrome-', [])).toBe(1);
+  });
+
+  it('removes nothing from an unavailable index', () => {
+    index.close();
+    const newer = join(dir.path, 'newer.sqlite');
+    const db = new DatabaseSync(newer);
+    db.exec('CREATE TABLE sessions (id INTEGER PRIMARY KEY); PRAGMA user_version = 99');
+    db.close();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    index = new Index(newer);
+    expect(index.browserHistory.removeImportedExcept('persist:maws-chrome-', [])).toBe(0);
+  });
+});
+// E4b end

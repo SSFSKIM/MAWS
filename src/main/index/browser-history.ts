@@ -53,4 +53,16 @@ export class BrowserHistoryStore {
     if (this.db.readOnly) return;
     this.db.run('DELETE FROM browser_history WHERE partition = ?', partition);
   }
+
+  // E4b start
+  // The boot sweep (E4b Design §14; Decision Log 26): every row of a partition named with `prefix` that `keep` does not
+  // list, whatever its source (an import's rows, or visits a restored tab made in it); answers the rows removed.
+  removeImportedExcept(prefix: string, keep: readonly string[]): number {
+    if (this.db.readOnly) return 0;
+    return this.db.run(
+      'DELETE FROM browser_history WHERE substr(partition, 1, length(?1)) = ?1 AND partition NOT IN (SELECT value FROM json_each(?2))',
+      prefix, JSON.stringify(keep),
+    );
+  }
+  // E4b end
 }
