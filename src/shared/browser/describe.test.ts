@@ -151,13 +151,43 @@ describe('cssPath', () => {
     for (let depth = 0; depth < 100; depth++) parent = append(parent, 'section');
     expect(cssPath(parent)).toBeNull();
   });
+
+  // M1 review: the id is page-chosen text the agent's prompt carries three times (css, locator, lead)
+  it('skips an id step whose escaped form is past 200 characters', () => {
+    const el = append(doc().body, 'i');
+    el.id = 'k'.repeat(199);
+    expect(cssPath(el)).toBe(`#${'k'.repeat(199)}`);
+    el.id = 'k'.repeat(200);
+    expect(cssPath(el)).toBe('body > i');
+  });
+
+  // M1 review: Playwright's `css=` pierces open shadow roots, so an id inside one makes the light-DOM id not unique
+  it('skips an id step that an element inside an open shadow root also carries', () => {
+    const host = target('shadow-host');
+    const outer = host.attachShadow({ mode: 'open' });
+    outer.innerHTML = '<div><span id="nested-host"></span></div>';
+    expect(cssPath(target('increment'))).toBe('#increment');
+    outer.querySelector('#nested-host')!.attachShadow({ mode: 'open' }).innerHTML = '<b id="increment">twin</b>';
+    expect(cssPath(target('increment'))).toBe('body > main > section:nth-of-type(1) > div:nth-of-type(4) > button:nth-of-type(1)');
+  });
+
+  // M1 review: a custom element's name may hold `.` or non-ASCII characters
+  it('names elements whose local names are outside ASCII letters, escaped as CSS.escape does', () => {
+    const host = fragment('<my-élément data-t><emoji-😀></emoji-😀><emoji-😀 data-u></emoji-😀></my-élément>');
+    expect(cssPath(host)).toBe('body > div > my-élément');
+    expect(cssPath(host.querySelector('[data-u]')!)).toBe('body > div > my-élément > emoji-😀:nth-of-type(2)');
+    expect(doc().querySelector(cssPath(host.querySelector('[data-u]')!)!)).toBe(host.querySelector('[data-u]'));
+    const dotted = append(doc().body, 'x.y');
+    expect(cssPath(dotted)).toBe('body > x\\.y');
+    expect(CSS_PATH.test(cssPath(dotted)!)).toBe(true);
+  });
 });
 
 describe('CSS_PATH', () => {
   it('admits only the grammar cssPath writes', () => {
-    for (const css of ['html', 'body > main > section:nth-of-type(2) > ul', '#increment', '#\\37  > a', '#한글-id', '#a\\ b > i', '#x\\"y', 'svg > linearGradient', 'my-widget:nth-of-type(3)'])
+    for (const css of ['html', 'body > main > section:nth-of-type(2) > ul', '#increment', '#\\37  > a', '#한글-id', '#a\\ b > i', '#x\\"y', 'svg > linearGradient', 'my-widget:nth-of-type(3)', 'body > my-élément > x\\.y:nth-of-type(2)'])
       expect(CSS_PATH.test(css), css).toBe(true);
-    for (const css of ['div, body', 'a[href]', ':has(a)', 'body >> a', 'text=x', 'body a', 'body>a', 'body > #x', '#a b', 'div:nth-of-type(0)', 'div:nth-child(2)', '', '#', 'a > ', '*'])
+    for (const css of ['div, body', 'a[href]', ':has(a)', 'body >> a', 'text=x', 'body a', 'body>a', 'body > #x', '#a b', 'div:nth-of-type(0)', 'div:nth-child(2)', '', '#', 'a > ', '*', '7a', 'body > -7', 'a:hover', 'a::before', 'a.b'])
       expect(CSS_PATH.test(css), css).toBe(false);
   });
 
@@ -166,6 +196,8 @@ describe('CSS_PATH', () => {
     expect(CSS_PATH.test(`#${'\\3 '.repeat(600)}!`)).toBe(false);
     expect(CSS_PATH.test(`#${'\\111111'.repeat(280)}!`)).toBe(false); // a hex run has one reading, so no backtracking blow-up
     expect(CSS_PATH.test(`${'a > '.repeat(500)}!`)).toBe(false);
+    expect(CSS_PATH.test(`${'x\\3 '.repeat(500)}!`)).toBe(false);
+    expect(CSS_PATH.test(`${'a\\111111'.repeat(280)}!`)).toBe(false);
     expect(performance.now() - started).toBeLessThan(200);
   });
 });
@@ -284,6 +316,24 @@ describe('accessibleNameOf', () => {
   ];
   it.each(cases)('%s → %j', (html, name) => {
     expect(accessibleNameOf(fragment(html))).toBe(name);
+  });
+
+  // M1 review: Playwright reads an open shadow root's children (and slotted light children) into a content name
+  it('answers no name for content that holds an open shadow root', () => {
+    const el = fragment('<button data-t>Go <span data-host></span></button>');
+    expect(accessibleNameOf(el)).toBe('Go');
+    el.querySelector('[data-host]')!.attachShadow({ mode: 'open' }).innerHTML = '<b>now</b>';
+    expect(accessibleNameOf(el)).toBe('');
+    const host = fragment('<div data-t role="button">x</div>');
+    host.attachShadow({ mode: 'open' }).innerHTML = '<slot></slot>';
+    expect(accessibleNameOf(host)).toBe('');
+  });
+
+  // M1 review: inside a label, legend or caption every descendant contributes its content, whatever its role
+  it('reads a label’s descendants whatever their role', () => {
+    expect(accessibleNameOf(fragment('<label for="r1"><div role="group">Email</div></label><input data-t id="r1">'))).toBe('Email');
+    expect(accessibleNameOf(fragment('<fieldset data-t><legend><nav>Shipping</nav></legend></fieldset>'))).toBe('Shipping');
+    expect(accessibleNameOf(fragment('<span id="r2"><div role="group">Grouped</div></span><button data-t aria-labelledby="r2">x</button>'))).toBe('Grouped');
   });
 
   it('survives a labelledby cycle', () => {

@@ -22,8 +22,12 @@ export interface DomElement extends DomNode {
   readonly previousElementSibling: DomElement | null;
   readonly nextElementSibling: DomElement | null;
   readonly ownerDocument: DomDocument;
+  readonly shadowRoot?: DomShadowRoot | null; // open shadow roots only; a closed one reads null, to Playwright as well
   getAttribute(name: string): string | null;
   hasAttribute(name: string): boolean;
+}
+export interface DomShadowRoot {
+  querySelectorAll(selectors: string): ArrayLike<DomElement>;
 }
 interface DomStyle {
   readonly display: string;
@@ -95,35 +99,56 @@ function cssEscape(value: string): string {
   return typeof escape === 'function' ? escape(value) : escapeIdentifier(value);
 }
 
-// The grammar `cssPath` writes: an optional first `#<escaped id>` step, then `<tag>` steps with an optional
-// `:nth-of-type(<n>)`, joined by ` > `. An escaped id admits a hex escape (maximal, so a run of hex digits has one
-// reading and the match stays linear), an escaped non-hex printable ASCII character, `[\w-]`, and any code point at or
-// above U+0080, which `CSS.escape` leaves as it is. No other combinator, no attribute selector, no pseudo-class but
-// `:nth-of-type`, no comma: main validates a page-supplied css against it, and E4c passes it to Playwright as `css=`.
-const ID = String.raw`#(?:\\[0-9a-fA-F]{1,6}(?![0-9a-fA-F]) ?|\\[\x20-\x2f\x3a-\x40\x47-\x60\x67-\x7e]|[\w-]|[^\x00-\x7f])+`;
-const TAG = String.raw`[A-Za-z][\w-]*(?::nth-of-type\([1-9][0-9]*\))?`;
+// The grammar `cssPath` writes: an optional first `#<escaped id>` step, then `<escaped local name>` steps with an
+// optional `:nth-of-type(<n>)`, joined by ` > `. An escaped identifier admits a hex escape (maximal, so a run of hex
+// digits has one reading and the match stays linear), an escaped non-hex printable ASCII character, `[\w-]`, and any
+// code point at or above U+0080, which `CSS.escape` leaves as it is; a local name does not start with a digit. No other
+// combinator, no attribute selector, no pseudo-class but `:nth-of-type`, no comma: main validates a page-supplied css
+// against it, and E4c passes it to Playwright as `css=`.
+const IDENT = String.raw`(?:\\[0-9a-fA-F]{1,6}(?![0-9a-fA-F]) ?|\\[\x20-\x2f\x3a-\x40\x47-\x60\x67-\x7e]|[\w-]|[^\x00-\x7f])+`;
+const ID = `#${IDENT}`;
+const TAG = String.raw`(?!-?[0-9])${IDENT}(?::nth-of-type\([1-9][0-9]*\))?`;
 export const CSS_PATH = new RegExp(`^(?:${ID}|${TAG})(?: > ${TAG})*$`, 'u');
 const ID_STEP = new RegExp(`^${ID}$`, 'u');
+// The id is page-chosen text the agent's prompt carries three times (css, locator, the lead); past this the path uses
+// nth-of-type steps instead, which stay unique (Design §9's bound on page text in the prompt).
+const ID_STEP_MAX = 200;
 
-// `#<id>` when the id is the only one in the document and its escape stays inside the grammar; else null, and the path
-// continues with tag steps as if the element had no id.
-function uniqueIdStep(el: DomElement): string | null {
+// Every id carried by an element inside an open shadow root of the document, nested roots included: Playwright's `css=`
+// pierces open shadow roots, so a light-DOM id repeated in one is not unique to the agent.
+function shadowIds(doc: DomDocument): Set<string> {
+  const ids = new Set<string>();
+  const visit = (elements: ArrayLike<DomElement>, inShadow: boolean) => {
+    for (const element of Array.from(elements)) {
+      if (inShadow && element.id !== '') ids.add(element.id);
+      if (element.shadowRoot) visit(element.shadowRoot.querySelectorAll('*'), true);
+    }
+  };
+  visit(doc.querySelectorAll('*'), false);
+  return ids;
+}
+
+// `#<id>` when the id is the only one in the document, light and open shadow trees alike, and its escape stays inside
+// the grammar and within `ID_STEP_MAX`; else null, and the path continues with tag steps as if the element had no id.
+function uniqueIdStep(el: DomElement, shadow: () => Set<string>): string | null {
   if (el.id === '') return null;
   const step = `#${cssEscape(el.id)}`;
-  if (step.length > CSS_PATH_MAX || !ID_STEP.test(step)) return null;
+  if (step.length > ID_STEP_MAX || !ID_STEP.test(step)) return null;
   try {
     const found = el.ownerDocument.querySelectorAll(step);
-    return found.length === 1 && found[0] === el ? step : null; // not a shadow tree's element that shares a light-DOM id
+    // the one match must be this element (not a shadow tree's element that shares a light-DOM id), and no open shadow root may repeat it
+    return found.length === 1 && found[0] === el && !shadow().has(el.id) ? step : null;
   } catch {
     return null;
   }
 }
 
 function tagStep(el: DomElement): string {
+  const name = cssEscape(el.localName);
   const parent = el.parentElement;
-  if (parent === null) return el.localName;
+  if (parent === null) return name;
   const same = Array.from(parent.children).filter((sibling) => sibling.localName === el.localName);
-  return same.length > 1 ? `${el.localName}:nth-of-type(${same.indexOf(el) + 1})` : el.localName;
+  return same.length > 1 ? `${name}:nth-of-type(${same.indexOf(el) + 1})` : name;
 }
 
 // A selector unique in the document (E0b's `cssPath`): the nearest ancestor-or-self with a unique id, else
@@ -132,10 +157,12 @@ function tagStep(el: DomElement): string {
 export function cssPath(el: DomElement): string | null {
   const root = el.ownerDocument.documentElement;
   if (el === root) return el.localName;
+  let ids: Set<string> | undefined;
+  const shadow = () => (ids ??= shadowIds(el.ownerDocument)); // one walk per path, and only when an id step is in question
   const steps: string[] = [];
   let node: DomElement | null = el;
   while (node !== null && node !== root) {
-    const id = uniqueIdStep(node);
+    const id = uniqueIdStep(node, shadow);
     if (id !== null) {
       steps.unshift(id);
       break;
@@ -313,7 +340,9 @@ const PLACEHOLDER_TYPES: ReadonlySet<string> = new Set(['text', 'password', 'num
 // `aria-owns`): the name it would be part of answers `''`.
 const DOUBT = null;
 type Text = string | typeof DOUBT;
-type Walk = { visited: Set<DomElement>; inLabelledBy: boolean };
+// `inReferenced`: inside a referenced subtree (a labelledby target, a label, a legend, a caption), where every
+// descendant contributes its content whatever its role (Playwright's `embeddedInLabel` and its siblings).
+type Walk = { visited: Set<DomElement>; inLabelledBy: boolean; inReferenced: boolean };
 
 function styleOf(el: DomElement, pseudo?: string): DomStyle | null {
   try {
@@ -422,8 +451,9 @@ function nativeName(el: DomElement, role: string, labelledBy: boolean, walk: Wal
 
 // What an element contributes to a name it is part of: a descendant of the named element, or an element the name
 // references (`referenced`: a labelledby target, a label, a legend, a caption), whose content always counts.
-function embeddedText(el: DomElement, walk: Walk, referenced: boolean): Text {
-  if (walk.visited.has(el)) return '';
+function embeddedText(el: DomElement, outer: Walk, referenced: boolean): Text {
+  if (outer.visited.has(el)) return '';
+  const walk = referenced && !outer.inReferenced ? { ...outer, inReferenced: true } : outer;
   if (!walk.inLabelledBy) {
     const refs = idRefs(el, 'aria-labelledby');
     if (refs.length > 0) {
@@ -442,7 +472,7 @@ function embeddedText(el: DomElement, walk: Walk, referenced: boolean): Text {
   if (flat(label) !== '') return label;
   const native = nativeName(el, role, el.hasAttribute('aria-labelledby'), walk);
   if (native !== undefined) return native;
-  if (referenced || walk.inLabelledBy || NAME_FROM_CONTENT_ROLES.has(role) || CONTENT_OF_DESCENDANT.has(role)) {
+  if (walk.inReferenced || NAME_FROM_CONTENT_ROLES.has(role) || CONTENT_OF_DESCENDANT.has(role)) {
     const content = contentText(el, walk);
     if (content === DOUBT || content.trim() !== '') return content;
   }
@@ -455,10 +485,11 @@ function labelledByText(refs: DomElement[], walk: Walk): Text {
 }
 
 // The element's text as a content name: its text nodes and its visible descendants' contributions, a block-level
-// descendant set off by spaces.
+// descendant set off by spaces. An open shadow root is doubt: Playwright reads the shadow tree's children (and the
+// light children its slots place) instead of the light children read here.
 function contentText(el: DomElement, walk: Walk): Text {
   if (walk.visited.has(el)) return ''; // a reference cycle (Playwright's `visitedElements`)
-  if (el.hasAttribute('aria-owns') || hasGeneratedContent(el)) return DOUBT;
+  if (el.shadowRoot || el.hasAttribute('aria-owns') || hasGeneratedContent(el)) return DOUBT;
   walk.visited.add(el);
   const parts: string[] = [];
   for (const node of Array.from(el.childNodes)) {
@@ -486,7 +517,7 @@ export function accessibleNameOf(el: DomElement): string {
 function computeName(el: DomElement): string {
   const role = ariaRole(el) ?? '';
   if (PROHIBITS_NAMING.has(role)) return '';
-  const walk: Walk = { visited: new Set(), inLabelledBy: false };
+  const walk: Walk = { visited: new Set(), inLabelledBy: false, inReferenced: false };
   const refs = idRefs(el, 'aria-labelledby');
   if (refs.length > 0) {
     const text = labelledByText(refs, walk);
