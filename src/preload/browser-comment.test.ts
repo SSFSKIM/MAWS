@@ -101,6 +101,36 @@ function wheelAt(at: Wheel) {
   return event;
 }
 
+// happy-dom computes no `overflow` for the root: its computed style answers the given value there.
+function rootOverflow(value: string) {
+  const computed = win().getComputedStyle.bind(win());
+  vi.spyOn(win(), 'getComputedStyle').mockImplementation((element: HappyElement) =>
+    element === doc().documentElement ? ({ overflowX: value, overflowY: value } as unknown as ReturnType<typeof computed>) : computed(element),
+  );
+}
+// The instant scroll the preload asks for, so it can read at once whether anything moved.
+const step = (left: number, top: number) => ({ left, top, behavior: 'instant' });
+// A scroll container as happy-dom cannot lay one out: its extents, and a `scrollBy` that moves it within them (or, with
+// `moves: false`, does not move it at all). Undone after each case, since `<html>` and `<body>` are shared.
+const undo: Array<() => void> = [];
+type Extent = { scrollHeight: number; clientHeight: number; scrollTop: number; moves?: boolean };
+function scrollable(el: HappyElement, extent: Extent) {
+  let top = extent.scrollTop;
+  const scrollBy = vi.fn((to: { top: number }) => {
+    if (extent.moves !== false) top = Math.min(Math.max(top + to.top, 0), extent.scrollHeight - extent.clientHeight);
+  });
+  Object.defineProperties(el, {
+    scrollHeight: { value: extent.scrollHeight, configurable: true },
+    clientHeight: { value: extent.clientHeight, configurable: true },
+    scrollTop: { get: () => top, configurable: true },
+    scrollBy: { value: scrollBy, configurable: true },
+  });
+  undo.push(() => {
+    for (const key of ['scrollHeight', 'clientHeight', 'scrollTop', 'scrollBy']) delete (el as unknown as Record<string, unknown>)[key];
+  });
+  return { scrollBy };
+}
+
 const PAGE = `
   <main>
     <section aria-label="A form"><button id="increment">Increment</button></section>
@@ -150,6 +180,8 @@ beforeEach(() => {
 
 afterEach(() => {
   uninstall();
+  undo.splice(0).forEach((restore) => restore());
+  doc().body.removeAttribute('style');
   vi.restoreAllMocks();
   delete (doc() as unknown as { elementsFromPoint?: unknown }).elementsFromPoint;
   Object.defineProperty(win(), 'scrollY', SCROLL_Y);
@@ -302,51 +334,58 @@ describe('the shield keeps the page from seeing anything', () => {
   });
 
   it('a wheel is taken from the page and scrolls the nearest scrollable ancestor of what is under the pointer', () => {
-    const scroller = byId('scroller');
-    Object.defineProperties(scroller, { scrollHeight: { value: 1000 }, clientHeight: { value: 100 }, scrollTop: { value: 0 } });
-    const scrollBy = vi.fn();
-    (scroller as unknown as { scrollBy: typeof scrollBy }).scrollBy = scrollBy;
+    const { scrollBy } = scrollable(byId('scroller'), { scrollHeight: 1000, clientHeight: 100, scrollTop: 0 });
     const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
     const seen = vi.fn();
     win().addEventListener('wheel', seen, true);
-    const wheel = (x: number, y: number, deltaY: number) => wheelAt({ x, y, deltaY });
-    const inScroller = wheel(600, 50, 40);
+    const inScroller = wheelAt({ x: 600, y: 50, deltaY: 40 });
     expect(inScroller.defaultPrevented).toBe(true);
-    expect(scrollBy).toHaveBeenCalledWith(0, 40);
+    expect(scrollBy).toHaveBeenCalledWith(step(0, 40));
     expect(windowScroll).not.toHaveBeenCalled();
-    wheel(600, 50, -40); // already at the top: the scroller cannot take it, the document does
-    expect(windowScroll).toHaveBeenCalledWith(0, -40);
-    wheel(250, 40, 25); // no scrollable ancestor: the document
-    expect(windowScroll).toHaveBeenLastCalledWith(0, 25);
+    wheelAt({ x: 600, y: 50, deltaY: -60 }); // more than it has: the scroller takes what it can
+    expect(scrollBy).toHaveBeenLastCalledWith(step(0, -60));
+    wheelAt({ x: 600, y: 50, deltaY: -40 }); // back at the top: the scroller cannot take it, the document does
+    expect(windowScroll).toHaveBeenCalledWith(step(0, -40));
+    wheelAt({ x: 250, y: 40, deltaY: 25 }); // no scrollable ancestor: the document
+    expect(windowScroll).toHaveBeenLastCalledWith(step(0, 25));
     expect(seen).not.toHaveBeenCalled();
   });
 
   it('a scroller within a pixel of its end (a fractional scrollTop at DPR 2) is at its end: the document scrolls', () => {
-    const scroller = byId('scroller');
-    Object.defineProperties(scroller, { scrollHeight: { value: 1000 }, clientHeight: { value: 100 }, scrollTop: { value: 899.5 } });
-    const scrollBy = vi.fn();
-    (scroller as unknown as { scrollBy: typeof scrollBy }).scrollBy = scrollBy;
+    const { scrollBy } = scrollable(byId('scroller'), { scrollHeight: 1000, clientHeight: 100, scrollTop: 899.5 });
     const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
     wheelAt({ x: 600, y: 50, deltaY: 40 });
     expect(scrollBy).not.toHaveBeenCalled();
-    expect(windowScroll).toHaveBeenCalledWith(0, 40);
+    expect(windowScroll).toHaveBeenCalledWith(step(0, 40));
   });
 
-  it('a page whose body is its scroller (the viewport does not scroll) scrolls the body', () => {
-    const body = doc().body; // the one body every case shares: restored below
-    const scrollBy = vi.fn();
-    body.setAttribute('style', 'overflow-y: auto');
-    Object.defineProperties(body, { scrollHeight: { value: 2000, configurable: true }, clientHeight: { value: 768, configurable: true }, scrollTop: { value: 0, configurable: true }, scrollBy: { value: scrollBy, configurable: true } });
-    try {
-      const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
-      expect(doc().scrollingElement).toBe(doc().documentElement); // standards mode: the root is the viewport's scroller
-      wheelAt({ x: 250, y: 40, deltaY: 30 });
-      expect(scrollBy).toHaveBeenCalledWith(0, 30);
-      expect(windowScroll).not.toHaveBeenCalled();
-    } finally {
-      body.removeAttribute('style');
-      for (const key of ['scrollHeight', 'clientHeight', 'scrollTop', 'scrollBy']) delete (body as unknown as Record<string, unknown>)[key];
-    }
+  it('a scroller that does not move when asked (a stale measure) passes the wheel on', () => {
+    const { scrollBy } = scrollable(byId('scroller'), { scrollHeight: 1000, clientHeight: 100, scrollTop: 0, moves: false });
+    const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
+    wheelAt({ x: 600, y: 50, deltaY: 40 });
+    expect(scrollBy).toHaveBeenCalledTimes(1);
+    expect(windowScroll).toHaveBeenCalledWith(step(0, 40));
+  });
+
+  it('a page whose body is its own scroller (the root does not let its overflow through) scrolls the body', () => {
+    rootOverflow('hidden');
+    doc().body.setAttribute('style', 'overflow-y: auto');
+    const { scrollBy } = scrollable(doc().body, { scrollHeight: 2000, clientHeight: 768, scrollTop: 0 });
+    const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
+    expect(doc().scrollingElement).toBe(doc().documentElement); // standards mode: the root is the viewport's scroller
+    wheelAt({ x: 250, y: 40, deltaY: 30 });
+    expect(scrollBy).toHaveBeenCalledWith(step(0, 30));
+    expect(windowScroll).not.toHaveBeenCalled();
+  });
+
+  it('a body whose overflow propagates to the viewport (the root’s is visible) is no scroller: the viewport scrolls', () => {
+    rootOverflow('visible');
+    doc().body.setAttribute('style', 'overflow-x: hidden; overflow-y: auto'); // as `overflow-x: hidden` computes
+    const { scrollBy } = scrollable(doc().body, { scrollHeight: 2000, clientHeight: 768, scrollTop: 0 });
+    const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
+    wheelAt({ x: 250, y: 40, deltaY: 30 });
+    expect(scrollBy).not.toHaveBeenCalled();
+    expect(windowScroll).toHaveBeenCalledWith(step(0, 30));
   });
 
   it('a ctrl+wheel (a trackpad pinch) is taken from the page and scrolls nothing', () => {
@@ -359,7 +398,7 @@ describe('the shield keeps the page from seeing anything', () => {
   it('a wheel in pages scales each axis by the viewport’s own extent', () => {
     const windowScroll = vi.spyOn(win(), 'scrollBy').mockImplementation(() => undefined);
     wheelAt({ x: 250, y: 40, deltaX: 1, deltaY: 1, deltaMode: 2 });
-    expect(windowScroll).toHaveBeenCalledWith(win().innerWidth, win().innerHeight);
+    expect(windowScroll).toHaveBeenCalledWith(step(win().innerWidth, win().innerHeight));
   });
 });
 

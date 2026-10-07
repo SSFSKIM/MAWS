@@ -35,6 +35,8 @@ import { accessibleNameOf, describeElement, roleOf, type DomDocument, type DomEl
 
 // --- the slice of the page this module reads (a browser window, and happy-dom's, satisfy it) ---
 
+// An instant scroll, so whether it moved anything can be read back at once (a smooth one would not have moved yet).
+type ScrollStep = { left: number; top: number; behavior: 'instant' };
 interface PageRect {
   readonly left: number;
   readonly top: number;
@@ -51,7 +53,7 @@ interface PageElement extends DomElement {
   readonly clientHeight: number;
   readonly clientWidth: number;
   getBoundingClientRect(): PageRect;
-  scrollBy(x: number, y: number): void;
+  scrollBy(step: ScrollStep): void;
 }
 // A node MAWS creates and owns.
 interface OwnNode {
@@ -65,6 +67,7 @@ interface OwnNode {
 interface PageDocument extends DomDocument {
   readonly documentElement: (PageElement & { appendChild(child: OwnNode): unknown }) | null;
   readonly scrollingElement: PageElement | null; // the viewport's scroller: the root in standards mode, the body in quirks
+  readonly body: PageElement | null;
   createElement(tagName: string): OwnNode;
   elementsFromPoint(x: number, y: number): ArrayLike<PageElement>;
 }
@@ -95,7 +98,7 @@ export interface CommentPage {
   readonly scrollX: number;
   readonly scrollY: number;
   requestAnimationFrame(callback: () => void): number;
-  scrollBy(x: number, y: number): void;
+  scrollBy(step: ScrollStep): void;
   getComputedStyle(element: PageElement): { readonly overflowX: string; readonly overflowY: string };
   addEventListener(type: string, listener: Listener, options: ListenerOptions): void;
   removeEventListener(type: string, listener: Listener, options: ListenerOptions): void;
@@ -364,8 +367,10 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
   };
 
   // A wheel over the shield would scroll only the viewport; it goes to the nearest ancestor of the element under the
-  // pointer that can still scroll its way (the viewport when none: `scrollingElement` is the viewport's scroller, so a
-  // body that scrolls by itself is an ancestor like any other), so nested panes scroll while the person looks.
+  // pointer that can still scroll its way, so nested panes scroll while the person looks, and to the viewport when none
+  // does. `scrollingElement` is the viewport's scroller; the body is a scroller of its own only when the root's overflow
+  // is not visible (else the body's overflow is the viewport's, CSS Overflow 3 §3.3, and scrolling the body does
+  // nothing). An ancestor that did not move when asked passes the wheel on, so a misjudged one never eats it.
   const canScroll = (element: PageElement, dx: number, dy: number) => {
     const style = page.getComputedStyle(element);
     const room = (position: number, view: number, extent: number, delta: number) => (delta > 0 ? position + view < extent - SCROLL_SLACK_PX : position > SCROLL_SLACK_PX);
@@ -373,6 +378,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     const horizontal = dx !== 0 && SCROLLABLE.has(style.overflowX) && room(element.scrollLeft, element.clientWidth, element.scrollWidth, dx);
     return vertical || horizontal;
   };
+  const scrollsItself = (element: PageElement) => element !== doc.body || doc.documentElement === null || page.getComputedStyle(doc.documentElement).overflowY !== 'visible';
   const onWheel: Listener = (event) => {
     if (epoch === null || !event.isTrusted) return;
     event.stopImmediatePropagation();
@@ -381,11 +387,15 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     if (wheel.ctrlKey) return; // a trackpad pinch (or ctrl+wheel) is a zoom, not a scroll: taken, nothing moves
     const dx = wheel.deltaX * (wheel.deltaMode === 1 ? LINE_PX : wheel.deltaMode === 2 ? page.innerWidth : 1);
     const dy = wheel.deltaY * (wheel.deltaMode === 1 ? LINE_PX : wheel.deltaMode === 2 ? page.innerHeight : 1);
+    const step: ScrollStep = { left: dx, top: dy, behavior: 'instant' };
     const viewport = doc.scrollingElement ?? doc.documentElement;
     for (let element = hit(wheel.clientX, wheel.clientY); element !== null && element !== viewport && element !== doc.documentElement; element = element.parentElement) {
-      if (canScroll(element, dx, dy)) return element.scrollBy(dx, dy);
+      if (!scrollsItself(element) || !canScroll(element, dx, dy)) continue;
+      const { scrollTop, scrollLeft } = element;
+      element.scrollBy(step);
+      if (element.scrollTop !== scrollTop || element.scrollLeft !== scrollLeft) return;
     }
-    page.scrollBy(dx, dy);
+    page.scrollBy(step);
   };
 
   // A scroll or resize moves what is under a still pointer: the outline (or the marquee) follows.
