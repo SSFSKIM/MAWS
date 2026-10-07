@@ -27,7 +27,7 @@ import { readTabsFile, TabsFileWriter, type TabsFile } from './persist';
 import { registerBrowserHandlers } from './register';
 import { browserSeam } from './seam';
 import { TabStore, type BrowserEmit } from './tabs';
-import { createTabView, tabWebPreferences, ViewManager } from './view';
+import { createTabView, registerBrowserPreload, tabWebPreferences, ViewManager } from './view';
 import { attachFocusEmulation, focusEmulationMode, setFocusEmulation } from './visibility';
 import { attachWindowOpen } from './window-open';
 
@@ -64,12 +64,13 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
 
   const { file, broken } = readTabsFile(tabsFile);
   const restored = knownSessionsOnly(file, index);
-  // Each partition's permission and download handlers. The preparers close over `store` and `downloads`, declared below:
-  // a partition is first opened by a tab's open or load (resolvePartition, createTabView), never while startBrowser runs,
-  // so both exist by then (startBrowser opens no tab, and a restored tab is suspended until asked).
+  // Each partition's browser preload (Decision Log 56), permission and download handlers. The last two close over `store`
+  // and `downloads`, declared below: a partition is first opened by a tab's open or load (resolvePartition,
+  // createTabView), never while startBrowser runs, so both exist by then (startBrowser opens no tab, and a restored tab is
+  // suspended until asked).
   const partitions = new Partitions(
     (partition) => session.fromPartition(partition),
-    [(ses, partition) => preparePermissions(store)(ses, partition), (ses, partition) => downloads.prepare()(ses, partition)],
+    [(ses) => registerBrowserPreload(ses), (ses, partition) => preparePermissions(store)(ses, partition), (ses, partition) => downloads.prepare()(ses, partition)],
   );
   const writer = new TabsFileWriter(tabsFile, () => store.snapshot());
   const store: TabStore = new TabStore({

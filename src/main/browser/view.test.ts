@@ -12,7 +12,7 @@ vi.mock('electron', () => ({
 }));
 
 const { TabStore } = await import('./tabs');
-const { ViewManager, createTabView, shown, tabWebPreferences } = await import('./view');
+const { BROWSER_PRELOAD, ViewManager, createTabView, registerBrowserPreload, shown, tabWebPreferences } = await import('./view');
 const { focusEmulationMode } = await import('./visibility');
 
 const A = 'App-A' as AppSessionId;
@@ -560,15 +560,14 @@ describe('focus emulation (Design §3, Decision Log 1; M0: off)', () => {
 });
 
 describe('createTabView: the page\'s webPreferences (Design §3, §14)', () => {
-  it('builds a view in the tab\'s prepared partition with the browser preload, sandboxed, isolated, without Node', () => {
+  it('builds a view in the tab\'s prepared partition, sandboxed, isolated, without Node, naming no preload (the partition\'s)', () => {
     const session = vi.fn();
-    const make = createTabView({ session } as never, '/out/preload/browser.js');
+    const make = createTabView({ session } as never);
     const view = make({ partition: 'persist:maws-chrome-Profile 1' } as never) as unknown as { options: unknown };
     expect(session).toHaveBeenCalledWith('persist:maws-chrome-Profile 1');
     expect(view.options).toEqual({
       webPreferences: {
         partition: 'persist:maws-chrome-Profile 1',
-        preload: '/out/preload/browser.js',
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
@@ -577,13 +576,58 @@ describe('createTabView: the page\'s webPreferences (Design §3, §14)', () => {
         safeDialogs: true,
       },
     });
-    // safeDialogs: a page's dialog loop is offered Chrome's "prevent additional dialogs"; adopted children get these too
-    expect(tabWebPreferences('/p.js')).toEqual({ preload: '/p.js', sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: true, safeDialogs: true });
+    // safeDialogs: a page's dialog loop is offered Chrome's "prevent additional dialogs"; adopted children get these too.
+    // No preload: the session's registration runs it, and naming it here as well would run it twice in every tab
+    // (Decision Log 56); nodeIntegrationInSubFrames is left off, so no subframe runs it.
+    const preferences = tabWebPreferences();
+    expect(preferences).toEqual({ sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: true, safeDialogs: true });
+    expect(preferences).not.toHaveProperty('preload');
+    expect(preferences).not.toHaveProperty('nodeIntegrationInSubFrames');
   });
 
   it('adopts a window.open child\'s own webContents (its preferences came through the open handler\'s override)', () => {
     const child = { id: 7 };
     const view = createTabView({ session: vi.fn() } as never)({ partition: DEFAULT_PARTITION } as never, child as never) as unknown as { options: unknown };
     expect(view.options).toEqual({ webContents: child });
+  });
+});
+
+describe('registerBrowserPreload: the browser preload is the partition session\'s (Decision Log 56)', () => {
+  // A session as Electron keeps its preloads: a repeated id throws ("Cannot register preload script with existing ID").
+  const fakeSession = () => {
+    const scripts: { id: string; type: string; filePath: string }[] = [];
+    return {
+      scripts,
+      getPreloadScripts: vi.fn(() => [...scripts]),
+      registerPreloadScript: vi.fn((script: { id?: string; type: string; filePath: string }) => {
+        if (scripts.some((known) => known.id === script.id)) throw new Error(`Cannot register preload script with existing ID '${script.id}'`);
+        scripts.push({ id: script.id ?? 'random', type: script.type, filePath: script.filePath });
+        return script.id;
+      }),
+    };
+  };
+
+  it('registers the built browser preload for frames, under its own id, at the path the views used', () => {
+    const ses = fakeSession();
+    registerBrowserPreload(ses as never);
+    expect(ses.scripts).toEqual([{ id: 'maws-browser', type: 'frame', filePath: BROWSER_PRELOAD }]);
+    expect(BROWSER_PRELOAD).toMatch(/^\/.*\/preload\/browser\.js$/); // absolute (Electron refuses a relative path), beside index.js
+  });
+
+  it('is a no-op for a session that already has it, and once per session', () => {
+    const one = fakeSession();
+    const two = fakeSession();
+    registerBrowserPreload(one as never, '/out/preload/browser.js');
+    registerBrowserPreload(one as never, '/out/preload/browser.js');
+    registerBrowserPreload(two as never, '/out/preload/browser.js');
+    expect(one.registerPreloadScript).toHaveBeenCalledTimes(1);
+    expect([one.scripts, two.scripts]).toEqual([[{ id: 'maws-browser', type: 'frame', filePath: '/out/preload/browser.js' }], [{ id: 'maws-browser', type: 'frame', filePath: '/out/preload/browser.js' }]]);
+  });
+
+  it('leaves a session\'s other preloads alone', () => {
+    const ses = fakeSession();
+    ses.scripts.push({ id: 'e4x-other', type: 'frame', filePath: '/other.js' });
+    registerBrowserPreload(ses as never, '/out/preload/browser.js');
+    expect(ses.scripts.map((script) => script.id)).toEqual(['e4x-other', 'maws-browser']);
   });
 });
