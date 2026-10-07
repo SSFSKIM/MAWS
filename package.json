@@ -21,7 +21,7 @@
     "e2e:packaged": "MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} playwright test",
     "build:helper": "scripts/build-voice-helper.sh",
     "build:app": "pnpm build:helper && electron-vite build && if [ -n \"$MAWS_SIGN_IDENTITY\" ]; then electron-builder --mac dir -c.mac.identity=\"$MAWS_SIGN_IDENTITY\"; else CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir; fi",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm e2e && pnpm build:app && pnpm verify:fuses && pnpm e2e:packaged && pnpm e2e:supervisor:packaged && pnpm e2e:transcript && pnpm e2e:terminal && pnpm e2e:panel && pnpm e2e:c7 && pnpm e2e:voice && pnpm e2e:code && pnpm e2e:agents && pnpm e2e:widgets && pnpm e2e:settings && pnpm e2e:c12 && pnpm e2e:tools && pnpm e2e:scm && pnpm e2e:side && pnpm e2e:deliverables && pnpm e2e:supervisor && pnpm e2e:browser && pnpm e2e:browser-import",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm e2e && pnpm build:app && pnpm verify:fuses && pnpm e2e:packaged && pnpm e2e:supervisor:packaged && pnpm e2e:transcript && pnpm e2e:terminal && pnpm e2e:panel && pnpm e2e:c7 && pnpm e2e:voice && pnpm e2e:code && pnpm e2e:agents && pnpm e2e:widgets && pnpm e2e:settings && pnpm e2e:c12 && pnpm e2e:tools && pnpm e2e:scm && pnpm e2e:side && pnpm e2e:deliverables && pnpm e2e:supervisor && pnpm e2e:browser && pnpm e2e:browser-comment && pnpm e2e:browser-import",
     "rebuild:native": "electron-rebuild -f -w node-pty",
     "dev:harness": "MAWS_HARNESS=1 electron-vite dev",
     "e2e:transcript": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/transcript.spec.ts",
@@ -44,6 +44,7 @@
     "verify:fuses": "out=$(FORCE_COLOR=0 NO_COLOR=1 electron-fuses read --app dist/mac-arm64/MAWS.app) && echo \"$out\" && echo \"$out\" | grep -q '^ *RunAsNode is Enabled$' || { echo 'verify:fuses: dist/mac-arm64/MAWS.app does not report RunAsNode is Enabled; the E10 supervisor runs the app binary as Node (ELECTRON_RUN_AS_NODE)' >&2; exit 1; }",
     "e2e:side": "MAWS_HARNESS=1 electron-vite build && MAWS_ENGINE_REPLAY=1 playwright test e2e/side.spec.ts",
     "e2e:browser": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/browser.spec.ts",
+    "e2e:browser-comment": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 MAWS_ENGINE_REPLAY=1 playwright test e2e/browser-comment.spec.ts",
     "e2e:browser-import": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 NODE_OPTIONS=--disable-warning=ExperimentalWarning playwright test e2e/browser-import.spec.ts",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper && install-electron"
   },

@@ -15,6 +15,10 @@ import {
 } from '../../browser/tab';
 import { validateBrowserUrl } from '../../browser/url';
 import type { CommandSpec } from './common';
+// E4d start
+import { AnchorSchema } from '../../anchor/anchor';
+import { CommentDisarmReasonSchema } from '../../browser/comment';
+// E4d end
 // E4b start
 import {
   ChromeProfileDirSchema,
@@ -63,6 +67,23 @@ export const BrowserNoticeSchema = z.strictObject({
 });
 export type BrowserNotice = z.infer<typeof BrowserNoticeSchema>;
 
+// E4d start: comment mode (E4d execution document, Design §2, §6, §8; Interfaces "IPC `browser.comment.*`"). The toggle
+// arms one tab at a time; main answers `on: false` with the reason when it cannot (no error), and `arming` while it
+// waits for the page's preload to confirm the shield is up (Decision Log 34): only `changed {on: true}` presses the
+// toggle. The pick goes to the window whose pane owns the tab, as an anchor main built and validated (X10), with what
+// became of its crop.
+export const BrowserCommentSetResultSchema = z.strictObject({ on: z.boolean(), reason: z.enum(['ok', 'unknownTab', 'suspended', 'notPlaced', 'noPage', 'agent', 'arming']) });
+export type BrowserCommentSetResult = z.infer<typeof BrowserCommentSetResultSchema>;
+export const BrowserCommentChangedSchema = z.strictObject({ tabId: BrowserTabIdSchema, on: z.boolean(), reason: z.enum([...CommentDisarmReasonSchema.options, 'armed']) });
+export type BrowserCommentChanged = z.infer<typeof BrowserCommentChangedSchema>;
+export const BrowserCommentPickedSchema = z.strictObject({
+  tabId: BrowserTabIdSchema,
+  appSessionId: AppSessionIdSchema,
+  anchor: AnchorSchema,
+  crop: z.enum(['attached', 'none', 'tooLarge', 'failed']),
+});
+export type BrowserCommentPicked = z.infer<typeof BrowserCommentPickedSchema>;
+// E4d end
 // E4b start: the Chrome profile import (E4b execution document, Interfaces "IPC `browser.import.*`"). Main re-validates
 // the Chrome folder and the profile directory against the disk and `Local State`; these schemas only keep a path out.
 const ChromeFolderSchema = AbsolutePathSchema.max(IMPORT_TEXT_MAX);
@@ -153,6 +174,9 @@ export const commands = {
     output: z.strictObject({ profiles: z.array(z.strictObject({ profileDir: z.string(), name: z.string() })) }),
     owner: 'main',
   },
+  // E4d start
+  'browser.comment.set': { input: z.strictObject({ tabId: BrowserTabIdSchema, on: z.boolean() }), output: BrowserCommentSetResultSchema, owner: 'main' },
+  // E4d end
   // E4b start: the import. One inspection and one run at a time, app-wide; `start` while one runs answers invalid_input.
   // `userDataDir: null` lists Chrome's default folder (under e2e, MAWS_E2E_CHROME_USER_DATA).
   'browser.import.profiles': {
@@ -210,6 +234,10 @@ export const events = {
   'browser.chrome.command': BrowserChromeCommandSchema,
   'browser.download.refused': z.strictObject({ tabId: BrowserTabIdSchema, url: z.string(), filename: z.string() }), // an agent-started download, cancelled
   'browser.notice': BrowserNoticeSchema,
+  // E4d start
+  'browser.comment.changed': BrowserCommentChangedSchema,
+  'browser.comment.picked': BrowserCommentPickedSchema, // to the owner window only (Design §8)
+  // E4d end
   // E4b start: a run's progress (at most every 100 ms per phase, plus each phase's first and last), its end, the records
   'browser.import.progress': z.strictObject({ importId: ImportIdSchema, phase: ImportPhaseSchema, done: ImportCountSchema, total: ImportCountSchema }),
   'browser.import.finished': z.strictObject({ importId: ImportIdSchema, report: ImportReportSchema }),

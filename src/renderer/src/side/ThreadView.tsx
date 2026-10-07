@@ -22,6 +22,10 @@ import type { Row } from '../transcript/model/rows';
 import { BtwView } from './BtwView';
 import { SIDE_COPY } from './copy';
 import { hideSideChild, setInlineQuestions, showSideChild, sidePaneOf, useSidePane } from './store';
+// E4d start
+import { openBrowserUrl } from '../tools/browser/comment/actions';
+import { COMMENT_COPY } from '../tools/browser/comment/copy';
+// E4d end
 
 const COPY = SIDE_COPY.pane;
 
@@ -54,6 +58,9 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
   const anchor = lineage?.anchor ?? null;
   const label = SIDE_COPY.label(anchor?.label ?? null, lineage?.openedBy ?? null);
   const path = anchor?.path;
+  // E4d start
+  const pageUrl = anchor?.kind === 'browser-element' ? anchor.pageUrl : undefined;
+  // E4d end
 
   return (
     <div data-side-thread-view={child} className="flex h-full min-h-0 flex-col">
@@ -72,7 +79,22 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
           ) : (
             <p className="m-0 truncate font-mono text-ui-sm text-fg">{label}</p>
           )}
-          {anchor?.pageUrl !== undefined && <p className="m-0 truncate text-ui-sm text-fg-muted" title={anchor.pageUrl}>{anchor.pageUrl}</p>}
+          {/* E4d start: a page element's URL is a button opening the page in the parent's browser, where the commented tab
+              lives (E4d execution document, Design §10): `child` maps to its own parent there, as the chip in its transcript
+              does, even when `parent` is itself a thread; E3's text line for any other anchor's URL, moved inside the block */}
+          {pageUrl !== undefined ? (
+            <button
+              type="button"
+              title={COMMENT_COPY.openInBrowser}
+              onClick={() => openBrowserUrl(child, pageUrl)}
+              className="block max-w-full truncate rounded-sm text-left text-ui-sm text-fg-muted outline-accent hover:text-fg hover:underline focus-visible:outline-2"
+            >
+              {pageUrl}
+            </button>
+          ) : (
+            anchor?.pageUrl !== undefined && <p className="m-0 truncate text-ui-sm text-fg-muted" title={anchor.pageUrl}>{anchor.pageUrl}</p>
+          )}
+          {/* E4d end */}
           {question !== null && (
             <p data-side-question="" className="m-0 truncate text-ui-sm text-fg-muted" title={question}>
               {question}

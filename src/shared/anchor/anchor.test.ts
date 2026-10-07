@@ -1,6 +1,6 @@
 // X10's schema: E5's file-line anchor and E6's pr-line shape are members; the security caps and the one-line rule hold.
 import { describe, expect, it } from 'vitest';
-import { AnchorSchema, AnchorScreenshotSchema, type Anchor, type FileLineAnchor } from './anchor';
+import { AnchorBoxSchema /* E4d */, AnchorSchema, AnchorScreenshotSchema, type Anchor, type FileLineAnchor } from './anchor';
 
 const fileLine: FileLineAnchor = { kind: 'file-line', locator: '/r/src/app.ts#L7', label: 'app.ts:7', path: '/r/src/app.ts', line: 7 }; // E5's fileLineAnchor('/r/src/app.ts', 7)
 
@@ -36,4 +36,54 @@ describe('AnchorSchema (X10)', () => {
     expect(AnchorScreenshotSchema.safeParse({ path: `/${'x'.repeat(999)}`, width: 1, height: 1 }).success).toBe(true);
     expect(AnchorScreenshotSchema.safeParse({ path: `/${'x'.repeat(1000)}`, width: 1, height: 1 }).success).toBe(false);
   });
+
+  // E4d start: the browser-element fields (E4d execution document, Design §6; P1 ledger §5): css, role, name, a11y, box
+  describe('browser-element (E4d)', () => {
+    const element: Anchor = {
+      kind: 'browser-element',
+      locator: '#increment',
+      label: 'button “Increment”',
+      pageUrl: 'http://127.0.0.1:4321/comment.html',
+      css: '#increment',
+      role: 'button',
+      name: 'Increment',
+      a11y: 'main > region “A form” > button “Increment”',
+      box: { x: 248, y: 312, width: 96, height: 30 },
+    };
+
+    it('accepts the five fields, each optional, beside a screenshot', () => {
+      expect(AnchorSchema.parse(element)).toEqual(element);
+      expect(AnchorSchema.parse({ ...element, screenshot: { path: '/u/browser/crops/x.png', width: 192, height: 60 } }).screenshot).toEqual({ path: '/u/browser/crops/x.png', width: 192, height: 60 });
+      const older: Anchor = { kind: element.kind, locator: element.locator, label: element.label, pageUrl: element.pageUrl }; // E3's shape
+      expect(AnchorSchema.parse(older)).toEqual(older);
+      expect(AnchorSchema.safeParse({ ...element, name: '', a11y: '' }).success).toBe(true);
+    });
+
+    it('caps each field and refuses a control character in it', () => {
+      expect(AnchorSchema.safeParse({ ...element, css: 'x'.repeat(2000) }).success).toBe(true);
+      expect(AnchorSchema.safeParse({ ...element, css: 'x'.repeat(2001) }).success).toBe(false);
+      expect(AnchorSchema.safeParse({ ...element, css: '' }).success).toBe(false);
+      expect(AnchorSchema.safeParse({ ...element, role: 'r'.repeat(64) }).success).toBe(true);
+      expect(AnchorSchema.safeParse({ ...element, role: 'r'.repeat(65) }).success).toBe(false);
+      expect(AnchorSchema.safeParse({ ...element, role: '' }).success).toBe(false);
+      expect(AnchorSchema.safeParse({ ...element, name: 'n'.repeat(200) }).success).toBe(true);
+      expect(AnchorSchema.safeParse({ ...element, name: 'n'.repeat(201) }).success).toBe(false);
+      expect(AnchorSchema.safeParse({ ...element, a11y: 'a'.repeat(2000) }).success).toBe(true);
+      expect(AnchorSchema.safeParse({ ...element, a11y: 'a'.repeat(2001) }).success).toBe(false);
+      for (const field of ['css', 'role', 'name', 'a11y'] as const) {
+        expect(AnchorSchema.safeParse({ ...element, [field]: 'a\nb' }).success, field).toBe(false);
+        expect(AnchorSchema.safeParse({ ...element, [field]: 'a\u001bb' }).success, field).toBe(false);
+      }
+    });
+
+    it('takes the box as whole CSS pixels, its size positive', () => {
+      expect(AnchorBoxSchema.safeParse({ x: -12, y: 0, width: 1, height: 1 }).success).toBe(true);
+      expect(AnchorBoxSchema.safeParse({ x: 1.5, y: 0, width: 1, height: 1 }).success).toBe(false);
+      expect(AnchorBoxSchema.safeParse({ x: 0, y: 0, width: 0, height: 1 }).success).toBe(false);
+      expect(AnchorBoxSchema.safeParse({ x: 0, y: 0, width: 1, height: -1 }).success).toBe(false);
+      expect(AnchorBoxSchema.safeParse({ x: 0, y: 0, width: 1, height: 1, z: 0 }).success).toBe(false);
+      expect(AnchorSchema.safeParse({ ...element, box: { x: 0, y: 0, width: 1 } }).success).toBe(false);
+    });
+  });
+  // E4d end
 });

@@ -12,8 +12,9 @@ export default defineConfig({
   // E1 (inside C6's block, as C8b's): so does the `maws` tools spec, under `pnpm e2e:tools`.
   // E2 (inside C6's block, as E1's): so does the deliverables spec, under `pnpm e2e:deliverables`.
   // E4a (inside C6's block, as E2's): so does the browser spec, under `pnpm e2e:browser`.
+  // E4d (inside C6's block, as E4a's): so does the comment mode spec, under `pnpm e2e:browser-comment`.
   // E4b (inside C6's block, as E4a's): so does the profile import spec, under `pnpm e2e:browser-import`.
-  testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts', 'terminal.spec.ts', 'code-tools.spec.ts', 'agent-tools.spec.ts', /* E5 start */ 'code-editor.spec.ts', /* E5 end */ /* E1 start */ 'maws-tools.spec.ts' /* E1 end */, /* E2 start */ 'deliverables.spec.ts' /* E2 end */, /* E4a start */ 'browser.spec.ts' /* E4a end */, /* E4b start */ 'browser-import.spec.ts' /* E4b end */],
+  testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts', 'terminal.spec.ts', 'code-tools.spec.ts', 'agent-tools.spec.ts', /* E5 start */ 'code-editor.spec.ts', /* E5 end */ /* E1 start */ 'maws-tools.spec.ts' /* E1 end */, /* E2 start */ 'deliverables.spec.ts' /* E2 end */, /* E4a start */ 'browser.spec.ts' /* E4a end */, /* E4d start */ 'browser-comment.spec.ts' /* E4d end */, /* E4b start */ 'browser-import.spec.ts' /* E4b end */],
   // end C6
   // C8a start: so does the panel spec, under `pnpm e2e:panel` (its product-app cases pass MAWS_HARNESS=0 per launch),
   // and the live check against this checkout runs only when named under MAWS_PANEL_LIVE=1 (it skips itself otherwise).
