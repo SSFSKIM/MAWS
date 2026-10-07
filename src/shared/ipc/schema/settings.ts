@@ -3,7 +3,7 @@
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
 // memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
 // auto. Version 7 (W7): the memory budget's switch. Version 8 (W13): the engine's pin retired (MAWS runs the installed
-// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Migrations live in `src/shared/settings/defaults.ts`,
+// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Version 11 (E4a): the in-app browser. Migrations live in `src/shared/settings/defaults.ts`,
 // run by main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
@@ -16,6 +16,9 @@ import { PermissionModeSchema } from '../../graph/enums';
 // C7 start
 import { UsageSnapshotSchema } from '../../usage/types';
 // C7 end
+// E4a start
+import { isSearchUrlTemplate } from '../../browser/url';
+// E4a end
 
 export const ThemeSettingSchema = z.enum(['light', 'dark', 'system']);
 export type ThemeSetting = z.infer<typeof ThemeSettingSchema>;
@@ -78,9 +81,21 @@ export const VoiceSettingsSchema = z.strictObject({ locale: z.string().min(2).ma
 export const MAX_IDLE_MINUTES = 1440; // a day; host.configure's millisecond cap is derived from it (schema/host.ts)
 export const SupervisorSettingsSchema = z.strictObject({ idleExitMinutes: z.number().int().min(1).max(MAX_IDLE_MINUTES).nullable(), keepRunningDefault: z.boolean() });
 // E10 end
+// E4a start: version 11, the in-app browser (E4a execution document, Interfaces "X15: settings 11"). profile: the imported
+// Chrome profile's directory whose partition new tabs open in (E4b lists them in profiles.json); null = the default
+// partition. searchUrl: the address bar's search, an http(s) template where %s stands for the query (refused rather than
+// trimmed: zod's url check trims, and validators never transform). linkTarget: where a page's new-window links open
+// (Decision Log 11): a new tab of the same session, or the system browser.
+export const BrowserSettingsSchema = z.strictObject({
+  profile: z.string().min(1).max(200).nullable(),
+  searchUrl: z.string().max(2048).refine(isSearchUrlTemplate, { message: 'not an http or https URL with %s' }),
+  linkTarget: z.enum(['in-app', 'external']),
+});
+export type BrowserSettings = z.infer<typeof BrowserSettingsSchema>;
+// E4a end
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(10), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor)
+  version: z.literal(11), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.
@@ -95,6 +110,7 @@ export const SettingsSchema = z.strictObject({
   permissions: PermissionsSettingsSchema, // W3
   voice: VoiceSettingsSchema, // E9
   supervisor: SupervisorSettingsSchema, // E10
+  browser: BrowserSettingsSchema, // E4a
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -112,6 +128,7 @@ export const SettingsPatchSchema = z.strictObject({
   permissions: PermissionsSettingsSchema.partial().optional(), // W3
   voice: VoiceSettingsSchema.partial().optional(), // E9
   supervisor: SupervisorSettingsSchema.partial().optional(), // E10
+  browser: BrowserSettingsSchema.partial().optional(), // E4a
 });
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
 

@@ -80,6 +80,13 @@ describe('layout value shapes', () => {
     expect(tabId({ kind: 'browser', appSessionId: 'App-1' as never, browserTabId: 'b_0123456789ab' })).toBe('browser:App-1:b_0123456789ab');
   });
 
+  // E4a (X15): Settings › Browser is a section the settings tab opens at (the partition pill's click)
+  it('opens the settings tab at its browser section', () => {
+    const settings = { id: 'settings', kind: 'settings', section: 'browser', pinned: false };
+    expect(TabRefSchema.parse(settings)).toEqual(settings);
+    expect(TabRefSchema.safeParse({ ...settings, section: 'web' }).success).toBe(false);
+  });
+
   // W5: only `StoredMainSchema` still knows the Overview's tab, to drop it from a layout saved before the panel.
   it('rejects an overview tab', () => {
     expect(TabRefSchema.safeParse({ id: 'overview', kind: 'overview', pinned: true }).success).toBe(false);

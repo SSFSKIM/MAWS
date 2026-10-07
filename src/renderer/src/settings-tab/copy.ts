@@ -9,6 +9,7 @@ export const SECTIONS = {
   voice: 'Voice', // E9
   appearance: 'Appearance',
   notifications: 'Notifications',
+  browser: 'Browser', // E4a: the settings tab's section enum carries it; the index lists it once BrowserSection lands (Task 3.4)
 } as const;
 
 export const INDEX = {

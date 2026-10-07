@@ -1,5 +1,5 @@
 // The values of MAWS's own settings file (C11 execution document, Interfaces "Settings, version 3"): the current
-// version's defaults (W13: version 8; E9: version 9; E10: version 10), the one migration from every earlier version, and the one patch merge
+// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11), the one migration from every earlier version, and the one patch merge
 // `settings.set` applies. Pure; main's store (src/main/settings/store.ts) reads, migrates, merges and writes with these,
 // and nothing else does.
 import * as z from 'zod';
@@ -7,7 +7,7 @@ import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
 import { ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
 export const SETTINGS_DEFAULTS_V11: Settings = {
-  version: 10, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10
+  version: 11, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
   notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
@@ -18,6 +18,7 @@ export const SETTINGS_DEFAULTS_V11: Settings = {
   permissions: { autoFallback: 'acceptEdits' }, // W3: the owner's ruling of 2026-10-01 (charter D-18)
   voice: { locale: null }, // E9: the system locale
   supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10: ruled by A-29 (residue 10 and 11)
+  browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app' }, // E4a: the default partition; Google (Decision Log 10); new-window links in the app (Decision Log 11)
 };
 
 // The earlier files, as their versions wrote them: C1's and C5's.
@@ -29,8 +30,13 @@ const SettingsV2Schema = z.strictObject({
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
 
-// E10 start: E9's version 9, as it wrote it: version 10's sections less the supervisor section
-const SettingsV9Schema = SettingsSchema.omit({ supervisor: true }).extend({ version: z.literal(9) });
+// E4a start: E10's version 10, as it wrote it: version 11's sections less the browser section
+const SettingsV10Schema = SettingsSchema.omit({ browser: true }).extend({ version: z.literal(10) });
+type SettingsV10 = z.infer<typeof SettingsV10Schema>;
+// E4a end
+
+// E10 start: E9's version 9, as it wrote it: version 10's sections less the supervisor section (E4a: re-based on version 10)
+const SettingsV9Schema = SettingsV10Schema.omit({ supervisor: true }).extend({ version: z.literal(9) });
 type SettingsV9 = z.infer<typeof SettingsV9Schema>;
 // E10 end
 
@@ -71,8 +77,10 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 
 const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V11);
 
-// E10: v9 → v10, the supervisor section with its defaults
-const fromV9 = (v9: SettingsV9): Settings => ({ ...v9, version: 10, supervisor: defaults().supervisor });
+// E4a: v10 → v11, the browser section with its defaults
+const fromV10 = (v10: SettingsV10): Settings => ({ ...v10, version: 11, browser: defaults().browser });
+// E10: v9 → v10, the supervisor section with its defaults; E4a: then v10 → v11
+const fromV9 = (v9: SettingsV9): Settings => fromV10({ ...v9, version: 10, supervisor: defaults().supervisor });
 // E9: v8 → v9, the voice section with the system locale; E10: then v9 → v10
 const fromV8 = (v8: SettingsV8): Settings => fromV9({ ...v8, version: 9, voice: defaults().voice });
 // W13: v7 → v8, the pin dropped (charter D-1 as amended 2026-10-01): a chosen binaryPath stays chosen; E9: then v8 → v9
@@ -90,7 +98,8 @@ const fromV4 = (v4: SettingsV4): Settings => fromV5({ ...v4, version: 5, appeara
 
 // v1 → v2 (C5's step: no keymap overrides, the notification defaults) → v3 (the sections C11 adds, with their
 // defaults) → v4 (C12's budget) → v5 (W2's transcript width) → v6 (W3's auto fallback) → v7 (W7's budget switch) → v8
-// (W13: the pin dropped) → v9 (E9: the voice section) → v10 (E10: the supervisor section). A version 10 object is validated and returned as it is;
+// (W13: the pin dropped) → v9 (E9: the voice section) → v10 (E10: the supervisor section) → v11 (E4a: the browser
+// section). A version 11 object is validated and returned as it is;
 // anything else (another version, an invalid file of a known version) throws the schema's error, which the store turns
 // into the defaults with a warning. At any version, overrides of a retired action are dropped first (W10).
 export function migrateSettings(input: unknown): Settings {
@@ -125,6 +134,8 @@ export function migrateSettings(input: unknown): Settings {
       return fromV8(SettingsV8Schema.parse(raw)); // E9
     case 9:
       return fromV9(SettingsV9Schema.parse(raw)); // E10
+    case 10:
+      return fromV10(SettingsV10Schema.parse(raw)); // E4a
     default:
       return SettingsSchema.parse(raw);
   }
@@ -143,7 +154,7 @@ function withoutRetiredActions(raw: unknown): unknown {
 // field, and `notifications.kinds` a second level, key by key, so a kinds patch never replaces the sibling kinds. The
 // theme and the keymap are values of their own and are replaced whole. A key present as `undefined` changes nothing.
 export function applySettingsPatch(state: Settings, patch: SettingsPatch): Settings {
-  const { notifications, engine, gateway, usage, appearance, permissions, voice, supervisor, ...values } = patch;
+  const { notifications, engine, gateway, usage, appearance, permissions, voice, supervisor, browser, ...values } = patch;
   const next: Settings = { ...state, ...defined(values) };
   if (notifications) {
     const { kinds, ...fields } = notifications;
@@ -156,6 +167,7 @@ export function applySettingsPatch(state: Settings, patch: SettingsPatch): Setti
   if (permissions) next.permissions = { ...state.permissions, ...defined(permissions) }; // W3
   if (voice) next.voice = { ...state.voice, ...defined(voice) }; // E9
   if (supervisor) next.supervisor = { ...state.supervisor, ...defined(supervisor) }; // E10
+  if (browser) next.browser = { ...state.browser, ...defined(browser) }; // E4a
   return next;
 }
 
