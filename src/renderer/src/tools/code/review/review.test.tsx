@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import { record } from '../../../../../../test/support/builders';
@@ -563,6 +563,11 @@ const receiptRow = () => useTranscriptStore.getState().rows(A).find((row) => row
 describe('review tool', () => {
   const offs: (() => void)[] = [];
   let main: ReturnType<typeof reviewMain>;
+  // E11 W-E: the diff view's lazy chunk (`@git-diff-view/react` under the React Compiler) is loaded once here, so no
+  // case waits on its import, whose transform is the step that grows with the machine's load.
+  beforeAll(async () => {
+    await import('./ReviewView');
+  });
   beforeEach(() => {
     resetPanelStores();
     useReview.getState().reset();
@@ -693,20 +698,24 @@ describe('review tool', () => {
     expect(document.querySelector('[data-review-hunk]')?.textContent).toBe('Showing hunk 1 of 1');
   });
 
+  // E11 W-E: load-independent (it timed out under load in `waitFor`'s one second before the body painted): the body is
+  // awaited over turns of the event loop, which the fake main's answers and React's work need, not over a time budget.
   it('draws the same hunks unified and split, and Wrap is the viewer’s one flag', async () => {
     render(<TestHost />);
     openReview();
-    await waitFor(() => expect(bodyText()).toContain('@@ -12,3 +13,4 @@'));
+    for (let turn = 0; turn < 50 && !bodyText()?.includes('@@ -12,3 +13,4 @@'); turn++) await act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+    expect(bodyText()).toContain('@@ -12,3 +13,4 @@');
     const hunkRows = () => document.querySelectorAll('[data-review-body] tr[data-state="hunk"]:not([data-side="new"])').length;
     expect(hunkRows()).toBe(2);
-    fireEvent.click(screen.getByText('Split'));
-    await waitFor(() => expect(document.querySelector('[data-review-body] .split-diff-view')).not.toBeNull());
+    fireEvent.click(screen.getByText('Split')); // the chunk is loaded: the click renders the split view within its act
+    expect(document.querySelector('[data-review-body] .split-diff-view')).not.toBeNull();
     expect(hunkRows()).toBe(2);
     expect(useViewer.getState().wrap).toBe(false);
     expect(document.querySelector('[data-review-body] [class*="-diff-view-wrap"]')).toBeNull();
     fireEvent.click(screen.getByText('Wrap'));
     expect(useViewer.getState().wrap).toBe(true);
-    await waitFor(() => expect(document.querySelector('[data-review-body] [class*="-diff-view-wrap"]')).not.toBeNull()); // DiffView received it
+    await act(async () => {}); // DiffView applies the flag on a commit after the click's
+    expect(document.querySelector('[data-review-body] [class*="-diff-view-wrap"]')).not.toBeNull(); // DiffView received it
   });
 
   it('keeps a hunk it jumped to when the hunk cannot reach the top of the scroller', async () => {
