@@ -202,6 +202,25 @@ describe('the socket layer handshake (server side)', () => {
     expect(host.changes).toEqual([true, false]);
   });
 
+  // E11 (tracker row E10 "refused connection stays open with no deadline"): the one exit a refused connection may send
+  // has the hello's deadline; with none, the server closes it
+  it('closes a refused connection that sends no exit within the hello deadline, and keeps one that sends it in time', async () => {
+    const host = await start({ helloTimeoutMs: 80 });
+    const silent = await host.connect();
+    silent.send(hello({ wire: 'wire-2' }));
+    expect(await silent.next()).toMatchObject({ t: 'refuse', reason: 'wire' });
+    await silent.closed;
+    expect(host.log).toHaveBeenCalledWith('closed a refused connection that sent no exit within 80 ms');
+    const late = await host.connect();
+    late.send({ t: 'hello', protocol: 2, token: TOKEN });
+    expect(await late.next()).toMatchObject({ t: 'refuse', reason: 'protocol' });
+    late.send({ t: 'exit', when: 'idle' });
+    await until(() => host.exits.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 120)); // past the deadline: an exit in time disarmed it
+    expect(host.log.mock.calls.filter(([line]) => line === 'closed a refused connection that sent no exit within 80 ms')).toHaveLength(1); // the silent one's only
+    expect(host.exits).toEqual(['idle']);
+  });
+
   it('closes a connection with no valid hello in time, or whose first line is not a hello', async () => {
     const host = await start({ helloTimeoutMs: 50 });
     const silent = await host.connect();

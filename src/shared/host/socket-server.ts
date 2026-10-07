@@ -4,7 +4,8 @@
 //
 // The server checks a hello in this order and stops at the first failure: (1) the token, wrong or missing → `refuse
 // token` and the connection is closed, nothing further read; (2) the protocol → `refuse protocol`; (3) the wire
-// fingerprint → `refuse wire`, after either of which the connection stays open for one `exit` and nothing else;
+// fingerprint → `refuse wire`, after either of which the connection stays open for one `exit` and nothing else, within
+// the hello's deadline again (E11: a refused connection that sends no exit in time is closed);
 // (4) replacement: a connected client receives `refuse replaced` and is closed; (5) `welcome`, and the connection's
 // later lines are C1's envelope through a SocketPort (plus `exit`). A malformed line, an oversized one, an unknown `t`
 // or a schema failure closes the connection with a log line.
@@ -67,11 +68,15 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
   function accept(socket: Socket): void {
     let phase: 'hello' | 'refused' | 'done' = 'hello';
     let welcome: (() => void) | null = null;
-    const helloTimer = setTimeout(() => {
-      log(`closed a connection that sent no valid hello within ${options.helloTimeoutMs ?? HELLO_TIMEOUT_MS} ms`);
+    const deadlineMs = options.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
+    // the hello's deadline, then (E11) a refused connection's for its one exit
+    const closeAfter = (what: string) => setTimeout(() => {
+      log(`closed a ${what} within ${deadlineMs} ms`);
+      phase = 'done';
       socket.destroy();
-    }, options.helloTimeoutMs ?? HELLO_TIMEOUT_MS);
-    socket.on('close', () => clearTimeout(helloTimer));
+    }, deadlineMs);
+    let deadline = closeAfter('connection that sent no valid hello');
+    socket.on('close', () => clearTimeout(deadline));
     socket.on('error', (error) => {
       if (phase !== 'done') log(`a connection failed during its handshake: ${error.message}`);
     });
@@ -109,6 +114,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       if (phase === 'refused') {
         const exit = ClientExitSchema.safeParse(data);
         if (!exit.success) return drop('a refused connection sent something other than exit');
+        clearTimeout(deadline);
         phase = 'done';
         socket.off('data', onData);
         log(`exit ${exit.data.when} asked by a refused connection`);
@@ -136,7 +142,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
         socket.end();
         return 'stop';
       }
-      clearTimeout(helloTimer);
+      clearTimeout(deadline);
       const preamble = HelloPreambleSchema.safeParse(data);
       if (!preamble.success) return drop('a hello without a protocol number');
       const identity = options.identity();
@@ -145,6 +151,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
         log(`refused protocol ${preamble.data.protocol} (this supervisor speaks ${identity.protocol})`);
         refuse('protocol');
         phase = 'refused';
+        deadline = closeAfter('refused connection that sent no exit');
         return;
       }
       const hello = ClientHelloSchema.safeParse(data);
@@ -154,6 +161,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
         log(`refused wire ${hello.data.wire} from appPid ${hello.data.appPid} (this supervisor's is ${identity.wire})`);
         refuse('wire');
         phase = 'refused';
+        deadline = closeAfter('refused connection that sent no exit');
         return;
       }
       // (4) replacement, then (5) welcome; the port is built once the splitter has kept the bytes past this line
