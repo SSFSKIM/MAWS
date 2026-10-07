@@ -21,7 +21,9 @@ scratch kept for the review: /private/tmp/maws-e4d-live-W4Epxi (journals under u
 
 notes (written by the M5 executor from the two runs' journals, 2026-10-07):
   the parent's journal holds no system/init: its process was launched and left idle (the engine emits init with a turn), so the one init is the thread's.
-  the thread's spawn row (seq 2 of neor66ca.jsonl): --model haiku --permission-mode default --resume 5cfadadb-e3f5-4105-958a-2296c61e8a2b --fork-session; envKeys carry no inherited CLAUDE_* key (only MAWS's own: CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_FORK_SUBAGENT, CLAUDE_CODE_QUESTION_PREVIEW_FORMAT, CLAUDE_CONFIG_DIR); its three plugins are the engine's builtins, none of the owner's.
+  the thread's spawn row (seq 1 of neor66ca.jsonl; the parent's is seq 2 of yy4mqp6h.jsonl, after a reconnect row): --model haiku --permission-mode default --resume 5cfadadb-e3f5-4105-958a-2296c61e8a2b --fork-session; envKeys carry no inherited CLAUDE_* key (only MAWS's own: CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_FORK_SUBAGENT, CLAUDE_CODE_QUESTION_PREVIEW_FORMAT, CLAUDE_CONFIG_DIR); its three plugins are the engine's builtins, none of the owner's.
+  both runs' thread journals carry, at seq 42, the host's meta notice engine:newer-than-tested ("Claude Code 2.1.292 is newer than the version MAWS was verified against (2.1.283); some events were not understood"); every frame the proof reads was handled.
+  the thread ran with no --max-budget-usd (a fork's launch takes none from its parent; the parent's 0.5 bound only the parent, which spent nothing); the thread's bound in this spec is its 300 s wait.
   the page the agent acted on: /comment-counter.html on the e2e server (E4d's route: /comment.html's markup plus E0b's counter script), tab b_000000000001, found by webContents.id 2.
   the row heading reads "Clicked #increment": E4c's row names an element by the role and name the call or result carries, else by its css (transcript/model/copy.ts elementOf); G2's {css} target carries neither.
 
