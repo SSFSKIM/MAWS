@@ -985,6 +985,16 @@ describe('side questions (E3 M1)', () => {
     transport.answer('side_question', { response: 'tools?', synthetic: true });
     await until(() => completions().some((c) => c.opId === second.opId), 'the second completion');
 
+    // E11: a retry names the failed entry it asks again; the log drops that entry once the retry is entered
+    const failing = await host.call('session.sideQuestion', { appSessionId: id, question: 'Fail?' });
+    transport.answer('side_question', undefined, 'Side question cancelled');
+    await until(() => completions().some((c) => c.opId === failing.opId), 'the failing completion');
+    const retried = await host.call('session.sideQuestion', { appSessionId: id, question: 'Fail?', retryOf: failing.opId });
+    expect(transport.requestsOf('side_question').at(-1)!.request).toEqual({ subtype: 'side_question', question: 'Fail?', history: [{ question: 'What word?', response: 'ZEBRA' }] });
+    expect((await host.call('side.question.list', { appSessionId: id })).exchanges.map((e) => [e.id, e.state])).toEqual([[first.opId, 'answered'], [second.opId, 'answered'], [retried.opId, 'pending']]);
+    transport.answer('side_question', { response: 'no', synthetic: false });
+    await until(() => completions().some((c) => c.opId === retried.opId), 'the retry’s completion');
+
     await host.call('side.question.clear', { appSessionId: id });
     const third = await host.call('session.sideQuestion', { appSessionId: id, question: 'Still there?' });
     expect(transport.requestsOf('side_question').at(-1)!.request).toEqual({ subtype: 'side_question', question: 'Still there?' }); // cleared: no history

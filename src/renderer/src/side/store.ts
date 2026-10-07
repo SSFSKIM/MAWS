@@ -7,7 +7,9 @@
 // The side questions are the host's log (X13: it outlives a renderer reload), listed by `side.question.list` and
 // patched from `session.operation` completions; a question this window asked shows at once as a local pending entry
 // (`local:<n>`) until the first listing after its receipt holds the host's entry for it. A question the host never
-// took (the invoke itself refused) stays here, failed, until it is retried or cleared.
+// took (the invoke itself refused) stays here, failed, until it is retried or cleared. A Retry of a host entry names it
+// (`retryOf`), and the host's log drops it once the retry is entered (E11); until then this window's stand-in is drawn in
+// its place, and nothing is hidden once the stand-in is gone (a reload lists the host's log as it is).
 import { create } from 'zustand';
 import type { OperationEvent } from '@shared/engine/operations';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -69,17 +71,24 @@ export function sideChildrenShown(state = useSidePane.getState()): ReadonlyMap<A
 
 // This window's questions the host does not list (yet): awaiting their receipt, or refused before the host took them.
 const locals = new Map<AppSessionId, SideExchange[]>();
-// Host entries a Retry asked again: the new question stands in for them, so they are not drawn twice.
-const retried = new Map<AppSessionId, Set<string>>();
+// A local that asks a failed host entry again, by its id: the host entry it stands in for until the host enters it.
+const standsIn = new Map<string, string>();
 // The latest listing asked per parent: an older answer arriving after it is dropped.
 const listings = new Map<AppSessionId, number>();
 let localSerial = 0;
 
 const localsOf = (parent: AppSessionId) => locals.get(parent) ?? [];
 
+// Keeps the parent's locals `keep` accepts; a dropped one stands in for nothing any more.
+function keepLocals(parent: AppSessionId, keep: (local: SideExchange) => boolean): void {
+  const [kept, dropped] = [localsOf(parent).filter(keep), localsOf(parent).filter((e) => !keep(e))];
+  for (const local of dropped) standsIn.delete(local.id);
+  locals.set(parent, kept);
+}
+
 function show(parent: AppSessionId, listed: readonly SideExchange[]): void {
-  const hidden = retried.get(parent);
-  const merged = [...listed.filter((e) => !hidden?.has(e.id)), ...localsOf(parent)].sort((a, b) => a.askedAt.localeCompare(b.askedAt));
+  const replaced = new Set(localsOf(parent).flatMap((e) => standsIn.get(e.id) ?? []));
+  const merged = [...listed.filter((e) => !replaced.has(e.id)), ...localsOf(parent)].sort((a, b) => a.askedAt.localeCompare(b.askedAt));
   patch(parent, { exchanges: merged });
 }
 
@@ -101,33 +110,36 @@ export async function refreshSide(parent: AppSessionId, client: MawsBridge = ipc
 }
 
 // Asks the engine a side question beside the running turn: drawn pending at once, sent through the host (which adds
-// the earlier answers as `history`), and listed again once the host took it.
-export async function askSide(parent: AppSessionId, question: string, client: MawsBridge = ipc): Promise<void> {
+// the earlier answers as `history`), and listed again once the host took it. `retryOf`: the failed host entry this
+// question asks again, which the new one is drawn in place of.
+export async function askSide(parent: AppSessionId, question: string, client: MawsBridge = ipc, retryOf?: string): Promise<void> {
   const local: SideExchange = { id: `local:${++localSerial}`, question, state: 'pending', response: null, synthetic: false, error: null, askedAt: new Date().toISOString(), answeredAt: null };
   locals.set(parent, [...localsOf(parent), local]);
+  if (retryOf !== undefined) standsIn.set(local.id, retryOf);
   show(parent, hostListed(parent));
-  const result = await client.invoke('session.sideQuestion', { appSessionId: parent, question });
+  const result = await client.invoke('session.sideQuestion', { appSessionId: parent, question, ...(retryOf !== undefined && { retryOf }) });
   if (!result.ok) {
     locals.set(parent, localsOf(parent).map((e) => (e.id === local.id ? { ...e, state: 'failed', error: result.error.message, answeredAt: new Date().toISOString() } : e)));
     show(parent, hostListed(parent));
     return;
   }
-  locals.set(parent, localsOf(parent).filter((e) => e.id !== local.id));
+  keepLocals(parent, (e) => e.id !== local.id);
   await refreshSide(parent, client);
 }
 
-// Retry on a failed exchange: the same question asked again, standing in for the failed one.
+// Retry on a failed exchange: the same question asked again, standing in for the failed one. A host entry is named to
+// the host; a local one hands on the host entry it stood in for, if any.
 export function retrySide(parent: AppSessionId, exchange: SideExchange, client: MawsBridge = ipc): Promise<void> {
-  if (exchange.id.startsWith('local:')) locals.set(parent, localsOf(parent).filter((e) => e.id !== exchange.id));
-  else retried.set(parent, new Set(retried.get(parent)).add(exchange.id));
-  return askSide(parent, exchange.question, client);
+  if (!exchange.id.startsWith('local:')) return askSide(parent, exchange.question, client, exchange.id);
+  const retryOf = standsIn.get(exchange.id);
+  keepLocals(parent, (e) => e.id !== exchange.id);
+  return askSide(parent, exchange.question, client, retryOf);
 }
 
 // A new side conversation: the host drops its answered and failed exchanges (pending ones stay, so their completions
 // find them), and so does this window.
 export async function clearSide(parent: AppSessionId, client: MawsBridge = ipc): Promise<void> {
-  locals.set(parent, localsOf(parent).filter((e) => e.state === 'pending'));
-  retried.delete(parent);
+  keepLocals(parent, (e) => e.state === 'pending');
   const result = await client.invoke('side.question.clear', { appSessionId: parent });
   if (!result.ok) console.warn('[side] side.question.clear failed', result.error.message);
   await refreshSide(parent, client);
@@ -175,7 +187,7 @@ export const promotable = (exchanges: readonly SideExchange[]): { question: stri
 // Tests: the module's own bookkeeping back to empty.
 export function resetSideQuestions(): void {
   locals.clear();
-  retried.clear();
+  standsIn.clear();
   listings.clear();
   localSerial = 0;
 }

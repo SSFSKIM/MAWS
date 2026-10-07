@@ -509,9 +509,9 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     return operations.start(id, 'session.mcpToggle', client, 'mcp_toggle', { serverName, enabled });
   });
   // E3: the host's side-question log supplies `history` and keeps the exchange (`side.question.list`)
-  handle('session.sideQuestion', async ({ appSessionId, question }) => {
+  handle('session.sideQuestion', async ({ appSessionId, question, retryOf }) => {
     const { session, client } = ready(appSessionId);
-    return session.sideQuestion(question, (request) => operations.start(appSessionId as AppSessionId, 'session.sideQuestion', client, 'side_question', request));
+    return session.sideQuestion(question, (request) => operations.start(appSessionId as AppSessionId, 'session.sideQuestion', client, 'side_question', request), retryOf);
   });
 
   // -- structured reads --------------------------------------------------------------------------------------------------

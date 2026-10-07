@@ -443,9 +443,9 @@ export class EngineSession {
 
   // E3 start: a side question (`session.sideQuestion`), sent through the caller's operation table with the log's
   // history and entered in the log under the operation id its request was written under; the table's completion
-  // settles it (ipc.ts)
-  async sideQuestion(question: string, start: (request: SideQuestionRequest) => Promise<{ opId: string }>): Promise<{ opId: string }> {
-    const ask = this.sideQuestions.ask(question, new Date().toISOString());
+  // settles it (ipc.ts). E11: a retry names the failed entry it replaces.
+  async sideQuestion(question: string, start: (request: SideQuestionRequest) => Promise<{ opId: string }>, retryOf?: string): Promise<{ opId: string }> {
+    const ask = this.sideQuestions.ask(question, new Date().toISOString(), retryOf);
     const receipt = await start(ask.history === undefined ? { question } : { question, history: ask.history });
     ask.bind(receipt.opId);
     return receipt;
