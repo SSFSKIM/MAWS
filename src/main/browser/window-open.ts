@@ -45,7 +45,7 @@ export function decideWindowOpen({ url, disposition, now, lastActivationAt, rece
 }
 
 export interface WindowOpenDeps {
-  store: Pick<TabStore, 'entry' | 'update' | 'adoptChild' | 'hasRoomForView'>;
+  store: Pick<TabStore, 'entry' | 'update' | 'adoptChild' | 'open' | 'hasRoomForView'>;
   linkTarget(): LinkTarget;
   seam: Pick<BrowserSeam, 'line' | 'openExternal'>;
   childPreferences: WebPreferences; // view.ts `tabWebPreferences`, applied to the child over whatever the page asked
@@ -55,12 +55,14 @@ export interface WindowOpenDeps {
 export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, childPreferences, now = Date.now }: WindowOpenDeps): void {
   // `createWindow`'s answer must be Chromium's child itself. A child that could not become a tab (its view could not be
   // made or wired) is handed back and closed on the next tick, once Electron has taken it back, so it never lingers as
-  // an invisible page. Electron gives no child only where it creates none; then nothing is adopted and the answer is
-  // unused.
+  // an invisible page. A link opened with a modifier (⌘-click, ⇧-click) comes through Electron's `-new-window` path,
+  // where Chromium creates no child and `createWindow` is to open the page itself (the answer is then unused): it opens
+  // as a new tab of the opener's session in the opener's partition, as the context menu's "Open link in new tab" does.
   const adoptChild = (opener: TabEntry, url: string, select: boolean, child: WebContents | undefined): WebContents => {
     if (!child) {
-      console.warn('[browser] window.open gave no child webContents; nothing adopted');
-      return child as unknown as WebContents;
+      const { appSessionId, partition } = opener.tab;
+      const opened = store.open({ appSessionId, url: url === 'about:blank' ? null : url, select, partition });
+      return store.entry(opened.tab.tabId)?.view?.webContents as WebContents;
     }
     let adopted: WebContents | undefined;
     try {

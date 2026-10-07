@@ -28,7 +28,7 @@ export function ErrorPage({ tabId, loadError }: { tabId: string; loadError: Load
                 aria-expanded={details}
                 aria-controls={detailsId}
                 onClick={() => setDetails((open) => !open)}
-                className="text-left text-fg-muted underline-offset-2 outline-accent hover:text-fg hover:underline focus-visible:outline-2"
+                className="text-left align-top text-fg-muted underline-offset-2 outline-accent hover:text-fg hover:underline focus-visible:outline-2"
               >
                 {copy.checkProxy}
               </button>

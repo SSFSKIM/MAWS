@@ -313,9 +313,30 @@ function committedTitle(wc: WebContents, url: string): string {
   try {
     const history = wc.navigationHistory;
     const title = history.getEntryAtIndex(history.getActiveIndex())?.title ?? '';
-    return title === url ? '' : title;
+    return isUrlTitle(title, url) ? '' : title;
   } catch {
     return '';
+  }
+}
+
+// Whether a title is Chromium's fallback for an untitled entry: the URL itself, or the URL as `url_formatter::FormatUrl`
+// shows it by default (Electron 44.4.5's entries carry this form: no "http://", no trailing slash on a bare host,
+// unescaped), so the chrome falls back to the host as for any untitled page.
+function isUrlTitle(title: string, url: string): boolean {
+  if (title === url) return true;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const bare = parsed.pathname === '/' && parsed.search === '' && parsed.hash === '';
+  const shown = `${parsed.protocol === 'http:' ? '' : `${parsed.protocol}//`}${parsed.host}${bare ? '' : `${parsed.pathname}${parsed.search}${parsed.hash}`}`;
+  if (title === shown) return true;
+  try {
+    return title === decodeURI(shown);
+  } catch {
+    return false;
   }
 }
 

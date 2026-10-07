@@ -42,7 +42,7 @@ describe('decideWindowOpen: the gate (E4a Design §14, Decision Log 11 and 24)',
 });
 
 describe('attachWindowOpen: the handler on the page', () => {
-  function harness(linkTarget: 'in-app' | 'external' = 'in-app', refuseChild = false) {
+  function harness(linkTarget: 'in-app' | 'external' = 'in-app', refuseChild = false, partition = DEFAULT_PARTITION) {
     const store = new TabStore({
       emit: () => {},
       createView: (_tab, adopted?) => {
@@ -63,7 +63,7 @@ describe('attachWindowOpen: the handler on the page', () => {
     });
     const seam = { line: vi.fn(), openExternal: vi.fn() };
     let clock = NOW;
-    const entry = store.entry(store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId) as TabEntry;
+    const entry = store.entry(store.open({ appSessionId: A, url: 'https://a.test/', select: true, partition }).tab.tabId) as TabEntry;
     const preferences = { preload: '/out/preload/browser.js', sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true };
     attachWindowOpen(entry, { store, linkTarget: () => linkTarget, seam, childPreferences: preferences, now: () => clock });
     const handler = (entry.view!.webContents as unknown as { setWindowOpenHandler: { mock: { calls: [(details: unknown) => Record<string, unknown>][] } } }).setWindowOpenHandler.mock.calls[0]![0];
@@ -93,7 +93,7 @@ describe('attachWindowOpen: the handler on the page', () => {
     expect(h.entry.tab.blockedPopups).toBe(0);
   });
 
-  it('a child that cannot become a tab is handed back to Electron and closed on the next tick; no child adopts nothing', async () => {
+  it('a child that cannot become a tab is handed back to Electron and closed on the next tick', async () => {
     const h = harness('in-app', true);
     h.entry.input.lastActivationAt = NOW;
     const answer = h.open('https://a.test/c.html');
@@ -102,16 +102,25 @@ describe('attachWindowOpen: the handler on the page', () => {
     expect(child.close).not.toHaveBeenCalled(); // not from under Electron, which still holds it
     await new Promise((resolve) => setImmediate(resolve));
     expect(child.close).toHaveBeenCalledTimes(1);
+  });
 
-    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const tabs = h.store.list(A).tabs.length;
-      expect((h.open('https://a.test/d.html').createWindow as (options: unknown) => unknown)({})).toBeUndefined();
-      expect(h.store.list(A).tabs).toHaveLength(tabs); // no tab, and no second webContents built
-      expect(warned).toHaveBeenCalled();
-    } finally {
-      warned.mockRestore();
-    }
+  // A link opened with a modifier (⌘-click, ⇧-click) reaches the handler through Electron's `-new-window` path, where
+  // Chromium makes no child: `createWindow` has no webContents and must open the page itself (the e2e's ⌘-click).
+  it('with no child from Chromium, a new tab of the opener\'s session and partition loads the URL, selected but for a background tab', () => {
+    const h = harness('in-app', false, 'persist:maws-chrome-work');
+    h.entry.input.lastActivationAt = NOW;
+    const background = h.open('https://a.test/d.html', 'background-tab');
+    expect(background).toMatchObject({ action: 'allow', outlivesOpener: true });
+    (background.createWindow as (options: unknown) => unknown)({ webPreferences: h.preferences });
+    const opened = h.store.list(A).tabs.find((tab) => tab.url === 'https://a.test/d.html')!;
+    expect(opened).toMatchObject({ appSessionId: A, partition: 'persist:maws-chrome-work', loading: true, suspended: false });
+    expect(h.store.entry(opened.tabId)!.view).not.toBeNull();
+    expect(h.store.list(A).selected[A]).toBe(h.entry.tab.tabId); // background-tab: the selection stays
+
+    (h.open('https://a.test/e.html', 'foreground-tab').createWindow as (options: unknown) => unknown)({});
+    const selected = h.store.list(A).tabs.find((tab) => tab.url === 'https://a.test/e.html')!;
+    expect(h.store.list(A).selected[A]).toBe(selected.tabId);
+    expect(h.entry.tab.blockedPopups).toBe(0);
   });
 
   it('three opens per 5 s: the fourth is blocked; external hands out and denies', () => {

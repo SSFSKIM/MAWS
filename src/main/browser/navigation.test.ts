@@ -119,6 +119,28 @@ describe('navigation: the view\'s own events into the tab (E4a Design §5, §7)'
     expect(h.history.setTitle).toHaveBeenLastCalledWith(DEFAULT_PARTITION, 'https://a.test/', 'Page A');
   });
 
+  // Electron 44.4.5 titles an untitled entry with its URL as Chromium's url_formatter shows it, not the URL itself (the
+  // e2e's untitled page read "127.0.0.1:<port>/plain.html"): no "http://", no trailing slash on a bare host, unescaped.
+  it('an entry titled with its URL as Chromium formats it reads as untitled; a real title that merely looks like a host stays', () => {
+    const h = harness();
+    const id = h.open();
+    const wc = h.wc(id);
+    for (const [url, formatted] of [
+      ['http://127.0.0.1:62317/plain.html', '127.0.0.1:62317/plain.html'],
+      ['http://a.test/', 'a.test'],
+      ['https://a.test/', 'https://a.test'],
+      ['https://a.test/caf%C3%A9?q=1#x', 'https://a.test/café?q=1#x'],
+    ] as const) {
+      wc.emit('page-title-updated', {}, 'Old', true);
+      wc.entryTitle = formatted;
+      commit(wc, url);
+      expect(h.tab(id).title, url).toBe('');
+    }
+    wc.entryTitle = 'b.test';
+    commit(wc, 'http://a.test/');
+    expect(h.tab(id).title).toBe('b.test');
+  });
+
   it('in-page navigations of the main frame move the URL and count as visits; a subframe\'s do nothing', () => {
     const h = harness();
     const id = h.open();
