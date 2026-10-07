@@ -510,6 +510,7 @@ void startWithProfileLock(app, () => {
     engines: { hostPid: () => hosts.snapshot('engine-host').pid, ps: listProcesses, kill: (pid) => process.kill(pid, 'SIGKILL') },
     // E5 start: the unsaved files the windows pushed, and Save all's round trip
     unsavedFiles: () => unsavedFiles.paths(),
+    onUnsavedFiles: (listener) => unsavedFiles.onChange(listener), // E11
     saveAll: () => unsavedFiles.saveAll((requestId) => void emit('layout.saveAll', { requestId })),
     // E5 end
   });

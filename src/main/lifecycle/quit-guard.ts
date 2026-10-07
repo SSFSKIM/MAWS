@@ -7,9 +7,9 @@
 // counted busy as C9's close check does). `before-quit` must prevent synchronously and the report is
 // asynchronous, so the guard always holds the quit while it computes the report: all zero, it quits; otherwise it asks
 // Quit, Quit when idle or Cancel. Quit quits; Quit when idle holds the quit, publishes the waiting report for the page's
-// banner, re-reads it on every status change and every 2 s, and quits at zero. Every quit first stops the engine host's
-// sessions (`engine.shutdown`, each through its ladder) and waits for that answer, bounded by SHUTDOWN_BOUND_MS, before
-// the final app.quit(): will-quit then kills the hosts, and an engine still running there would outlive the app. (E10:
+// banner, re-reads it on every status change (E11: and every unsaved-files push) and every 2 s, and quits at zero.
+// Every quit first stops the engine host's sessions (`engine.shutdown`, each through its ladder) and waits for that
+// answer, bounded by SHUTDOWN_BOUND_MS, before the final app.quit(): will-quit then kills the hosts, and an engine still running there would outlive the app. (E10:
 // in detached mode every quit but a keep stops them through `stopAllForQuit`, which sends `host.stopAll` and the
 // supervisor exits after it; will-quit only closes the supervisor's socket, killing nothing.)
 // Foreign-live sessions and the owner's terminals outside MAWS are never waited on (the statuses and the pty table are
@@ -273,6 +273,7 @@ export interface QuitGuardDeps {
   pollMs?: number;
   // E5 start
   unsavedFiles(): readonly string[]; // every window's dirty file tabs, as last pushed
+  onUnsavedFiles(listener: () => void): () => void; // E11: a wait re-reads at each push, as at each status change
   // asks every window to save its dirty tabs; settles once each has answered, or at the bound, with the reasons the
   // answers gave by path for the files not saved
   saveAll(): Promise<ReadonlyMap<string, string>>;
@@ -367,8 +368,9 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
         });
     };
     const off = model.on('engine', changed);
+    const offFiles = deps.onUnsavedFiles(changed); // E11
     const timer = setInterval(tick, deps.pollMs ?? WAIT_POLL_MS);
-    const mine = { report: first, stop: () => (off(), clearInterval(timer)) };
+    const mine = { report: first, stop: () => (off(), offFiles(), clearInterval(timer)) };
     wait = mine;
     deps.publish(first);
   };
@@ -447,6 +449,7 @@ export interface UnsavedFiles {
   update(sender: UnsavedFilesSender, paths: readonly string[]): void; // `layout.unsavedFiles`
   done(sender: UnsavedFilesSender, requestId: string, failed: readonly { path: string; message: string }[]): void; // `layout.saveAllDone`
   paths(): string[]; // every window's, once each, sorted
+  onChange(listener: () => void): () => void; // E11: after each push and each window forgotten
   saveAll(send: (requestId: string) => void): Promise<ReadonlyMap<string, string>>; // `send` emits `layout.saveAll` to every window
 }
 
@@ -454,12 +457,16 @@ export function trackUnsavedFiles(): UnsavedFiles {
   const sets = new Map<number, readonly string[]>();
   const followed = new WeakSet<UnsavedFilesSender>();
   const waits = new Map<string, { windows: Set<number>; failed: Map<string, string>; finish(): void }>();
+  const listeners = new Set<() => void>(); // E11
+  const changed = () => {
+    for (const listener of [...listeners]) listener();
+  };
   const answered = (requestId: string, windowId: number) => {
     const wait = waits.get(requestId);
     if (wait?.windows.delete(windowId) && wait.windows.size === 0) wait.finish();
   };
   const forget = (windowId: number) => {
-    sets.delete(windowId);
+    if (sets.delete(windowId)) changed(); // E11
     for (const requestId of [...waits.keys()]) answered(requestId, windowId); // it will not answer now
   };
   return {
@@ -472,6 +479,7 @@ export function trackUnsavedFiles(): UnsavedFiles {
         sender.on('render-process-gone', () => forget(id)); // E11: a crashed renderer's edits are gone; Save all waits for none
       }
       sets.set(id, [...paths]);
+      changed(); // E11
     },
     done(sender, requestId, failed) {
       for (const { path, message } of failed) console.warn(`[quit-guard] could not save ${path}: ${message}`);
@@ -480,6 +488,10 @@ export function trackUnsavedFiles(): UnsavedFiles {
       answered(requestId, sender.id);
     },
     paths: () => [...new Set([...sets.values()].flat())].sort(),
+    onChange(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
     saveAll(send) {
       const windows = new Set([...sets].flatMap(([id, paths]) => (paths.length > 0 ? [id] : [])));
       if (windows.size === 0) return Promise.resolve(new Map());
