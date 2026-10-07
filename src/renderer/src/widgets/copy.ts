@@ -418,7 +418,6 @@ export const PLUGIN_MANAGEMENT = {
   noAvailable: 'No plugins available to install',
   noMatch: 'No available plugin matches the filter',
   install: 'Install…',
-  installedNote: 'installed',
   // the confirm sheet
   verb: {
     install: 'Install',

@@ -196,7 +196,6 @@ describe('plugins widget: management', () => {
     await waitFor(() => expect(within(section('available')).getByText('e8-scratch · 2 plugins')).toBeTruthy());
     fireEvent.click(within(section('available')).getByText('e8-scratch · 2 plugins'));
     const other = await waitFor(() => section('available').querySelector<HTMLElement>('[data-plugin-row="e8-other@e8-scratch"]')!);
-    expect(within(section('available').querySelector<HTMLElement>('[data-plugin-row="e8-probe@e8-scratch"]')!).getByText('installed')).toBeTruthy();
 
     fireEvent.click(within(other).getByRole('button', { name: 'Install…' }));
     expect(sheet().getAttribute('data-plugins-sheet')).toBe('install');
