@@ -37,7 +37,7 @@ import { inspectExtensions, type InspectedExtension } from './chrome/extensions'
 import { readChromeProfiles } from './chrome/local-state';
 import { importCookies, planCookies, type CookiePlan, type CookiesBlock } from './cookies-import';
 import type { KeychainResult } from './keychain';
-import { importLog, type ImportLogEvent } from './log';
+import { errorCode, importLog, type ImportLogEvent } from './log';
 import type { ImportedProfiles } from './profiles';
 import { SkipTally } from './report';
 import { createStaging, deleteStaging, deleteStagingSync, openStagedStore, stageStore, type Staging, type StoreName } from './staging';
@@ -84,7 +84,8 @@ export type ImportRefusal =
   | 'unverified'
   | 'unknownExtension'
   | 'notImported'
-  | 'notInRecord';
+  | 'notInRecord'
+  | 'badFolder';
 const REFUSALS: Record<ImportRefusal, string> = {
   unknownProfile: 'not a profile of this Chrome folder',
   imported: 'this profile is already imported; remove it first',
@@ -95,6 +96,7 @@ const REFUSALS: Record<ImportRefusal, string> = {
   unknownExtension: 'an extension is not one the inspection found',
   notImported: 'not an imported profile',
   notInRecord: 'not an extension of this imported profile',
+  badFolder: 'the Chrome folder must be an absolute, normal path',
 };
 export class ImportRefused extends Error {
   constructor(readonly reason: ImportRefusal) {
@@ -315,7 +317,7 @@ export class BrowserImportService {
         } catch (error) {
           report.outcome = 'failed';
           report.failure = 'recordUnwritable';
-          this.log({ kind: 'error', where: 'record', code: codeOf(error) });
+          this.log({ kind: 'error', where: 'record', code: errorCode(error) });
         }
       }
       // Announced only once the record stands; a failed announcement never undoes a written record.
@@ -323,11 +325,11 @@ export class BrowserImportService {
         try {
           this.deps.emit('browser.import.changed', { profiles: this.deps.profiles.list() });
         } catch (error) {
-          this.log({ kind: 'error', where: 'changed', code: codeOf(error) });
+          this.log({ kind: 'error', where: 'changed', code: errorCode(error) });
         }
       }
       if (report.outcome !== 'done' && ses !== null) await this.rollback(ses, partition, partitionFolder);
-      await deleteStaging(run.staging).catch((error: unknown) => this.log({ kind: 'error', where: 'staging', code: codeOf(error) }));
+      await deleteStaging(run.staging).catch((error: unknown) => this.log({ kind: 'error', where: 'staging', code: errorCode(error) }));
       progress('cleaning', 1, 1);
       this.current = null;
       this.deps.emit('browser.import.finished', { importId: run.importId, report });
@@ -357,8 +359,8 @@ export class BrowserImportService {
       try {
         if (batch.length > 0) imported += this.deps.history.importRows(partition, batch);
       } catch (error) {
-        this.log({ kind: 'error', where: 'history', code: codeOf(error) });
-        return block(codeOf(error));
+        this.log({ kind: 'error', where: 'history', code: errorCode(error) });
+        return block(errorCode(error));
       }
       progress('history', Math.min(at + HISTORY_BATCH, rows.value.length), rows.value.length);
       await nextTurn(); // a cancel arriving over IPC is heard between batches
@@ -427,7 +429,7 @@ export class BrowserImportService {
       try {
         await step();
       } catch (error) {
-        this.log({ kind: 'error', where: `rollback_${where}`, code: codeOf(error) });
+        this.log({ kind: 'error', where: `rollback_${where}`, code: errorCode(error) });
       }
     }
   }
@@ -442,7 +444,7 @@ export class BrowserImportService {
     try {
       return { ok: true, file: staged.file, rows: count(opened.db) };
     } catch (error) {
-      return { ok: false, code: codeOf(error) };
+      return { ok: false, code: errorCode(error) };
     } finally {
       opened.db.close();
     }
@@ -454,7 +456,7 @@ export class BrowserImportService {
     try {
       return { ok: true, value: read(opened.db) };
     } catch (error) {
-      return { ok: false, code: codeOf(error) };
+      return { ok: false, code: errorCode(error) };
     } finally {
       opened.db.close();
     }
@@ -492,7 +494,7 @@ export class BrowserImportService {
 
   private failureOf(error: unknown): string {
     if (error instanceof RunFailure) return error.code;
-    this.log({ kind: 'error', where: 'import', code: codeOf(error), message: error instanceof Error ? error.message : undefined });
+    this.log({ kind: 'error', where: 'import', code: errorCode(error), message: error instanceof Error ? error.message : undefined });
     return 'unexpected';
   }
 
@@ -527,11 +529,6 @@ function emptyCookies(keychain: CookiesBlock['keychain'], error: string | null, 
   return { imported: 0, partitioned: { imported: 0, verified: 0 }, skipped: tally.skipped, hosts: tally.hosts, keychain, error };
 }
 
-// An error's code as the report and the log keep it: an identifier (`EBUSY`, `indexUnavailable`), never its message.
-function codeOf(error: unknown): string {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(code) ? code : 'unexpected';
-}
 
 const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
 

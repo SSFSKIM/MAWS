@@ -167,6 +167,19 @@ describe('BrowserHistoryStore.removeImportedExcept (E4b Design §14: the boot sw
     vi.spyOn(console, 'error').mockImplementation(() => {});
     index = new Index(newer);
     expect(index.browserHistory.removeImportedExcept('persist:maws-chrome-', [])).toBe(0);
+    expect(index.browserHistory.countPartition('persist:maws-chrome-Default')).toBe(0);
+  });
+
+  it('counts one partition\'s rows, for the removal\'s answer (E4a\'s removePartition answers nothing)', () => {
+    const history = index.browserHistory;
+    const IMPORTED = 'persist:maws-chrome-Default';
+    history.visit(IMPORTED, 'https://a.example/', { typed: false, at: 1 });
+    history.visit(IMPORTED, 'https://b.example/', { typed: false, at: 2 });
+    history.visit(P, 'https://a.example/', { typed: false, at: 1 });
+    expect(history.countPartition(IMPORTED)).toBe(2);
+    history.removePartition(IMPORTED);
+    expect(history.countPartition(IMPORTED)).toBe(0);
+    expect(history.countPartition(P)).toBe(1);
   });
 });
 

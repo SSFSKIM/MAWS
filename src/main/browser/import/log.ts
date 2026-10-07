@@ -55,6 +55,12 @@ export function importLog(event: ImportLogEvent, env: NodeJS.ProcessEnv = proces
   }
 }
 
+// An error's code as the report and the log keep it: an identifier (`EBUSY`, `indexUnavailable`), never its message.
+export function errorCode(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(code) ? code : 'unexpected';
+}
+
 // Hierarchical URLs (`scheme://…`) and the opaque schemes a page or a store may carry. A bare `host:port` or a time is
 // not matched, so `example.test:443` and `10:00:05` stay as they are.
 const URL_LIKE = /\b(?:[a-z][a-z0-9+.-]*:\/\/|(?:data|javascript|mailto|blob|about|file):)[^\s'"<>]*/gi;

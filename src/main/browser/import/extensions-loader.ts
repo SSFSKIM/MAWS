@@ -19,7 +19,7 @@ import { join, sep } from 'node:path';
 import type { Extension, ServiceWorkersRunningStatusChangedEventParams, Session, WebContents } from 'electron';
 import type { ImportedExtension } from '@shared/browser/import';
 import { partitionDirName } from '@shared/browser/profiles';
-import { importLog, redactMessage } from './log';
+import { errorCode, importLog, redactMessage } from './log';
 import type { ImportedProfiles } from './profiles';
 import { ImportRefused, type ImportExtensions } from './service';
 
@@ -100,7 +100,7 @@ export class ExtensionsLoader {
       };
       void this.enqueue(partition, () => this.bootLoad(ses, record.profileDir, partition, finishLoads)).finally(finishLoads);
     } catch (error) {
-      this.log({ kind: 'error', where: 'extensions_boot', code: codeOf(error) });
+      this.log({ kind: 'error', where: 'extensions_boot', code: errorCode(error) });
     }
   }
 
@@ -166,7 +166,7 @@ export class ExtensionsLoader {
           ses.extensions.removeExtension(extension.id);
           unloaded++;
         } catch (error) {
-          this.log({ kind: 'error', where: 'extensions_unload', code: codeOf(error) });
+          this.log({ kind: 'error', where: 'extensions_unload', code: errorCode(error) });
         }
       }
       return unloaded;
@@ -198,7 +198,7 @@ export class ExtensionsLoader {
       await this.deps.profiles.put({ ...current, extensions });
       this.deps.changed?.();
     } catch (error) {
-      this.log({ kind: 'error', where: 'extensions_record', code: codeOf(error) });
+      this.log({ kind: 'error', where: 'extensions_record', code: errorCode(error) });
     }
   }
 
@@ -380,7 +380,7 @@ async function copyIntoPlace(versionDir: string, stagingDir: string, partitionFo
     return null;
   } catch (error) {
     await rm(staged, { recursive: true, force: true }).catch(() => {});
-    return codeOf(error);
+    return errorCode(error);
   }
 }
 
@@ -442,7 +442,3 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-function codeOf(error: unknown): string {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(code) ? code : 'unexpected';
-}

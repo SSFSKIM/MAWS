@@ -84,6 +84,12 @@ export class BrowserHistoryStore {
       prefix, JSON.stringify(keep),
     );
   }
+
+  // A partition's rows, read by "Remove imported profile" just before E4a's `removePartition` (which answers nothing).
+  countPartition(partition: string): number {
+    if (this.db.readOnly) return 0;
+    return this.db.get<{ rows: number }>('SELECT count(*) AS rows FROM browser_history WHERE partition = ?', partition)?.rows ?? 0;
+  }
   // E4b end
 }
 
