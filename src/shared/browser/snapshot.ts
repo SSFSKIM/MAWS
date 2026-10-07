@@ -58,6 +58,35 @@ export function outlineOf(text: string, maxLines: number): string[] {
   return inPageOrder(outlineCandidates(splitLines(text)).slice(0, maxLines));
 }
 
+// What each ref of a snapshot names: the line's role and its accessible name (the quoted string after the role; inline
+// text after the colon is content, not a name). Main keeps it per tab so an act by ref can report `button "Submit"`
+// (Decision Log 37) without asking the page, since any aria snapshot Playwright takes replaces the frame's ref table.
+export interface RefElement {
+  role: string;
+  name?: string;
+}
+
+export function refElementsOf(text: string): Map<string, RefElement> {
+  const elements = new Map<string, RefElement>();
+  for (const line of splitLines(text)) {
+    const node = nodeOf(line);
+    if (node === null) continue;
+    const key = unquotedKey(node.key.trimStart().slice(2));
+    const ref = REF_PATTERN.exec(key)?.[1];
+    if (ref === undefined) continue;
+    const quotedName = /^[a-z][a-zA-Z-]* ("(?:[^"\\]|\\.)*")/.exec(key)?.[1];
+    elements.set(ref, quotedName === undefined ? { role: node.role } : { role: node.role, name: JSON.parse(quotedName) as string });
+  }
+  return elements;
+}
+
+// A YAML-quoted key as Playwright wrote it (`'link "a: b" [ref=e3]'`), unquoted.
+function unquotedKey(key: string): string {
+  if (key.startsWith("'") && key.endsWith("'")) return key.slice(1, -1).replaceAll("''", "'");
+  if (key.startsWith('"') && key.endsWith('"')) return JSON.parse(key) as string;
+  return key;
+}
+
 export interface SnapshotCut {
   text: string;
   truncated: boolean;

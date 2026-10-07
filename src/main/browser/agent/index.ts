@@ -24,11 +24,10 @@ import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import { focusEmulationMode } from '../visibility';
 import { Drivers, type DriverState } from './driver';
 import { answerOfError, refusal } from './errors';
-import { BrowserHandlers, describeCall, type AgentControl, type BrowserCall, type CallContext, type DownloadRefusal } from './handlers';
+import { BrowserHandlers, describeCall, reachedEntry, type AgentControl, type AgentDialogs, type BrowserCall, type CallContext, type DownloadRefusal } from './handlers';
+import { waitingReporter, type Via } from './progress';
 
 const LAST_INPUTS_KEPT = 32;
-
-type Via = 'host' | 'seam';
 
 // Why a request's controller was aborted.
 class RequestEnded extends Error {
@@ -178,20 +177,6 @@ export function e2eTabIds(env: NodeJS.ProcessEnv, restored: readonly { tabId: st
   return () => `b_${String(next++).padStart(12, '0')}`;
 }
 
-// A wait on the person or a cover (Design §6, §10): the host pauses its deadline for a host request (`null` re-arms
-// it), and the windows draw the row's waiting line for any request.
-export function waitingReporter({ hosts, emit, now = Date.now }: { hosts: Pick<HostSupervisor, 'dispatch'>; emit: BrowserEmit; now?(): number }) {
-  return (call: BrowserCall, tabId: string, reason: BrowserWaitReason | null, via: Via): void => {
-    const { appSessionId, requestId, toolUseId, tool } = call;
-    if (via === 'host') {
-      hosts
-        .dispatch('engine-host', 'maws.browser.waiting', { appSessionId, requestId: requestId as RequestId, waiting: reason })
-        .catch((error: unknown) => console.error('[browser] could not report a wait to the engine host', error));
-    }
-    emit('maws.browser.progress', { appSessionId, toolUseId: toolUseId as never, tabId, tool, waiting: reason, since: new Date(now()).toISOString() });
-  };
-}
-
 // Until Task 2.4's control.ts: no pause point (nothing in this build sets `control: 'human'`), the agent's mark, and its
 // lapse to idle BROWSER_AGENT_IDLE_MS after the last action. control.ts replaces it whole.
 export function provisionalControl(store: Pick<TabStore, 'setControl' | 'entry'>): AgentControl {
@@ -249,6 +234,7 @@ export interface BrowserAgentDeps {
   emit: BrowserEmit;
   env: NodeJS.ProcessEnv; // the mode of focus emulation, as startBrowser read it
   control?: AgentControl; // Task 2.4's control.ts; the provisional one until then
+  dialogs?: AgentDialogs; // Task 2.4's `-run-dialog` wrap: the dialogs it answered per tab; none until then
   drivers?: Pick<Drivers, 'for' | 'state' | 'close' | 'retire' | 'stop'>; // tests: the drivers made here otherwise
 }
 
@@ -268,11 +254,14 @@ export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
       busy: (entry) => entry.tab.control === 'agent' || requests.pendingFor(entry.tab.tabId),
       log,
     });
+  const reachable = (appSessionId: AppSessionId) => reachableSessions(deps.sessions, appSessionId);
   const handlers = new BrowserHandlers({
     store,
     navigator: deps.navigator,
     control,
-    reachable: (appSessionId) => reachableSessions(deps.sessions, appSessionId),
+    drivers,
+    dialogs: deps.dialogs,
+    reachable,
     onDownloadRefused: deps.onDownloadRefused,
     emit,
   });
@@ -286,10 +275,7 @@ export function startBrowserAgent(deps: BrowserAgentDeps): BrowserAgent {
     report: waitingReporter({ hosts, emit }),
     control,
     store,
-    reaches: (appSessionId, tabId) => {
-      const entry = store.entry(tabId);
-      return entry !== undefined && reachableSessions(deps.sessions, appSessionId).includes(entry.tab.appSessionId);
-    },
+    reaches: (appSessionId, tabId) => reachedEntry(store, reachable, appSessionId, tabId) !== undefined,
     now: Date.now,
   });
 

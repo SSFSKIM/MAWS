@@ -14,10 +14,11 @@ export class BrowserToolError extends Error {
 
 export const refusal = (error: string): MawsBrowserAnswerResult => ({ ok: false, error });
 
-// A Playwright or Electron error as the texts quote it: its first line (Playwright appends its call log below).
+// A Playwright or Electron error as the texts quote it: its first line (Playwright appends its call log below), without
+// the API call Playwright names first (`locator.click: `, `page.evaluate: `), which is ours, not the page's.
 export function firstLine(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message.split('\n', 1)[0].trim() || 'unknown error';
+  return message.split('\n', 1)[0].replace(/^(?:locator|page|frame|mouse|keyboard|elementHandle)\.\w+: /, '').trim() || 'unknown error';
 }
 
 // What a thrown error answers, for the action it interrupted: a refusal the handler named, a tab that went away, or

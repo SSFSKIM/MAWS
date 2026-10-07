@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { BROWSER_SNAPSHOT_MAX_CHARS_CEILING, BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT, BROWSER_SNAPSHOT_OUTLINE_MAX_LINES } from '../maws/browser';
-import { countRefs, cutSnapshot, outlineOf, REF_PATTERN, SNAPSHOT_OUTLINE_HEADER } from './snapshot';
+import { countRefs, cutSnapshot, outlineOf, REF_PATTERN, refElementsOf, SNAPSHOT_OUTLINE_HEADER } from './snapshot';
 
 const real = (name: string) => readFileSync(fileURLToPath(new URL(`../../../spikes/browser-probe/results/pass2/snapshot-${name}.txt`, import.meta.url)), 'utf8');
 const GITHUB = real('github-front');
@@ -146,5 +146,35 @@ describe('cutSnapshot', () => {
     expect([SNAPSHOT_OUTLINE_HEADER, ...outline].join('\n').length).toBeLessThanOrEqual(500);
     expect(outline.length).toBeGreaterThan(0);
     expect(body.length).toBeGreaterThan(0);
+  });
+});
+
+describe('refElementsOf (the role and name each ref names, for the act\'s target; Decision Log 37)', () => {
+  it('reads every ref-bearing line, at any depth, with its role and its name when it has one', () => {
+    const elements = refElementsOf(SMALL);
+    expect(elements.get('e3')).toEqual({ role: 'heading', name: 'E4c order form' });
+    expect(elements.get('e4')).toEqual({ role: 'textbox', name: 'Name' });
+    expect(elements.get('e6')).toEqual({ role: 'button', name: 'Submit' });
+    expect(elements.get('e7')).toEqual({ role: 'paragraph' }); // inline text is not a name
+    expect(elements.get('e9')).toEqual({ role: 'contentinfo' });
+    expect(elements.size).toBe(countRefs(SMALL));
+  });
+
+  it('unescapes a quoted name and a YAML-quoted line, and keeps frame refs', () => {
+    const text = [
+      '- button "say \\"hi\\"" [ref=e2]',
+      `- 'link "a: b" [ref=e3] [cursor=pointer]':`,
+      '  - /url: /x',
+      '- iframe [ref=e4]:',
+      '  - button "Frame button" [ref=f1e2]',
+    ].join('\n');
+    const elements = refElementsOf(text);
+    expect(elements.get('e2')).toEqual({ role: 'button', name: 'say "hi"' });
+    expect(elements.get('e3')).toEqual({ role: 'link', name: 'a: b' });
+    expect(elements.get('f1e2')).toEqual({ role: 'button', name: 'Frame button' });
+  });
+
+  it('reads all of a real page', () => {
+    expect(refElementsOf(GITHUB).size).toBe(countRefs(GITHUB));
   });
 });

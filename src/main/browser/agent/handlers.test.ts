@@ -81,6 +81,7 @@ function harness() {
     store,
     navigator,
     control,
+    drivers: { for: vi.fn(() => Promise.reject(new Error('no driver in these tests'))) },
     reachable: (appSessionId) => (appSessionId === THREAD ? [THREAD, A] : [appSessionId]),
     onDownloadRefused: (listener) => {
       refusals.add(listener);
@@ -469,15 +470,10 @@ describe('browser_navigate (Design §6)', () => {
   });
 });
 
-describe('the tools later tasks build', () => {
-  it.each([
-    ['browser_snapshot', 'snapshot'],
-    ['browser_act', 'act'],
-    ['browser_eval', 'eval'],
-    ['browser_screenshot', 'screenshot'],
-  ] as const)('%s answers a plain actionFailed until it is built', async (tool, action) => {
+describe('the tool a later task builds', () => {
+  it('browser_screenshot answers a plain actionFailed until Task 2.5 builds it', async () => {
     const h = harness();
     const tabId = h.open(A);
-    expect(await h.run(A, tool, { tabId })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.actionFailed(tool, action, '', 'not available in this build of MAWS') });
+    expect(await h.run(A, 'browser_screenshot', { tabId })).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.actionFailed('browser_screenshot', 'screenshot', '', 'not available in this build of MAWS') });
   });
 });

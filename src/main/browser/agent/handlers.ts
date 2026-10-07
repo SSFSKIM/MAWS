@@ -1,8 +1,8 @@
 // The six browser tools in main (E4c execution document, Design §6, §8, §11, §12): one call, already parsed with its
 // tool's input schema, run against the calling session's tab and answered as the host writes it. `browser_tabs` and
 // `browser_navigate` work through E4a's TabStore and Navigator alone (no Playwright: a navigation goes where the chrome's
-// own would, through `will-navigate`, the history and the load-error lifecycle); Task 2.3 adds snapshot, act and eval
-// over the driver, Task 2.5 the screenshot, each as a case of `run`.
+// own would, through `will-navigate`, the history and the load-error lifecycle); `browser_snapshot`, `browser_act` and
+// `browser_eval` work through the tab's Playwright driver (driver.ts); Task 2.5 adds the screenshot as a case of `run`.
 //
 // The rules every handler keeps: a tab is reachable when it is the calling session's or, for a side thread, its parent's
 // (P-21, P-24); an action shows its tab (selects it unless the person is using the session's selected tab, and says
@@ -10,12 +10,24 @@
 // agent's before its first page-changing command; a load (a tab that has no page yet) is marked the agent's in the tick
 // it starts, before any network event, so E4a's download handler refuses for the agent (A-31), and has no pause point;
 // reads touch neither control nor the selection (Decision Log 5, 6, 15). An aborted request answers nothing (null).
+// A page dialog MAWS answered for the agent (Task 2.4's `-run-dialog` wrap) reaches the next successful result naming its
+// tab (Decision Log 33, 35, 37): `run` drains the tab's dialogs into it.
+import type { WebContents } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_HANDBACK_IDLE_MS, type BrowserTab } from '@shared/browser/tab';
+import { cutSnapshot } from '@shared/browser/snapshot';
 import { validateBrowserUrl } from '@shared/browser/url';
 import type { MawsBrowserAnswerResult } from '@shared/ipc/schema/maws';
 import {
+  BROWSER_ACTION_TIMEOUT_MS,
+  BROWSER_DIALOGS_MAX,
+  BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT,
   BROWSER_TOOL_ERRORS,
+  browserTargetText,
+  type BrowserActResult,
+  type BrowserDialog,
+  type BrowserEvalResult,
+  type BrowserSnapshotResult,
   type BrowserEvalInput,
   type BrowserActInput,
   type BrowserNavigateInput,
@@ -31,8 +43,13 @@ import {
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import type { NavigateTo, Navigator } from '../navigation';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
-import { answerOfError, BrowserToolError } from './errors';
-import { waitForSettled, type DownloadRefusal } from './navigate';
+import { dispatch, waitUntilReady } from './act';
+import type { Driver, Drivers } from './driver';
+import { answerOfError, BrowserToolError, firstLine } from './errors';
+import { evalValueOf } from './evaluate';
+import { isTimeout, locate, RefBook } from './locate';
+import { SETTLE_DEADLINE_MS, waitForSettled, type DownloadRefusal } from './navigate';
+import { takeSnapshot } from './snapshot';
 
 export type { DownloadRefusal } from './navigate';
 
@@ -51,6 +68,12 @@ export interface AgentControl {
   markActing(entry: TabEntry): void; // an action passed its pause point, or a load starts: `control: 'agent'`
   actionEnded(entry: TabEntry): void; // the agent-idle timer runs from here
   requestPending(entry: TabEntry, delta: 1 | -1): void; // a request for the tab was queued (1) or finished (-1)
+}
+
+// The page dialogs Task 2.4's `-run-dialog` wrap answered for the agent, per tab, until a result reports them: `take`
+// returns them (at most BROWSER_DIALOGS_MAX, each message already cut) and forgets them.
+export interface AgentDialogs {
+  take(tabId: string): BrowserDialog[];
 }
 
 interface ToolArgs {
@@ -83,19 +106,21 @@ export interface BrowserHandlerDeps {
   store: TabStore;
   navigator: Pick<Navigator, 'navigate'>;
   control: AgentControl;
+  drivers: Pick<Drivers, 'for'>;
+  dialogs?: AgentDialogs;
   reachable(appSessionId: AppSessionId): AppSessionId[]; // the session itself first, then its parent for a side thread
   onDownloadRefused(listener: (refusal: DownloadRefusal) => void): () => void;
   emit: BrowserEmit;
   now?(): number;
 }
 
-// The noun a not-yet-built tool's refusal names.
-const UNBUILT: Partial<Record<BrowserToolName, string>> = { browser_snapshot: 'snapshot', browser_act: 'act', browser_eval: 'eval', browser_screenshot: 'screenshot' };
+const NAVIGATION_GRACE_MS = 2_000; // after an act: how long a navigation it started is waited for
 
 const ok = (result: object): MawsBrowserAnswerResult => ({ ok: true, result: result as Record<string, unknown> });
 
 export class BrowserHandlers {
   private readonly now: () => number;
+  private readonly refBooks = new WeakMap<WebContents, RefBook>();
 
   constructor(private readonly deps: BrowserHandlerDeps) {
     this.now = deps.now ?? Date.now;
@@ -104,19 +129,37 @@ export class BrowserHandlers {
   // The call's answer, or null when the request was aborted (nothing is written for it).
   async run(call: BrowserCall, ctx: CallContext): Promise<MawsBrowserAnswerResult | null> {
     try {
-      switch (call.tool) {
-        case 'browser_tabs':
-          return await this.tabs(call, ctx);
-        case 'browser_navigate':
-          return await this.navigate(call, ctx);
-        default:
-          return { ok: false, error: BROWSER_TOOL_ERRORS.actionFailed(call.tool, UNBUILT[call.tool]!, '', 'not available in this build of MAWS') };
-      }
+      ctx.signal.throwIfAborted();
+      return this.withDialogs(await this.answer(call, ctx));
     } catch (error) {
       if (ctx.signal.aborted) return null;
       const [action, target] = describeCall(call);
       return answerOfError(error, call.tool, action, target);
     }
+  }
+
+  private answer(call: BrowserCall, ctx: CallContext): Promise<MawsBrowserAnswerResult> {
+    switch (call.tool) {
+      case 'browser_tabs':
+        return this.tabs(call, ctx);
+      case 'browser_navigate':
+        return this.navigate(call, ctx);
+      case 'browser_snapshot':
+        return this.snapshot(call, ctx);
+      case 'browser_act':
+        return this.act(call, ctx);
+      case 'browser_eval':
+        return this.evaluate(call, ctx);
+      case 'browser_screenshot':
+        return Promise.resolve({ ok: false, error: BROWSER_TOOL_ERRORS.actionFailed(call.tool, 'screenshot', '', 'not available in this build of MAWS') });
+    }
+  }
+
+  // The dialogs answered on the result's tab since its last result (Decision Log 37: the action's, else the tab's next).
+  private withDialogs(answer: MawsBrowserAnswerResult): MawsBrowserAnswerResult {
+    if (!answer.ok || !this.deps.dialogs || typeof answer.result.tabId !== 'string') return answer;
+    const dialogs = this.deps.dialogs.take(answer.result.tabId).slice(-BROWSER_DIALOGS_MAX);
+    return dialogs.length === 0 ? answer : { ...answer, result: { ...answer.result, dialogs } };
   }
 
   // ---- browser_tabs -----------------------------------------------------------------------------------------------------
@@ -209,13 +252,163 @@ export class BrowserHandlers {
     return ok(result);
   }
 
+  // ---- browser_snapshot (a read) ----------------------------------------------------------------------------------------
+
+  private async snapshot(call: CallOf<'browser_snapshot'>, ctx: CallContext): Promise<MawsBrowserAnswerResult> {
+    const { appSessionId, args } = call;
+    const tool = 'browser_snapshot';
+    const entry = this.reach(tool, appSessionId, args.tabId);
+    this.requirePage(entry, tool);
+    const refs = this.refsOf(entry);
+    const { page } = await this.driverOf(entry, tool, 'snapshot', args.root ?? '', ctx.signal);
+    const taken = await takeSnapshot(page, args.root, ctx.signal);
+    refs.record(taken.text);
+    const { text, ...cut } = cutSnapshot(taken.text, { maxChars: args.maxChars ?? BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT });
+    const { tabId, url, title } = entry.tab;
+    const result: BrowserSnapshotResult = { status: 'ok', tabId, url, title, ms: this.ms(ctx), root: args.root ?? null, rootMatches: taken.rootMatches, ...cut };
+    return { ok: true, result, text };
+  }
+
+  // ---- browser_act ------------------------------------------------------------------------------------------------------
+
+  // Design §6's four steps: the acting tab; the target resolved and waited for without input (suspended under a cover);
+  // the pause point; the dispatch, then a short wait for a navigation it started.
+  private async act(call: CallOf<'browser_act'>, ctx: CallContext): Promise<MawsBrowserAnswerResult> {
+    const { appSessionId, args } = call;
+    const { control } = this.deps;
+    const tool = 'browser_act';
+    const target = browserTargetText(args.target);
+    const entry = this.reach(tool, appSessionId, args.tabId);
+    this.requirePage(entry, tool);
+    const refs = this.refsOf(entry);
+    const downloads = this.watchDownloads(entry, tool);
+    try {
+      this.show(entry);
+      const { page } = await this.driverOf(entry, tool, args.action, target, ctx.signal);
+      const { locator, resolved } = await locate(page, args.target, { tool, signal: ctx.signal, refs });
+      let coveredMs = 0;
+      let waited: Waited = { waitedFor: null, waitedMs: null };
+      do {
+        try {
+          coveredMs += (await waitUntilReady(entry, locator, args.action, { store: this.deps.store, signal: ctx.signal, report: (reason) => ctx.waiting(entry.tab.tabId, reason), now: this.now })).coveredMs;
+        } catch (error) {
+          if (isTimeout(error) && !ctx.signal.aborted) throw new BrowserToolError(BROWSER_TOOL_ERRORS.actionTimeout(tool, args.action, target, BROWSER_ACTION_TIMEOUT_MS));
+          throw error;
+        }
+        const paused = await this.pause(entry, ctx);
+        if (paused.waitedFor !== null) waited = { waitedFor: paused.waitedFor, waitedMs: (waited.waitedMs ?? 0) + (paused.waitedMs ?? 0) };
+      } while (entry.tab.covered); // a sheet came up while the person held the page: wait it out again
+      if (waited.waitedFor === null && coveredMs > 0) waited = { waitedFor: 'cover', waitedMs: Math.round(coveredMs) };
+
+      control.markActing(entry);
+      let navigated: boolean;
+      try {
+        const before = page.url();
+        await dispatch(page, locator, args.action, args.value, ctx.signal);
+        // a navigation the action started: its load, briefly; a download it started answers at once
+        await Promise.race([page.waitForLoadState('load', { timeout: NAVIGATION_GRACE_MS, signal: ctx.signal }).catch(() => ctx.signal.throwIfAborted()), downloads.refused]);
+        navigated = page.url() !== before;
+      } finally {
+        control.actionEnded(entry);
+      }
+      downloads.throwIfRefused();
+      const { tabId, url, title } = entry.tab;
+      const result: BrowserActResult = { status: 'ok', tabId, url, title, ms: this.ms(ctx), action: args.action, target: resolved, navigated, ...waited };
+      return ok(result);
+    } finally {
+      downloads.stop();
+    }
+  }
+
+  // ---- browser_eval (an action: it can change the page) -------------------------------------------------------------------
+
+  private async evaluate(call: CallOf<'browser_eval'>, ctx: CallContext): Promise<MawsBrowserAnswerResult> {
+    const { appSessionId, args } = call;
+    const { control } = this.deps;
+    const tool = 'browser_eval';
+    const entry = this.reach(tool, appSessionId, args.tabId);
+    this.requirePage(entry, tool);
+    const downloads = this.watchDownloads(entry, tool);
+    try {
+      this.show(entry);
+      const { page } = await this.driverOf(entry, tool, 'eval', '', ctx.signal);
+      await this.pause(entry, ctx);
+      control.markActing(entry);
+      let value: unknown;
+      try {
+        // a string is evaluated as an expression and a promise awaited; once sent it runs to its end (Decision Log 3), so
+        // an abort or a promise that never settles only stops the waiting for it
+        const evaluation = page.evaluate(args.expression);
+        evaluation.catch(() => {});
+        value = await abortable(evaluation, ctx.signal, { ms: SETTLE_DEADLINE_MS, text: BROWSER_TOOL_ERRORS.evalFailed(`the expression did not settle within ${SETTLE_DEADLINE_MS / 1000} s`) });
+      } catch (error) {
+        if (ctx.signal.aborted || error instanceof BrowserToolError) throw error;
+        throw new BrowserToolError(BROWSER_TOOL_ERRORS.evalFailed(firstLine(error)));
+      } finally {
+        control.actionEnded(entry);
+      }
+      downloads.throwIfRefused();
+      const { tabId, url, title } = entry.tab;
+      const result: BrowserEvalResult = { status: 'ok', tabId, url, title, ms: this.ms(ctx), ...evalValueOf(value) };
+      return ok(result);
+    } finally {
+      downloads.stop();
+    }
+  }
+
   // ---- shared steps -----------------------------------------------------------------------------------------------------
 
   // The tab, when the calling session reaches it (P-21, P-24); else `tabNotFound`, as for an id that names nothing.
   private reach(tool: BrowserToolName, appSessionId: AppSessionId, tabId: string): TabEntry {
-    const entry = this.deps.store.entry(tabId);
-    if (!entry || !this.deps.reachable(appSessionId).includes(entry.tab.appSessionId)) throw new BrowserToolError(BROWSER_TOOL_ERRORS.tabNotFound(tool, tabId));
+    const entry = reachedEntry(this.deps.store, this.deps.reachable, appSessionId, tabId);
+    if (!entry) throw new BrowserToolError(BROWSER_TOOL_ERRORS.tabNotFound(tool, tabId));
     return entry;
+  }
+
+  // A read or an act needs the tab's page: a suspended tab is loaded only by `reload` or `select` (Decision Log 15).
+  private requirePage(entry: TabEntry, tool: BrowserToolName): void {
+    const { tabId, url, crashed } = entry.tab;
+    if (crashed) throw new BrowserToolError(BROWSER_TOOL_ERRORS.tabCrashed(tool, tabId));
+    if (!entry.view) throw new BrowserToolError(BROWSER_TOOL_ERRORS.tabNotLoaded(tool, tabId, url));
+  }
+
+  // The tab's Playwright driver, connected on first use; a connection that fails is the action's failure (Design §11),
+  // and an abort stops waiting for it (the connection, once made, serves the next call).
+  private async driverOf(entry: TabEntry, tool: BrowserToolName, action: string, target: string, signal: AbortSignal): Promise<Driver> {
+    try {
+      return await abortable(this.deps.drivers.for(entry), signal);
+    } catch (error) {
+      if (signal.aborted) throw signal.reason;
+      throw new BrowserToolError(BROWSER_TOOL_ERRORS.actionFailed(tool, action, target, `MAWS could not attach to the tab: ${firstLine(error)}`));
+    }
+  }
+
+  // The refs this tab's snapshots named (per page: a new view is a new book).
+  private refsOf(entry: TabEntry): RefBook {
+    const contents = entry.view!.webContents;
+    let book = this.refBooks.get(contents);
+    if (!book) this.refBooks.set(contents, (book = new RefBook(contents)));
+    return book;
+  }
+
+  // A-31, Decision Log 22: a download the tab refuses for the agent while this call runs is the call's answer.
+  private watchDownloads(entry: TabEntry, tool: BrowserToolName) {
+    const { tabId } = entry.tab;
+    let refusal: DownloadRefusal | null = null;
+    let wake: () => void = () => {};
+    const refused = new Promise<void>((resolve) => (wake = resolve));
+    const stop = this.deps.onDownloadRefused((download) => {
+      if (download.tabId !== tabId || refusal) return;
+      refusal = download;
+      wake();
+    });
+    return {
+      refused, // resolves when one comes
+      throwIfRefused: () => {
+        if (refusal) throw new BrowserToolError(BROWSER_TOOL_ERRORS.downloadRefused(tool, refusal.url, refusal.filename));
+      },
+      stop,
+    };
   }
 
   // Main refuses again what the schema refused (Design §12), and loads the normalised URL.
@@ -233,7 +426,9 @@ export class BrowserHandlers {
     this.deps.emit('browser.agent.acting', { appSessionId, tabId });
   }
 
+  // The pause point (Design §6 step 3): the abort checked before it and again right before dispatch (Decision Log 3).
   private pause(entry: TabEntry, ctx: CallContext): Promise<Waited> {
+    ctx.signal.throwIfAborted();
     return this.deps.control.pause(entry, ctx.signal, (reason) => ctx.waiting(entry.tab.tabId, reason)).then((waited) => {
       ctx.signal.throwIfAborted(); // checked again right before dispatch (Decision Log 3)
       return waited;
@@ -309,7 +504,38 @@ export function describeCall(call: BrowserCall): [action: string, target: string
       const { url } = call.args;
       return url === 'back' || url === 'forward' || url === 'reload' ? [url, ''] : ['load', url];
     }
-    default:
-      return [UNBUILT[call.tool]!, ''];
+    case 'browser_snapshot':
+      return ['snapshot', call.args.root ?? ''];
+    case 'browser_act':
+      return [call.args.action, browserTargetText(call.args.target)];
+    case 'browser_eval':
+      return ['eval', ''];
+    case 'browser_screenshot':
+      return ['screenshot', call.args.target === undefined ? '' : browserTargetText(call.args.target)];
   }
+}
+
+// The tab, when the calling session reaches it (P-21; P-24: a side thread reaches its parent's tabs too).
+export function reachedEntry(store: Pick<TabStore, 'entry'>, reachable: (appSessionId: AppSessionId) => AppSessionId[], appSessionId: AppSessionId, tabId: string): TabEntry | undefined {
+  const entry = store.entry(tabId);
+  return entry && reachable(appSessionId).includes(entry.tab.appSessionId) ? entry : undefined;
+}
+
+// A promise's value, unless the signal aborts first (its reason) or a deadline passes first (its refusal).
+function abortable<T>(promise: Promise<T>, signal: AbortSignal, deadline?: { ms: number; text: string }): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    const onAbort = () => finish(() => reject(signal.reason));
+    const timer = deadline && setTimeout(() => finish(() => reject(new BrowserToolError(deadline.text))), deadline.ms);
+    const finish = (settle: () => void) => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      settle();
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
 }

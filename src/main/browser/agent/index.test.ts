@@ -9,7 +9,7 @@ import { BROWSER_AGENT_IDLE_MS, BROWSER_TOOL_ERRORS } from '@shared/maws/browser
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { TabStore } from '../tabs';
 import type { BrowserCall, CallContext } from './handlers';
-import { BrowserRequests, e2eTabIds, provisionalControl, reachableSessions, startBrowserAgent, waitingReporter } from './index';
+import { BrowserRequests, e2eTabIds, provisionalControl, reachableSessions, startBrowserAgent } from './index';
 
 // The request lifecycle in main (E4c Design §4 "Every request has an AbortController", Interfaces "Main"): one request
 // at a time per tab, the host's cancel, the tab's close, the engine host's connection going (Decision Log 46: the host
@@ -265,22 +265,6 @@ describe('provisionalControl (until Task 2.4)', () => {
   });
 });
 
-describe('waitingReporter (the host\'s paused deadline and the row\'s waiting line, Design §10)', () => {
-  it('tells the host about a host request and the windows about every request', () => {
-    const dispatch = vi.fn(() => Promise.resolve({ ok: true }) as never);
-    const emitted: unknown[] = [];
-    const report = waitingReporter({ hosts: { dispatch }, emit: ((name: string, payload: unknown) => void emitted.push([name, payload])) as never, now: () => Date.parse('2026-10-07T00:00:00.000Z') });
-    const call = { appSessionId: A, requestId: rid(9), toolUseId: 'toolu_1', tool: 'browser_act' } as unknown as BrowserCall;
-    report(call, TAB, 'human', 'host');
-    report(call, TAB, null, 'seam');
-    expect(dispatch.mock.calls).toEqual([['engine-host', 'maws.browser.waiting', { appSessionId: A, requestId: rid(9), waiting: 'human' }]]);
-    expect(emitted).toEqual([
-      ['maws.browser.progress', { appSessionId: A, toolUseId: 'toolu_1', tabId: TAB, tool: 'browser_act', waiting: 'human', since: '2026-10-07T00:00:00.000Z' }],
-      ['maws.browser.progress', { appSessionId: A, toolUseId: 'toolu_1', tabId: TAB, tool: 'browser_act', waiting: null, since: '2026-10-07T00:00:00.000Z' }],
-    ]);
-  });
-});
-
 // The wiring: the host's events in, the commands out, the tab's close and the host's state, over E4a's real store.
 describe('startBrowserAgent', () => {
   class FakeWebContents extends EventEmitter {
@@ -415,6 +399,17 @@ describe('startBrowserAgent', () => {
     expect(w.agent.seam.driverState(tabId)).toBe('none');
     w.store.entry(tabId)!.input.emit({ kind: 'mouse', source: 'human', at: 7 });
     expect(w.agent.seam.lastInputs(tabId)).toEqual([{ kind: 'mouse', source: 'human', at: 7 }]);
+    await w.agent.stop();
+  });
+
+  it("hands the handlers its drivers: a snapshot reads the tab's page through the tab's driver", async () => {
+    const w = wired();
+    const tabId = w.store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
+    const ariaSnapshot = vi.fn(async () => '- heading "A" [level=1] [ref=e2]');
+    w.drivers.for.mockResolvedValue({ page: { ariaSnapshot } });
+    const answer = await w.agent.seam.run(A, 'browser_snapshot', { tabId });
+    expect(answer).toMatchObject({ ok: true, result: { tabId, refs: 1 }, text: '- heading "A" [level=1] [ref=e2]' });
+    expect(w.drivers.for).toHaveBeenCalledWith(w.store.entry(tabId));
     await w.agent.stop();
   });
 });
