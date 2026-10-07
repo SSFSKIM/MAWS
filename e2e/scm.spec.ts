@@ -262,7 +262,7 @@ test.describe('source control over a scratch repository', () => {
       let push = await openPushSheet(p);
       await expect(push.locator('[data-scm-plan-row="remote"]')).toContainText('origin');
       await expect(push.locator('[data-scm-destination]')).toHaveText([scratch.origin]);
-      await expect(push.locator('[data-scm-plan-command]')).toHaveText(/\/git push --progress origin refs\/heads\/main:refs\/heads\/main$/); // the program's path is this machine's
+      await expect(push.locator('[data-scm-plan-command]')).toHaveText(/\/git push --progress --recurse-submodules=no origin refs\/heads\/main:refs\/heads\/main$/); // the program's path is this machine's
       await button(push, 'Cancel').click();
       await expect(push).toHaveCount(0);
       await expect(output(p), 'nothing ran').toHaveCount(0);
@@ -351,7 +351,7 @@ test.describe('source control over a scratch repository', () => {
       const { scratch } = p;
       await openTool(p);
       const push = await openPushSheet(p);
-      await expect(push.locator('[data-scm-plan-command]'), 'the wrapper is the git the push runs').toContainText(`${scratch.root}/bin/git push --progress origin`);
+      await expect(push.locator('[data-scm-plan-command]'), 'the wrapper is the git the push runs').toContainText(`${scratch.root}/bin/git push --progress --recurse-submodules=no origin`);
       await button(push, 'Push').click();
       await expect(outputText(p)).toContainText('slow git: waiting 3 s');
       await expect(output(p).locator('[data-scm-output-state]')).toContainText('Running');

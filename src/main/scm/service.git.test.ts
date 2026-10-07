@@ -231,7 +231,7 @@ describe('scm plans read their destinations under the push’s environment', () 
       expect(plan).toMatchObject({ program: '/usr/bin/git', remote: 'origin', remoteUrl: 'https://github.com/o/r.git', pushUrls: ['ssh://push.example.invalid/o/r.git'] });
       const { token } = plan as RemotePlan;
       expect(await scm.run({ appSessionId: ID, token }, 'push')).toEqual({ started: true, token });
-      expect(spawned).toEqual([{ program: '/usr/bin/git', argv: ['push', '--progress', '--set-upstream', 'origin', 'refs/heads/main:refs/heads/main'] }]);
+      expect(spawned).toEqual([{ program: '/usr/bin/git', argv: ['push', '--progress', '--recurse-submodules=no', '--set-upstream', 'origin', 'refs/heads/main:refs/heads/main'] }]);
     } finally {
       scm.dispose();
     }
