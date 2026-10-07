@@ -257,7 +257,8 @@ describe('subagents lists', () => {
     await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(b.events) }));
     const [one] = sidecarsOf('subagent-sidecars');
     await mount({ events: [started('solo', 1), started(one.agentId, 2)], sidecars: [{ ...one, meta: { ...one.meta!, name: 'researcher' } }] });
-    expect(treeOf('agents')).toEqual(['Team · led by this session', `  ${one.agentId}`, '  testergeneral-purpose · idle · joined 2m ago · listed 2m ago', 'solo']);
+    // E11 W-D (tracker row E7 "teammate joined extra frozen"): the listing's joined age, frozen at its time, is dropped
+    expect(treeOf('agents')).toEqual(['Team · led by this session', `  ${one.agentId}`, '  testergeneral-purpose · idle · listed 2m ago', 'solo']);
     expect(heading('agents')).toBe('Agents · 2 running');
     const group = within(section('agents')!).getByRole('group', { name: 'Team · led by this session' });
     expect(Array.from(group.querySelectorAll<HTMLElement>('[data-agent-row], [data-roster]')).map((el) => el.dataset.agentRow ?? el.dataset.roster)).toEqual([one.agentId, 'tester']);
