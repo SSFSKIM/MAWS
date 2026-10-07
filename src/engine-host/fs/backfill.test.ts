@@ -645,5 +645,28 @@ describe('peer messages from disk (E7)', () => {
     expect(only(events, 'user.message')[0]).toMatchObject({ origin: 'peer', content: blocks });
     expect(only(events, 'peer.message')[0]).toMatchObject({ text: 'hi', midTurn: false });
   });
+
+  // E11 (tracker row E7 "isPeerPrompt requires text-only blocks"): text beside an image is still a peer message, read
+  // from its text blocks, as live reads the same frame; never observed, so the frame is hand-built from the text case.
+  it('reads a peer record whose blocks mix text and an image, as the live normaliser does', () => {
+    const blocks = [
+      { type: 'text', text: '<cross-session-message from="uds:/tmp/cc-socks/1.sock">\nsee the shot\n</cross-session-message>' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
+    ];
+    const origin = { kind: 'peer', from: 'uds:/tmp/cc-socks/1.sock' };
+    const events = mapAll([rec({ type: 'user', uuid: 'p1', timestamp: at(1), isMeta: true, origin, message: { role: 'user', content: blocks } })]);
+    expect(kinds(events)).toEqual(['turn.started', 'user.message', 'peer.message']);
+    expect(only(events, 'user.message')[0]).toMatchObject({ origin: 'peer', content: blocks });
+    const live = new Normalizer({ appSessionId: 'app' as never, launchId: 'L', sessionId: null })
+      .push({ seq: 1, direction: 'in', at: at(1), frame: { type: 'user', uuid: 'p1', session_id: 'S', isSynthetic: true, origin, message: { role: 'user', content: blocks } } });
+    expect(payloads(events)).toEqual(payloads(live));
+    expect(payloads(events)).toEqual([expect.objectContaining({ kind: 'peer.message', text: 'see the shot' })]);
+  });
+
+  it('keeps a peer record carrying a tool result off the peer path', () => {
+    const events = mapAll([rec({ type: 'user', uuid: 'p1', timestamp: at(1), origin: { kind: 'peer' }, message: { role: 'user', content: [{ type: 'text', text: 'x' }, { type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } })]);
+    expect(kinds(events)).not.toContain('peer.message');
+    expect(only(events, 'user.message').every((e) => e.origin !== 'peer')).toBe(true);
+  });
 });
 // E7 end

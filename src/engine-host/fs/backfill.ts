@@ -185,12 +185,13 @@ function peerMessage(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillC
   if (companion) events.push({ ...base(), ...companion });
 }
 
-// A `user` record of the peer origin whose content is text: a string, or text blocks with no tool result.
+// A `user` record of the peer origin that carries text: a string, or blocks with a text block and no tool result (an
+// image beside the text too, whose text blocks the companion parses, as live parses the same frame's).
 function isPeerPrompt(record: TranscriptRecord): boolean {
   if (record.type !== 'user' || (record.origin as { kind?: unknown } | undefined)?.kind !== 'peer') return false;
   const content = messageContent(record);
   if (typeof content === 'string') return true;
-  return Array.isArray(content) && content.length > 0 && content.every((block) => isContentBlock(block) && block.type === 'text');
+  return Array.isArray(content) && content.some((block) => isContentBlock(block) && block.type === 'text') && content.every((block) => isContentBlock(block) && block.type !== 'tool_result');
 }
 
 // Shared with the follower's unended-turn rule: a record that opens a turn on this mapping, `startsTurn`'s human prompts
