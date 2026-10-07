@@ -98,7 +98,9 @@ import { connectBrowser } from './tools/browser/store';
 // E4d start
 import { connectBrowserComment } from './tools/browser/comment/connect';
 import { CommentToggle } from './tools/browser/comment/CommentToggle';
+import { openBrowserUrl } from './tools/browser/comment/actions';
 import { registerChromeExtra } from './tools/browser/extras';
+import { registerTranscriptActions as registerBrowserTranscriptActions } from './transcript';
 // E4d end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
@@ -245,9 +247,11 @@ export function App() {
   useEffect(() => connectBrowser(), []);
   // E4a end
   // E4d start: comment mode (E4d execution document, M3): the chrome's Comment toggle in E4a's extras slot, and main's
-  // comment-mode events (the toggle's store; a pick opens E3's composer through E5's seam)
+  // comment-mode events (the toggle's store; a pick opens E3's composer through E5's seam); the transcript's page-element
+  // chip opens its page in the in-app browser
   useEffect(() => registerChromeExtra(CommentToggle), []);
   useEffect(() => connectBrowserComment(), []);
+  useEffect(() => registerBrowserTranscriptActions({ openBrowserUrl }), []);
   // E4d end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
