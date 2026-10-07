@@ -5,8 +5,8 @@
 //
 // One exit order for every reason: (1) the server stops accepting; (2) every live row is stopped through
 // engine.shutdown's body (grace 3 s) and the plugin runner with it; (3) the orphan ledger is cleared if this process
-// still owns it; (4) the socket file and the lock are unlinked if the lock still names this process (a successor that
-// replaced a stale lock keeps its files); (5) the client is closed; (6) exit 0. A fatal error exits 1 and skips (3)
+// still owns it; (4) the socket file, its tmpdir fallback directory when empty, and the lock are removed if the lock
+// still names this process (a successor that replaced a stale lock keeps its files); (5) the client is closed; (6) exit 0. A fatal error exits 1 and skips (3)
 // and (4), so the successor's staleness check finds the lock and the ledger.
 //
 // When to exit is not decided here: the engine host's Supervision (supervision.ts) holds the idle exit, exit-when-idle
@@ -124,7 +124,10 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
   };
   const abortStart = (stage: string): null => {
     log(`start aborted by a signal ${stage}; exiting ${START_EXIT_ABORTED}`);
-    if (lockNamesMe()) unlinkQuietly(join(dir, SUPERVISOR_FILES.lock));
+    if (lockNamesMe()) {
+      removeFallbackDirectory(socketPath, dir);
+      unlinkQuietly(join(dir, SUPERVISOR_FILES.lock));
+    }
     proc.exit(START_EXIT_ABORTED);
     return null;
   };
@@ -170,6 +173,7 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
         clearLive(dir, owner); // (3)
         if (lockNamesMe()) {
           unlinkQuietly(socketPath); // (4) usually gone already: Node unlinks a listening path when its server closes
+          removeFallbackDirectory(socketPath, dir); // before the lock goes, so no successor can be using it yet
           unlinkQuietly(join(dir, SUPERVISOR_FILES.lock));
         }
       }
@@ -227,6 +231,17 @@ function listen(server: Server, path: string): Promise<void> {
       resolve();
     });
   });
+}
+
+// The tmpdir fallback directory of a socket path too long for sun_path (socketPathFor), once its socket is gone: removed
+// only when empty, never recursively, so whatever another supervisor put there stays.
+function removeFallbackDirectory(socketPath: string, dir: string): void {
+  if (dirname(socketPath) === dir) return;
+  try {
+    fs.rmdirSync(dirname(socketPath));
+  } catch {
+    // not empty, or already gone
+  }
 }
 
 function unlinkQuietly(path: string): void {

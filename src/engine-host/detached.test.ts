@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostEmit } from '@shared/host/runtime';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
@@ -218,6 +218,47 @@ describe('the detached entry', () => {
     expect(readLive(dir)).not.toBeNull();
     await supervisor.stop('exit'); // a second stop is the same exit, not another
     expect(host.exit).toHaveBeenCalledOnce();
+  });
+
+  // A profile path too long for sun_path puts the socket in a per-profile directory under the tmpdir (socketPathFor);
+  // the exit removes that directory once empty, and never what another supervisor put there.
+  describe('the tmpdir fallback directory', () => {
+    let socketDir: string | null = null; // removed after each case whatever it asserted
+    const fallback = async () => {
+      dir = join(root, 'p'.repeat(100), 'supervisor');
+      const host = harness();
+      const supervisor = (await host.start())!;
+      socketDir = dirname(supervisor.socketPath);
+      return { host, supervisor, socketDir };
+    };
+    afterEach(() => {
+      if (socketDir) rmSync(socketDir, { recursive: true, force: true });
+      socketDir = null;
+    });
+
+    it('a clean exit removes the fallback directory with its socket', async () => {
+      const { host, supervisor, socketDir } = await fallback();
+      expect(socketDir).toMatch(/maws-supervisor-[0-9a-f]{12}$/);
+      expect(existsSync(supervisor.socketPath)).toBe(true);
+      await supervisor.stop('exit');
+      expect(host.exit).toHaveBeenCalledWith(0);
+      expect(existsSync(socketDir)).toBe(false);
+      expect(existsSync(dir)).toBe(true); // the profile's own directory stays
+    });
+
+    it('a fallback directory that holds anything else stays, with what it holds', async () => {
+      const { host, supervisor, socketDir } = await fallback();
+      writeFileSync(join(socketDir, 'other'), '');
+      await supervisor.stop('exit');
+      expect(host.exit).toHaveBeenCalledWith(0);
+      expect(readdirSync(socketDir)).toEqual(['other']);
+    });
+
+    it('a fatal exit keeps the fallback directory, as it keeps the lock', async () => {
+      const { supervisor, socketDir } = await fallback();
+      await supervisor.stop('fatal', 1);
+      expect(existsSync(socketDir)).toBe(true);
+    });
   });
 
   it('a socket that cannot be created is fatal: exit 1 with the reason logged', async () => {
