@@ -108,17 +108,19 @@ describe('attachContextMenu', () => {
   it('pops the menu up over the view\'s window; the actions reach the navigator, the store and the page', () => {
     const webContents = Object.assign(new EventEmitter(), { cut: vi.fn(), copy: vi.fn(), paste: vi.fn(), selectAll: vi.fn(), openDevTools: vi.fn(), inspectElement: vi.fn() });
     const host = { id: 1 };
-    const entry = { tab: { ...tab, tabId: 'b_000000000001', appSessionId: 'App-A' }, view: { webContents }, host };
+    const entry = { tab: { ...tab, tabId: 'b_000000000001', appSessionId: 'App-A', partition: 'persist:maws-chrome-Profile 1' }, view: { webContents }, host };
     const store = { entry: () => entry, open: vi.fn() };
     const navigator = { navigate: vi.fn() };
     const openExternal = vi.fn();
     const popup = vi.fn();
     attachContextMenu(entry as never, { store: store as never, navigator, openExternal, popup });
-    webContents.emit('context-menu', {}, params({ linkURL: 'https://b.test/x', isEditable: true, editFlags: { canCut: true, canCopy: true, canPaste: true, canSelectAll: true } as never }));
-    const [template, window] = popup.mock.calls[0]! as [MenuItemConstructorOptions[], unknown];
-    expect(window).toBe(host);
+    const frame = { routingId: 3 };
+    webContents.emit('context-menu', {}, params({ frame: frame as never, linkURL: 'https://b.test/x', isEditable: true, editFlags: { canCut: true, canCopy: true, canPaste: true, canSelectAll: true } as never }));
+    const [template, options] = popup.mock.calls[0]! as [MenuItemConstructorOptions[], unknown];
+    expect(options).toEqual({ window: host, frame }); // the frame: macOS's own menu features (Writing Tools)
     click(template, 'Open link in new tab');
-    expect(store.open).toHaveBeenCalledWith({ appSessionId: 'App-A', url: 'https://b.test/x', select: false });
+    // in the page's own partition, as a window.open child is, whatever the Browser setting says
+    expect(store.open).toHaveBeenCalledWith({ appSessionId: 'App-A', url: 'https://b.test/x', select: false, partition: 'persist:maws-chrome-Profile 1' });
     click(template, 'Reload');
     expect(navigator.navigate).toHaveBeenCalledWith('b_000000000001', 'reload');
     click(template, 'Paste');

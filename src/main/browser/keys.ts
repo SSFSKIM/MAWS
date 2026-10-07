@@ -55,7 +55,12 @@ export function attachKeys(entry: TabEntry, { store, navigator, emit }: KeysDeps
       return;
     }
     const action = keyAction(input, { findOpen: entry.findOpen, loading: entry.tab.loading });
-    if (!action) return;
+    if (!action) {
+      // a press of a key whose taken chord's keyUp went elsewhere (⌘L and ⌘F move the focus to the app's window): its
+      // own keyUp now belongs to the page
+      if (input.type === 'keyDown') taken.delete(input.code);
+      return;
+    }
     event.preventDefault();
     taken.add(input.code);
     switch (action.kind) {

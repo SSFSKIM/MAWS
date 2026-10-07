@@ -421,11 +421,44 @@ describe('TabStore: adopting a page\'s window.open child (Design §14, Decision 
     expect(blank.tab).toMatchObject({ url: '', loading: false });
   });
 
-  it('with no child webContents from Chromium, the URL is loaded into a view of the tab\'s own', () => {
-    const { h } = adopting();
+  it('a child whose view cannot be made, or whose wiring throws, is a failed tab with no view, and the child is left open', () => {
+    let refuse = false;
+    const own: ReturnType<typeof fakeView>[] = [];
+    const h = harness({
+      createView: (_tab, adopted?: unknown) => {
+        if (refuse && adopted) throw new Error('no view');
+        if (adopted) return { webContents: adopted } as WebContentsView;
+        own.push(fakeView());
+        return own.at(-1)!;
+      },
+    });
     const opener = h.entry(open(h, 'https://a.test/').tab.tabId);
-    const adopted = h.store.adoptChild(opener, { url: 'https://a.test/c.html', select: true });
-    expect((adopted.view!.webContents as unknown as ReturnType<typeof child>).loadURL).toHaveBeenCalledWith('https://a.test/c.html');
+    refuse = true;
+    const unmade = child();
+    const failed = h.store.adoptChild(opener, { url: 'https://a.test/c.html', select: true, webContents: unmade as never });
+    expect(failed.view).toBeNull();
+    expect(failed.tab.failed).toEqual({ message: 'no view' });
+    expect(unmade.close).not.toHaveBeenCalled(); // the caller closes it once Electron has it back
+
+    refuse = false;
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const unhook = h.store.onViewCreated(() => {
+      throw new Error('wiring broke');
+    });
+    try {
+      const unwired = child();
+      const broken = h.store.adoptChild(opener, { url: 'https://a.test/d.html', select: true, webContents: unwired as never });
+      expect(broken.view).toBeNull();
+      expect(broken.tab.failed).toEqual({ message: 'wiring broke' });
+      expect(unwired.close).not.toHaveBeenCalled();
+      // a tab's own view whose wiring throws is closed at once
+      const plain = open(h, 'https://b.test/').tab;
+      expect(h.store.entry(plain.tabId)!.view).toBeNull();
+      expect(own.at(-1)!.webContents.close).toHaveBeenCalled();
+    } finally {
+      unhook();
+      logged.mockRestore();
+    }
   });
 
   it('adopting at the cap suspends the least recently shown eligible tab; with none, the child is adopted over the cap', () => {
@@ -447,6 +480,13 @@ describe('TabStore: adopting a page\'s window.open child (Design §14, Decision 
     h.store.adoptChild(opener, { url: 'https://a.test/d.html', select: true, webContents: child() as never });
     expect(h.store.entry(tabs[0]!.tabId)!.view).toBeNull(); // the least recently shown idle, unplaced tab
     expect(h.notices().at(-1)).toMatchObject({ kind: 'tabsCap', appSessionId: A });
+  });
+
+  it('open with an explicit partition (a page\'s context menu) skips the setting\'s partition', () => {
+    const { h } = adopting();
+    const tab = h.store.open({ appSessionId: A, url: 'https://a.test/', select: false, partition: 'persist:maws-chrome-Profile 1' }).tab;
+    expect(tab.partition).toBe('persist:maws-chrome-Profile 1');
+    expect(open(h, null).tab.partition).toBe(DEFAULT_PARTITION);
   });
 
   it('entryOf finds the tab whose view holds a webContents; a new entry has no input yet', () => {

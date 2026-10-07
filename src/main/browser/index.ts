@@ -62,7 +62,9 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
 
   const { file, broken } = readTabsFile(tabsFile);
   const restored = knownSessionsOnly(file, index);
-  // Each partition's permission and download handlers; run when a tab first needs the partition, after the store exists.
+  // Each partition's permission and download handlers. The preparers close over `store` and `downloads`, declared below:
+  // a partition is first opened by a tab's open or load (resolvePartition, createTabView), never while startBrowser runs,
+  // so both exist by then (startBrowser opens no tab, and a restored tab is suspended until asked).
   const partitions = new Partitions(
     (partition) => session.fromPartition(partition),
     [(ses, partition) => preparePermissions(store)(ses, partition), (ses, partition) => downloads.prepare()(ses, partition)],

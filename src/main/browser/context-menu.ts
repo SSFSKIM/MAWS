@@ -4,7 +4,7 @@
 // Copy, Paste, Select all (enabled from `editFlags`); always Back, Forward, Reload, and last Inspect (DevTools detached).
 // Later children add items through `registerContextMenuExtras` (E4d's Comment), consulted at popup time and placed
 // before Inspect; E4a registers none.
-import { clipboard, Menu, type BaseWindow, type ContextMenuParams, type MenuItemConstructorOptions } from 'electron';
+import { clipboard, Menu, type ContextMenuParams, type MenuItemConstructorOptions, type PopupOptions } from 'electron';
 import type { BrowserTab } from '@shared/browser/tab';
 import { validateBrowserUrl } from '@shared/browser/url';
 import type { Navigator } from './navigation';
@@ -89,10 +89,11 @@ export interface ContextMenuDeps {
   store: Pick<TabStore, 'entry' | 'open'>;
   navigator: Pick<Navigator, 'navigate'>;
   openExternal(url: string): void;
-  popup?(template: MenuItemConstructorOptions[], window: BaseWindow | undefined): void;
+  popup?(template: MenuItemConstructorOptions[], options: Pick<PopupOptions, 'window' | 'frame'>): void;
 }
 
-const nativePopup = (template: MenuItemConstructorOptions[], window: BaseWindow | undefined) => Menu.buildFromTemplate(template).popup({ window });
+// The frame the menu was opened on lets macOS offer its own features (Writing Tools) as it would in Chrome.
+const nativePopup = (template: MenuItemConstructorOptions[], options: Pick<PopupOptions, 'window' | 'frame'>) => Menu.buildFromTemplate(template).popup(options);
 
 export function attachContextMenu(entry: TabEntry, { store, navigator, openExternal, popup = nativePopup }: ContextMenuDeps): void {
   const view = entry.view!;
@@ -101,7 +102,8 @@ export function attachContextMenu(entry: TabEntry, { store, navigator, openExter
   wc.on('context-menu', (_event, params) => {
     if (store.entry(tabId) !== entry || entry.view !== view) return;
     const actions: ContextMenuActions = {
-      openInNewTab: (url) => void store.open({ appSessionId: entry.tab.appSessionId, url, select: false }), // Chrome's: in the background
+      // Chrome's: in the background; in this page's partition (its cookies), as a window.open child is
+      openInNewTab: (url) => void store.open({ appSessionId: entry.tab.appSessionId, url, select: false, partition: entry.tab.partition }),
       openExternal,
       copyText: (text) => clipboard.writeText(text),
       navigate: (to) => void navigator.navigate(tabId, to),
@@ -111,6 +113,6 @@ export function attachContextMenu(entry: TabEntry, { store, navigator, openExter
         wc.inspectElement(x, y);
       },
     };
-    popup(contextMenuTemplate(params, entry.tab, actions), entry.host ?? undefined);
+    popup(contextMenuTemplate(params, entry.tab, actions), { window: entry.host ?? undefined, frame: params.frame ?? undefined });
   });
 }

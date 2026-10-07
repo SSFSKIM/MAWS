@@ -109,6 +109,13 @@ describe('attachKeys: before-input-event', () => {
     ]);
   });
 
+  it('a taken chord whose keyUp went to the app window does not swallow the next press of its key', () => {
+    const h = harness();
+    expect(h.press(cmd('l', { code: 'KeyL' }))).toBe(true); // its keyUp goes to the app's window, which now has the focus
+    expect(h.press(key('l', { code: 'KeyL' }))).toBe(false);
+    expect(h.press(key('l', { type: 'keyUp', code: 'KeyL' }))).toBe(false); // reaches the page
+  });
+
   it('Esc while loading stops; with nothing to do it reaches the page', () => {
     const h = harness();
     expect(h.store.entry(h.tabId)!.tab.loading).toBe(true);

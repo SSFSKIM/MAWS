@@ -42,11 +42,12 @@ describe('decideWindowOpen: the gate (E4a Design §14, Decision Log 11 and 24)',
 });
 
 describe('attachWindowOpen: the handler on the page', () => {
-  function harness(linkTarget: 'in-app' | 'external' = 'in-app') {
+  function harness(linkTarget: 'in-app' | 'external' = 'in-app', refuseChild = false) {
     const store = new TabStore({
       emit: () => {},
-      createView: (_tab, adopted?) =>
-        ({
+      createView: (_tab, adopted?) => {
+        if (adopted && refuseChild) throw new Error('no view');
+        return {
           webContents:
             adopted ??
             Object.assign(new EventEmitter(), {
@@ -55,7 +56,8 @@ describe('attachWindowOpen: the handler on the page', () => {
               isDestroyed: () => false,
               setWindowOpenHandler: vi.fn(),
             }),
-        }) as unknown as WebContentsView,
+        } as unknown as WebContentsView;
+      },
       resolvePartition: () => DEFAULT_PARTITION,
       schedule: () => {},
     });
@@ -89,6 +91,27 @@ describe('attachWindowOpen: the handler on the page', () => {
     expect(adopted.tab).toMatchObject({ appSessionId: A, url: 'https://a.test/c.html' });
     expect(h.store.list(A).selected[A]).toBe(h.entry.tab.tabId); // background-tab: not selected
     expect(h.entry.tab.blockedPopups).toBe(0);
+  });
+
+  it('a child that cannot become a tab is handed back to Electron and closed on the next tick; no child adopts nothing', async () => {
+    const h = harness('in-app', true);
+    h.entry.input.lastInputAt = NOW;
+    const answer = h.open('https://a.test/c.html');
+    const child = Object.assign(new EventEmitter(), { close: vi.fn(), isDestroyed: () => false, setWindowOpenHandler: vi.fn() });
+    expect((answer.createWindow as (options: unknown) => unknown)({ webContents: child })).toBe(child);
+    expect(child.close).not.toHaveBeenCalled(); // not from under Electron, which still holds it
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(child.close).toHaveBeenCalledTimes(1);
+
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const tabs = h.store.list(A).tabs.length;
+      expect((h.open('https://a.test/d.html').createWindow as (options: unknown) => unknown)({})).toBeUndefined();
+      expect(h.store.list(A).tabs).toHaveLength(tabs); // no tab, and no second webContents built
+      expect(warned).toHaveBeenCalled();
+    } finally {
+      warned.mockRestore();
+    }
   });
 
   it('three opens per 5 s: the fourth is blocked; external hands out and denies', () => {

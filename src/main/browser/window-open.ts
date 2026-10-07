@@ -52,6 +52,25 @@ export interface WindowOpenDeps {
 }
 
 export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, childPreferences, now = Date.now }: WindowOpenDeps): void {
+  // `createWindow`'s answer must be Chromium's child itself. A child that could not become a tab (its view could not be
+  // made or wired) is handed back and closed on the next tick, once Electron has taken it back, so it never lingers as
+  // an invisible page. Electron gives no child only where it creates none; then nothing is adopted and the answer is
+  // unused.
+  const adoptChild = (opener: TabEntry, url: string, select: boolean, child: WebContents | undefined): WebContents => {
+    if (!child) {
+      console.warn('[browser] window.open gave no child webContents; nothing adopted');
+      return child as unknown as WebContents;
+    }
+    let adopted: WebContents | undefined;
+    try {
+      adopted = store.adoptChild(opener, { url, select, webContents: child }).view?.webContents;
+    } catch (error) {
+      console.error('[browser] a window.open child could not be adopted:', error);
+    }
+    if (adopted !== child) setImmediate(() => !child.isDestroyed() && child.close());
+    return child;
+  };
+
   const view = entry.view!;
   const { tabId } = entry.tab;
   let opens: number[] = [];
@@ -76,11 +95,7 @@ export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, chi
           outlivesOpener: true,
           overrideBrowserWindowOptions: { webPreferences: childPreferences },
           // Chromium's child is in the options; the view must adopt that very webContents (Electron checks)
-          createWindow: (options) => {
-            const child = (options as { webContents?: WebContents }).webContents;
-            const adopted = store.adoptChild(entry, { url, select: decision.select, webContents: child });
-            return adopted.view?.webContents ?? child!;
-          },
+          createWindow: (options) => adoptChild(entry, url, decision.select, (options as { webContents?: WebContents }).webContents),
         };
     }
   });

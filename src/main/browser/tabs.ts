@@ -104,7 +104,7 @@ export interface TabStoreDeps {
 export interface AdoptRequest {
   url: string; // the child's first URL as the page gave it: http(s), or about:blank
   select: boolean;
-  webContents?: WebContents; // Chromium's child webContents (the `createWindow` options' own)
+  webContents: WebContents; // Chromium's child webContents (the `createWindow` options' own)
 }
 
 export interface OpenRequest {
@@ -113,6 +113,7 @@ export interface OpenRequest {
   select: boolean;
   reuse?: 'url';
   requestId?: string;
+  partition?: string; // a tab opened from a page (its context menu) opens in that page's partition, not the setting's
 }
 
 const normalised = (url: string) => {
@@ -256,7 +257,7 @@ export class TabStore {
     }
 
     const tabId = this.mintTabId();
-    const entry = this.blankEntry(this.newTab(tabId, appSessionId, this.deps.resolvePartition(appSessionId, tabId)));
+    const entry = this.blankEntry(this.newTab(tabId, appSessionId, request.partition ?? this.deps.resolvePartition(appSessionId, tabId)));
     this.entries.set(tabId, entry);
     this.changed(entry);
     if (select || !this.selected.get(appSessionId)) this.setSelected(appSessionId, tabId);
@@ -270,6 +271,8 @@ export class TabStore {
   // `hasRoomForView` first; should the room have gone meanwhile, the child is adopted over the cap rather than refused,
   // since Chromium has already created it). Its listeners are wired before this returns, ahead of the child's first
   // navigation, which Chromium starts itself. An `about:blank` child counts as committed (see `TabEntry.committed`).
+  // When the view cannot be made or wired, the tab is marked failed with no view and the child is left open for the
+  // caller to close once Electron has it back (closing it inside `createWindow` would pull it from under Electron).
   adoptChild(opener: TabEntry, { url, select, webContents }: AdoptRequest): TabEntry {
     const { appSessionId, partition } = opener.tab;
     const blank = url === 'about:blank';
@@ -278,15 +281,8 @@ export class TabStore {
     this.entries.set(tabId, entry);
     this.changed(entry);
     if (select || !this.selected.get(appSessionId)) this.setSelected(appSessionId, tabId);
-    if (this.loadedCount() >= BROWSER_LOADED_TABS_MAX) {
-      const victim = this.capVictim(entry);
-      if (victim) {
-        this.suspend(victim.tab.tabId);
-        this.capNotice(entry);
-      }
-    }
-    if (!this.createViewFor(entry, webContents, blank)) return entry;
-    if (!webContents && !blank) this.navigateView(entry, url); // no child from Chromium: the URL is loaded here
+    this.makeRoom(entry); // no room: adopted over the cap all the same
+    this.createViewFor(entry, webContents, blank);
     return entry;
   }
 
@@ -447,20 +443,27 @@ export class TabStore {
 
   private ensureView(entry: TabEntry, url: string): boolean {
     if (entry.view) return true;
-    if (this.loadedCount() >= BROWSER_LOADED_TABS_MAX) {
-      const victim = this.capVictim(entry);
-      if (!victim) {
-        this.update(entry.tab.tabId, { suspended: true, url, loading: false });
-        this.capNotice(entry);
-        return false;
-      }
-      this.suspend(victim.tab.tabId);
+    if (!this.makeRoom(entry)) {
+      this.update(entry.tab.tabId, { suspended: true, url, loading: false });
       this.capNotice(entry);
+      return false;
     }
     return this.createViewFor(entry);
   }
 
-  // The view made (or Chromium's child adopted) and its listeners wired; false, with the tab failed, when it throws.
+  // Room for one more loaded tab: true under the cap, or once the least recently shown eligible tab is suspended for it
+  // (with the notice on `entry`); false when no tab is eligible.
+  private makeRoom(entry: TabEntry): boolean {
+    if (this.loadedCount() < BROWSER_LOADED_TABS_MAX) return true;
+    const victim = this.capVictim(entry);
+    if (!victim) return false;
+    this.suspend(victim.tab.tabId);
+    this.capNotice(entry);
+    return true;
+  }
+
+  // The view made (or Chromium's child adopted) and its listeners wired; false, with the tab failed and no view, when
+  // either throws. An adopted child is never closed here (adoptChild).
   private createViewFor(entry: TabEntry, adopted?: WebContents, committed = false): boolean {
     try {
       entry.view = adopted ? this.deps.createView(entry.tab, adopted) : this.deps.createView(entry.tab);
@@ -471,7 +474,13 @@ export class TabStore {
     entry.debugger = new TabDebugger(entry.view.webContents); // attaches only when someone first asks
     entry.committed = committed;
     this.update(entry.tab.tabId, { suspended: false, failed: null });
-    for (const listener of [...this.created]) listener(entry);
+    try {
+      for (const listener of [...this.created]) listener(entry);
+    } catch (error) {
+      console.error('[browser] a new view could not be wired:', error);
+      this.failView(entry, error, { close: !adopted });
+      return false;
+    }
     return true;
   }
 
@@ -482,12 +491,12 @@ export class TabStore {
     this.deps.emit('browser.notice', { appSessionId, tabId, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX });
   }
 
-  private failView(entry: TabEntry, error: unknown): void {
-    this.destroyView(entry);
+  private failView(entry: TabEntry, error: unknown, options: { close?: boolean } = {}): void {
+    this.destroyView(entry, options);
     this.update(entry.tab.tabId, { failed: { message: error instanceof Error ? error.message : String(error) }, loading: false });
   }
 
-  private destroyView(entry: TabEntry): void {
+  private destroyView(entry: TabEntry, { close = true }: { close?: boolean } = {}): void {
     const view = entry.view;
     if (!view) return;
     for (const listener of [...this.destroying]) listener(entry);
@@ -497,7 +506,7 @@ export class TabStore {
     entry.committed = false;
     entry.committedUrl = null;
     entry.pending = null;
-    if (!view.webContents.isDestroyed()) view.webContents.close();
+    if (close && !view.webContents.isDestroyed()) view.webContents.close();
   }
 
   private setSelected(appSessionId: AppSessionId, tabId: string): void {
