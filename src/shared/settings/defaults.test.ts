@@ -279,6 +279,9 @@ describe('settings v10 → v11 adds the browser section', () => {
     expect(valid({ searchUrl: 'javascript:alert(%s)' })).toBe(false);
     expect(valid({ searchUrl: ' https://duckduckgo.com/?q=%s' })).toBe(false); // refused, never trimmed (C1: validators never transform)
     expect(valid({ searchUrl: '%s' })).toBe(false);
+    const longest = `https://search.test/?q=%s&pad=${'x'.repeat(2048 - 'https://search.test/?q=%s&pad='.length)}`;
+    expect(valid({ searchUrl: longest })).toBe(true); // at the bound
+    expect(valid({ searchUrl: `${longest}x` })).toBe(false); // one past it
     expect(valid({ linkTarget: 'external' })).toBe(true);
     expect(valid({ linkTarget: 'tab' })).toBe(false);
     expect(valid({ passwords: false })).toBe(false); // strict

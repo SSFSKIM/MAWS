@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { browserTab, T1, T2, T3 } from '../../test-support/browser';
 import { BROWSER_COPY } from './copy';
-import { BROWSER_NOTICE_MS, browser, connectBrowser, dismissNotice, listSession, onChromeCommand, raiseNotice, resetBrowser, tabTitle } from './store';
+import { BROWSER_NOTICE_MS, browser, connectBrowser, dismissNotice, listSession, loadedTabs, onChromeCommand, raiseNotice, resetBrowser, tabTitle } from './store';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -122,5 +122,14 @@ describe('tabTitle', () => {
     expect(tabTitle(browserTab(T1, A, { title: '', url: 'https://en.wikipedia.org/wiki/X' }))).toBe('en.wikipedia.org');
     expect(tabTitle(browserTab(T1, A, { title: '', url: '' }))).toBe('');
     expect(BROWSER_COPY.newTab).toBe('New tab');
+  });
+});
+
+describe('loadedTabs (Session info, Task 3.4)', () => {
+  it('counts the tabs with a page across sessions, summing what main sampled, null before any sample', () => {
+    const state = (tabs: ReturnType<typeof browserTab>[]) => ({ ...browser.getState(), sessions: new Map([[A, { tabs, selected: null }]]) });
+    expect(loadedTabs(state([]))).toEqual({ loaded: 0, memoryKiB: null });
+    expect(loadedTabs(state([browserTab(T1, A), browserTab(T2, A, { url: '' }), browserTab(T3, A, { suspended: true })]))).toEqual({ loaded: 1, memoryKiB: null });
+    expect(loadedTabs(state([browserTab(T1, A, { memoryKiB: 2048 }), browserTab(T2, A, { url: '', memoryKiB: 1024 })]))).toEqual({ loaded: 2, memoryKiB: 3072 });
   });
 });

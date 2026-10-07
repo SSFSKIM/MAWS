@@ -63,6 +63,9 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V11): Setti
     'host.status': () => ({ transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', matches: null, reason: null, waitingLiveSessions: null, lastExit: null }),
     'host.restart': () => undefined,
     // E10 end
+    // E4a start: Settings › Browser's profile select (E4b writes the profiles; none by default)
+    'browser.profiles.list': () => ({ profiles: [] }),
+    // E4a end
   };
   const bridge = {
     invoke: vi.fn(async (name: string, input: unknown) => {

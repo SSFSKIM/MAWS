@@ -51,9 +51,9 @@ describe('settings tab writes one field per row', () => {
   it('has the six sections, the index and its footer', () => {
     renderView();
     const index = screen.getByRole('navigation', { name: 'Settings sections' });
-    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications']); // E9: Voice after Keyboard
+    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Browser']); // E9: Voice after Keyboard; E4a: Browser last
     expect(index.textContent).toContain("Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.");
-    for (const name of ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications']) expect(screen.getByRole('region', { name })).toBeTruthy();
+    for (const name of ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Browser']) expect(screen.getByRole('region', { name })).toBeTruthy();
   });
 
   it('Engine: the binary, the config home, and the subagent model as one field', async () => {
@@ -431,3 +431,59 @@ describe('settings view lists Voice', () => {
   });
 });
 // E9 end
+
+// E4a start: Settings › Browser (E4a execution document, Design §9 and §16; settings version 11): the profile select with
+// Default first and the imported profiles by name (a saved one the list lost stays, marked), the search template written
+// only when it is an http(s) address with %s, and the link target, each one field of `settings.browser`.
+describe('settings view lists Browser', () => {
+  const profiles = { 'browser.profiles.list': () => ({ profiles: [{ profileDir: 'Profile 2', name: 'Work' }, { profileDir: 'Default', name: 'Home' }] }) };
+  const select = () => within(row('Profile')).getByRole('combobox', { name: 'Profile' }) as HTMLSelectElement;
+  const search = () => within(row('Search engine')).getByRole('textbox', { name: 'Search engine' }) as HTMLInputElement;
+
+  it('the Profile select lists Default first, then the imported profiles by name, and writes the choice as one field', async () => {
+    renderView(SETTINGS_DEFAULTS_V11, 'browser', profiles);
+    expect(row('Profile').textContent).toContain('Applies to tabs opened from now on');
+    await vi.waitFor(() => expect([...select().options].map((o) => [o.value, o.textContent])).toEqual([['', 'Default'], ['Default', 'Home'], ['Profile 2', 'Work']]));
+    fireEvent.change(select(), { target: { value: 'Profile 2' } });
+    await vi.waitFor(() => expect(b.sets).toEqual([{ browser: { profile: 'Profile 2' } }]));
+    expect(settings().browser.profile).toBe('Profile 2');
+    fireEvent.change(select(), { target: { value: '' } });
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ browser: { profile: null } }));
+  });
+
+  it('a saved profile the list no longer has stays selected, marked as not found', async () => {
+    renderView({ ...SETTINGS_DEFAULTS_V11, browser: { ...SETTINGS_DEFAULTS_V11.browser, profile: 'Profile 9' } }, null, profiles);
+    await vi.waitFor(() => expect(select().options).toHaveLength(4));
+    expect(select().value).toBe('Profile 9');
+    expect(select().selectedOptions[0]!.textContent).toBe('Profile 9 · not found');
+  });
+
+  it('the search template is written on Enter when it holds %s, refused in words otherwise, and Use default puts Google back', async () => {
+    const user = userEvent.setup();
+    renderView();
+    expect(search().value).toBe('https://www.google.com/search?q=%s');
+    expect(row('Search engine').textContent).toContain('Use %s for the search text');
+    expect(within(row('Search engine')).queryByRole('button', { name: 'Use default' })).toBeNull();
+    await user.clear(search());
+    await user.type(search(), 'https://duckduckgo.com/?q={Enter}');
+    await vi.waitFor(() => expect(search().value).toBe('https://www.google.com/search?q=%s'));
+    expect(b.sets).toEqual([]);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Enter an http or https address with %s where the search text goes']);
+    await user.clear(search());
+    await user.type(search(), 'https://duckduckgo.com/?q=%s{Enter}');
+    await vi.waitFor(() => expect(b.sets).toEqual([{ browser: { searchUrl: 'https://duckduckgo.com/?q=%s' } }]));
+    await user.click(within(row('Search engine')).getByRole('button', { name: 'Use default' }));
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ browser: { searchUrl: 'https://www.google.com/search?q=%s' } }));
+    expect(search().value).toBe('https://www.google.com/search?q=%s');
+  });
+
+  it('the link target writes its one field', async () => {
+    renderView();
+    const links = within(row('Links that open a new window'));
+    expect((links.getByRole('radio', { name: 'In MAWS' }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(links.getByRole('radio', { name: 'In the system browser' }));
+    await vi.waitFor(() => expect(b.sets).toEqual([{ browser: { linkTarget: 'external' } }]));
+    expect(settings().browser.linkTarget).toBe('external');
+  });
+});
+// E4a end

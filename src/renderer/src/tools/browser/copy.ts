@@ -109,6 +109,11 @@ export const BROWSER_COPY = {
   downloadRefusedAgent: 'A download the agent started was refused; downloads are yours to start',
   urlCopied: 'URL copied to clipboard', // Codex's `thread.browser.url.copied`
   tabsFileBroken: 'The saved browser tabs could not be read; the file was set aside',
+
+  // ---- Session info (Task 3.4; Design §12): the app's loaded pages beside the engine's memory budget ----
+  sessionInfoLabel: 'Browser tabs',
+  sessionInfo: (loaded: number, mib: number | null) => `${loaded} loaded${mib === null ? '' : ` · ${mib} MB`} · outside the engine budget`,
+  sessionInfoNone: 'No tabs loaded',
 } as const;
 
 // A permission as the denied-permission line names it: Codex's capability phrases (`browser.permission.capability.*`)

@@ -154,7 +154,7 @@ function withoutRetiredActions(raw: unknown): unknown {
 // field, and `notifications.kinds` a second level, key by key, so a kinds patch never replaces the sibling kinds. The
 // theme and the keymap are values of their own and are replaced whole. A key present as `undefined` changes nothing.
 export function applySettingsPatch(state: Settings, patch: SettingsPatch): Settings {
-  const { notifications, engine, gateway, usage, appearance, permissions, voice, supervisor, browser, ...values } = patch;
+  const { notifications, engine, gateway, usage, appearance, permissions, voice, supervisor, browser, ...values } = patch; // E4a: browser
   const next: Settings = { ...state, ...defined(values) };
   if (notifications) {
     const { kinds, ...fields } = notifications;

@@ -178,6 +178,21 @@ export function useBrowserTitle(appSessionId: AppSessionId | null, browserTabId:
   });
 }
 
+// Session info's Browser tabs row (Design §12; Decision Log 5): the tabs with a page in a renderer across the app and the
+// sum of their sampled working sets in KiB, null before main's first sample (the first comes 15 s after the first page).
+export function loadedTabs(state: BrowserState): { loaded: number; memoryKiB: number | null } {
+  let loaded = 0;
+  let memoryKiB: number | null = null;
+  for (const { tabs } of state.sessions.values()) {
+    for (const tab of tabs) {
+      if (tab.suspended || (tab.url === '' && tab.memoryKiB === null)) continue; // no page, no renderer
+      loaded++;
+      if (tab.memoryKiB !== null) memoryKiB = (memoryKiB ?? 0) + tab.memoryKiB;
+    }
+  }
+  return { loaded, memoryKiB };
+}
+
 // Tests.
 export function resetBrowser(): void {
   versions.clear();

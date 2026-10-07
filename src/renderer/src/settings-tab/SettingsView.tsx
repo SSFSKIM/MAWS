@@ -13,9 +13,10 @@ import { KeymapSection } from './KeymapSection';
 import { NotificationsSection } from './NotificationsSection';
 import { useSettingsValue } from './parts';
 import { VoiceSection } from './VoiceSection'; // E9
+import { BrowserSection } from './BrowserSection'; // E4a
 
 export type SettingsSection = NonNullable<Extract<TabRef, { kind: 'settings' }>['section']>;
-const ORDER: SettingsSection[] = ['engine', 'gateway', 'keyboard', 'voice', 'appearance', 'notifications']; // E9: Voice after Keyboard
+const ORDER: SettingsSection[] = ['engine', 'gateway', 'keyboard', 'voice', 'appearance', 'notifications', 'browser']; // E9: Voice after Keyboard; E4a: Browser last
 const HINTS: Partial<Record<SettingsSection, string>> = { keyboard: KEYBOARD.hint }; // W9 (H4): no charter labels in the UI
 const headingId = (section: SettingsSection) => `settings-${section}`;
 
@@ -101,6 +102,10 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
               </Section>
               <Section id="notifications">
                 <NotificationsSection settings={settings} />
+              </Section>
+              {/* E4a */}
+              <Section id="browser">
+                <BrowserSection settings={settings} />
               </Section>
             </div>
           )}

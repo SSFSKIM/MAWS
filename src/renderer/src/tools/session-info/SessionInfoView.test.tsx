@@ -27,6 +27,10 @@ import { useUsage } from '../../stores/usage';
 import { applyEvents, createState } from '../../transcript/model/reduce';
 import { builder, tool } from '../../transcript/model/test-events';
 import { sessionInfoTool } from '.';
+// E4a start
+import { browserTab, T1, T2, T3 } from '../../test-support/browser';
+import { browser, resetBrowser } from '../browser/store';
+// E4a end
 
 const ROOT = join(__dirname, '../../../../..');
 const READY = 'app-7412a115' as AppSessionId; // Settings idle probe: ready, idle, routed, auto
@@ -77,7 +81,7 @@ describe('session info renders the six sections', () => {
     mount(ctxOf(READY));
     for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) expect(screen.getByRole('region', { name: title })).toBeTruthy();
     const labels = screen.getAllByRole('term').map((t) => t.textContent);
-    expect(labels).toEqual(['Version', 'Binary', 'Session id', 'Held by' /* W7 */, 'Process tree', 'Memory budget' /* C12 */, 'Main', 'Subagents', 'Route', 'Account', 'Tool search', 'Mode', 'Auto-mode lane', 'Rules', 'Context', 'Usage', 'Cost', 'Hooks', 'MCP']);
+    expect(labels).toEqual(['Version', 'Binary', 'Session id', 'Held by' /* W7 */, 'Process tree', 'Memory budget' /* C12 */, 'Browser tabs' /* E4a */, 'Main', 'Subagents', 'Route', 'Account', 'Tool search', 'Mode', 'Auto-mode lane', 'Rules', 'Context', 'Usage', 'Cost', 'Hooks', 'MCP']);
     expect(valueOf('Version')).toBe('2.1.283'); // W13: the session's own, no pin note
     expect(valueOf('Binary')).toBe('~/.local/share/claude/versions/2.1.283'); // W13: the file it was spawned from, not today's setting
     expect(valueOf('Session id')).toBe(record.engineSessionId);
@@ -235,3 +239,25 @@ describe('the route switch and the Direct poll, re-homed from the status line', 
     await waitFor(() => expect(useUsage.getState().direct.get(READY)).toBeTruthy());
   });
 });
+
+// E4a start: the Browser tabs row under Memory budget (E4a execution document, Design §12): the app's loaded pages from
+// the browser store, any session's, with their sampled weight, outside the engine budget.
+describe('session info names the browser’s loaded pages', () => {
+  afterEach(() => resetBrowser());
+
+  it('reads none, then the loaded tabs across sessions with the sum of their sampled working sets', () => {
+    mount(ctxOf(READY));
+    expect(valueOf('Browser tabs')).toBe('No tabs loaded');
+    cleanup();
+    const other = 'app-other' as AppSessionId;
+    browser.setState({
+      sessions: new Map([
+        [READY, { tabs: [browserTab(T1, READY, { memoryKiB: 300 * 1024 }), browserTab(T2, READY, { suspended: true, memoryKiB: null })], selected: T1 }],
+        [other, { tabs: [browserTab(T3, other, { memoryKiB: 112 * 1024 })], selected: T3 }],
+      ]),
+    });
+    mount(ctxOf(READY));
+    expect(valueOf('Browser tabs')).toBe('2 loaded · 412 MB · outside the engine budget');
+  });
+});
+// E4a end

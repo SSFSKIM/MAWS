@@ -26,6 +26,7 @@ import { autoModeLane, reviewsOf } from './lane';
 import { sessionInfoSections, type InfoRow } from './model';
 import { RouteSwitch } from './RouteSwitch';
 import { useBudget } from '../../budget/store'; // C12
+import { loadedTabs, useBrowser } from '../browser/store'; // E4a
 
 export type SessionInfoState = { openedAt: string }; // no per-tab state beyond bookkeeping; every value is read live
 
@@ -70,6 +71,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   const now = useNow(POPOVER_TICK_MS);
   const windows = useSessionWindows(record, status);
   const budget = useBudget((s) => s.state); // C12
+  const browserTabs = useBrowser(useShallow(loadedTabs)); // E4a
   useDirectFallback(appSessionId, visible ? status : null); // W2: a Direct session's windows, read while the tab is shown
 
   // W2: a session whose first launch C10 still runs (its intent, no status) chooses its route on the intent (the model
@@ -95,6 +97,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
     models: models ?? null,
     windows,
     budget, // C12
+    browserTabs, // E4a
     now,
     reads: { status: statusRead.data ?? null, rules: rules.data ?? null, hooks: hooks.data ?? null, mcp: mcp.data ?? null, context: context.data ?? null },
   });
