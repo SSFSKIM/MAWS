@@ -1,11 +1,14 @@
 // E4a: the commands the browser's own surfaces send main (E4a execution document, Interfaces "IPC `browser.*`"). Every
 // URL here has passed `validateBrowserUrl` and is its parsed form, never typed text (Decision Log 34). A tab that closed
-// meanwhile answers `invalid_input`, which is no fault of the person's and is dropped silently.
+// meanwhile answers `invalid_input` "unknown browser tab", which is no fault of the person's and is dropped silently;
+// every other refusal is warned.
+import { UNKNOWN_BROWSER_TAB } from '@shared/browser/tab';
 import type { CommandInput } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 
 const quietly = (what: string) => (result: { ok: true } | { ok: false; error: { code: string; message: string } }) => {
-  if (!result.ok && result.error.code !== 'invalid_input') console.warn(`[browser] ${what} failed: ${result.error.message}`);
+  if (result.ok || (result.error.code === 'invalid_input' && result.error.message === UNKNOWN_BROWSER_TAB)) return;
+  console.warn(`[browser] ${what} failed: ${result.error.message}`);
 };
 
 export function navigate(tabId: string, to: CommandInput<'browser.tabs.navigate'>['to']): void {

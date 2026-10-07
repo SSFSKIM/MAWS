@@ -53,6 +53,15 @@ describe('BrowserHandle.open', () => {
     expect(fake.invoked('browser.tabs.select')).toEqual([{ appSessionId: A, tabId: T2 }]);
   });
 
+  it('a tab id selects in the session the store lists the tab under, not the session the handle was made for', () => {
+    resetBrowser();
+    browser.setState({ sessions: new Map([[B, { tabs: [browserTab(T2, B)], selected: null }]]) });
+    const handle = new BrowserHandle(A, undefined, fake.client);
+    handle.open({ tabId: T2 });
+    expect(fake.invoked('browser.tabs.select')).toEqual([{ appSessionId: B, tabId: T2 }]);
+    resetBrowser();
+  });
+
   it('nothing, a refused target, or no session at all sends nothing', () => {
     const handle = new BrowserHandle(A, undefined, fake.client);
     handle.open(undefined);

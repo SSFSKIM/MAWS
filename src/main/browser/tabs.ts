@@ -19,7 +19,7 @@ import { randomBytes } from 'node:crypto';
 import type { BrowserWindow, WebContents, WebContentsView } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import { classifyLoadError } from '@shared/browser/errors';
-import { BROWSER_LOADED_TABS_MAX, type BrowserControl, type BrowserTab } from '@shared/browser/tab';
+import { BROWSER_LOADED_TABS_MAX, UNKNOWN_BROWSER_TAB, type BrowserControl, type BrowserTab } from '@shared/browser/tab';
 import { hostOf, validateBrowserUrl } from '@shared/browser/url';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabDebugger } from './debugger';
@@ -84,7 +84,7 @@ export type BrowserEmit = <N extends EventName>(name: N, payload: EventPayload<N
 
 export class UnknownTabError extends Error {
   constructor(readonly tabId: string) {
-    super('unknown browser tab');
+    super(UNKNOWN_BROWSER_TAB);
   }
 }
 

@@ -3,7 +3,7 @@
 // Retry (`reload`, Decision Log 44 (c)); a suspended tab offering its last URL as parsed (Decision Log 34); a tab that
 // never navigated; a main tab whose tab is gone.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LOAD_ERROR_KINDS } from '@shared/browser/errors';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -98,6 +98,22 @@ describe('the other pages', () => {
     render(<BrowserPane tab={null} surface="main" gone />);
     expect(screen.getByText(BROWSER_COPY.tabGone)).toBeTruthy();
     expect(screen.getByRole('heading', { name: BROWSER_COPY.empty.title })).toBeTruthy();
+  });
+
+  it('a refusal other than an unknown tab is warned; an unknown tab (closed meanwhile) is not', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    main = installFakeMain(() => ({ ok: false, error: { code: 'invalid_input', message: 'unknown browser tab' } }));
+    show({ crashed: { reason: 'oom' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(warn).not.toHaveBeenCalled();
+    cleanup();
+    main = installFakeMain(() => ({ ok: false, error: { code: 'invalid_input', message: 'not an http or https URL' } }));
+    show({ crashed: { reason: 'oom' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(warn).toHaveBeenCalledWith('[browser] navigating failed: not an http or https URL');
+    warn.mockRestore();
   });
 
   it('a live page draws nothing over the view', () => {

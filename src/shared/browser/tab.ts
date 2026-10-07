@@ -7,6 +7,8 @@ import { AppSessionIdSchema } from '../graph/ids';
 import { LOAD_ERROR_KINDS } from './errors';
 
 export const BROWSER_TAB_ID = /^b_[0-9a-f]{12}$/;
+// Main's `invalid_input` message for a tab id it does not know (a tab closed meanwhile); the renderer drops only this one.
+export const UNKNOWN_BROWSER_TAB = 'unknown browser tab';
 export const BrowserTabIdSchema = z.string().regex(BROWSER_TAB_ID);
 
 // The tab's own Chromium session: the default partition, or one per imported Chrome profile (E4b). Never the app's

@@ -17,6 +17,7 @@ import { ipc } from '../../ipc/client';
 import type { PanelTool, PanelToolContext } from '../../panel/tool';
 import { BROWSER_COPY } from './copy';
 import { BrowserIcon } from './icons';
+import { browser } from './store';
 import { BrowserView } from './View';
 
 export interface BrowserParams {
@@ -49,7 +50,10 @@ export class BrowserHandle {
       const request = { appSessionId, url: checked.url, select: true, reuse: 'url' as const, ...(params.requestId !== undefined && { requestId: params.requestId }) };
       void this.client.invoke('browser.tabs.open', request).then(warnRefused('opening a tab'));
     } else if (params?.tabId !== undefined) {
-      void this.client.invoke('browser.tabs.select', { appSessionId, tabId: params.tabId }).then(warnRefused('selecting a tab'));
+      // the tab's own session as the store lists it, else the one named, else the one the tool shows
+      const { tabId } = params;
+      const listed = [...browser.getState().sessions].find(([, { tabs }]) => tabs.some((tab) => tab.tabId === tabId))?.[0];
+      void this.client.invoke('browser.tabs.select', { appSessionId: listed ?? appSessionId, tabId }).then(warnRefused('selecting a tab'));
     }
   };
 }
