@@ -26,7 +26,7 @@ import { Shell } from './Shell';
 import { registerSlot, resetSlots } from './slots';
 import { toolbarTitle } from './Toolbar';
 import { fillStores, scenarioFile } from '../test-support/shell-stores';
-import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -230,6 +230,10 @@ describe('toolbar', () => {
     const deliverable = { id: 'deliverable:app-a:d1', kind: 'deliverable', appSessionId: A, deliverableId: 'd1', pinned: false } as const;
     expect(toolbarTitle(deliverable, records, 'Dashboard')).toEqual({ title: 'Dashboard', branch: null });
     expect(toolbarTitle(deliverable, records)).toEqual({ title: 'Deliverable', branch: null });
+    // E4a: a browser tab by its page's title (else host), else "Browser" until the browser store lists the tab
+    const browser = { id: 'browser:app-a:b_000000000001', kind: 'browser', appSessionId: A, browserTabId: 'b_000000000001', pinned: false } as const;
+    expect(toolbarTitle(browser, records, null, 'Page A')).toEqual({ title: 'Page A', branch: null });
+    expect(toolbarTitle(browser, records)).toEqual({ title: 'Browser', branch: null });
     // W9 (H2): the engine's HEAD (a folder that is no repository) is no branch, so no chip
     expect(toolbarTitle(sessionTab('app-a'), new Map([[A, record('app-a', { branch: 'HEAD' })]])).branch).toBeNull();
   });
@@ -261,7 +265,7 @@ describe('toolbar', () => {
   });
 
   it('shows a rebound chord in the tooltip', () => {
-    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V10, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
+    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V11, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
     render(<Shell />);
     expect(screen.getByRole('button', { name: 'Toggle sidebar' }).getAttribute('title')).toBe('Toggle sidebar · ⌘⌥S');
     useSettings.setState({ state: null });

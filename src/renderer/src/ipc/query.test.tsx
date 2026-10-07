@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { IpcCommandError, QUERY_COMMANDS, useCommand } from './query';
-import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -21,7 +21,7 @@ describe('useCommand', () => {
   });
 
   it('resolves to the validated command output', async () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V10, theme: 'dark' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V11, theme: 'dark' }, resolvedTheme: 'dark' };
     answer({ ok: true, value: state });
     const { result } = renderHook(() => useCommand('settings.get', undefined), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -47,7 +47,8 @@ describe('useCommand is for reads only', () => {
     const e9 = ['voice.status']; // E9: Settings › Voice (a non-prompting probe)
     const e6 = ['scm.status', 'scm.pr.state']; // E6: the Source control tool's and the push-state row's reads
     const e2 = ['deliverables.list', 'deliverables.listAll', 'deliverables.get']; // E2: the deliverable store's reads
-    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11, ...w3, ...e9, ...e6, ...e2].sort());
+    const e4a = ['browser.tabs.list', 'browser.history.suggest', 'browser.profiles.list']; // E4a: the browser's tab list, suggestions, profiles
+    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11, ...w3, ...e9, ...e6, ...e2, ...e4a].sort());
   });
 
   // Compile-time: writes and void-output commands are not queries (checked by `pnpm typecheck`); they go through

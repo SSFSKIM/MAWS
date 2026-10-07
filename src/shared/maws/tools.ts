@@ -284,6 +284,9 @@ export const TOOL_ERRORS = {
   // E2 end
   // E10: a bridge request made while no app is connected to the engine host (the detached supervisor), answered at once
   appNotOpen: (tool: 'show_pane' | 'artifact_screenshot') => `${tool}: MAWS is not open; the ${tool === 'show_pane' ? 'pane cannot be shown' : 'artifact cannot be captured'}`,
+  // E4a start: a target the browser refuses (not http or https; `validateBrowserUrl`); E4c's tools pass their own name
+  navigationRefused: (target: string, tool: MawsToolName = 'show_pane') => `${tool}: MAWS opens only http and https pages in its browser; refused "${target}"`,
+  // E4a end
 } as const;
 
 function issuesText(error: z.ZodError): string {

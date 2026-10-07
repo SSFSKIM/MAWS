@@ -27,6 +27,7 @@ import type { Lane } from './lane';
 import type { BudgetState } from '@shared/ipc/schema/engine';
 import { BUDGET } from '../../budget/copy';
 // C12 end
+import { BROWSER_COPY } from '../browser/copy'; // E4a
 
 // W2: `route` is the Direct⇄gateway switch, offering `targets` (the routing facts' own)
 export type InfoRow = { label: string; value: string; note?: string; action?: 'permissions' | 'route'; targets?: Route[] };
@@ -42,6 +43,7 @@ export interface SessionInfoInput {
   models: readonly ModelRow[] | null; // the session's listed catalogue, when C7 read one (an alias matched to its resolved id)
   windows: SessionWindows;
   budget: BudgetState | null; // C12: the engine host's memory budget, null before it answered
+  browserTabs: { loaded: number; memoryKiB: number | null }; // E4a: the app's loaded browser tabs (the browser store's `loadedTabs`)
   now: number;
   reads: {
     status: GetStatusResponse | null;
@@ -70,6 +72,13 @@ export function budgetRows(budget: BudgetState | null, digest: SessionDigest | n
 }
 // C12 end
 
+// E4a: the app's browser pages beside the budget (E4a execution document, Design §12; Decision Log 5): renderer
+// processes of the app's own, which the engine budget does not count and never releases.
+export function browserTabsRow({ loaded, memoryKiB }: SessionInfoInput['browserTabs']): InfoRow {
+  const value = loaded === 0 ? BROWSER_COPY.sessionInfoNone : BROWSER_COPY.sessionInfo(loaded, memoryKiB === null ? null : Math.round(memoryKiB / 1024));
+  return { label: BROWSER_COPY.sessionInfoLabel, value };
+}
+
 // W7: who holds the session, read through the same derivation as the glyph and the tab (§5.7).
 export function heldByRow(record: SessionRecord): InfoRow {
   const contest = contestLine(record);
@@ -79,7 +88,7 @@ export function heldByRow(record: SessionRecord): InfoRow {
   return { label: INFO.heldBy, value: record.holder.kind === 'self' ? INFO.heldByMaws : INFO.heldByNone };
 }
 
-function engineSection({ record, status, digest, budget }: SessionInfoInput): InfoSection { // C12: digest, budget
+function engineSection({ record, status, digest, budget, browserTabs }: SessionInfoInput): InfoSection { // C12: digest, budget; E4a: browserTabs
   const version = status?.engineVersion ?? record.engineVersion;
   const tree = status?.memory.treeRssKiB ?? null;
   return {
@@ -93,6 +102,7 @@ function engineSection({ record, status, digest, budget }: SessionInfoInput): In
       heldByRow(record), // W7
       { label: INFO.processTree, value: tree === null ? NONE : INFO.tree(mb(tree), status?.memory.rssKiB == null ? null : mb(status.memory.rssKiB)) },
       ...budgetRows(budget, digest), // C12
+      browserTabsRow(browserTabs), // E4a
     ],
   };
 }

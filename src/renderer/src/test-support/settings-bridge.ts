@@ -5,7 +5,7 @@ import { vi } from 'vitest';
 import { validateCommandInput } from '@shared/ipc/validate';
 import type { BinaryInfo } from '@shared/ipc/schema/engine';
 import type { CommandName, MawsBridge, Settings, SettingsPatch } from '@shared/ipc/schema';
-import { applySettingsPatch, SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
+import { applySettingsPatch, SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 import { useSettings } from '../stores/settings';
 
 export const BINARY: BinaryInfo = { path: '/Users/owner/.local/share/claude/versions/2.1.287', testedVersion: '2.1.283', version: '2.1.287', ok: true, error: null }; // W13: the installed one
@@ -19,7 +19,7 @@ export interface SettingsBridge {
   answers: Record<string, (input: unknown) => unknown>; // command → the value it answers (throw to answer an error)
 }
 
-export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V10): SettingsBridge {
+export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V11): SettingsBridge {
   let settings = structuredClone(initial);
   const publish = () => useSettings.setState({ state: { settings, resolvedTheme: settings.theme === 'dark' ? 'dark' : 'light' } });
   publish();
@@ -63,6 +63,9 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V10): Setti
     'host.status': () => ({ transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', matches: null, reason: null, waitingLiveSessions: null, lastExit: null }),
     'host.restart': () => undefined,
     // E10 end
+    // E4a start: Settings › Browser's profile select (E4b writes the profiles; none by default)
+    'browser.profiles.list': () => ({ profiles: [] }),
+    // E4a end
   };
   const bridge = {
     invoke: vi.fn(async (name: string, input: unknown) => {

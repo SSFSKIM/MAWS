@@ -98,6 +98,21 @@ CREATE INDEX side_threads_parent ON side_threads(parent_app_id);
 UPDATE sessions SET transcript_mtime_ms = -1 WHERE kind = 'engine' AND transcript_path IS NOT NULL;
 `,
   },
+  // E4a start
+  {
+    version: 5,
+    // E4a (P1 ledger §4; E4a execution document, Design §6): MAWS's own browser history, one row per (partition, url),
+    // fed by the tabs' committed navigations and read by the address field's suggestions. `source` is 'imported' for a
+    // row E4b brought in from a Chrome profile (kept so when MAWS visits it again); the index serves the most recent
+    // rows of one partition.
+    sql: `
+CREATE TABLE browser_history (partition TEXT NOT NULL, url TEXT NOT NULL, title TEXT, visit_count INTEGER NOT NULL DEFAULT 0,
+  typed_count INTEGER NOT NULL DEFAULT 0, last_visit_ms INTEGER NOT NULL, source TEXT NOT NULL CHECK (source IN ('maws','imported')),
+  PRIMARY KEY (partition, url));
+CREATE INDEX browser_history_recent ON browser_history(partition, last_visit_ms DESC);
+`,
+  },
+  // E4a end
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

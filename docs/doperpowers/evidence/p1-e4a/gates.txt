@@ -1,0 +1,192 @@
+E4a gates on the final head 9fd95ea9 (branch worktree-agent-a7ad1e8121768486d; merge base with master 07bbea8b), 2026-10-06 PDT.
+Run by /tmp/maws-review/gates/e4a-gates.sh: each gate in turn behind the load gate and a slot; an e2e failure is retried once at once by the script; a timing-only failure was then retried once alone.
+
+Summary as the script wrote it:
+  head 9fd95ea9 start 2026-10-06 22:28:07
+  typecheck rc=0 22:28:54 :: 
+  lint rc=0 22:29:21 :: 
+  units rc=1 22:32:53 :: ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯  Test Files  1 failed | 637 passed | 1 skipped (639)       Tests  3 failed | 8634 passed | 1 skipped (8638) 
+  e2e-browser rc=0 22:35:14 ::   8 passed (21.1s) 
+  e2e-tools rc=0 22:35:58 ::   8 passed (16.1s) 
+  e2e-deliverables: first run failed (kept as /tmp/maws-review/gates/e4a-e2e-deliverables.log.first), retry rc=1
+  e2e-deliverables rc=1 22:38:45 ::   1 failed   9 passed (54.3s) 
+  e2e-panel rc=0 22:39:56 ::   23 passed (42.0s) 
+  e2e-settings rc=0 22:40:43 ::   9 passed (18.2s) 
+  e2e-voice rc=0 22:41:38 ::   14 passed (27.3s) 
+  e2e-smoke rc=0 22:42:10 ::   2 passed (3.0s) 
+  done 2026-10-06 22:42:10
+
+Retries alone (22:42-22:47, load average about 16):
+  e2e-deliverables rc=0 :: 10 passed (50.5s)
+  units rc=0 :: Test Files  638 passed | 1 skipped (639) / Tests  8637 passed | 1 skipped (8638)
+
+Reading of the two first-run failures (neither in E4a's code):
+  units: three timeouts (5000 ms) in src/renderer/src/tools/code/viewer/viewer.test.tsx (the follow-the-file re-read and Load more cases), a file E4a never touched; the known load flake (tracker row 'E4a (seen)'); green alone.
+  e2e-deliverables: case 3 (e2e/deliverables.spec.ts:225, E2's bridge pick) failed twice in a row on the hover overlay (expected 1, received 0 after 5 s) and passed alone; no file it exercises changed since ce65c8c0, where it passed; the owner was active at the display during the run (UserIsActive 1), and a real pointer over the test window is the likeliest interference. Logged as a seen row in the tracker.
+
+Earlier full run at ce65c8c0 (before the whole-branch fix wave), all green on the first run: typecheck, lint, units 8620, e2e browser 8, tools 8, deliverables 10, panel 23, settings 9, voice 14, smoke 2.
+
+Shots (MAWS_E4A_SHOTS=1 pnpm e2e:browser, case 8; last regenerated at the M4 fix f182a34d; the fix wave changed none of what they show): six states in both themes, twelve files beside this one:
+  e4a-empty-dark.png
+  e4a-empty-light.png
+  e4a-error-dark.png
+  e4a-error-light.png
+  e4a-find-dark.png
+  e4a-find-light.png
+  e4a-page-dark.png
+  e4a-page-light.png
+  e4a-permission-dark.png
+  e4a-permission-light.png
+  e4a-zoom-dark.png
+  e4a-zoom-light.png
+Four of them (page, zoom, find, permission) are composites: a WebContentsView draws outside the app's DOM, so Playwright's window screenshot cannot see the page; the shot lays the view page's own Playwright screenshot into the pane (an <img> placed where the view draws) before the app window's screenshot, and removes it after (e2e/support/browser-scene.ts:248-275). empty and error are plain window screenshots (the view is hidden there by design).
+
+=== e4a-typecheck.log (tail)
+slot slot.1 acquired at 22:28:07 load { 15.10 15.06 15.14 }
+$ tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false
+=== e4a-lint.log (tail)
+slot slot.1 acquired at 22:28:54 load { 15.29 15.05 15.13 }
+$ eslint .
+=== e4a-units.log (tail)
+    377|     const { main, gated } = gatedHead();
+    378|     connect();
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+ Test Files  1 failed | 637 passed | 1 skipped (639)
+      Tests  3 failed | 8634 passed | 1 skipped (8638)
+Type Errors  no errors
+   Start at  22:29:21
+   Duration  211.20s (tests 63%, import 17%, environment 10%, transform 8%, typecheck 2%)
+  Transform  |renderer-compiled| transforming modules took 24.87s · 31% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+[ELIFECYCLE] Test failed. See above for more details.
+=== e4a-units.retry.log (tail)
+(node:23270) Warning: Closing file descriptor 16 on garbage collection
+(node:31692) Warning: Closing file descriptor 15 on garbage collection
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:31692) [DEP0137] DeprecationWarning: Closing a FileHandle object on garbage collection is deprecated. Please close FileHandle objects explicitly using FileHandle.prototype.close(). In the future, an error will be t
+ Test Files  638 passed | 1 skipped (639)
+      Tests  8637 passed | 1 skipped (8638)
+Type Errors  no errors
+   Start at  22:44:10
+   Duration  171.64s (tests 67%, import 16%, environment 9%, transform 7%)
+  Transform  |renderer-compiled| transforming modules took 25.50s · 37% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+=== e4a-e2e-browser.log (tail)
+../../out/renderer/assets/mermaid-HWGCJPDP-CO4vnHbw.js                           6,303.74 kB
+✓ built in 26.40s
+Running 8 tests using 1 worker
+  ✓  1 e2e/browser.spec.ts:28:5 › show_pane opens one tab for two windows’ worth of one request; links and window.open open tabs, gated without input; a main tab owns the view until Show here (4.9s)
+  ✓  2 e2e/browser.spec.ts:164:5 › error pages: refused, dns, generic, each with Codex’s summary and Reload; Back from an error commits the page and shows the view; a second failure replaces the first (2.2s)
+  ✓  3 e2e/browser.spec.ts:233:5 › refused addresses: file:, the app’s own scheme and javascript: are refused in the address field; the page’s file:, app-link and mailto: links navigate nothing (2.2s)
+  ✓  4 e2e/browser.spec.ts:282:5 › the cover: the palette hides the view within 200 ms behind its picture and Esc restores it; menus, popovers, a sheet and a toast over the pane cover, a popover elsewhere does not; the O
+  ✓  5 e2e/browser.spec.ts:392:5 › placement: the panel resized by the keyboard and by a 40-step drag, and the window resized, keep the view on the pane within 1 px two frames after the last step (2.0s)
+  ✓  6 e2e/browser.spec.ts:439:5 › a relaunch restores the tabs suspended: both chips muted, the selected one offering its last URL, nothing loaded until Open (2.8s)
+  ✓  7 e2e/browser.spec.ts:521:5 › the page’s guards: a permission request denied with the line; the clipboard written only on a real click; a download to the save path with Reveal; find in page; Esc reaches the page whe
+  ✓  8 e2e/browser.spec.ts:585:5 › the chrome in both themes: the empty state, a loaded page, the zoom banner at 125%, the find bar, the permission line, the error page (shots under MAWS_E4A_SHOTS=1) (1.8s)
+  8 passed (21.1s)
+=== e4a-e2e-tools.log (tail)
+../../out/renderer/assets/mermaid-HWGCJPDP-CO4vnHbw.js                           6,303.74 kB
+✓ built in 25.78s
+Running 8 tests using 1 worker
+  ✓  1 e2e/maws-tools.spec.ts:234:5 › send_file: the delivery row names hello.txt and the caption, its two buttons reach the seams, and the X12 record is written (2.3s)
+  ✓  2 e2e/maws-tools.spec.ts:278:5 › a blocking ask: the capsule waits, the sheet holds every modality, the attention item shows on the Overview card and in Needs you, and Submit answers it (2.0s)
+  ✓  3 e2e/maws-tools.spec.ts:367:5 › a reload mid-ask: the sheet lists the ask again from the host and Submit answers it; after another reload View answers reopens it read-only (2.0s)
+  ✓  4 e2e/maws-tools.spec.ts:419:5 › a stop with a blocking ask pending: the capsule reads cancelled, the exit names a question lost, and the journal holds maws_ask_cancelled before the exit (1.6s)
+  ✓  5 e2e/maws-tools.spec.ts:443:5 › an ask from a session not shown never switches the main view; its sheet opens when that session is selected (2.3s)
+  ✓  6 e2e/maws-tools.spec.ts:480:5 › an async ask: acknowledged at once, Submit sends the recorded steer, and the capsule turns answered across the second turn (2.1s)
+  ✓  7 e2e/maws-tools.spec.ts:526:5 › show_pane: the Terminal opens in the panel, a deliverable no record answers to and an unknown pane are error cells (1.8s)
+  ✓  8 e2e/maws-tools.spec.ts:564:5 › the SDK MCP round trip: the app answers the engine’s handshake with the seven tools and refuses the probe’s own tool (1.5s)
+  8 passed (16.1s)
+=== e4a-e2e-deliverables.log.first (tail)
+      255 |     await maws.page.mouse.move(100, 100);
+    > 256 |     await expect.poll(() => frame.locator('[data-maws-pick-overlay]').count()).toBe(1);
+          |                                                                                ^
+      257 |     await maws.page.mouse.click(100, 100);
+      258 |     await expect.poll(posted).toEqual([
+      259 |       { type: 'maws:picked', selector: '#hero', label: 'h1#hero', text: 'Sales overview', rect: { x: 0, y: 0, width: FRAME.width, height: 200 } },
+        at /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7ad1e8121768486d/e2e/deliverables.spec.ts:256:80
+    Error Context: test-results/deliverables-the-bridge-sc-f47de-d-posts-the-pick-to-the-app/error-context.md
+  1 failed
+    e2e/deliverables.spec.ts:225:5 › the bridge script picks an element of an artifact in a sandboxed frame and posts the pick to the app 
+  9 passed (54.4s)
+[ELIFECYCLE] Command failed with exit code 1.
+=== e4a-e2e-deliverables.log (tail)
+      255 |     await maws.page.mouse.move(100, 100);
+    > 256 |     await expect.poll(() => frame.locator('[data-maws-pick-overlay]').count()).toBe(1);
+          |                                                                                ^
+      257 |     await maws.page.mouse.click(100, 100);
+      258 |     await expect.poll(posted).toEqual([
+      259 |       { type: 'maws:picked', selector: '#hero', label: 'h1#hero', text: 'Sales overview', rect: { x: 0, y: 0, width: FRAME.width, height: 200 } },
+        at /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7ad1e8121768486d/e2e/deliverables.spec.ts:256:80
+    Error Context: test-results/deliverables-the-bridge-sc-f47de-d-posts-the-pick-to-the-app/error-context.md
+  1 failed
+    e2e/deliverables.spec.ts:225:5 › the bridge script picks an element of an artifact in a sandboxed frame and posts the pick to the app 
+  9 passed (54.3s)
+[ELIFECYCLE] Command failed with exit code 1.
+=== e4a-e2e-deliverables.retry.log (tail)
+  ✓   1 e2e/deliverables.spec.ts:114:5 › the PDF trial: which frame sandbox draws a scheme-served PDF in Chromium’s viewer (17.9s)
+  ✓   2 e2e/deliverables.spec.ts:155:5 › the capture renders a scheme-served artifact offscreen at the asked size; the same page’s inline script runs in a viewer frame (1.2s)
+  ✓   3 e2e/deliverables.spec.ts:225:5 › the bridge script picks an element of an artifact in a sandboxed frame and posts the pick to the app (1.3s)
+  ✓   4 e2e/deliverables.spec.ts:417:5 › the artifact replay: two artifact rows and a refusal, the list and screenshot cells, main’s real capture in the journal, and the console chip once on the row and in the viewer (4.
+  ✓   5 e2e/deliverables.spec.ts:533:5 › the Deliverables tool: groups newest first, Back to the list’s scroll, the version switcher, Open in tab, the tab across a reload and after its record is deleted (3.0s)
+[e2-files] ICE candidate types in the frame: "done:"
+  ✓   6 e2e/deliverables.spec.ts:635:5 › delivered files: every kind draws in its body inside and outside the session’s directory, Reveal and Open externally reach the seam, and the frames reach nothing (11.8s)
+  ✓   7 e2e/deliverables.spec.ts:823:5 › show_pane: a target no record answers to is the model’s error; an artifact the target names opens in the Deliverables viewer and answers panel-tool (2.5s)
+  ✓   8 e2e/deliverables.spec.ts:876:5 › comment mode: Escape ends picking and nothing else, picking highlights the element under the pointer, and a click opens E3’s composer on the artifact-element anchor (1.6s)
+  ✓   9 e2e/deliverables.spec.ts:933:5 › a relaunch over the same profile lists every deliverable; the All scope shows another session’s with its title and opens it; a delivered file’s name opens the viewer (4.4s)
+  ✓  10 e2e/deliverables.spec.ts:1007:5 › a capture while a notification’s navigation is on its way: the page hears the click at once and nothing stays queued (2.2s)
+  10 passed (50.5s)
+=== e4a-e2e-panel.log (tail)
+  ✓  13 e2e/panel.spec.ts:571:7 › the #panel harness: strip, summary, R7 and themes › a beforeClose veto keeps the tab until the tool confirms (1.2s)
+  ✓  14 e2e/panel.spec.ts:588:7 › the #panel harness: strip, summary, R7 and themes › the summary renders from git, the status, the digest and the transcript projection and every row opens its tool (1.6s)
+  ✓  15 e2e/panel.spec.ts:646:7 › the #panel harness: strip, summary, R7 and themes › the summary’s Sources and Subagents do not change with disclosure (1.2s)
+  ✓  16 e2e/panel.spec.ts:678:7 › the #panel harness: strip, summary, R7 and themes › a second edit to an already-dirty file updates the change line (2.5s)
+  ✓  17 e2e/panel.spec.ts:697:7 › the #panel harness: strip, summary, R7 and themes › a disk-only session marks shells unavailable (1.2s)
+  ✓  18 e2e/panel.spec.ts:707:7 › the #panel harness: strip, summary, R7 and themes › section expansion persists (1.6s)
+  ✓  19 e2e/panel.spec.ts:724:7 › the #panel harness: strip, summary, R7 and themes › child transcript renders inside the region at 280, 380, 640 and maximized (1.6s)
+  ✓  20 e2e/panel.spec.ts:771:7 › the #panel harness: strip, summary, R7 and themes › both themes use tokens only (1.7s)
+  ✓  21 e2e/panel.spec.ts:845:7 › the #panel harness: strip, summary, R7 and themes › a Terminal tab works at the default side-column width (2.0s)
+  ✓  22 e2e/panel.spec.ts:954:7 › the product host over a scenario derived from C5’s records › the product host rests on the summary and follows the focused session (2.6s)
+  ✓  23 e2e/panel.spec.ts:995:7 › the product host over a scenario derived from C5’s records › unregistered tools are named (1.9s)
+  23 passed (42.0s)
+=== e4a-e2e-settings.log (tail)
+✓ built in 25.58s
+Running 9 tests using 1 worker
+  ✓  1 e2e/accounts.spec.ts:101:5 › usage: the pill, and ClaudeUsage’s accounts in its geometry, the routing one and why, a reauth account, the disabled actions and the hand-off (3.2s)
+  ✓  2 e2e/accounts.spec.ts:216:5 › usage: without ClaudeUsage data the pill is a muted dash and the popover says so (1.7s)
+  ✓  3 e2e/accounts.spec.ts:251:5 › usage: with ClaudeUsage’s control route (a stub), the actions enable, Route asks and posts, and a refusal shows its message (3.1s)
+  ✓  4 e2e/settings.spec.ts:35:5 › settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, refused, unbound and reset; the route and policy persist (2.8s)
+  ✓  5 e2e/settings.spec.ts:133:5 › settings: the monospace font applies to the root --font-mono and to the Appearance preview (1.1s)
+  ✓  6 e2e/settings.spec.ts:163:5 › settings: the transcript width applies to the root --measure, and Narrow restores the token (1.2s)
+  ✓  7 e2e/settings.spec.ts:188:5 › settings: Engine shows the resolved binary, its version and the tested one, and offers the update (1.1s)
+  ✓  8 e2e/settings.spec.ts:217:5 › settings: in a 50/50 split the view stacks inside its pane, and in one pane it keeps its columns (1.3s)
+  ✓  9 e2e/settings.spec.ts:352:5 › settings: a Nerd Font in appearance.monoFont draws private-use prompt glyphs in the terminal, and follows a change (2.2s)
+  9 passed (18.2s)
+=== e4a-e2e-voice.log (tail)
+  ✓   6 e2e/voice.spec.ts:299:1 › the toolbar microphone toggles: a click starts listening, a second settles the final; a click while asking cancels (2.1s)
+  ✓   7 e2e/voice.spec.ts:337:1 › Enter while finishing sends the greyed words as they stand, and the late final changes nothing (1.6s)
+  ✓   8 e2e/voice.spec.ts:366:1 › with two composers the words land in the focused pane's only (1.4s)
+  ✓   9 e2e/voice.spec.ts:382:1 › a card docked over the composer refuses the hold with a notice and no start (1.1s)
+  ✓  10 e2e/voice.spec.ts:399:1 › the window losing focus mid-hold cancels and removes the interim words (1.2s)
+  ✓  11 e2e/voice.spec.ts:421:1 › a denied microphone shows the notice whose button records the pane and opens nothing (1.3s)
+  ✓  12 e2e/voice.spec.ts:440:1 › a missing helper refuses the hold with the path it looked at (1.3s)
+  ✓  13 e2e/voice.spec.ts:454:1 › a partial arriving after the final leaves the settled text unchanged (1.6s)
+  ✓  14 e2e/voice.spec.ts:482:1 › Settings › Voice reads the status from main and writes the language to settings version 9 (1.3s)
+  -  15 e2e/voice.spec.ts:504:1 › packaged: the bundled helper answers voice.status from Contents/Resources and voice.start is refused under the harness
+  1 skipped
+  14 passed (27.3s)
+=== e4a-e2e-smoke.log (tail)
+../../out/renderer/assets/xterm-uHRXyou2.js                           630.84 kB
+../../out/renderer/assets/emacs-lisp-4gdXY_g3.js                      779.90 kB
+../../out/renderer/assets/CodeView-C5P_VDOr.js                        809.89 kB
+../../out/renderer/assets/cytoscape.esm-Ct9zsnh1.js                   961.04 kB
+../../out/renderer/assets/index-CdUJ6xwl.js                         1,226.64 kB
+../../out/renderer/assets/cynefin-OW5HDTMX-CDLqg_kW.js              1,304.47 kB
+../../out/renderer/assets/index-C7EyQAlp.js                         7,139.37 kB
+✓ built in 25.75s
+Running 2 tests using 1 worker
+  ✓  1 e2e/smoke.spec.ts:14:5 › preload bundle has no external runtime imports (4ms)
+  ✓  2 e2e/smoke.spec.ts:23:5 › MAWS opens light, hosts answer, pty echoes, survives reload and window close, theme switches, exits clean (2.5s)
+  2 passed (3.0s)

@@ -2,15 +2,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandResult, HostState, Settings } from '@shared/ipc/schema';
 import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
-import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 import { idleExitMsOf, startHostConfigure, type HostConfigureDeps } from './host-configure';
 
 const host = (state: HostState['state']): HostState => ({ state, pid: state === 'ready' ? 1 : null, restarts: 0, revision: 0 });
 
 // Settings version 10's `supervisor.idleExitMinutes` (Task 3.2)
-const withIdle = (idleExitMinutes: number | null): Settings => ({ ...SETTINGS_DEFAULTS_V10, supervisor: { idleExitMinutes, keepRunningDefault: true } });
+const withIdle = (idleExitMinutes: number | null): Settings => ({ ...SETTINGS_DEFAULTS_V11, supervisor: { idleExitMinutes, keepRunningDefault: true } });
 
-function harness(initial: HostState['state'], env: Record<string, string | undefined> = {}, settings: Settings = SETTINGS_DEFAULTS_V10) {
+function harness(initial: HostState['state'], env: Record<string, string | undefined> = {}, settings: Settings = SETTINGS_DEFAULTS_V11) {
   let current = host(initial);
   let now = settings;
   const settingsListeners = new Set<(s: Settings) => void>();
@@ -44,7 +44,7 @@ describe('the idle time main pushes', () => {
   it('is the setting in minutes, null for never, and 10 minutes by default (the setting’s and the supervisor’s own)', () => {
     expect(idleExitMsOf(withIdle(3), {})).toBe(180_000);
     expect(idleExitMsOf(withIdle(null), {})).toBeNull();
-    expect(idleExitMsOf(SETTINGS_DEFAULTS_V10, {})).toBe(600_000);
+    expect(idleExitMsOf(SETTINGS_DEFAULTS_V11, {})).toBe(600_000);
   });
 
   it('is MAWS_E2E_SUPERVISOR_IDLE_MS under the e2e harness, in place of the setting; ignored elsewhere or when not a positive integer', () => {

@@ -102,6 +102,9 @@ export default defineConfig({
             // E6 start: the Source control tool renders from a store handle, as the panel's tools do
             'src/renderer/src/tools/scm/**/*.test.tsx',
             // E6 end
+            // E4a start: the Browser tool and its pane render from the browser store and a placement controller held in refs
+            'src/renderer/src/tools/browser/**/*.test.tsx',
+            // E4a end
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },

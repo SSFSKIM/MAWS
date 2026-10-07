@@ -6,7 +6,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { SETTINGS_DEFAULTS_V10 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 import { routingFacts } from '../../gateway/routing-facts';
 import { useGateway } from '../../gateway/store';
 import type { PanelToolContext } from '../../panel/tool';
@@ -26,6 +26,7 @@ import { autoModeLane, reviewsOf } from './lane';
 import { sessionInfoSections, type InfoRow } from './model';
 import { RouteSwitch } from './RouteSwitch';
 import { useBudget } from '../../budget/store'; // C12
+import { loadedTabs, useBrowser } from '../browser/store'; // E4a
 
 export type SessionInfoState = { openedAt: string }; // no per-tab state beyond bookkeeping; every value is read live
 
@@ -59,7 +60,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   // C3 samples the context at ready and after every turn into the digest (debt wave 3); the engine's summary is read
   // only while no sample has arrived (a session C3 has not sampled yet, or one whose digest predates the sampling).
   const context = useEngineRead('session.getContextUsage', { appSessionId, detail: 'summary' }, { ...read, enabled: visible && !digest?.context });
-  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V10;
+  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V11;
   const snapshot = useUsage((s) => s.snapshot);
   const directLogin = useGateway((s) => s.directLogin.get(appSessionId) ?? null);
   // the model's catalogue entry, when C7 listed the session's models (the lane reads only its value, which the status
@@ -70,6 +71,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   const now = useNow(POPOVER_TICK_MS);
   const windows = useSessionWindows(record, status);
   const budget = useBudget((s) => s.state); // C12
+  const browserTabs = useBrowser(useShallow(loadedTabs)); // E4a
   useDirectFallback(appSessionId, visible ? status : null); // W2: a Direct session's windows, read while the tab is shown
 
   // W2: a session whose first launch C10 still runs (its intent, no status) chooses its route on the intent (the model
@@ -95,6 +97,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
     models: models ?? null,
     windows,
     budget, // C12
+    browserTabs, // E4a
     now,
     reads: { status: statusRead.data ?? null, rules: rules.data ?? null, hooks: hooks.data ?? null, mcp: mcp.data ?? null, context: context.data ?? null },
   });

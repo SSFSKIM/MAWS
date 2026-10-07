@@ -13,7 +13,13 @@
 // target through main first, so the answer waits on that read (the bridge allows 8 s; a read takes milliseconds). A
 // record that exists opens the Deliverables tool on it; a target no record answers to is the model's error to read
 // (`deliverableNotFound`), never "shown" over a list; no target opens the list.
+//
+// E4a (E4a execution document, Interfaces "The renderer"; Decision Log 7): the `browser` pane checks its target as main
+// will (`validateBrowserUrl`), so a refused address answers `navigationRefused` before anything opens; otherwise the
+// Browser tool opens with the parsed URL, the session and the request's own id (main makes one tab of a request two
+// windows both handle).
 import * as z from 'zod';
+import { validateBrowserUrl } from '@shared/browser/url'; // E4a
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { tabId } from '@shared/ipc/schema/layout';
@@ -46,7 +52,7 @@ function selectTerminal(tool: PanelTool<unknown, unknown>, appSessionId: AppSess
   return existing.id;
 }
 
-export function showPane({ appSessionId, pane, target, line }: MawsPaneShow, client: MawsBridge = ipc): MawsPaneAnswerResult | Promise<MawsPaneAnswerResult> {
+export function showPane({ appSessionId, requestId, pane, target, line }: MawsPaneShow, client: MawsBridge = ipc): MawsPaneAnswerResult | Promise<MawsPaneAnswerResult> {
   const where = PANES[pane];
   if ('mainTab' in where || pane === 'file') {
     if (target === null) return { ok: false, error: TOOL_ERRORS.targetRequired(pane) }; // the host resolves one for `file`
@@ -57,6 +63,7 @@ export function showPane({ appSessionId, pane, target, line }: MawsPaneShow, cli
   const tool = panelHost.tools().find((candidate) => candidate.id === where.toolId);
   if (!tool) return { ok: false, error: TOOL_ERRORS.paneUnavailable(pane) };
   if (pane === 'deliverable') return showDeliverable(tool, appSessionId, target, client); // E2
+  if (pane === 'browser') return showBrowser(tool, appSessionId, requestId, target); // E4a
   const opened = (pane === 'terminal' ? selectTerminal(tool, appSessionId) : null) ?? panelHost.addTool(tool.id, { appSessionId, params: paramsOf(pane, target), activate: true });
   return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
 }
@@ -99,3 +106,17 @@ async function showDeliverable(tool: PanelTool<unknown, unknown>, appSessionId: 
   return open({ target: found.id, appSessionId }); // the session named, so a pinned tab showing another one follows it
 }
 // E2 end
+
+// E4a start: the `browser` pane.
+function showBrowser(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId, requestId: string, target: string | null): MawsPaneAnswerResult {
+  let url: string | null = null;
+  if (target !== null) {
+    const checked = validateBrowserUrl(target);
+    if (!checked.ok) return { ok: false, error: TOOL_ERRORS.navigationRefused(target) };
+    url = checked.url;
+  }
+  const params = { ...(url !== null && { target: url }), appSessionId, requestId };
+  const opened = panelHost.addTool(tool.id, { appSessionId, params, activate: true });
+  return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
+}
+// E4a end

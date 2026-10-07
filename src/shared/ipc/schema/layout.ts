@@ -6,6 +6,9 @@ import * as z from 'zod';
 import { AgentIdSchema, AppSessionIdSchema, ProjectIdSchema } from '../../graph/ids';
 import { ACTION_IDS } from '../../keymap/actions';
 import type { CommandSpec } from './common';
+// E4a start
+import { BrowserTabIdSchema } from '../../browser/tab';
+// E4a end
 
 // W5 (§5.2 as amended 2026-10-01): the Overview is no longer a tab; it floats over the main area (`regions.overview`).
 // A stored `main.tabs` that still holds its tab is read through `StoredMainSchema`, which drops it. W6 (E1): the
@@ -16,11 +19,15 @@ export const TabRefSchema = z.discriminatedUnion('kind', [
   z.strictObject({ id: z.string(), kind: z.literal('file'),    path: z.string(), line: z.number().int().nullable(), appSessionId: AppSessionIdSchema.nullable(), pinned: z.boolean() }),
   z.strictObject({ id: z.string(), kind: z.literal('diff'),    appSessionId: AppSessionIdSchema, ref: z.string(), pinned: z.boolean() }),
   z.strictObject({ id: z.literal('diagnostics'), kind: z.literal('diagnostics'), pinned: z.boolean() }),
-  z.strictObject({ id: z.literal('settings'), kind: z.literal('settings'), section: z.enum(['engine', 'gateway', 'keyboard', 'appearance', 'notifications', 'voice']).nullable(), pinned: z.literal(false) }),   // C11: singleton; a second openTab activates it and updates `section`; titled 'Settings'; E9: 'voice' appended (the index places it after Keyboard)
+  z.strictObject({ id: z.literal('settings'), kind: z.literal('settings'), section: z.enum(['engine', 'gateway', 'keyboard', 'appearance', 'notifications', 'voice', 'browser']).nullable(), pinned: z.literal(false) }),   // C11: singleton; a second openTab activates it and updates `section`; titled 'Settings'; E9: 'voice' appended (the index places it after Keyboard); E4a: 'browser' appended (Settings › Browser, Task 3.4)
   // E2 start (X14): a deliverable's viewer as a main tab, one per record; restores to the record by id, and a record
   // that is gone shows the Deliverables list for the tab's session with a notice
   z.strictObject({ id: z.string(), kind: z.literal('deliverable'), appSessionId: AppSessionIdSchema, deliverableId: z.string(), pinned: z.boolean() }),
   // E2 end
+  // E4a start (X14): one of a session's browser tabs as a main tab; it restores to the Browser tool's empty state with
+  // the tab's last URL as a suggestion, never auto-loaded (the page itself lives in main, `<userData>/browser/tabs.json`)
+  z.strictObject({ id: z.string(), kind: z.literal('browser'), appSessionId: AppSessionIdSchema, browserTabId: BrowserTabIdSchema, pinned: z.boolean() }),
+  // E4a end
 ]);
 export type TabRef = z.infer<typeof TabRefSchema>;
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -45,6 +52,10 @@ export function tabId(tab: TabTarget): string {
     case 'deliverable':
       return `deliverable:${tab.appSessionId}:${tab.deliverableId}`;
     // E2 end
+    // E4a start
+    case 'browser':
+      return `browser:${tab.appSessionId}:${tab.browserTabId}`;
+    // E4a end
   }
 }
 

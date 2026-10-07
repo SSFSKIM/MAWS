@@ -9,6 +9,7 @@ export const SECTIONS = {
   voice: 'Voice', // E9
   appearance: 'Appearance',
   notifications: 'Notifications',
+  browser: 'Browser', // E4a: Settings › Browser (settings version 11), last in the index
 } as const;
 
 export const INDEX = {
@@ -219,3 +220,20 @@ export const NOTIFICATIONS = {
   on: 'on',
   off: 'off',
 };
+
+// E4a start: Settings › Browser (E4a execution document, Design §9 and §16; settings version 11): which profile new tabs
+// browse with, the address field's search, and where a page's new-window links open.
+export const BROWSER = {
+  profile: 'Profile',
+  defaultProfile: 'Default',
+  missingProfile: (profileDir: string) => `${profileDir} · not found`,
+  profileNote: 'Applies to tabs opened from now on. The address bar shows which profile a tab browses with.',
+  search: 'Search engine',
+  searchNote: 'Use %s for the search text',
+  searchInvalid: 'Enter an http or https address with %s where the search text goes',
+  useDefault: 'Use default',
+  links: 'Links that open a new window',
+  linkTargets: { 'in-app': 'In MAWS', external: 'In the system browser' },
+  linksNote: 'In MAWS, such a link opens as a new tab of the same session.',
+};
+// E4a end

@@ -1,0 +1,210 @@
+{
+  "electron": "44.4.5",
+  "chrome": "152.0.7977.130",
+  "steps": [
+    {
+      "label": "baseline: first window shown inactive, alone",
+      "shell": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "child": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "win": {
+        "bounds": {
+          "x": 40,
+          "y": 73,
+          "width": 700,
+          "height": 400
+        },
+        "isFocused": false,
+        "isVisibleApi": true
+      },
+      "win2": null
+    },
+    {
+      "label": "second window show:true (focused), clear of the first",
+      "shell": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "child": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "win": {
+        "bounds": {
+          "x": 40,
+          "y": 73,
+          "width": 700,
+          "height": 400
+        },
+        "isFocused": false,
+        "isVisibleApi": true
+      },
+      "win2": {
+        "bounds": {
+          "x": 1172,
+          "y": 693,
+          "width": 300,
+          "height": 200
+        },
+        "isFocused": true,
+        "isVisibleApi": true
+      }
+    },
+    {
+      "label": "the same focused second window, moved partly over the child",
+      "shell": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "child": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "win": {
+        "bounds": {
+          "x": 40,
+          "y": 73,
+          "width": 700,
+          "height": 400
+        },
+        "isFocused": false,
+        "isVisibleApi": true
+      },
+      "win2": {
+        "bounds": {
+          "x": 490,
+          "y": 173,
+          "width": 300,
+          "height": 200
+        },
+        "isFocused": true,
+        "isVisibleApi": true
+      }
+    },
+    {
+      "label": "second window destroyed",
+      "shell": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "child": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "win": {
+        "bounds": {
+          "x": 40,
+          "y": 73,
+          "width": 700,
+          "height": 400
+        },
+        "isFocused": true,
+        "isVisibleApi": true
+      },
+      "win2": null
+    },
+    {
+      "label": "second window showInactive, clear of the first",
+      "shell": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "child": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "win": {
+        "bounds": {
+          "x": 40,
+          "y": 73,
+          "width": 700,
+          "height": 400
+        },
+        "isFocused": true,
+        "isVisibleApi": true
+      },
+      "win2": {
+        "bounds": {
+          "x": 1172,
+          "y": 693,
+          "width": 300,
+          "height": 200
+        },
+        "isFocused": false,
+        "isVisibleApi": true
+      }
+    },
+    {
+      "label": "the inactive second window moved partly over the child",
+      "shell": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "child": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "win": {
+        "bounds": {
+          "x": 40,
+          "y": 73,
+          "width": 700,
+          "height": 400
+        },
+        "isFocused": true,
+        "isVisibleApi": true
+      },
+      "win2": {
+        "bounds": {
+          "x": 490,
+          "y": 173,
+          "width": 300,
+          "height": 200
+        },
+        "isFocused": false,
+        "isVisibleApi": true
+      }
+    },
+    {
+      "label": "second window destroyed, first focused",
+      "shell": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "child": {
+        "visibility": "visible",
+        "rafFires": true,
+        "framesPresented": 11
+      },
+      "win": {
+        "bounds": {
+          "x": 40,
+          "y": 73,
+          "width": 700,
+          "height": 400
+        },
+        "isFocused": true,
+        "isVisibleApi": true
+      },
+      "win2": null
+    }
+  ]
+}

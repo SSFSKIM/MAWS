@@ -2,13 +2,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SettingsPatchSchema, SettingsSchema, type Settings } from '../ipc/schema/settings';
-import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V10 } from './defaults';
+import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V11 } from './defaults';
 
 const fixture = (name: string): unknown => JSON.parse(readFileSync(resolve(__dirname, '../../../test/fixtures/settings', name), 'utf8'));
 // W13: the pin every version from 3 to 7 wrote (version 8 drops it)
 const PIN = { pinnedVersion: '2.1.283' };
 // W7: the engine section every version from 4 to 6 wrote (version 7 adds the budget's switch), with the pin
-const { memoryBudget: _switch, ...ENGINE_V8_LESS_SWITCH } = SETTINGS_DEFAULTS_V10.engine;
+const { memoryBudget: _switch, ...ENGINE_V8_LESS_SWITCH } = SETTINGS_DEFAULTS_V11.engine;
 void _switch;
 const ENGINE_BEFORE_V7 = { ...ENGINE_V8_LESS_SWITCH, ...PIN };
 // W13: an engine section as version 8 holds it: the pin gone
@@ -17,9 +17,12 @@ const unpinned = <E extends { pinnedVersion?: string }>(engine: E): Omit<E, 'pin
   void _pin;
   return rest;
 };
-// E10: the sections version 9 wrote (version 10 adds the supervisor section); `version` still says 10, so an object
+// E4a: the sections version 10 wrote (version 11 adds the browser section); `version` still says 11, so an object
 // built from them names its own
-const { supervisor: _supervisor, ...SECTIONS_V9 } = SETTINGS_DEFAULTS_V10;
+const { browser: _browser, ...SECTIONS_V10 } = SETTINGS_DEFAULTS_V11;
+void _browser;
+// E10: the sections version 9 wrote (version 10 adds the supervisor section)
+const { supervisor: _supervisor, ...SECTIONS_V9 } = SECTIONS_V10;
 void _supervisor;
 // E9: the sections version 8 wrote (version 9 adds the voice section)
 const { voice: _voice, ...SECTIONS_V8 } = SECTIONS_V9;
@@ -30,12 +33,13 @@ void _permissions;
 const BEFORE_V6 = { ...SECTIONS_BEFORE_V6, engine: ENGINE_BEFORE_V7 };
 const ON = { memoryBudget: { enabled: true } }; // W7: what a migrated engine section gains
 const VOICE = { voice: { locale: null } }; // E9: what every object migrated from before 9 gains
-const SUPERVISOR = { supervisor: { idleExitMinutes: 10, keepRunningDefault: true } }; // E10: what every migrated object gains
+const SUPERVISOR = { supervisor: { idleExitMinutes: 10, keepRunningDefault: true } }; // E10: what every object migrated from before 10 gains
+const BROWSER = { browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app' } }; // E4a: what every migrated object gains
 
 describe('settings migrate v1 and v2 to v3', () => {
   it('holds the defaults the document states, and they validate', () => {
-    expect(SETTINGS_DEFAULTS_V10).toEqual({
-      version: 10, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10
+    expect(SETTINGS_DEFAULTS_V11).toEqual({
+      version: 11, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11
       theme: 'light',
       keymap: {},
       notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
@@ -46,99 +50,102 @@ describe('settings migrate v1 and v2 to v3', () => {
       permissions: { autoFallback: 'acceptEdits' }, // W3
       voice: { locale: null }, // E9: the system locale
       supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10: exits 10 minutes after its last session; keep is the quit's default
+      browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app' }, // E4a: the default partition, Google, links in the app
     });
-    expect(SettingsSchema.parse(SETTINGS_DEFAULTS_V10)).toEqual(SETTINGS_DEFAULTS_V10);
+    expect(SettingsSchema.parse(SETTINGS_DEFAULTS_V11)).toEqual(SETTINGS_DEFAULTS_V11);
   });
 
   it('migrates the v1 fixture to the defaults with its theme', () => {
-    expect(migrateSettings(fixture('v1.json'))).toEqual({ ...SETTINGS_DEFAULTS_V10, theme: 'dark' });
+    expect(migrateSettings(fixture('v1.json'))).toEqual({ ...SETTINGS_DEFAULTS_V11, theme: 'dark' });
   });
 
   it('migrates the v2 fixture keeping its theme, its keymap override and its notification policy', () => {
     const migrated = migrateSettings(fixture('v2.json'));
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
     expect(migrated).toEqual({
-      ...SETTINGS_DEFAULTS_V10,
+      ...SETTINGS_DEFAULTS_V11,
       theme: 'system',
       keymap: { 'attention.next': 'Cmd+Alt+J' },
-      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V10.notifications.kinds },
+      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V11.notifications.kinds },
     });
   });
 
   // W10: ⌥Enter's hold (`composer.steer`) is gone; a file that overrode it keeps everything else
   it('drops an override of a retired action instead of refusing the file, at the current version and an earlier one', () => {
-    const current = { ...SETTINGS_DEFAULTS_V10, theme: 'dark', keymap: { 'composer.steer': 'Cmd+Enter', 'attention.next': 'Cmd+Alt+J' } };
-    expect(migrateSettings(current)).toEqual({ ...SETTINGS_DEFAULTS_V10, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' } });
+    const current = { ...SETTINGS_DEFAULTS_V11, theme: 'dark', keymap: { 'composer.steer': 'Cmd+Enter', 'attention.next': 'Cmd+Alt+J' } };
+    expect(migrateSettings(current)).toEqual({ ...SETTINGS_DEFAULTS_V11, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' } });
     const v2 = { version: 2, theme: 'system', keymap: { 'composer.steer': null }, notifications: { enabled: true, sound: false } };
     expect(migrateSettings(v2).keymap).toEqual({});
-    expect(() => migrateSettings({ ...SETTINGS_DEFAULTS_V10, keymap: { 'composer.nothing': 'Cmd+J' } })).toThrow(); // an unknown id still refuses
+    expect(() => migrateSettings({ ...SETTINGS_DEFAULTS_V11, keymap: { 'composer.nothing': 'Cmd+J' } })).toThrow(); // an unknown id still refuses
   });
 
   // C12 start: version 4 (the memory budget); a v3 object gains the budget's defaults. W2: the identity moves to v5, and
   // a v3 or v4 object gains the transcript's default width. W3: the identity moves to v6. W7: to v7, and every earlier
   // object gains the budget's switch, on. W13: the identity moves to v8, and every earlier object loses its pin. E9: the
   // identity moves to v9, and every earlier object gains the voice section. E10: the identity moves to v10, and every
-  // earlier object gains the supervisor section.
-  it('is the identity over a v10 object', () => {
-    const v10: Settings = {
-      ...SETTINGS_DEFAULTS_V10,
+  // earlier object gains the supervisor section. E4a: the identity moves to v11, and every earlier object gains the
+  // browser section.
+  it('is the identity over a v11 object', () => {
+    const v11: Settings = {
+      ...SETTINGS_DEFAULTS_V11,
       theme: 'dark',
       gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false },
       appearance: { monoFont: 'JetBrainsMono Nerd Font', transcriptWidth: 1280 },
-      engine: { ...SETTINGS_DEFAULTS_V10.engine, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'], memoryBudget: { enabled: false } },
+      engine: { ...SETTINGS_DEFAULTS_V11.engine, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'], memoryBudget: { enabled: false } },
       permissions: { autoFallback: 'default' },
       voice: { locale: 'en-US' },
       supervisor: { idleExitMinutes: null, keepRunningDefault: false }, // E10
+      browser: { profile: 'Profile 1', searchUrl: 'https://duckduckgo.com/?q=%s', linkTarget: 'external' }, // E4a
     };
-    expect(migrateSettings(structuredClone(v10))).toEqual(v10);
+    expect(migrateSettings(structuredClone(v11))).toEqual(v11);
   });
 
-  it('migrates a v3 object to v10 keeping every v3 value, with the budget’s defaults, the default width, the default fallback and the budget on', () => {
+  it('migrates a v3 object to v11 keeping every v3 value, with the budget’s defaults, the default width, the default fallback and the budget on', () => {
     const { memoryBudgetMiB: _m, statefulMcpServers: _s, ...engineV3 } = { ...ENGINE_BEFORE_V7, binaryPath: '/opt/claude', subagentModel: 'haiku' };
     void _m;
     void _s;
     const v3 = { ...BEFORE_V6, version: 3, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' }, usage: { nearLimitPercent: 80 }, engine: engineV3, appearance: { monoFont: 'Hack' } };
     const migrated = migrateSettings(structuredClone(v3));
-    expect(migrated).toEqual({ ...v3, version: 10, ...VOICE, ...SUPERVISOR, engine: { ...unpinned(engineV3), memoryBudgetMiB: null, statefulMcpServers: [], ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(migrated).toEqual({ ...v3, version: 11, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(engineV3), memoryBudgetMiB: null, statefulMcpServers: [], ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } });
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
   // C12 end
 
   // W2 start
-  it('migrates a v4 object to v10 keeping every v4 value, with the default width, the default fallback and the budget on', () => {
+  it('migrates a v4 object to v11 keeping every v4 value, with the default width, the default fallback and the budget on', () => {
     const v4 = { ...BEFORE_V6, version: 4, theme: 'dark', engine: { ...ENGINE_BEFORE_V7, memoryBudgetMiB: 6144 }, appearance: { monoFont: 'Hack' } };
     const migrated = migrateSettings(structuredClone(v4));
-    expect(migrated).toEqual({ ...v4, version: 10, ...VOICE, ...SUPERVISOR, engine: { ...unpinned(v4.engine), ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(migrated).toEqual({ ...v4, version: 11, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(v4.engine), ...ON }, appearance: { monoFont: 'Hack', transcriptWidth: 768 }, permissions: { autoFallback: 'acceptEdits' } });
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
   // W2 end
 
   // W3 start
-  it('migrates a v5 object to v10 keeping every v5 value, with acceptEdits as the auto fallback and the budget on', () => {
+  it('migrates a v5 object to v11 keeping every v5 value, with acceptEdits as the auto fallback and the budget on', () => {
     const v5 = { ...BEFORE_V6, version: 5, theme: 'dark', appearance: { monoFont: 'Hack', transcriptWidth: 960 } };
     const migrated = migrateSettings(structuredClone(v5));
-    expect(migrated).toEqual({ ...v5, version: 10, ...VOICE, ...SUPERVISOR, engine: { ...unpinned(v5.engine), ...ON }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(migrated).toEqual({ ...v5, version: 11, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(v5.engine), ...ON }, permissions: { autoFallback: 'acceptEdits' } });
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
   it('takes any engine mode but auto as the fallback', () => {
     expect(SettingsPatchSchema.safeParse({ permissions: { autoFallback: 'plan' } }).success).toBe(true);
     expect(SettingsPatchSchema.safeParse({ permissions: { autoFallback: 'auto' } }).success).toBe(false);
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V10, { permissions: { autoFallback: 'default' } }).permissions).toEqual({ autoFallback: 'default' });
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V11, { permissions: { autoFallback: 'default' } }).permissions).toEqual({ autoFallback: 'default' });
   });
   // W3 end
 
   // W7 start
-  it('migrates a v6 object to v10 keeping every v6 value, its own budget and stateful servers included, with the budget on', () => {
+  it('migrates a v6 object to v11 keeping every v6 value, its own budget and stateful servers included, with the budget on', () => {
     const v6 = { ...SECTIONS_BEFORE_V6, version: 6, theme: 'dark', engine: { ...ENGINE_BEFORE_V7, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'] }, permissions: { autoFallback: 'plan' } };
     const migrated = migrateSettings(structuredClone(v6));
-    expect(migrated).toEqual({ ...v6, version: 10, ...VOICE, ...SUPERVISOR, engine: { ...unpinned(v6.engine), ...ON } });
+    expect(migrated).toEqual({ ...v6, version: 11, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: { ...unpinned(v6.engine), ...ON } });
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
   it('takes the switch as one object a patch replaces whole, and nothing but a boolean in it', () => {
-    const off = applySettingsPatch(SETTINGS_DEFAULTS_V10, SettingsPatchSchema.parse({ engine: { memoryBudget: { enabled: false } } }));
-    expect(off.engine).toEqual({ ...SETTINGS_DEFAULTS_V10.engine, memoryBudget: { enabled: false } });
+    const off = applySettingsPatch(SETTINGS_DEFAULTS_V11, SettingsPatchSchema.parse({ engine: { memoryBudget: { enabled: false } } }));
+    expect(off.engine).toEqual({ ...SETTINGS_DEFAULTS_V11.engine, memoryBudget: { enabled: false } });
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: {} } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: { enabled: 'off' } } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: { enabled: true, limitMiB: 1 } } }).success).toBe(false);
@@ -146,11 +153,11 @@ describe('settings migrate v1 and v2 to v3', () => {
   // W7 end
 
   // W13 start: v7 → v8 drops the pin (charter D-1 as amended 2026-10-01); a chosen binary stays chosen, any pin is dropped
-  it('migrates a v7 object to v10 dropping its pin and keeping every other value, a chosen binary path included', () => {
+  it('migrates a v7 object to v11 dropping its pin and keeping every other value, a chosen binary path included', () => {
     for (const pinnedVersion of ['2.1.283', '2.1.290']) {
       const v7 = { ...SECTIONS_V8, version: 7, theme: 'dark', engine: { ...SECTIONS_V8.engine, binaryPath: '/opt/claude', pinnedVersion, memoryBudget: { enabled: false } } };
       const migrated = migrateSettings(structuredClone(v7));
-      expect(migrated).toEqual({ ...v7, version: 10, ...VOICE, ...SUPERVISOR, engine: unpinned(v7.engine) });
+      expect(migrated).toEqual({ ...v7, version: 11, ...VOICE, ...SUPERVISOR, ...BROWSER, engine: unpinned(v7.engine) });
       expect(SettingsSchema.safeParse(migrated).success).toBe(true);
     }
   });
@@ -159,7 +166,7 @@ describe('settings migrate v1 and v2 to v3', () => {
   it('never shares the defaults object with a migrated result', () => {
     const migrated = migrateSettings(fixture('v1.json'));
     migrated.notifications.kinds.errors = false;
-    expect(SETTINGS_DEFAULTS_V10.notifications.kinds.errors).toBe(true);
+    expect(SETTINGS_DEFAULTS_V11.notifications.kinds.errors).toBe(true);
   });
 });
 
@@ -168,11 +175,11 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
   it('migrates a v8 object to v9 with the system locale and every other value unchanged', () => {
     const v8 = { ...SECTIONS_V8, version: 8, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' }, usage: { nearLimitPercent: 80 }, permissions: { autoFallback: 'plan' } };
     const migrated = migrateSettings(structuredClone(v8));
-    expect(migrated).toEqual({ ...v8, version: 10, voice: { locale: null }, ...SUPERVISOR }); // E10: then v9 → v10
+    expect(migrated).toEqual({ ...v8, version: 11, voice: { locale: null }, ...SUPERVISOR, ...BROWSER }); // E10: then v9 → v10; E4a: then v10 → v11
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
-  it('ends every earlier version at 10 with the voice section', () => {
+  it('ends every earlier version at 11 with the voice section', () => {
     const earlier: unknown[] = [
       fixture('v1.json'),
       fixture('v2.json'),
@@ -185,14 +192,14 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
     ];
     for (const raw of earlier) {
       const migrated = migrateSettings(JSON.parse(JSON.stringify(raw)));
-      expect(migrated.version).toBe(10); // E10
+      expect(migrated.version).toBe(11); // E10: 10; E4a: 11
       expect(migrated.voice).toEqual({ locale: null });
     }
   });
 
   it('validates a v9 object as it is and refuses a locale outside its bounds', () => {
-    expect(migrateSettings({ ...SETTINGS_DEFAULTS_V10, voice: { locale: 'ko-KR' } }).voice).toEqual({ locale: 'ko-KR' });
-    const valid = (voice: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V10, voice }).success;
+    expect(migrateSettings({ ...SETTINGS_DEFAULTS_V11, voice: { locale: 'ko-KR' } }).voice).toEqual({ locale: 'ko-KR' });
+    const valid = (voice: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V11, voice }).success;
     expect(valid({ locale: null })).toBe(true);
     expect(valid({ locale: 'en' })).toBe(true);
     expect(valid({ locale: 'e' })).toBe(false);
@@ -203,9 +210,9 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
 
   it('patches the locale alone and leaves every other section as it was', () => {
     const patch = SettingsPatchSchema.parse({ voice: { locale: 'en-US' } });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V10, patch)).toEqual({ ...SETTINGS_DEFAULTS_V10, voice: { locale: 'en-US' } });
-    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V10, voice: { locale: 'en-US' } }, { voice: { locale: null } }).voice).toEqual({ locale: null });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V10, { voice: {} })).toEqual(SETTINGS_DEFAULTS_V10);
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V11, patch)).toEqual({ ...SETTINGS_DEFAULTS_V11, voice: { locale: 'en-US' } });
+    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V11, voice: { locale: 'en-US' } }, { voice: { locale: null } }).voice).toEqual({ locale: null });
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V11, { voice: {} })).toEqual(SETTINGS_DEFAULTS_V11);
     expect(SettingsPatchSchema.safeParse({ voice: { locale: 'e' } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ voice: { language: 'en-US' } }).success).toBe(false);
   });
@@ -215,15 +222,15 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
 // E10 start: version 10, the background supervisor (E10 execution document, Interfaces "Settings version 10"; ruled by
 // A-29 (4))
 describe('settings v9 → v10 adds the supervisor section', () => {
-  it('migrates a v9 object to v10 with the supervisor’s defaults and every other value unchanged', () => {
+  it('migrates a v9 object to v11 with the supervisor’s defaults and every other value unchanged', () => {
     const v9 = { ...SECTIONS_V9, version: 9, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' }, voice: { locale: 'en-GB' }, permissions: { autoFallback: 'plan' } };
     const migrated = migrateSettings(structuredClone(v9));
-    expect(migrated).toEqual({ ...v9, version: 10, supervisor: { idleExitMinutes: 10, keepRunningDefault: true } });
+    expect(migrated).toEqual({ ...v9, version: 11, supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, ...BROWSER }); // E4a: then v10 → v11
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
   });
 
   it('holds the idle time to whole minutes from 1 to 1440, or null for never, and the quit default to a boolean', () => {
-    const valid = (supervisor: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V10, supervisor }).success;
+    const valid = (supervisor: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V11, supervisor }).success;
     expect(valid({ idleExitMinutes: 1, keepRunningDefault: true })).toBe(true);
     expect(valid({ idleExitMinutes: 1440, keepRunningDefault: false })).toBe(true);
     expect(valid({ idleExitMinutes: null, keepRunningDefault: true })).toBe(true);
@@ -236,21 +243,70 @@ describe('settings v9 → v10 adds the supervisor section', () => {
   });
 
   it('patches each field alone and leaves every other section as it was', () => {
-    const never = applySettingsPatch(SETTINGS_DEFAULTS_V10, SettingsPatchSchema.parse({ supervisor: { idleExitMinutes: null } }));
-    expect(never).toEqual({ ...SETTINGS_DEFAULTS_V10, supervisor: { idleExitMinutes: null, keepRunningDefault: true } });
+    const never = applySettingsPatch(SETTINGS_DEFAULTS_V11, SettingsPatchSchema.parse({ supervisor: { idleExitMinutes: null } }));
+    expect(never).toEqual({ ...SETTINGS_DEFAULTS_V11, supervisor: { idleExitMinutes: null, keepRunningDefault: true } });
     expect(applySettingsPatch(never, { supervisor: { keepRunningDefault: false } }).supervisor).toEqual({ idleExitMinutes: null, keepRunningDefault: false });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V10, { supervisor: {} })).toEqual(SETTINGS_DEFAULTS_V10);
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V11, { supervisor: {} })).toEqual(SETTINGS_DEFAULTS_V11);
     expect(SettingsPatchSchema.safeParse({ supervisor: { idleExitMinutes: 0 } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ supervisor: { idleExitMs: 60_000 } }).success).toBe(false);
   });
 });
 // E10 end
 
+// E4a start: version 11, the in-app browser (E4a execution document, Interfaces "X15: settings 11"; Decision Log 10, 11)
+describe('settings v10 → v11 adds the browser section', () => {
+  it('migrates a v10 object to v11 with the browser’s defaults and every other value unchanged', () => {
+    const v10 = { ...SECTIONS_V10, version: 10, theme: 'dark', voice: { locale: 'en-GB' }, supervisor: { idleExitMinutes: null, keepRunningDefault: false } };
+    const migrated = migrateSettings(structuredClone(v10));
+    expect(migrated).toEqual({ ...v10, version: 11, browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app' } });
+    expect(SettingsSchema.safeParse(migrated).success).toBe(true);
+  });
+
+  it('chains a v9 object through v10 to v11', () => {
+    const v9 = { ...SECTIONS_V9, version: 9, voice: { locale: 'ko-KR' } };
+    expect(migrateSettings(structuredClone(v9))).toEqual({ ...v9, version: 11, ...SUPERVISOR, ...BROWSER });
+  });
+
+  it('holds the profile to a name or null, the search URL to an http(s) template with %s, and the link target to its two values', () => {
+    const valid = (browser: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V11, browser: { ...SETTINGS_DEFAULTS_V11.browser, ...browser } }).success;
+    expect(valid({ profile: 'Profile 1' })).toBe(true);
+    expect(valid({ profile: '' })).toBe(false);
+    expect(valid({ profile: 'x'.repeat(201) })).toBe(false);
+    expect(valid({ searchUrl: 'https://duckduckgo.com/?q=%s' })).toBe(true);
+    expect(valid({ searchUrl: 'http://localhost:8080/search?q=%s' })).toBe(true);
+    expect(valid({ searchUrl: 'https://duckduckgo.com/' })).toBe(false); // no %s
+    expect(valid({ searchUrl: 'file:///search?q=%s' })).toBe(false);
+    expect(valid({ searchUrl: 'javascript:alert(%s)' })).toBe(false);
+    expect(valid({ searchUrl: ' https://duckduckgo.com/?q=%s' })).toBe(false); // refused, never trimmed (C1: validators never transform)
+    expect(valid({ searchUrl: '%s' })).toBe(false);
+    const longest = `https://search.test/?q=%s&pad=${'x'.repeat(2048 - 'https://search.test/?q=%s&pad='.length)}`;
+    expect(valid({ searchUrl: longest })).toBe(true); // at the bound
+    expect(valid({ searchUrl: `${longest}x` })).toBe(false); // one past it
+    expect(valid({ linkTarget: 'external' })).toBe(true);
+    expect(valid({ linkTarget: 'tab' })).toBe(false);
+    expect(valid({ passwords: false })).toBe(false); // strict
+    expect(SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V11, browser: { profile: null, linkTarget: 'in-app' } }).success).toBe(false);
+  });
+
+  it('patches each field alone and leaves every other section as it was', () => {
+    const external = applySettingsPatch(SETTINGS_DEFAULTS_V11, SettingsPatchSchema.parse({ browser: { linkTarget: 'external' } }));
+    expect(external).toEqual({ ...SETTINGS_DEFAULTS_V11, browser: { ...SETTINGS_DEFAULTS_V11.browser, linkTarget: 'external' } });
+    expect(applySettingsPatch(external, { browser: { profile: 'Profile 1' } }).browser).toEqual({ profile: 'Profile 1', searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'external' });
+    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V11, browser: { ...SETTINGS_DEFAULTS_V11.browser, profile: 'Profile 1' } }, { browser: { profile: null } }).browser.profile).toBeNull();
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V11, { browser: {} })).toEqual(SETTINGS_DEFAULTS_V11);
+    expect(SettingsPatchSchema.safeParse({ browser: { searchUrl: 'https://duckduckgo.com/' } }).success).toBe(false);
+    expect(SettingsPatchSchema.safeParse({ browser: { homepage: 'https://example.com/' } }).success).toBe(false);
+  });
+});
+// E4a end
+
 describe('settings v3 validates and refuses unknown versions', () => {
   it.each([
-    ['a v11 object', { ...SETTINGS_DEFAULTS_V10, version: 11 }], // W2: v5 is the current version; W3: v6; W7: v7; W13: v8; E9: v9; E10: v10
+    ['a v12 object', { ...SETTINGS_DEFAULTS_V11, version: 12 }], // W2: v5 is the current version; W3: v6; W7: v7; W13: v8; E9: v9; E10: v10; E4a: v11
+    ['a v11 file without its browser section', { ...SECTIONS_V10, version: 11 }], // E4a: every v11 file writes one
+    ['a v10 file with a browser section', { ...SETTINGS_DEFAULTS_V11, version: 10 }], // E4a: v10 never had it
     ['a v10 file without its supervisor section', { ...SECTIONS_V9, version: 10 }], // E10: every v10 file writes one
-    ['a v9 file with a supervisor section', { ...SETTINGS_DEFAULTS_V10, version: 9 }], // E10: v9 never had it
+    ['a v9 file with a supervisor section', { ...SECTIONS_V10, version: 9 }], // E10: v9 never had it
     ['a v9 file without its voice section', { ...SECTIONS_V8, version: 9 }], // E9: every v9 file writes one
     ['a v8 file with a voice section', { ...SECTIONS_V9, version: 8 }], // E9: v8 never had it
     ['a v7 file without its pin', { ...SECTIONS_V8, version: 7 }], // W13: every v7 file wrote one
@@ -263,14 +319,14 @@ describe('settings v3 validates and refuses unknown versions', () => {
     ['not an object', 'settings'],
     ['an invalid v1 file', { version: 1, theme: 'sepia' }],
     ['a v2 file with a key v2 never had', { version: 2, theme: 'light', keymap: {}, notifications: { enabled: true, sound: false }, engine: {} }],
-    ['a v3 file missing a section', { ...SETTINGS_DEFAULTS_V10, appearance: undefined }],
+    ['a v3 file missing a section', { ...SETTINGS_DEFAULTS_V11, appearance: undefined }],
   ])('refuses %s', (_, raw) => {
     expect(() => migrateSettings(raw)).toThrow();
   });
 
   // C12 start: the budget's fields
   it('holds each v4 field to its range', () => {
-    const bad = (engine: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V10, engine: { ...SETTINGS_DEFAULTS_V10.engine, ...engine } }).success;
+    const bad = (engine: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V11, engine: { ...SETTINGS_DEFAULTS_V11.engine, ...engine } }).success;
     expect(bad({ memoryBudgetMiB: 511 })).toBe(false);
     expect(bad({ memoryBudgetMiB: 512 })).toBe(true);
     expect(bad({ memoryBudgetMiB: 1024.5 })).toBe(false);
@@ -283,11 +339,11 @@ describe('settings v3 validates and refuses unknown versions', () => {
   // C12 end
 
   it('holds each v3 field to its range', () => {
-    const bad = (patch: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V10, ...patch }).success;
+    const bad = (patch: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V11, ...patch }).success;
     expect(bad({ usage: { nearLimitPercent: 49 } })).toBe(false);
     expect(bad({ usage: { nearLimitPercent: 101 } })).toBe(false);
     expect(bad({ usage: { nearLimitPercent: 90.5 } })).toBe(false);
-    expect(bad({ gateway: { ...SETTINGS_DEFAULTS_V10.gateway, relayUnreachable: 'retry' } })).toBe(false);
+    expect(bad({ gateway: { ...SETTINGS_DEFAULTS_V11.gateway, relayUnreachable: 'retry' } })).toBe(false);
     expect(bad({ appearance: { monoFont: '' } })).toBe(false);
     expect(bad({ appearance: { monoFont: 'x'.repeat(201) } })).toBe(false);
     expect(bad({ appearance: { monoFont: null, transcriptWidth: 800 } })).toBe(false); // W2: Claude Desktop's three widths only
@@ -298,7 +354,7 @@ describe('settings v3 validates and refuses unknown versions', () => {
 
 describe('settings patch merges one kind and keeps its siblings', () => {
   const siblings = { approvals: false, questions: false, planReviews: false, errors: true, heldPeerMessages: true };
-  const state: Settings = { ...SETTINGS_DEFAULTS_V10, notifications: { enabled: true, sound: false, kinds: siblings } };
+  const state: Settings = { ...SETTINGS_DEFAULTS_V11, notifications: { enabled: true, sound: false, kinds: siblings } };
 
   it('validates a patch of one kind and changes that kind alone', () => {
     const patch = SettingsPatchSchema.parse({ notifications: { kinds: { errors: false } } });

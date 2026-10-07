@@ -264,3 +264,11 @@ describe('X9 artifact tools (E2)', () => {
   });
 });
 // E2 end
+// E4a start: the browser pane's refusal, which E4c's browser tools reuse under their own names
+describe('E4a: the browser refusal', () => {
+  it('names the refused target and, by default, show_pane', () => {
+    expect(TOOL_ERRORS.navigationRefused('file:///etc/hosts')).toBe('show_pane: MAWS opens only http and https pages in its browser; refused "file:///etc/hosts"');
+    expect(TOOL_ERRORS.navigationRefused('javascript:1', 'show_pane')).toBe('show_pane: MAWS opens only http and https pages in its browser; refused "javascript:1"');
+  });
+});
+// E4a end

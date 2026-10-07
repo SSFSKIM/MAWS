@@ -61,6 +61,11 @@ export const QUERY_COMMANDS = [
   'deliverables.listAll',
   'deliverables.get',
   // E2 end
+  // E4a start: the browser's tab list, the address field's history suggestions, the imported profiles
+  'browser.tabs.list',
+  'browser.history.suggest',
+  'browser.profiles.list',
+  // E4a end
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
 

@@ -57,7 +57,21 @@ export default defineConfig(({ command }) => {
       // A sandboxed preload's `require` loads only `electron`, `events`, `timers` and `url`, so whatever it imports
       // (X2's zod-free name lists, `@shared/ipc/names`) is bundled into out/preload/index.js; only `electron` stays
       // external.
-      build: { externalizeDeps: false, rollupOptions },
+      // E4a start: a second entry, the browser view's preload (out/preload/browser.js); the two share no module, so
+      // neither requires a chunk beside it (src/preload/bundle.test.ts). Its body is empty until E4c and E4d fill it,
+      // so Rollup's "empty chunk" notice for it is expected and dropped; drop this filter when it has a body.
+      build: {
+        externalizeDeps: false,
+        rollupOptions: {
+          ...rollupOptions,
+          input: { index: resolve(__dirname, 'src/preload/index.ts'), browser: resolve(__dirname, 'src/preload/browser.ts') },
+          onwarn(warning: Rollup.RollupLog, warn: (warning: Rollup.RollupLog) => void) {
+            if (warning.code === 'EMPTY_BUNDLE' && warning.names?.includes('browser')) return;
+            rollupOptions.onwarn(warning, warn);
+          },
+        },
+      },
+      // E4a end
     },
     renderer: {
       resolve: { alias },
