@@ -215,7 +215,12 @@ describe('the engine-host commands survive a JSON wire (E11 W-E)', () => {
     expect(new Set(found.map(eventKey).filter(Boolean))).toEqual(new Set(EVENT_KEYS));
   });
 
-  it("every recorded ui_render ask and answer validates as session.ui.render's input and output after a JSON round trip", () => {
+  // The input half cannot fail by JSON: the asks are read from JSON fixtures, so a JSON copy of their input loses
+  // nothing; it checks only that each ask validates as the command's input. What guards the input against a key JSON
+  // drops is the schema walk above (no `session.ui.render:in` key in its list). The output half is the real round trip:
+  // renderAnswerOf builds the output in memory (a tree or ENGINE_NODE, the props as answered), and its JSON copy must
+  // still validate and read as the renderer reads it.
+  it("every recorded ui_render ask validates as session.ui.render's input, and its answer's output survives a JSON round trip", () => {
     const renders = recordedRenders();
     expect(renders.length).toBeGreaterThan(20);
     const sites = new Set(renders.map((r) => r.request.component));
