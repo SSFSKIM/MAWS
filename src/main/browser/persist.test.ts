@@ -72,6 +72,22 @@ describe('tabs.json (E4a Design §2, G4)', () => {
     expect(readdirSync(dir)).toEqual(['tabs.json']);
   });
 
+  it('does not write again text identical to its last write', () => {
+    const path = join(dir, 'tabs.json');
+    let current = FILE;
+    const writer = new TabsFileWriter(path, () => current);
+    writer.markDirty();
+    writer.flushSync();
+    rmSync(path); // a second write would recreate it
+    writer.markDirty();
+    writer.flushSync();
+    expect(readdirSync(dir)).toEqual([]);
+    current = { ...FILE, tabs: [] };
+    writer.markDirty();
+    writer.flushSync();
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(current);
+  });
+
   it('flushSync with nothing dirty writes nothing', () => {
     const path = join(dir, 'tabs.json');
     new TabsFileWriter(path, () => FILE).flushSync();

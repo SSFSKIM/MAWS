@@ -13,7 +13,8 @@ const built = existsSync(OUT);
 describe.skipIf(!built)('the built preloads (needs `electron-vite build`)', () => {
   it('no preload requires a sibling chunk', () => {
     const files = readdirSync(OUT, { recursive: true, encoding: 'utf8' }).filter((name) => name.endsWith('.js'));
-    expect(files.length).toBeGreaterThan(0);
+    // both entries are there: a build from before the browser preload existed is stale, and must not pass vacuously
+    expect(files).toEqual(expect.arrayContaining(['index.js', 'browser.js']));
     const offenders = files.filter((name) => /\brequire\(\s*["']\.\.?\//.test(readFileSync(join(OUT, name), 'utf8')));
     expect(offenders).toEqual([]);
   });

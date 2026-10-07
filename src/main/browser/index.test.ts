@@ -40,8 +40,8 @@ function fakeIndex(known: string[], unavailable: string | null = null) {
   return { index: index as never, change, listeners };
 }
 
-function start(index: never) {
-  return startBrowser({ userData, settings: () => BROWSER_SETTINGS_DEFAULTS, index, register: () => {}, emit: () => {}, env: {} });
+function start(index: never, more: Partial<Parameters<typeof startBrowser>[0]> = {}) {
+  return startBrowser({ userData, settings: () => BROWSER_SETTINGS_DEFAULTS, index, register: () => {}, emit: () => {}, env: {}, ...more });
 }
 
 describe('startBrowser (E4a Design §2, G4)', () => {
@@ -73,5 +73,19 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     expect(browser.store.list(A).tabs).toEqual([]);
     browser.stop();
     expect(listeners.size).toBe(0);
+  });
+
+  it('one profiles accessor serves both a new tab\'s partition and browser.profiles.list (Decision Log 40)', () => {
+    const profiles = vi.fn(() => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't', storageDirName: 'x' }]);
+    const handlers = new Map<string, (input: unknown) => unknown>();
+    const browser = start(fakeIndex([A]).index, {
+      profiles,
+      settings: () => ({ ...BROWSER_SETTINGS_DEFAULTS, profile: 'Profile 1' }),
+      register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as never,
+    });
+    expect(handlers.get('browser.profiles.list')!(undefined)).toEqual({ profiles: [{ profileDir: 'Profile 1', name: 'Work' }] });
+    expect(browser.store.open({ appSessionId: A, url: null, select: true }).tab.partition).toBe('persist:maws-chrome-Profile 1');
+    expect(profiles).toHaveBeenCalledTimes(2);
+    browser.stop();
   });
 });

@@ -11,7 +11,10 @@ const B = 'App-B' as AppSessionId;
 // A WebContentsView as the store uses it: a webContents that loads and closes.
 function fakeView() {
   const webContents = {
-    loadURL: vi.fn((url: string) => (url.includes('reject') ? Promise.reject(new Error('ERR_ABORTED (-3)')) : Promise.resolve())),
+    loadURL: vi.fn((url: string) => {
+      if (url.includes('throw')) throw new Error('refused synchronously');
+      return url.includes('reject') ? Promise.reject(new Error('ERR_ABORTED (-3)')) : Promise.resolve();
+    }),
     close: vi.fn(),
     isDestroyed: () => false,
   };
@@ -74,6 +77,15 @@ describe('TabStore: opening (E4a Design §2)', () => {
     expect(h.views[0]!.webContents.loadURL).toHaveBeenCalledWith('http://127.0.0.1:1/reject');
     expect(tab).toMatchObject({ url: 'http://127.0.0.1:1/reject', loading: true, suspended: false });
     await Promise.resolve(); // the rejected promise has been handled: no unhandled rejection fails the run
+  });
+
+  it('a loadURL that throws synchronously marks the tab failed and closes the view it made', () => {
+    const h = harness();
+    const { tab } = open(h, 'https://a.test/throw');
+    expect(tab).toMatchObject({ failed: { message: 'refused synchronously' }, loading: false });
+    expect(h.entry(tab.tabId).view).toBeNull();
+    expect(h.views[0]!.webContents.close).toHaveBeenCalled();
+    expect(h.store.loadedCount()).toBe(0);
   });
 
   it('keeps the selection when select is false', () => {
@@ -216,7 +228,8 @@ describe('TabStore: the loaded-tab cap (Design §2, Decision Log 6)', () => {
     expect(victim.view).toBeNull();
     expect(victim.tab).toMatchObject({ suspended: true, url: 'https://1.test/', loading: false, memoryKiB: null });
     expect(h.views[1]!.webContents.close).toHaveBeenCalled();
-    expect(h.notices()).toEqual([{ appSessionId: B, tabId: tabs[1]!.tabId, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX }]);
+    // told to the opener's session, on the tab it opened, not on the other session's tab that was unloaded
+    expect(h.notices()).toEqual([{ appSessionId: B, tabId: added.tabId, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX }]);
   });
 
   it('with no eligible victim a commanded open opens suspended, its URL kept, and nothing is closed', () => {
@@ -330,6 +343,16 @@ describe('TabStore: restore (G4) and the view hooks', () => {
     expect(h.store.load('b_aaaaaaaaaaaa', 'https://a.test/')).toBe(true);
     expect(created).toHaveBeenCalledWith(expect.objectContaining({ tab: expect.objectContaining({ tabId: 'b_aaaaaaaaaaaa', suspended: false }) }));
     expect(h.views[0]!.webContents.loadURL).toHaveBeenCalledWith('https://a.test/');
+  });
+
+  it('a restored selection naming another session\'s tab, or no tab at all, restores as null', () => {
+    const h = harness({
+      restored: {
+        tabs: [{ tabId: 'b_aaaaaaaaaaaa', appSessionId: A, partition: DEFAULT_PARTITION, url: '', title: '', favicon: null, zoom: 1, createdAt: 'c', lastShownAt: 'l' }],
+        selected: { [A]: 'b_aaaaaaaaaaaa', [B]: 'b_aaaaaaaaaaaa', ['App-C' as AppSessionId]: 'b_cccccccccccc' },
+      },
+    });
+    expect(h.store.list().selected).toEqual({ [A]: 'b_aaaaaaaaaaaa', [B]: null, 'App-C': null });
   });
 
   it('a broken tabs file is announced once, to the first session that lists or opens', () => {

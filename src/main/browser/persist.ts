@@ -63,8 +63,11 @@ function moveAside(file: string, epoch: number, reason: unknown): { file: TabsFi
 }
 
 // Writes `contents()` to the file at most once per interval while dirty; `flushSync` writes now if anything is pending.
+// Text identical to the last write is not written again (most tab changes, a memory sample or a loading flag, touch no
+// field the file keeps).
 export class TabsFileWriter {
   private dirty = false;
+  private written: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -82,8 +85,11 @@ export class TabsFileWriter {
     this.timer = null;
     if (!this.dirty) return;
     this.dirty = false;
+    const text = `${JSON.stringify(this.contents(), null, 2)}\n`;
+    if (text === this.written) return;
     try {
-      atomicWriteFileSync(this.file, `${JSON.stringify(this.contents(), null, 2)}\n`);
+      atomicWriteFileSync(this.file, text);
+      this.written = text;
     } catch (error) {
       console.warn(`[browser] could not write ${this.file}:`, error instanceof Error ? error.message : error);
     }

@@ -99,10 +99,7 @@ export class ViewManager {
     this.watch(win);
     const owns = entry.placement?.paneId === paneId;
     if (rect === null) {
-      if (owns) {
-        entry.placement = null;
-        this.apply(entry);
-      }
+      if (owns) this.release(entry);
       return;
     }
     if (!owns && !claim) return;
@@ -113,7 +110,7 @@ export class ViewManager {
       rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
     };
     this.attach(entry);
-    this.apply(entry, owns ? {} : { lastShownAt: new Date(this.now()).toISOString() });
+    this.apply(entry, owns ? {} : { lastShownAt: this.stamp() });
   }
 
   // `browser.view.cover` (Design §3, Decision Log 4 and 20). Resolves once every placeholder is sent.
@@ -131,14 +128,19 @@ export class ViewManager {
     if (this.coveredWindows.has(win.id)) return;
     const generation = this.nextGeneration(win);
     const hiding = placed.filter((entry) => entry.visible);
-    if (hiding.some((entry) => entry.view!.webContents.isFocused())) win.webContents.focus();
+    // any placed page holding the native focus gives it to the window's own page, so the layer takes the typing and Esc
+    if (placed.some((entry) => entry.view !== null && entry.view.webContents.isFocused())) win.webContents.focus();
     this.coveredWindows.add(win.id);
     for (const entry of placed) this.apply(entry);
     await Promise.all(
       hiding.map(async (entry) => {
         const view = entry.view!;
         const placeholder = await placeholderOf(view);
-        const current = this.coverGeneration.get(win.id) === generation && this.deps.store.entry(entry.tab.tabId) === entry && entry.view === view;
+        const current =
+          this.coverGeneration.get(win.id) === generation &&
+          this.deps.store.entry(entry.tab.tabId) === entry &&
+          entry.view === view &&
+          entry.placement?.window === win; // not moved to another window meanwhile
         if (current) this.deps.emit('browser.view.covered', { tabId: entry.tab.tabId, placeholder });
       }),
     );
@@ -149,6 +151,17 @@ export class ViewManager {
   }
 
   // ---- internals ------------------------------------------------------------------------------------------------------
+
+  // A showing ends: the owner let go, or its window reloaded or closed. `lastShownAt` is when the tab was last on screen,
+  // so it is stamped when a showing ends as well as when one starts (the cap evicts the least recently shown).
+  private release(entry: TabEntry): void {
+    entry.placement = null;
+    this.apply(entry, { lastShownAt: this.stamp() });
+  }
+
+  private stamp(): string {
+    return new Date(this.now()).toISOString();
+  }
 
   // Puts the view in its owner's window at its owner's rect (no-op without a view or an owner).
   private attach(entry: TabEntry): void {
@@ -234,10 +247,7 @@ export class ViewManager {
   private reset(win: BrowserWindow): void {
     this.coveredWindows.delete(win.id);
     this.nextGeneration(win);
-    for (const entry of this.placedIn(win)) {
-      entry.placement = null;
-      this.apply(entry);
-    }
+    for (const entry of this.placedIn(win)) this.release(entry);
   }
 
   // The window closes: its views removed from it, their placements released (the tabs and pages live on).

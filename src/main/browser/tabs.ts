@@ -319,11 +319,11 @@ export class TabStore {
       const victim = this.capVictim(entry);
       if (!victim) {
         this.update(entry.tab.tabId, { suspended: true, url, loading: false });
-        this.capNotice(entry.tab.appSessionId, entry.tab.tabId);
+        this.capNotice(entry);
         return false;
       }
       this.suspend(victim.tab.tabId);
-      this.capNotice(entry.tab.appSessionId, victim.tab.tabId);
+      this.capNotice(entry);
     }
     try {
       entry.view = this.deps.createView(entry.tab);
@@ -353,8 +353,10 @@ export class TabStore {
     return eligible[0];
   }
 
-  // Told in the chrome of the session whose open or resume caused it; the tab is the one unloaded (Design §2).
-  private capNotice(appSessionId: AppSessionId, tabId: string): void {
+  // Told in the chrome of the session whose open or resume met the cap, on the tab it opened or resumed (whether another
+  // tab, perhaps another session's, was unloaded for it, or it was itself left unloaded) (Design §2).
+  private capNotice(opened: TabEntry): void {
+    const { appSessionId, tabId } = opened.tab;
     this.deps.emit('browser.notice', { appSessionId, tabId, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX });
   }
 

@@ -10,12 +10,12 @@ import type { BROWSER_SETTINGS_DEFAULTS } from '@shared/browser/tab';
 import type { Index } from '../index/index';
 import type { registerMainHandler } from '../ipc/router';
 import { isAppWindow } from '../windows';
-import { choosePartition, Partitions, preparePartition, readProfiles } from './partition';
+import { Partitions, readProfiles, tabPartition, type BrowserProfile } from './partition';
 import { readTabsFile, TabsFileWriter, type TabsFile } from './persist';
 import { registerBrowserHandlers } from './register';
 import { TabStore, type BrowserEmit } from './tabs';
 import { createTabView, ViewManager } from './view';
-import { FOCUS_EMULATION } from './visibility';
+import { focusEmulationMode } from './visibility';
 
 export type BrowserSettings = typeof BROWSER_SETTINGS_DEFAULTS;
 
@@ -25,7 +25,10 @@ export interface BrowserDeps {
   index: Pick<Index, 'sessions' | 'unavailable'>;
   register: typeof registerMainHandler;
   emit: BrowserEmit;
-  env: NodeJS.ProcessEnv;
+  env: NodeJS.ProcessEnv; // MAWS_BROWSER_FOCUS_EMULATION
+  // The imported Chrome profiles, for a new tab's partition and `browser.profiles.list` alike: `profiles.json` read
+  // from disk by default; E4b's block hands its in-memory owner here (Decision Log 40).
+  profiles?(): BrowserProfile[];
 }
 
 export interface Browser {
@@ -34,21 +37,22 @@ export interface Browser {
   stop(): void; // at will-quit: tabs.json written, every view closed
 }
 
-export function startBrowser({ userData, settings, index, register, emit }: BrowserDeps): Browser {
+export function startBrowser({ userData, settings, index, register, emit, env, profiles: listProfiles }: BrowserDeps): Browser {
   const dir = join(userData, 'browser');
   mkdirSync(dir, { recursive: true });
   const tabsFile = join(dir, 'tabs.json');
   const profilesFile = join(dir, 'profiles.json');
+  const profiles = listProfiles ?? (() => readProfiles(profilesFile));
 
   const { file, broken } = readTabsFile(tabsFile);
   const restored = knownSessionsOnly(file, index);
-  const partitions = new Partitions((partition) => session.fromPartition(partition), [preparePartition]);
+  const partitions = new Partitions((partition) => session.fromPartition(partition));
   const writer = new TabsFileWriter(tabsFile, () => store.snapshot());
   const store: TabStore = new TabStore({
     emit,
     createView: createTabView(partitions),
     resolvePartition: (appSessionId, tabId) => {
-      const { partition, notice } = choosePartition(settings().profile, readProfiles(profilesFile), (name) => partitions.session(name));
+      const { partition, notice } = tabPartition(settings().profile, profiles(), partitions);
       if (notice) emit('browser.notice', { appSessionId, tabId, kind: notice.kind, name: notice.name });
       return partition;
     },
@@ -64,10 +68,10 @@ export function startBrowser({ userData, settings, index, register, emit }: Brow
       const win = BrowserWindow.fromWebContents(sender);
       return win && isAppWindow(win) && !win.isDestroyed() ? win : null;
     },
-    focusEmulation: FOCUS_EMULATION,
+    focusEmulation: focusEmulationMode(env),
   });
 
-  registerBrowserHandlers({ store, views, profiles: () => readProfiles(profilesFile), register });
+  registerBrowserHandlers({ store, views, profiles, register });
   const stopSessions = index.sessions.onChange((record, cause) => {
     if (cause === 'removed') store.removeSession(record.appId);
   });

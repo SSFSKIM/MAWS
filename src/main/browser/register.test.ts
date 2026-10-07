@@ -4,15 +4,18 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { CommandName } from '@shared/ipc/schema';
 
-vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, BrowserWindow: { fromWebContents: () => null } }));
+vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, BrowserWindow: { fromWebContents: () => null }, WebContentsView: class {} }));
 
 const { CommandFailure } = await import('../ipc/router');
 const { TabStore } = await import('./tabs');
 const { registerBrowserHandlers } = await import('./register');
+const { ViewManager } = await import('./view');
 
 const A = 'App-A' as AppSessionId;
 
-function setup() {
+type Views = Parameters<typeof registerBrowserHandlers>[0]['views'];
+
+function setup(makeViews?: (store: InstanceType<typeof TabStore>) => Views) {
   const store = new TabStore({
     emit: () => {},
     createView: () => ({ webContents: { loadURL: () => Promise.resolve(), close: () => {}, isDestroyed: () => false } }) as unknown as WebContentsView,
@@ -23,7 +26,7 @@ function setup() {
   const views = { place: vi.fn(), cover: vi.fn(async () => {}) };
   registerBrowserHandlers({
     store,
-    views,
+    views: makeViews?.(store) ?? views,
     profiles: () => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't' }],
     register: (name, handler) => void handlers.set(name, handler as (input: unknown) => unknown),
   });
@@ -46,6 +49,30 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     expect(views.place).toHaveBeenCalledWith(place, sender);
     expect(handlers.get('browser.view.cover')!({ covered: true }, { sender })).toBeUndefined();
     expect(views.cover).toHaveBeenCalledWith(true, sender);
+  });
+
+  it('browser.view.place for an unknown tab answers invalid_input', () => {
+    const { call } = setup((store) => new ViewManager({ store, emit: () => {}, windowOf: () => ({}) as never, focusEmulation: 'off' }));
+    let thrown: unknown;
+    try {
+      call('browser.view.place', { tabId: 'b_ffffffffffff', paneId: 'p', surface: 'panel', rect: null, claim: false });
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as InstanceType<typeof CommandFailure>).error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
+  });
+
+  it('a cover that fails is logged, never an unhandled rejection', async () => {
+    const failing = new Error('capture service gone');
+    const { handlers } = setup(() => ({ place: vi.fn(), cover: vi.fn(async () => Promise.reject(failing)) }));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      handlers.get('browser.view.cover')!({ covered: true }, { sender: {} });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(logged).toHaveBeenCalledWith('[browser] the cover failed:', failing);
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it('opens, lists, selects and closes through the store', () => {

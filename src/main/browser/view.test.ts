@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { BrowserWindow, WebContents, WebContentsView } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { BROWSER_PLACEHOLDER_MAX_BYTES, DEFAULT_PARTITION } from '@shared/browser/tab';
+import { BROWSER_LOADED_TABS_MAX, BROWSER_PLACEHOLDER_MAX_BYTES, DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 
 vi.mock('electron', () => ({ WebContentsView: class {} }));
@@ -63,9 +63,10 @@ class FakeWindow extends EventEmitter {
   };
   readonly webContents = Object.assign(new EventEmitter(), { focus: vi.fn(), isDestroyed: () => false, getURL: () => 'file:///app/out/renderer/index.html#/s' });
   minimized = false;
+  shownOnScreen = true;
   isDestroyed = () => false;
   isMinimized = () => this.minimized;
-  isVisible = () => true;
+  isVisible = () => this.shownOnScreen;
 }
 
 function harness(options: { focus?: 'on' | 'off' } = {}) {
@@ -203,6 +204,46 @@ describe('the view manager: placement (E4a Design §3, Decision Log 22)', () => 
   });
 });
 
+describe('the view manager: lastShownAt and the cap (Design §2)', () => {
+  it('a showing stamps lastShownAt when it starts and when it ends, so the cap evicts the tab released first', () => {
+    const h = harness();
+    const { sender } = h.win();
+    const x = h.loaded('https://x.test/');
+    const y = h.loaded('https://y.test/');
+    for (let i = 2; i < BROWSER_LOADED_TABS_MAX; i++) h.store.update(h.loaded(`https://${i}.test/`).tabId, { control: 'agent' }); // ineligible
+    for (const { tab } of h.store.all()) h.store.update(tab.tabId, { loading: false });
+    h.tick(1000);
+    h.place(sender, x.tabId, 'px', R, true); // x claimed first
+    h.tick(1000);
+    h.place(sender, y.tabId, 'py', R, true);
+    h.tick(1000);
+    h.place(sender, y.tabId, 'py', null); // y released first
+    h.tick(1000);
+    h.place(sender, x.tabId, 'px', null); // x was on screen until now
+    expect(h.store.entry(x.tabId)!.tab.lastShownAt).toBe('2026-10-06T12:00:04.000Z');
+    expect(h.store.entry(y.tabId)!.tab.lastShownAt).toBe('2026-10-06T12:00:03.000Z');
+    h.store.open({ appSessionId: A, url: 'https://new.test/', select: true });
+    expect(h.store.entry(y.tabId)!.tab.suspended).toBe(true);
+    expect(h.store.entry(x.tabId)!.tab.suspended).toBe(false);
+  });
+
+  it('a window\'s reload and its closing end the showings in it, stamped', () => {
+    const h = harness();
+    const one = h.win();
+    const two = h.win();
+    const a = h.loaded('https://a.test/');
+    const b = h.loaded('https://b.test/');
+    h.place(one.sender, a.tabId, 'pa', R, true);
+    h.place(two.sender, b.tabId, 'pb', R, true);
+    h.tick(7000);
+    one.w.webContents.emit('render-process-gone', {}, { reason: 'crashed' });
+    expect(h.store.entry(a.tabId)!.tab.lastShownAt).toBe('2026-10-06T12:00:07.000Z');
+    h.tick(1000);
+    two.w.emit('close');
+    expect(h.store.entry(b.tabId)!.tab.lastShownAt).toBe('2026-10-06T12:00:08.000Z');
+  });
+});
+
 describe('the view manager: shown (Design §3, §5)', () => {
   it('a load error or a crash hides the view until the next commit; a suspended tab has no view', () => {
     const h = harness();
@@ -304,6 +345,41 @@ describe('the view manager: cover (Design §3, Decision Log 4, 20)', () => {
     };
     await h.manager.cover(true, sender);
     expect(order).toEqual(['focus window', 'visible false']);
+  });
+
+  it('moves focus to the window when a placed view that is not showing (its error page drawn) held it; never otherwise', async () => {
+    const quiet = harness();
+    const q = quiet.win();
+    const shown = quiet.loaded();
+    quiet.place(q.sender, shown.tabId, 'p1', R, true);
+    await quiet.manager.cover(true, q.sender);
+    expect(q.w.webContents.focus).not.toHaveBeenCalled(); // no placed page had the focus
+
+    const h = harness();
+    const { w, sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    h.store.loadFailed(tabId, { url: 'http://127.0.0.1:1/', code: -102, description: 'ERR_CONNECTION_REFUSED', canGoBack: false, canGoForward: false });
+    view.focused = true;
+    await h.manager.cover(true, sender);
+    expect(w.webContents.focus).toHaveBeenCalledTimes(1);
+    expect(h.covered()).toEqual([]); // nothing was showing, so nothing is captured
+  });
+
+  it('a placeholder whose tab moved to another window during the capture is not sent', async () => {
+    const h = harness();
+    const one = h.win();
+    const two = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(one.sender, tabId, 'p1', R, true);
+    let answer!: (image: unknown) => void;
+    view.capture = () => new Promise((resolve) => (answer = resolve));
+    const pending = h.manager.cover(true, one.sender);
+    h.place(two.sender, tabId, 'p2', R, true);
+    answer(fakeImage(10));
+    await pending;
+    expect(h.covered()).toEqual([]);
+    expect(view.visible).toBe(true);
   });
 
   it('a pane claiming while its window is covered stays hidden; a cover that lifts before the capture answers sends nothing', async () => {
@@ -423,6 +499,22 @@ describe('focus emulation (Design §3, Decision Log 1; M0: off)', () => {
       [tabId, false],
       [tabId, true],
       [tabId, false],
+    ]);
+  });
+
+  it('on: the window\'s hide and show re-evaluate it', () => {
+    const h = harness({ focus: 'on' });
+    const { w, sender } = h.win();
+    const { tabId } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    w.shownOnScreen = false;
+    w.emit('hide');
+    w.shownOnScreen = true;
+    w.emit('show');
+    expect(h.focusCalls).toEqual([
+      [tabId, true],
+      [tabId, false],
+      [tabId, true],
     ]);
   });
 });

@@ -39,5 +39,7 @@ export function registerBrowserHandlers({ store, views, profiles, register }: Br
   register('browser.profiles.list', () => ({ profiles: profiles().map(({ profileDir, name }) => ({ profileDir, name })) }));
   // The sender's window places and covers; the cover answers at once, its placeholders follow as browser.view.covered.
   register('browser.view.place', knownTabs((input, { sender }) => views.place(input, sender)));
-  register('browser.view.cover', ({ covered }, { sender }) => void views.cover(covered, sender));
+  register('browser.view.cover', ({ covered }, { sender }) => {
+    views.cover(covered, sender).catch((error: unknown) => console.error('[browser] the cover failed:', error));
+  });
 }
