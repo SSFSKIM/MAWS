@@ -35,9 +35,11 @@ describe('replay: a read the fixture never recorded', () => {
     const meta = run.journal.rows.filter((r) => r.direction === 'meta').map((r) => r.frame as { event: string; subtype?: string });
     expect(meta.filter((m) => m.event === 'replay_mismatch')).toEqual([]);
     expect(meta.filter((m) => m.event === 'replay_unrecorded_read').map((m) => m.subtype)).toEqual(expect.arrayContaining(['list_models', 'list_permission_rules']));
-    // the empty answer reaches the caller as a read that failed its schema, never as a crash of the replay
+    // the empty answer reaches the caller as a read the replay did not record (E11: `replay_unrecorded`), never as a
+    // crash of the replay
     expect(outcomes.listModels).toBeInstanceOf(ControlError);
     expect(outcomes.rules).toBeInstanceOf(ControlError);
+    expect(outcomes.rules).toMatchObject({ code: 'replay_unrecorded', message: 'list_permission_rules was not recorded in this replay' });
     // E11 (tracker row E10 "host.log expected traffic as errors"): the replay's own stand-in answer is expected, so it
     // logs no schema warning (the meta row records it); a recorded answer failing its schema still would
     expect(logs.filter((line) => line.includes('failed its schema'))).toEqual([]);

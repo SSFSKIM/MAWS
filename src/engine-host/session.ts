@@ -971,14 +971,15 @@ export class EngineSession {
   }
 
   // The status line's `ctx` once ready and after every turn (debt wave 3): the engine's context read, whose answer the normaliser turns
-  // into `context.sample` from its journal row; a failed read samples nothing and the last sample stands.
+  // into `context.sample` from its journal row; a failed read samples nothing and the last sample stands. E11: a read a
+  // replay never recorded is logged by nothing but its journal row.
   private async sampleContext(): Promise<void> {
     const client = this.client;
     if (!client) return;
     try {
       await getContextUsage(client, { detail: 'summary' });
     } catch (error) {
-      this.log(`get_context_usage failed: ${messageOf(error)}`);
+      if (!(error instanceof ControlError && error.code === 'replay_unrecorded')) this.log(`get_context_usage failed: ${messageOf(error)}`);
     }
   }
 

@@ -100,13 +100,15 @@ export class ControlClient {
   }
 
   // A typed request: the response payload is parsed with the subtype's schema; a parse failure rejects with
-  // ControlError `invalid_response` (the wire changed under us) and the raw response stays in the journal.
+  // ControlError `invalid_response` (the wire changed under us) and the raw response stays in the journal. E11: a
+  // replay's stand-in for a read it never recorded rejects `replay_unrecorded`, warning nothing (its meta row says it).
   async request<S extends OutboundSubtype>(subtype: S, payload: OutboundRequest<S>, opts: RequestOptions = {}): Promise<OutboundResponse<S>> {
     const { envelope, requestId, standIn } = await this.exchange(subtype, payload as Record<string, unknown>, opts);
     const parsed = CONTROLS[subtype].response.safeParse(envelope.response ?? {});
     if (!parsed.success) {
       const paths = parsed.error.issues.map((issue) => issue.path.join('.') || '<root>').join(', ');
-      if (!standIn) this.warn(`${subtype} ${requestId}: response failed its schema at ${paths}`);
+      if (standIn) throw new ControlError(subtype, requestId, `${subtype} was not recorded in this replay`, 'replay_unrecorded');
+      this.warn(`${subtype} ${requestId}: response failed its schema at ${paths}`);
       throw new ControlError(subtype, requestId, `${subtype} answered with an unexpected shape (${paths})`, 'invalid_response');
     }
     return parsed.data as OutboundResponse<S>;
