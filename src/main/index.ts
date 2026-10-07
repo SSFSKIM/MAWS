@@ -92,6 +92,10 @@ import { sideThreadEvents, startSideThreads } from './side/side-threads';
 import { appWindows } from './windows';
 import { registerDeliverableScheme, startDeliverables } from './deliverables';
 // E2 end
+// E4a start
+import { BROWSER_SETTINGS_DEFAULTS } from '@shared/browser/tab';
+import { startBrowser } from './browser';
+// E4a end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -381,6 +385,21 @@ void startWithProfileLock(app, () => {
   const stopWidgetBackend = installWidgetBackend({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), intercept: interceptCommand, emit, fail: (error) => new CommandFailure(error) });
   if (stopWidgetBackend) app.on('will-quit', stopWidgetBackend);
   // C11 end
+
+  // E4a start: the in-app browser's main side (E4a execution document, Design §1 to §3, §9): the tab store over
+  // <userData>/browser/tabs.json, the partitions, the views and browser.*, after the index (a deleted session closes its
+  // tabs) and before any window, so the first page finds its handlers. Its will-quit write runs before the hosts stop.
+  // The Browser settings are the defaults until settings 11 lands (Task 3.5: settings.state().settings.browser).
+  const browser = startBrowser({
+    userData: app.getPath('userData'),
+    settings: () => BROWSER_SETTINGS_DEFAULTS,
+    index,
+    register: registerMainHandler,
+    emit,
+    env: process.env,
+  });
+  app.on('will-quit', browser.stop);
+  // E4a end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.
