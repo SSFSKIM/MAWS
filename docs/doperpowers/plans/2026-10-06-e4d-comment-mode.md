@@ -13,7 +13,7 @@ To see it: open a session, add Browser from the panel's "+", load a page, press 
 - [x] M0 — Re-pin against E4a as landed (and E4c's `locator.ts` if landed); merge master (2026-10-06 23:35, reviewed: one round, the findings folded into the document at bacf5ee0)
 - [x] M1 — Shared: the naming module, the comment protocol, X10's fields and the tag, the `browser.comment.*` IPC (2026-10-07, reviewed clean in two rounds: 634e90b8..fcf65f04, fix 7e33dac5)
 - [x] M2 — The preload's hover and pick; main: the mode, the report gate, the crop, the context-menu entry, the seam (2026-10-07, reviewed clean: Task 2.1 0c6a5e41 + fixes 1f7c4c4b, 6da28eea; Tasks 2.2-2.4 514bfa5f, a872b291, 151a3e97 + fix f430e195)
-- [ ] M3 — Renderer: the Comment toggle, the composer call, the chip and thread header openers, copy
+- [x] M3 — Renderer: the Comment toggle, the composer call, the chip and thread header openers, copy (2026-10-07, reviewed: approved in one round, 1c7faaec, 5d10b88f, f05760d8; minor fixes 9e495e2f)
 - [ ] M4 — `e2e:browser-comment`, evidence in both themes, gates, the whole-branch review, hand-back
 - [ ] M5 — G2's live proof (after E4c lands): a side thread's agent clicks the anchored element through `browser_act {target: {css}}`
 
