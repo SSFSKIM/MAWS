@@ -13,6 +13,7 @@ import { expect, test } from '@playwright/test';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { invoke } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { tmpSocketDirOf } from './support/supervisor-socket';
 
 const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? realpathOr(resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE)) : null;
 test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1' || EXECUTABLE === null, 'the packaged supervisor check runs under pnpm e2e:supervisor:packaged (a packaged MAWS_E2E_EXECUTABLE and MAWS_SUPERVISOR_E2E=1)');
@@ -156,7 +157,8 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
         if ((error as NodeJS.ErrnoException).code !== 'ESRCH') console.error(error);
       }
     }
-    if (socketPath !== null && !socketPath.startsWith(root)) rmSync(dirname(socketPath), { recursive: true, force: true });
+    const tmpSocketDir = socketPath !== null ? tmpSocketDirOf(userData, socketPath) : null; // a socket under root goes with it
+    if (tmpSocketDir !== null) rmSync(tmpSocketDir, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });

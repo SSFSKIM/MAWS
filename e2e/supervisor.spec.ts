@@ -20,7 +20,7 @@ import { execFileSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
@@ -30,6 +30,7 @@ import { invoke, launchReady, replaySpec, turnsJournal, value } from './support/
 import { menu, otherThemeColours } from './support/code-product';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
+import { tmpSocketDirOf } from './support/supervisor-socket';
 
 test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1', 'the supervisor e2e runs under pnpm e2e:supervisor (MAWS_SUPERVISOR_E2E=1)');
 
@@ -229,7 +230,10 @@ class Scratch {
     }
     let leftover: unknown = null; // a survivor is reported, after the files are removed all the same
     await expect.poll(() => processesNaming(this.root).map((p) => p.pid), { timeout: 10_000, message: `no process of ${this.root} outlives the case` }).toEqual([]).catch((error: unknown) => (leftover = error));
-    for (const socket of this.sockets) if (!socket.startsWith(this.root)) rmSync(dirname(socket), { recursive: true, force: true });
+    for (const socket of this.sockets) {
+      const dir = tmpSocketDirOf(this.userData, socket); // a socket under root goes with it
+      if (dir !== null) rmSync(dir, { recursive: true, force: true });
+    }
     rmSync(this.root, { recursive: true, force: true });
     if (leftover !== null) throw leftover;
   }
