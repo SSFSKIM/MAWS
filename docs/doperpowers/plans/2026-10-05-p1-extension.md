@@ -342,7 +342,7 @@ What exists, read-only, that the children build on or replace.
 - **Contracts:** consumes all.
 - **Design inheritance:** §2 [binding]; P0's C12 finish pattern (`docs/doperpowers/plans/2026-09-29-c12-finish.md`) [advisory].
 - **Required:** required.
-- **Status:** not-dispatched, deliberately late.
+- **Status:** author dispatched 2026-10-06 after E10's landing (the scale review's panel runs from the architect's session on the pinned range; the executor follows E4a to E4d).
 
 ## 10. Cross-child contracts
 
@@ -394,7 +394,7 @@ What exists, read-only, that the children build on or replace.
 | E8 Plugins, marketplaces and mods | plan | landed 2026-10-06 (merged to master at 0eb56c11 from 7c9d89d8, code head 4f28bdd8; 43 commits over 76b58fe0; seven files conflicted with E9's merge, all additive, resolved on semantics by the architect with typecheck and the two affected suites green; gates on the code head: typecheck, lint, 6,012 units, `e2e:widgets` 24, `e2e:settings` 9, `e2e:panel` 23, the live run of sixteen steps on 2.1.291 under a scratch home; document review 7 P2 folded; three milestones each two task-review rounds; whole-branch reviewer-high two rounds, 1 P1 and 9 P2 fixed; nothing dismissed; master gate after the merge at 13199d89: typecheck clean and the full unit suite green, `/tmp/maws-review/gates/master-e8-merge.log`) | `docs/doperpowers/plans/2026-10-05-e8-plugins.md` (Outcomes written), `docs/doperpowers/evidence/p1-e8/` |
 | E9 Voice | plan | landed 2026-10-06 (merged to master at 75b352d2 from 0af16f74, code tree 3869830a; 62 commits over 76b58fe0; gates on the code tree: typecheck, lint, 6,061 units, `e2e:voice` 14, `e2e:c7` 29, unsigned `build:app`, packaged helper probed and packaged e2e 1; adversarial document review 7 findings folded; every task approved within two rounds; whole-branch reviewer-high two Important fixed, round two clean; the owner's three rulings applied as M6; the live Apple recognition and the two TCC dialogs are the owner's first hold; master gate on 75b352d2: typecheck clean, 6,073 units in 458 files, `/tmp/maws-review/gates/master-75b352d2.log`) | `docs/doperpowers/plans/2026-10-05-e9-voice.md` (Outcomes & Retrospective written), `docs/doperpowers/evidence/p1-e9/` |
 | E10 Detachable supervisor | plan | landed 2026-10-06 (merged to master at f2ccd239 from c8e9a5e1, code head dedbf4ae; three controller contexts over the day; 16 tasks, task-reviewer per task on Opus, whole-branch reviewer-high two rounds; master gate green: 8,178 units with the known viewer flake green alone, supervisor 8, transcript 31, tools 8, deliverables 10, side 8, scm 8, code 35, packaged 49 plus the packaged supervisor case, `verify:fuses`) | `docs/doperpowers/plans/2026-10-06-e10-supervisor.md` (Outcomes written); evidence `docs/doperpowers/evidence/p1-e10/` |
-| E11 Finish | plan | not-dispatched, deliberately late | execution document at dispatch |
+| E11 Finish | plan | author dispatched 2026-10-06 after E10's landing (Fable, isolated worktree; adversarial review on Opus before hand-back); executor after E4a to E4d land | execution document at the author's hand-back |
 
 ## 14. Surprises and discoveries
 
