@@ -235,5 +235,22 @@ export const BROWSER = {
   links: 'Links that open a new window',
   linkTargets: { 'in-app': 'In MAWS', external: 'In the system browser' },
   linksNote: 'In MAWS, such a link opens as a new tab of the same session.',
+  // E4b start: the imported Chrome profiles (E4b execution document, Design §11; Decision Log 35)
+  chromeProfile: 'Chrome profile',
+  import: 'Import a Chrome profile…',
+  importNote: 'A one-time copy of its history, cookies and extensions. Chrome is never changed.',
+  importing: (step: string) => `Import running · ${step}`,
+  show: 'Show',
+  lastImport: (outcome: 'cancelled' | 'failed') => (outcome === 'cancelled' ? 'The last import was cancelled' : 'The last import failed'),
+  importedOn: (date: string) => `Imported ${date}`,
+  showReport: 'Show report',
+  remove: 'Remove imported profile',
+  extensions: 'Extensions',
+  walletOff: 'Wallet extensions start off',
+  toggles: [
+    { value: 'on', label: 'On' },
+    { value: 'off', label: 'Off' },
+  ] as const,
+  // E4b end
 };
 // E4a end

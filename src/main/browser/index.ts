@@ -52,6 +52,10 @@ export interface Browser {
   store: TabStore;
   views: ViewManager;
   stop(): void; // at will-quit: tabs.json written, every view closed
+  // E4b start: the partitions, for the Chrome import (E4b Decision Log 31): its partition opened and prepared once, as a
+  // tab's is, and its per-boot extension loading registered as a preparer
+  partitions: Partitions;
+  // E4b end
 }
 
 export function startBrowser({ userData, settings, index, register, emit, env, profiles: listProfiles }: BrowserDeps): Browser {
@@ -136,6 +140,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   return {
     store,
     views,
+    partitions, // E4b
     // At will-quit, before the hosts stop: nothing more is sampled or placed, tabs.json is written, every page closed.
     stop: () => {
       commentMode.stop(); // E4d

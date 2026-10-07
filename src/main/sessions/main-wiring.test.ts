@@ -54,7 +54,8 @@ vi.mock('../settings/engine-configure', () => ({ startEngineConfigure: () => ({ 
 vi.mock('../settings/host-configure', () => ({ startHostConfigure: () => vi.fn() })); // E10
 vi.mock('../widgets/fixture-backend', () => ({ installWidgetBackend: vi.fn() }));
 vi.mock('../deliverables', () => ({ registerDeliverableScheme: vi.fn(), startDeliverables: () => ({ reader: {}, stop: vi.fn() }) })); // E2
-vi.mock('../browser', () => ({ startBrowser: (deps: { settings(): unknown }) => { state.browserSettings = deps.settings; return { stop: vi.fn() }; } })); // E4a
+vi.mock('../browser', () => ({ startBrowser: (deps: { settings(): unknown }) => { state.browserSettings = deps.settings; return { stop: vi.fn(), partitions: {} /* E4b */ }; } })); // E4a
+vi.mock('../browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b
 
 const ID = '11111111-1111-4111-8111-111111111111' as AppSessionId;
 const invoke = async (name: string, input?: unknown) => state.handlers.get(name)!(input);

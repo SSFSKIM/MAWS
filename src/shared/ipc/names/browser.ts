@@ -7,6 +7,10 @@ export const commands = [
   // E4d start
   'browser.comment.set',
   // E4d end
+  // E4b start
+  'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
+  'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
+  // E4b end
 ] as const;
 
 export const events = [
@@ -14,4 +18,7 @@ export const events = [
   // E4d start
   'browser.comment.changed', 'browser.comment.picked',
   // E4d end
+  // E4b start
+  'browser.import.progress', 'browser.import.finished', 'browser.import.changed',
+  // E4b end
 ] as const;

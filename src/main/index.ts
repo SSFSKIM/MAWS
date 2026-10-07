@@ -99,6 +99,9 @@ import { engineQuitDeps } from './lifecycle/engine-quit';
 // E4a start
 import { startBrowser } from './browser';
 // E4a end
+// E4b start
+import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './browser/import';
+// E4b end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -404,6 +407,14 @@ void startWithProfileLock(app, () => {
   if (stopWidgetBackend) app.on('will-quit', stopWidgetBackend);
   // C11 end
 
+  // E4b start: the Chrome import's records and its boot sweep, before E4a's browser opens any partition (E4b execution
+  // document, Decision Log 24, 27, 34): profiles.json's one owner in memory, which E4a reads through `profiles` below, and
+  // the sweep of what a crash, a quit mid-import or a removal left (staging, unlisted partition folders, storage
+  // directories and history rows).
+  const browserProfiles = ImportedProfiles.open(app.getPath('userData'));
+  sweepBrowserImports({ userData: app.getPath('userData'), profiles: browserProfiles, history: index.browserHistory });
+  // E4b end
+
   // E4a start: the in-app browser's main side (E4a execution document, Design §1 to §3, §9): the tab store over
   // <userData>/browser/tabs.json, the partitions, the views and browser.*, after the index (a deleted session closes its
   // tabs) and before any window, so the first page finds its handlers. Its will-quit write runs before the hosts stop.
@@ -416,9 +427,25 @@ void startWithProfileLock(app, () => {
     register: registerMainHandler,
     emit,
     env: process.env,
+    profiles: () => browserProfiles.browsable(), // E4b
   });
   app.on('will-quit', browser.stop);
   // E4a end
+  // E4b start: the Chrome import over E4a's handle (E4b Decision Log 31, 32, 34): browser.import.*, the per-boot loading
+  // of an imported profile's extensions, the active profile's partition prepared now; at will-quit a running import is
+  // cancelled as far as can be done synchronously and every staging directory deleted.
+  const browserImport = startBrowserImport({
+    userData: app.getPath('userData'),
+    settings: () => settings.state().settings.browser,
+    index,
+    register: registerMainHandler,
+    emit,
+    env: process.env,
+    browser,
+    profiles: browserProfiles,
+  });
+  app.on('will-quit', browserImport.stop);
+  // E4b end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.
