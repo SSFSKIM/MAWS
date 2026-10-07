@@ -1,4 +1,6 @@
+import { act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { AttentionItem } from '@shared/graph/attention';
 import type { AttentionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
@@ -108,6 +110,54 @@ describe('the fallback toast', () => {
     useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId }); // the docked card is not in a file tab
     fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
     expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${plan.id}`, `attention:${fix.id}`]);
+  });
+
+  // E11 (W-C; E10's crash screenshot; A-47): the toast names an item; once that item is no longer open (answered,
+  // retired, or cleared with its dead host), the toast goes with it
+  describe('leaves with its item', () => {
+    const fix = () => nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    const toasted = () => useNotices.getState().notices.map((n) => n.id);
+    const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
+
+    it('a permission request answered: its item confirmed, the toast is dismissed', () => {
+      const item = fix();
+      expect(item.kind).toBe('permission');
+      notify(item);
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }));
+      expect(toasted()).toEqual([`attention:${item.id}`]); // delivered is still open
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'confirmed' }] }));
+      expect(toasted()).toEqual([]);
+    });
+
+    it('its item cleared with a dead host (gone from the list), or retired, while another toast stays', () => {
+      const item = fix();
+      const plan = nine.attention.find((a) => a.appSessionId === idOf('Quota reset recovery'))!.items[0];
+      notify(item);
+      notify(plan);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [] }));
+      expect(toasted()).toEqual([`attention:${plan.id}`]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: plan.appSessionId, items: [{ ...plan, state: 'retired' }] }));
+      expect(toasted()).toEqual([]);
+    });
+
+    it('an item the page’s list does not hold yet keeps its toast until it has been seen open and then leaves', () => {
+      const item = { ...fix(), id: 'att-late' as AttentionId };
+      notify(item);
+      act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Quota reset recovery'), items: [] })); // another session's change
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [fix(), item] }));
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [fix()] }));
+      expect(toasted()).toEqual([]);
+    });
+
+    it('an item already settled when its notice arrives raises no toast', () => {
+      const item = fix();
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'retired' }] }));
+      notify(item);
+      expect(toasted()).toEqual([]);
+    });
   });
 });
 
