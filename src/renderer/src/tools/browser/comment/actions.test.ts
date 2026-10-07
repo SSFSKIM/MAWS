@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record } from '../../../../../../test/support/builders';
 import { registerPanelTool } from '../../../panel/host';
+import { useLayout } from '../../../stores/layout';
+import { activeTab, sessionOfTab } from '../../../stores/layout-model';
 import { useNotices } from '../../../stores/notices';
 import { useSessions } from '../../../stores/sessions';
 import { installFakeMain, ok } from '../../../test-support/code';
@@ -67,6 +69,7 @@ describe('openBrowserUrl', () => {
     expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: C, url: URL, select: true, reuse: 'url' }]);
     expect(browserTabs(C)).toHaveLength(1);
     expect(panelOf(C)!.activeTabId).not.toBe(browserTabs(C)[0]!.id);
+    expect(sessionOfTab(activeTab(useLayout.getState().main))).toBe(A); // the panel rule: the main view stays where it was
     expect(toasts()).toEqual([COMMENT_COPY.openedElsewhere(C)]); // the builder's title is the id
   });
 

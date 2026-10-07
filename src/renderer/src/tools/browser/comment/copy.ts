@@ -2,9 +2,7 @@
 // toggle, the toasts after a pick, and the transcript's and the Side pane's page openers. The words the in-page hover UI
 // and the native context menu use are main's and the preload's (`COMMENT_WORDS`); they are re-exported here so one
 // place holds every word comment mode shows.
-import { COMMENT_WORDS } from '@shared/browser/comment-protocol';
-
-export { COMMENT_WORDS };
+export { COMMENT_WORDS } from '@shared/browser/comment-protocol';
 
 export const COMMENT_COPY = {
   toggle: 'Comment',
@@ -16,5 +14,4 @@ export const COMMENT_COPY = {
   openInBrowser: 'Open in the browser',
   cannotOpen: (url: string) => `MAWS can’t open ${url}`,
   openedElsewhere: (title: string) => `Opened in the browser of ${title}`,
-  words: COMMENT_WORDS,
 } as const;

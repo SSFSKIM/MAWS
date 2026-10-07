@@ -80,12 +80,13 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
             <p className="m-0 truncate font-mono text-ui-sm text-fg">{label}</p>
           )}
           {/* E4d start: a page element's URL is a button opening the page in the parent's browser, where the commented tab
-              lives (E4d execution document, Design §10); E3's text line for any other anchor's URL, moved inside the block */}
+              lives (E4d execution document, Design §10): `child` maps to its own parent there, as the chip in its transcript
+              does, even when `parent` is itself a thread; E3's text line for any other anchor's URL, moved inside the block */}
           {pageUrl !== undefined ? (
             <button
               type="button"
               title={COMMENT_COPY.openInBrowser}
-              onClick={() => openBrowserUrl(parent, pageUrl)}
+              onClick={() => openBrowserUrl(child, pageUrl)}
               className="block max-w-full truncate rounded-sm text-left text-ui-sm text-fg-muted outline-accent hover:text-fg hover:underline focus-visible:outline-2"
             >
               {pageUrl}

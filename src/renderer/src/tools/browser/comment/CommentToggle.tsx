@@ -23,7 +23,7 @@ export function commentUnavailable(tab: BrowserTab): string | null {
 }
 
 const plainEscape = (event: KeyboardEvent) =>
-  event.key === 'Escape' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.isComposing && !event.defaultPrevented;
+  event.key === 'Escape' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.isComposing;
 
 export function CommentToggle({ tab }: ChromeExtraProps) {
   const { tabId } = tab;
