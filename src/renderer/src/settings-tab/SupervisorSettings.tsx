@@ -49,6 +49,9 @@ const restart = (failed?: (why: string) => string) => restartSupervisor(ipc, use
 // After an action removes or disables the control that had focus, focus would fall to the page: it goes to `preferred`
 // when that is still there and enabled, else to the group's heading. Focus the owner moved elsewhere is left alone.
 type KeepFocus = (preferred: HTMLButtonElement | null) => void;
+// E11 W-D: a refused action leaves its control offered and enabled again: the focus the heading held meanwhile (or
+// that fell to the page) goes back to it.
+type ReturnFocus = (control: HTMLButtonElement | null) => void;
 
 export function SupervisorSettings({ settings }: { settings: Settings }) {
   const headingId = useId();
@@ -62,12 +65,17 @@ export function SupervisorSettings({ settings }: { settings: Settings }) {
     if (preferred?.isConnected && !preferred.disabled) preferred.focus();
     else heading.current?.focus({ preventScroll: true });
   }, []);
+  const returnFocus = useCallback<ReturnFocus>((control) => {
+    const active = document.activeElement;
+    const held = active === null || active === document.body || active === heading.current;
+    if (held && control?.isConnected && !control.disabled) control.focus();
+  }, []);
   return (
     <div role="group" aria-labelledby={headingId} className="mt-3">
       <h4 id={headingId} ref={heading} tabIndex={-1} className="m-0 mb-0.5 text-ui-sm font-semibold text-fg outline-accent focus-visible:outline-2">
         {SUPERVISOR.title}
       </h4>
-      <StatusRow status={status} keepFocus={keepFocus} />
+      <StatusRow status={status} keepFocus={keepFocus} returnFocus={returnFocus} />
       <IdleExit settings={settings} />
       <Setting label={SUPERVISOR.quitDefault} note={SUPERVISOR.quitNote}>
         <Segment
@@ -85,20 +93,29 @@ export function SupervisorSettings({ settings }: { settings: Settings }) {
   );
 }
 
-function StatusRow({ status, keepFocus }: { status: HostStatus | null; keepFocus: KeepFocus }) {
+function StatusRow({ status, keepFocus, returnFocus }: { status: HostStatus | null; keepFocus: KeepFocus; returnFocus: ReturnFocus }) {
   const [busy, setBusy] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const acted = useRef(false); // Restart now was pressed, and its button may take focus with it as it goes
+  const refused = useRef(false); // main refused that press: the button stays offered
   const { text, restart: offered, note } = describe(status);
   useEffect(() => {
     if (!acted.current) return;
+    if (refused.current && !busy) {
+      acted.current = refused.current = false; // the press is over; the button is back
+      returnFocus(button.current);
+      return;
+    }
     keepFocus(button.current);
     if (!offered) acted.current = false;
-  }, [busy, offered, keepFocus]);
+  }, [busy, offered, keepFocus, returnFocus]);
   const restartNow = () => {
     acted.current = true;
+    refused.current = false;
     setBusy(true);
-    void restart().finally(() => setBusy(false));
+    void restart()
+      .then((ok) => (refused.current = !ok))
+      .finally(() => setBusy(false));
   };
   return (
     <Setting label={SUPERVISOR.status} note={note}>

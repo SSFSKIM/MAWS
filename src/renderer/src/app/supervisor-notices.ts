@@ -35,14 +35,16 @@ export interface SupervisorNoticesDeps {
 const waiting = (status: HostStatus | null) => status?.state === 'crashed' && status.reason === 'incompatible';
 
 // Restart now, the banners', Diagnostics' and Settings' one act: stop the sessions, start this build's supervisor; a
-// refusal is a warning toast. Settings' Stop all is the same call, said as a stop when refused (`failed`).
+// refusal is a warning toast. Settings' Stop all is the same call, said as a stop when refused (`failed`). Answers
+// whether main took it.
 export async function restartSupervisor(
   client: MawsBridge,
   notices: Pick<ReturnType<typeof createNoticesStore>, 'getState'>,
   failed: (why: string) => string = SUPERVISOR_NOTICES.restartFailed,
-): Promise<void> {
+): Promise<boolean> {
   const result = await client.invoke('host.restart', { stopSessions: true });
   if (!result.ok) notices.getState().toast({ level: 'warning', text: failed(result.error.message), actions: [], dismissible: true });
+  return result.ok;
 }
 
 export function connectSupervisorNotices({ client = ipc, hosts = useHosts, notices = useNotices, refusals = onCommandRefused }: SupervisorNoticesDeps = {}): () => void {

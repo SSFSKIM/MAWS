@@ -142,6 +142,33 @@ describe('the status line, from host.status', () => {
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Background supervisor' }));
   });
 
+  // E11 W-D (tracker row E10 "Restart now acted flag strands focus"): the heading held the focus only while the button
+  // was disabled; a refusal leaves the button offered, so the focus goes back to it and the row forgets the press
+  it('a refused Restart now returns the focus from the heading to the button once it is enabled again', async () => {
+    await renderGroup(status({ state: 'crashed', supervisor: null, matches: null, reason: 'held_lock' }));
+    let refuse: () => void = () => {};
+    const invoke = vi.mocked(b.bridge.invoke);
+    const answer = invoke.getMockImplementation()!;
+    invoke.mockImplementation((name, input) =>
+      name === 'host.restart' ? new Promise((resolve) => (refuse = () => resolve({ ok: false, error: { code: 'internal', message: 'the engine host is not available' } }))) : answer(name, input),
+    );
+    const heading = screen.getByRole('heading', { name: 'Background supervisor' });
+    const button = within(row('Status')).getByRole('button', { name: 'Restart now' }) as HTMLButtonElement;
+    button.focus();
+    fireEvent.click(button);
+    await vi.waitFor(() => expect(button.disabled).toBe(true));
+    expect(document.activeElement).toBe(heading);
+    await act(async () => refuse());
+    await vi.waitFor(() => expect(button.disabled).toBe(false));
+    expect(document.activeElement).toBe(button);
+    expect(toasts()).toEqual(['The supervisor was not restarted · the engine host is not available']);
+    // the press is forgotten: a later status that takes the button away leaves a focus moved elsewhere alone
+    const field = within(row('Exit when idle')).getByRole('textbox');
+    field.focus();
+    event(status({ state: 'starting', supervisor: null, matches: null }));
+    expect(document.activeElement).toBe(field);
+  });
+
   it('says what the background process is for only while the engine host is one (detached)', async () => {
     await renderGroup();
     expect(within(row('Status')).getByText('Sessions run in this background process, so they can keep running after MAWS quits.')).toBeTruthy();
