@@ -40,6 +40,11 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // trust file. Called after the shell home is written and `claude-config` created, with the config home the app reads.
   prepare?: (paths: { userData: string; shellHome: string; claudeConfigDir: string }) => void;
   // E6 end
+  // E10 start: a relaunch over a given profile whose supervisor may still be running keeps the engine store
+  // (`claude-config`) and the replay stub as they are instead of recreating them under it (E10 execution document,
+  // Interfaces "Files and environment").
+  keepConfigHome?: boolean;
+  // E10 end
 }
 // C5 end
 
@@ -52,7 +57,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   const ownsUserData = opts.userData === undefined; // C5
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'maws-e2e-')); // C5: an existing profile when given
   // C5: a relaunch over a given profile still starts from an empty engine store, which C4's block below creates anew.
-  if (!ownsUserData) rmSync(join(userData, 'claude-config'), { recursive: true, force: true });
+  if (!ownsUserData && !opts.keepConfigHome /* E10 */) rmSync(join(userData, 'claude-config'), { recursive: true, force: true });
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
   // A shell inherited from `electron-vite dev` or an editor must not turn the app into a dev-server client or a Node.
@@ -62,11 +67,12 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   env.MAWS_USER_DATA = userData;
   // FX4: replay launch gates need a version, not an installed engine. Live specs explicitly pass ENGINE_BIN;
   // an environment override or the Engine setting can still name another binary. The scratch owns this stub.
-  env.MAWS_E2E_ENGINE_BIN ??= opts.env?.MAWS_E2E_ENGINE_BIN ?? writeReplayEngine(userData);
+  const keptStub = opts.keepConfigHome && existsSync(join(userData, 'replay-engine')) ? join(userData, 'replay-engine') : null; // E10
+  env.MAWS_E2E_ENGINE_BIN ??= opts.env?.MAWS_E2E_ENGINE_BIN ?? keptStub ?? writeReplayEngine(userData);
   // C4 start: an empty engine store (C4 reads the config home the engine would), so the run never reads the owner's
   // ~/.claude; a test's `env` may still name another.
   env.CLAUDE_CONFIG_DIR = join(userData, 'claude-config');
-  mkdirSync(env.CLAUDE_CONFIG_DIR);
+  mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: opts.keepConfigHome === true }); // E10: kept, it may exist
   // C4 end
   // C7 start: no ClaudeUsage data (a directory that does not exist), so the status line never reads the owner's
   // ~/Library/Application Support/ClaudeUsage; statusline.spec.ts names its own copy of the fixture.

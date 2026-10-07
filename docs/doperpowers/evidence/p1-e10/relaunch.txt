@@ -1,0 +1,34 @@
+E10 G2: a kept session across a quit and a relaunch (e2e/supervisor.spec.ts case (b))
+fixture spikes/protocol-probe/fixtures/permission-roundtrip.jsonl, MAWS_E2E_REPLAY_ROW_MS=250
+
+first run: supervisor pid 37616; 7 events seen before the quit
+quit-guard: 1 mid-turn, auto-answered keep, 1 session kept
+after the app exited: pid 37616 alive true
+while closed: 24 journal rows written, the permission request among them
+
+relaunch: the same supervisor pid 37616; 32 events in the launch at the connect, 25 of them streamed while the app was closed
+Needs-you items for the request after the relaunch: 1 (pending); sidebar glyph "Needs approval"
+rows received live by the window after the relaunch: 20, none twice
+
+finished: 52 events, equal in fixture order (journal row rank:i kind) to the control run's 52: true
+  raw seq:i equal: false (journal rows 113 here, 110 in the control; the app's own reads are journaled where they fell, 4 unrecorded-read rows here)
+  this run's seq:i: 12:0 13:0 14:0 14:1 15:0 23:0 25:0 27:0 29:0 31:0 33:0 35:0 37:0 40:0 43:0 44:0 45:0 46:0 47:0 48:0 49:0 50:0 51:0 52:0 53:0 54:0 55:0 56:0 57:0 58:0 58:1 60:0 64:0 67:0 72:0 74:0 76:0 78:0 80:0 82:0 84:0 86:0 88:0 90:0 92:0 94:0 96:0 99:0 102:0 103:0 107:0 107:1
+  control's seq:i:  12:0 13:0 14:0 14:1 15:0 23:0 25:0 27:0 29:0 31:0 33:0 35:0 37:0 40:0 43:0 44:0 45:0 46:0 47:0 48:0 49:0 50:0 51:0 52:0 53:0 54:0 55:0 56:0 57:0 58:0 58:1 60:0 61:0 64:0 69:0 71:0 73:0 75:0 77:0 79:0 81:0 83:0 85:0 87:0 89:0 91:0 93:0 96:0 99:0 100:0 104:0 104:1
+rendered transcript rows: 4 [time, user, divider, text], equal to the control run's 4: true
+
+host.log (the supervisor across both app runs):
+  2026-10-06T23:59:49.508Z supervisor 0.0.0 pid 37616 build 99c29219c8bae60f starting in /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-keep-VinGES/ud/supervisor
+  2026-10-06T23:59:49.537Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
+  2026-10-06T23:59:49.539Z listening on /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-keep-VinGES/ud/supervisor/host.sock
+  2026-10-06T23:59:49.688Z client connected: appPid 37555 build 99c29219c8bae60f
+  2026-10-06T23:59:49.696Z error: [host] 3 events dropped while no client was ready
+  2026-10-06T23:59:50.219Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_context_usage xybukxcg-3: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+  2026-10-06T23:59:50.219Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+  2026-10-06T23:59:51.353Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_settings xybukxcg-4: response failed its schema at effective, sources
+  2026-10-06T23:59:53.386Z client disconnected
+  2026-10-06T23:59:53.390Z error: [host] dropping events until a client is ready (first: session.eventBatch)
+  2026-10-07T00:00:02.204Z client connected: appPid 40685 build 99c29219c8bae60f
+  2026-10-07T00:00:02.217Z error: [host] 28 events dropped while no client was ready
+  2026-10-07T00:00:02.522Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_settings xybukxcg-5: response failed its schema at effective, sources
+  2026-10-07T00:00:14.454Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_context_usage xybukxcg-7: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+  2026-10-07T00:00:14.455Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
