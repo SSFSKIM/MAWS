@@ -227,6 +227,26 @@ describe('editor', () => {
       expect(document.querySelector('[data-updated]')).toBeNull(); // the owner's own act
     });
 
+    // E11 W-D (tracker row E5 "change load does not say why disk cannot become theirs")
+    it('says in the bar why a change on disk under unsaved edits cannot be theirs, and drops it once the disk is text again', async () => {
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      const unusable = () => document.querySelector('[data-disk-unusable]');
+      disk.files[APP] = { text: 'log line\n', bytes: 5 * MiB };
+      changed(disk);
+      await waitFor(() => expect(unusable()?.textContent).toBe('Changed on disk: now larger than the editor’s cap, so it cannot be merged'));
+      expect(unusable()?.getAttribute('data-disk-unusable')).toBe('head');
+      expect(entry()).toMatchObject({ dirty: true, theirs: null });
+      expect(doc()).toBe('// mine\nconst a = 1;\n');
+      disk.files[APP] = { text: 'caf�\n', bytes: 5, utf8: false };
+      changed(disk);
+      await waitFor(() => expect(unusable()?.textContent).toBe('Changed on disk: no longer UTF-8, so it cannot be merged'));
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk);
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
+      expect(unusable()).toBeNull();
+    });
+
     it('leaves theirs empty when a change event’s read answers the baseline’s own hash', async () => {
       const { disk } = await open({ [APP]: 'const a = 1;\n' });
       type('// mine\n');
