@@ -1,0 +1,101 @@
+E11 Acceptance 4 check, tracker and triage at HEAD 10696e94
+1. rows matching `^| 2026`: 81
+2. non-table lines inside the table (lines 23-105): none
+3. rows without exactly five cells: none
+4. kept rows whose "Closes when" names no owner: none
+5. "— closed" annotations left: none
+6. original rows in triage.txt: 159; with a disposition: 159; missing: none; unknown dispositions: none
+7. kept rows whose "now line" is not a tracker row: none; gone rows without an existing commit: none
+8. dispositions: dropped 1, fixed 79, open until 5.2 2, open until 7.3 3, re-deferred 64, re-deferred, narrowed 3, removed 7
+   original rows still in the tracker: 72; rows added after M0: 9; total 81
+   open until a later E11 step: [31, 32, 35, 106, 157]
+RESULT: PASS
+exit 0
+
+== The script (/tmp/e11-16/acceptance4.py; run from the worktree root; rerun at 5.2 and 7.3) ==
+#!/usr/bin/env python3
+"""E11 Acceptance 4 as a script (Task 1.6; rerun at 5.2 and 7.3).
+
+Run from the worktree root: python3 acceptance4.py
+Checks docs/tech-debt-tracker.md against docs/doperpowers/evidence/p1-e11/triage.txt.
+"""
+import re
+import subprocess
+import sys
+
+TRACKER = 'docs/tech-debt-tracker.md'
+TRIAGE = 'docs/doperpowers/evidence/p1-e11/triage.txt'
+# An owner in "Closes when": a child id, P2, E11 (open until a later E11 step), or the owner with a question id or sitting step.
+OWNER = re.compile(r"[Oo]wner:? ?(P2|E11|the owner\b[^|]*?\b(Q\d{1,2}|step [A-J])|[CE]\d+[a-d]?\b)")
+DISPOSITIONS = ('fixed', 'removed', 'dropped', 're-deferred', 're-deferred, narrowed', 'open until 5.2', 'open until 7.3')
+
+failures = []
+head = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True).stdout.strip()
+print(f'E11 Acceptance 4 check, tracker and triage at HEAD {head}')
+
+lines = open(TRACKER).read().split('\n')
+rows = {i: l for i, l in enumerate(lines, 1) if l.startswith('| 2026')}
+print(f'1. rows matching `^| 2026`: {len(rows)}')
+
+# The table renders whole: from its header row to its last row, no line that is not a table line.
+start = next(i for i, l in enumerate(lines, 1) if l.startswith('| Logged | Owner |'))
+end = max(rows)
+gaps = [i for i in range(start, end + 1) if not lines[i - 1].startswith('|')]
+print(f'2. non-table lines inside the table (lines {start}-{end}): {gaps or "none"}')
+failures += [f'line {i} breaks the table' for i in gaps]
+
+bad_cells = [i for i, l in rows.items() if len(l[2:-2].split(' | ')) != 5]
+print(f'3. rows without exactly five cells: {bad_cells or "none"}')
+failures += [f'line {i} has a wrong cell count' for i in bad_cells]
+
+no_owner = [i for i, l in rows.items() if not OWNER.search(l[2:-2].split(' | ')[-1])]
+print(f'4. kept rows whose "Closes when" names no owner: {no_owner or "none"}')
+failures += [f'line {i} has no owner' for i in no_owner]
+
+closed = [i for i, l in enumerate(lines, 1) if '— closed' in l]
+print(f'5. "— closed" annotations left: {closed or "none"}')
+failures += [f'line {i} still annotated closed' for i in closed]
+
+text = open(TRIAGE).read()
+rows_part = text.split('== Rows ==', 1)[1].split('\n== ', 1)[0]
+original = [int(m.group(1)) for m in re.finditer(r'^(\d+) \| ', rows_part, re.M)]
+disp_part = text.split('== Dispositions after M1', 1)[1].split('\n== ', 1)[0]
+disp = {}
+for m in re.finditer(r'^(\d+) \| [^|]* \| [^|]* \| ([^|]+?) \| (.*)$', disp_part, re.M):
+    disp[int(m.group(1))] = (m.group(2), m.group(3))
+missing = [o for o in original if o not in disp]
+unknown = [o for o, (d, _) in disp.items() if d not in DISPOSITIONS]
+print(f'6. original rows in triage.txt: {len(original)}; with a disposition: {len([o for o in original if o in disp])}; '
+      f'missing: {missing or "none"}; unknown dispositions: {unknown or "none"}')
+failures += [f'triage row {o} has no disposition' for o in missing] + [f'triage row {o}: unknown disposition' for o in unknown]
+
+# Kept rows point at a row that exists; gone rows name a commit that exists.
+dangling, no_commit = [], []
+for o, (d, detail) in sorted(disp.items()):
+    if d.startswith('re-deferred') or d.startswith('open until'):
+        m = re.search(r'now line (\d+)', detail)
+        if not m or int(m.group(1)) not in rows:
+            dangling.append(o)
+    else:
+        shas = re.findall(r'\b[0-9a-f]{8}\b', detail)
+        ok = shas and all(subprocess.run(['git', 'cat-file', '-e', s + '^{commit}'], capture_output=True).returncode == 0 for s in shas)
+        if not ok:
+            no_commit.append(o)
+print(f'7. kept rows whose "now line" is not a tracker row: {dangling or "none"}; '
+      f'gone rows without an existing commit: {no_commit or "none"}')
+failures += [f'triage row {o}: dangling line' for o in dangling] + [f'triage row {o}: no commit' for o in no_commit]
+
+kept = len([o for o, (d, _) in disp.items() if d.startswith('re-deferred') or d.startswith('open until')])
+added = len(rows) - kept
+counts = {}
+for d, _ in disp.values():
+    counts[d] = counts.get(d, 0) + 1
+print('8. dispositions: ' + ', '.join(f'{k} {v}' for k, v in sorted(counts.items())))
+print(f'   original rows still in the tracker: {kept}; rows added after M0: {added}; total {len(rows)}')
+open_until = sorted(o for o, (d, _) in disp.items() if d.startswith('open until'))
+print(f'   open until a later E11 step: {open_until}')
+
+print('RESULT: ' + ('PASS' if not failures else 'FAIL'))
+for f in failures:
+    print('  ' + f)
+sys.exit(1 if failures else 0)
