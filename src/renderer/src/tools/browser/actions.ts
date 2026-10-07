@@ -6,6 +6,7 @@ import { UNKNOWN_BROWSER_TAB, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
+import { useLayout } from '../../stores/layout';
 
 type Answer<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -32,6 +33,11 @@ export function place(report: CommandInput<'browser.view.place'>): void {
 export async function openTab(appSessionId: AppSessionId, url: string | null): Promise<BrowserTab | null> {
   const value = quietly('opening a tab')(await ipc.invoke('browser.tabs.open', { appSessionId, url, select: true }));
   return value?.tab ?? null;
+}
+
+// One of the session's browser tabs as its own main tab (X14).
+export function openMainTab(appSessionId: AppSessionId, browserTabId: string): void {
+  useLayout.getState().openTab({ kind: 'browser', appSessionId, browserTabId });
 }
 
 export function closeTab(tabId: string): void {

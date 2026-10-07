@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayUrl, hostOf, isSearchUrlTemplate, resolveAddress, validateBrowserUrl } from './url';
+import { displayUrl, hostOf, isSearchUrlTemplate, resolveAddress, searchUrlFor, validateBrowserUrl } from './url';
 
 const SEARCH = 'https://www.google.com/search?q=%s';
 
@@ -25,6 +25,12 @@ describe('validateBrowserUrl (main checks every URL before a view sees it)', () 
     expect(validateBrowserUrl('not a url')).toEqual({ ok: false, scheme: '' });
     expect(validateBrowserUrl('http://')).toEqual({ ok: false, scheme: '' });
     expect(validateBrowserUrl('')).toEqual({ ok: false, scheme: '' });
+  });
+});
+
+describe('searchUrlFor', () => {
+  it('puts the encoded text wherever the template says %s', () => {
+    expect(searchUrlFor('https://s.test/?q=%s&again=%s', 'a b&c')).toBe('https://s.test/?q=a%20b%26c&again=a%20b%26c');
   });
 });
 

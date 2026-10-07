@@ -6,7 +6,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
@@ -220,13 +220,27 @@ describe('the address field', () => {
     expect(screen.getByText(BROWSER_COPY.refusedScheme('file:'))).toBeTruthy();
   });
 
-  it('with no tab, the address opens one in the session', async () => {
+  it('with no tab, the address opens an empty tab of the session and navigates it as typed', async () => {
     const user = userEvent.setup();
+    const openTab = vi.spyOn(useLayout.getState(), 'openTab').mockImplementation(() => {});
     show({ tab: null });
     await user.click(field());
     await user.keyboard('example.com{Enter}');
     await wait(0);
-    expect(calls('browser.tabs.open')).toEqual([{ appSessionId: A, url: 'https://example.com/', select: true }]);
+    expect(calls('browser.tabs.open')).toEqual([{ appSessionId: A, url: null, select: true }]);
+    expect(calls('browser.tabs.navigate')).toEqual([{ tabId: T2, to: { url: 'https://example.com/', typed: true } }]);
+    expect(openTab).not.toHaveBeenCalled(); // the panel shows the session's selected tab
+  });
+
+  it('a main tab with no tab of its own ("That tab was closed") moves to the opened tab’s main tab', async () => {
+    const user = userEvent.setup();
+    const openTab = vi.spyOn(useLayout.getState(), 'openTab').mockImplementation(() => {});
+    render(<Chrome appSessionId={A} surface="main" tab={null} tabs={[]} />);
+    await user.click(field());
+    await user.keyboard('example.com{Enter}');
+    await wait(0);
+    expect(calls('browser.tabs.navigate')).toEqual([{ tabId: T2, to: { url: 'https://example.com/', typed: true } }]);
+    expect(openTab).toHaveBeenCalledWith({ kind: 'browser', appSessionId: A, browserTabId: T2 });
   });
 
   it('the list holds the window’s cover while it shows', async () => {
@@ -370,6 +384,12 @@ describe('the tab strip', () => {
     expect(calls('browser.tabs.open')).toEqual([{ appSessionId: A, url: null, select: true }]);
   });
 
+  it('after a failed load a chip names the failed host, not the last page’s title', () => {
+    const failed = tab({ title: 'Page A', url: 'http://127.0.0.1:1/', loadError: { url: 'http://127.0.0.1:1/', host: '127.0.0.1', kind: 'refused', code: -102, description: 'ERR_CONNECTION_REFUSED' } });
+    render(<Chrome appSessionId={A} surface="panel" tab={failed} tabs={[failed]} />);
+    expect(screen.getByRole('tab').textContent).toBe('127.0.0.1');
+  });
+
   it('in a main tab a chip opens that tab’s own main tab, and "+" moves to the new tab’s', async () => {
     const openTab = vi.spyOn(useLayout.getState(), 'openTab').mockImplementation(() => {});
     render(<Chrome appSessionId={A} surface="main" tab={tabs()[0]!} tabs={tabs()} />);
@@ -393,7 +413,12 @@ describe('the overflow menu', () => {
   it('Copy URL writes the address and raises the chrome’s own notice; Open in tab opens the main tab', async () => {
     const user = userEvent.setup();
     const writeText = vi.fn(() => Promise.resolve());
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    onTestFinished(() => {
+      if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    });
     const openTab = vi.spyOn(useLayout.getState(), 'openTab').mockImplementation(() => {});
     show({ tab: tab({ url: 'https://example.com/a' }) });
     await menu(user);
@@ -406,13 +431,24 @@ describe('the overflow menu', () => {
     expect(openTab).toHaveBeenCalledWith({ kind: 'browser', appSessionId: A, browserTabId: T1 });
   });
 
+  const disabledItems = async (user: ReturnType<typeof userEvent.setup>) =>
+    (await menu(user)).filter((item) => item.getAttribute('aria-disabled') === 'true').map((item) => item.textContent);
+
+  it('a chrome whose pane does not hold the view offers neither find nor zoom (they act on the page it does not show)', async () => {
+    const user = userEvent.setup();
+    const { rerender } = show({ tab: tab({ zoom: 1.25 }), owns: false });
+    expect(await disabledItems(user)).toEqual([BROWSER_COPY.menu.find, BROWSER_COPY.menu.zoomIn, BROWSER_COPY.menu.zoomOut, BROWSER_COPY.menu.resetZoom]);
+    await user.keyboard('{Escape}');
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1.25 })} tabs={[]} owns />);
+    expect(await disabledItems(user)).toEqual([]);
+  });
+
   it('a suspended tab offers no page actions; Find in page opens the bar on a live one', async () => {
     const user = userEvent.setup();
-    const { rerender } = show({ tab: tab({ suspended: true }) });
-    const disabled = (await menu(user)).filter((item) => item.getAttribute('aria-disabled') === 'true').map((item) => item.textContent);
-    expect(disabled).toEqual([BROWSER_COPY.menu.find, BROWSER_COPY.menu.zoomIn, BROWSER_COPY.menu.zoomOut, BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.inspect]);
+    const { rerender } = show({ tab: tab({ suspended: true }), owns: true });
+    expect(await disabledItems(user)).toEqual([BROWSER_COPY.menu.find, BROWSER_COPY.menu.zoomIn, BROWSER_COPY.menu.zoomOut, BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.inspect]);
     await user.keyboard('{Escape}');
-    rerender(<Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[]} />);
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[]} owns />);
     await menu(user);
     await user.click(screen.getByRole('menuitem', { name: BROWSER_COPY.menu.find }));
     await wait(10);

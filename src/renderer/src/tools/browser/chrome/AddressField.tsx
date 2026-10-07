@@ -11,7 +11,7 @@ import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import { displayUrl, resolveAddress } from '@shared/browser/url';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../../ipc/client';
-import { navigate, openTab } from '../actions';
+import { navigate, openMainTab, openTab } from '../actions';
 import { BROWSER_COPY } from '../copy';
 import { holdCover } from '../covering';
 import { InsecureIcon, LockIcon } from '../icons';
@@ -24,11 +24,12 @@ export const SUGGEST_DEBOUNCE_MS = 60;
 
 export interface AddressFieldProps {
   appSessionId: AppSessionId;
+  surface: 'panel' | 'main';
   tab: BrowserTab | null;
   inputRef: RefObject<HTMLInputElement | null>;
 }
 
-export function AddressField({ appSessionId, tab, inputRef }: AddressFieldProps) {
+export function AddressField({ appSessionId, surface, tab, inputRef }: AddressFieldProps) {
   const searchUrl = useSearchUrl();
   const listId = useId();
   const [draft, setDraft] = useState<string | null>(null); // the field's text while focused; null unfocused
@@ -86,8 +87,17 @@ export function AddressField({ appSessionId, tab, inputRef }: AddressFieldProps)
       target = resolved.url;
     }
     if (tab) navigate(tab.tabId, { url: target, typed: true });
-    else void openTab(appSessionId, target);
+    else void openTyped(target);
     inputRef.current?.blur();
+  };
+
+  // A surface with no tab: an empty tab of the session, navigated as typed (so the history counts it), shown where the
+  // address was typed: the panel shows the session's selected tab, a main tab moves to the new tab's own.
+  const openTyped = async (target: string) => {
+    const opened = await openTab(appSessionId, null);
+    if (!opened) return;
+    navigate(opened.tabId, { url: target, typed: true });
+    if (surface === 'main') openMainTab(appSessionId, opened.tabId);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {

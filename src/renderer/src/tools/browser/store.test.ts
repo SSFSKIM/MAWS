@@ -123,6 +123,12 @@ describe('tabTitle', () => {
     expect(tabTitle(browserTab(T1, A, { title: '', url: '' }))).toBe('');
     expect(BROWSER_COPY.newTab).toBe('New tab');
   });
+
+  it('while the load failed, the failed host, as Chrome names a tab at the address it could not reach', () => {
+    const failed = (host: string) => ({ url: 'http://127.0.0.1:1/', host, kind: 'refused' as const, code: -102, description: 'ERR_CONNECTION_REFUSED' });
+    expect(tabTitle(browserTab(T1, A, { title: 'Page A', url: 'http://127.0.0.1:1/', loadError: failed('127.0.0.1') }))).toBe('127.0.0.1');
+    expect(tabTitle(browserTab(T1, A, { title: 'Page A', loadError: { ...failed(''), url: 'http://e4a.invalid/x' } }))).toBe('e4a.invalid');
+  });
 });
 
 describe('loadedTabs (Session info, Task 3.4)', () => {
@@ -131,5 +137,6 @@ describe('loadedTabs (Session info, Task 3.4)', () => {
     expect(loadedTabs(state([]))).toEqual({ loaded: 0, memoryKiB: null });
     expect(loadedTabs(state([browserTab(T1, A), browserTab(T2, A, { url: '' }), browserTab(T3, A, { suspended: true })]))).toEqual({ loaded: 1, memoryKiB: null });
     expect(loadedTabs(state([browserTab(T1, A, { memoryKiB: 2048 }), browserTab(T2, A, { url: '', memoryKiB: 1024 })]))).toEqual({ loaded: 2, memoryKiB: 3072 });
+    expect(loadedTabs(state([browserTab(T1, A, { failed: { message: 'no view' } })]))).toEqual({ loaded: 0, memoryKiB: null }); // no view, no page
   });
 });

@@ -55,7 +55,12 @@ const EMPTY: SessionTabs = { tabs: [], selected: null };
 export const sessionTabs = (state: BrowserState, appSessionId: AppSessionId): SessionTabs => state.sessions.get(appSessionId) ?? EMPTY;
 
 // A tab's name in the chrome and the main tab's title: the page's title, else its host (Codex's rule), else nothing.
-export const tabTitle = (tab: BrowserTab): string => tab.title || (tab.url === '' ? '' : hostOf(tab.url));
+// While a load has failed, the failed host, as Chrome names a tab at the address it could not reach (the title is still
+// the last page's).
+export const tabTitle = (tab: BrowserTab): string => {
+  if (tab.loadError) return tab.loadError.host || hostOf(tab.loadError.url);
+  return tab.title || (tab.url === '' ? '' : hostOf(tab.url));
+};
 
 // ---- sessions ----------------------------------------------------------------------------------------------------------
 
@@ -185,7 +190,7 @@ export function loadedTabs(state: BrowserState): { loaded: number; memoryKiB: nu
   let memoryKiB: number | null = null;
   for (const { tabs } of state.sessions.values()) {
     for (const tab of tabs) {
-      if (tab.suspended || (tab.url === '' && tab.memoryKiB === null)) continue; // no page, no renderer
+      if (tab.suspended || tab.failed !== null || (tab.url === '' && tab.memoryKiB === null)) continue; // no page, no renderer
       loaded++;
       if (tab.memoryKiB !== null) memoryKiB = (memoryKiB ?? 0) + tab.memoryKiB;
     }

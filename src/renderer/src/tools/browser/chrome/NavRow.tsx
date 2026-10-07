@@ -20,10 +20,11 @@ export interface NavRowProps {
   surface: 'panel' | 'main';
   tab: BrowserTab | null;
   addressRef: RefObject<HTMLInputElement | null>;
+  owns: boolean;
   onFind(): void;
 }
 
-export function NavRow({ appSessionId, surface, tab, addressRef, onFind }: NavRowProps) {
+export function NavRow({ appSessionId, surface, tab, addressRef, owns, onFind }: NavRowProps) {
   const extras = useChromeExtras();
   const loading = tab?.loading ?? false;
   return (
@@ -43,11 +44,11 @@ export function NavRow({ appSessionId, surface, tab, addressRef, onFind }: NavRo
           <ReloadIcon />
         </IconButton>
       )}
-      <AddressField appSessionId={appSessionId} tab={tab} inputRef={addressRef} />
+      <AddressField appSessionId={appSessionId} surface={surface} tab={tab} inputRef={addressRef} />
       <PartitionPill partition={tab?.partition ?? DEFAULT_PARTITION} />
       {tab && <ControlSlot tab={tab} />}
       {tab && extras.map((Extra, index) => <Extra key={index} tab={tab} appSessionId={appSessionId} surface={surface} />)}
-      <OverflowMenu appSessionId={appSessionId} surface={surface} tab={tab} onFind={onFind} />
+      <OverflowMenu appSessionId={appSessionId} surface={surface} tab={tab} owns={owns} onFind={onFind} />
       {loading && (
         <div aria-hidden data-browser-loading="" className="pointer-events-none absolute inset-x-0 -bottom-px h-0.5 overflow-hidden">
           <div className="size-full animate-pulse bg-accent motion-reduce:animate-none" />

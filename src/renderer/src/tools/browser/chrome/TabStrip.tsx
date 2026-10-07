@@ -6,8 +6,7 @@
 import type { KeyboardEvent } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
-import { useLayout } from '../../../stores/layout';
-import { closeTab, openTab, selectTab } from '../actions';
+import { closeTab, openMainTab, openTab, selectTab } from '../actions';
 import { BROWSER_COPY } from '../copy';
 import { BrowserIcon, CloseIcon, PlusIcon } from '../icons';
 import { tabTitle } from '../store';
@@ -19,8 +18,6 @@ export interface TabStripProps {
   tabs: BrowserTab[];
   shownId: string | null; // the tab the surface shows
 }
-
-const openMainTab = (appSessionId: AppSessionId, browserTabId: string) => useLayout.getState().openTab({ kind: 'browser', appSessionId, browserTabId });
 
 export function TabStrip({ appSessionId, surface, tabs, shownId }: TabStripProps) {
   const show = (tabId: string) => {

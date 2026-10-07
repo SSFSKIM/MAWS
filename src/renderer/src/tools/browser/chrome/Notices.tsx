@@ -33,7 +33,7 @@ export function Notices({ appSessionId, tab }: { appSessionId: AppSessionId; tab
     <>
       {tab && <TabLines tab={tab} />}
       {notices.map((notice) => (
-        <Line key={notice.id} kind={notice.kind} edge={notice.kind === 'refusedScheme' ? 'danger' : NOTICE_EDGE[notice.kind]} onDismiss={() => dismissNotice(notice.id)}>
+        <Line key={notice.id} kind={notice.kind} edge={NOTICE_EDGE[notice.kind]} onDismiss={() => dismissNotice(notice.id)}>
           {noticeText(notice)}
         </Line>
       ))}

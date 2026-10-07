@@ -1,6 +1,7 @@
 // E4a (Task 3.3): the navigation row's "…" (Design §4 "Navigation row"): a Radix DropdownMenu, so while it is open its
 // popper covers the pane under it (Design §3's popper rule). What it offers needs a tab, and a live page where the page
-// itself acts (find, zoom, Inspect): a suspended tab or one that never navigated has none.
+// itself acts (find, zoom, Inspect): a suspended tab or one that never navigated has none. Find and zoom also need this
+// chrome's pane to hold the view, since they act on the page as it shows (Inspect opens detached DevTools wherever).
 import { DropdownMenu } from 'radix-ui';
 import { useRef, type ReactNode } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
@@ -8,8 +9,7 @@ import { validateBrowserUrl } from '@shared/browser/url';
 import type { AppSessionId } from '@shared/graph/ids';
 import { IconButton } from '../../../app/IconButton';
 import { panelHost } from '../../../panel/host';
-import { useLayout } from '../../../stores/layout';
-import { closeTab, inspect, openExternal, zoom } from '../actions';
+import { closeTab, inspect, openExternal, openMainTab, zoom } from '../actions';
 import { BROWSER_COPY } from '../copy';
 import { MoreIcon } from '../icons';
 import { raiseNotice } from '../store';
@@ -18,16 +18,18 @@ export interface OverflowMenuProps {
   appSessionId: AppSessionId;
   surface: 'panel' | 'main';
   tab: BrowserTab | null;
+  owns: boolean; // this chrome's pane holds the view: find and zoom act on the page it shows
   onFind(): void;
 }
 
 const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
-export function OverflowMenu({ appSessionId, surface, tab, onFind }: OverflowMenuProps) {
+export function OverflowMenu({ appSessionId, surface, tab, owns, onFind }: OverflowMenuProps) {
   const copy = BROWSER_COPY.menu;
   const web = tab ? validateBrowserUrl(tab.url) : null;
   const url = web?.ok ? web.url : null; // the page's address, when it has one
   const live = tab !== null && !tab.suspended && tab.url !== ''; // a page in a view
+  const shown = live && owns; // and in this chrome's pane, so find and zoom act on what the person sees
   const toFind = useRef(false); // Find in page chosen: the find bar keeps the keyboard, not the menu's trigger
   const copyUrl = (tab: BrowserTab, url: string) =>
     void navigator.clipboard.writeText(url).then(
@@ -56,7 +58,7 @@ export function OverflowMenu({ appSessionId, surface, tab, onFind }: OverflowMen
             {copy.openExternal}
           </Item>
           <Item
-            disabled={!live}
+            disabled={!shown}
             onSelect={() => {
               toFind.current = true;
               onFind();
@@ -65,18 +67,18 @@ export function OverflowMenu({ appSessionId, surface, tab, onFind }: OverflowMen
             {copy.find}
           </Item>
           <Separator />
-          <Item disabled={!live} onSelect={() => tab && zoom(tab.tabId, 'in')}>
+          <Item disabled={!shown} onSelect={() => tab && zoom(tab.tabId, 'in')}>
             {copy.zoomIn}
           </Item>
-          <Item disabled={!live} onSelect={() => tab && zoom(tab.tabId, 'out')}>
+          <Item disabled={!shown} onSelect={() => tab && zoom(tab.tabId, 'out')}>
             {copy.zoomOut}
           </Item>
-          <Item disabled={!live || tab?.zoom === 1} onSelect={() => tab && zoom(tab.tabId, 'reset')}>
+          <Item disabled={!shown || tab?.zoom === 1} onSelect={() => tab && zoom(tab.tabId, 'reset')}>
             {copy.resetZoom}
           </Item>
           <Separator />
           {surface === 'panel' ? (
-            <Item disabled={tab === null} onSelect={() => tab && useLayout.getState().openTab({ kind: 'browser', appSessionId, browserTabId: tab.tabId })}>
+            <Item disabled={tab === null} onSelect={() => tab && openMainTab(appSessionId, tab.tabId)}>
               {copy.openInTab}
             </Item>
           ) : (

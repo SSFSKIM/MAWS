@@ -56,6 +56,9 @@ function leadingHost(text: string): string {
   return text.split(/[:/?#]/, 1)[0];
 }
 
+// A search for `query` through a search engine template: `%s` takes the encoded text.
+export const searchUrlFor = (searchUrl: string, query: string): string => searchUrl.replaceAll('%s', encodeURIComponent(query));
+
 // Typed text, read as Chrome's omnibox would in the cases MAWS needs: text with a space is a search; a bare host
 // (`wikipedia.org`, `localhost:3000`, an IPv4 address, `[::1]`, a single label with a port such as `devbox:8080`) gets
 // `https://`, or `http://` for localhost and loopback; a bare host followed by anything but a port is a search; an
@@ -63,7 +66,7 @@ function leadingHost(text: string): string {
 // `searchUrl`, whose `%s` takes the encoded text.
 export function resolveAddress(text: string, searchUrl: string): ResolvedAddress {
   const typed = text.trim();
-  const search = (): ResolvedAddress => ({ kind: 'search', url: searchUrl.replaceAll('%s', encodeURIComponent(typed)), query: typed });
+  const search = (): ResolvedAddress => ({ kind: 'search', url: searchUrlFor(searchUrl, typed), query: typed });
   if (/\s/.test(typed)) return search();
 
   const typedHost = leadingHost(typed);

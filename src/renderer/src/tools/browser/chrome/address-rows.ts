@@ -3,7 +3,7 @@
 // when the text reads as an address, with "Search for" it second, else "Search for" alone; the partition's history rows
 // follow. A refused scheme offers no row (Enter then shows the refused-scheme line). Every URL a row carries is the
 // parsed form `validateBrowserUrl` answers (Decision Log 34), so no history string reaches main unchecked.
-import { resolveAddress, validateBrowserUrl } from '@shared/browser/url';
+import { resolveAddress, searchUrlFor, validateBrowserUrl } from '@shared/browser/url';
 
 export type AddressRow =
   | { kind: 'go'; url: string }
@@ -21,7 +21,7 @@ export function addressRows(text: string, history: readonly HistorySuggestion[],
     const resolved = resolveAddress(text, searchUrl);
     if (resolved.kind === 'url') {
       const query = text.trim();
-      typed.push({ kind: 'go', url: resolved.url }, { kind: 'search', url: searchUrl.replaceAll('%s', encodeURIComponent(query)), query });
+      typed.push({ kind: 'go', url: resolved.url }, { kind: 'search', url: searchUrlFor(searchUrl, query), query });
     } else if (resolved.kind === 'search') {
       typed.push(resolved);
     }
