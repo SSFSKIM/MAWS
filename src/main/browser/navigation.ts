@@ -11,7 +11,9 @@
 //
 // Visits feed the history (Decision Log 14: in-page navigations count; the address field's own navigation counts as
 // typed), and titles name the visited row. A page's own top-level navigation leaves http(s) only for `mailto:`, which goes
-// out through `openExternalUrl` (Decision Log 27); any other scheme is refused with the chrome's notice. A certificate
+// out through `openExternalUrl` (Decision Log 27) under the `window.open` gate (a recent activation, three per 5 s), so a
+// script cannot launch the mail client in a loop; anything else is refused with the seam line and the chrome's notice,
+// told once per burst of refusals. A page that closes itself (`window.close()`) takes its tab with it. A certificate
 // error is never overridden, no client certificate is ever chosen, and `beforeunload` never blocks (Decision Log 26).
 import type { Certificate, WebContents } from 'electron';
 import { validateBrowserUrl } from '@shared/browser/url';
@@ -19,6 +21,7 @@ import type { BrowserHistoryStore } from '../index/browser-history';
 import type { Favicons } from './favicon';
 import type { BrowserSeam } from './seam';
 import type { BrowserEmit, TabEntry, TabStore } from './tabs';
+import { activationAllows, WINDOW_OPEN_INPUT_MS } from './window-open';
 
 // Chrome's zoom presets (Design §4).
 export const ZOOM_PRESETS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3] as const;
@@ -52,6 +55,8 @@ export class Navigator {
   private readonly typed = new WeakMap<TabEntry, string>(); // the address field's navigation (its URL), until it lands
   private readonly killing = new WeakSet<TabEntry>(); // Stop page killed the renderer: its exit is not a crash
   private readonly faviconRequests = new WeakMap<TabEntry, number>();
+  private readonly mailOpens = new WeakMap<TabEntry, number[]>(); // when the page's mailto: navigations went out
+  private readonly lastRefusedAt = new WeakMap<TabEntry, number>(); // the page's last refused navigation
   private readonly now: () => number;
 
   constructor(private readonly deps: NavigatorDeps) {
@@ -259,9 +264,22 @@ export class Navigator {
       const { url } = event;
       if (validateBrowserUrl(url).ok) return;
       event.preventDefault();
-      if (/^mailto:/i.test(url)) return this.deps.seam.openExternal(url);
+      if (!live()) return;
+      const at = this.now();
+      if (/^mailto:/i.test(url)) {
+        const sent = (this.mailOpens.get(entry) ?? []).filter((when) => at - when < WINDOW_OPEN_INPUT_MS);
+        this.mailOpens.set(entry, sent);
+        if (activationAllows(at, entry.input.lastActivationAt, sent)) {
+          sent.push(at);
+          return this.deps.seam.openExternal(url);
+        }
+      }
       this.deps.seam.line(`browser-blocked-navigation ${url}`);
-      if (live()) this.deps.emit('browser.notice', { appSessionId: entry.tab.appSessionId, tabId, kind: 'refusedScheme', name: schemeOf(url) });
+      // a script's loop of refusals is one burst, told once: a notice only after WINDOW_OPEN_INPUT_MS without a refusal
+      const last = this.lastRefusedAt.get(entry);
+      this.lastRefusedAt.set(entry, at);
+      if (last !== undefined && at - last <= WINDOW_OPEN_INPUT_MS) return;
+      this.deps.emit('browser.notice', { appSessionId: entry.tab.appSessionId, tabId, kind: 'refusedScheme', name: schemeOf(url) });
     });
     wc.on('will-frame-navigate', (event) => {
       if (!event.isMainFrame && SUBFRAME_REFUSED.test(event.url)) event.preventDefault();
@@ -276,6 +294,12 @@ export class Navigator {
       (callback as (certificate?: Certificate) => void)();
     });
     wc.on('will-prevent-unload', (event) => event.preventDefault());
+    // `window.close()` (Chromium allows it to a page a script opened, so every adopted popup): the webContents is
+    // destroyed under the tab, which is dropped as a close drops it. The store's own closing and suspending let go of
+    // the view first, so their late `destroyed` finds it no longer the tab's.
+    wc.once('destroyed', () => {
+      if (live()) store.pageClosed(tabId);
+    });
   }
 
   // ---- internals ------------------------------------------------------------------------------------------------------

@@ -110,6 +110,15 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   });
 
   registerBrowserHandlers({ store, views, navigator, downloads, history: index.browserHistory, profiles, register });
+  // A request with no page behind it, a favicon fetched on a tab's partition (`ses.fetch`) among them, asks the app for a
+  // client certificate, and Electron's default hands over the keychain's first identity: no certificate is chosen, as
+  // for a page (navigation.ts). A request a page made is left to that page's handler.
+  const refuseUnownedCertificate = (event: Electron.Event, webContents: Electron.WebContents | null, _url: string, _list: Electron.Certificate[], callback: (certificate?: Electron.Certificate) => void) => {
+    if (webContents !== null) return;
+    event.preventDefault();
+    callback();
+  };
+  app.on('select-client-certificate', refuseUnownedCertificate);
   const stopSessions = index.sessions.onChange((record, cause) => {
     if (cause === 'removed') store.removeSession(record.appId);
   });
@@ -122,10 +131,11 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     // At will-quit, before the hosts stop: nothing more is sampled or placed, tabs.json is written, every page closed.
     stop: () => {
       if (inspector && globalThis.__maws_browser === inspector) delete globalThis.__maws_browser;
+      app.removeListener('select-client-certificate', refuseUnownedCertificate);
       stopSessions();
       memory.stop();
       views.dispose();
-      writer.flushSync();
+      writer.close(); // the pages closed next destroy their webContents, which drops tabs nobody closed
       for (const { view } of store.all()) if (view && !view.webContents.isDestroyed()) view.webContents.close();
     },
   };

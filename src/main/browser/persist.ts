@@ -69,6 +69,7 @@ export class TabsFileWriter {
   private dirty = false;
   private written: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private closed = false;
 
   constructor(
     private readonly file: string,
@@ -76,8 +77,15 @@ export class TabsFileWriter {
   ) {}
 
   markDirty(): void {
+    if (this.closed) return;
     this.dirty = true;
     this.timer ??= setTimeout(() => this.flushSync(), WRITE_INTERVAL_MS);
+  }
+
+  // At quit: what is pending written, and nothing afterwards (the pages closed then are not the person closing tabs).
+  close(): void {
+    this.flushSync();
+    this.closed = true;
   }
 
   flushSync(): void {

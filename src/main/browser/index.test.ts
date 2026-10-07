@@ -58,10 +58,12 @@ const fakes = await vi.hoisted(async () => {
     isVisible: () => true,
     isMinimized: () => false,
   });
-  return { cdp, View, win };
+  const app = new EventEmitter(); // the app's own events (the client certificate a request with no page asks for)
+  return { cdp, View, win, app };
 });
 
 vi.mock('electron', () => ({
+  app: fakes.app,
   ipcMain: { handle: () => {} },
   BrowserWindow: { fromWebContents: () => fakes.win },
   session: {
@@ -123,6 +125,41 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     expect(browser.store.list().tabs.map((t) => [t.tabId, t.suspended])).toEqual([['b_aaaaaaaaaaaa', true]]);
     browser.stop();
     expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ tabs: [{ tabId: 'b_aaaaaaaaaaaa' }], selected: { [A]: 'b_aaaaaaaaaaaa' } });
+  });
+
+  it('a page that closes itself after stop (every page is closed there) leaves tabs.json as stop wrote it', () => {
+    mkdirSync(join(userData, 'browser'));
+    const file = join(userData, 'browser', 'tabs.json');
+    const browser = start(fakeIndex([A]).index);
+    const { tab } = browser.store.open({ appSessionId: A, url: 'https://a.test/', select: true });
+    const wc = browser.store.entry(tab.tabId)!.view!.webContents as unknown as import('node:events').EventEmitter;
+    browser.stop();
+    expect(JSON.parse(readFileSync(file, 'utf8')).tabs).toHaveLength(1);
+    vi.useFakeTimers();
+    try {
+      wc.emit('destroyed'); // Electron destroys each closed page a moment later
+      vi.advanceTimersByTime(1000);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(JSON.parse(readFileSync(file, 'utf8')).tabs).toHaveLength(1);
+  });
+
+  it('refuses a client certificate to a request no page made (a favicon fetch), and leaves a page\'s own to its handler', () => {
+    const browser = start(fakeIndex([A]).index);
+    expect(fakes.app.listenerCount('select-client-certificate')).toBe(1);
+    const unowned = { preventDefault: vi.fn() };
+    const refuse = vi.fn();
+    fakes.app.emit('select-client-certificate', unowned, null, 'https://mtls.test/favicon.ico', [{ subjectName: 'owner' }], refuse);
+    expect(unowned.preventDefault).toHaveBeenCalled();
+    expect(refuse).toHaveBeenCalledWith();
+    const paged = { preventDefault: vi.fn() };
+    const pick = vi.fn();
+    fakes.app.emit('select-client-certificate', paged, { id: 3 }, 'https://mtls.test/', [{ subjectName: 'owner' }], pick);
+    expect(paged.preventDefault).not.toHaveBeenCalled();
+    expect(pick).not.toHaveBeenCalled();
+    browser.stop();
+    expect(fakes.app.listenerCount('select-client-certificate')).toBe(0);
   });
 
   it('keeps every tab when the index is unavailable', () => {

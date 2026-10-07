@@ -36,7 +36,8 @@ const PLACEHOLDER_JPEG_QUALITY = 80;
 // A page's `window.open` child gets these over whatever the page asked for (window-open.ts); its partition is its
 // opener's, which Chromium's child already shares.
 export function tabWebPreferences(preload = BROWSER_PRELOAD): WebPreferences {
-  return { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: true };
+  // safeDialogs: a page looping alert() is offered Chrome's "prevent additional dialogs" after the first
+  return { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: true, safeDialogs: true };
 }
 
 // A tab's view in its partition; or, for an adopted `window.open` child, the view over Chromium's child webContents.
@@ -128,7 +129,9 @@ export class ViewManager {
     const generation = this.nextGeneration(win);
     const hiding = placed.filter((entry) => entry.visible);
     // any placed page holding the native focus gives it to the window's own page, so the layer takes the typing and Esc
-    if (placed.some((entry) => entry.view !== null && entry.view.webContents.isFocused())) win.webContents.focus();
+    // (a page that closed itself has a destroyed webContents until its tab is dropped, and holds nothing)
+    const focused = (entry: TabEntry) => entry.view !== null && !entry.view.webContents.isDestroyed() && entry.view.webContents.isFocused();
+    if (placed.some(focused)) win.webContents.focus();
     this.coveredWindows.add(win.id);
     for (const entry of placed) this.apply(entry);
     await Promise.all(

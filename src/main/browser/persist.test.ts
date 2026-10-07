@@ -88,6 +88,21 @@ describe('tabs.json (E4a Design §2, G4)', () => {
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(current);
   });
 
+  it('close writes what is pending and nothing after it', () => {
+    vi.useFakeTimers();
+    const path = join(dir, 'tabs.json');
+    let contents = FILE;
+    const writer = new TabsFileWriter(path, () => contents);
+    writer.markDirty();
+    writer.close();
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(FILE);
+    contents = { ...FILE, tabs: [] };
+    writer.markDirty();
+    writer.flushSync();
+    vi.advanceTimersByTime(1000);
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(FILE);
+  });
+
   it('flushSync with nothing dirty writes nothing', () => {
     const path = join(dir, 'tabs.json');
     new TabsFileWriter(path, () => FILE).flushSync();

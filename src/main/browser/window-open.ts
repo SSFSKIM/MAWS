@@ -27,14 +27,21 @@ export interface WindowOpenRequest {
   lastActivationAt: number | null; // the page's last attributed activation, the human's or the agent's (entry.input)
   recentOpens: readonly number[]; // when the opens honoured so far happened
   linkTarget: LinkTarget;
-  hasRoom: boolean; // the loaded-tab cap can take one more (TabStore.hasRoomForView)
+  hasRoom: boolean; // the loaded-tab cap can take one more without suspending the opener (TabStore.hasRoomForView)
 }
 
 const BLOCKED: WindowOpenDecision = { action: 'deny', blocked: true };
 
+// The stand-in for Chrome's user activation that a page's own act needs before it may open anything (a window, a tab,
+// the mail client): an attributed activation within WINDOW_OPEN_INPUT_MS, and fewer than WINDOW_OPEN_BURST acts
+// honoured in that window (`recent`: when they happened).
+export function activationAllows(now: number, lastActivationAt: number | null, recent: readonly number[]): boolean {
+  if (lastActivationAt === null || now - lastActivationAt > WINDOW_OPEN_INPUT_MS) return false;
+  return recent.filter((at) => now - at < WINDOW_OPEN_INPUT_MS).length < WINDOW_OPEN_BURST;
+}
+
 export function decideWindowOpen({ url, disposition, now, lastActivationAt, recentOpens, linkTarget, hasRoom }: WindowOpenRequest): WindowOpenDecision {
-  if (lastActivationAt === null || now - lastActivationAt > WINDOW_OPEN_INPUT_MS) return BLOCKED;
-  if (recentOpens.filter((at) => now - at < WINDOW_OPEN_INPUT_MS).length >= WINDOW_OPEN_BURST) return BLOCKED;
+  if (!activationAllows(now, lastActivationAt, recentOpens)) return BLOCKED;
   if (/^mailto:/i.test(url)) return { action: 'external' };
   const web = validateBrowserUrl(url).ok;
   if (!web && url !== 'about:blank') return BLOCKED;
@@ -61,7 +68,7 @@ export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, chi
   const adoptChild = (opener: TabEntry, url: string, select: boolean, child: WebContents | undefined): WebContents => {
     if (!child) {
       const { appSessionId, partition } = opener.tab;
-      const opened = store.open({ appSessionId, url: url === 'about:blank' ? null : url, select, partition });
+      const opened = store.open({ appSessionId, url: url === 'about:blank' ? null : url, select, partition, opener });
       return store.entry(opened.tab.tabId)?.view?.webContents as WebContents;
     }
     let adopted: WebContents | undefined;
@@ -81,7 +88,7 @@ export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, chi
     if (store.entry(tabId) !== entry || entry.view !== view) return { action: 'deny' };
     const at = now();
     opens = opens.filter((when) => at - when < WINDOW_OPEN_INPUT_MS);
-    const decision = decideWindowOpen({ url, disposition, now: at, lastActivationAt: entry.input.lastActivationAt, recentOpens: opens, linkTarget: linkTarget(), hasRoom: store.hasRoomForView() });
+    const decision = decideWindowOpen({ url, disposition, now: at, lastActivationAt: entry.input.lastActivationAt, recentOpens: opens, linkTarget: linkTarget(), hasRoom: store.hasRoomForView(entry) });
     switch (decision.action) {
       case 'deny':
         store.update(tabId, { blockedPopups: entry.tab.blockedPopups + 1 });

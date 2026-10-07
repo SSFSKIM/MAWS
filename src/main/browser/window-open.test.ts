@@ -123,6 +123,16 @@ describe('attachWindowOpen: the handler on the page', () => {
     expect(h.entry.tab.blockedPopups).toBe(0);
   });
 
+  it('the room check and the tab the page opens itself spare the opener (a page never suspends its own opener)', () => {
+    const h = harness();
+    h.entry.input.lastActivationAt = NOW;
+    const room = vi.spyOn(h.store, 'hasRoomForView');
+    const opened = vi.spyOn(h.store, 'open');
+    (h.open('https://a.test/d.html').createWindow as (options: unknown) => unknown)({});
+    expect(room).toHaveBeenCalledWith(h.entry);
+    expect(opened).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://a.test/d.html', opener: h.entry }));
+  });
+
   it('three opens per 5 s: the fourth is blocked; external hands out and denies', () => {
     const h = harness();
     h.entry.input.lastActivationAt = NOW;

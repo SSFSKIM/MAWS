@@ -33,12 +33,16 @@ class FakeView {
   visible = true; // a new WebContentsView is visible until told otherwise
   readonly calls: string[] = [];
   focused = false;
+  destroyed = false; // the page closed itself (window.close()): Electron's destroyed webContents throws on use
   capture: () => Promise<unknown> = async () => fakeImage(1000);
   readonly webContents = {
     loadURL: vi.fn(() => Promise.resolve()),
     close: vi.fn(),
-    isDestroyed: () => false,
-    isFocused: () => this.focused,
+    isDestroyed: () => this.destroyed,
+    isFocused: () => {
+      if (this.destroyed) throw new TypeError('Object has been destroyed');
+      return this.focused;
+    },
     capturePage: () => {
       this.calls.push('capture');
       return this.capture();
@@ -406,6 +410,36 @@ describe('the view manager: cover (Design §3, Decision Log 4, 20)', () => {
     expect(view.visible).toBe(true);
   });
 
+  it('a placed view whose page closed itself (its webContents destroyed) does not break the window\'s cover', async () => {
+    const h = harness();
+    const { w, sender } = h.win();
+    const gone = h.loaded('https://gone.test/');
+    const live = h.loaded('https://live.test/');
+    h.place(sender, gone.tabId, 'p1', R, true);
+    h.place(sender, live.tabId, 'p2', { ...R, x: 400 }, true);
+    gone.view.destroyed = true;
+    gone.view.capture = () => Promise.reject(new TypeError('Object has been destroyed'));
+    await h.manager.cover(true, sender);
+    expect(live.view.visible).toBe(false);
+    expect(gone.view.visible).toBe(false);
+    expect(w.webContents.focus).not.toHaveBeenCalled();
+    expect(h.covered()).toHaveLength(2);
+    expect(h.covered()).toContainEqual({ tabId: gone.tabId, placeholder: null });
+    expect(h.covered()).toContainEqual({ tabId: live.tabId, placeholder: expect.stringMatching(/^data:image\/jpeg;base64,/) });
+  });
+
+  it('a tab dropped because its page closed itself leaves its window, its view never touched through the destroyed contents', () => {
+    const h = harness();
+    const { w, sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    view.destroyed = true;
+    h.store.pageClosed(tabId);
+    expect(h.store.entry(tabId)).toBeUndefined();
+    expect(w.children.has(view)).toBe(false);
+    expect(view.webContents.close).not.toHaveBeenCalled();
+  });
+
   it('a second cover while covered changes nothing and keeps the first cover\'s placeholder', async () => {
     const h = harness();
     const { sender } = h.win();
@@ -540,9 +574,11 @@ describe('createTabView: the page\'s webPreferences (Design §3, §14)', () => {
         nodeIntegration: false,
         webSecurity: true,
         backgroundThrottling: true,
+        safeDialogs: true,
       },
     });
-    expect(tabWebPreferences('/p.js')).toEqual({ preload: '/p.js', sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: true });
+    // safeDialogs: a page's dialog loop is offered Chrome's "prevent additional dialogs"; adopted children get these too
+    expect(tabWebPreferences('/p.js')).toEqual({ preload: '/p.js', sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: true, safeDialogs: true });
   });
 
   it('adopts a window.open child\'s own webContents (its preferences came through the open handler\'s override)', () => {

@@ -17,7 +17,8 @@ function fakeView() {
       return url.includes('reject') ? Promise.reject(new Error('ERR_ABORTED (-3)')) : Promise.resolve();
     }),
     close: vi.fn(),
-    isDestroyed: () => false,
+    destroyed: false,
+    isDestroyed: () => webContents.destroyed,
   };
   return { webContents } as unknown as WebContentsView & { webContents: typeof webContents };
 }
@@ -161,6 +162,25 @@ describe('TabStore: closing and selecting', () => {
     expect(h.store.list(A).selected[A]).toBe(t1.tabId); // the previous
     h.store.close(t1.tabId);
     expect(h.store.list(A)).toEqual({ tabs: [], selected: { [A]: null } });
+  });
+
+  it('a page that closed itself drops its tab as a close does, never touching its destroyed contents', () => {
+    const h = harness();
+    const t1 = open(h, 'https://1.test/').tab;
+    const t2 = open(h, 'https://2.test/').tab;
+    const t3 = open(h, 'https://3.test/').tab;
+    h.store.select(A, t2.tabId);
+    const destroying = vi.fn();
+    h.store.onViewDestroying(destroying);
+    h.views[1]!.webContents.destroyed = true;
+    h.store.pageClosed(t2.tabId);
+    expect(h.store.entry(t2.tabId)).toBeUndefined();
+    expect(h.views[1]!.webContents.close).not.toHaveBeenCalled();
+    expect(destroying).toHaveBeenCalledTimes(1);
+    expect(h.store.list(A).selected[A]).toBe(t3.tabId);
+    expect(h.store.loadedCount()).toBe(2);
+    expect(h.store.list(A).tabs.map((t) => t.tabId)).toEqual([t1.tabId, t3.tabId]);
+    expect(() => h.store.pageClosed(t2.tabId)).toThrow(UnknownTabError);
   });
 
   it('closing a tab that is not selected keeps the selection', () => {
@@ -492,8 +512,52 @@ describe('TabStore: adopting a page\'s window.open child (Design §14, Decision 
     h.store.update(over.tab.tabId, { loading: false, lastShownAt: '2026-10-06T13:00:00.000Z' });
     expect(h.store.hasRoomForView()).toBe(true);
     h.store.adoptChild(opener, { url: 'https://a.test/d.html', select: true, webContents: child() as never });
-    expect(h.store.entry(tabs[0]!.tabId)!.view).toBeNull(); // the least recently shown idle, unplaced tab
+    expect(h.store.entry(tabs[0]!.tabId)!.view).not.toBeNull(); // the opener, though least recently shown, is spared
+    expect(h.store.entry(tabs[1]!.tabId)!.view).toBeNull(); // the next least recently shown idle, unplaced tab
     expect(h.notices().at(-1)).toMatchObject({ kind: 'tabsCap', appSessionId: A });
+  });
+
+  it('a page never suspends its own opener to make room: the room check spares it too', () => {
+    const { h } = adopting();
+    const tabs: BrowserTab[] = [];
+    for (let i = 0; i < BROWSER_LOADED_TABS_MAX; i++) {
+      tabs.push(open(h, `https://${i}.test/`).tab);
+      h.tick(1000);
+    }
+    h.store.update(tabs[0]!.tabId, { loading: false }); // the one idle, unplaced tab: the opener itself
+    const opener = h.entry(tabs[0]!.tabId);
+    expect(h.store.hasRoomForView()).toBe(true);
+    expect(h.store.hasRoomForView(opener)).toBe(false);
+    // adopted over the cap all the same (Chromium already made the child), the opener kept
+    const over = h.store.adoptChild(opener, { url: 'https://a.test/c.html', select: true, webContents: child() as never });
+    expect(over.view).not.toBeNull();
+    expect(opener.view).not.toBeNull();
+    expect(h.store.loadedCount()).toBe(BROWSER_LOADED_TABS_MAX + 1);
+    // a tab the page opens itself (a ⌘-click: no child from Chromium) spares it as well, and opens suspended
+    const clicked = h.store.open({ appSessionId: A, url: 'https://a.test/d.html', select: false, opener });
+    expect(opener.view).not.toBeNull();
+    expect(clicked.tab).toMatchObject({ suspended: true, url: 'https://a.test/d.html' });
+  });
+
+  it('a popup that closes itself (an OAuth sign-in posting back) returns the selection to its opener, as Chrome does', () => {
+    const { h } = adopting();
+    const opener = h.entry(open(h, 'https://a.test/').tab.tabId);
+    const between = open(h, 'https://b.test/').tab;
+    const popup = h.store.adoptChild(opener, { url: 'https://a.test/c.html', select: true, webContents: child() as never });
+    h.store.pageClosed(popup.tab.tabId);
+    expect(h.store.list(A).selected[A]).toBe(opener.tab.tabId); // not the neighbour, `between`
+    // an opener gone meanwhile: the neighbour, as any close
+    const orphan = h.store.adoptChild(opener, { url: 'https://a.test/d.html', select: true, webContents: child() as never });
+    h.store.close(opener.tab.tabId);
+    h.store.select(A, orphan.tab.tabId);
+    h.store.pageClosed(orphan.tab.tabId);
+    expect(h.store.list(A).selected[A]).toBe(between.tabId);
+    // the person's own close keeps the neighbour rule
+    const third = h.entry(open(h, 'https://e.test/').tab.tabId);
+    const shut = h.store.adoptChild(third, { url: 'https://e.test/f.html', select: true, webContents: child() as never });
+    open(h, 'https://g.test/', { select: false });
+    h.store.close(shut.tab.tabId);
+    expect(h.store.list(A).selected[A]).not.toBe(third.tab.tabId);
   });
 
   it('open with an explicit partition (a page\'s context menu) skips the setting\'s partition', () => {

@@ -6,6 +6,7 @@ import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { Navigator, ZOOM_PRESETS, stepZoom } from './navigation';
 import { TabStore, type TabEntry } from './tabs';
+import { WINDOW_OPEN_BURST, WINDOW_OPEN_INPUT_MS } from './window-open';
 
 const A = 'App-A' as AppSessionId;
 
@@ -28,7 +29,8 @@ class FakeWebContents extends EventEmitter {
   readonly reload = vi.fn();
   readonly stop = vi.fn();
   readonly close = vi.fn();
-  readonly isDestroyed = () => false;
+  destroyed = false;
+  readonly isDestroyed = () => this.destroyed;
   loading = false;
   readonly isLoading = () => this.loading;
   readonly getZoomFactor = () => this.zoom;
@@ -567,7 +569,7 @@ describe('navigation: commands (browser.tabs.navigate, zoom, find, dismiss, devt
 });
 
 describe('navigation: the page\'s own navigations and handlers (E4a Design §8, §14; Decision Log 26, 27)', () => {
-  it('will-navigate admits http(s); hands mailto: out; refuses any other scheme with the seam line and the chrome notice', () => {
+  it('will-navigate admits http(s), and refuses any other scheme with the seam line and one chrome notice per burst', () => {
     const h = harness();
     const id = h.open();
     const wc = h.wc(id);
@@ -575,27 +577,76 @@ describe('navigation: the page\'s own navigations and handlers (E4a Design §8, 
     wc.emit('will-navigate', ok);
     expect(ok.preventDefault).not.toHaveBeenCalled();
 
-    const mail = cancellable({ url: 'mailto:e4a@example.test' });
-    wc.emit('will-navigate', mail);
-    expect(mail.preventDefault).toHaveBeenCalled();
-    expect(h.seam.openExternal).toHaveBeenCalledWith('mailto:e4a@example.test');
-
     for (const url of ['zoommtg://x', 'file:///etc/hosts', 'about:blank']) {
       const refused = cancellable({ url });
       wc.emit('will-navigate', refused);
       expect(refused.preventDefault).toHaveBeenCalled();
+      h.tick(1000);
     }
     expect(h.seam.line.mock.calls.map(([line]) => line)).toEqual([
       'browser-blocked-navigation zoommtg://x',
       'browser-blocked-navigation file:///etc/hosts',
       'browser-blocked-navigation about:blank',
     ]);
-    expect(h.notices()).toEqual([
-      { appSessionId: A, tabId: id, kind: 'refusedScheme', name: 'zoommtg:' },
-      { appSessionId: A, tabId: id, kind: 'refusedScheme', name: 'file:' },
-      { appSessionId: A, tabId: id, kind: 'refusedScheme', name: 'about:' },
-    ]);
-    expect(h.seam.openExternal).toHaveBeenCalledTimes(1);
+    // a script's loop of refusals is one burst: told once, not once per attempt
+    expect(h.notices()).toEqual([{ appSessionId: A, tabId: id, kind: 'refusedScheme', name: 'zoommtg:' }]);
+    h.tick(WINDOW_OPEN_INPUT_MS + 1); // the burst over: the next refusal is told again
+    wc.emit('will-navigate', cancellable({ url: 'slack://x' }));
+    expect(h.notices().at(-1)).toEqual({ appSessionId: A, tabId: id, kind: 'refusedScheme', name: 'slack:' });
+    expect(h.notices()).toHaveLength(2);
+    expect(h.seam.openExternal).not.toHaveBeenCalled();
+  });
+
+  it('will-navigate hands mailto: out only after a recent activation, at most three per 5 s; anything else is refused like a scheme', () => {
+    const h = harness();
+    const id = h.open();
+    const wc = h.wc(id);
+    const mail = (n: number) => {
+      const event = cancellable({ url: `mailto:e4a+${n}@example.test` });
+      wc.emit('will-navigate', event);
+      return event;
+    };
+    // a script's mailto: with no input to the page: refused, launching nothing
+    expect(mail(0).preventDefault).toHaveBeenCalled();
+    expect(h.seam.openExternal).not.toHaveBeenCalled();
+    expect(h.seam.line).toHaveBeenLastCalledWith('browser-blocked-navigation mailto:e4a+0@example.test');
+    expect(h.notices()).toEqual([{ appSessionId: A, tabId: id, kind: 'refusedScheme', name: 'mailto:' }]);
+
+    h.tick(WINDOW_OPEN_INPUT_MS + 1);
+    h.entry(id).input.emit({ kind: 'mouse', source: 'human', at: 1_000_000 + WINDOW_OPEN_INPUT_MS + 1 }); // a click on the link
+    for (let n = 1; n <= WINDOW_OPEN_BURST + 2; n++) expect(mail(n).preventDefault).toHaveBeenCalled();
+    expect(h.seam.openExternal.mock.calls.map(([url]) => url)).toEqual(['mailto:e4a+1@example.test', 'mailto:e4a+2@example.test', 'mailto:e4a+3@example.test']);
+    expect(h.seam.line.mock.calls.slice(-2).map(([line]) => line)).toEqual(['browser-blocked-navigation mailto:e4a+4@example.test', 'browser-blocked-navigation mailto:e4a+5@example.test']);
+    expect(h.notices()).toHaveLength(2); // the over-cap pair is one burst
+
+    // a wheel is no activation; an activation older than 5 s opens nothing
+    h.tick(WINDOW_OPEN_INPUT_MS + 1);
+    h.entry(id).input.emit({ kind: 'wheel', source: 'human', at: 1_000_000 + 2 * (WINDOW_OPEN_INPUT_MS + 1) });
+    mail(6);
+    expect(h.seam.openExternal).toHaveBeenCalledTimes(3);
+  });
+
+  it('a page that closes itself (window.close()) drops its tab as a close does; a view the store closed or suspended changes nothing', () => {
+    const h = harness();
+    const first = h.open('https://a.test/');
+    const second = h.open('https://b.test/');
+    const wc = h.wc(second);
+    wc.destroyed = true;
+    wc.emit('destroyed');
+    expect(h.store.entry(second)).toBeUndefined();
+    expect(wc.close).not.toHaveBeenCalled();
+    expect(h.store.list(A)).toMatchObject({ selected: { [A]: first }, tabs: [expect.objectContaining({ tabId: first })] });
+
+    const third = h.open('https://c.test/');
+    const suspended = h.wc(third);
+    h.store.suspend(third);
+    suspended.destroyed = true;
+    suspended.emit('destroyed');
+    expect(h.store.entry(third)).toBeDefined();
+    const closing = h.wc(first);
+    h.store.close(first);
+    closing.emit('destroyed');
+    expect(h.store.list(A).tabs.map((tab) => tab.tabId)).toEqual([third]);
   });
 
   it('will-frame-navigate refuses a subframe\'s file:, app scheme, chrome: and devtools:, and leaves the main frame to will-navigate', () => {

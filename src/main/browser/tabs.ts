@@ -67,6 +67,9 @@ export interface TabEntry {
   // The tab's one CDP attachment (debugger.ts), made with its view and gone with it; attached only when someone asks.
   debugger: TabDebugger | null;
   input: TabInputSeam;
+  // The tab whose page opened this one (`window.open`, a modifier-clicked link); null for a tab the person or the agent
+  // opened. A page that closes itself hands the selection back to it.
+  openerTabId: string | null;
   // The chrome's find bar is open for this tab (main opened it on ⌘F in the page, or a find request arrived), so Esc in
   // the page closes it rather than reaching the page (keys.ts).
   findOpen: boolean;
@@ -117,6 +120,7 @@ export interface OpenRequest {
   reuse?: 'url';
   requestId?: string;
   partition?: string; // a tab opened from a page (its context menu) opens in that page's partition, not the setting's
+  opener?: TabEntry; // a tab a page opened itself (a modifier-clicked link): that page's, never suspended for it
 }
 
 const normalised = (url: string) => {
@@ -185,11 +189,12 @@ export class TabStore {
   }
 
   // The least recently shown loaded tab that may be unloaded: not placed in a pane, not loading, not downloading, and
-  // not the agent's or the human's (Design §2). The count cap here and the memory cap (memory.ts) share it.
-  capVictim(except: TabEntry | null = null): TabEntry | undefined {
+  // not the agent's or the human's (Design §2), nor one of `spared` (the tab being loaded; a page opening a tab, which
+  // never suspends its own opener). The count cap here and the memory cap (memory.ts) share it.
+  capVictim(...spared: TabEntry[]): TabEntry | undefined {
     const eligible = this.all().filter(
       (entry) =>
-        entry !== except &&
+        !spared.includes(entry) &&
         entry.view !== null &&
         entry.tab.placedIn === null &&
         !entry.tab.loading &&
@@ -200,9 +205,9 @@ export class TabStore {
     return eligible[0];
   }
 
-  // Whether one more tab could be loaded now: under the cap, or with an eligible tab to suspend for it.
-  hasRoomForView(): boolean {
-    return this.loadedCount() < BROWSER_LOADED_TABS_MAX || this.capVictim(null) !== undefined;
+  // Whether one more tab could be loaded now: under the cap, or with an eligible tab other than `spared` to suspend for it.
+  hasRoomForView(spared?: TabEntry): boolean {
+    return this.loadedCount() < BROWSER_LOADED_TABS_MAX || this.capVictim(...(spared ? [spared] : [])) !== undefined;
   }
 
   loadedCount(): number {
@@ -254,26 +259,27 @@ export class TabStore {
     const same = url !== null && reuse === 'url' ? this.all().find(({ tab }) => tab.appSessionId === appSessionId && tab.url !== '' && normalised(tab.url) === url) : undefined;
     if (same) {
       if (select) this.setSelected(appSessionId, same.tab.tabId);
-      if (!same.view) this.load(same.tab.tabId, url!);
+      if (!same.view) this.loadInto(same, url!, request.opener);
       this.remember(requestId, same.tab.tabId, at);
       return { tab: same.tab, reused: true };
     }
 
     const tabId = this.mintTabId();
     const entry = this.blankEntry(this.newTab(tabId, appSessionId, request.partition ?? this.deps.resolvePartition(appSessionId, tabId)));
+    entry.openerTabId = request.opener?.tab.tabId ?? null;
     this.entries.set(tabId, entry);
     this.changed(entry);
     if (select || !this.selected.get(appSessionId)) this.setSelected(appSessionId, tabId);
-    if (url !== null) this.load(tabId, url);
+    if (url !== null) this.loadInto(entry, url, request.opener);
     this.remember(requestId, tabId, at);
     return { tab: entry.tab, reused: false };
   }
 
   // A page's `window.open` child (Design §14; Decision Log 24): a new tab of the opener's session and partition whose
-  // view adopts Chromium's child webContents, so `window.opener` works. The cap applies as for any load (the gate asked
-  // `hasRoomForView` first; should the room have gone meanwhile, the child is adopted over the cap rather than refused,
-  // since Chromium has already created it). Its listeners are wired before this returns, ahead of the child's first
-  // navigation, which Chromium starts itself. An `about:blank` child counts as committed (see `TabEntry.committed`).
+  // view adopts Chromium's child webContents, so `window.opener` works. The cap applies as for any load, never at the
+  // opener's expense (the gate asked `hasRoomForView(opener)` first; should the room have gone meanwhile, the child is
+  // adopted over the cap rather than refused, since Chromium has already created it). Its listeners are wired before
+  // this returns, ahead of the child's first navigation, which Chromium starts itself. An `about:blank` child counts as committed (see `TabEntry.committed`).
   // When the view cannot be made or wired, the tab is marked failed with no view and the child is left open for the
   // caller to close once Electron has it back (closing it inside `createWindow` would pull it from under Electron).
   adoptChild(opener: TabEntry, { url, select, webContents }: AdoptRequest): TabEntry {
@@ -281,10 +287,11 @@ export class TabStore {
     const blank = url === 'about:blank';
     const tabId = this.mintTabId();
     const entry = this.blankEntry({ ...this.newTab(tabId, appSessionId, partition), url: blank ? '' : url, loading: !blank });
+    entry.openerTabId = opener.tab.tabId;
     this.entries.set(tabId, entry);
     this.changed(entry);
     if (select || !this.selected.get(appSessionId)) this.setSelected(appSessionId, tabId);
-    this.makeRoom(entry); // no room: adopted over the cap all the same
+    this.makeRoom(entry, opener); // no room: adopted over the cap all the same
     this.createViewFor(entry, webContents, blank);
     return entry;
   }
@@ -292,17 +299,15 @@ export class TabStore {
   // `browser.tabs.close`: the view destroyed, the entry dropped, and the session's selection moved to the neighbour (the
   // next tab, else the previous) when it was this tab.
   close(tabId: string): void {
+    this.drop(this.require(tabId), { close: true, selectNext: null });
+  }
+
+  // The tab's page closed itself (`window.close()`, as an OAuth popup does once it has posted back): Chromium destroyed
+  // its webContents, so the tab goes by the close path with nothing asked of the destroyed contents, and the selection
+  // returns to the page that opened it while that is still open, as in Chrome (else the neighbour).
+  pageClosed(tabId: string): void {
     const entry = this.require(tabId);
-    const { appSessionId } = entry.tab;
-    const siblings = this.all().filter(({ tab }) => tab.appSessionId === appSessionId);
-    const index = siblings.indexOf(entry);
-    this.destroyView(entry);
-    this.entries.delete(tabId);
-    if (this.selected.get(appSessionId) === tabId) {
-      const neighbour = siblings[index + 1] ?? siblings[index - 1] ?? null;
-      this.selected.set(appSessionId, neighbour?.tab.tabId ?? null);
-    }
-    this.markSession(appSessionId);
+    this.drop(entry, { close: false, selectNext: entry.openerTabId });
   }
 
   // `browser.tabs.select`: the tab must be the session's.
@@ -327,9 +332,7 @@ export class TabStore {
   // the navigation commanded and `loadURL` voided, since tab state comes from the view's events alone (Decision Log 23).
   // False when the tab could not be loaded: left suspended by the cap, or its view could not be created.
   load(tabId: string, url: string): boolean {
-    const entry = this.require(tabId);
-    if (!this.ensureView(entry, url)) return false;
-    return this.navigateView(entry, url);
+    return this.loadInto(this.require(tabId), url);
   }
 
   // Unloads the tab: its view closed, {url, title, favicon, zoom} kept, the page's transient state dropped.
@@ -430,6 +433,27 @@ export class TabStore {
 
   // ---- internals ------------------------------------------------------------------------------------------------------
 
+  // The entry gone; when it was selected, the session selects `selectNext` if that is still one of its tabs, else the
+  // neighbour (the next tab, else the previous).
+  private drop(entry: TabEntry, { close, selectNext }: { close: boolean; selectNext: string | null }): void {
+    const { appSessionId, tabId } = entry.tab;
+    const siblings = this.all().filter(({ tab }) => tab.appSessionId === appSessionId);
+    const index = siblings.indexOf(entry);
+    this.destroyView(entry, { close });
+    this.entries.delete(tabId);
+    if (this.selected.get(appSessionId) === tabId) {
+      const preferred = siblings.find((sibling) => sibling !== entry && sibling.tab.tabId === selectNext);
+      const next = preferred ?? siblings[index + 1] ?? siblings[index - 1] ?? null;
+      this.selected.set(appSessionId, next?.tab.tabId ?? null);
+    }
+    this.markSession(appSessionId);
+  }
+
+  private loadInto(entry: TabEntry, url: string, opener?: TabEntry): boolean {
+    if (!this.ensureView(entry, url, opener)) return false;
+    return this.navigateView(entry, url);
+  }
+
   private navigateView(entry: TabEntry, url: string): boolean {
     const view = entry.view!;
     this.beginNavigation(entry.tab.tabId, { url });
@@ -442,9 +466,9 @@ export class TabStore {
     return true;
   }
 
-  private ensureView(entry: TabEntry, url: string): boolean {
+  private ensureView(entry: TabEntry, url: string, opener?: TabEntry): boolean {
     if (entry.view) return true;
-    if (!this.makeRoom(entry)) {
+    if (!this.makeRoom(entry, opener)) {
       this.update(entry.tab.tabId, { suspended: true, url, loading: false });
       this.capNotice(entry);
       return false;
@@ -452,11 +476,11 @@ export class TabStore {
     return this.createViewFor(entry);
   }
 
-  // Room for one more loaded tab: true under the cap, or once the least recently shown eligible tab is suspended for it
-  // (with the notice on `entry`); false when no tab is eligible.
-  private makeRoom(entry: TabEntry): boolean {
+  // Room for one more loaded tab: true under the cap, or once the least recently shown eligible tab (never the page that
+  // opened it) is suspended for it (with the notice on `entry`); false when no tab is eligible.
+  private makeRoom(entry: TabEntry, opener?: TabEntry): boolean {
     if (this.loadedCount() < BROWSER_LOADED_TABS_MAX) return true;
-    const victim = this.capVictim(entry);
+    const victim = this.capVictim(entry, ...(opener ? [opener] : []));
     if (!victim) return false;
     this.suspend(victim.tab.tabId);
     this.capNotice(entry);
@@ -569,7 +593,7 @@ export class TabStore {
   }
 
   private blankEntry(tab: BrowserTab): TabEntry {
-    return { tab, view: null, placement: null, host: null, visible: false, committed: false, committedUrl: null, pending: null, debugger: null, input: new TabInputSeam(), findOpen: false };
+    return { tab, view: null, placement: null, host: null, visible: false, committed: false, committedUrl: null, pending: null, debugger: null, input: new TabInputSeam(), openerTabId: null, findOpen: false };
   }
 
   private newTab(tabId: string, appSessionId: AppSessionId, partition: string): BrowserTab {
