@@ -248,6 +248,26 @@ test.describe('the editor in stub mode over a scratch repository', () => {
     });
   });
 
+  // W-D review m4: a basename wider than the bar's lead is cut by its own box, so it ends in an ellipsis rather than
+  // being clipped mid-character by the lead.
+  test('a basename wider than the bar ends in an ellipsis', async () => {
+    const LONG = `src/${'a-file-name-longer-than-the-bar-'.repeat(6)}end.ts`;
+    await withProduct(
+      async (p) => {
+        const viewer = await openInViewer(p, LONG);
+        const name = viewer.locator('[data-path-name]');
+        await expect(name).toHaveText(LONG.slice('src/'.length));
+        const shown = await name.evaluate((el) => ({
+          width: el.clientWidth, needed: el.scrollWidth, overflow: getComputedStyle(el).textOverflow, right: el.getBoundingClientRect().right, lead: el.parentElement!.getBoundingClientRect().right,
+        }));
+        expect(shown.needed, 'the name is wider than the bar can show').toBeGreaterThan(shown.width);
+        expect(shown.overflow, 'cut with an ellipsis').toBe('ellipsis');
+        expect(shown.right, 'by its own box, inside the lead').toBeLessThanOrEqual(shown.lead + 0.5);
+      },
+      (scratch) => writeFileSync(scratch.path(LONG), 'export const long = true;\n'),
+    );
+  });
+
   test('a file with conflict markers shows the block with its actions, and Accept theirs resolves it', async () => {
     await withProduct(async (p) => {
       const viewer = await openEditor(p, MERGE);

@@ -32,8 +32,9 @@ const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-m
 
 // The path at the bar's start: its directory truncates first and the basename stays whole, so the controls, which keep
 // their size, take the directory's width and never the file's name (E11 W-D: the merge bar at a ~600 px viewer). The
-// lead's least width is the basename's, in the mono font's character widths (a name past 40 characters may still be
-// cut; the title carries the whole path).
+// lead's least width is the basename's, in the mono font's character widths (a name wider than the lead, past 40
+// characters, is cut by its own box, at most the lead's width, so it ends in an ellipsis; the title carries the whole
+// path).
 const NAME_MIN_CH = 40;
 
 function PathLead({ path }: { path: string }) {
@@ -42,7 +43,7 @@ function PathLead({ path }: { path: string }) {
   return (
     <span data-path-lead className="flex flex-1 overflow-hidden font-mono text-fg-muted" style={{ minWidth: `${Math.min(name.length, NAME_MIN_CH)}ch` }} title={path}>
       {cut > 0 ? <span className="min-w-0 truncate">{path.slice(0, cut)}</span> : null}
-      <span data-path-name className="min-w-0 shrink-0 truncate">
+      <span data-path-name className="min-w-0 max-w-full shrink-0 truncate">
         {name}
       </span>
     </span>
