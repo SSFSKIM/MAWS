@@ -112,6 +112,32 @@ describe('the fallback toast', () => {
     expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${plan.id}`, `attention:${fix.id}`]);
   });
 
+  // W-C review m1: a maximized panel covers the main region, so a session tab in front there shows nothing; an ask's
+  // surface is the panel's Question sheet, which E1 opens for the shown session (a file tab of it counts)
+  it('counts the panel: a maximized one hides the session tab’s card; an open one shows the shown session’s Question sheet', () => {
+    const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    const question: AttentionItem = { ...fix, id: 'att-ask' as AttentionId, kind: 'question' };
+    act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [fix, question] }));
+    const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
+    const toasted = () => useNotices.getState().notices.map((n) => n.id);
+    useLayout.getState().openSession(fix.appSessionId);
+    useLayout.getState().setPanel({ maximized: true, collapsed: false });
+    notify(fix); // the docked card is under the maximized panel
+    expect(toasted()).toEqual([`attention:${fix.id}`]);
+    notify(question); // the Question sheet is in the panel, in front
+    expect(toasted()).toEqual([`attention:${fix.id}`]);
+    useNotices.setState({ notices: [] });
+    useLayout.getState().setPanel({ maximized: false });
+    useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId });
+    notify(question); // a file tab of the session shows its sheet in the open panel
+    expect(toasted()).toEqual([]);
+    notify(fix); // but not its docked card
+    expect(toasted()).toEqual([`attention:${fix.id}`]);
+    useLayout.getState().setPanel({ collapsed: true });
+    notify(question); // a collapsed panel shows no sheet
+    expect(toasted()).toEqual([`attention:${fix.id}`, `attention:${question.id}`]);
+  });
+
   // E11 (W-C; E10's crash screenshot; A-47): the toast names an item; once that item is no longer open (answered,
   // retired, or cleared with its dead host), the toast goes with it
   describe('leaves with its item', () => {

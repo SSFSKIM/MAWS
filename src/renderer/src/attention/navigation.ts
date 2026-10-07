@@ -10,6 +10,7 @@ import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
 import { tabId } from '@shared/ipc/schema/layout';
 import { ipc } from '../ipc/client';
 import { registerAction } from '../keymap/actions-runtime';
+import { shownSession } from '../panel/host';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
@@ -37,10 +38,17 @@ function navigate({ appSessionId }: EventPayload<'attention.navigate'>): void {
 }
 
 // E11 (W-C; E1's live sitting): a session whose tab is in front in a pane has its request on screen already, the
-// docked card (C7) or, for an ask, the Question sheet E1 opens for the shown session; a toast would only cover the
-// panel's action bar. A file tab of the session does not count: the docked card is in the session's own pane.
-const requestOnScreen = (appSessionId: AppSessionId): boolean =>
-  currentSet(useLayout.getState().main).panes.some((pane) => pane.activeTabId === tabId({ kind: 'session', appSessionId }));
+// docked card (C7); a toast would only cover the panel's action bar. A file tab of the session does not count (the
+// docked card is in the session's own pane), and neither does a pane under a maximized panel (visibility.ts's rule).
+// W-C review m1: an ask's surface is the panel's Question sheet, which E1 opens whenever the session is the shown one
+// (a file tab of it counting), so for a `question` item the open panel showing that session is on screen too.
+function requestOnScreen(appSessionId: AppSessionId, kind: AttentionItem['kind'] | undefined): boolean {
+  const { main, regions } = useLayout.getState();
+  const panelOpen = !regions.panel.collapsed;
+  const inFront = currentSet(main).panes.some((pane) => pane.activeTabId === tabId({ kind: 'session', appSessionId }));
+  if (inFront && !(regions.panel.maximized && panelOpen)) return true;
+  return kind === 'question' && panelOpen && shownSession(main) === appSessionId;
+}
 
 // The session's latest list holds the item: the buffer of an outstanding attention snapshot first, else the store's.
 function itemOf(appSessionId: AppSessionId, attentionId: AttentionId): AttentionItem | undefined {
@@ -57,8 +65,8 @@ type ToastedItems = Map<AttentionId, { appSessionId: AppSessionId; held: boolean
 function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, delivery }: EventPayload<'attention.notified'>): void {
   if (delivery !== 'fallback') return;
   const id = appSessionId as AppSessionId;
-  if (requestOnScreen(id)) return;
   const item = itemOf(id, attentionId as AttentionId);
+  if (requestOnScreen(id, item?.kind)) return;
   if (item && !isOpen(item)) return; // settled before its notice arrived
   const record = useSessions.getState().records.get(id);
   const title = record ? displayTitle(record) : 'A session';
