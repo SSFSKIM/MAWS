@@ -14,8 +14,7 @@
 // - `/dialogs.html`: "Alert" (`alert()`, then `#alert-result` reads "alert returned"), "Confirm" (`confirm()`, its
 //   answer in `#confirm-result` as "confirm: true|false"), and a link "Open the pop-up" calling
 //   `window.open('/popup.html')` (an adopted tab, Decision Log 60);
-// - `/popup.html` ("E4c pop-up"): "Alert from the pop-up" raising an `alert()` (`#alerts` counts the returns); with
-//   `?auto=1` it raises one at load as well;
+// - `/popup.html` ("E4c pop-up"): "Alert from the pop-up" raising an `alert()` (`#alerts` counts the returns);
 // - `/links.html`: "Download the report" (`/report.csv`, served `Content-Disposition: attachment`: a navigation that
 //   becomes a download, A-31) and "Open the background page" (`/background.html`, a plain link a person ⌘-clicks into
 //   a background tab, Decision Log 43);
@@ -26,6 +25,7 @@ import type { Socket } from 'node:net';
 import type { BrowserServer } from './browser-server';
 
 export const BROWSER_TOOLS_PORT = 17391;
+export const ORDER_REFERENCE = 'MAWS-7731'; // what /done.html shows, and what the recording's reply names
 
 export interface BrowserToolsServer extends BrowserServer {
   frameOrigin: string; // http://localhost:17391, a second site
@@ -60,7 +60,7 @@ email.addEventListener('input', () => {
 );
 
 const done = (name: string) =>
-  page('E4c order received', `<main><h1>Order received</h1><p id="reference">Thanks, ${escapeHtml(name)}. Your reference is MAWS-7731.</p></main>`);
+  page('E4c order received', `<main><h1>Order received</h1><p id="reference">Thanks, ${escapeHtml(name)}. Your reference is ${ORDER_REFERENCE}.</p></main>`);
 
 const HTML: Record<string, string> = {
   '/form.html': FORM,
@@ -93,14 +93,12 @@ const HTML: Record<string, string> = {
     'E4c background page',
     `<main><h1>Background page</h1><p><button id="count-button" onclick="${escapeHtml(counter('count'))}">Count</button> <span id="count">0</span></p></main>`,
   ),
-};
-
-const popup = (auto: boolean) =>
-  page(
+  '/popup.html': page(
     'E4c pop-up',
     `<main><h1>Pop-up</h1><p><button id="popup-alert" onclick="popupAlert()">Alert from the pop-up</button> <span id="alerts">0</span></p></main>`,
-    `function popupAlert() { alert('Hello from the pop-up'); ${counter('alerts')} }${auto ? '\npopupAlert();' : ''}`,
-  );
+    `function popupAlert() { alert('Hello from the pop-up'); ${counter('alerts')} }`,
+  ),
+};
 
 const REPORT = 'item,count\nwidgets,3\n';
 
@@ -114,7 +112,7 @@ export async function startBrowserToolsServer(): Promise<BrowserToolsServer> {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     const path = url.pathname;
     hits.set(path, (hits.get(path) ?? 0) + 1);
-    const html = path === '/done.html' ? done(url.searchParams.get('name') ?? '') : path === '/popup.html' ? popup(url.searchParams.get('auto') === '1') : HTML[path];
+    const html = path === '/done.html' ? done(url.searchParams.get('name') ?? '') : HTML[path];
     if (html !== undefined) {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       return response.end(html);

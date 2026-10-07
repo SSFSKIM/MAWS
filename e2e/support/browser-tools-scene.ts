@@ -8,19 +8,20 @@
 //   fills and the Submit click by the snapshot's refs, `browser_snapshot` of `/done.html`; never a navigation first,
 //   since a ref's frame prefix counts the documents the connection has seen. The generator writes its two snapshots as
 //   the fixtures the live recording's stand-in answers from; case 1 compares a fresh run with them.
-import { readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import type { KeyboardInputEvent, MouseInputEvent, MouseWheelInputEvent } from 'electron';
 import { refElementsOf } from '@shared/browser/snapshot';
 import type { BrowserControl } from '@shared/browser/tab';
-import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBrowserAnswerResult } from '@shared/ipc/schema/maws';
+import type { AppSessionId, RequestId } from '@shared/graph/ids';
+import type { MawsBrowserAnswerResult, MawsBrowserProgress } from '@shared/ipc/schema/maws';
 import type { BrowserToolName } from '@shared/maws/browser';
 import { launchBrowserScene, type BrowserScene } from './browser-scene';
-import { closeScene, scratchProject } from './deliverables-scene';
+import { invoke, value } from './c7-replay';
+import { clearToasts, closeScene, ofKind, scratchProject, type Scene } from './deliverables-scene';
 import { REPO_ROOT } from './launch';
-import { startBrowserToolsServer, type BrowserToolsServer } from './browser-tools-server';
+import { ORDER_REFERENCE, startBrowserToolsServer, type BrowserToolsServer } from './browser-tools-server';
 
 export interface BrowserToolsScene extends BrowserScene {
   server: BrowserToolsServer;
@@ -35,6 +36,7 @@ export async function browserToolsScene(titles: string[], body: (s: BrowserTools
   try {
     const s = (await launchBrowserScene(scratch, server)) as BrowserToolsScene;
     try {
+      await quiet(s);
       await body(s);
     } catch (error) {
       await s.maws.cleanup();
@@ -45,6 +47,19 @@ export async function browserToolsScene(titles: string[], body: (s: BrowserTools
     await server.close();
     rmSync(scratch.root, { recursive: true, force: true });
   }
+}
+
+// What the e2e's own harness would otherwise add to the app (both found by this group's first runs):
+// - the attention fallback toasts: an e2e window is never focused and its build is unsigned, so every permission the
+//   replay asks raises C5's `attention.notified { delivery: 'fallback' }` toast, which stays until dismissed; stacked at
+//   the window's bottom right they meet the panel's pane, which E4a counts as a cover, so the agent's next act would
+//   wait under them. Notifications are switched off, as an owner may (the interplay is reported, not tested here);
+// - the e2e's own Playwright connection to every page: with no `dialog` listener its server answers each JavaScript
+//   dialog over CDP itself, after the app's wrap already has, and that answer's "No dialog is showing" rejection is
+//   unhandled; a listener that does nothing leaves dialogs to the app, as in the owner's app.
+async function quiet(s: BrowserScene): Promise<void> {
+  value(await invoke(s.page, 'settings.set', { notifications: { enabled: false } }));
+  s.maws.app.context().on('dialog', () => undefined);
 }
 
 // ---- the seam's `agent` (the e2e does not import main's code; these mirror `BrowserAgentSeam`) -----------------------
@@ -77,7 +92,7 @@ export async function agentRun(s: BrowserScene, appSessionId: AppSessionId, tool
 }
 
 // The answer of a call that must succeed: its result and text, or the failure printed.
-export async function agentOk(s: BrowserScene, appSessionId: AppSessionId, tool: BrowserToolName, args: unknown): Promise<{ result: Record<string, unknown>; text?: string }> {
+export async function agentOk(s: BrowserScene, appSessionId: AppSessionId, tool: BrowserToolName, args: unknown): Promise<Extract<MawsBrowserAnswerResult, { ok: true }>> {
   const answer = await agentRun(s, appSessionId, tool, args);
   expect(answer, `${tool} ${JSON.stringify(args)} answered`).not.toBeNull();
   if (!answer!.ok) throw new Error(`${tool} ${JSON.stringify(args)} failed: ${answer!.error}`);
@@ -100,7 +115,7 @@ export const cursorMessages = (s: BrowserScene, tabId: string): Promise<number> 
 // ---- the recording's sequence and its fixtures ------------------------------------------------------------------------
 
 export const FIRST_TAB_ID = 'b_000000000001'; // the first id a launch mints under MAWS_E2E=1 (Decision Log 36)
-export const ORDER = { name: 'Ada Lovelace', email: 'ada@example.test', reference: 'MAWS-7731' } as const;
+export const ORDER = { name: 'Ada Lovelace', email: 'ada@example.test', reference: ORDER_REFERENCE } as const;
 export const SNAPSHOT_FIXTURES = {
   form: join(REPO_ROOT, 'test/fixtures/browser/form.snapshot.txt'),
   done: join(REPO_ROOT, 'test/fixtures/browser/done.snapshot.txt'),
@@ -126,4 +141,121 @@ export async function recordedSequence(s: BrowserToolsScene, appSessionId: AppSe
   expect(clicked.result).toMatchObject({ navigated: true, title: 'E4c order received' });
   const done = (await agentOk(s, appSessionId, 'browser_snapshot', { tabId })).text!;
   return { tabId, form, done };
+}
+
+// ---- waits, the person, the cover -----------------------------------------------------------------------------------
+
+// A call left running while the case acts around it: its promise, and when it settled (null while it runs). A rejection
+// (the app closed under a failing case) is left to whoever awaits `promise`.
+export interface Running<T> {
+  promise: Promise<T>;
+  settledAt(): number | null;
+}
+export function running<T>(promise: Promise<T>): Running<T> {
+  let at: number | null = null;
+  const settled = promise.finally(() => (at = Date.now()));
+  settled.catch(() => undefined);
+  return { promise: settled, settledAt: () => at };
+}
+
+// Every `maws.browser.progress` the window receives from now on, kept in the window: a seam run has no transcript row,
+// so a case reads the waits main reported here (Acceptance, case 3).
+export async function recordProgress(s: Scene): Promise<void> {
+  await s.page.evaluate(() => {
+    const w = window as unknown as { __e4cProgress?: MawsBrowserProgress[] };
+    if (w.__e4cProgress) return;
+    const log: MawsBrowserProgress[] = [];
+    w.__e4cProgress = log;
+    window.maws.on('maws.browser.progress', (payload) => log.push(payload));
+  });
+}
+export const progressOf = (s: Scene, tabId: string): Promise<MawsBrowserProgress[]> =>
+  s.page.evaluate((id) => ((window as unknown as { __e4cProgress?: MawsBrowserProgress[] }).__e4cProgress ?? []).filter((p) => p.tabId === id), tabId);
+// The waits main reported for the tab, in order (null: a wait ended).
+export const waitsOf = async (s: Scene, tabId: string): Promise<(string | null)[]> => (await progressOf(s, tabId)).map((p) => p.waiting);
+
+// The person's click (E4-0's stand-in: a native press and release sent to the tab's page through the seam, as the OS
+// would deliver them) at the centre of `selector` in `page`: when it was sent.
+export async function humanClick(s: BrowserScene, tabId: string, page: Page, selector: string): Promise<number> {
+  const box = await page.locator(selector).boundingBox();
+  expect(box, `${selector} has a box`).not.toBeNull();
+  const x = Math.round(box!.x + box!.width / 2);
+  const y = Math.round(box!.y + box!.height / 2);
+  const at = Date.now();
+  expect(await sendInput(s, tabId, { type: 'mouseDown', x, y, button: 'left', clickCount: 1 })).toBe(true);
+  expect(await sendInput(s, tabId, { type: 'mouseUp', x, y, button: 'left', clickCount: 1 })).toBe(true);
+  return at;
+}
+
+// The tab's attributed inputs as kind/source pairs (the order E4a's classifier emitted them).
+export const inputsOf = async (s: BrowserScene, tabId: string): Promise<string[]> => (await lastInputs(s, tabId)).map((input) => `${input.kind}/${input.source}`);
+
+// The id of the next permission the session asks (beyond those answered), once it is asked.
+export async function nextPermission(s: Scene, id: AppSessionId): Promise<RequestId> {
+  const answered = ofKind(await s.events(id), 'permission.resolved').length;
+  await expect.poll(async () => ofKind(await s.events(id), 'permission.requested').length, { timeout: 30_000 }).toBeGreaterThan(answered);
+  return ofKind(await s.events(id), 'permission.requested').at(-1)!.requestId;
+}
+
+// A permission allowed once through `session.answer`, the request card's own command (for when a sheet covers the card).
+export async function allowByCommand(s: Scene, id: AppSessionId, requestId: RequestId): Promise<void> {
+  const answered = ofKind(await s.events(id), 'permission.resolved').length;
+  expect(value(await invoke(s.page, 'session.answer', { appSessionId: id, requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }))).toEqual({ outcome: 'delivered' });
+  await expect.poll(async () => ofKind(await s.events(id), 'permission.resolved').length, { timeout: 30_000 }).toBe(answered + 1);
+}
+
+// How many pixels of a PNG are the agent cursor's accent blue (#2f6feb), its glow over a light page included, counted in
+// main through nativeImage (a BGRA bitmap): the picture's size in pixels and the count.
+export async function bluePixels(s: Scene, png: { path: string } | { base64: string }): Promise<{ width: number; height: number; blue: number }> {
+  return s.maws.app.evaluate(({ nativeImage }, png) => {
+    const image = 'path' in png ? nativeImage.createFromPath(png.path) : nativeImage.createFromBuffer(Buffer.from(png.base64, 'base64'));
+    const { width, height } = image.getSize();
+    const bitmap = image.toBitmap();
+    let blue = 0;
+    for (let k = 0; k < bitmap.length; k += 4) {
+      const [b, g, r] = [bitmap[k]!, bitmap[k + 1]!, bitmap[k + 2]!];
+      if (b > 180 && b - r > 60 && b - g > 30) blue++;
+    }
+    return { width, height, blue };
+  }, png);
+}
+
+// ---- evidence -------------------------------------------------------------------------------------------------------
+
+export const SHOTS = process.env.MAWS_E4C_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e4c') : null;
+const THEMES = ['light', 'dark'] as const;
+
+// `e4c-<surface>-<theme>.png` under docs/doperpowers/evidence/p1-e4c/ when MAWS_E4C_SHOTS=1, in each theme, then back to
+// light. The view draws over the renderer and is not in its screenshot, so the shown page's own picture is laid into
+// `pane` for the shot (E4a's method) and taken out after; `clip` narrows the shot to an element; `before` runs at the
+// start of each theme's shot (a wait the shot is of is kept alive there).
+export async function shootE4c(s: Scene, surface: string, opts: { pane: Locator; page: Page; clip?: Locator; before?: () => Promise<void> }): Promise<void> {
+  if (SHOTS === null) return;
+  mkdirSync(SHOTS, { recursive: true });
+  await clearToasts(s.page);
+  await s.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur()); // no focus ring left from the last click
+  for (const theme of THEMES) {
+    await opts.before?.();
+    value(await invoke(s.page, 'settings.set', { theme }));
+    await expect(s.page.locator('html')).toHaveAttribute('data-theme', theme);
+    const picture = `data:image/png;base64,${(await opts.page.screenshot()).toString('base64')}`;
+    await opts.pane.evaluate(
+      (el, src) =>
+        new Promise<void>((resolve) => {
+          const img = document.createElement('img');
+          img.dataset.e4cShot = '';
+          img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none';
+          img.onload = () => resolve();
+          img.src = src;
+          el.appendChild(img);
+        }),
+      picture,
+    );
+    await s.page.waitForTimeout(250);
+    const clip = opts.clip ? await opts.clip.boundingBox() : null;
+    await s.page.screenshot({ path: join(SHOTS, `e4c-${surface}-${theme}.png`), ...(clip && { clip }) });
+    await opts.pane.evaluate((el) => el.querySelector('img[data-e4c-shot]')?.remove());
+  }
+  value(await invoke(s.page, 'settings.set', { theme: 'light' }));
+  await expect(s.page.locator('html')).toHaveAttribute('data-theme', 'light');
 }
