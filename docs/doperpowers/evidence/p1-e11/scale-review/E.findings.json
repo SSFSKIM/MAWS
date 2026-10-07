@@ -1,0 +1,91 @@
+{
+  "verdict": "incorrect",
+  "findings": [
+    {
+      "id": "scalpel-1#1",
+      "priority": "P2",
+      "title": "Attach the stderr listener before startup, or the will-quit warning check can't fail",
+      "file": "e2e/c12-quit.spec.ts",
+      "lines": "160-177",
+      "comment": "I reproduced this. In playwright-core's electron loader.js (lines 96-114), app.whenReady is replaced with a promise that only `globalThis.__playwright_run` resolves, and Playwright evaluates that inside `_electron.launch`. src/main/files/profile-lock.ts runs `start()` synchronously in that whenReady `.then`, and every will-quit registration happens inside it. src/main/index.ts:124 registers through shutdownSteps, and src/main/lifecycle/shutdown.ts:28 is now the single `app.on('will-quit')`. `onLaunched` attaches its hook only after launch resolves (e2e/support/launch.ts:113). Meanwhile Playwright's process launcher already reads stderr, so earlier chunks never reach the late listener.\n\nThe experiment: a throwaway Electron main that adds 12 `will-quit` listeners in `whenReady().then`, launched with this repo's playwright-core, then `app.process().stderr.on('data')` attached right after launch, the same as the spec. In 3 of 3 runs the collected log had no `MaxListenersExceededWarning`, only the debugger line. Delaying the same 12 registrations by 1.5 s put the warning in the log. So if someone reintroduces per-block `app.on('will-quit', …)` in start(), the check at e2e/c12-quit.spec.ts:176 still passes. The guard cannot catch the regression it was written for. A dependable alternative is to assert `app.evaluate(({app}) => app.listenerCount('will-quit'))` equals 1.",
+      "sources": [
+        "scalpel-1"
+      ]
+    },
+    {
+      "id": "scalpel-1#2",
+      "priority": "P3",
+      "title": "Stop the live proof overwriting committed live-proof.txt, even on a skip",
+      "file": "e2e/browser-comment-live.spec.ts",
+      "lines": "37-38, 74-77, 129-134",
+      "comment": "Confirmed but minor. docs/doperpowers/evidence/p1-e4d/live-proof.txt is tracked (git ls-files lists it). `note()` (e2e/browser-comment-live.spec.ts:74-77) rewrites the whole file from `lines`, and its first call writes only the header (:130). Failure scenario: `MAWS_E4D_LIVE=1 pnpm e2e:browser-comment-live` with the relay down. Lines 131-134 then leave the committed passing proof cut down to the header plus `skipped: …; G2's live half stays open`. That misstates the cited G2 evidence in the working tree, and a later broad `git add` could commit it.\n\nWhy P3: the spec only runs on an explicit opt-in, and the change shows in git status. E11's W-E row also named the specs it moved behind flags or output variables (E1, E3, E5, E10), and plan line 52 handles any other rewriting directory by restoring it. So this is a leftover of a hazard E11 itself recognised, not a product defect. Log it as debt rather than block on it.",
+      "sources": [
+        "scalpel-1"
+      ]
+    },
+    {
+      "id": "scalpel-1#4",
+      "priority": "P3",
+      "title": "Return a skip reason when the relay is down instead of throwing from curl",
+      "file": "e2e/support/plugins-live.ts",
+      "lines": "21-22",
+      "comment": "Confirmed. I ran the same `execFileSync('/usr/bin/curl', ['-s','-o','/dev/null','-w','%{http_code}', ...])` against a closed port. It throws with status 7, and stdout holds '000'. e2e/plugins-live.spec.ts:27 calls `pluginsLiveSkipReason()` at module scope. So with `MAWS_E8_LIVE=1` and ClaudeUsage stopped, the file fails to load with a curl error, and the intended skip (`relay at … answered 000: start ClaudeUsage`) never appears. The shared `relaySkipReason` (test/support/relay-health.ts) catches this case and also bounds the wait with --max-time, which this copy lacks. It only affects the opt-in live run, hence P3.",
+      "sources": [
+        "scalpel-1"
+      ]
+    }
+  ],
+  "coverage": [
+    {
+      "finder": "sweep",
+      "lens": null,
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-1",
+      "lens": "Truthfulness of the gates: asserts versus notes, skipped cases, expect bounds that hide timing.",
+      "status": "ok",
+      "candidates": 4
+    },
+    {
+      "finder": "scalpel-2",
+      "lens": "Fixture integrity and provenance, the pins, the snapshot suites.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-3",
+      "lens": "Harness seams only under MAWS_E2E/MAWS_HARNESS and never in a production path.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-4",
+      "lens": "The packaged build: asar contents, fuses, playwright-core as a production dependency and no ws (A-43), the voice helper's bundling and entitlements.",
+      "status": "ok",
+      "candidates": 0
+    },
+    {
+      "finder": "scalpel-5",
+      "lens": "Scratch isolation: no owner-store write, the CLAUDE_* scrub on every scratch-home launch (Decision Log 22), process cleanup with survivor checks, evidence rewrites.",
+      "status": "ok",
+      "candidates": 0
+    }
+  ],
+  "lenses": [
+    "Truthfulness of the gates: asserts versus notes, skipped cases, expect bounds that hide timing.",
+    "Fixture integrity and provenance, the pins, the snapshot suites.",
+    "Harness seams only under MAWS_E2E/MAWS_HARNESS and never in a production path.",
+    "The packaged build: asar contents, fuses, playwright-core as a production dependency and no ws (A-43), the voice helper's bundling and entitlements.",
+    "Scratch isolation: no owner-store write, the CLAUDE_* scrub on every scratch-home launch (Decision Log 22), process cleanup with survivor checks, evidence rewrites."
+  ],
+  "explanation": "confirmed: Attach the stderr listener before startup, or the will-quit warning check can't fail; Stop the live proof overwriting committed live-proof.txt, even on a skip; Return a skip reason when the relay is down instead of throwing from curl",
+  "target": {
+    "base": "base",
+    "baseCommit": "6f6450c25a60d769004580f0a27dc46e157fd79b",
+    "headCommit": "55a1ce03d917d1f5420540fc6fb40094a0256ed9",
+    "repo": "/private/tmp/maws-e11-review/E"
+  },
+  "level": "max"
+}
