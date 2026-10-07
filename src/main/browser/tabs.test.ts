@@ -285,6 +285,20 @@ describe('TabStore: the load-error lifecycle (Design §5, Decision Log 23)', () 
     expect(h.entry(tabId).committed).toBe(false);
   });
 
+  // The denial line belongs to the document that asked; a failed load replaces that document as a commit does, so the
+  // line must not sit over the next address's error page (the e2e's error shot after a denied notification).
+  it('a main-frame failure clears the previous document\'s denied permissions; -3 leaves them', () => {
+    const h = harness();
+    const { tabId } = open(h, 'https://a.test/').tab;
+    h.store.navigationCommitted(tabId, { url: 'https://a.test/', canGoBack: false, canGoForward: false });
+    const denied = [{ host: 'a.test', permission: 'notifications' }];
+    h.store.update(tabId, { denied });
+    h.store.loadFailed(tabId, { url: 'https://a.test/x', code: -3, description: 'ERR_ABORTED', canGoBack: true, canGoForward: false });
+    expect(h.entry(tabId).tab.denied).toEqual(denied);
+    h.store.loadFailed(tabId, { url: 'http://127.0.0.1:1/', code: -102, description: 'ERR_CONNECTION_REFUSED', canGoBack: true, canGoForward: false });
+    expect(h.entry(tabId).tab).toMatchObject({ denied: [], loadError: { kind: 'refused' } });
+  });
+
   it('fail → fail: the second failure replaces the first', () => {
     const h = harness();
     const { tabId } = open(h, 'http://127.0.0.1:1/').tab;

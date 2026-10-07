@@ -407,6 +407,7 @@ export class TabStore {
   }
 
   // A main-frame `did-fail-load`: the failed URL stays in the address field and the view is hidden; -3 is never an error.
+  // The error page replaces the document as a commit does, so that document's denied permissions go with it.
   loadFailed(tabId: string, failure: { url: string; code: number; description: string; canGoBack: boolean; canGoForward: boolean }): void {
     const kind = classifyLoadError(failure.code, failure.description);
     if (kind === null) return;
@@ -414,7 +415,7 @@ export class TabStore {
     entry.committed = false;
     entry.pending = null;
     const { url, code, description, canGoBack, canGoForward } = failure;
-    this.update(tabId, { url, canGoBack, canGoForward, loading: false, loadError: { url, host: hostOf(url), kind, code, description } });
+    this.update(tabId, { url, canGoBack, canGoForward, loading: false, loadError: { url, host: hostOf(url), kind, code, description }, denied: [] });
   }
 
   // `render-process-gone`: the crash page until the next committed navigation. The debugger's attachment ends with the

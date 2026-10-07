@@ -106,7 +106,7 @@ describe('the zoom banner', () => {
   it('is absent at 100% and shows the level with Zoom out, Zoom in and Reset otherwise', async () => {
     const { rerender } = show({ tab: tab() });
     expect(screen.queryByRole('group', { name: BROWSER_COPY.zoom.label })).toBeNull();
-    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1.25 })} tabs={[]} />);
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1.25 })} tabs={[]} owns />);
     const banner = screen.getByRole('group', { name: BROWSER_COPY.zoom.label });
     expect(within(banner).getByText('125%')).toBeTruthy();
     for (const name of ['Zoom out', 'Zoom in', 'Reset']) fireEvent.click(within(banner).getByRole('button', { name }));
@@ -116,6 +116,19 @@ describe('the zoom banner', () => {
       { tabId: T1, action: 'in' },
       { tabId: T1, action: 'reset' },
     ]);
+  });
+
+  it('in a chrome whose pane does not hold the view, the level shows but the buttons are disabled (as the menu\'s zoom items)', async () => {
+    show({ tab: tab({ zoom: 1.25 }), owns: false });
+    const banner = screen.getByRole('group', { name: BROWSER_COPY.zoom.label });
+    expect(within(banner).getByText('125%')).toBeTruthy();
+    for (const name of ['Zoom out', 'Zoom in', 'Reset']) {
+      const button = within(banner).getByRole<HTMLButtonElement>('button', { name });
+      expect(button.disabled, name).toBe(true);
+      fireEvent.click(button);
+    }
+    await wait(0);
+    expect(calls('browser.tabs.zoom')).toEqual([]);
   });
 });
 

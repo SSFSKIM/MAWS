@@ -52,7 +52,7 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false }: Chrom
     <div data-browser-chrome="" className="relative z-10 flex shrink-0 flex-col border-b border-border bg-bg-raised">
       <TabStrip appSessionId={appSessionId} surface={surface} tabs={tabs} shownId={tabId} />
       <NavRow appSessionId={appSessionId} surface={surface} tab={tab} addressRef={addressRef} owns={owns} onFind={openFind} />
-      {tab && tab.zoom !== 1 && <ZoomBanner tab={tab} />}
+      {tab && tab.zoom !== 1 && <ZoomBanner tab={tab} owns={owns} />}
       {tab && finding !== null && <FindBar tab={tab} focusRequest={finding.focus} onClose={() => setFinding(null)} />}
       <Notices appSessionId={appSessionId} tab={tab} />
     </div>
