@@ -1,0 +1,6 @@
+step build-app
+command: pnpm build:app
+head 07e50719  ended 2026-10-07T22:32:46Z  load { 8.05 8.48 8.92 }  34s
+  • skipped dependencies rebuild  reason=npmRebuild is set to false
+  • skipped macOS code signing  reason=identity explicitly is set to null
+exit 0

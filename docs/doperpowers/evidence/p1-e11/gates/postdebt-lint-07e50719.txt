@@ -1,0 +1,4 @@
+step lint
+command: pnpm lint
+head 07e50719  ended 2026-10-07T22:32:12Z  load { 9.16 8.67 9.00 }  29s
+exit 0

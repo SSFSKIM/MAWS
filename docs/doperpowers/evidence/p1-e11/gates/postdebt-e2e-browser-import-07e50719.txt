@@ -1,0 +1,5 @@
+step e2e-browser-import
+command: pnpm e2e:browser-import
+head 07e50719  ended 2026-10-07T23:03:18Z  load { 16.02 13.07 9.95 }  56s
+  6 passed (27.8s)
+exit 0

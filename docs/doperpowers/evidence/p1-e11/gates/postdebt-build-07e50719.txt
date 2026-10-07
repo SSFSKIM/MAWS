@@ -1,0 +1,4 @@
+step build
+command: pnpm build
+head 07e50719  ended 2026-10-07T22:36:03Z  load { 9.72 8.94 9.01 }  25s
+exit 0

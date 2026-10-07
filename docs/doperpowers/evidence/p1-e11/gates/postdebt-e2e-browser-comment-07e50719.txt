@@ -1,0 +1,5 @@
+step e2e-browser-comment
+command: pnpm e2e:browser-comment
+head 07e50719  ended 2026-10-07T23:02:22Z  load { 22.80 13.44 9.87 }  56s
+  13 passed (27.1s)
+exit 0

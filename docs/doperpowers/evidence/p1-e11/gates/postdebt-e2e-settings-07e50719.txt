@@ -1,0 +1,5 @@
+step e2e-settings
+command: pnpm e2e:settings
+head 07e50719  ended 2026-10-07T22:53:26Z  load { 11.07 7.56 7.59 }  43s
+  9 passed (16.8s)
+exit 0

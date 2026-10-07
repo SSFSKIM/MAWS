@@ -1,0 +1,33 @@
+== postdebt head 07e50719 2026-10-07T22:30:58Z load { 4.24 7.85 8.76 } front "LSDisplayName"="loginwindow"
+typecheck exit 0 45s 
+lint exit 0 29s 
+build-app exit 0 34s 
+test exit 0 172s  Test Files  708 passed | 1 skipped (709)       Tests  9844 passed | 1 skipped (9845) 
+test-probes exit 0 0s # pass 172 # fail 0 
+build exit 0 25s 
+e2e exit 0 210s   49 passed (3.5m) 
+e2e-transcript exit 0 207s   31 passed (3.0m) 
+e2e-terminal exit 0 140s   15 passed (1.9m) 
+e2e-panel exit 0 64s   23 passed (37.4s) 
+e2e-c7 exit 0 89s   29 passed (1.0m) 
+e2e-voice exit 0 53s   14 passed (25.4s) 
+e2e-code exit 0 106s   36 passed (1.3m) 
+e2e-agents exit 0 66s   23 passed (38.9s) 
+e2e-widgets exit 0 64s   24 passed (36.0s) 
+e2e-settings exit 0 43s   9 passed (16.8s) 
+e2e-c12 exit 0 35s   4 passed (10.6s) 
+e2e-tools exit 0 41s   8 passed (13.6s) 
+e2e-scm exit 0 56s   8 passed (31.0s) 
+e2e-side exit 0 56s   8 passed (28.4s) 
+e2e-deliverables exit 0 74s   10 passed (45.9s) 
+e2e-supervisor exit 0 156s   8 passed (2.2m) 
+e2e-browser exit 1 61s   7 passed (34.6s) 
+e2e-browser-comment exit 0 56s   13 passed (27.1s) 
+e2e-browser-import exit 0 56s   6 passed (27.8s) 
+e2e-browser-tools exit 0 77s   11 passed (48.6s) 
+verify-fuses exit 0 1s 
+e2e-packaged exit 0 213s   51 passed (3.5m) 
+e2e-supervisor-packaged exit 0 2s   1 passed (1.4s) 
+stale supervisors: 0
+== done 2026-10-07T23:08:11Z load { 10.92 11.40 10.06 }
+e2e-browser retried alone exit 0  8 passed (first run 7 passed 1 failed: case 6, the C10 expandRow timing race)

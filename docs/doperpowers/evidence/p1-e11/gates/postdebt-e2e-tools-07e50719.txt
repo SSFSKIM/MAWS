@@ -1,0 +1,5 @@
+step e2e-tools
+command: pnpm e2e:tools
+head 07e50719  ended 2026-10-07T22:54:43Z  load { 11.09 8.36 7.90 }  41s
+  8 passed (13.6s)
+exit 0
