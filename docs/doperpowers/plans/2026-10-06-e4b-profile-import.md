@@ -10,7 +10,7 @@ To see it: Settings › Browser › Import a Chrome profile…; pick a profile; 
 
 ## Progress
 
-- [ ] M0 — Re-pin against E4a as landed; the synthetic Chrome user-data fixture
+- [x] M0 — Re-pin against E4a as landed; the synthetic Chrome user-data fixture (2026-10-06, reviewed clean: 89454219..e81d155d)
 - [ ] M1 — Shared contracts: the import schemas, the `browser.import.*` IPC, `profiles.json`
 - [ ] M2 — Main: the pure decoders, staging, the Keychain step, the history and cookie imports, the CHIPS route, the extension inspector and loader, the report, cancel and rollback, removal, the boot sweep, the logging discipline
 - [ ] M3 — Renderer: the import sheet (picker, consent, Keychain step, progress, report, toggles), Settings › Browser's imported-profiles block, copy
