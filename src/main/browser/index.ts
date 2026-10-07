@@ -9,7 +9,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, session } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { BROWSER_SETTINGS_DEFAULTS } from '@shared/browser/tab';
+import type { BrowserSettings } from '@shared/ipc/schema/settings';
 import type { Index } from '../index/index';
 import type { registerMainHandler } from '../ipc/router';
 import { isAppWindow } from '../windows';
@@ -31,12 +31,10 @@ import { createTabView, tabWebPreferences, ViewManager } from './view';
 import { attachFocusEmulation, focusEmulationMode, setFocusEmulation } from './visibility';
 import { attachWindowOpen } from './window-open';
 
-export type BrowserSettings = typeof BROWSER_SETTINGS_DEFAULTS;
-
 export interface BrowserDeps {
   userData: string;
-  // Read when a tab opens (the profile) and when a page opens a window (`linkTarget`); settings 11's `browser` section
-  // once it lands (Task 3.5), the defaults until then.
+  // Settings 11's `browser` section, read when a tab opens (the profile: a change applies to tabs opened afterwards) and
+  // when a page opens a window (`linkTarget`, at the moment of the open).
   settings(): BrowserSettings;
   index: Pick<Index, 'sessions' | 'unavailable' | 'browserHistory'>;
   register: typeof registerMainHandler;

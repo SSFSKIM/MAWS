@@ -8,11 +8,14 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionServiceDeps } from './context';
 import { intentFor } from '../../../test/support/session-host';
 import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import type { Settings } from '@shared/ipc/schema';
 
 const state = vi.hoisted(() => ({
   root: '', shellConfig: '', ready: null as null | (() => unknown),
   deps: null as SessionServiceDeps | null,
   handlers: new Map<string, (input?: unknown) => unknown>(),
+  settings: null as unknown as Settings, // E4a: what the settings service answers now
+  browserSettings: null as null | (() => unknown), // E4a: the accessor main hands the browser
   model: null as unknown as { record: () => null; allRecords: () => []; on: (name: string, listener: (...args: unknown[]) => void) => () => void; emit: (name: string, ...args: unknown[]) => boolean },
 }));
 vi.mock('electron', () => ({
@@ -22,7 +25,7 @@ vi.mock('electron', () => ({
 vi.mock('../ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn), interceptCommand: vi.fn(), CommandFailure: class extends Error {} }));
 vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => ({ HOME: join(state.root, 'home'), CLAUDE_CONFIG_DIR: state.shellConfig }) }));
 vi.mock('../hosts', () => ({ createHosts: () => ({ start: vi.fn(), stop: vi.fn() }) }));
-vi.mock('../settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V11, resolvedTheme: 'light' }) }) }));
+vi.mock('../settings', () => ({ startSettings: () => ({ state: () => ({ settings: state.settings, resolvedTheme: 'light' }) }) }));
 vi.mock('../window', () => ({ installContentSecurityPolicy: vi.fn(), appUrl: '', createWindow: vi.fn() }));
 vi.mock('../index/index', () => ({ Index: class { unavailable = 'test'; sessions = { get: () => null, list: () => [] }; projects = { list: () => [] }; } }));
 vi.mock('../index/source', () => ({ IndexSessionSource: class {} }));
@@ -51,7 +54,7 @@ vi.mock('../settings/engine-configure', () => ({ startEngineConfigure: () => ({ 
 vi.mock('../settings/host-configure', () => ({ startHostConfigure: () => vi.fn() })); // E10
 vi.mock('../widgets/fixture-backend', () => ({ installWidgetBackend: vi.fn() }));
 vi.mock('../deliverables', () => ({ registerDeliverableScheme: vi.fn(), startDeliverables: () => ({ reader: {}, stop: vi.fn() }) })); // E2
-vi.mock('../browser', () => ({ startBrowser: () => ({ stop: vi.fn() }) })); // E4a
+vi.mock('../browser', () => ({ startBrowser: (deps: { settings(): unknown }) => { state.browserSettings = deps.settings; return { stop: vi.fn() }; } })); // E4a
 
 const ID = '11111111-1111-4111-8111-111111111111' as AppSessionId;
 const invoke = async (name: string, input?: unknown) => state.handlers.get(name)!(input);
@@ -60,6 +63,7 @@ describe('main setup-intent and shell-environment wiring', () => {
   beforeEach(async () => {
     vi.resetModules();
     state.handlers.clear();
+    state.settings = SETTINGS_DEFAULTS_V11; // E4a
     state.root = mkdtempSync(join(tmpdir(), 'maws-main-wiring-'));
     state.shellConfig = join(state.root, 'shell-config');
     for (const name of ['userData', 'home', 'shell-config', 'dock-config', 'additional']) mkdirSync(join(state.root, name));
@@ -132,4 +136,13 @@ describe('main setup-intent and shell-environment wiring', () => {
     await expect(invoke('scm.status', { appSessionId: ID })).resolves.toMatchObject({ trusted: true, trustKey: checkout });
   });
   // E6 end
+
+  // E4a: the browser reads settings 11's browser section from the service at each use, so a change reaches the next tab
+  // opened and the next new-window link without a restart
+  it('hands the browser the live browser settings, read at each call', () => {
+    expect(state.browserSettings!()).toEqual(SETTINGS_DEFAULTS_V11.browser);
+    const browser = { profile: 'Profile 1', searchUrl: 'https://duckduckgo.com/?q=%s', linkTarget: 'external' } as const;
+    state.settings = { ...SETTINGS_DEFAULTS_V11, browser };
+    expect(state.browserSettings!()).toEqual(browser);
+  });
 });

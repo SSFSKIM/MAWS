@@ -9,13 +9,14 @@
 // (Decision Log 27). `linkTarget` is read at the moment of the open.
 import type { WebContents, WebPreferences, WindowOpenHandlerResponse } from 'electron';
 import { validateBrowserUrl } from '@shared/browser/url';
+import type { BrowserSettings } from '@shared/ipc/schema/settings';
 import type { BrowserSeam } from './seam';
 import type { TabEntry, TabStore } from './tabs';
 
 export const WINDOW_OPEN_INPUT_MS = 5000;
 export const WINDOW_OPEN_BURST = 3; // honoured opens per WINDOW_OPEN_INPUT_MS
 
-export type LinkTarget = 'in-app' | 'external';
+export type LinkTarget = BrowserSettings['linkTarget'];
 
 export type WindowOpenDecision = { action: 'adopt'; select: boolean } | { action: 'external' } | { action: 'deny'; blocked: true };
 

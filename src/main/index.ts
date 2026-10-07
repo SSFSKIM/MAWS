@@ -97,7 +97,6 @@ import { registerDeliverableScheme, startDeliverables } from './deliverables';
 import { engineQuitDeps } from './lifecycle/engine-quit';
 // E10 end
 // E4a start
-import { BROWSER_SETTINGS_DEFAULTS } from '@shared/browser/tab';
 import { startBrowser } from './browser';
 // E4a end
 
@@ -408,10 +407,11 @@ void startWithProfileLock(app, () => {
   // E4a start: the in-app browser's main side (E4a execution document, Design §1 to §3, §9): the tab store over
   // <userData>/browser/tabs.json, the partitions, the views and browser.*, after the index (a deleted session closes its
   // tabs) and before any window, so the first page finds its handlers. Its will-quit write runs before the hosts stop.
-  // The Browser settings are the defaults until settings 11 lands (Task 3.5: settings.state().settings.browser).
+  // Settings 11's browser section is read from the service at each use: the profile when a tab opens, the link target
+  // when a page opens a window.
   const browser = startBrowser({
     userData: app.getPath('userData'),
-    settings: () => BROWSER_SETTINGS_DEFAULTS,
+    settings: () => settings.state().settings.browser,
     index,
     register: registerMainHandler,
     emit,

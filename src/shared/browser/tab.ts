@@ -31,14 +31,6 @@ export const BROWSER_DENIED_MAX = 8; // a document's denied permission requests 
 export const BROWSER_PLACEHOLDER_MAX_BYTES = 400 * 1024; // the cover's JPEG; larger, and main sends null
 export const BROWSER_SUGGESTIONS_MAX = 8; // the address field's history rows
 
-// X15's `browser` settings while settings 11 waits for E10 (Decision Log 29 and 33): the values `SETTINGS_DEFAULTS_V11`
-// will carry, read from here until Task 3.5 swaps every reader for `settings.browser`.
-export const BROWSER_SETTINGS_DEFAULTS: { readonly profile: string | null; readonly searchUrl: string; readonly linkTarget: 'in-app' | 'external' } = {
-  profile: null,
-  searchUrl: 'https://www.google.com/search?q=%s',
-  linkTarget: 'in-app',
-};
-
 const count = z.number().int().min(0);
 
 export const BrowserTabSchema = z.strictObject({

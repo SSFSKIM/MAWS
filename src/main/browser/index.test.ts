@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { BROWSER_SETTINGS_DEFAULTS, DEFAULT_PARTITION } from '@shared/browser/tab';
+import { DEFAULT_PARTITION } from '@shared/browser/tab';
+import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
 
 const prepared = vi.hoisted(() => [] as string[]); // what each opened partition was given, in order
 
@@ -110,7 +111,7 @@ function fakeIndex(known: string[], unavailable: string | null = null) {
 }
 
 function start(index: never, more: Partial<Parameters<typeof startBrowser>[0]> = {}) {
-  return startBrowser({ userData, settings: () => BROWSER_SETTINGS_DEFAULTS, index, register: () => {}, emit: () => {}, env: {}, ...more });
+  return startBrowser({ userData, settings: () => SETTINGS_DEFAULTS_V11.browser, index, register: () => {}, emit: () => {}, env: {}, ...more });
 }
 
 describe('startBrowser (E4a Design §2, G4)', () => {
@@ -149,12 +150,24 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     const handlers = new Map<string, (input: unknown) => unknown>();
     const browser = start(fakeIndex([A]).index, {
       profiles,
-      settings: () => ({ ...BROWSER_SETTINGS_DEFAULTS, profile: 'Profile 1' }),
+      settings: () => ({ ...SETTINGS_DEFAULTS_V11.browser, profile: 'Profile 1' }),
       register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as never,
     });
     expect(handlers.get('browser.profiles.list')!(undefined)).toEqual({ profiles: [{ profileDir: 'Profile 1', name: 'Work' }] });
     expect(browser.store.open({ appSessionId: A, url: null, select: true }).tab.partition).toBe('persist:maws-chrome-Profile 1');
     expect(profiles).toHaveBeenCalledTimes(2);
+    browser.stop();
+  });
+
+  it('reads the profile when a tab opens, so a change applies to tabs opened afterwards (Design §9)', () => {
+    let settings = SETTINGS_DEFAULTS_V11.browser;
+    const profiles = () => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't', storageDirName: 'x' }];
+    const browser = start(fakeIndex([A]).index, { profiles, settings: () => settings });
+    const before = browser.store.open({ appSessionId: A, url: null, select: true }).tab;
+    settings = { ...settings, profile: 'Profile 1' };
+    const after = browser.store.open({ appSessionId: A, url: null, select: true }).tab;
+    expect([before.partition, after.partition]).toEqual([DEFAULT_PARTITION, 'persist:maws-chrome-Profile 1']);
+    expect(browser.store.list(A).tabs.find((t) => t.tabId === before.tabId)!.partition).toBe(DEFAULT_PARTITION);
     browser.stop();
   });
 
