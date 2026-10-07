@@ -13,6 +13,11 @@
 //   answers, for Stop).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
+// E4d start
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { REPO_ROOT } from './launch';
+// E4d end
 
 export interface BrowserServer {
   origin: string; // http://127.0.0.1:<port>
@@ -86,6 +91,28 @@ const HTML: Record<string, string> = {
     OPENER_SCRIPT,
   ),
 };
+
+// E4d start: comment mode's page (E4d execution document, Interfaces "e2e"): `/comment.html` is the naming module's
+// fixture (`test/fixtures/browser/probe-page.html`, E0b's four targets and the discriminating cases, each with a
+// `data-target`) served with what the e2e adds after its last section, so every path the fixture's units pin is
+// unchanged: a same-origin frame of `/b.html` (titled, so it has a name), a modal `<dialog>` (top layer) the case opens
+// itself, a 2,400 px filler so the page scrolls, the fixture's `#shadow-host` given an open shadow root holding a button,
+// and a capture-phase recorder on `window` writing every pointer and mouse event type the page hears into `#log` (a
+// listener a page registers can only run after the preload's, which is what "no click reaches the page" is about).
+const COMMENT_ADDITIONS = `
+  <section class="card" aria-label="A frame"><iframe src="/b.html" title="Frame B" data-target="frame" style="width:320px;height:140px;border:1px solid #ccc"></iframe></section>
+  <dialog id="modal" aria-label="A modal"><p>A modal dialog</p><button type="button" id="modal-confirm" data-target="modal-confirm">Confirm</button></dialog>
+  <div aria-hidden="true" style="height:2400px"></div>`;
+const COMMENT_SCRIPT = `<script>
+  const log = document.getElementById('log');
+  for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu'])
+    window.addEventListener(type, () => (log.textContent = (log.textContent ? log.textContent + ',' : '') + type), true);
+  document.getElementById('shadow-host').attachShadow({ mode: 'open' }).innerHTML = '<button type="button">Inner action</button>';
+</script>`;
+HTML['/comment.html'] = readFileSync(join(REPO_ROOT, 'test/fixtures/browser/probe-page.html'), 'utf8')
+  .replace('</main>', `${COMMENT_ADDITIONS}\n</main>`)
+  .replace('</body>', `${COMMENT_SCRIPT}\n</body>`);
+// E4d end
 
 // A loopback port nothing listens on (bound, read, closed), for a refused connection. Not a fixed low port: Chromium
 // refuses ports such as 1 itself (ERR_UNSAFE_PORT, a generic error) before connecting.
