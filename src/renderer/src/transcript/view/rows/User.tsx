@@ -140,7 +140,8 @@ function PastedBlock({ rowId, n, lines, attachment }: { rowId: string; n: number
 }
 
 // E3: what an anchored comment is about. A file or PR line opens the file at its line (C5's file tab through the
-// transcript's `openFile`); any other anchor is a label only until its surface exists (E4's browser, E2's viewer).
+// transcript's `openFile`); a page element opens its page in the browser (E4d's branch below); any other anchor, and
+// a page element outside a session's transcript, is a label.
 function AnchorChip({ anchor }: { anchor: Anchor }) {
   const actions = useActions();
   const content = (
