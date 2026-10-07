@@ -48,6 +48,7 @@ import { AskAnswerMismatch } from './tool-server/ask';
 // E1 end
 // E3 start
 import type { commands as SideCommands } from '@shared/ipc/schema/side';
+import type { commands as HostCommands } from '@shared/ipc/schema/host'; // E11
 // E3 end
 // C10 start
 import type { ModelCatalogue } from '@shared/sessions/models';
@@ -102,6 +103,10 @@ export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.
 // E3: the side-question log's commands (P1 ledger §5), each answered from the host's log at once
 type SideHostCommand = { [N in keyof typeof SideCommands]: (typeof SideCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof SideCommands];
 export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 'side.question.list': 'immediate', 'side.question.clear': 'immediate' };
+// E11: the supervisor's own commands (E10; registered by Supervision.register): three answer at once, `host.stopAll` is
+// engine.shutdown's body (the ladder's cap and the plugin runner's kill), bounded as engine.shutdown is
+type HostHostCommand = { [N in keyof typeof HostCommands]: (typeof HostCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof HostCommands];
+export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate' };
 
 // The longest wait before a live launch spawns: its three checks run in parallel, each under its own bound (W13: the
 // binary probe's covers a PATH lookup that waits for the capture before `--version`).
