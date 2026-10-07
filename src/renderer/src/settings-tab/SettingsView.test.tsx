@@ -48,7 +48,7 @@ afterEach(() => {
 });
 
 describe('settings tab writes one field per row', () => {
-  it('has the six sections, the index and its footer', () => {
+  it('has the seven sections, the index and its footer', () => {
     renderView();
     const index = screen.getByRole('navigation', { name: 'Settings sections' });
     expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Browser']); // E9: Voice after Keyboard; E4a: Browser last
@@ -451,8 +451,9 @@ describe('settings view lists Browser', () => {
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ browser: { profile: null } }));
   });
 
-  it('a saved profile the list no longer has stays selected, marked as not found', async () => {
+  it('a saved profile reads as its directory until the list answers, then, if the list lacks it, as not found', async () => {
     renderView({ ...SETTINGS_DEFAULTS_V11, browser: { ...SETTINGS_DEFAULTS_V11.browser, profile: 'Profile 9' } }, null, profiles);
+    expect([...select().options].map((o) => o.textContent)).toEqual(['Default', 'Profile 9']); // not yet answered
     await vi.waitFor(() => expect(select().options).toHaveLength(4));
     expect(select().value).toBe('Profile 9');
     expect(select().selectedOptions[0]!.textContent).toBe('Profile 9 · not found');

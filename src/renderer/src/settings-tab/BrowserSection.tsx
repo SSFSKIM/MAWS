@@ -2,7 +2,8 @@
 // each row writing its one field of `settings.browser`:
 //
 // - Profile: Default (MAWS's own partition) first, then the imported Chrome profiles `browser.profiles.list` names (E4b
-//   writes them); a saved profile the list no longer has stays listed, marked, so the select shows what is saved
+//   writes them); a saved profile the list no longer has stays listed, marked once the list has answered (its directory
+//   until then), so the select shows what is saved
 //   (main then browses with the default and says so, Design §9). It applies to tabs opened afterwards.
 // - Search engine: the address field's search template, written on Enter or blur only when it is an http(s) address
 //   with %s (the schema refuses anything else; a refusal is said in words and the field goes back).
@@ -37,9 +38,9 @@ export function BrowserSection({ settings }: { settings: Settings }) {
 }
 
 function ProfileSelect({ profile }: { profile: string | null }) {
-  const listed = useCommand('browser.profiles.list', undefined).data?.profiles ?? [];
-  const profiles = [...listed].sort((a, b) => a.name.localeCompare(b.name, 'en'));
-  const missing = profile !== null && !profiles.some(({ profileDir }) => profileDir === profile);
+  const listed = useCommand('browser.profiles.list', undefined).data?.profiles; // undefined until main answers
+  const profiles = [...(listed ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  const unlisted = profile !== null && !profiles.some(({ profileDir }) => profileDir === profile); // its directory as label
   return (
     <select
       aria-label={BROWSER.profile}
@@ -53,7 +54,7 @@ function ProfileSelect({ profile }: { profile: string | null }) {
           {name}
         </option>
       ))}
-      {missing && <option value={profile}>{BROWSER.missingProfile(profile)}</option>}
+      {unlisted && <option value={profile}>{listed === undefined ? profile : BROWSER.missingProfile(profile)}</option>}
     </select>
   );
 }
