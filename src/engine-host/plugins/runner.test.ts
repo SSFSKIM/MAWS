@@ -206,6 +206,11 @@ describe('PluginsRunner mutations', () => {
     const installed = await done((await runner.start('install', { plugin: 'e8-probe@e8-scratch' }, cwd, bin)).opId);
     expect(installed.reload).toEqual({ sessions: [{ appSessionId: 'a', outcome: 'reflected', error: null }] });
     expect(reloads).toEqual(['a']);
+    // an update is held to its result's newVersion: the answer above carries no version, so both reloads disagree
+    behave(RESULT({ command: 'update', outcome: 'ok', plugin: 'e8-probe@e8-scratch', pluginId: 'e8-probe@e8-scratch', scope: 'user', message: 'Plugin "e8-probe" updated from 0.1.0 to 0.2.0 for scope user. Restart to apply changes.', oldVersion: '0.1.0', newVersion: '0.2.0' }));
+    const updated = await done((await runner.start('update', { plugin: 'e8-probe@e8-scratch' }, cwd, bin)).opId);
+    expect(updated.reload).toEqual({ sessions: [{ appSessionId: 'a', outcome: 'not_reflected', error: null }] });
+    expect(reloads).toEqual(['a', 'a', 'a']);
   });
 
   it('stop resolves once every child is gone, a TERM-ignoring one through SIGKILL, and closes admission', async () => {

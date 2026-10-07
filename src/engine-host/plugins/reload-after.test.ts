@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { ReloadPluginsResponse } from '@shared/wire/control';
+import { ReloadPluginsResponseSchema, type ReloadPluginsResponse } from '@shared/wire/control';
+import { loadJournal } from '../../../test/support/fixtures';
 import { expectationOf, reloadAfter, SETTLE_MS, type ReloadChange, type ReloadTarget } from './reload-after';
 
 let root: string;
@@ -41,7 +42,14 @@ function run(change: ReloadChange, targets: ReloadTarget[], log: string[]) {
   return reloadAfter(change, () => targets, { sleep: async (ms) => void log.push(`sleep ${ms}`) });
 }
 
-const install = (scope: ReloadChange['scope'] = 'user'): ReloadChange => ({ action: 'install', scope, cwd: here, plugin: 'e8-probe' });
+const install = (scope: ReloadChange['scope'] = 'user'): ReloadChange => ({ action: 'install', scope, cwd: here, plugin: 'e8-probe', version: null });
+
+// The engine's reload answer with e8-probe 0.1.0 loaded (pass3/e8-plugins-reload seq 31): each plugin carries its version.
+const recorded = (): ReloadPluginsResponse => {
+  const frame = loadJournal('pass3', 'e8-plugins-reload').find((row) => row.seq === 31)!.frame as { response: { response: unknown } };
+  return ReloadPluginsResponseSchema.parse(frame.response.response);
+};
+const update = (version: string | null): ReloadChange => ({ action: 'update', scope: 'user', cwd: here, plugin: 'e8-probe', version });
 
 describe('reloadAfter', () => {
   it('settles first, then reloads every ready session in parallel; a user-scope install is expected everywhere', async () => {
@@ -84,23 +92,46 @@ describe('reloadAfter', () => {
   it('expects the plugin absent after uninstall and disable', async () => {
     for (const action of ['uninstall', 'disable'] as const) {
       const log: string[] = [];
-      const sessions = await run({ action, scope: 'user', cwd: here, plugin: 'e8-probe' }, [target('a', here, log, answer('e8-probe'), answer('other'))], log);
+      const sessions = await run({ action, scope: 'user', cwd: here, plugin: 'e8-probe', version: null }, [target('a', here, log, answer('e8-probe'), answer('other'))], log);
       expect(sessions, action).toEqual([{ appSessionId: 'a', outcome: 'reflected', error: null }]);
     }
   });
 
-  it('holds no expectation after an update or a marketplace refresh or removal, whatever the scope', async () => {
-    for (const action of ['update', 'marketplace-update', 'marketplace-remove'] as const) {
+  it('holds no expectation after a marketplace refresh or removal, or an update whose result named no new version', async () => {
+    for (const change of [
+      { action: 'marketplace-update', scope: 'user', cwd: here, plugin: null, version: null },
+      { action: 'marketplace-remove', scope: 'user', cwd: here, plugin: null, version: null },
+      update(null),
+    ] as const) {
       const log: string[] = [];
-      const sessions = await run({ action, scope: 'user', cwd: here, plugin: action === 'update' ? 'e8-probe' : null }, [target('a', here, log, answer())], log);
-      expect(sessions, action).toEqual([{ appSessionId: 'a', outcome: 'no_expectation', error: null }]);
-      expect(log.filter((l) => l === 'reload a'), action).toHaveLength(1);
+      const sessions = await run(change, [target('a', here, log, answer())], log);
+      expect(sessions, change.action).toEqual([{ appSessionId: 'a', outcome: 'no_expectation', error: null }]);
+      expect(log.filter((l) => l === 'reload a'), change.action).toHaveLength(1);
     }
     expect(expectationOf('install')).toBe('present');
     expect(expectationOf('enable')).toBe('present');
     expect(expectationOf('uninstall')).toBe('absent');
     expect(expectationOf('disable')).toBe('absent');
-    expect(expectationOf('update')).toBeNull();
+    expect(expectationOf('update')).toBe('version');
+  });
+
+  it('holds an update to the reload answer carrying the plugin at the result’s new version (fixture seq 31)', async () => {
+    const answered = recorded();
+    expect(answered.plugins.find((p) => p.name === 'e8-probe')).toMatchObject({ version: '0.1.0' });
+    const atNew = { ...answered, plugins: answered.plugins.map((p) => (p.name === 'e8-probe' ? { ...p, version: '0.2.0' } : p)) };
+    const log: string[] = [];
+    const sessions = await run(update('0.2.0'), [
+      target('now', here, log, atNew), // the reload already carries 0.2.0
+      target('late', there, log, answered, atNew), // the first answer is the old snapshot, the retry the new
+      target('never', there, log, answered, answered),
+    ], log);
+    expect(sessions).toEqual([
+      { appSessionId: 'now', outcome: 'reflected', error: null },
+      { appSessionId: 'late', outcome: 'reflected', error: null },
+      { appSessionId: 'never', outcome: 'not_reflected', error: null },
+    ]);
+    // an update that found the plugin already at its latest version reads reflected against the same answer
+    expect(await run(update('0.1.0'), [target('same', here, [], answered)], [])).toEqual([{ appSessionId: 'same', outcome: 'reflected', error: null }]);
   });
 
   it('settles each session independently: one answering and one timing out complete reflected and failed', async () => {

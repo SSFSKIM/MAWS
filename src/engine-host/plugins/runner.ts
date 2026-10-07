@@ -279,7 +279,8 @@ export class PluginsRunner {
     const i = op.input as { plugin?: string; scope?: 'user' | 'project' | 'local' };
     const id = typeof outcome.result.pluginId === 'string' ? outcome.result.pluginId : (i.plugin ?? null);
     const plugin = id === null ? null : id.lastIndexOf('@') > 0 ? id.slice(0, id.lastIndexOf('@')) : id;
-    const sessions = await reloadAfter({ action: op.action, scope: i.scope ?? 'user', cwd: op.cwd, plugin }, () => this.deps.reloadTargets(), {
+    const version = op.action === 'update' && typeof outcome.result.newVersion === 'string' ? outcome.result.newVersion : null;
+    const sessions = await reloadAfter({ action: op.action, scope: i.scope ?? 'user', cwd: op.cwd, plugin, version }, () => this.deps.reloadTargets(), {
       sleep: (ms) => new Promise((resolve) => this.timers.setTimeout(resolve, ms)),
     });
     this.finish(op, outcome, { sessions });
