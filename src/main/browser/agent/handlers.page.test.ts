@@ -6,7 +6,7 @@ import type { WebContentsView } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
-import { BROWSER_ACTION_TIMEOUT_MS, BROWSER_EVAL_MAX_CHARS, BROWSER_SCREENSHOT_MAX_BYTES, BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT, BROWSER_TOOL_ERRORS, BrowserScreenshotResultSchema, type BrowserDialog, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
+import { BROWSER_ACTION_TIMEOUT_MS, BROWSER_COVER_WAIT_MAX_MS, BROWSER_EVAL_MAX_CHARS, BROWSER_SCREENSHOT_MAX_BYTES, BROWSER_SNAPSHOT_MAX_CHARS_DEFAULT, BROWSER_TOOL_ERRORS, BrowserScreenshotResultSchema, type BrowserDialog, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
 import { cutSnapshot } from '@shared/browser/snapshot';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { MawsBrowserAnswerResultSchema } from '@shared/ipc/schema/maws';
@@ -358,11 +358,32 @@ describe('browser_act (Design §6: show, resolve, wait without input, the pause 
     h.page.hidden.add('aria-ref=e5');
     h.cover(tabId, true);
     const answer = h.run('browser_act', { tabId, action: 'click', target: 'e5' });
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(50_000); // under A-47's bound
     expect(h.page.lines()).toEqual(['count aria-ref=e5']);
     h.cover(tabId, false);
     await vi.advanceTimersByTimeAsync(BROWSER_ACTION_TIMEOUT_MS + 100);
     expect(await answer).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.actionTimeout('browser_act', 'click', 'e5', BROWSER_ACTION_TIMEOUT_MS) });
+  });
+
+  it('answers pageCovered once its waits under covers, summed over the call, pass 60 s, dispatching nothing and clearing the wait (A-47)', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.counts.set('aria-ref=e5', 1);
+    h.page.hidden.add('aria-ref=e5');
+    h.cover(tabId, true);
+    const answer = h.run('browser_act', { tabId, action: 'click', target: 'e5' });
+    await vi.advanceTimersByTimeAsync(40_000);
+    h.cover(tabId, false); // lifted: 40 s counted, the readiness wait runs again
+    await vi.advanceTimersByTimeAsync(2_000);
+    h.cover(tabId, true); // a second cover has the 20 s left
+    let settled = false;
+    void answer.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(BROWSER_COVER_WAIT_MAX_MS - 40_000 - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await answer).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.pageCovered('browser_act', 60) });
+    expect(h.waits).toEqual([[tabId, 'cover'], [tabId, null], [tabId, 'cover'], [tabId, null]]);
+    expect(h.log).toEqual([]);
   });
 
   it('waits at the pause point while the person holds the page, then dispatches and says how long it waited', async () => {
@@ -613,6 +634,17 @@ describe('browser_eval (an action: Design §6, Decision Log 5)', () => {
     expect(h.acting()).toEqual([{ appSessionId: A, tabId }]);
   });
 
+  it('never waits for a cover: script runs in a hidden page, so a covered tab evaluates at once (A-47 holds trivially)', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.cover(tabId, true);
+    h.page.onEvaluate = async () => 2;
+    const pending = h.run('browser_eval', { tabId, expression: '1 + 1' });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(resultOf(await pending)).toMatchObject({ value: 2 });
+    expect(h.waits).toEqual([]);
+  });
+
   it('cuts a long value at 16,000 characters', async () => {
     const h = harness();
     const tabId = h.open();
@@ -785,6 +817,20 @@ describe('browser_screenshot (a read: Design §7, Decision Log 5, 23, 43, 44 (b)
     expect(h.cursor.hide).toHaveBeenCalledWith(h.store.entry(tabId));
     expect(h.contents(tabId).capturePage).toHaveBeenCalledTimes(1);
     expect(h.page.calls).toEqual([]);
+  });
+
+  it('answers pageCovered for a target held under a cover for 60 s, writing nothing (A-47)', async () => {
+    const h = harness();
+    const tabId = h.open();
+    h.page.counts.set('css=#chart', 1);
+    h.page.onScreenshot = () => pngBytes(300, 200);
+    h.cover(tabId, true);
+    const answer = h.run('browser_screenshot', { tabId, target: { css: '#chart' } }, { deliverableId: ID });
+    await vi.advanceTimersByTimeAsync(BROWSER_COVER_WAIT_MAX_MS);
+    expect(await answer).toEqual({ ok: false, error: BROWSER_TOOL_ERRORS.pageCovered('browser_screenshot', 60) });
+    expect(h.waits).toEqual([[tabId, 'cover'], [tabId, null]]);
+    expect(h.page.calls.filter((call) => call.method === 'screenshot')).toEqual([]);
+    expect(existsSync(shotsOf(h))).toBe(false);
   });
 
   it('waits out a cover for a target, reporting it to the host and the row', async () => {

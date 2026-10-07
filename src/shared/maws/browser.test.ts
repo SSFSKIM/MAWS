@@ -329,6 +329,7 @@ describe('the browser tools\' error texts', () => {
     expect(e.screenshotFailed('Target closed')).toBe('browser_screenshot: could not capture: Target closed');
     expect(e.screenshotTooLarge(4_000_000)).toBe('browser_screenshot: the picture is 4000000 bytes after the JPEG fallback and exceeds 3.5 MiB; screenshot a target instead of fullPage');
     expect(e.browserTimeout('browser_navigate')).toBe('browser_navigate: MAWS did not answer within 30 s');
+    expect(e.pageCovered('browser_act', 60)).toBe('browser_act: the page has been covered by a MAWS sheet or notice for 60 s; nothing was done; call it again once the page is shown');
     expect(e.interrupted('browser_act')).toBe('browser_act: cancelled, the turn was interrupted');
   });
 

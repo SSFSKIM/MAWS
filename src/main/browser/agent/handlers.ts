@@ -45,7 +45,7 @@ import {
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import type { NavigateTo, Navigator } from '../navigation';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
-import { dispatch, waitUntilReady } from './act';
+import { coverTally, dispatch, waitUntilReady } from './act';
 import type { AgentCursor } from './cursor';
 import type { Driver, Drivers } from './driver';
 import { answerOfError, BrowserToolError, firstLine } from './errors';
@@ -303,10 +303,11 @@ export class BrowserHandlers {
       const { page } = await this.driverOf(entry, tool, args.action, target, ctx.signal);
       const { locator, resolved } = await locate(page, args.target, { tool, signal: ctx.signal, refs });
       let coveredMs = 0;
+      const covers = coverTally(tool); // every cover wait of this call, bounded together (A-47)
       let waited: Waited = { waitedFor: null, waitedMs: null };
       do {
         try {
-          coveredMs += (await waitUntilReady(entry, locator, args.action, { store: this.deps.store, signal: ctx.signal, report: (reason) => ctx.waiting(entry.tab.tabId, reason), now: this.now })).coveredMs;
+          coveredMs += (await waitUntilReady(entry, locator, args.action, { store: this.deps.store, signal: ctx.signal, report: (reason) => ctx.waiting(entry.tab.tabId, reason), now: this.now, tally: covers })).coveredMs;
         } catch (error) {
           if (isTimeout(error) && !ctx.signal.aborted) throw new BrowserToolError(BROWSER_TOOL_ERRORS.actionTimeout(tool, args.action, target, BROWSER_ACTION_TIMEOUT_MS));
           throw error;
@@ -409,6 +410,7 @@ export class BrowserHandlers {
       signal: ctx.signal,
       report: (reason) => ctx.waiting(entry.tab.tabId, reason),
       now: this.now,
+      tally: coverTally(tool),
       hideCursor: () => this.deps.cursor?.hide(entry),
     });
     ctx.signal.throwIfAborted(); // a withdrawn call leaves no file

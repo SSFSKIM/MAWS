@@ -13,20 +13,33 @@
 // a sheet covers the page. A screenshot of a target or of the full page waits the same way (`withoutCover`); a viewport
 // screenshot takes another route under a cover instead (`unlessCovered`, screenshot.ts).
 //
+// The waits under covers are bounded per call (A-47, Decision Log 82): summed over the call (`CoverTally`), past
+// BROWSER_COVER_WAIT_MAX_MS the wait ends, its report is cleared, and the call answers pageCovered with nothing done, so
+// a cover nobody lifts (a notice left over the pane) never holds a call for good.
+//
 // The dispatch is the real Playwright action with a short timeout of its own (its actionability checks pass at once
 // now); every call takes the request's signal, and once a command has left nothing cancels it (Decision Log 3).
 import type { Locator, Page } from 'playwright-core';
-import { BROWSER_ACTION_TIMEOUT_MS, type BrowserActAction, type BrowserWaitReason } from '@shared/maws/browser';
+import { BROWSER_ACTION_TIMEOUT_MS, BROWSER_COVER_WAIT_MAX_MS, BROWSER_TOOL_ERRORS, type BrowserActAction, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
 import type { TabEntry, TabStore } from '../tabs';
+import { BrowserToolError } from './errors';
 
 export const READY_POLL_MS = 100;
 export const DISPATCH_TIMEOUT_MS = 5_000;
+
+// One call's time under covers so far (A-47): every cover wait of the call adds to it and is bounded by what is left.
+export interface CoverTally {
+  tool: BrowserToolName;
+  ms: number;
+}
+export const coverTally = (tool: BrowserToolName): CoverTally => ({ tool, ms: 0 });
 
 export interface CoverDeps {
   store: Pick<TabStore, 'onUpdated'>;
   signal: AbortSignal;
   report(reason: Extract<BrowserWaitReason, 'cover'> | null): void;
   now(): number;
+  tally: CoverTally;
 }
 
 class StepTimeout extends Error {
@@ -91,14 +104,17 @@ export async function unlessCovered<T>(entry: TabEntry, deps: Pick<CoverDeps, 's
   }
 }
 
-// Waits for the cover to lift, reporting the wait; resolves with how long it held.
-function uncovered(entry: TabEntry, { store, signal, report, now }: CoverDeps): Promise<number> {
+// Waits for the cover to lift, reporting the wait; resolves with how long it held, which the call's tally keeps. Past
+// what the tally leaves of BROWSER_COVER_WAIT_MAX_MS it rejects with pageCovered (A-47).
+function uncovered(entry: TabEntry, { store, signal, report, now, tally }: CoverDeps): Promise<number> {
   const started = now();
   report('cover');
   return new Promise<number>((resolve, reject) => {
     const finish = (settle: () => void) => {
+      clearTimeout(bound);
       stop();
       signal.removeEventListener('abort', onAbort);
+      tally.ms += now() - started;
       report(null);
       settle();
     };
@@ -106,6 +122,10 @@ function uncovered(entry: TabEntry, { store, signal, report, now }: CoverDeps): 
     const stop = store.onUpdated((updated) => {
       if (updated === entry && !entry.tab.covered) finish(() => resolve(now() - started));
     });
+    const bound = setTimeout(
+      () => finish(() => reject(new BrowserToolError(BROWSER_TOOL_ERRORS.pageCovered(tally.tool, Math.round(BROWSER_COVER_WAIT_MAX_MS / 1000))))),
+      Math.max(0, BROWSER_COVER_WAIT_MAX_MS - tally.ms),
+    );
     signal.addEventListener('abort', onAbort, { once: true });
   });
 }

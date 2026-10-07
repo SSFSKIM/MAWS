@@ -25,6 +25,7 @@ export const BROWSER_EVAL_MAX_CHARS = 16_000;
 export const BROWSER_SCREENSHOT_MAX_BYTES = 3.5 * 1024 * 1024; // A-34: PNG, else the JPEG retake, else an error
 export const BROWSER_ANSWER_MS = 30_000; // the host's deadline on main's own work, paused while the person or a cover holds the action
 export const BROWSER_ACTION_TIMEOUT_MS = 10_000; // the readiness wait, not counting time under a cover
+export const BROWSER_COVER_WAIT_MAX_MS = 60_000; // A-47 (Decision Log 82): a call's waits under covers, summed, end in pageCovered past this
 export const BROWSER_LOCATE_MS = 2_000; // how long a locator with no match waits before targetNotFound
 export const BROWSER_AGENT_IDLE_MS = 10_000; // `control: 'agent'` lapses to idle this long after the last action
 export const BROWSER_BRIDGE_IDLE_MS = 300_000; // a driver with no command for this long closes
@@ -258,6 +259,8 @@ export const BROWSER_TOOL_ERRORS = {
   rootNotFound: (root: string) => `browser_snapshot: no element for root "${root}"`,
   screenshotFailed: (message: string) => `browser_screenshot: could not capture: ${message}`,
   screenshotTooLarge: (bytes: number) => `browser_screenshot: the picture is ${bytes} bytes after the JPEG fallback and exceeds ${BROWSER_SCREENSHOT_MAX_BYTES / (1024 * 1024)} MiB; screenshot a target instead of fullPage`,
+  // A-47 (Decision Log 82): a call held by covers (a sheet, the palette, a notice over the pane) past BROWSER_COVER_WAIT_MAX_MS
+  pageCovered: (tool: BrowserToolName, seconds: number) => `${tool}: the page has been covered by a MAWS sheet or notice for ${seconds} s; nothing was done; call it again once the page is shown`,
   browserTimeout: (tool: BrowserToolName) => `${tool}: MAWS did not answer within ${BROWSER_ANSWER_MS / 1000} s`,
   // Internal: never written (the engine abandoned the call); the row reads it.
   interrupted: (tool: BrowserToolName) => `${tool}: cancelled, the turn was interrupted`,

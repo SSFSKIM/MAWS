@@ -6,6 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { screenshotPath } from '@shared/maws/deliverable-files';
 import { BROWSER_ACTION_TIMEOUT_MS, BROWSER_SCREENSHOT_MAX_BYTES, BROWSER_TOOL_ERRORS, type BrowserWaitReason } from '@shared/maws/browser';
 import type { TabEntry } from '../tabs';
+import { coverTally } from './act';
 import { BrowserToolError } from './errors';
 import { FakePage, jpegBytes as jpeg, pngBytes as png, type ScreenshotOptions } from './page.fake';
 import { captureScreenshot, CURSOR_HIDE_GRACE_MS, imageSize, saveScreenshot, SCREENSHOT_STYLE, type Picture } from './screenshot';
@@ -68,6 +69,7 @@ function harness({ covered = false } = {}) {
     signal: controller.signal,
     report: (reason: BrowserWaitReason | null) => void waits.push(reason),
     now: Date.now,
+    tally: coverTally('browser_screenshot'),
     hideCursor: vi.fn(() => void log.push('hide')),
   };
   const cover = (on: boolean) => {
