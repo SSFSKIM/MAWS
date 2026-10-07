@@ -57,9 +57,10 @@ const NOTICE_EDGE: Record<ChromeNotice['kind'], Edge> = {
   commentUnavailable: 'warning',
   commentCannotName: 'warning',
   // E4d end
+  dialogAnswered: 'info', // E4c
 };
 
-export function noticeText(notice: Pick<ChromeNotice, 'kind' | 'name' | 'count'>): string {
+export function noticeText(notice: Pick<ChromeNotice, 'kind' | 'name' | 'count' | /* E4c */ 'dialogType' | 'excerpt'>): string {
   switch (notice.kind) {
     case 'tabsCap':
       return notice.count === undefined ? BROWSER_COPY.tabsCapMemory : BROWSER_COPY.tabsCap(notice.count);
@@ -81,6 +82,10 @@ export function noticeText(notice: Pick<ChromeNotice, 'kind' | 'name' | 'count'>
     case 'commentCannotName':
       return COMMENT_COPY.cannotName;
     // E4d end
+    // E4c start
+    case 'dialogAnswered':
+      return BROWSER_COPY.dialogAnswered(notice.dialogType ?? 'alert', notice.excerpt ?? '');
+    // E4c end
   }
 }
 

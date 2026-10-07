@@ -42,6 +42,10 @@ export interface ChromeNotice {
   kind: ChromeNoticeKind;
   name?: string;
   count?: number;
+  // E4c start: `dialogAnswered`'s dialog and the start of its message (A-42)
+  dialogType?: 'alert' | 'confirm';
+  excerpt?: string;
+  // E4c end
 }
 
 export interface BrowserState {
@@ -189,8 +193,11 @@ export function onShowRequest(listener: (request: ShowRequest) => void): () => v
 // (Decision Log 44 (a)). `browser.download.refused` is E4c's to read; its chrome line arrives as a notice.
 export function connectBrowser(client: MawsBridge = ipc): () => void {
   const offs = [
-    client.on('browser.notice', ({ appSessionId, tabId, kind, name, count }) =>
-      raiseNotice({ appSessionId: appSessionId as AppSessionId, tabId, kind, ...(name !== undefined && { name }), ...(count !== undefined && { count }) }),
+    client.on('browser.notice', ({ appSessionId, tabId, kind, name, count, dialogType, excerpt }) =>
+      raiseNotice({
+        appSessionId: appSessionId as AppSessionId, tabId, kind, ...(name !== undefined && { name }), ...(count !== undefined && { count }),
+        ...(dialogType !== undefined && { dialogType }), ...(excerpt !== undefined && { excerpt }), // E4c
+      }),
     ),
     client.on('browser.tabs.changed', applyChanged),
     client.on('browser.view.covered', ({ tabId, placeholder }) => browser.setState((s) => ({ placeholders: new Map(s.placeholders).set(tabId, placeholder) }))),

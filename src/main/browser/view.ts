@@ -273,6 +273,19 @@ export class ViewManager {
     this.reset(win);
     for (const entry of this.deps.store.all()) if (entry.host === win) this.detach(entry);
   }
+
+  // E4c start: parking (E4c execution document, Design §9; Decision Log 36, 43; spikes/browser-probe/findings-e4c-released.txt).
+  // An unplaced tab the agent acts on needs a viewport: its view leaves the window a release left it hidden in (as
+  // `detach` does, so `host` and `visible` stay true) and takes `bounds`. Only a size: its native visibility stays what
+  // `apply` decides (hidden; Playwright's focus emulation is what the page reads as visible, measured), and parking is no
+  // placement, so the owner table, `placedIn` and focus emulation are untouched. A pane's claim later attaches and sizes
+  // it as for any unplaced view.
+  park(entry: TabEntry, bounds: { x: number; y: number; width: number; height: number }): void {
+    if (!entry.view || entry.placement) return;
+    if (entry.host) this.detach(entry);
+    entry.view.setBounds(bounds);
+  }
+  // E4c end
 }
 
 const withoutHash = (url: string) => url.split('#', 1)[0];

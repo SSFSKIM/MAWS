@@ -1,0 +1,783 @@
+{
+  "meta": {
+    "electron": "44.4.5",
+    "chrome": "152.0.7977.130",
+    "playwrightCore": "1.63.0",
+    "startedAt": "2026-10-07T06:09:49.514Z",
+    "platform": "darwin arm64",
+    "windowContent": {
+      "x": 156,
+      "y": 33,
+      "width": 1200,
+      "height": 800
+    }
+  },
+  "parking": {
+    "a": {
+      "view": {
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "visible": false,
+        "ownerWindowId": null,
+        "ownerIsProbeWindow": false,
+        "after": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "visible": false,
+          "ownerWindowId": null,
+          "ownerIsProbeWindow": false
+        }
+      },
+      "connectMs": 47,
+      "state": {
+        "ok": true,
+        "value": {
+          "visibilityState": "visible",
+          "hidden": false,
+          "hasFocus": true,
+          "innerWidth": 0,
+          "innerHeight": 0
+        },
+        "ms": 6
+      },
+      "rafFramesIn1s": {
+        "ok": true,
+        "value": 121,
+        "ms": 1103
+      },
+      "snapshot": {
+        "ok": true,
+        "chars": 126,
+        "hasButton": true,
+        "ms": 21
+      },
+      "click": {
+        "ok": false,
+        "error": "locator.click: Timeout 5000ms exceeded.",
+        "ms": 5002,
+        "counter": {
+          "before": "0",
+          "after": "0",
+          "advanced": false
+        }
+      },
+      "screenshot": {
+        "ok": false,
+        "error": "page.screenshot: Protocol error (Page.captureScreenshot): Cannot take screenshot with 0 width.",
+        "ms": 5
+      },
+      "stateAfter": {
+        "ok": true,
+        "value": {
+          "visibilityState": "visible",
+          "innerWidth": 0,
+          "innerHeight": 0
+        },
+        "ms": 1
+      },
+      "passes": false
+    },
+    "b": {
+      "view": {
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 800
+        },
+        "visible": true,
+        "ownerWindowId": null,
+        "ownerIsProbeWindow": false,
+        "after": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": true,
+          "ownerWindowId": null,
+          "ownerIsProbeWindow": false
+        }
+      },
+      "connectMs": 6,
+      "state": {
+        "ok": true,
+        "value": {
+          "visibilityState": "visible",
+          "hidden": false,
+          "hasFocus": true,
+          "innerWidth": 1280,
+          "innerHeight": 800
+        },
+        "ms": 3
+      },
+      "rafFramesIn1s": {
+        "ok": true,
+        "value": 121,
+        "ms": 1103
+      },
+      "snapshot": {
+        "ok": true,
+        "chars": 116,
+        "hasButton": true,
+        "ms": 18
+      },
+      "click": {
+        "ok": true,
+        "ms": 24,
+        "counter": {
+          "before": "0",
+          "after": "1",
+          "advanced": true
+        }
+      },
+      "screenshot": {
+        "ok": true,
+        "width": 2560,
+        "height": 1600,
+        "bytes": 25795,
+        "ms": 56
+      },
+      "stateAfter": {
+        "ok": true,
+        "value": {
+          "visibilityState": "visible",
+          "innerWidth": 1280,
+          "innerHeight": 800
+        },
+        "ms": 1
+      },
+      "passes": true
+    },
+    "c": {
+      "view": {
+        "bounds": {
+          "x": 1200,
+          "y": 0,
+          "width": 1280,
+          "height": 800
+        },
+        "visible": true,
+        "ownerWindowId": 1,
+        "ownerIsProbeWindow": true,
+        "after": {
+          "bounds": {
+            "x": 1200,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": true,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true
+        }
+      },
+      "connectMs": 7,
+      "state": {
+        "ok": true,
+        "value": {
+          "visibilityState": "visible",
+          "hidden": false,
+          "hasFocus": true,
+          "innerWidth": 0,
+          "innerHeight": 0
+        },
+        "ms": 3
+      },
+      "rafFramesIn1s": {
+        "ok": true,
+        "value": 121,
+        "ms": 1103
+      },
+      "snapshot": {
+        "ok": true,
+        "chars": 126,
+        "hasButton": true,
+        "ms": 18
+      },
+      "click": {
+        "ok": false,
+        "error": "locator.click: Timeout 5000ms exceeded.",
+        "ms": 5001,
+        "counter": {
+          "before": "0",
+          "after": "0",
+          "advanced": false
+        }
+      },
+      "screenshot": {
+        "ok": false,
+        "error": "page.screenshot: Protocol error (Page.captureScreenshot): Cannot take screenshot with 0 width.",
+        "ms": 4
+      },
+      "stateAfter": {
+        "ok": true,
+        "value": {
+          "visibilityState": "visible",
+          "innerWidth": 0,
+          "innerHeight": 0
+        },
+        "ms": 1
+      },
+      "passes": false
+    },
+    "d": {
+      "view": {
+        "bounds": {
+          "x": 1200,
+          "y": 0,
+          "width": 1280,
+          "height": 800
+        },
+        "visible": false,
+        "ownerWindowId": 1,
+        "ownerIsProbeWindow": true,
+        "after": {
+          "bounds": {
+            "x": 1200,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": false,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true
+        }
+      },
+      "connectMs": 17,
+      "state": {
+        "ok": true,
+        "value": {
+          "visibilityState": "visible",
+          "hidden": false,
+          "hasFocus": true,
+          "innerWidth": 0,
+          "innerHeight": 0
+        },
+        "ms": 3
+      },
+      "rafFramesIn1s": {
+        "ok": true,
+        "value": 121,
+        "ms": 1103
+      },
+      "snapshot": {
+        "ok": true,
+        "chars": 126,
+        "hasButton": true,
+        "ms": 17
+      },
+      "click": {
+        "ok": false,
+        "error": "locator.click: Timeout 5000ms exceeded.",
+        "ms": 5002,
+        "counter": {
+          "before": "0",
+          "after": "0",
+          "advanced": false
+        }
+      },
+      "screenshot": {
+        "ok": false,
+        "error": "page.screenshot: Protocol error (Page.captureScreenshot): Cannot take screenshot with 0 width.",
+        "ms": 5
+      },
+      "stateAfter": {
+        "ok": true,
+        "value": {
+          "visibilityState": "visible",
+          "innerWidth": 0,
+          "innerHeight": 0
+        },
+        "ms": 1
+      },
+      "passes": false
+    },
+    "e": {
+      "view": {
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 800
+        },
+        "visible": true,
+        "ownerWindowId": 2,
+        "ownerIsProbeWindow": false,
+        "after": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": true,
+          "ownerWindowId": 2,
+          "ownerIsProbeWindow": false
+        }
+      },
+      "connectMs": 8,
+      "state": {
+        "ok": true,
+        "value": {
+          "visibilityState": "visible",
+          "hidden": false,
+          "hasFocus": true,
+          "innerWidth": 1280,
+          "innerHeight": 800
+        },
+        "ms": 2
+      },
+      "rafFramesIn1s": {
+        "ok": true,
+        "value": 121,
+        "ms": 1102
+      },
+      "snapshot": {
+        "ok": true,
+        "chars": 116,
+        "hasButton": true,
+        "ms": 17
+      },
+      "click": {
+        "ok": true,
+        "ms": 14,
+        "counter": {
+          "before": "0",
+          "after": "1",
+          "advanced": true
+        }
+      },
+      "screenshot": {
+        "ok": true,
+        "width": 2560,
+        "height": 1600,
+        "bytes": 25795,
+        "ms": 44
+      },
+      "stateAfter": {
+        "ok": true,
+        "value": {
+          "visibilityState": "visible",
+          "innerWidth": 1280,
+          "innerHeight": 800
+        },
+        "ms": 1
+      },
+      "passes": true
+    },
+    "verdict": "b"
+  },
+  "dialogs": {
+    "placed": {
+      "view": {
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 600,
+          "height": 400
+        },
+        "visible": true,
+        "ownerWindowId": 1,
+        "ownerIsProbeWindow": true
+      },
+      "runDialogListeners": 1,
+      "nativePrompt": {
+        "expression": "prompt('native prompt', 'dflt')",
+        "returned": {
+          "error": "Script failed to execute, this normally means an error was thrown. Check the renderer console for the error.",
+          "afterMs": 1
+        },
+        "pageBlocked": false,
+        "sheets": []
+      },
+      "cdp_confirm": {
+        "expression": "confirm('cdp confirm')",
+        "returned": {
+          "value": false,
+          "afterMs": 389
+        },
+        "pageBlocked": false,
+        "sheets": [
+          {
+            "event": "sheet-begin",
+            "atMs": 58
+          }
+        ],
+        "cdp": [
+          {
+            "method": "Page.javascriptDialogOpening",
+            "type": "confirm",
+            "message": "cdp confirm",
+            "hasBrowserHandler": true,
+            "defaultPrompt": "",
+            "sessionId": "",
+            "at": 1
+          },
+          {
+            "method": "Page.javascriptDialogClosed",
+            "result": false,
+            "userInput": "",
+            "sessionId": "",
+            "at": 377
+          },
+          {
+            "method": "handleJavaScriptDialog",
+            "ok": true,
+            "at": 376
+          }
+        ],
+        "cleanUp": {
+          "openSheets": 1,
+          "afterReload": [
+            "sheet-end"
+          ],
+          "reloadClosedIt": true
+        }
+      },
+      "cdp_alert": {
+        "expression": "alert('cdp alert'), 'alert returned'",
+        "returned": {
+          "value": "alert returned",
+          "afterMs": 307
+        },
+        "pageBlocked": false,
+        "sheets": [
+          {
+            "event": "sheet-begin",
+            "atMs": 35
+          }
+        ],
+        "cdp": [
+          {
+            "method": "Page.javascriptDialogOpening",
+            "type": "alert",
+            "message": "cdp alert",
+            "hasBrowserHandler": true,
+            "defaultPrompt": "",
+            "sessionId": "",
+            "at": 1
+          },
+          {
+            "method": "Page.javascriptDialogClosed",
+            "result": true,
+            "userInput": "",
+            "sessionId": "",
+            "at": 307
+          },
+          {
+            "method": "handleJavaScriptDialog",
+            "ok": true,
+            "at": 307
+          }
+        ],
+        "cleanUp": {
+          "openSheets": 1,
+          "afterReload": [
+            "sheet-end"
+          ],
+          "reloadClosedIt": true
+        }
+      },
+      "cdp_prompt": {
+        "expression": "prompt('cdp prompt', 'dflt')",
+        "returned": {
+          "error": "Script failed to execute, this normally means an error was thrown. Check the renderer console for the error.",
+          "afterMs": 1
+        },
+        "pageBlocked": false,
+        "sheets": [],
+        "cdp": [],
+        "cleanUp": {
+          "openSheets": 0
+        }
+      },
+      "wrap": {
+        "originalListeners": 1,
+        "steps": [
+          {
+            "expression": "alert('wrapped alert'), 'alert returned'",
+            "returned": {
+              "value": "alert returned",
+              "afterMs": 1
+            },
+            "pageBlocked": false,
+            "sheets": []
+          },
+          {
+            "expression": "confirm('wrapped confirm')",
+            "returned": {
+              "value": false,
+              "afterMs": 1
+            },
+            "pageBlocked": false,
+            "sheets": []
+          },
+          {
+            "expression": "prompt('wrapped prompt', 'dflt')",
+            "returned": {
+              "error": "Script failed to execute, this normally means an error was thrown. Check the renderer console for the error.",
+              "afterMs": 0
+            },
+            "pageBlocked": false,
+            "sheets": []
+          }
+        ],
+        "seen": [
+          {
+            "dialogType": "alert",
+            "messageText": "wrapped alert",
+            "defaultPromptText": "",
+            "frameUrl": "http://127.0.0.1:17401/dialog.html",
+            "at": 0
+          },
+          {
+            "dialogType": "confirm",
+            "messageText": "wrapped confirm",
+            "defaultPromptText": "",
+            "frameUrl": "http://127.0.0.1:17401/dialog.html",
+            "at": 402
+          }
+        ],
+        "cdp": [
+          {
+            "method": "Page.javascriptDialogOpening",
+            "type": "alert",
+            "message": "wrapped alert",
+            "hasBrowserHandler": true,
+            "defaultPrompt": "",
+            "sessionId": "",
+            "at": 0
+          },
+          {
+            "method": "Page.javascriptDialogClosed",
+            "result": false,
+            "userInput": "",
+            "sessionId": "",
+            "at": 0
+          },
+          {
+            "method": "Page.javascriptDialogOpening",
+            "type": "confirm",
+            "message": "wrapped confirm",
+            "hasBrowserHandler": true,
+            "defaultPrompt": "",
+            "sessionId": "",
+            "at": 402
+          },
+          {
+            "method": "Page.javascriptDialogClosed",
+            "result": false,
+            "userInput": "",
+            "sessionId": "",
+            "at": 402
+          }
+        ],
+        "restoredListeners": 1,
+        "cleanUp": {
+          "openSheets": 0
+        }
+      },
+      "playwrightNoListener": {
+        "evaluate": {
+          "ok": true,
+          "value": false,
+          "ms": 298
+        },
+        "sheets": [
+          {
+            "event": "sheet-begin",
+            "atMs": 25
+          }
+        ],
+        "cleanUp": {
+          "openSheets": 1,
+          "afterReload": [
+            "sheet-end"
+          ],
+          "reloadClosedIt": true
+        }
+      },
+      "playwrightNoopListener": {
+        "evaluate": {
+          "ok": true,
+          "value": false,
+          "ms": 1003
+        },
+        "seen": [
+          {
+            "type": "confirm",
+            "message": "pw noop listener"
+          }
+        ],
+        "cdp": [
+          {
+            "method": "Page.javascriptDialogOpening",
+            "type": "confirm",
+            "message": "pw noop listener",
+            "hasBrowserHandler": true,
+            "defaultPrompt": "",
+            "sessionId": "",
+            "at": 2
+          },
+          {
+            "method": "Page.javascriptDialogClosed",
+            "result": false,
+            "userInput": "",
+            "sessionId": "",
+            "at": 1003
+          },
+          {
+            "method": "handleJavaScriptDialog",
+            "ok": true,
+            "at": 1003
+          }
+        ],
+        "sheets": [
+          {
+            "event": "sheet-begin",
+            "atMs": 24
+          }
+        ],
+        "cleanUp": {
+          "openSheets": 1,
+          "afterReload": [
+            "sheet-end"
+          ],
+          "reloadClosedIt": true
+        }
+      },
+      "playwrightWrapped": {
+        "confirm": {
+          "ok": true,
+          "value": false,
+          "ms": 4
+        },
+        "prompt": {
+          "ok": false,
+          "error": "page.evaluate: Error: prompt() is not supported.",
+          "ms": 1
+        },
+        "seen": [
+          {
+            "dialogType": "confirm",
+            "messageText": "pw wrapped confirm",
+            "defaultPromptText": "",
+            "frameUrl": "http://127.0.0.1:17401/dialog.html",
+            "at": 3
+          }
+        ],
+        "sheets": [],
+        "rejections": [
+          "Protocol error (Page.handleJavaScriptDialog): No dialog is showing"
+        ]
+      }
+    },
+    "unplacedWrapped": {
+      "view": {
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "visible": false,
+        "ownerWindowId": null,
+        "ownerIsProbeWindow": false
+      },
+      "steps": [
+        {
+          "expression": "alert('unplaced alert'), 'alert returned'",
+          "returned": {
+            "value": "alert returned",
+            "afterMs": 0
+          },
+          "pageBlocked": false,
+          "sheets": []
+        },
+        {
+          "expression": "confirm('unplaced confirm')",
+          "returned": {
+            "value": false,
+            "afterMs": 2
+          },
+          "pageBlocked": false,
+          "sheets": []
+        },
+        {
+          "expression": "prompt('unplaced prompt', 'dflt')",
+          "returned": {
+            "error": "Script failed to execute, this normally means an error was thrown. Check the renderer console for the error.",
+            "afterMs": 1
+          },
+          "pageBlocked": false,
+          "sheets": []
+        }
+      ],
+      "seen": [
+        {
+          "dialogType": "alert",
+          "messageText": "unplaced alert",
+          "defaultPromptText": "",
+          "frameUrl": "http://127.0.0.1:17401/dialog.html",
+          "at": 0
+        },
+        {
+          "dialogType": "confirm",
+          "messageText": "unplaced confirm",
+          "defaultPromptText": "",
+          "frameUrl": "http://127.0.0.1:17401/dialog.html",
+          "at": 402
+        }
+      ],
+      "cdp": [
+        {
+          "method": "Page.javascriptDialogOpening",
+          "type": "alert",
+          "message": "unplaced alert",
+          "hasBrowserHandler": true,
+          "defaultPrompt": "",
+          "sessionId": "",
+          "at": 0
+        },
+        {
+          "method": "Page.javascriptDialogClosed",
+          "result": false,
+          "userInput": "",
+          "sessionId": "",
+          "at": 0
+        },
+        {
+          "method": "Page.javascriptDialogOpening",
+          "type": "confirm",
+          "message": "unplaced confirm",
+          "hasBrowserHandler": true,
+          "defaultPrompt": "",
+          "sessionId": "",
+          "at": 402
+        },
+        {
+          "method": "Page.javascriptDialogClosed",
+          "result": false,
+          "userInput": "",
+          "sessionId": "",
+          "at": 402
+        }
+      ]
+    },
+    "unplacedNative": {
+      "startedAt": "2026-10-07T06:10:26.438Z",
+      "ticks": [],
+      "operatorNote": "Written after the run: the process printed nothing after 'dialogs, unplaced, native (watchdog armed)' and was killed by the 15 s watchdog; no 250 ms tick, no CDP answer timer and not the step's own 12 s timeout ever ran, so main's event loop was blocked from the parentless confirm() onward (Electron's -run-dialog handler -> dialog.showMessageBox(options) with no owner window -> NSAlert runModal, lib/browser/api/web-contents.ts:821, shell/browser/ui/message_box_mac.mm ShowMessageBox)."
+    }
+  }
+}

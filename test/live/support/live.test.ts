@@ -55,13 +55,14 @@ describe('live suite bookkeeping', () => {
     const journal = [
       row(1, 'meta', { event: 'spawn', envKeys: ['ANTHROPIC_AUTH_TOKEN'], args: ['--settings', '{"dialogExpiry":"never"}'] }),
       row(2, 'in', { type: 'control_response', response: { account: { email: 'owner@example.com' }, key: 'sk-ant-api03-abcdef_123', token: 'hunter2-secret-value' } }),
+      row(3, 'in', { type: 'user', placeholders: ['ada@example.test', 'x@mail.example', 'y@redacted.invalid'] }), // E4c: reserved names are kept
     ]
       .map((r) => JSON.stringify(r))
       .join('\n');
     const out = exportFixture(`${journal}\n`, { MY_TOKEN: 'hunter2-secret-value' }, '2026-09-28T11:00:00.000Z');
     const lines = out.split('\n').filter((l) => l.length > 0);
     const rows = lines.map((l) => parseJournalRow(JSON.parse(l)));
-    expect(rows.map((r) => r.seq)).toEqual([0, 1, 2]);
+    expect(rows.map((r) => r.seq)).toEqual([0, 1, 2, 3]);
     expect(rows[0]).toEqual({ seq: 0, direction: 'meta', at: '2026-09-28T11:00:00.000Z', frame: { event: 'provenance', ...PROVENANCE } });
     expect(PROVENANCE).toMatchObject({ charter: 'docs/charter.md', child: 'C3', pin: '87f8c7881119ea670901205dae35917d3751459c' });
     expect(rows[1]).toEqual(JSON.parse(journal.split('\n')[0]!));
@@ -69,6 +70,7 @@ describe('live suite bookkeeping', () => {
     expect(out).not.toContain('sk-ant-api03');
     expect(out).not.toContain('hunter2-secret-value');
     expect(out).toContain('owner@redacted.invalid');
+    expect(rows[3]).toEqual(JSON.parse(journal.split('\n')[2]!));
     expect(out.endsWith('\n')).toBe(true);
   });
 

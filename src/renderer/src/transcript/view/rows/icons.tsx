@@ -37,3 +37,5 @@ export const AnchorIcon = ({ kind }: { kind: AnchorKind }) => <Icon path={ANCHOR
 export const ThreadIcon = () => <Icon path="M4 2v12M4 9c0-2.2 1.8-4 4-4h4M10 3l2 2-2 2" />;
 // E3 end
 export const ArtifactIcon = () => <Icon path="M2 2.5h12v11H2zM2 5.5h12M6.5 8 5 9.5 6.5 11M9.5 8l1.5 1.5L9.5 11" />; // E2: the artifact row (a page of code)
+// E4c: the browser action row, the Browser tool's globe
+export const BrowserIcon = () => <Icon path="M13.5 8A5.5 5.5 0 1 1 2.5 8a5.5 5.5 0 0 1 11 0zM2.5 8h11M8 2.5c1.6 1.5 2.4 3.4 2.4 5.5S9.6 12 8 13.5M8 2.5C6.4 4 5.6 5.9 5.6 8s.8 4 2.4 5.5" />;

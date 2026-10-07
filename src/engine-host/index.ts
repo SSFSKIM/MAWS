@@ -60,6 +60,7 @@ const register: HostRegister = (on, emit, client) => {
     replayRowMs: replayRowDelayMs(process.env), // E10: the e2e pacing seam
     diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
     onConnect: client.onConnect, hasClient: client.hasClient, // E10: the connect burst; a refused batch told from a client gone
+    onClientGone: client.onClientGone, // E4c: pending browser requests settle when the app goes
   });
   ({ table } = ipc);
   table.startSampling();

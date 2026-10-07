@@ -33,6 +33,7 @@ const ESTIMATES: Record<RowKind, number> = {
   side_thread: 36, // E3
   agent_list: 96, // E7: the self line and one short section
   artifact: 44, // E2
+  browser_action: 34, // E4c: one line and its bottom padding
 };
 export function estimateRow(row: Row): number {
   if (row.kind === 'group' && row.expanded) return 280;

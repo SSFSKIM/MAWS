@@ -12,6 +12,7 @@ import type { Anchor, AnchorKind } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 // E3 end
 import type { ListingSection } from './agent-listing'; // E7
+import type { BrowserToolName, BrowserWaitReason } from '@shared/maws/browser'; // E4c
 
 export type TurnId = string & z.$brand<'TurnId'>; // `turn:<userMessageUuid>`; `turn:e<eventId>` for engine-initiated turns or a user message without uuid
 export type RowId = string & z.$brand<'RowId'>; // formats in keys.ts
@@ -102,6 +103,18 @@ export type Row = RowBase &
     // is in (a result that does not parse leaves the version null on an answered row)
     | { kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean }
     // E2 end
+    // E4c start: a browser tool call's row (E4c execution document, Design §10): from the call (`action`, `tabId`,
+    // `target` as `maws.browser.action` names them; `value`: a select's option, a key, a check or a scroll amount, never
+    // what a fill typed), filled by its result (the page, `ms`, the element's role and name, a snapshot's whole size in
+    // `chars` and whether it was cut in `truncated` (an eval's value too), a listing's `tabCount`, and `detail`: a snapshot's text or an eval's value) and refined by the event. `state`
+    // cancelled: the turn closed with no result, or the engine stopped the call; `answered` once the result is in
+    | {
+        kind: 'browser_action'; toolUseId: ToolUseId; tool: BrowserToolName; action: string; tabId: string | null; target: string | null;
+        targetRole: string | null; targetName: string | null; value: string | null; url: string | null; title: string | null; ms: number | null;
+        deliverableId: string | null; error: string | null; waitedFor: BrowserWaitReason | null; waitedMs: number | null; chars: number | null; truncated: boolean;
+        tabCount: number | null; state: 'running' | 'done' | 'error' | 'cancelled'; detail: string | null; answered: boolean;
+      }
+    // E4c end
   );
 
 // E1: an ask as its capsule holds it, without the row base: what the Question sheet shows when the capsule reopens it

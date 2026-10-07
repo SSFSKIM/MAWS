@@ -52,6 +52,9 @@ export const rowId = {
   // E2 start: an artifact call's row, keyed by the tool use
   artifact: (toolUse: ToolUseId) => row(`artifact:${toolUse}`),
   // E2 end
+  // E4c start: a browser tool call's row, keyed by the tool use
+  browserAction: (toolUse: ToolUseId) => row(`browser:${toolUse}`),
+  // E4c end
 };
 
 export const cellId = {

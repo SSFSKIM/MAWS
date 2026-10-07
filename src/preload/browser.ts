@@ -26,3 +26,11 @@ import { installCommentMode } from './browser-comment';
 
 installCommentMode(ipcRenderer);
 // E4d end
+// E4c start: the agent's cursor (E4c execution document, Design §9): one listener on main's `browser:cursor`, drawing
+// `<maws-agent-cursor>`; nothing sent, nothing exposed. `browser-cursor.ts` and the zod-free `@shared/browser/cursor` it
+// reads are imported from here alone, so Rollup inlines them and no chunk is shared with the app preload. It uses the
+// `ipcRenderer` E4d's block imports above (a second import of it trips the duplicate-import rule).
+import { installAgentCursor } from './browser-cursor';
+
+installAgentCursor(ipcRenderer);
+// E4c end

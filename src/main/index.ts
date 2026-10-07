@@ -428,6 +428,9 @@ void startWithProfileLock(app, () => {
     emit,
     env: process.env,
     profiles: () => browserProfiles.browsable(), // E4b
+    // E4c start: the browser tools answer the engine host's requests (E4c Design §4; Decision Log 36)
+    hosts,
+    // E4c end
   });
   app.on('will-quit', browser.stop);
   // E4a end

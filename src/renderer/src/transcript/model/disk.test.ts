@@ -242,3 +242,33 @@ describe('maws artifacts read from disk', () => {
   });
 });
 // E2 end
+
+// E4c start (E4c execution document, Acceptance G1; Decision Log 79 (e)): the browser session read from its transcript on
+// disk, where there are no `maws.browser.action` events, only the calls and their results (each result carrying main's
+// own `ms`). The seven rows read as the journal's do, `ms` included.
+describe('maws browser actions read from disk', () => {
+  beforeAll(() => configureTime({ now: '2026-09-29T00:00:00.000Z', locale: 'en-US', timeZone: 'UTC' })); // the snapshot suite's pin
+  afterAll(() => configureTime(null));
+  const sortKeys = (value: unknown): unknown =>
+    Array.isArray(value) ? value.map(sortKeys) : typeof value === 'object' && value !== null ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys((value as Record<string, unknown>)[key])])) : value;
+  const actions = (rows: Row[]) => ofKind(rows, 'browser_action').map((row) => ({ ...row, turnId: null, at: '' })); // the two paths' clocks and turn keys differ
+
+  it('p1-maws-browser: the same seven browser_action rows as the journal, from the calls and results alone', async () => {
+    const disk = await backfillFixture('p1-maws-browser', 'aff051dc-b475-49ff-9352-5086395b37ef');
+    expect(disk.filter((event) => event.kind.startsWith('maws.'))).toEqual([]);
+    const rows = rowsOf(withAllExpanded(stateOf(disk)));
+    const journal = rowsOf(withAllExpanded(stateOf(journalToEvents(loadJournal('pass3', 'p1-maws-browser')))));
+    expect(actions(rows).map((row) => [row.tool, row.action, row.target, row.state, row.ms, row.error])).toEqual([
+      ['browser_tabs', 'open', 'http://127.0.0.1:17391/form.html', 'done', 120, null],
+      ['browser_snapshot', 'snapshot', null, 'done', 60, null],
+      ['browser_act', 'fill', 'e7', 'done', 40, null],
+      ['browser_act', 'fill', 'e10', 'done', 40, null],
+      ['browser_act', 'click', 'e12', 'done', 40, null],
+      ['browser_snapshot', 'snapshot', null, 'done', 60, null],
+      ['browser_screenshot', 'screenshot', 'page', 'done', 80, null],
+    ]);
+    expect(actions(rows)).toEqual(actions(journal));
+    await expect(`${JSON.stringify(rows.map(sortKeys), null, 2)}\n`).toMatchFileSnapshot(join(SNAPSHOT_DIR, 'disk/p1-maws-browser.rows.json'));
+  });
+});
+// E4c end

@@ -62,6 +62,12 @@ import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import type { ArtifactCaptureRequest, CaptureBridge } from './tool-server/artifacts';
 import { HostBridge } from './tool-server/bridge';
 // E2 end
+// E4c start
+import { tmpdir } from 'node:os';
+import type { MawsBrowserAnswerResult } from '@shared/ipc/schema/maws';
+import type { BrowserWaitReason } from '@shared/maws/browser';
+import { BrowserBridge, type BrowserRequest } from './tool-server/browser-bridge';
+// E4c end
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
 
 export { HostHookRegistry } from './host-hooks';
@@ -113,6 +119,12 @@ export interface EngineSessionOptions {
   // E10: whether an app is connected to the engine host (the runtime's); `show_pane` and `artifact_screenshot` fail at
   // once with `appNotOpen` while it is false. Absent, always connected.
   hasClient?: () => boolean;
+  // E4c start: where main writes a browser screenshot (the launcher's userData: host and main derive the same path from
+  // it; a session without one, in tests, names paths under the temp directory), and the runtime's notice that the app
+  // went (the browser bridge settles its pending requests `appNotOpen`; absent, it never goes)
+  userData?: string;
+  onClientGone?: (hook: () => void) => () => void;
+  // E4c end
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -133,6 +145,10 @@ interface Listeners {
   deliverableChanged: (change: { appSessionId: LaunchSpec['appSessionId']; id: string; change: DeliverableChange }) => void;
   artifactCapture: (request: ArtifactCaptureRequest & { appSessionId: LaunchSpec['appSessionId'] }) => void;
   // E2 end
+  // E4c start: a browser tool asks main (maws.browser.request); the host tells main to stop one (maws.browser.cancel)
+  browserRequest: (request: BrowserRequest & { appSessionId: LaunchSpec['appSessionId'] }) => void;
+  browserCancel: (cancel: { appSessionId: LaunchSpec['appSessionId']; requestId: RequestId }) => void;
+  // E4c end
 }
 
 type ProcessState = EngineSessionStatus['process'];
@@ -159,12 +175,13 @@ export class EngineSession {
   readonly toolServer: MawsToolServer;
   private readonly panes: PaneBridge;
   private readonly captures: CaptureBridge; // E2: the bridge `artifact_screenshot` asks main through
+  private readonly browser: BrowserBridge; // E4c: the bridge the browser tools ask main through
   private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
   private askItems = new Map<string, AttentionItem>(); // E1 M4b: the blocking asks' attention items, published with the broker's
   readonly sideQuestions = new SideQuestionLog(); // E3: this process's `/btw` exchanges (host memory, X13)
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, deliverableChanged: new Set(), artifactCapture: new Set() /* E2 */ };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, deliverableChanged: new Set(), artifactCapture: new Set() /* E2 */, browserRequest: new Set(), browserCancel: new Set() /* E4c */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
@@ -221,6 +238,14 @@ export class EngineSession {
     this.panes = new PaneBridge({ show: (request) => this.emit('paneShow', { appSessionId: opts.spec.appSessionId, ...request }), hasClient: opts.hasClient /* E10 */ });
     this.captures = new HostBridge({ send: (request) => this.emit('artifactCapture', { appSessionId: opts.spec.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS, hasClient: opts.hasClient /* E10 */ }); // E2
     const announce: OnDeliverableWritten = (record, change) => this.emit('deliverableChanged', { appSessionId: record.appSessionId, id: record.id, change }); // E2
+    // E4c start: a deadline paused while main waits on the person or a cover; main told to stop what no one awaits
+    this.browser = new BrowserBridge({
+      send: (request) => this.emit('browserRequest', { appSessionId: opts.spec.appSessionId, ...request }),
+      cancel: (requestId) => this.emit('browserCancel', { appSessionId: opts.spec.appSessionId, requestId }),
+      connected: opts.hasClient,
+      onClientGone: opts.onClientGone,
+    });
+    // E4c end
     this.askTable = new AskTable({
       onChange: () => {
         this.publishAsks(); // E1 M4b
@@ -231,6 +256,7 @@ export class EngineSession {
       tools: mawsTools({
         deliverables: opts.deliverables?.(announce) ?? new MemoryDeliverableStore({ onWritten: announce }), bridge: this.panes, capture: this.captures /* E2 */,
         asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
+        browser: this.browser, userData: opts.userData ?? tmpdir() /* E4c */,
       }),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,
@@ -397,6 +423,18 @@ export class EngineSession {
   answerCapture(requestId: RequestId, result: MawsArtifactCapturedResult): 'delivered' | 'not_pending' {
     return this.captures.answer(requestId, result);
   }
+
+  // E4c start: main's answer to a browser tool's request (`maws.browser.answer`), the first one wins; and its report
+  // that the request waits on the person or a cover, or no longer does (`maws.browser.waiting`), which pauses or
+  // re-arms the request's deadline.
+  answerBrowser(requestId: RequestId, result: MawsBrowserAnswerResult): 'delivered' | 'not_pending' {
+    return this.browser.answer(requestId, result);
+  }
+
+  browserWaiting(requestId: RequestId, waiting: BrowserWaitReason | null): 'delivered' | 'not_pending' {
+    return this.browser.waiting(requestId, waiting);
+  }
+  // E4c end
 
   // E1 M2: the asks waiting for the human (`maws.asks.list`), pending or being answered.
   asks(): PendingAsk[] {
@@ -1138,6 +1176,7 @@ export class EngineSession {
     this.toolServer.processExited(); // a blocking ask's call aborts with it, cancelling the ask (meta row)
     this.panes.processExited();
     this.captures.processExited(); // E2
+    this.browser.processExited(); // E4c: main told to stop each; the bridge stops following the app
     for (const ask of this.askTable.cancelAll('exit')) this.askCancelled(ask, 'exit'); // E1 M2: the async asks, before the exit row
     this.sideQuestions.processExited(new Date().toISOString()); // E3: no answer comes once the process is gone
     this.client?.close('the process exited');

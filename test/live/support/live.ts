@@ -24,10 +24,12 @@ import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from '../../../src/
 export const LIVE_MAX_BUDGET_USD = 0.5;
 export const LIVE_APP_VERSION = '0.0.0-live';
 
-// The probe's `redact`, applied when a live run's journal is exported as a pass-3 fixture (M6), never by the
+// The redactor (the probe's `redact` widened for RFC 2606 names; spikes/protocol-probe/harness.mjs keeps the probe's
+// narrower pattern), applied when a live run's journal is exported as a pass-3 fixture (M6), never by the
 // production writer (the journal is a faithful record; Interfaces, Journal): values of environment keys that look
 // secret (8+ characters, longest first so a value containing another is replaced whole), then `sk-ant-…` keys, then
-// e-mail addresses other than local placeholders.
+// e-mail addresses other than placeholders (`localhost`, and the reserved test TLDs `.test`, `.example`, `.invalid` of
+// RFC 2606, which name no one: E4c's recording types `ada@example.test` into a form, and its replay needs the value).
 export function createRedactor(env: Record<string, string>): (text: string) => string {
   const secrets = Object.entries(env)
     .filter(([key, value]) => /TOKEN|KEY|SECRET|PASSWORD/i.test(key) && value.length >= 8)
@@ -38,7 +40,7 @@ export function createRedactor(env: Record<string, string>): (text: string) => s
     for (const secret of secrets) out = out.split(secret).join('[REDACTED]');
     return out
       .replace(/sk-ant-[A-Za-z0-9_-]+/g, 'sk-ant-[REDACTED]')
-      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z.]{2,}/g, (m) => (/@(localhost|redacted\.invalid)$/.test(m) ? m : 'owner@redacted.invalid'));
+      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z.]{2,}/g, (m) => (/@(localhost|[A-Za-z0-9.-]+\.(test|example|invalid))$/.test(m) ? m : 'owner@redacted.invalid'));
   };
 }
 

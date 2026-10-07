@@ -21,4 +21,5 @@ export const events = [
   // E4b start
   'browser.import.progress', 'browser.import.finished', 'browser.import.changed',
   // E4b end
+  'browser.agent.acting', // E4c
 ] as const;

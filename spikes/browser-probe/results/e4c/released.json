@@ -1,0 +1,567 @@
+{
+  "meta": {
+    "electron": "44.4.5",
+    "chrome": "152.0.7977.130",
+    "playwrightCore": "1.63.0",
+    "startedAt": "2026-10-07T09:17:42.246Z",
+    "platform": "darwin arm64",
+    "windowContent": {
+      "x": 156,
+      "y": 33,
+      "width": 1200,
+      "height": 800
+    },
+    "finishedAt": "2026-10-07T09:18:10.152Z"
+  },
+  "variants": {
+    "rb": {
+      "placed": {
+        "view": {
+          "bounds": {
+            "x": 40,
+            "y": 60,
+            "width": 900,
+            "height": 600
+          },
+          "visible": true,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true,
+          "inProbeWindow": true
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "visible",
+            "innerWidth": 900,
+            "innerHeight": 600
+          },
+          "ms": 1
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 121,
+          "ms": 1102
+        }
+      },
+      "parkedBare": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": true,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "hidden",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 0
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 0,
+          "ms": 1991
+        }
+      },
+      "parked": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": true,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "visible",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 5
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 121,
+          "ms": 1103
+        },
+        "snapshot": {
+          "ok": true,
+          "chars": 116,
+          "hasButton": true,
+          "ms": 27
+        },
+        "click": {
+          "ok": true,
+          "ms": 26,
+          "counter": {
+            "before": "0",
+            "after": "1",
+            "advanced": true
+          }
+        },
+        "screenshot": {
+          "ok": true,
+          "width": 1280,
+          "height": 800,
+          "bytes": 10135,
+          "ms": 50
+        },
+        "passes": true
+      },
+      "parkedBareAfterPlaywright": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": true,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "hidden",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 7
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 0,
+          "ms": 1720
+        }
+      },
+      "unparkedOntoPane": {
+        "view": {
+          "bounds": {
+            "x": 40,
+            "y": 60,
+            "width": 900,
+            "height": 600
+          },
+          "visible": true,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true,
+          "inProbeWindow": true
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "visible",
+            "innerWidth": 900,
+            "innerHeight": 600
+          },
+          "ms": 0
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 121,
+          "ms": 1101
+        }
+      }
+    },
+    "rs": {
+      "placed": {
+        "view": {
+          "bounds": {
+            "x": 40,
+            "y": 60,
+            "width": 900,
+            "height": 600
+          },
+          "visible": true,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true,
+          "inProbeWindow": true
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "visible",
+            "innerWidth": 900,
+            "innerHeight": 600
+          },
+          "ms": 0
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 121,
+          "ms": 1101
+        }
+      },
+      "parkedBare": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": false,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "hidden",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 0
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 0,
+          "ms": 1310
+        }
+      },
+      "parked": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": false,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "visible",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 5
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 122,
+          "ms": 1103
+        },
+        "snapshot": {
+          "ok": true,
+          "chars": 116,
+          "hasButton": true,
+          "ms": 19
+        },
+        "click": {
+          "ok": true,
+          "ms": 11,
+          "counter": {
+            "before": "0",
+            "after": "1",
+            "advanced": true
+          }
+        },
+        "screenshot": {
+          "ok": true,
+          "width": 1280,
+          "height": 800,
+          "bytes": 10135,
+          "ms": 156
+        },
+        "passes": true
+      },
+      "parkedBareAfterPlaywright": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": false,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "hidden",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 0
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 0,
+          "ms": 1693
+        }
+      }
+    },
+    "ns": {
+      "placed": null,
+      "parkedBare": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": false,
+          "ownerWindowId": null,
+          "ownerIsProbeWindow": false,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "hidden",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 1
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 0,
+          "ms": 1590
+        }
+      },
+      "parked": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": false,
+          "ownerWindowId": null,
+          "ownerIsProbeWindow": false,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "visible",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 4
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 121,
+          "ms": 1104
+        },
+        "snapshot": {
+          "ok": true,
+          "chars": 116,
+          "hasButton": true,
+          "ms": 22
+        },
+        "click": {
+          "ok": true,
+          "ms": 26,
+          "counter": {
+            "before": "0",
+            "after": "1",
+            "advanced": true
+          }
+        },
+        "screenshot": {
+          "ok": true,
+          "width": 1280,
+          "height": 800,
+          "bytes": 10135,
+          "ms": 28
+        },
+        "passes": true
+      },
+      "parkedBareAfterPlaywright": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": false,
+          "ownerWindowId": null,
+          "ownerIsProbeWindow": false,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "hidden",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 6
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 0,
+          "ms": 1798
+        }
+      }
+    },
+    "re": {
+      "placed": {
+        "view": {
+          "bounds": {
+            "x": 40,
+            "y": 60,
+            "width": 900,
+            "height": 600
+          },
+          "visible": true,
+          "ownerWindowId": 1,
+          "ownerIsProbeWindow": true,
+          "inProbeWindow": true
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "visible",
+            "innerWidth": 900,
+            "innerHeight": 600
+          },
+          "ms": 1
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 122,
+          "ms": 1102
+        }
+      },
+      "parkedBare": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": true,
+          "ownerWindowId": 2,
+          "ownerIsProbeWindow": false,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "hidden",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 11
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 0,
+          "ms": 1687
+        }
+      },
+      "parked": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": true,
+          "ownerWindowId": 2,
+          "ownerIsProbeWindow": false,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "visible",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 4
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 122,
+          "ms": 1103
+        },
+        "snapshot": {
+          "ok": true,
+          "chars": 116,
+          "hasButton": true,
+          "ms": 22
+        },
+        "click": {
+          "ok": true,
+          "ms": 14,
+          "counter": {
+            "before": "0",
+            "after": "1",
+            "advanced": true
+          }
+        },
+        "screenshot": {
+          "ok": true,
+          "width": 1280,
+          "height": 800,
+          "bytes": 10135,
+          "ms": 28
+        },
+        "passes": true
+      },
+      "parkedBareAfterPlaywright": {
+        "view": {
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 800
+          },
+          "visible": true,
+          "ownerWindowId": 2,
+          "ownerIsProbeWindow": false,
+          "inProbeWindow": false
+        },
+        "state": {
+          "ok": true,
+          "value": {
+            "visibilityState": "hidden",
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "ms": 0
+        },
+        "rafFramesIn1s": {
+          "ok": true,
+          "value": 0,
+          "ms": 1814
+        }
+      }
+    }
+  }
+}

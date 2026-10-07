@@ -3,6 +3,7 @@
 // for an artifact, `<recordId>/v<n>.html` (MAWS's copy of version `n`). Every write goes through a temp file and a
 // rename, so a crash leaves a file whole or absent; a reader lists `.json` names only, so version directories and temp
 // files are passed over. E1's `FileDeliverableStore.list` body lives here as `readRecords`.
+// E4c adds `screenshots/<recordId>.<png|jpg>` (a browser screenshot's picture, named by the host, written by main).
 import { randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -31,6 +32,18 @@ export function versionPath(userData: string, appSessionId: AppSessionId, id: st
   assertDeliverableId(id);
   return join(deliverablesDir(userData, appSessionId), id, `v${version}.html`);
 }
+
+// E4c start: a browser screenshot's file. The host names it with `png`; main writes the `jpg` sibling instead after the
+// JPEG fallback, and the host accepts either (E4c execution document, Design §7).
+export function screenshotsDir(userData: string, appSessionId: AppSessionId): string {
+  return join(deliverablesDir(userData, appSessionId), 'screenshots');
+}
+
+export function screenshotPath(userData: string, appSessionId: AppSessionId, id: string, ext: 'png' | 'jpg'): string {
+  assertDeliverableId(id);
+  return join(screenshotsDir(userData, appSessionId), `${id}.${ext}`);
+}
+// E4c end
 
 // The data at `path` through a temp file beside it and a rename; a temp file whose write or rename failed is removed.
 // The temp name is unique per write, so two overlapping writes of one path each land whole (the last rename wins).

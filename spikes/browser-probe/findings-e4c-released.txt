@@ -1,0 +1,24 @@
+E4c M2 Task 2.4: parking a released tab, and whether sizing alone suffices (e4c/released.mjs; results/e4c/released.json), run
+2026-10-07 09:17 UTC on the owner's unlocked screen (CGSSessionScreenIsLocked absent, kCGSSessionOnConsoleKey true) with the
+repository's Electron 44.4.5 (Chrome 152.0.7977.130) and playwright-core 1.63.0 through E0b's bridge, the window shown inactive
+and floating, through the slot script; the process exited by itself (no Electron left), /tmp/maws-e4c-t24/ deleted, nothing
+clicked.
+
+Released tab (Decision Log 43): a view placed in the shown window at 900 x 600 and painted (visible, rAF 121 Hz), then released
+as E4a releases it (setVisible(false), still the window's child), then parked as variant (b) (removed from the window,
+setBounds(0, 0, 1280, 800), setVisible(true)) passes: with Playwright connected the page reads visible at 1280 x 800, rAF 121,
+the snapshot has the button's ref (27 ms), the locator click advances the counter (26 ms), the viewport screenshot is 1280 x 800
+CSS px (50 ms). (b) carries over to a view that had an owner window and a painted compositor; the fallback (e), the same view
+moved into a hidden host window of its own, passes identically. A removed view keeps its owner window (getOwnerBrowserWindow is
+the probe window after removeChildView), so Electron's native dialog for it would be a sheet on that window, not a parentless
+modal, while the window lives.
+
+Sizing alone: parked by setBounds alone (no setVisible(true)), both the released view (rs) and a never-attached one (ns) pass the
+same three checks with the same readings. Read with no CDP client attached, every parked variant, (b) with setVisible(true)
+included, is hidden with no requestAnimationFrame (visibilityState hidden, 0 frames in 1 s, viewport 1280 x 800); the page's
+visibility comes from Playwright's attach-time Emulation.setFocusEmulationEnabled alone, and setVisible(true) on a view in no
+window adds nothing measurable. Verdict: park is a size, not a visibility: the view leaves the window a release left it in and
+takes 1280 x 800; its native visibility stays E4a's (hidden), so E4a's `entry.visible` bookkeeping needs nothing.
+
+Unpark onto a pane: the (b)-parked view placed again in the shown window at a pane's rect (900 x 600) and shown reads visible at
+900 x 600 with rAF 121, with no CDP client attached.

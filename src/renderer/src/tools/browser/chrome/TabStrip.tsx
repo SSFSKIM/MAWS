@@ -80,6 +80,7 @@ function Chip({ tab, selected, onSelect }: { tab: BrowserTab; selected: boolean;
         ) : (
           <BrowserIcon className={`size-3.5 ${tab.suspended ? 'text-fg-faint' : ''}`} />
         )}
+        {tab.control === 'agent' && <ActingDot /> /* E4c */}
         <span className={`min-w-0 truncate ${tab.loading ? 'browser-chip-loading' : ''}`}>{title}</span>
       </button>
       <button
@@ -94,3 +95,10 @@ function Chip({ tab, selected, onSelect }: { tab: BrowserTab; selected: boolean;
     </div>
   );
 }
+
+// E4c start: the acting tab (E4c execution document, Design §9): the chip of the tab the agent holds (`control: 'agent'`)
+// carries a small accent dot before its title, so the person sees which of the session's tabs the agent is using.
+function ActingDot() {
+  return <span data-browser-acting role="img" aria-label={BROWSER_COPY.acting} title={BROWSER_COPY.acting} className="size-1.5 shrink-0 rounded-full bg-accent" />;
+}
+// E4c end

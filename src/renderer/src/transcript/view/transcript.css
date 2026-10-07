@@ -547,3 +547,27 @@ button.transcript-chip[data-chip="anchor"]:hover { background: var(--bg-hover); 
 .transcript-delivery-open:hover:not(:disabled) { text-decoration: underline; }
 .transcript-delivery-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 /* E2 end */
+
+/* E4c start: a browser tool call's row: one compact line like a standalone cell's, the glyph giving way to the running
+   ring while the call runs, quiet actions at the end; the waiting line, a refusal or a cancellation under it. */
+.transcript-browser-action { padding: 1px 0 6px; font-size: var(--text-ui-sm); }
+.transcript-browser-action-line { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-height: 26px; color: var(--fg-muted); }
+.transcript-browser-action-heading { min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
+.transcript-browser-action[data-state="error"] .transcript-browser-action-heading, .transcript-browser-action[data-state="cancelled"] .transcript-browser-action-heading { color: var(--fg-muted); }
+.transcript-browser-action[data-state="running"] .transcript-browser-action-line > .transcript-icon { display: none; }
+.transcript-browser-action[data-state="running"] .transcript-browser-action-line::before {
+  content: '';
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin: 0 1.5px;
+  border: 1.5px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: transcript-spin 1s linear infinite;
+}
+.transcript-browser-action-actions { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
+.transcript-browser-action-actions .transcript-quiet-button { margin-top: 0; }
+.transcript-browser-action-note { margin: 0 0 2px 23px; overflow-wrap: anywhere; }
+.transcript-browser-action > .transcript-output { margin: 4px 0 2px 23px; }
+/* E4c end */

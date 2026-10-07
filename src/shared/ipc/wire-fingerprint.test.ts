@@ -34,12 +34,15 @@ describe('HOST_EVENTS', () => {
         'maws.pane.show',
         'maws.artifact.capture',
         'host.supervisorStatus', // E10 M2
+        'maws.browser.request', // E4c: the browser tools' request to main and its cancellation
+        'maws.browser.cancel',
       ].sort(),
     );
     for (const name of HOST_EVENTS) expect(events).toHaveProperty([name]);
     expect(HOST_EVENTS).not.toContain('engine.hostState'); // main's own snapshot of the host
     expect(HOST_EVENTS).not.toContain('deliverables.console'); // main's
     expect(HOST_EVENTS).not.toContain('host.status'); // main's composition of the supervisor's status and its own facts
+    expect(HOST_EVENTS).not.toContain('maws.browser.progress'); // E4c: main's, to the windows
   });
 });
 

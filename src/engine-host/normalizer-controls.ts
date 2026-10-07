@@ -13,6 +13,9 @@ import { withQuestionIds } from '@shared/maws/ask';
 import { readMcpMessage, toolCallOf } from '@shared/maws/rpc';
 import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema, AskAnswerSchema, AskResultSchema, isMawsToolName, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
 // E1 end
+// E4c start
+import { browserCallOf, browserToolResultSchemaOf, isBrowserToolName, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
+// E4c end
 import type { ControlRequestFrame, ControlResponseFrame } from '@shared/wire/frames';
 import { compact, stringOrNull, type Attribution, type EventSink } from './normalizer-support';
 
@@ -233,6 +236,14 @@ function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: E
     return;
   }
   // E2 end
+  // E4c start: `maws.browser.action` for an admitted browser tool call the host answered, a success that parses as the
+  // tool's result or a refusal (its text the `error`), so the row's facts come from the journal (E4c Design §10)
+  if (isBrowserToolName(call.tool)) {
+    const action = browserActionOf(call.tool, call.args, isError ? null : json, isError ? text : null);
+    if (action !== null) out.emit({ kind: 'maws.browser.action', toolUseId: call.toolUseId, requestId, ...action }, attribution);
+    return;
+  }
+  // E4c end
   if (call.tool === 'ask' && call.askId !== null && openAsks.has(call.askId)) {
     const parsed = AskResultSchema.safeParse(json);
     if (!parsed.success || parsed.data.status !== 'answered') return;
@@ -257,6 +268,39 @@ export function mapMawsAskMeta(meta: Record<string, unknown>, out: EventSink, at
     out.emit({ kind: 'maws.ask.cancelled', askId, toolUseId, reason: meta.reason }, attribution);
   }
 }
+
+// E4c start: what one browser call did, from its arguments (the action and its target) and its answer (the page, the
+// timing, the deliverable, the waits); null when the answer is a success that is not the tool's result.
+type BrowserAction = Omit<Extract<EventPayload, { kind: 'maws.browser.action' }>, 'kind' | 'toolUseId' | 'requestId'>;
+
+function browserActionOf(tool: BrowserToolName, rawArgs: unknown, json: unknown, error: string | null): BrowserAction | null {
+  const args = parseToolArguments(tool, rawArgs);
+  if (!args.ok) return null;
+  const call = browserCallOf(tool, args.data);
+  let result: BrowserResultFields | null = null;
+  if (error === null) {
+    const parsed = browserToolResultSchemaOf(tool).safeParse(json);
+    if (!parsed.success) return null;
+    result = parsed.data as BrowserResultFields;
+  }
+  return {
+    tool, action: call.action, tabId: result?.tabId ?? call.tabId, target: call.target,
+    url: result?.url ?? null, title: result?.title ?? null, ms: result?.ms ?? null, deliverableId: result?.deliverableId ?? null, error,
+    waitedFor: result?.waitedFor ?? null, waitedMs: result?.waitedMs ?? null,
+  };
+}
+
+// The fields of the six results the event reads (each result has some of them).
+interface BrowserResultFields {
+  tabId?: string | null;
+  url?: string | null;
+  title?: string | null;
+  ms?: number;
+  deliverableId?: string;
+  waitedFor?: BrowserWaitReason | null;
+  waitedMs?: number | null;
+}
+// E4c end
 
 function parseJson(text: string): unknown {
   try {

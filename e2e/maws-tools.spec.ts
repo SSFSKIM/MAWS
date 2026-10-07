@@ -584,6 +584,14 @@ test('the SDK MCP round trip: the app answers the engine’s handshake with the 
       ['artifact_update', { title: 'Update artifact', readOnlyHint: false, openWorldHint: false }],
       ['artifact_list', { title: 'List artifacts', readOnlyHint: true, openWorldHint: false }],
       ['artifact_screenshot', { title: 'Screenshot artifact', readOnlyHint: true, openWorldHint: false }],
+      // E4c start: the six browser tools, listed from the first `tools/list`; navigate, act and eval are not read-only (A-31)
+      ['browser_tabs', { title: 'Browser tabs', readOnlyHint: true, openWorldHint: false }],
+      ['browser_navigate', { title: 'Browser navigate', readOnlyHint: false, openWorldHint: false }],
+      ['browser_snapshot', { title: 'Browser snapshot', readOnlyHint: true, openWorldHint: false }],
+      ['browser_act', { title: 'Browser act', readOnlyHint: false, openWorldHint: false }],
+      ['browser_eval', { title: 'Browser eval', readOnlyHint: false, openWorldHint: false }],
+      ['browser_screenshot', { title: 'Browser screenshot', readOnlyHint: true, openWorldHint: false }],
+      // E4c end
     ]);
     const [echo] = mcpCalls(rows);
     expect(mcpResultOf(rows, echo!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true });

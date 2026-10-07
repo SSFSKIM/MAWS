@@ -8,6 +8,7 @@ import type { Pane } from '../maws/panes';
 import type { AskAnswer, AskQuestion, ShowPaneOpened } from '../maws/tools';
 // E1 end
 import type { MessageUuid } from './ids'; // E7
+import type { BrowserToolName } from '../maws/browser'; // E4c
 
 describe('session events are EventBase & EventPayload', () => {
   it('every event carries the base fields and a kind from EVENT_KINDS', () => {
@@ -65,4 +66,15 @@ describe('session events are EventBase & EventPayload', () => {
     expectTypeOf<Artifact['version']>().toEqualTypeOf<number>();
   });
   // E2 end
+
+  // E4c start
+  it('maws.browser.action carries the browser tool, the waits and the branded correlators', () => {
+    type Action = Extract<SessionEvent, { kind: 'maws.browser.action' }>;
+    expectTypeOf<Action['tool']>().toEqualTypeOf<BrowserToolName>();
+    expectTypeOf<Action['toolUseId']>().toEqualTypeOf<ToolUseId | null>();
+    expectTypeOf<Action['requestId']>().toEqualTypeOf<RequestId>();
+    expectTypeOf<Action['waitedFor']>().toEqualTypeOf<'human' | 'cover' | null>();
+    expectTypeOf<Action['ms']>().toEqualTypeOf<number | null>();
+  });
+  // E4c end
 });

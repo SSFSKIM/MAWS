@@ -29,6 +29,11 @@ import { isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandL
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome } from '@shared/engine/peer-envelope'; // E7
 import { parseListing } from './agent-listing'; // E7
 import { peerMessageCopy } from './copy'; // E7
+// E4c start
+import { BROWSER_TOOL_NAMES, browserCallOf, browserToolResultSchemaOf, type BrowserCallSummary, type BrowserToolName } from '@shared/maws/browser';
+import type { ContentBlock } from '@shared/graph/events';
+import { denialDisposition } from './classify';
+// E4c end
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -118,7 +123,7 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
+  row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
   || isPersistentMessage(row); // E7
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
@@ -205,7 +210,8 @@ type Item =
   | { kind: 'steer'; row: RowOf<'user'> } // a prompt folded into this turn: a persistent row at its delivery position (W1)
   | { kind: 'ask' | 'delivery'; toolUseId: ToolUseId } // E1: a `maws` call's row, filled once its result and events are seen
   | { kind: 'later'; row: () => Row } // E7: a message or listing row, filled once the turn's results and agents are known
-  | { kind: 'artifact'; toolUseId: ToolUseId }; // E2: as E1's, for an artifact call
+  | { kind: 'artifact'; toolUseId: ToolUseId } // E2: as E1's, for an artifact call
+  | { kind: 'browser_action'; toolUseId: ToolUseId }; // E4c: as E2's, for a browser tool call
 
 interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null; error: string | null /* E1: the engine's refusal */ }
@@ -249,6 +255,17 @@ interface ArtifactRecord {
   answered: boolean; // the call's result is in
 }
 // E2 end
+// E4c start: what a turn's events say about one browser tool call (its row): the call opens it, its result fills it,
+// `maws.browser.action` refines what it carries. The sources are kept as they arrived and read once at resolution, so
+// the order the result and the event came in does not matter; the disk path has the call and its result alone.
+interface BrowserActionRecord {
+  use: Event<'tool.use'>;
+  tool: BrowserToolName;
+  call: BrowserCallSummary;
+  result: Event<'tool.result'> | null;
+  event: Event<'maws.browser.action'> | null;
+}
+// E4c end
 
 const isAborted = (reason: string | null) => reason !== null && reason.startsWith('aborted');
 
@@ -279,6 +296,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const sideThreads = new Map<AppSessionId, RowOf<'side_thread'>>(); // E3
   const results = new Map<ToolUseId, Event<'tool.result'>>(); // E7: a SendMessage's or ListAgents' result, for its row
   const artifacts = new Map<ToolUseId, ArtifactRecord>(); // E2
+  const browserActions = new Map<ToolUseId, BrowserActionRecord>(); // E4c
   const retracted = new Set<string>();
   const superseded = new Set<string>();
   const byMarker = new Map<string, LiveBlock>();
@@ -431,6 +449,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (presentation === 'artifact') { // E2
           artifacts.set(event.toolUseId, artifactOfCall(event));
           items.push({ kind: 'artifact', toolUseId: event.toolUseId });
+        } else if (presentation === 'browser_action') { // E4c
+          browserActions.set(event.toolUseId, browserActionOfCall(event));
+          items.push({ kind: 'browser_action', toolUseId: event.toolUseId });
         } else {
           pendingRows.set(event.toolUseId, { kind: presentation, use: event, answers: null, outcome: null, feedback: null, requestId: null, error: null });
           items.push({ kind: 'request', toolUseId: event.toolUseId });
@@ -462,6 +483,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         results.set(event.toolUseId, event); // E7
         const artifact = artifacts.get(event.toolUseId); // E2
         if (artifact) resultOfArtifact(artifact, event);
+        const browserAction = browserActions.get(event.toolUseId); // E4c
+        if (browserAction) browserAction.result = event;
         break;
       }
       case 'tool.safeguard': {
@@ -639,6 +662,13 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       }
       // E2 end
+      // E4c start: the host's account of a browser tool call, routed here by its tool use (reduce.ts)
+      case 'maws.browser.action': {
+        const browserAction = event.toolUseId === null ? undefined : browserActions.get(event.toolUseId);
+        if (browserAction) browserAction.event = event;
+        break;
+      }
+      // E4c end
       default:
         break;
     }
@@ -683,6 +713,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'artifact': // E2
         resolved.push({ kind: 'row', row: artifactRow(artifacts.get(item.toolUseId)!, turn.id) });
         break;
+      case 'browser_action': // E4c
+        resolved.push({ kind: 'row', row: browserActionRow(browserActions.get(item.toolUseId)!, turn.id, context) });
+        break;
       case 'subagents': {
         if (item.group.refs.length === 0) break;
         for (const ref of item.group.refs) if (ref.toolUseId && agentIds.has(ref.toolUseId)) ref.agentId = agentIds.get(ref.toolUseId)!;
@@ -699,7 +732,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary. A hook,
   // a notice and what a plugin said (R1) are not the model's work: under MessageDisplay and Stop hooks every final text
   // is followed by hook events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
-  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */, 'agent_list' /* E7 */, 'artifact' /* E2 */]);
+  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */, 'agent_list' /* E7 */, 'artifact' /* E2 */, 'browser_action' /* E4c */]);
   const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin')));
   const lastWork = resolved.map(isWork).lastIndexOf(true);
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
@@ -1184,6 +1217,85 @@ function artifactRow(artifact: ArtifactRecord, turnId: TurnId): RowOf<'artifact'
   };
 }
 // E2 end
+
+// E4c start: the browser action row from its record (Design §10). The call names the action, tab and target (as the
+// normaliser's event does, from the same `browserCallOf`); the result's first JSON block, parsed with the tool's result
+// schema, fills the page, the time, the waits and what only the result carries (the element's role and name, a
+// snapshot's size and text, an eval's value, a listing's count); the event, when the journal has one, overrides the
+// fields it carries. A result the engine stopped (an interruption, a denial inside an aborted turn) reads cancelled, as
+// does a call whose turn closed with none; a refusal is an error with its text.
+const BROWSER_TOOL_OF_USE = new Map<string, BrowserToolName>(BROWSER_TOOL_NAMES.map((name) => [MAWS_TOOL_USE[name], name]));
+const ACT_VALUES = new Set(['select', 'press', 'check', 'scroll']); // a fill's value is what was typed: never kept
+
+function browserActionOfCall(use: Event<'tool.use'>): BrowserActionRecord {
+  const tool = BROWSER_TOOL_OF_USE.get(use.toolName)!; // presentationOf named it a browser tool
+  return { use, tool, call: browserCallOf(tool, use.input), result: null, event: null };
+}
+
+// The fields of the six results the row reads (each result has some of them).
+interface BrowserResultFields {
+  tabId?: string | null;
+  url?: string | null;
+  title?: string | null;
+  ms?: number;
+  deliverableId?: string;
+  waitedFor?: RowOf<'browser_action'>['waitedFor'];
+  waitedMs?: number | null;
+  target?: { role?: string; name?: string } | null;
+  chars?: number;
+  truncated?: boolean;
+  tabs?: unknown[];
+  value?: unknown;
+}
+
+// The text blocks after the first one that parses as a JSON object (a snapshot's text), null when there are none.
+function textAfterJson(content: string | ContentBlock[]): string | null {
+  if (typeof content === 'string') return null;
+  const texts = content.filter((block) => block.type === 'text').map((block) => str(block.text));
+  const first = texts.findIndex((text) => {
+    try {
+      const value: unknown = JSON.parse(text);
+      return typeof value === 'object' && value !== null && !Array.isArray(value);
+    } catch {
+      return false;
+    }
+  });
+  const after = first < 0 ? [] : texts.slice(first + 1);
+  return after.length === 0 ? null : after.join('\n');
+}
+
+function browserActionRow(rec: BrowserActionRecord, turnId: TurnId, context: TurnContext): RowOf<'browser_action'> {
+  const { use, tool, call, result, event } = rec;
+  const input = record(use.input);
+  const locator = record(input.target);
+  let parsed: BrowserResultFields | null = null;
+  let stopped = false;
+  let error: string | null = null;
+  if (result) {
+    if (result.denial !== null && denialDisposition(result.denial, context.terminalReason, context.closed).disposition === 'stopped') stopped = true;
+    else if (result.isError) error = toolErrorText(resultText(result.content));
+    else {
+      const read = browserToolResultSchemaOf(tool).safeParse(firstJsonBlock(result.content));
+      if (read.success) parsed = read.data as BrowserResultFields;
+    }
+  }
+  if (event?.error) error = event.error;
+  const value = parsed && tool === 'browser_eval' ? (typeof parsed.value === 'string' ? parsed.value : JSON.stringify(parsed.value ?? null, null, 2)) : null;
+  const state: RowOf<'browser_action'>['state'] = stopped ? 'cancelled' : error !== null ? 'error' : result ? 'done' : context.closed ? 'cancelled' : 'running';
+  return {
+    id: rowId.browserAction(use.toolUseId), turnId, at: use.at, kind: 'browser_action', toolUseId: use.toolUseId, tool, action: call.action,
+    tabId: event ? event.tabId : (parsed?.tabId ?? call.tabId), target: call.target,
+    targetRole: parsed?.target?.role ?? (typeof locator.role === 'string' ? locator.role : null),
+    targetName: parsed?.target?.name ?? (typeof locator.name === 'string' ? locator.name : null),
+    value: tool === 'browser_act' && ACT_VALUES.has(call.action) && typeof input.value === 'string' ? input.value : null,
+    url: event ? event.url : (parsed?.url ?? null), title: event ? event.title : (parsed?.title ?? null), ms: event ? event.ms : (parsed?.ms ?? null),
+    deliverableId: event ? event.deliverableId : (parsed?.deliverableId ?? null), error: stopped ? null : error,
+    waitedFor: event ? event.waitedFor : (parsed?.waitedFor ?? null), waitedMs: event ? event.waitedMs : (parsed?.waitedMs ?? null),
+    chars: parsed?.chars ?? null, truncated: parsed?.truncated ?? false, tabCount: parsed?.tabs?.length ?? null,
+    state, detail: tool === 'browser_snapshot' && parsed && result ? textAfterJson(result.content) : value, answered: result !== null,
+  };
+}
+// E4c end
 
 function slotRow(event: Event<'permission.requested' | 'question.requested' | 'plan.requested' | 'dialog.requested' | 'elicitation.requested'>, turnId: TurnId | null, toolUseId: ToolUseId | null): RowOf<'request_slot'> {
   const requestKind = event.kind.split('.')[0] as RowOf<'request_slot'>['requestKind'];
