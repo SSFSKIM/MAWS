@@ -67,9 +67,13 @@ describe('the Browser tool follows the agent', () => {
   });
 
   it('a pinned Browser tool counts as open', () => {
+    const { tool } = probeTool('terminal', { multiInstance: false });
+    registerPanelTool(tool);
     panelHost.addTool(browserTool.id, { appSessionId: A, pin: true, activate: false });
+    const terminal = panelHost.addTool('terminal', { appSessionId: A, activate: true });
     acting(A);
     expect(browserTabs(A).filter((t) => !t.pinned)).toHaveLength(0);
+    expect(panelOf(A)!.activeTabId).toBe(terminal); // neither added nor activated over the person's tab
   });
 
   it('a tool the person closed during the turn stays closed until the turn ends; the next turn opens it again', async () => {
@@ -81,6 +85,15 @@ describe('the Browser tool follows the agent', () => {
     busy(A, true);
     acting(A);
     expect(browserTabs(A)).toHaveLength(1);
+  });
+
+  it('an action outside any turn (the e2e seam) opens a tool that is absent, every time', async () => {
+    busy(A, false);
+    acting(A);
+    expect(browserTabs(A)).toHaveLength(1);
+    await panelHost.closeTab(browserTabs(A)[0]!.id);
+    acting(A);
+    expect(browserTabs(A)).toHaveLength(1); // no turn marked the session, so the close does not hold
   });
 
   it('a session the window does not show opens nothing, and its action does not use up the turn’s open', () => {

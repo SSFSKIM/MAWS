@@ -5,7 +5,7 @@
 // outlined and fading over 800 ms, the whole fading 1.5 s after the last message, and gone within a frame on `hide`. A
 // removed element is put back by the next message and on DOMContentLoaded. It never takes the pointer, sits at the top
 // z-index, and leaves `display` to the page's styles, so a screenshot's `maws-agent-cursor{display:none!important}`
-// hides it. It sends nothing.
+// hides it. It sends nothing (`CursorIpc` has no way to).
 //
 // The shadow root is closed, so the suite reads it by recording what `attachShadow` returns.
 import type { CSSStyleDeclaration, Document as HappyDocument, Element as HappyElement, ShadowRoot as HappyShadowRoot, Window as HappyWindow } from 'happy-dom';
@@ -56,10 +56,10 @@ afterEach(() => {
 });
 
 describe('the agent cursor', () => {
-  it('listens on the cursor channel, draws nothing before a message, and sends nothing', () => {
+  // That it sends nothing is the type's to enforce: `CursorIpc` offers `on` and `removeListener` alone.
+  it('listens on the cursor channel and draws nothing before a message', () => {
     expect(ipc.listeners.has(BROWSER_CURSOR_CHANNEL)).toBe(true);
     expect(hosts()).toHaveLength(0);
-    expect(Object.keys(ipc.ipc)).not.toContain('send');
   });
 
   it('a move appends one element under the root, in a closed shadow root, that never takes the pointer, at the top', () => {
