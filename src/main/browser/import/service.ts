@@ -130,6 +130,7 @@ interface Run {
   profileDir: string;
   staging: Staging;
   controller: AbortController;
+  phase: ImportPhase | null; // the last phase reported
 }
 
 type Progress = (phase: ImportPhase, done: number, total: number) => void;
@@ -159,9 +160,10 @@ export class BrowserImportService {
     this.now = deps.now ?? Date.now;
   }
 
-  // The run under way, for the e2e seam and for refusing a removal meanwhile.
-  running(): { importId: string; profileDir: string } | null {
-    return this.current && { importId: this.current.importId, profileDir: this.current.profileDir };
+  // The run under way and its last phase, for `browser.import.list` (a window reloaded mid-run), the e2e seam and for
+  // refusing a removal meanwhile.
+  running(): { importId: string; profileDir: string; phase: ImportPhase | null } | null {
+    return this.current && { importId: this.current.importId, profileDir: this.current.profileDir, phase: this.current.phase };
   }
 
   // Stages the two stores, counts them, lists the extensions in place; a standing inspection is discarded first. The
@@ -227,7 +229,7 @@ export class BrowserImportService {
     if (this.deps.profiles.get(profileDir) !== null) throw new ImportRefused('imported');
 
     this.inspection = null; // the run owns the staging now
-    const run: Run = { importId: randomUUID(), profileDir, staging: inspection.staging, controller: new AbortController() };
+    const run: Run = { importId: randomUUID(), profileDir, staging: inspection.staging, controller: new AbortController(), phase: null };
     this.current = run;
     const finished = this.run(run, inspection, categories, chosen);
     return { importId: run.importId, finished };
@@ -257,7 +259,7 @@ export class BrowserImportService {
     const { profile } = inspection.answer;
     const partition = profilePartition(profile.profileDir);
     const partitionFolder = join(this.deps.userData, 'browser', partitionDirName(partition));
-    const progress = this.progressFor(run.importId);
+    const progress = this.progressFor(run);
     const report: ImportReport = {
       profileDir: profile.profileDir,
       name: profile.name,
@@ -498,10 +500,12 @@ export class BrowserImportService {
     return 'unexpected';
   }
 
-  private progressFor(importId: string): Progress {
+  private progressFor(run: Run): Progress {
+    const { importId } = run;
     const throttled = progressThrottle((phase, done, total) => this.deps.emit('browser.import.progress', { importId, phase, done, total }), this.now);
     const started = new Set<ImportPhase>();
     return (phase, done, total) => {
+      run.phase = phase;
       throttled(phase, done, total);
       if (!started.has(phase) || done >= total) this.log({ kind: 'phase', importId, phase, done, total });
       started.add(phase);

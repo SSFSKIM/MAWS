@@ -507,7 +507,7 @@ describe('BrowserImportService', () => {
       const running = svc.start({ inspectionId: first.inspectionId, categories: ALL, extensionIds: [], allowUnverifiedExtensions: true });
       const second = await svc.inspect({ userDataDir: fixture.dir, profileDir: 'Profile 1' });
       expect(() => svc.start({ inspectionId: second.inspectionId, categories: ALL, extensionIds: [], allowUnverifiedExtensions: true })).toThrow(expect.objectContaining({ reason: 'running' }));
-      expect(svc.running()).toEqual({ importId: running.importId, profileDir: 'Default' });
+      await vi.waitFor(() => expect(svc.running()).toEqual({ importId: running.importId, profileDir: 'Default', phase: 'keychain' })); // the step a reloaded window reads
       svc.cancel(running.importId);
       expect((await running.finished).outcome).toBe('cancelled');
       await svc.discard(second.inspectionId);

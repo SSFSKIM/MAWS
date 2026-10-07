@@ -176,7 +176,16 @@ export const commands = {
   },
   'browser.import.cancel': { input: z.strictObject({ importId: ImportIdSchema }), output: z.void(), owner: 'main' },
   // `fileBroken`: this boot moved an unreadable profiles.json aside (Decision Log 35); the renderer raises one banner.
-  'browser.import.list': { input: z.void(), output: z.strictObject({ profiles: z.array(ImportedProfileSchema), fileBroken: z.boolean() }), owner: 'main' },
+  // `running`: the run under way and the last phase it reported, so a window reloaded mid-run shows it (Decision Log 41).
+  'browser.import.list': {
+    input: z.void(),
+    output: z.strictObject({
+      profiles: z.array(ImportedProfileSchema),
+      fileBroken: z.boolean(),
+      running: z.strictObject({ importId: ImportIdSchema, profileDir: ChromeProfileDirSchema, phase: ImportPhaseSchema.nullable() }).nullable(),
+    }),
+    owner: 'main',
+  },
   'browser.import.remove': {
     input: z.strictObject({ profileDir: ChromeProfileDirSchema }),
     output: z.strictObject({ removed: z.strictObject({ tabs: ImportCountSchema, historyRows: ImportCountSchema, extensions: ImportCountSchema }) }),

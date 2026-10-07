@@ -74,7 +74,7 @@ describe('pick', () => {
 
   it('an imported profile is shown with its date and cannot be chosen; the next one is preselected', async () => {
     const profiles = PROFILES_ANSWER.profiles.map((p) => (p.profileDir === 'Default' ? { ...p, imported: true } : p));
-    b.answers['browser.import.list'] = () => ({ profiles: [RECORD], fileBroken: false });
+    b.answers['browser.import.list'] = () => ({ profiles: [RECORD], fileBroken: false, running: null });
     renderSheet({ 'browser.import.profiles': () => ({ ...PROFILES_ANSWER, profiles }) });
     const person = (await within(sheet()).findByRole('radio', { name: /Person 1/ })) as HTMLInputElement;
     expect(person.disabled).toBe(true);
@@ -98,6 +98,21 @@ describe('pick', () => {
     renderSheet({ 'browser.import.profiles': () => ({ ...PROFILES_ANSWER, userDataDir: other, found: false, profiles: [] }) });
     await within(sheet()).findByText(`No Chrome folder at ${other}`);
     expect(button('Continue').disabled).toBe(true);
+  });
+
+  it('a failed Local State read and a refused folder are said in words, never an endless "Reading…"', async () => {
+    renderSheet({
+      'browser.import.profiles': () => {
+        throw new Error('the Chrome folder must be an absolute, normal path');
+      },
+      'browser.import.chooseUserData': () => {
+        throw new Error('the Chrome folder must be an absolute, normal path');
+      },
+    });
+    await within(sheet()).findByText("Couldn't list Chrome's profiles: the Chrome folder must be an absolute, normal path");
+    expect(within(sheet()).queryByText("Reading Chrome's profiles…")).toBeNull();
+    fireEvent.click(button('Choose another Chrome folder…'));
+    await within(sheet()).findByText("Couldn't use that folder: the Chrome folder must be an absolute, normal path");
   });
 
   it('shows the Chrome-running hint, never as a block', async () => {
@@ -164,6 +179,16 @@ describe('consent', () => {
     );
   });
 
+  it('a cookie store with no rows says so, without the Keychain sentence, and starts unchecked', async () => {
+    renderSheet({ 'browser.import.inspect': () => ({ ...INSPECTION, cookies: { rows: 0, partitioned: 0, storeVersion: 24 } }) });
+    await within(sheet()).findByRole('radio', { name: /Person 1/ });
+    fireEvent.click(button('Continue'));
+    await within(sheet()).findByText('No cookies in this profile.');
+    expect(sheet().textContent).not.toContain('Keychain');
+    expect(sheet().querySelector('[data-cookies-agents]')).toBeNull();
+    expect([box('Cookies').checked, box('Cookies').disabled]).toEqual([false, false]);
+  });
+
   it('a store the inspection could not read disables its row and says why in words', async () => {
     renderSheet({ 'browser.import.inspect': () => ({ ...INSPECTION, history: { error: 'SQLITE_NOTADB' }, cookies: { error: 'missing' } }) });
     await within(sheet()).findByRole('radio', { name: /Person 1/ });
@@ -226,6 +251,19 @@ describe('close', () => {
     expect(browserImport.getState().stage).toEqual({ kind: 'pick' });
   });
 
+  it('unmounting in consent (Settings closed) discards the inspection; unmounting in report discards nothing', async () => {
+    await toConsent();
+    cleanup();
+    expect(calls('browser.import.discard')).toEqual([{ inspectionId: INSPECTION_ID }]);
+    expect(browserImport.getState().stage).toEqual({ kind: 'pick' });
+    disconnect();
+    showReport(DONE);
+    renderSheet();
+    cleanup();
+    expect(calls('browser.import.discard')).toHaveLength(1);
+    expect(browserImport.getState().stage).toEqual({ kind: 'report', report: DONE });
+  });
+
   it('in report Escape and Done just close', async () => {
     showReport(DONE);
     const { onClose } = renderSheet();
@@ -273,6 +311,17 @@ describe('report', () => {
     expect(sheet().querySelector('[data-import-summary]')!.textContent).toBe('Before it stopped: 1,200 cookies, 2 history entries, 3 extensions · 3,912 skipped: 3,912 not imported (cancelled)');
     expect(within(sheet()).queryByText(/Loaded ·/)).toBeNull();
     expect(button('Close')).toBeTruthy();
+  });
+
+  it('a history write that failed in MAWS’s index is said about the index, not Chrome', () => {
+    showReport({ ...DONE, history: { ...DONE.history, imported: 2, error: 'ERR_SQLITE_ERROR' } });
+    renderSheet();
+    expect(within(sheet()).getByTitle('ERR_SQLITE_ERROR').textContent).toBe("MAWS couldn't write the history into its index; some history wasn't imported.");
+    cleanup();
+    disconnect();
+    showReport({ ...DONE, history: { ...DONE.history, imported: 0, error: 'indexUnavailable' } });
+    renderSheet();
+    expect(within(sheet()).getByTitle('indexUnavailable').textContent).toBe("MAWS's index is read-only right now, so history couldn't be imported.");
   });
 
   it('a failed run says why and that nothing was kept', () => {

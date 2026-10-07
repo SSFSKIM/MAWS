@@ -56,7 +56,7 @@ function Finished({ report }: { report: ImportReport }) {
       )}
       {history?.error != null && (
         <p title={history.error} className="m-0 text-ui-sm text-danger">
-          {IMPORT_COPY.storeError('History', history.error)}
+          {IMPORT_COPY.historyError(history.error)}
         </p>
       )}
       {cookies !== null && cookies.partitioned.imported > 0 && (
@@ -64,11 +64,11 @@ function Finished({ report }: { report: ImportReport }) {
       )}
       {cookies !== null &&
         COOKIE_SKIP_REASONS.map((reason) => (
-          <Sites key={`cookies-${reason}`} label={IMPORT_COPY.skippedSites('Cookies', IMPORT_COPY.cookieReasons[reason], cookies.skipped[reason])} hosts={cookies.hosts[reason]} />
+          <Sites key={`cookies-${reason}`} label={IMPORT_COPY.skippedSites('cookies', IMPORT_COPY.cookieReasons[reason], cookies.skipped[reason])} hosts={cookies.hosts[reason]} />
         ))}
       {history !== null &&
         HISTORY_SKIP_REASONS.map((reason) => (
-          <Sites key={`history-${reason}`} label={IMPORT_COPY.skippedSites('History', IMPORT_COPY.historyReasons[reason], history.skipped[reason])} hosts={history.hosts[reason]} />
+          <Sites key={`history-${reason}`} label={IMPORT_COPY.skippedSites('history', IMPORT_COPY.historyReasons[reason], history.skipped[reason])} hosts={history.hosts[reason]} />
         ))}
       {extensions !== null && extensions.length > 0 && (
         <section aria-label={IMPORT_COPY.extensionsHeading} className="mt-1 flex flex-col gap-1.5">

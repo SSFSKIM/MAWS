@@ -9,7 +9,7 @@ import { ipc } from '../../../ipc/client';
 import { useNotices } from '../../../stores/notices';
 import { useSettings } from '../../../stores/settings';
 import { CHROME, DONE, IMPORT_ID, importBridge, INSPECTION, OTHER_IMPORT_ID, RECORD, type ImportBridge } from '../../../test-support/browser-import';
-import { browserImport, cancel, connectBrowserImport, discard, inspect, openImport, PROFILES_FILE_BROKEN_BANNER, removeProfile, resetBrowserImport, start } from './store';
+import { browserImport, cancel, connectBrowserImport, discard, inspect, openImport, PROFILES_FILE_BROKEN_BANNER, removeProfile, resetBrowserImport, setExtension, showReport, start } from './store';
 
 let b: ImportBridge;
 let queries: QueryClient;
@@ -106,6 +106,47 @@ describe('progress', () => {
   });
 });
 
+describe('a window connecting mid-run (Decision Log 41)', () => {
+  it('adopts the run the list names, at its last phase, so Import shows the run rather than a refusal', async () => {
+    connect({ 'browser.import.list': () => ({ profiles: [], fileBroken: false, running: { importId: IMPORT_ID, profileDir: 'Default', phase: 'keychain' } }) });
+    await expect.poll(() => stage().kind).toBe('running');
+    expect(stage()).toEqual({ kind: 'running', importId: IMPORT_ID, name: null, progress: { phase: 'keychain', done: 0, total: 0 }, cancelling: false });
+    openImport();
+    expect(stage().kind).toBe('running');
+    b.emit('browser.import.progress', { importId: IMPORT_ID, phase: 'cookies', done: 2, total: 5 });
+    expect(stage()).toMatchObject({ progress: { phase: 'cookies', done: 2, total: 5 } });
+  });
+
+  it('a run the list names that this window already saw end, or a run already shown, is left as it is', async () => {
+    let answer!: () => void;
+    const invoke = b.bridge.invoke;
+    b.bridge.invoke = (async (name: string, input: unknown) => {
+      if (name === 'browser.import.list') await new Promise<void>((resolve) => (answer = resolve));
+      return invoke(name as never, input as never);
+    }) as MawsBridge['invoke'];
+    connect({ 'browser.import.list': () => ({ profiles: [], fileBroken: false, running: { importId: IMPORT_ID, profileDir: 'Default', phase: null } }) });
+    await expect.poll(() => typeof answer).toBe('function');
+    b.emit('browser.import.finished', { importId: IMPORT_ID, report: DONE });
+    answer();
+    await expect.poll(() => browserImport.getState().listed).toBe(true);
+    expect(stage()).toEqual({ kind: 'report', report: DONE });
+  });
+});
+
+describe('the toggles', () => {
+  it('a refused toggle is said in words naming the extension and what was asked', async () => {
+    connect({
+      'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false, running: null }),
+      'browser.import.setExtension': () => {
+        throw new Error('not an imported profile');
+      },
+    });
+    await expect.poll(() => browserImport.getState().records).toHaveLength(1);
+    expect(await setExtension('Default', RECORD.extensions[2]!.id, true)).toBeNull();
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(["Couldn't turn Probe Wallet on: not an imported profile"]);
+  });
+});
+
 describe('the sheet’s stages', () => {
   it('a refused start shows main’s sentence and discards the inspection it may have left standing', async () => {
     connect({
@@ -145,6 +186,14 @@ describe('the sheet’s stages', () => {
     expect(b.calls.filter((c) => c.name === 'browser.import.discard')).toHaveLength(2);
   });
 
+  it('Show report over a standing inspection discards it first', async () => {
+    connect();
+    await toConsent();
+    showReport(DONE);
+    expect(stage()).toEqual({ kind: 'report', report: DONE });
+    expect(b.calls.filter((c) => c.name === 'browser.import.discard')).toEqual([{ name: 'browser.import.discard', input: { inspectionId: INSPECTION.inspectionId } }]);
+  });
+
   it('opening the sheet again over a standing inspection discards it and starts at the picker', async () => {
     connect();
     await toConsent();
@@ -156,7 +205,7 @@ describe('the sheet’s stages', () => {
 
 describe('the records', () => {
   it('come from the list at connect, then from main’s changes, each change invalidating E4a’s profile list and the picker', async () => {
-    connect({ 'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false }) });
+    connect({ 'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false, running: null }) });
     await expect.poll(() => browserImport.getState().records).toEqual([RECORD]);
     queries.setQueryData(['maws', 'browser.profiles.list', undefined], { profiles: [] });
     queries.setQueryData(['maws', 'browser.import.profiles', { userDataDir: null }], { profiles: [] });
@@ -174,7 +223,7 @@ describe('the records', () => {
       if (name === 'browser.import.list') await new Promise<void>((resolve) => (answer = resolve));
       return invoke(name as never, input as never);
     }) as MawsBridge['invoke'];
-    connect({ 'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false }) });
+    connect({ 'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false, running: null }) });
     await expect.poll(() => typeof answer).toBe('function');
     b.emit('browser.import.changed', { profiles: [] });
     answer();
@@ -184,7 +233,7 @@ describe('the records', () => {
   });
 
   it('a records file this boot moved aside raises one app banner, with a fixed id', async () => {
-    connect({ 'browser.import.list': () => ({ profiles: [], fileBroken: true }) });
+    connect({ 'browser.import.list': () => ({ profiles: [], fileBroken: true, running: null }) });
     await expect.poll(() => useNotices.getState().notices.length).toBe(1);
     disconnect();
     connect(); // a second connection (a remount) replaces the same banner
@@ -196,7 +245,7 @@ describe('the records', () => {
   });
 
   it('removal writes browser.profile null only when it named the removed profile', async () => {
-    connect({ 'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false }), 'browser.import.remove': () => ({ removed: { tabs: 1, historyRows: 4, extensions: 3 } }) });
+    connect({ 'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false, running: null }), 'browser.import.remove': () => ({ removed: { tabs: 1, historyRows: 4, extensions: 3 } }) });
     await expect.poll(() => browserImport.getState().records).toHaveLength(1);
     await removeProfile('Profile 1');
     expect(b.sets).toEqual([]);

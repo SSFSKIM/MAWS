@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V11 } from '@shared/settings/defaults';
+import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { browserTab, T1, T2 } from '../test-support/browser';
 import { FAILS_ID, IMPORT_ID, importBridge, RECORD, WALLET_ID, type ImportBridge } from '../test-support/browser-import';
@@ -35,7 +36,7 @@ function renderBlock(answers: ImportBridge['answers'] = {}, profileSetting: stri
     </QueryClientProvider>,
   );
 }
-const withRecord = { 'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false }) };
+const withRecord = { 'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false, running: null }) };
 
 beforeEach(() => resetBrowserImport());
 afterEach(() => {
@@ -44,6 +45,7 @@ afterEach(() => {
   resetBrowserImport();
   browser.setState({ sessions: new Map() });
   useSettings.setState({ state: null });
+  useNotices.setState({ notices: [] });
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -55,6 +57,11 @@ describe('with no imported profile', () => {
     fireEvent.click(within(importRow).getByRole('button', { name: 'Import a Chrome profile…' }));
     expect(dialog().dataset.browserImport).toBe('pick');
     await within(dialog()).findByRole('radio', { name: /Person 1/ });
+  });
+
+  it('a window opened mid-run shows the run’s step from the list (Decision Log 41)', async () => {
+    renderBlock({ 'browser.import.list': () => ({ profiles: [], fileBroken: false, running: { importId: IMPORT_ID, profileDir: 'Default', phase: 'keychain' } }) });
+    await within(screen.getByRole('group', { name: 'Chrome profile' })).findByText('Import running · Waiting for the Keychain… choose Allow in the macOS dialog');
   });
 
   it('while a run goes on, says so with its step and Show reopens the running sheet', async () => {
@@ -102,6 +109,28 @@ describe('an imported profile', () => {
       { profileDir: 'Default', extensionId: FAILS_ID, enabled: false },
     ]);
     expect(b.sets).toEqual([]); // the toggles live in profiles.json, never in settings (Decision Log 1)
+  });
+
+  it('a toggle shows its pending state until main answers, and a refusal names the extension', async () => {
+    let answer!: () => void;
+    renderBlock(withRecord);
+    const invoke = b.bridge.invoke;
+    b.bridge.invoke = (async (name: string, input: unknown) => {
+      if (name === 'browser.import.setExtension') await new Promise<void>((resolve) => (answer = resolve));
+      return invoke(name as never, input as never);
+    }) as MawsBridge['invoke'];
+    b.answers['browser.import.setExtension'] = () => {
+      throw new Error('not an imported profile');
+    };
+    await screen.findByRole('region', { name: 'Person 1' });
+    fireEvent.click(within(row('Probe Wallet')).getByRole('radio', { name: 'On' }));
+    await within(row('Probe Wallet')).findByText('Turning on…');
+    expect(within(row('Probe Wallet')).getByRole('radiogroup').closest('[aria-busy]')!.getAttribute('aria-busy')).toBe('true');
+    fireEvent.click(within(row('Probe Wallet')).getByRole('radio', { name: 'Off' })); // ignored while pending
+    answer();
+    await within(row('Probe Wallet')).findByText('Off (wallet)');
+    expect(calls('browser.import.setExtension')).toHaveLength(1);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(["Couldn't turn Probe Wallet on: not an imported profile"]);
   });
 
   it('Show report reopens the sheet on the record’s report', async () => {

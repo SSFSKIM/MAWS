@@ -9,16 +9,25 @@ const count = (n: number): string => n.toLocaleString('en-US');
 const plural = (n: number, one: string, many = `${one}s`): string => `${count(n)} ${n === 1 ? one : many}`;
 export const importDate = (iso: string): string => new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
-// The Chrome stores the inspection stages, as the category rows and the report name them.
-type StoreName = 'History' | 'Cookies';
+// The categories' names, and the two Chrome stores the inspection stages as the rows and the report name them.
+const CATEGORIES = { history: 'History', cookies: 'Cookies', extensions: 'Extensions' } as const;
+type Store = 'history' | 'cookies';
 
-// A store the inspection or the run could not read, by main's code (`missing`, `symlink`, an errno, an SQLite code,
-// `indexUnavailable`): the code stays in the row's title; the words say what the owner can do (Codex's recovery line).
-function storeError(store: StoreName, code: string): string {
-  if (code === 'missing') return `This profile has no ${store} file.`;
-  if (code === 'symlink') return `${store} is a link in this profile, so MAWS didn't copy it.`;
-  if (code === 'indexUnavailable') return `MAWS's index is read-only right now, so ${store === 'History' ? 'history' : 'cookies'} couldn't be imported.`;
-  return `${store} couldn't be read from the copy. Chrome may have been writing it; quit Chrome and try again.`;
+// A Chrome store the inspection or the run could not read, by main's code (`missing`, `symlink`, an errno, an SQLite
+// code, `indexUnavailable`): the code stays in the row's title; the words say what the owner can do (Codex's recovery line).
+function storeError(store: Store, code: string): string {
+  const name = CATEGORIES[store];
+  if (code === 'missing') return `This profile has no ${name} file.`;
+  if (code === 'symlink') return `${name} is a link in this profile, so MAWS didn't copy it.`;
+  if (code === 'indexUnavailable') return `MAWS's index is read-only right now, so ${name.toLowerCase()} couldn't be imported.`;
+  return `${name} couldn't be read from the copy. Chrome may have been writing it; quit Chrome and try again.`;
+}
+
+// The report's history error. The run reads a copy the inspection already opened, so an error there (other than the
+// copy going missing or turning into a link) is MAWS's index refusing the write, not Chrome.
+function historyError(code: string): string {
+  if (code === 'missing' || code === 'symlink' || code === 'indexUnavailable') return storeError('history', code);
+  return "MAWS couldn't write the history into its index; some history wasn't imported.";
 }
 
 const PHASES: Record<ImportPhase, string> = {
@@ -63,7 +72,6 @@ export const IMPORT_COPY = {
   },
 
   // the picker
-  profilesLabel: 'Chrome profiles',
   chromeRunning: 'Quit Chrome for the most complete copy',
   notFound: (path: string) => `No Chrome folder at ${path}`,
   localStateUnreadable: "Chrome's Local State couldn't be read in this folder",
@@ -71,19 +79,23 @@ export const IMPORT_COPY = {
   chooseFolder: 'Choose another Chrome folder…',
   imported: (date: string | null) => (date === null ? 'Imported' : `Imported ${date}`),
   reading: "Reading Chrome's profiles…",
+  profilesFailed: (message: string) => `Couldn't list Chrome's profiles: ${message}`,
+  chooseFailed: (message: string) => `Couldn't use that folder: ${message}`,
   inspecting: 'Reading what this profile holds…',
   continue: 'Continue',
 
   // the consent
   history: (rows: number) => `${plural(rows, 'page')}. Read from a copy; needs no password. Shown in the address bar's suggestions.`,
   cookies: (rows: number, partitioned: number) =>
-    `${plural(rows, 'cookie')}${partitioned > 0 ? ` (${count(partitioned)} partitioned)` : ''}. macOS will ask once for Chrome's Safe Storage password from your login keychain; choose Allow. ` +
-    'MAWS reads it once, keeps it in memory only while the cookies are decrypted, and never writes it anywhere. Nothing is written back to Chrome.',
+    rows === 0
+      ? 'No cookies in this profile.'
+      : `${plural(rows, 'cookie')}${partitioned > 0 ? ` (${count(partitioned)} partitioned)` : ''}. macOS will ask once for Chrome's Safe Storage password from your login keychain; choose Allow. ` +
+        'MAWS reads it once, keeps it in memory only while the cookies are decrypted, and never writes it anywhere. Nothing is written back to Chrome.',
   cookiesAgents: (name: string) => `New browser tabs, including the ones agents open through MAWS's browser tools, will be signed in as ${name} wherever Chrome was.`,
   passwords: 'Saved passwords — a credential store comes later',
   extensions: (n: number) => (n === 0 ? 'No extensions in this profile.' : `${plural(n, 'extension')}. Copied into MAWS and loaded in this profile's tabs.`),
   storeError,
-  categories: { history: 'History', cookies: 'Cookies', passwords: 'Saved passwords', extensions: 'Extensions' },
+  categories: CATEGORIES,
   importExtension: (name: string) => `Import ${name}`,
   candidateError: (error: NonNullable<ExtensionCandidate['error']>) => CANDIDATE_ERRORS[error],
   walletChip: 'Wallet · off until you turn it on',
@@ -109,10 +121,11 @@ export const IMPORT_COPY = {
   failure: (code: string | null) => FAILURES[code ?? 'unexpected'] ?? FAILURES.unexpected!,
   partitionedLine: (set: number, verified: number) => `${plural(set, 'partitioned cookie')} set, ${count(verified)} confirmed in the partition`,
   keychainLine,
+  historyError,
   extensionsHeading: 'Extensions',
   extensionStatus,
   unsupportedHeading: "Permissions MAWS doesn't support",
-  skippedSites: (category: 'Cookies' | 'History', reason: string, n: number) => `${category} · ${reason} (${count(n)})`,
+  skippedSites: (store: Store, reason: string, n: number) => `${CATEGORIES[store]} · ${reason} (${count(n)})`,
   cookieReasons: {
     wrongKey: 'Could not be decrypted',
     corruptRow: 'Unreadable rows',
@@ -130,6 +143,10 @@ export const IMPORT_COPY = {
   // the broken records file (Decision Log 35)
   profilesFileBroken: "MAWS's list of imported Chrome profiles couldn't be read and was set aside; their cookies and history were removed. Import the profiles again from Settings › Browser.",
 
+  // Settings › Browser's extension toggles
+  toggling: (enabled: boolean) => (enabled ? 'Turning on…' : 'Turning off…'),
+  toggleFailed: (name: string, enabled: boolean, message: string) => `Couldn't turn ${name} ${enabled ? 'on' : 'off'}: ${message}`,
+
   // the removal (Design §12)
   removeTitle: (name: string) => `Remove ${name}?`,
   removeBody: (name: string, { history, extensions, tabs }: { history: number; extensions: number; tabs: number }) =>
@@ -145,7 +162,7 @@ export const IMPORT_COPY = {
 function keychainLine(cookies: NonNullable<ImportReport['cookies']>, outcome: ImportReport['outcome']): string | null {
   if (cookies.keychain === 'allowed') return null;
   if (cookies.keychain === 'skipped') {
-    if (cookies.error !== null) return storeError('Cookies', cookies.error);
+    if (cookies.error !== null) return storeError('cookies', cookies.error);
     return outcome === 'done' ? 'This profile has no cookies to import' : null;
   }
   return KEYCHAIN[cookies.keychain];

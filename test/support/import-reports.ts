@@ -19,7 +19,8 @@ export const PROBE_EXTENSION = {
 export const FAILS_EXTENSION = {
   id: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', chromeId: null, name: 'Fails', version: '1.0', enabled: true, wallet: false,
   unsupportedPermissions: ['contextMenus'],
-  status: 'loaded', error: null, background: 'failed', backgroundError: "Cannot read properties of undefined (reading 'onClicked')", checkedAt: AT,
+  // main's finished wording (`describeBackgroundError`, Decision Log 39), not the worker's raw text
+  status: 'loaded', error: null, background: 'failed', backgroundError: 'chrome.contextMenus.onClicked is not available in MAWS', checkedAt: AT,
 } satisfies ImportedExtension;
 
 export const WALLET_EXTENSION = {

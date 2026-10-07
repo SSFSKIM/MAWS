@@ -1278,10 +1278,14 @@ describe('ipc schema validates both directions', () => {
 
     it('validates the records, the removal and the toggle', () => {
       expect(validateCommandInput('browser.import.list', undefined).ok).toBe(true);
-      expect(validateCommandOutput('browser.import.list', { profiles: [record], fileBroken: false }).ok).toBe(true);
-      expect(validateCommandOutput('browser.import.list', { profiles: [], fileBroken: true }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.list', { profiles: [record], fileBroken: false, running: null }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.list', { profiles: [], fileBroken: true, running: null }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.list', { profiles: [], fileBroken: false, running: { importId: ID, profileDir: 'Default', phase: 'keychain' } }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.list', { profiles: [], fileBroken: false, running: { importId: ID, profileDir: 'Default', phase: null } }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.list', { profiles: [], fileBroken: false, running: { importId: ID, profileDir: 'Default', phase: 'paused' } }).ok).toBe(false);
+      expect(validateCommandOutput('browser.import.list', { profiles: [], fileBroken: false }).ok).toBe(false);
       expect(validateCommandOutput('browser.import.list', { profiles: [] }).ok).toBe(false);
-      expect(validateCommandOutput('browser.import.list', { profiles: [{ ...record, partition: 'persist:maws-browser' }], fileBroken: false }).ok).toBe(false);
+      expect(validateCommandOutput('browser.import.list', { profiles: [{ ...record, partition: 'persist:maws-browser' }], fileBroken: false, running: null }).ok).toBe(false);
       expect(validateCommandInput('browser.import.remove', { profileDir: 'Profile 1' }).ok).toBe(true);
       expect(validateCommandOutput('browser.import.remove', { removed: { tabs: 1, historyRows: 4, extensions: 3 } }).ok).toBe(true);
       expect(validateCommandOutput('browser.import.remove', { removed: { tabs: -1, historyRows: 4, extensions: 3 } }).ok).toBe(false);

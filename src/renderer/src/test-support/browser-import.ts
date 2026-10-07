@@ -59,9 +59,7 @@ export const INSPECTION: BrowserImportInspection = {
   ],
 };
 
-// The background error as main words it (Decision Log 39), not the worker's raw text.
-export const FAILS_WORDS = 'chrome.contextMenus.onClicked is not available in MAWS';
-export const DONE = { ...DONE_REPORT, extensions: DONE_REPORT.extensions.map((e) => (e.id === FAILS_ID ? { ...e, backgroundError: FAILS_WORDS } : e)) };
+export const DONE = DONE_REPORT;
 
 export const RECORD: ImportedProfile = {
   profileDir: 'Default',
@@ -83,7 +81,7 @@ export interface ImportBridge extends SettingsBridge {
 export function importBridge(initial: Settings = SETTINGS_DEFAULTS_V11): ImportBridge {
   const b = settingsBridge(initial);
   Object.assign(b.answers, {
-    'browser.import.list': () => ({ profiles: [], fileBroken: false }),
+    'browser.import.list': () => ({ profiles: [], fileBroken: false, running: null }),
     'browser.import.profiles': (input: { userDataDir: string | null }) => (input.userDataDir === null ? PROFILES_ANSWER : { ...PROFILES_ANSWER, userDataDir: input.userDataDir }),
     'browser.import.chooseUserData': () => ({ userDataDir: null }),
     'browser.import.inspect': () => INSPECTION,

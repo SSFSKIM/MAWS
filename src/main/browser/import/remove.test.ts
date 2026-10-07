@@ -133,7 +133,7 @@ describe('Remove imported profile (E4b Design §12)', () => {
 
   it('refuses a profile that is not imported, and any removal while an import runs, touching nothing', async () => {
     await expect(removeImportedProfile(deps, 'Profile 2')).rejects.toThrow(new ImportRefused('notImported'));
-    deps.importing = () => ({ importId: 'x', profileDir: 'Profile 2' });
+    deps.importing = () => ({ importId: 'x', profileDir: 'Profile 2', phase: 'extensions' });
     await expect(removeImportedProfile(deps, 'Default')).rejects.toThrow(new ImportRefused('running'));
     expect(steps).toEqual([]);
   });

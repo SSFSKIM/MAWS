@@ -20,7 +20,7 @@ import { ImportRefused, type BrowserImportService } from './service';
 export type ChooseDirectory = (sender: WebContents, options: OpenDialogOptions) => Promise<{ canceled: boolean; filePaths: string[] }>;
 
 export interface ImportHandlerDeps {
-  service: Pick<BrowserImportService, 'inspect' | 'discard' | 'start' | 'cancel'>;
+  service: Pick<BrowserImportService, 'inspect' | 'discard' | 'start' | 'cancel' | 'running'>;
   profiles: Pick<ImportedProfiles, 'list' | 'get' | 'fileBroken'>;
   extensions: Pick<ExtensionsLoader, 'setExtension'>;
   remove(profileDir: string): Promise<Removed>;
@@ -64,7 +64,7 @@ export function registerBrowserImportHandlers({ service, profiles, extensions, r
     return { importId };
   });
   handle('browser.import.cancel', ({ importId }) => service.cancel(importId));
-  handle('browser.import.list', () => ({ profiles: profiles.list(), fileBroken: profiles.fileBroken }));
+  handle('browser.import.list', () => ({ profiles: profiles.list(), fileBroken: profiles.fileBroken, running: service.running() }));
   handle('browser.import.remove', async ({ profileDir }) => {
     const removed = await remove(chromeProfile(profileDir));
     announce();

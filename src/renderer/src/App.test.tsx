@@ -131,7 +131,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       // E4a end
       // E4b start: the import store's records at connect (none imported)
       case 'browser.import.list':
-        return { profiles: [], fileBroken: false };
+        return { profiles: [], fileBroken: false, running: null };
       // E4b end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };

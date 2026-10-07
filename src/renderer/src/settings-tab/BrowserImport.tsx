@@ -21,8 +21,10 @@ import { openImport, setExtension, showReport, useBrowserImport } from '../tools
 import { BROWSER } from './copy';
 import { Segment, Setting, TEXT_ACTION } from './parts';
 
-const DANGER_ACTION =
-  'rounded-sm px-1.5 py-0.5 text-ui-sm whitespace-nowrap text-danger outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
+// TEXT_ACTION in the danger colour, at rest and on hover.
+const DANGER_ACTION = TEXT_ACTION.split(' ')
+  .map((name) => (name === 'text-fg-muted' ? 'text-danger' : name === 'hover:text-fg' ? 'hover:text-danger' : name))
+  .join(' ');
 
 export function BrowserImport() {
   const [sheet, setSheet] = useState(false);
@@ -72,17 +74,28 @@ export function BrowserImport() {
   );
 }
 
+// While main loads (and lets the background settle) or unloads the extension, the row says so and the toggle waits.
 function ExtensionToggle({ profileDir, extension }: { profileDir: string; extension: ImportedExtension }) {
+  const [pending, setPending] = useState<boolean | null>(null); // the value asked for, until main answers
+  const toggle = async (enabled: boolean) => {
+    if (pending !== null) return;
+    setPending(enabled);
+    await setExtension(profileDir, extension.id, enabled);
+    setPending(null);
+  };
   return (
     <Setting label={extension.name} note={extension.wallet ? BROWSER.walletOff : undefined}>
       <span className="text-fg-muted">{extension.version}</span>
-      <StatusChip extension={extension} />
-      <Segment
-        label={extension.name}
-        value={extension.enabled ? 'on' : 'off'}
-        options={BROWSER.toggles}
-        onChange={(next) => void setExtension(profileDir, extension.id, next === 'on')}
-      />
+      {pending === null ? (
+        <StatusChip extension={extension} />
+      ) : (
+        <span role="status" className="text-ui-sm text-fg-muted">
+          {IMPORT_COPY.toggling(pending)}
+        </span>
+      )}
+      <span aria-busy={pending !== null} className={`flex max-w-[260px] flex-1 ${pending === null ? '' : 'pointer-events-none opacity-60'}`}>
+        <Segment label={extension.name} value={(pending ?? extension.enabled) ? 'on' : 'off'} options={BROWSER.toggles} onChange={(next) => void toggle(next === 'on')} />
+      </span>
     </Setting>
   );
 }

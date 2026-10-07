@@ -16,7 +16,9 @@ const firstChoice = (profiles: ChromeProfile[]): string | null =>
 export function ProfilePicker() {
   const [folder, setFolder] = useState<string | null>(null); // null: Chrome's default folder
   const [chosen, setChosen] = useState<string | null>(null);
-  const answer = useCommand('browser.import.profiles', { userDataDir: folder }).data;
+  const [chooseError, setChooseError] = useState<string | null>(null);
+  const query = useCommand('browser.import.profiles', { userDataDir: folder });
+  const answer = query.data;
   const busy = useBrowserImport((s) => s.busy);
   const records = useBrowserImport((s) => s.records);
   const profiles = answer?.found ? answer.profiles : [];
@@ -27,6 +29,7 @@ export function ProfilePicker() {
   };
   const chooseFolder = async () => {
     const result = await ipc.invoke('browser.import.chooseUserData', undefined);
+    setChooseError(result.ok ? null : IMPORT_COPY.chooseFailed(result.error.message));
     if (result.ok && result.value.userDataDir !== null) {
       setFolder(result.value.userDataDir);
       setChosen(null);
@@ -46,9 +49,15 @@ export function ProfilePicker() {
       }
     >
       {answer === undefined ? (
-        <p role="status" className="m-0 text-ui-sm text-fg-muted">
-          {IMPORT_COPY.reading}
-        </p>
+        query.error ? (
+          <p role="alert" className="m-0 text-ui-sm text-danger">
+            {IMPORT_COPY.profilesFailed(query.error.message)}
+          </p>
+        ) : (
+          <p role="status" className="m-0 text-ui-sm text-fg-muted">
+            {IMPORT_COPY.reading}
+          </p>
+        )
       ) : !answer.found ? (
         <p role="alert" className="m-0 text-ui-sm break-all text-fg-muted">
           {IMPORT_COPY.notFound(answer.userDataDir)}
@@ -87,6 +96,11 @@ export function ProfilePicker() {
         </fieldset>
       )}
       {answer?.chromeRunning && <p className="m-0 text-ui-sm text-fg-muted">{IMPORT_COPY.chromeRunning}</p>}
+      {chooseError && (
+        <p role="alert" className="m-0 text-ui-sm text-danger">
+          {chooseError}
+        </p>
+      )}
       {busy && (
         <p role="status" className="m-0 text-ui-sm text-fg-muted">
           {IMPORT_COPY.inspecting}

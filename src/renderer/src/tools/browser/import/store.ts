@@ -5,7 +5,8 @@
 //
 // - `stage`: the sheet's state, pick → consent (the standing inspection) → running (the run's id and latest progress) →
 //   report, or failed (main refused or could not answer). A run started in another window, or before a reload, is
-//   adopted from its first progress event; progress and the end of any other run are ignored.
+//   adopted from `browser.import.list`'s `running` at connect (Decision Log 41) or from its next progress event;
+//   progress and the end of any other run are ignored.
 // - `records`: the imported profiles, from `browser.import.list` once and `browser.import.changed` after; each change
 //   invalidates E4a's `browser.profiles.list` so the partition pill and the profile select follow.
 //
@@ -73,8 +74,7 @@ export function connectBrowserImport(client: MawsBridge = ipc, queries: QueryCli
         if (current.importId === importId) set({ stage: { ...current, progress } });
         return;
       }
-      if (current.kind === 'consent' && !browserImport.getState().busy) return; // this window is mid-consent: someone else's run
-      set({ stage: { kind: 'running', importId, name: null, progress, cancelling: false } }); // a run this window did not start (or forgot in a reload)
+      adopt(importId, progress);
     }),
     client.on('browser.import.finished', ({ importId, report }) => {
       if (ended.has(importId)) return;
@@ -101,7 +101,16 @@ async function list(client: MawsBridge): Promise<void> {
     return;
   }
   if (!browserImport.getState().listed) set({ records: result.value.profiles, listed: true }); // a change that landed first is newer
+  const { running } = result.value;
+  if (running && !ended.has(running.importId) && stage().kind !== 'running') adopt(running.importId, running.phase && { phase: running.phase, done: 0, total: 0 });
   if (result.value.fileBroken) banner({ id: PROFILES_FILE_BROKEN_BANNER, level: 'warning', text: IMPORT_COPY.profilesFileBroken, actions: [], dismissible: true });
+}
+
+// A run this window did not start, or forgot in a reload, shown under no name (main's events carry none). A window
+// mid-consent with no start of its own in flight leaves it alone: that run is someone else's.
+function adopt(importId: string, progress: ImportProgress | null): void {
+  if (stage().kind === 'consent' && !browserImport.getState().busy) return;
+  set({ stage: { kind: 'running', importId, name: null, progress, cancelling: false } });
 }
 
 // ---- the sheet's actions ---------------------------------------------------------------------------------------------
@@ -113,9 +122,11 @@ export function openImport(client: MawsBridge = ipc): void {
   set({ stage: { kind: 'pick' } });
 }
 
-// "Show report": a record's report, unless a run is showing.
-export function showReport(report: ImportReport): void {
-  if (stage().kind !== 'running') set({ stage: { kind: 'report', report } });
+// "Show report": a record's report, unless a run is showing; a standing inspection is discarded first.
+export function showReport(report: ImportReport, client: MawsBridge = ipc): void {
+  if (stage().kind === 'running') return;
+  discard(client);
+  set({ stage: { kind: 'report', report } });
 }
 
 // Each inspect takes a ticket; a close (`discard`) while it is out voids it, so its answer is discarded on arrival.
@@ -181,7 +192,8 @@ export function cancel(client: MawsBridge = ipc): void {
 export async function setExtension(profileDir: string, extensionId: string, enabled: boolean, client: MawsBridge = ipc): Promise<ImportedExtension | null> {
   const result = await client.invoke('browser.import.setExtension', { profileDir, extensionId, enabled });
   if (!result.ok) {
-    toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true });
+    const name = browserImport.getState().records.find((r) => r.profileDir === profileDir)?.extensions.find((e) => e.id === extensionId)?.name ?? extensionId;
+    toast({ level: 'warning', text: IMPORT_COPY.toggleFailed(name, enabled, result.error.message), actions: [], dismissible: true });
     return null;
   }
   const { extension } = result.value;

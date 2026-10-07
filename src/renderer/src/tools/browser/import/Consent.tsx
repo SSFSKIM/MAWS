@@ -20,7 +20,7 @@ export function Consent({ inspection }: { inspection: BrowserImportInspection })
   const { profile, history, cookies, extensions, chromeRunning } = inspection;
   const busy = useBrowserImport((s) => s.busy);
   const [historyOn, setHistory] = useState('rows' in history);
-  const [cookiesOn, setCookies] = useState('rows' in cookies);
+  const [cookiesOn, setCookies] = useState('rows' in cookies && cookies.rows > 0); // nothing to decrypt: no Keychain to ask
   const [extensionsOn, setExtensions] = useState(extensions.some(importable));
   const [chosen, setChosen] = useState(() => new Set(extensions.filter(checkedByDefault).map((e) => e.id)));
   const [acknowledged, setAcknowledged] = useState(false);
@@ -62,18 +62,20 @@ export function Consent({ inspection }: { inspection: BrowserImportInspection })
         {chromeRunning && <p className="m-0 text-ui-sm text-fg-muted">{IMPORT_COPY.chromeRunning}</p>}
 
         <Category name={IMPORT_COPY.categories.history} checked={historyOn} onChange={setHistory} disabled={!('rows' in history)} data-category="history">
-          {'rows' in history ? IMPORT_COPY.history(history.rows) : <StoreError store="History" code={history.error} />}
+          {'rows' in history ? IMPORT_COPY.history(history.rows) : <StoreError store="history" code={history.error} />}
         </Category>
         <Category name={IMPORT_COPY.categories.cookies} checked={cookiesOn} onChange={setCookies} disabled={!('rows' in cookies)} data-category="cookies">
           {'rows' in cookies ? (
             <>
               <span>{IMPORT_COPY.cookies(cookies.rows, cookies.partitioned)}</span>
-              <span data-cookies-agents className="text-fg">
-                {IMPORT_COPY.cookiesAgents(profile.name)}
-              </span>
+              {cookies.rows > 0 && (
+                <span data-cookies-agents className="text-fg">
+                  {IMPORT_COPY.cookiesAgents(profile.name)}
+                </span>
+              )}
             </>
           ) : (
-            <StoreError store="Cookies" code={cookies.error} />
+            <StoreError store="cookies" code={cookies.error} />
           )}
         </Category>
         <Category name={IMPORT_COPY.passwords} checked={false} onChange={() => {}} disabled data-category="passwords" />
@@ -145,7 +147,7 @@ function Category({
   );
 }
 
-function StoreError({ store, code }: { store: 'History' | 'Cookies'; code: string }) {
+function StoreError({ store, code }: { store: 'history' | 'cookies'; code: string }) {
   return (
     <span role="alert" title={code} className="text-danger">
       {IMPORT_COPY.storeError(store, code)}

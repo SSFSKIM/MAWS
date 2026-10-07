@@ -33,6 +33,7 @@ function setup(env: NodeJS.ProcessEnv = { MAWS_E2E: '1', MAWS_E2E_CHROME_USER_DA
     discard: vi.fn(async () => {}),
     start: vi.fn(() => ({ importId: IMPORT_ID, finished: new Promise(() => {}) })),
     cancel: vi.fn(),
+    running: vi.fn((): { importId: string; profileDir: string; phase: string | null } | null => null),
   };
   const record = { profileDir: 'Default', name: 'Person 1' };
   const profiles = { list: vi.fn(() => [record]), get: vi.fn((dir: string) => (dir === 'Default' ? record : null)), fileBroken: false };
@@ -133,7 +134,13 @@ describe('browser.import.* handlers (E4b Interfaces "IPC"; Design §2, §15)', (
     expect(await call('browser.import.start', { inspectionId: INSPECTION_ID, categories: { history: true, cookies: false, extensions: false }, extensionIds: [], allowUnverifiedExtensions: false })).toEqual({
       importId: IMPORT_ID,
     });
-    expect(await call('browser.import.list')).toEqual({ profiles: [{ profileDir: 'Default', name: 'Person 1' }], fileBroken: false });
+    expect(await call('browser.import.list')).toEqual({ profiles: [{ profileDir: 'Default', name: 'Person 1' }], fileBroken: false, running: null });
+  });
+
+  it('list answers the run under way, so a window reloaded mid-run shows it (Decision Log 41)', async () => {
+    const { call, service } = setup();
+    service.running.mockReturnValue({ importId: IMPORT_ID, profileDir: 'Default', phase: 'keychain' });
+    expect(await call('browser.import.list')).toMatchObject({ running: { importId: IMPORT_ID, profileDir: 'Default', phase: 'keychain' } });
   });
 
   it('remove and setExtension answer, then announce the records', async () => {
