@@ -375,6 +375,8 @@ Read at `fad4d8c7` (master `32c2b016` plus the pre-flight commit; E4a merged at 
 
 Seams found absent, each added later in an E4d block: `locator.ts`'s `BrowserLocatorSchema` (Task 1.1); a `control` setter reachable by the e2e and the commented tab's `webContentsId` (E4d's seam, Task 2.2); the E4d hook in `startBrowser`'s `stop` (Task 2.2); a binary write for the crop (`writeCrop`'s own exclusive write, Task 2.3); an E4d shot helper (Task 4.1). The by-id tab lookup, the owner's `windowId`, main-side access to the tab map and the `control` tap were assumed absent and are present under the landed names above.
 
+Merges of master into the branch: `b26ee6f5` (master `61708e17`, 2026-10-07, M1); `cbd5892b` (master `5c761cba`, 2026-10-07, after the whole-branch review: E4a's corrective, `registerBrowserPreload(ses)` once per partition session, `tabWebPreferences` without a preload; e2e case "7b (adopted)" deleted and 7c's `test.fail` removed in the same commit; `electron.vite.config.ts`'s empty-chunk filter gone with it, so the tracker row for it was dropped).
+
 ## Decision Log
 
 1. **Comment mode's state lives in main, mirrored by `browser.comment.changed`, not as a `BrowserTab` field.** A field on E4a's model would need defaults in every constructor of a tab (`open`, `adoptChild`, the restore from `tabs.json`) and a touch inside E4a's `update` path, while the state is only the toggle's and the gate's; one event and a small renderer store keep E4a's model and `tabs.json` untouched. Alternative: `BrowserTab.commenting`, which would also make the chrome's store the source; rejected for the merge cost alone.
