@@ -1,0 +1,427 @@
+import { EventEmitter } from 'node:events';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import type { Session } from 'electron';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ImportedExtension } from '@shared/browser/import';
+import { partitionDirName, type ImportedProfile } from '@shared/browser/profiles';
+import { profilePartition } from '@shared/browser/tab';
+import { buildChromeUserData, type ChromeUserData } from '../../../../test/support/chrome-profile';
+import { inspectExtensions, type InspectedExtension } from './chrome/extensions';
+import { describeBackgroundError, ExtensionsLoader, holdFirstLoad, SETTLE_MS } from './extensions-loader';
+import type { ChosenExtension } from './service';
+
+// How the fake session's loaded extension behaves, by Chrome's directory id.
+interface Behaviour {
+  background?: 'running' | 'error' | 'stopped' | 'silent';
+  throws?: string;
+  id?: string; // Electron's id when it differs from the directory's
+  path?: string; // where Electron says it loaded from
+}
+
+const WORKER_ERROR = "Uncaught TypeError: Cannot read properties of undefined (reading 'onClicked')";
+
+function fakeSession(behaviours: Record<string, Behaviour> = {}) {
+  const loaded = new Map<string, Electron.Extension>();
+  const running: Record<number, Electron.ServiceWorkerInfo> = {};
+  const versions = new Map<number, string>();
+  let nextVersion = 1;
+  const workers = Object.assign(new EventEmitter(), {
+    getAllRunning: () => ({ ...running }),
+    getInfoFromVersionID: (versionId: number) => {
+      const scope = versions.get(versionId);
+      if (!scope) throw new Error('no such version');
+      return { scope, scriptUrl: `${scope}sw.js`, renderProcessId: 1, versionId };
+    },
+  });
+  const extensions = {
+    loadExtension: vi.fn<(dir: string, options?: Electron.LoadExtensionOptions) => Promise<Electron.Extension>>(async (dir) => {
+      const behaviour = behaviours[basename(dir)] ?? {};
+      if (behaviour.throws) throw new Error(behaviour.throws);
+      const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Record<string, unknown>;
+      const id = behaviour.id ?? basename(dir);
+      const url = `chrome-extension://${id}/`;
+      const extension = { id, manifest, name: String(manifest.name), path: behaviour.path ?? dir, url, version: String(manifest.version) } as Electron.Extension;
+      loaded.set(id, extension);
+      const versionId = nextVersion++;
+      versions.set(versionId, url);
+      if (behaviour.background === 'running') running[versionId] = { scope: url, scriptUrl: `${url}sw.js`, renderProcessId: 1, versionId };
+      if (behaviour.background === 'error') workers.emit('console-message', {}, { message: WORKER_ERROR, versionId, source: 'javascript', level: 3, sourceUrl: `${url}sw.js`, lineNumber: 1 });
+      if (behaviour.background === 'stopped') {
+        workers.emit('running-status-changed', { versionId, runningStatus: 'starting' });
+        versions.delete(versionId); // a stopped version is no longer known by id: the loader keeps what it learnt at the start
+        workers.emit('running-status-changed', { versionId, runningStatus: 'stopped' });
+      }
+      return extension;
+    }),
+    removeExtension: vi.fn((id: string) => {
+      loaded.delete(id);
+      for (const [versionId, info] of Object.entries(running)) if (info.scope.startsWith(`chrome-extension://${id}/`)) delete running[Number(versionId)];
+    }),
+    getExtension: (id: string) => loaded.get(id) ?? null,
+    getAllExtensions: () => [...loaded.values()],
+  };
+  const ses = { extensions, serviceWorkers: workers };
+  return Object.assign(ses as unknown as Session, { fake: { loaded, extensions, workers } });
+}
+
+function memoryProfiles(records: ImportedProfile[] = []) {
+  const store = {
+    records,
+    list: () => [...store.records],
+    get: (profileDir: string) => store.records.find((record) => record.profileDir === profileDir) ?? null,
+    put: vi.fn(async (record: ImportedProfile) => {
+      const at = store.records.findIndex((candidate) => candidate.profileDir === record.profileDir);
+      store.records = at === -1 ? [...store.records, record] : store.records.map((candidate, i) => (i === at ? record : candidate));
+    }),
+  };
+  return store;
+}
+
+const PARTITION = profilePartition('Default');
+let root: string;
+let fixture: ChromeUserData;
+let inspected: InspectedExtension[];
+
+beforeAll(async () => {
+  root = mkdtempSync(join(tmpdir(), 'maws-e4b-extensions-'));
+  fixture = buildChromeUserData(join(root, 'Chrome'));
+  inspected = await inspectExtensions(fixture.profiles.Default.dir);
+});
+afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+describe('the extensions loader (E4b Design §9, Decision Log 4, 19, 20)', () => {
+  let userData: string;
+  let partitionFolder: string;
+  let stagingDir: string;
+  let wait: ReturnType<typeof vi.fn<(ms: number, signal?: AbortSignal) => Promise<void>>>;
+
+  const chosen = (...names: (keyof ChromeUserData['extensions'])[]): ChosenExtension[] =>
+    names.map((name) => {
+      const found = inspected.find((extension) => extension.candidate.id === fixture.extensions[name].id)!;
+      return { candidate: found.candidate, versionDir: found.versionDir! };
+    });
+  const loader = (profiles = memoryProfiles(), extra: { changed?: () => void } = {}) =>
+    new ExtensionsLoader({ userData, profiles, env: {}, wait, now: () => Date.parse('2026-10-07T00:00:00Z'), ...extra });
+  const run = (target: ExtensionsLoader, ses: Session, extensions: ChosenExtension[], signal = new AbortController().signal) =>
+    target.importExtensions({ ses, partition: PARTITION, partitionFolder, stagingDir, extensions, signal, progress: () => {} });
+
+  beforeEach(() => {
+    userData = mkdtempSync(join(root, 'userData-'));
+    partitionFolder = join(userData, 'browser', partitionDirName(PARTITION));
+    stagingDir = join(userData, 'browser', 'import', 'run');
+    mkdirSync(stagingDir, { recursive: true });
+    wait = vi.fn(async () => {});
+  });
+
+  describe('the import phase', () => {
+    it('copies each extension to staging, renames it into the partition folder, then loads the enabled ones from there', async () => {
+      const { probe, fails, wallet } = fixture.extensions;
+      const ses = fakeSession({ [probe.id]: { background: 'running' }, [fails.id]: { background: 'error' } });
+      const records = await run(loader(), ses, chosen('probe', 'fails', 'wallet'));
+
+      for (const { id } of [probe, fails, wallet]) expect(existsSync(join(partitionFolder, 'extensions', id, 'manifest.json'))).toBe(true);
+      expect(readdirSync(join(stagingDir, 'extensions'))).toEqual([]); // renamed, not copied twice
+      expect(ses.fake.extensions.loadExtension.mock.calls).toEqual([
+        [join(partitionFolder, 'extensions', probe.id), { allowFileAccess: false }],
+        [join(partitionFolder, 'extensions', fails.id), { allowFileAccess: false }],
+      ]);
+      expect(wait).toHaveBeenCalledExactlyOnceWith(SETTLE_MS, expect.any(AbortSignal)); // one settle for every load
+      const byId = Object.fromEntries(records.map((record) => [record.id, record]));
+      expect(byId[probe.id]).toMatchObject({ status: 'loaded', enabled: true, background: 'running', backgroundError: null, error: null, chromeId: null, checkedAt: '2026-10-07T00:00:00.000Z' });
+      expect(byId[fails.id]).toMatchObject({ status: 'loaded', background: 'failed', backgroundError: 'chrome.contextMenus.onClicked is not available in MAWS' });
+      expect(byId[wallet.id]).toMatchObject({ status: 'off', enabled: false, wallet: true, background: 'none', backgroundError: null });
+    });
+
+    it('reads no background for a manifest without one, and a stopped one for a worker neither running nor failing', async () => {
+      const { probe, disabled } = fixture.extensions;
+      const ses = fakeSession({ [probe.id]: { background: 'silent' } });
+      const records = await run(loader(), ses, chosen('probe', 'disabled'));
+      expect(records.find((record) => record.id === disabled.id)).toMatchObject({ status: 'loaded', background: 'none' });
+      expect(records.find((record) => record.id === probe.id)).toMatchObject({ status: 'loaded', background: 'stopped', backgroundError: null });
+    });
+
+    it('reads a worker that stopped within the settle as failed, with no error text', async () => {
+      const { probe } = fixture.extensions;
+      const records = await run(loader(), fakeSession({ [probe.id]: { background: 'stopped' } }), chosen('probe'));
+      expect(records[0]).toMatchObject({ background: 'failed', backgroundError: null });
+    });
+
+    it('a load that throws is loadFailed with its first line; the others still load', async () => {
+      const { probe, fails } = fixture.extensions;
+      const ses = fakeSession({ [probe.id]: { throws: 'Manifest file is missing or unreadable\nat /somewhere' }, [fails.id]: { background: 'running' } });
+      const records = await run(loader(), ses, chosen('probe', 'fails'));
+      expect(records[0]).toMatchObject({ id: probe.id, status: 'loadFailed', error: 'Manifest file is missing or unreadable', background: 'none' });
+      expect(records[1]).toMatchObject({ id: fails.id, status: 'loaded', background: 'running' });
+    });
+
+    it('refuses an extension Electron says it loaded from outside the partition folder, and unloads it', async () => {
+      const { probe } = fixture.extensions;
+      const ses = fakeSession({ [probe.id]: { path: join(root, 'elsewhere'), background: 'running' } });
+      const records = await run(loader(), ses, chosen('probe'));
+      expect(records[0]).toMatchObject({ status: 'loadFailed', error: 'pathOutsideProfile', background: 'none' });
+      expect(ses.fake.extensions.removeExtension).toHaveBeenCalledWith(probe.id);
+    });
+
+    it('keeps Electron\'s id and Chrome\'s directory id beside it when they differ', async () => {
+      const { probe } = fixture.extensions;
+      const electronId = 'a'.repeat(32);
+      const records = await run(loader(), fakeSession({ [probe.id]: { id: electronId, background: 'running' } }), chosen('probe'));
+      expect(records[0]).toMatchObject({ id: electronId, chromeId: probe.id, status: 'loaded', background: 'running' });
+    });
+
+    it('a tree that cannot be copied is copyFailed with its code, never loaded; the others continue', async () => {
+      const [probe, fails] = chosen('probe', 'fails');
+      const copy = join(root, `symlinked-${basename(userData)}`);
+      mkdirSync(copy);
+      for (const name of readdirSync(probe!.versionDir)) symlinkSync(join(probe!.versionDir, name), join(copy, name)); // appeared after the inspection
+      const ses = fakeSession({ [fails!.candidate.id]: { background: 'running' } });
+      const records = await run(loader(), ses, [{ ...probe!, versionDir: copy }, fails!]);
+      expect(records[0]).toMatchObject({ id: probe!.candidate.id, status: 'copyFailed', error: 'symlink', background: 'none' });
+      expect(records[1]).toMatchObject({ status: 'loaded' });
+      expect(ses.fake.extensions.loadExtension).toHaveBeenCalledTimes(1);
+      expect(existsSync(join(partitionFolder, 'extensions', probe!.candidate.id))).toBe(false);
+    });
+
+    it('replaces a stale folder a crashed run left in the partition folder', async () => {
+      const { probe } = fixture.extensions;
+      mkdirSync(join(partitionFolder, 'extensions', probe.id, 'stale'), { recursive: true });
+      await run(loader(), fakeSession(), chosen('probe'));
+      expect(existsSync(join(partitionFolder, 'extensions', probe.id, 'stale'))).toBe(false);
+      expect(existsSync(join(partitionFolder, 'extensions', probe.id, 'manifest.json'))).toBe(true);
+    });
+
+    it('on abort resolves with what it reached, removes nothing and skips the settle', async () => {
+      const controller = new AbortController();
+      const ses = fakeSession();
+      const target = loader();
+      const records = await target.importExtensions({
+        ses,
+        partition: PARTITION,
+        partitionFolder,
+        stagingDir,
+        extensions: chosen('wallet', 'probe', 'fails'),
+        signal: controller.signal,
+        progress: (done) => {
+          if (done === 1) controller.abort(); // the cancel lands once the first extension is in place
+        },
+      });
+      expect(records.map((record) => record.id)).toEqual([fixture.extensions.wallet.id]);
+      expect(ses.fake.extensions.loadExtension).not.toHaveBeenCalled();
+      expect(ses.fake.extensions.removeExtension).not.toHaveBeenCalled();
+      expect(wait).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the namespace-naming rule (Decision Log 19)', () => {
+    it('names the namespace only when exactly one permission is unsupported', () => {
+      expect(describeBackgroundError(WORKER_ERROR, ['contextMenus'])).toBe('chrome.contextMenus.onClicked is not available in MAWS');
+      expect(describeBackgroundError(WORKER_ERROR, ['contextMenus', 'cookies'])).toBe('onClicked of an unavailable chrome API');
+      expect(describeBackgroundError(WORKER_ERROR, [])).toBe('onClicked of an unavailable chrome API');
+    });
+
+    it('keeps any other error as its redacted first line', () => {
+      expect(describeBackgroundError('Uncaught Error: fetch https://secret.example.test/a?b=1 failed\nstack', [])).toBe('Uncaught Error: fetch secret.example.test failed');
+    });
+  });
+
+  describe('per boot (Decision Log 32)', () => {
+    const record = (extensions: ImportedExtension[]): ImportedProfile => ({
+      profileDir: 'Default',
+      name: 'Person 1',
+      partition: PARTITION,
+      importedAt: '2026-10-06T00:00:00.000Z',
+      storageDirName: 'maws-chrome-default',
+      userDataDir: fixture.dir,
+      extensions,
+      report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: [] },
+    });
+    // An import of probe, fails and wallet, as the import phase leaves it.
+    async function imported(behaviours: Record<string, Behaviour> = {}) {
+      const records = await run(loader(), fakeSession(behaviours), chosen('probe', 'fails', 'wallet'));
+      wait.mockClear();
+      return record(records);
+    }
+
+    it('loads the enabled extensions of the prepared partition\'s record, writes their statuses back and announces it', async () => {
+      const { probe, fails, wallet } = fixture.extensions;
+      const profiles = memoryProfiles([await imported()]);
+      const changed = vi.fn();
+      const target = loader(profiles, { changed });
+      const ses = fakeSession({ [probe.id]: { background: 'running' }, [fails.id]: { background: 'error' } });
+
+      target.onPartitionPrepared(ses, PARTITION);
+      expect(target.loading(PARTITION)).not.toBeNull();
+      await target.idle(PARTITION);
+
+      expect(ses.fake.extensions.loadExtension.mock.calls.map(([dir]) => basename(dir))).toEqual([probe.id, fails.id]); // the wallet is off
+      const extensions = profiles.get('Default')!.extensions;
+      expect(extensions.find((extension) => extension.id === probe.id)).toMatchObject({ status: 'loaded', background: 'running', checkedAt: '2026-10-07T00:00:00.000Z' });
+      expect(extensions.find((extension) => extension.id === fails.id)).toMatchObject({ background: 'failed', backgroundError: 'chrome.contextMenus.onClicked is not available in MAWS' });
+      expect(extensions.find((extension) => extension.id === wallet.id)).toMatchObject({ status: 'off', enabled: false });
+      expect(changed).toHaveBeenCalledTimes(1);
+      expect(target.loading(PARTITION)).toBeNull();
+    });
+
+    it('loads nothing for a partition no record names, and never throws into the partition\'s preparation', async () => {
+      const ses = fakeSession();
+      const target = loader();
+      target.onPartitionPrepared(ses, profilePartition('Profile 1'));
+      expect(target.loading(profilePartition('Profile 1'))).toBeNull();
+      const broken = new ExtensionsLoader({
+        userData,
+        profiles: { list: () => { throw new Error('boom'); }, get: () => null, put: vi.fn() },
+        env: {},
+        wait,
+      });
+      expect(() => broken.onPartitionPrepared(ses, PARTITION)).not.toThrow();
+      expect(ses.fake.extensions.loadExtension).not.toHaveBeenCalled();
+    });
+
+    it('reports a load that fails again, and keeps the extension enabled for the owner to turn off', async () => {
+      const { probe } = fixture.extensions;
+      const profiles = memoryProfiles([await imported()]);
+      const target = loader(profiles);
+      target.onPartitionPrepared(fakeSession({ [probe.id]: { throws: 'Could not load background script' } }), PARTITION);
+      await target.idle(PARTITION);
+      expect(profiles.get('Default')!.extensions.find((extension) => extension.id === probe.id)).toMatchObject({ status: 'loadFailed', enabled: true, error: 'Could not load background script' });
+    });
+  });
+
+  describe('the first page of a partition waits for its loads (the boot race)', () => {
+    it('holds a load until ready, then passes it through; a load after that is not held', async () => {
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => (release = resolve));
+      const calls: string[] = [];
+      const webContents = { loadURL: vi.fn(async (url: string) => void calls.push(url)), isDestroyed: () => false };
+      const original = webContents.loadURL;
+      holdFirstLoad(webContents, ready);
+      const first = webContents.loadURL('http://127.0.0.1/a');
+      await Promise.resolve();
+      expect(calls).toEqual([]);
+      release();
+      await first;
+      expect(calls).toEqual(['http://127.0.0.1/a']);
+      expect(webContents.loadURL).toBe(original);
+    });
+
+    it('drops a held load whose page was closed meanwhile', async () => {
+      const webContents = { loadURL: vi.fn<(url: string) => Promise<void>>(async () => {}), isDestroyed: () => true };
+      const original = webContents.loadURL;
+      holdFirstLoad(webContents, Promise.resolve());
+      await expect(webContents.loadURL('http://127.0.0.1/a')).rejects.toThrow();
+      expect(original).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the toggle (P-21)', () => {
+    async function liveImport(behaviours: Record<string, Behaviour> = {}) {
+      const ses = fakeSession(behaviours);
+      const profiles = memoryProfiles();
+      const target = loader(profiles);
+      target.onPartitionPrepared(ses, PARTITION); // the import opened the partition: no record yet, nothing loaded
+      const records = await run(target, ses, chosen('probe', 'fails', 'wallet'));
+      profiles.records = [
+        {
+          profileDir: 'Default', name: 'Person 1', partition: PARTITION, importedAt: '2026-10-06T00:00:00.000Z', storageDirName: 'maws-chrome-default', userDataDir: fixture.dir, extensions: records,
+          report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: records },
+        },
+      ];
+      wait.mockClear();
+      return { ses, profiles, target };
+    }
+
+    it('turns a loaded extension off at once on a live partition', async () => {
+      const { fails } = fixture.extensions;
+      const { ses, profiles, target } = await liveImport({ [fails.id]: { background: 'error' } });
+      const extension = await target.setExtension('Default', fails.id, false);
+      expect(ses.fake.extensions.removeExtension).toHaveBeenCalledWith(fails.id);
+      expect(extension).toMatchObject({ enabled: false, status: 'off', background: 'none', backgroundError: null });
+      expect(profiles.get('Default')!.extensions.find((candidate) => candidate.id === fails.id)).toEqual(extension);
+    });
+
+    it('turns a wallet on: loaded and read, with no settle for an extension without a background', async () => {
+      const { wallet } = fixture.extensions;
+      const { ses, target } = await liveImport();
+      const extension = await target.setExtension('Default', wallet.id, true);
+      expect(ses.fake.extensions.loadExtension).toHaveBeenLastCalledWith(join(partitionFolder, 'extensions', wallet.id), { allowFileAccess: false });
+      expect(wait).not.toHaveBeenCalled();
+      expect(extension).toMatchObject({ enabled: true, wallet: true, status: 'loaded', background: 'none' });
+    });
+
+    it('turns an extension back on: loaded again, settled, its background read again', async () => {
+      const { fails } = fixture.extensions;
+      const { target } = await liveImport({ [fails.id]: { background: 'error' } });
+      await target.setExtension('Default', fails.id, false);
+      const extension = await target.setExtension('Default', fails.id, true);
+      expect(wait).toHaveBeenCalledExactlyOnceWith(SETTLE_MS, undefined);
+      expect(extension).toMatchObject({ enabled: true, status: 'loaded', background: 'failed', backgroundError: 'chrome.contextMenus.onClicked is not available in MAWS' });
+    });
+
+    it('on a partition not prepared this boot, writes the choice for its next preparation and loads nothing', async () => {
+      const { probe, wallet } = fixture.extensions;
+      const { profiles } = await liveImport();
+      const target = loader(profiles); // a fresh boot: nothing prepared
+      expect(await target.setExtension('Default', probe.id, false)).toMatchObject({ enabled: false, status: 'off' });
+      expect(await target.setExtension('Default', wallet.id, true)).toMatchObject({ enabled: true, status: 'off' });
+      const ses = fakeSession();
+      target.onPartitionPrepared(ses, PARTITION);
+      await target.idle(PARTITION);
+      expect(ses.fake.extensions.loadExtension.mock.calls.map(([dir]) => basename(dir))).toEqual([fixture.extensions.fails.id, wallet.id]);
+    });
+
+    it('waits for a boot load of the same profile, whose statuses never undo the toggle', async () => {
+      const { probe } = fixture.extensions;
+      const profiles = memoryProfiles([(await liveImport()).profiles.records[0]!]);
+      let release!: () => void;
+      wait.mockImplementationOnce(() => new Promise<void>((resolve) => (release = resolve)));
+      const target = loader(profiles);
+      const ses = fakeSession({ [probe.id]: { background: 'running' } });
+      target.onPartitionPrepared(ses, PARTITION);
+      const toggled = target.setExtension('Default', probe.id, false);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(ses.fake.extensions.removeExtension).not.toHaveBeenCalled();
+      release();
+      expect(await toggled).toMatchObject({ enabled: false, status: 'off' });
+      expect(profiles.get('Default')!.extensions.find((candidate) => candidate.id === probe.id)).toMatchObject({ enabled: false, status: 'off' });
+    });
+
+    it('refuses a profile that is not imported, or an extension its record does not hold', async () => {
+      const { target } = await liveImport();
+      await expect(target.setExtension('Profile 1', fixture.extensions.probe.id, true)).rejects.toThrow('not an imported profile');
+      await expect(target.setExtension('Default', 'b'.repeat(32), true)).rejects.toThrow('not an extension of this imported profile');
+    });
+  });
+
+  describe('removal', () => {
+    it('unloads the record\'s extensions loaded from its folder, and a later preparation loads nothing', async () => {
+      const { probe, fails } = fixture.extensions;
+      const ses = fakeSession();
+      const profiles = memoryProfiles();
+      const target = loader(profiles);
+      target.onPartitionPrepared(ses, PARTITION);
+      const records = await run(target, ses, chosen('probe', 'fails'));
+      const { disabled } = fixture.extensions;
+      const foreign = await ses.extensions.loadExtension(disabled.dir); // another loader's, from elsewhere
+      expect(foreign.path.startsWith(partitionFolder)).toBe(false);
+      profiles.records = [{ ...(await imported()), extensions: records }];
+
+      const unloaded = await target.unloadForRemoval(profiles.records[0]!);
+      expect(unloaded).toBe(2);
+      expect(ses.fake.extensions.removeExtension.mock.calls.map(([id]) => id).sort()).toEqual([probe.id, fails.id].sort());
+
+      const later = fakeSession();
+      target.onPartitionPrepared(later, PARTITION);
+      expect(later.fake.extensions.loadExtension).not.toHaveBeenCalled();
+      target.removalDone(PARTITION);
+    });
+
+    async function imported(): Promise<ImportedProfile> {
+      return {
+        profileDir: 'Default', name: 'Person 1', partition: PARTITION, importedAt: '2026-10-06T00:00:00.000Z', storageDirName: 'maws-chrome-default', userDataDir: fixture.dir, extensions: [],
+        report: { profileDir: 'Default', name: 'Person 1', partition: PARTITION, startedAt: '2026-10-06T00:00:00.000Z', finishedAt: '2026-10-06T00:00:00.000Z', outcome: 'done', failure: null, history: null, cookies: null, extensions: [] },
+      };
+    }
+  });
+});

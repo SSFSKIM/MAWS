@@ -74,8 +74,17 @@ export interface BrowserImportDeps {
   now?: () => number;
 }
 
-// Why `inspect` or `start` would not proceed; Task 2.5's handlers answer these as `invalid_input`.
-export type ImportRefusal = 'unknownProfile' | 'imported' | 'unknownInspection' | 'running' | 'noCategory' | 'unverified' | 'unknownExtension';
+// Why `inspect`, `start`, a toggle or a removal would not proceed; the handlers answer these as `invalid_input`.
+export type ImportRefusal =
+  | 'unknownProfile'
+  | 'imported'
+  | 'unknownInspection'
+  | 'running'
+  | 'noCategory'
+  | 'unverified'
+  | 'unknownExtension'
+  | 'notImported'
+  | 'notInRecord';
 const REFUSALS: Record<ImportRefusal, string> = {
   unknownProfile: 'not a profile of this Chrome folder',
   imported: 'this profile is already imported; remove it first',
@@ -84,6 +93,8 @@ const REFUSALS: Record<ImportRefusal, string> = {
   noCategory: 'choose at least one category',
   unverified: 'importing extensions needs the unverified-files acknowledgement',
   unknownExtension: 'an extension is not one the inspection found',
+  notImported: 'not an imported profile',
+  notInRecord: 'not an extension of this imported profile',
 };
 export class ImportRefused extends Error {
   constructor(readonly reason: ImportRefusal) {
