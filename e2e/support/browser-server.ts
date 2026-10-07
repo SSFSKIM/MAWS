@@ -123,6 +123,13 @@ HTML['/comment.html'] = readFileSync(join(REPO_ROOT, 'test/fixtures/browser/prob
   .replace('</main>', `${COMMENT_ADDITIONS}\n</main>`)
   .replace('</body>', `${COMMENT_SCRIPT}\n</body>`);
 // E4d end
+// E4d start: M5's live proof (`e2e/browser-comment-live.spec.ts`): `/comment.html` with E0b's counter, so the agent's
+// click on `#increment` shows in `#count`; `/comment.html` itself stays as the naming cases pin it
+HTML['/comment-counter.html'] = HTML['/comment.html'].replace(
+  '</body>',
+  `<script>document.getElementById('increment').addEventListener('click', () => { const c = document.getElementById('count'); c.textContent = String(Number(c.textContent) + 1); });</script>\n</body>`,
+);
+// E4d end
 
 // A loopback port nothing listens on (bound, read, closed), for a refused connection. Not a fixed low port: Chromium
 // refuses ports such as 1 itself (ERR_UNSAFE_PORT, a generic error) before connecting.

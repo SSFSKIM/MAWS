@@ -1,0 +1,39 @@
+E4d live proof (M5, Acceptance G2's live half), 2026-10-07T15:02:50.129Z
+engine: ~/.local/share/claude/versions/2.1.292 (2.1.292), unmodified, through ClaudeUsage's relay http://127.0.0.1:8641 (GET /api/hello 200), Haiku, default permission mode
+app: the harness build run as the product app (MAWS_HARNESS=0 per launch) over a scratch CLAUDE_CONFIG_DIR /private/tmp/maws-e4d-live-W4Epxi/claude-config (settings.json {}, .claude.json trusting /private/tmp/maws-e4d-live-W4Epxi/repo); profile /private/tmp/maws-e4d-live-W4Epxi/user-data
+environment: removed from the runner before the launch (names only): CLAUDECODE, CLAUDE_CODE_CHILD_SESSION, CLAUDE_CODE_DISABLE_1M_CONTEXT, CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING, CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_EXECPATH, CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS, CLAUDE_CODE_MAX_CONTEXT_TOKENS, CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION, CLAUDE_CODE_MESSAGING_SOCKET, CLAUDE_CODE_MESSAGING_TOKEN, CLAUDE_CODE_PLUGIN_DIRS, CLAUDE_CODE_SESSION_ATTENDED, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_SUBAGENT_MODEL, CLAUDE_EFFORT, CLAUDE_MODEL, CLAUDE_PID
+A-15 before the launch: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8
+parent c4952c36-df38-4400-a03c-cc86fe1b5c0b: Haiku (record model.requested haiku), default mode, resuming its seeded conversation 5cfadadb-e3f5-4105-958a-2296c61e8a2b (one user record, 316 bytes); the commented tab b_000000000001 at http://127.0.0.1:59778/comment-counter.html (the served page: /comment.html's markup plus E0b's counter script), webContents.id 2; #count 0
+side thread 98350bd5-9955-4034-9c9a-7aa5e50ab151 opened from the comment (Side thread, the sheet's default); its own tabs at open: []
+the thread's row in the parent's transcript reads finished: "Side thread on button “Increment” finished: DONEOpen"; permissions allowed once through the Side pane's card: ["mcp__maws__browser_tabs","mcp__maws__browser_act"]
+init: the thread's model "claude-haiku-4-5-20251001", plugins [{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}]; the parent's plugins null
+journals: thread /private/tmp/maws-e4d-live-W4Epxi/user-data/engine-host/journal/98350bd5-9955-4034-9c9a-7aa5e50ab151/neor66ca.jsonl; parent /private/tmp/maws-e4d-live-W4Epxi/user-data/engine-host/journal/c4952c36-df38-4400-a03c-cc86fe1b5c0b/yy4mqp6h.jsonl
+  seq 121 browser_tabs {"action":"list"} → {"status":"ok","action":"list","tabId":null,"url":null,"title":null,"tabs":[{"tabId":"b_000000000001","url":"http://127.0.0.1:59778/comment-counter.html","title":"MAWS comment probe","selected":true,"loaded":true,"control":"idle","owner":"parent"}],"ms":1}
+  seq 158 browser_act {"tabId":"b_000000000001","action":"click","target":{"css":"#increment"}} → {"status":"ok","tabId":"b_000000000001","url":"http://127.0.0.1:59778/comment-counter.html","title":"MAWS comment probe","ms":213,"action":"click","target":{"css":"#increment","matches":1},"navigated":false,"waitedFor":null,"waitedMs":null}
+after: the commented tab's page (by webContents.id 2) shows #count "1"; the parent's tabs [{"tabId":"b_000000000001","url":"http://127.0.0.1:59778/comment-counter.html","control":"agent"}]; the thread's own tabs []
+browser.agent.acting notices the window received: [{"appSessionId":"c4952c36-df38-4400-a03c-cc86fe1b5c0b","tabId":"b_000000000001","actingSessionId":"98350bd5-9955-4034-9c9a-7aa5e50ab151"}]
+the thread's browser_act rows: ["Clicked #increment"] (states ["done"])
+the thread's replies: ["DONE"]
+verdict: YES: G2 live half met (one browser_act click with target.css "#increment" and the commented tab's tabId, answered ok; #count 1 in that tab; the thread opened no tab)
+spend: side thread 0.0254; parent 0.0000; total US$0.0254
+the app closed (its engine processes stopped first); A-15 after the run: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+scratch kept for the review: /private/tmp/maws-e4d-live-W4Epxi (journals under user-data/engine-host/journal/)
+
+notes (written by the M5 executor from the two runs' journals, 2026-10-07):
+  the parent's journal holds no system/init: its process was launched and left idle (the engine emits init with a turn), so the one init is the thread's.
+  the thread's spawn row (seq 1 of neor66ca.jsonl; the parent's is seq 2 of yy4mqp6h.jsonl, after a reconnect row): --model haiku --permission-mode default --resume 5cfadadb-e3f5-4105-958a-2296c61e8a2b --fork-session; envKeys carry no inherited CLAUDE_* key (only MAWS's own: CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_FORK_SUBAGENT, CLAUDE_CODE_QUESTION_PREVIEW_FORMAT, CLAUDE_CONFIG_DIR); its three plugins are the engine's builtins, none of the owner's.
+  both runs' thread journals carry, at seq 42, the host's meta notice engine:newer-than-tested ("Claude Code 2.1.292 is newer than the version MAWS was verified against (2.1.283); some events were not understood"); every frame the proof reads was handled.
+  the thread ran with no --max-budget-usd (a fork's launch takes none from its parent; the parent's 0.5 bound only the parent, which spent nothing); the thread's bound in this spec is its 300 s wait.
+  the page the agent acted on: /comment-counter.html on the e2e server (E4d's route: /comment.html's markup plus E0b's counter script), tab b_000000000001, found by webContents.id 2.
+  the row heading reads "Clicked #increment": E4c's row names an element by the role and name the call or result carries, else by its css (transcript/model/copy.ts elementOf); G2's {css} target carries neither.
+
+run 1 (the same build and spec but for the row assertion; same verdict; the spec failed only its last assertion, which expected "Clicked button “Increment”", corrected for run 2; kept here as found):
+    seq 121 browser_tabs {"action":"list"} → {"status":"ok","action":"list","tabId":null,"url":null,"title":null,"tabs":[{"tabId":"b_000000000001","url":"http://127.0.0.1:59604/comment-counter.html","title":"MAWS comment probe","selected":true,"loaded":true,"control":"idle","owner":"parent"}],"ms":0}
+    seq 155 browser_act {"tabId":"b_000000000001","action":"click","target":{"css":"#increment"}} → {"status":"ok","tabId":"b_000000000001","url":"http://127.0.0.1:59604/comment-counter.html","title":"MAWS comment probe","ms":210,"action":"click","target":{"css":"#increment","matches":1},"navigated":false,"waitedFor":null,"waitedMs":null}
+  after: the commented tab's page (by webContents.id 2) shows #count "1"; the parent's tabs [{"tabId":"b_000000000001","url":"http://127.0.0.1:59604/comment-counter.html","control":"agent"}]; the thread's own tabs []
+  verdict: YES: G2 live half met (one browser_act click with target.css "#increment" and the commented tab's tabId, answered ok; #count 1 in that tab; the thread opened no tab)
+  spend: side thread 0.0403; parent 0.0000; total US$0.0403
+  the app closed (its engine processes stopped first); A-15 after the run: 25 keys, sha1 42a98859ccfdc08994dca565482aa00ba0254ca8 (identical)
+  scratch /private/tmp/maws-e4d-live-MnegOt
+
+total spend over both runs: US$0.0657 (run 1 0.0403, run 2 0.0254) of the milestone's US$0.50.
