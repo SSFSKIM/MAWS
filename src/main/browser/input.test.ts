@@ -128,6 +128,18 @@ describe('classify: the decision table (E4a Design §11; A-33)', () => {
     expect(classify('input-event', { type: 'keyDown' }, none)).toBeNull(); // no raw modifiers at all: not the agent's
   });
 
+  // E11 (tracker row E4a "activation gates count taken chords and Esc"): Chrome's user activation leaves out Esc and the
+  // browser's own shortcuts; the human still gave input
+  it('keys: a human Esc, or a chord the browser takes from the page, is the human\'s input but no activation', () => {
+    const key = (key: string, over: { meta?: boolean; shift?: boolean } = {}) => ({ type: 'keyDown', key, meta: false, control: false, alt: false, shift: false, ...over });
+    for (const press of [key('Escape'), key('Escape', { shift: true }), key('f', { meta: true }), key('l', { meta: true }), key('r', { meta: true }), key('R', { meta: true, shift: true }), key('[', { meta: true }), key(']', { meta: true }), key('=', { meta: true }), key('-', { meta: true })]) {
+      expect(classify('before-input-event', press, none), JSON.stringify(press)).toEqual({ kind: 'key', source: 'human', activation: false });
+    }
+    for (const press of [key('a'), key('v', { meta: true }), key('c', { meta: true }), key('Enter'), key('k', { meta: true })]) {
+      expect(classify('before-input-event', press, none), JSON.stringify(press)).toEqual({ kind: 'key', source: 'human' });
+    }
+  });
+
   it('wheels: input-event alone, the bit deciding', () => {
     expect(classify('input-event', { type: 'mouseWheel', _modifiers: FROM_DEBUGGER }, none)).toEqual({ kind: 'wheel', source: 'agent' });
     expect(classify('input-event', { type: 'mouseWheel', _modifiers: 0 }, none)).toEqual({ kind: 'wheel', source: 'human' });
@@ -227,6 +239,22 @@ describe('TabInputSeam and attachInputSeams', () => {
     expect(gates()).toEqual({ clipboard: false, windowOpen: 'adopt' });
     clock += 10_000;
     tab.webContents.emit('before-input-event', {}, { type: 'keyDown' });
+    expect(gates()).toEqual({ clipboard: true, windowOpen: 'adopt' });
+  });
+
+  // E11 (tracker row E4a "activation gates count taken chords and Esc")
+  it('⌘F or Esc in a page is input for the hand-back but opens neither gate', async () => {
+    const clock = 1000;
+    const tab = await tabWithSeams(() => clock);
+    const gates = () => ({
+      clipboard: permissionGranted('clipboard-sanitized-write', { control: 'idle' }, tab.entry.input, clock),
+      windowOpen: decideWindowOpen({ url: 'https://a.test/', disposition: 'foreground-tab', now: clock, lastActivationAt: tab.entry.input.lastActivationAt, recentOpens: [], linkTarget: 'in-app', hasRoom: true }).action,
+    });
+    tab.webContents.emit('before-input-event', {}, { type: 'keyDown', key: 'f', meta: true, control: false, alt: false, shift: false });
+    tab.webContents.emit('before-input-event', {}, { type: 'keyDown', key: 'Escape', meta: false, control: false, alt: false, shift: false });
+    expect(tab.entry.input).toMatchObject({ lastHumanAt: 1000, lastHumanActivationAt: null, lastActivationAt: null });
+    expect(gates()).toEqual({ clipboard: false, windowOpen: 'deny' });
+    tab.webContents.emit('before-input-event', {}, { type: 'keyDown', key: 'v', meta: true, control: false, alt: false, shift: false });
     expect(gates()).toEqual({ clipboard: true, windowOpen: 'adopt' });
   });
 
