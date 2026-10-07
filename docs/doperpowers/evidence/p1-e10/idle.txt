@@ -2,47 +2,47 @@ E10 G3: the idle release and the idle exit (e2e/supervisor.spec.ts case (e))
 MAWS_E2E_SUPERVISOR_IDLE_MS=10000, MAWS_E2E_REPLAY_ROW_MS=1500, a replay of one human turn
 
 keep-quit:
-  +6.7 s quit mid-turn, answered keep (pid 44443 alive true)
-  +11.5 s the turn ended with no app connected
-  +19.4 s the row was released: journal {"event":"exit","code":0,"signal":null,"reason":"idle","lostAttentionCount":0,"peakTreeRssKiB":null,"budget":null}
-  +20.2 s relaunched: the same pid 44443; session.status exit.reason idle; the sidebar's mark "Stopped at 17:00 while idle · Send resumes it"
-  +20.2 s the app killed with SIGKILL; supervisor alive true
-  +31.1 s the supervisor exited by itself; lock and socket unlinked
+  +6.8 s quit mid-turn, answered keep (pid 68079 alive true)
+  +11.6 s the turn ended with no app connected
+  +19.5 s the row was released: journal {"event":"exit","code":0,"signal":null,"reason":"idle","lostAttentionCount":0,"peakTreeRssKiB":null,"budget":null}
+  +20.4 s relaunched: the same pid 68079; session.status exit.reason idle; session.events' process.exited reason idle; the sidebar's mark "Stopped at 17:46 while idle · Send resumes it"
+  +20.4 s the app killed with SIGKILL; supervisor alive true
+  +31.3 s the supervisor exited by itself 10001 ms after the app's disconnect; lock and socket unlinked
   host.log:
-    2026-10-07T00:00:21.061Z supervisor 0.0.0 pid 44443 build 99c29219c8bae60f starting in /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-idle-keep-QnQoL0/ud/supervisor
-    2026-10-07T00:00:21.088Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
-    2026-10-07T00:00:21.089Z listening on /var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-supervisor-64e5f240b51f/host.sock
-    2026-10-07T00:00:21.147Z client connected: appPid 44421 build 99c29219c8bae60f
-    2026-10-07T00:00:21.158Z error: [host] 4 events dropped while no client was ready
-    2026-10-07T00:00:24.281Z warn: [engine-host] 3a81bd39-4faa-4424-80c8-248d5f306cfc: get_context_usage tx7qiuk7-3: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
-    2026-10-07T00:00:24.281Z warn: [engine-host] 3a81bd39-4faa-4424-80c8-248d5f306cfc: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
-    2026-10-07T00:00:27.167Z client disconnected
-    2026-10-07T00:00:28.171Z error: [host] dropping events until a client is ready (first: session.eventBatch)
-    2026-10-07T00:00:29.679Z warn: [engine-host] 3a81bd39-4faa-4424-80c8-248d5f306cfc: get_context_usage tx7qiuk7-5: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
-    2026-10-07T00:00:29.679Z warn: [engine-host] 3a81bd39-4faa-4424-80c8-248d5f306cfc: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
-    2026-10-07T00:00:39.678Z warn: [engine-host process table] idle release of 3a81bd39-4faa-4424-80c8-248d5f306cfc: no hard reason for 10000 ms with no app connected or exit-when-idle armed
-    2026-10-07T00:00:40.361Z client connected: appPid 48813 build 99c29219c8bae60f
-    2026-10-07T00:00:40.369Z error: [host] 18 events dropped while no client was ready
-    2026-10-07T00:00:40.744Z client disconnected
-    2026-10-07T00:00:40.744Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
-    2026-10-07T00:00:50.745Z exiting (idle)
+    2026-10-07T00:45:54.383Z supervisor 0.0.0 pid 68079 build 2e271d5e8c560d4f starting in /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-idle-keep-ViAjtv/ud/supervisor
+    2026-10-07T00:45:54.411Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
+    2026-10-07T00:45:54.412Z listening on /var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-supervisor-4d114d4cd8cb/host.sock
+    2026-10-07T00:45:54.456Z client connected: appPid 68018 build 2e271d5e8c560d4f
+    2026-10-07T00:45:54.462Z error: [host] 4 events dropped while no client was ready
+    2026-10-07T00:45:57.603Z warn: [engine-host] 2c081101-9c81-4430-a4a5-2574ff01a4c5: get_context_usage 7biehg2i-3: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+    2026-10-07T00:45:57.604Z warn: [engine-host] 2c081101-9c81-4430-a4a5-2574ff01a4c5: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+    2026-10-07T00:46:00.492Z client disconnected
+    2026-10-07T00:46:01.490Z error: [host] dropping events until a client is ready (first: session.eventBatch)
+    2026-10-07T00:46:02.996Z warn: [engine-host] 2c081101-9c81-4430-a4a5-2574ff01a4c5: get_context_usage 7biehg2i-5: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+    2026-10-07T00:46:02.996Z warn: [engine-host] 2c081101-9c81-4430-a4a5-2574ff01a4c5: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+    2026-10-07T00:46:12.995Z warn: [engine-host process table] idle release of 2c081101-9c81-4430-a4a5-2574ff01a4c5: no hard reason for 10000 ms with no app connected or exit-when-idle armed
+    2026-10-07T00:46:13.771Z client connected: appPid 72934 build 2e271d5e8c560d4f
+    2026-10-07T00:46:13.779Z error: [host] 18 events dropped while no client was ready
+    2026-10-07T00:46:14.180Z client disconnected
+    2026-10-07T00:46:14.180Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
+    2026-10-07T00:46:24.181Z exiting (idle)
 
 kill -9 of the app mid-turn:
-  +37.8 s the app killed with SIGKILL mid-turn (pid 52140 alive true)
-  +42.7 s the turn ended with no app connected (9 journal rows after the kill)
-  +50.6 s the row was released: journal {"event":"exit","code":0,"signal":null,"reason":"idle","lostAttentionCount":0,"peakTreeRssKiB":null,"budget":null}
-  +60.5 s the supervisor exited by itself; lock and socket unlinked
+  +38.0 s the app killed with SIGKILL mid-turn (pid 75831 alive true; 13 journal rows, no completion)
+  +42.9 s the turn ended with no app connected (9 journal rows after the kill, the completion at row 22)
+  +50.7 s the row was released: journal {"event":"exit","code":0,"signal":null,"reason":"idle","lostAttentionCount":0,"peakTreeRssKiB":null,"budget":null}
+  +61.6 s the supervisor exited by itself 10004 ms after the idle release; lock and socket unlinked
   host.log:
-    2026-10-07T00:00:52.349Z supervisor 0.0.0 pid 52140 build 99c29219c8bae60f starting in /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-idle-kill-rwK85g/ud/supervisor
-    2026-10-07T00:00:52.377Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
-    2026-10-07T00:00:52.378Z listening on /var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-supervisor-24196299e47b/host.sock
-    2026-10-07T00:00:52.422Z client connected: appPid 52010 build 99c29219c8bae60f
-    2026-10-07T00:00:52.427Z error: [host] 4 events dropped while no client was ready
-    2026-10-07T00:00:55.550Z warn: [engine-host] 01da0bfd-521a-4331-ab6e-58377a9fb126: get_context_usage vqxbv4wm-3: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
-    2026-10-07T00:00:55.550Z warn: [engine-host] 01da0bfd-521a-4331-ab6e-58377a9fb126: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
-    2026-10-07T00:00:58.336Z client disconnected
-    2026-10-07T00:00:59.438Z error: [host] dropping events until a client is ready (first: session.eventBatch)
-    2026-10-07T00:01:00.971Z warn: [engine-host] 01da0bfd-521a-4331-ab6e-58377a9fb126: get_context_usage vqxbv4wm-5: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
-    2026-10-07T00:01:00.974Z warn: [engine-host] 01da0bfd-521a-4331-ab6e-58377a9fb126: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
-    2026-10-07T00:01:10.966Z warn: [engine-host process table] idle release of 01da0bfd-521a-4331-ab6e-58377a9fb126: no hard reason for 10000 ms with no app connected or exit-when-idle armed
-    2026-10-07T00:01:20.971Z exiting (idle)
+    2026-10-07T00:46:25.770Z supervisor 0.0.0 pid 75831 build 2e271d5e8c560d4f starting in /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-idle-kill-8FVwv5/ud/supervisor
+    2026-10-07T00:46:25.800Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
+    2026-10-07T00:46:25.801Z listening on /var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-supervisor-4136ebcb2172/host.sock
+    2026-10-07T00:46:25.830Z client connected: appPid 75767 build 2e271d5e8c560d4f
+    2026-10-07T00:46:25.835Z error: [host] 4 events dropped while no client was ready
+    2026-10-07T00:46:28.981Z warn: [engine-host] a43cd7bb-421b-4866-b0c4-ae3a2e59da34: get_context_usage nih4n5lk-3: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+    2026-10-07T00:46:28.981Z warn: [engine-host] a43cd7bb-421b-4866-b0c4-ae3a2e59da34: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+    2026-10-07T00:46:31.741Z client disconnected
+    2026-10-07T00:46:32.865Z error: [host] dropping events until a client is ready (first: session.eventBatch)
+    2026-10-07T00:46:34.371Z warn: [engine-host] a43cd7bb-421b-4866-b0c4-ae3a2e59da34: get_context_usage nih4n5lk-5: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+    2026-10-07T00:46:34.371Z warn: [engine-host] a43cd7bb-421b-4866-b0c4-ae3a2e59da34: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+    2026-10-07T00:46:44.372Z warn: [engine-host process table] idle release of a43cd7bb-421b-4866-b0c4-ae3a2e59da34: no hard reason for 10000 ms with no app connected or exit-when-idle armed
+    2026-10-07T00:46:54.376Z exiting (idle)

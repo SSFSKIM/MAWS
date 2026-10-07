@@ -1,34 +1,50 @@
 E10 G2: a kept session across a quit and a relaunch (e2e/supervisor.spec.ts case (b))
-fixture spikes/protocol-probe/fixtures/permission-roundtrip.jsonl, MAWS_E2E_REPLAY_ROW_MS=250
+fixture spikes/protocol-probe/fixtures/permission-roundtrip.jsonl with one background task failure inserted before its request, MAWS_E2E_REPLAY_ROW_MS=250
 
-first run: supervisor pid 37616; 7 events seen before the quit
+first run: supervisor pid 59506; 7 events read just before ⌘Q
 quit-guard: 1 mid-turn, auto-answered keep, 1 session kept
-after the app exited: pid 37616 alive true
-while closed: 24 journal rows written, the permission request among them
+after the app exited: pid 59506 alive true; journal at seq 27, holding neither the task failure nor the permission request
+while closed: 34 journal rows written, the task failure (seq 60) and the permission request (seq 61) among them
 
-relaunch: the same supervisor pid 37616; 32 events in the launch at the connect, 25 of them streamed while the app was closed
-Needs-you items for the request after the relaunch: 1 (pending); sidebar glyph "Needs approval"
-rows received live by the window after the relaunch: 20, none twice
+relaunch: the same supervisor pid 59506; 33 events in the launch at the connect; between 25 (from rows journaled after the app had exited) and 26 (all after the last read before ⌘Q) streamed while the app was closed
+the tail reached main's listeners: the error item "Background task failed: e10 background check" (id …:error:60:0), from the failure event journaled at seq 60 after the app had exited, 1 item; the sidebar glyph "Needs you: error"
+the request's Needs-you item (from the host's re-listed broker items): 1 (pending)
+engine.budget after the relaunch: {"enabled":true,"limitKiB":8388608,"totalKiB":0,"sampledAt":"2026-10-07T00:45:29.088Z","over":false,"overWithoutCandidate":false,"candidates":0,"settling":0,"releasing":null,"blocked":[{"appSessionId":"8037c7ae-b067-4c20-bdbb-44759de586fe","reasons":["turn","pending_request"]}],"lastRelease":null}; Session info's Memory budget "0 GB of 8 GB · 1 session"
+rows received live by the window once its listener was installed (after the connect's burst): 20, none twice
 
-finished: 52 events, equal in fixture order (journal row rank:i kind) to the control run's 52: true
-  raw seq:i equal: false (journal rows 113 here, 110 in the control; the app's own reads are journaled where they fell, 4 unrecorded-read rows here)
-  this run's seq:i: 12:0 13:0 14:0 14:1 15:0 23:0 25:0 27:0 29:0 31:0 33:0 35:0 37:0 40:0 43:0 44:0 45:0 46:0 47:0 48:0 49:0 50:0 51:0 52:0 53:0 54:0 55:0 56:0 57:0 58:0 58:1 60:0 64:0 67:0 72:0 74:0 76:0 78:0 80:0 82:0 84:0 86:0 88:0 90:0 92:0 94:0 96:0 99:0 102:0 103:0 107:0 107:1
-  control's seq:i:  12:0 13:0 14:0 14:1 15:0 23:0 25:0 27:0 29:0 31:0 33:0 35:0 37:0 40:0 43:0 44:0 45:0 46:0 47:0 48:0 49:0 50:0 51:0 52:0 53:0 54:0 55:0 56:0 57:0 58:0 58:1 60:0 61:0 64:0 69:0 71:0 73:0 75:0 77:0 79:0 81:0 83:0 85:0 87:0 89:0 91:0 93:0 96:0 99:0 100:0 104:0 104:1
+finished: the host's stream for the launch holds 53 events, equal in fixture order (journal row rank:i kind) to the control run's 53: true
+  raw seq:i equal: false (journal rows 142 here, 111 in the control; the app's own reads are journaled where they fell, 12 unrecorded-read rows here)
+  this run's seq:i: 12:0 13:0 14:0 14:1 15:0 23:0 25:0 27:0 29:0 31:0 33:0 35:0 37:0 40:0 43:0 44:0 45:0 46:0 47:0 48:0 49:0 50:0 51:0 52:0 53:0 54:0 55:0 56:0 57:0 58:0 58:1 60:0 61:0 79:0 82:0 87:0 89:0 91:0 93:0 95:0 97:0 99:0 101:0 103:0 105:0 107:0 109:0 111:0 114:0 117:0 118:0 122:0 122:1
+  control's seq:i:  12:0 13:0 14:0 14:1 15:0 23:0 25:0 27:0 29:0 31:0 33:0 35:0 37:0 40:0 43:0 44:0 45:0 46:0 47:0 48:0 49:0 50:0 51:0 52:0 53:0 54:0 55:0 56:0 57:0 58:0 58:1 60:0 61:0 62:0 65:0 70:0 72:0 74:0 76:0 78:0 80:0 82:0 84:0 86:0 88:0 90:0 92:0 94:0 97:0 100:0 101:0 105:0 105:1
 rendered transcript rows: 4 [time, user, divider, text], equal to the control run's 4: true
 
+What this proves: the session kept, the supervisor surviving the app, the same pid at the relaunch, its state re-listed
+(status, broker items, budget), the undelivered tail reaching main's session.eventBatch listeners (the error item only
+it raises), the host's stream equal to the control's, no event twice in the window's live batches. That no tail
+event reaches a listener twice rests on the delivered cursor's units (Task 2.1) and the live probe's Q6: derived
+items are keyed by event id and rendered rows by row id, so neither would show a doubled event.
+
 host.log (the supervisor across both app runs):
-  2026-10-06T23:59:49.508Z supervisor 0.0.0 pid 37616 build 99c29219c8bae60f starting in /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-keep-VinGES/ud/supervisor
-  2026-10-06T23:59:49.537Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
-  2026-10-06T23:59:49.539Z listening on /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-keep-VinGES/ud/supervisor/host.sock
-  2026-10-06T23:59:49.688Z client connected: appPid 37555 build 99c29219c8bae60f
-  2026-10-06T23:59:49.696Z error: [host] 3 events dropped while no client was ready
-  2026-10-06T23:59:50.219Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_context_usage xybukxcg-3: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
-  2026-10-06T23:59:50.219Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
-  2026-10-06T23:59:51.353Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_settings xybukxcg-4: response failed its schema at effective, sources
-  2026-10-06T23:59:53.386Z client disconnected
-  2026-10-06T23:59:53.390Z error: [host] dropping events until a client is ready (first: session.eventBatch)
-  2026-10-07T00:00:02.204Z client connected: appPid 40685 build 99c29219c8bae60f
-  2026-10-07T00:00:02.217Z error: [host] 28 events dropped while no client was ready
-  2026-10-07T00:00:02.522Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_settings xybukxcg-5: response failed its schema at effective, sources
-  2026-10-07T00:00:14.454Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_context_usage xybukxcg-7: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
-  2026-10-07T00:00:14.455Z warn: [engine-host] 10f7cb96-7a3d-4510-b696-dc6d2a1654cc: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+  2026-10-07T00:45:19.079Z supervisor 0.0.0 pid 59506 build 2e271d5e8c560d4f starting in /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-keep-eM1khB/ud/supervisor
+  2026-10-07T00:45:19.105Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
+  2026-10-07T00:45:19.106Z listening on /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-keep-eM1khB/ud/supervisor/host.sock
+  2026-10-07T00:45:19.158Z client connected: appPid 59404 build 2e271d5e8c560d4f
+  2026-10-07T00:45:19.163Z error: [host] 3 events dropped while no client was ready
+  2026-10-07T00:45:19.553Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: get_context_usage bmupoyip-3: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+  2026-10-07T00:45:19.553Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+  2026-10-07T00:45:20.678Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: get_settings bmupoyip-4: response failed its schema at effective, sources
+  2026-10-07T00:45:22.693Z client disconnected
+  2026-10-07T00:45:22.703Z error: [host] dropping events until a client is ready (first: session.eventBatch)
+  2026-10-07T00:45:32.083Z client connected: appPid 62127 build 2e271d5e8c560d4f
+  2026-10-07T00:45:32.101Z error: [host] 29 events dropped while no client was ready
+  2026-10-07T00:45:32.464Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: get_settings bmupoyip-5: response failed its schema at effective, sources
+  2026-10-07T00:45:33.841Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: list_permission_rules bmupoyip-7: response failed its schema at state
+  2026-10-07T00:45:33.841Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: get_hooks_listing bmupoyip-8: response failed its schema at events, hooks
+  2026-10-07T00:45:33.841Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: mcp_status bmupoyip-9: response failed its schema at mcpServers
+  2026-10-07T00:45:33.841Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: get_context_usage bmupoyip-10: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+  2026-10-07T00:45:44.665Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: get_context_usage bmupoyip-12: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+  2026-10-07T00:45:44.665Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+  2026-10-07T00:45:44.671Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: list_permission_rules bmupoyip-14: response failed its schema at state
+  2026-10-07T00:45:44.671Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: get_hooks_listing bmupoyip-15: response failed its schema at events, hooks
+  2026-10-07T00:45:44.671Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: mcp_status bmupoyip-16: response failed its schema at mcpServers
+  2026-10-07T00:45:44.671Z warn: [engine-host] 8037c7ae-b067-4c20-bdbb-44759de586fe: get_context_usage bmupoyip-17: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model

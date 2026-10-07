@@ -1,23 +1,23 @@
 E10 G3: kill -9 of the supervisor mid-turn (e2e/supervisor.spec.ts case (c))
-supervisor pid 43651 killed with SIGKILL at 2026-10-07T00:00:16.868Z, the session mid-turn at its permission request
+supervisor pid 66158 killed with SIGKILL at 2026-10-07T00:45:49.256Z, the session mid-turn at its permission request
 toast: The session supervisor stopped unexpectedly (SIGKILL); 1 session was interrupted. Their transcripts are on disk; open one to resume.
-host.status after the restart: state ready, pid 43834, lastExit {"code":null,"signal":"SIGKILL","at":"2026-10-07T00:00:17.084Z","interrupted":1}
-Diagnostics: supervisor · detached · pid 43834 · build matches · 0 sessions held · idle exit 10 min · orphans killed 0 · socket /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-crash-v3ZqHn/ud/supervisor/host.sock · last unexpected exit 17:00 (SIGKILL) · 1 interrupted
+host.status after the restart: state ready, pid 66603, lastExit {"code":null,"signal":"SIGKILL","at":"2026-10-07T00:45:49.467Z","interrupted":1}
+Diagnostics: supervisor · detached · pid 66603 · build matches · 0 sessions held · idle exit 10 min · orphans killed 0 · socket /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-crash-pikLAb/ud/supervisor/host.sock · last unexpected exit 17:45 (SIGKILL) · 1 interrupted
 the composer reads "Send" (Session ended); engine.sessions lists no live row of the session
-the lock names pid 43834
+the lock names pid 66603
 
 host.log (the killed supervisor, then its successor):
-  2026-10-07T00:00:16.463Z supervisor 0.0.0 pid 43651 build 99c29219c8bae60f starting in /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-crash-v3ZqHn/ud/supervisor
-  2026-10-07T00:00:16.488Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
-  2026-10-07T00:00:16.490Z listening on /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-crash-v3ZqHn/ud/supervisor/host.sock
-  2026-10-07T00:00:16.548Z client connected: appPid 43552 build 99c29219c8bae60f
-  2026-10-07T00:00:16.553Z error: [host] 3 events dropped while no client was ready
-  2026-10-07T00:00:16.792Z warn: [engine-host] 5cc57d65-f0e6-4d72-800f-4793af79ceff: get_context_usage lyowm4w4-3: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
-  2026-10-07T00:00:16.792Z warn: [engine-host] 5cc57d65-f0e6-4d72-800f-4793af79ceff: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
-  2026-10-07T00:00:16.804Z warn: [engine-host] 5cc57d65-f0e6-4d72-800f-4793af79ceff: get_settings lyowm4w4-4: response failed its schema at effective, sources
-  2026-10-07T00:00:16.830Z warn: [engine-host] 5cc57d65-f0e6-4d72-800f-4793af79ceff: get_settings lyowm4w4-5: response failed its schema at effective, sources
-  2026-10-07T00:00:17.701Z supervisor 0.0.0 pid 43834 build 99c29219c8bae60f starting in /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-crash-v3ZqHn/ud/supervisor
-  2026-10-07T00:00:17.728Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
-  2026-10-07T00:00:17.729Z listening on /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-crash-v3ZqHn/ud/supervisor/host.sock
-  2026-10-07T00:00:17.797Z client connected: appPid 43552 build 99c29219c8bae60f
-  2026-10-07T00:00:17.801Z error: [host] 3 events dropped while no client was ready
+  2026-10-07T00:45:48.276Z supervisor 0.0.0 pid 66158 build 2e271d5e8c560d4f starting in /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-crash-pikLAb/ud/supervisor
+  2026-10-07T00:45:48.520Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
+  2026-10-07T00:45:48.521Z listening on /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-crash-pikLAb/ud/supervisor/host.sock
+  2026-10-07T00:45:48.739Z client connected: appPid 66068 build 2e271d5e8c560d4f
+  2026-10-07T00:45:48.747Z error: [host] 3 events dropped while no client was ready
+  2026-10-07T00:45:49.074Z warn: [engine-host] b45da41c-1d3b-4296-beef-a9c5c31e440c: get_context_usage mxmauhf6-3: response failed its schema at categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model
+  2026-10-07T00:45:49.074Z warn: [engine-host] b45da41c-1d3b-4296-beef-a9c5c31e440c: get_context_usage failed: get_context_usage answered with an unexpected shape (categories, totalTokens, maxTokens, percentage, isAutoCompactEnabled, model)
+  2026-10-07T00:45:49.078Z warn: [engine-host] b45da41c-1d3b-4296-beef-a9c5c31e440c: get_settings mxmauhf6-4: response failed its schema at effective, sources
+  2026-10-07T00:45:49.205Z warn: [engine-host] b45da41c-1d3b-4296-beef-a9c5c31e440c: get_settings mxmauhf6-5: response failed its schema at effective, sources
+  2026-10-07T00:45:50.101Z supervisor 0.0.0 pid 66603 build 2e271d5e8c560d4f starting in /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-crash-pikLAb/ud/supervisor
+  2026-10-07T00:45:50.129Z error: [host] dropping events until a client is ready (first: host.supervisorStatus)
+  2026-10-07T00:45:50.130Z listening on /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-e10-crash-pikLAb/ud/supervisor/host.sock
+  2026-10-07T00:45:50.177Z client connected: appPid 66068 build 2e271d5e8c560d4f
+  2026-10-07T00:45:50.180Z error: [host] 3 events dropped while no client was ready

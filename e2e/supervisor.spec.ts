@@ -4,9 +4,10 @@
 // supervisor it starts is killed and its files removed in the case's cleanup, whatever happened:
 //   (a) start: the lock, the files and their modes, the process in its own group; an unbusy quit stops it; a kill -9
 //       of the app leaves it serving; a kill -9 of it leaves a stale lock a relaunch replaces;
-//   (b) G2: a paced replay kept across a quit streams on unobserved (its permission request lands while the app is
-//       closed), the relaunch connects to the same pid, the request's Needs-you item shows exactly once, rows keep
-//       arriving, and the finished transcript equals a control run's without the quit;
+//   (b) G2: a paced replay kept across a quit streams on unobserved (a background task's failure and the permission
+//       request land while the app is closed), the relaunch connects to the same pid, the failure's Needs-you item
+//       (derived only from the undelivered tail) and the request's show once each, `engine.budget` answers from the kept
+//       supervisor, rows keep arriving, and the finished transcript equals a control run's without the quit;
 //   (c) G3: kill -9 of the supervisor mid-turn: the crash toast, a new pid in Diagnostics, the session not live;
 //   (d) G3: Settings' Stop all: the old supervisor exits, a fresh one starts and launches;
 //   (e) G3: the idle release (`idle`) and the supervisor's own idle exit, after a keep-quit and after a kill -9 of the app;
@@ -26,7 +27,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { invoke, launchReady, replaySpec, turnsJournal, value } from './support/c7-replay';
-import { COLOUR_TOKENS, menu } from './support/code-product';
+import { menu, otherThemeColours } from './support/code-product';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 
@@ -48,6 +49,22 @@ function firstPrompt(fixture: string): string {
   throw new Error(`${fixture} records no prompt`);
 }
 const PROMPT = firstPrompt(PERMISSION);
+
+// (b)'s fixture: the permission round trip with one background task's failure (a `task_notification`, status failed,
+// as C3's frames carry one) inserted right before its request, so the span the app is closed for holds an event whose
+// derived effect only main's `session.eventBatch` listeners produce: the attention service's error item (nothing else
+// derives it, the resync folds only the digest, and the first app never saw the event).
+const TASK_FAILED = 'e10 background check';
+function tailFixture(dir: string): string {
+  const rows = readFileSync(join(REPO_ROOT, PERMISSION), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow);
+  const at = rows.findIndex(isRequestRow);
+  const before = rows[at - 1]!;
+  const failure = { type: 'system', subtype: 'task_notification', task_id: 'e10tail01', status: 'failed', output_file: null, summary: TASK_FAILED, uuid: 'e1000000-0000-4000-8000-000000000001', session_id: before.frame.session_id };
+  rows.splice(at, 0, { seq: 0, direction: 'in', at: before.at, frame: failure });
+  const path = join(dir, 'permission-task-failure.jsonl');
+  writeFileSync(path, `${rows.map((row, k) => JSON.stringify({ ...row, seq: k + 1 })).join('\n')}\n`);
+  return path;
+}
 
 // ---- processes ---------------------------------------------------------------------------------------------------------
 
@@ -78,6 +95,9 @@ function processesNaming(text: string): { pid: number; command: string }[] {
 }
 
 interface Lock { pid: number; procStart: string; socketPath: string; buildId: string }
+interface JournalRow { seq: number; direction: string; at: string; frame: Record<string, unknown> }
+const isRequestRow = (r: JournalRow) => r.direction === 'in' && (r.frame.request as { subtype?: string } | undefined)?.subtype === 'can_use_tool';
+const isTaskFailureRow = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'task_notification';
 
 // ---- one case's scratch profile, its launches and its supervisors ------------------------------------------------------
 
@@ -169,13 +189,13 @@ class Scratch {
   }
 
   // Every journal row of the session's launches, oldest file first.
-  journal(id: string): { direction: string; frame: Record<string, unknown> }[] {
+  journal(id: string): JournalRow[] {
     const dir = join(this.userData, 'engine-host', 'journal', id);
     if (!existsSync(dir)) return [];
     return readdirSync(dir)
       .filter((f) => f.endsWith('.jsonl'))
       .sort()
-      .flatMap((f) => readFileSync(join(dir, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as { direction: string; frame: Record<string, unknown> }));
+      .flatMap((f) => readFileSync(join(dir, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow));
   }
 
   // The app killed with SIGKILL (no quit, no question): its supervisor is left with no client.
@@ -200,11 +220,18 @@ class Scratch {
     const named = processesNaming(this.root);
     for (const pid of new Set([...this.supervisors, ...named.map((p) => p.pid)])) {
       // a recorded pid is killed only while it is still a supervisor of this profile (never a reused pid)
-      if (isAlive(pid) && ps(pid, 'command').includes(this.root)) process.kill(pid, 'SIGKILL');
+      if (!isAlive(pid) || !ps(pid, 'command').includes(this.root)) continue;
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') console.error(error); // gone meanwhile is fine
+      }
     }
-    await expect.poll(() => processesNaming(this.root).map((p) => p.pid), { timeout: 10_000, message: `no process of ${this.root} outlives the case` }).toEqual([]);
+    let leftover: unknown = null; // a survivor is reported, after the files are removed all the same
+    await expect.poll(() => processesNaming(this.root).map((p) => p.pid), { timeout: 10_000, message: `no process of ${this.root} outlives the case` }).toEqual([]).catch((error: unknown) => (leftover = error));
     for (const socket of this.sockets) if (!socket.startsWith(this.root)) rmSync(dirname(socket), { recursive: true, force: true });
     rmSync(this.root, { recursive: true, force: true });
+    if (leftover !== null) throw leftover;
   }
 }
 
@@ -220,10 +247,18 @@ async function bounded<T>(promise: Promise<T>, ms: number, message: () => string
 
 async function withScratch(name: string, body: (s: Scratch) => Promise<void>): Promise<void> {
   const s = new Scratch(name);
+  let failed = false;
   try {
     await body(s);
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    await s.cleanup();
+    // a cleanup failure is the case's failure only when the body passed; otherwise it is logged and the body's error stands
+    await s.cleanup().catch((error: unknown) => {
+      if (!failed) throw error;
+      console.error(error);
+    });
   }
 }
 
@@ -245,8 +280,9 @@ function fixtureOrder(events: readonly SessionEvent[]): string[] {
     return `${ranks.get(seq!)}:${i} ${e.kind}`;
   });
 }
-const pendingPermissions = async (page: Page, id: AppSessionId): Promise<AttentionItem[]> =>
-  value(await invoke(page, 'attention.list', undefined)).filter((i) => i.appSessionId === id && i.kind === 'permission');
+const attentionOf = async (page: Page, id: AppSessionId, kind: AttentionItem['kind']): Promise<AttentionItem[]> =>
+  value(await invoke(page, 'attention.list', undefined)).filter((i) => i.appSessionId === id && i.kind === kind);
+const pendingPermissions = (page: Page, id: AppSessionId) => attentionOf(page, id, 'permission');
 
 // A replayed launch of the record and its prompt, written once the launch is ready.
 async function startTurn(page: Page, s: Scratch, id: AppSessionId, fixture = PERMISSION, prompt = PROMPT): Promise<void> {
@@ -287,40 +323,6 @@ function evidence(name: string, lines: string[]): void {
   writeFileSync(join(EVIDENCE, name), `${lines.join('\n')}\n`);
 }
 
-// Elements whose background, text or border colour only the other theme's tokens produce (code-product's scan), among
-// the elements that paint: one with no layout box (display: none, as xterm's IME composition view is until a
-// composition starts, with its own fixed colours) shows nothing in either theme.
-async function otherThemeColours(page: Page): Promise<string[]> {
-  return page.evaluate((names) => {
-    const resolve = (theme: string) => {
-      const host = document.createElement('div');
-      host.setAttribute('data-theme', theme);
-      const probe = document.createElement('span');
-      host.append(probe);
-      document.body.append(host);
-      const out = names.map((name) => {
-        probe.style.color = `var(${name})`;
-        return getComputedStyle(probe).color;
-      });
-      host.remove();
-      return out;
-    };
-    const themed = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-    const own = resolve(themed);
-    const forbidden = [...new Set(resolve(themed === 'dark' ? 'light' : 'dark'))].filter((colour) => !own.includes(colour));
-    const props = ['background-color', 'color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color'];
-    const offenders: string[] = [];
-    for (const el of Array.from(document.querySelectorAll('body *'))) {
-      if (el.getClientRects().length === 0) continue;
-      const style = getComputedStyle(el);
-      const prop = props.find((p) => forbidden.includes(style.getPropertyValue(p)));
-      if (prop) offenders.push(`${el.tagName.toLowerCase()}.${String(el.getAttribute('class') ?? '').slice(0, 60)} ${prop} ${style.getPropertyValue(prop)}`);
-      if (offenders.length >= 8) break;
-    }
-    return offenders;
-  }, COLOUR_TOKENS);
-}
-
 // `target` in both themes (light last, the default), each checked for the other theme's colours first.
 async function shots(maws: MawsLaunch, name: string, target: () => Locator | null): Promise<void> {
   const { page } = maws;
@@ -328,7 +330,7 @@ async function shots(maws: MawsLaunch, name: string, target: () => Locator | nul
   for (const theme of ['dark', 'light'] as const) {
     await menu(maws, `theme.${theme}`);
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-    expect(await otherThemeColours(page), `${theme}: ${name}`).toEqual([]);
+    expect(await otherThemeColours(page, { paintedOnly: true }), `${theme}: ${name}`).toEqual([]); // xterm's hidden IME view keeps fixed colours
     const path = join(EVIDENCE, `${name}-${theme}.png`);
     const element = target();
     if (element) await element.screenshot({ path });
@@ -399,8 +401,9 @@ test('(a) the supervisor starts in its own group with its files; an unbusy quit 
   });
 });
 
-test('(b) G2: a kept session streams on while the app is closed; the relaunch catches up exactly once and ends as a control run does', async () => {
+test('(b) G2: a kept session streams on while the app is closed; the relaunch reconnects, its undelivered tail reaches main, and it ends as a control run does', async () => {
   const pace = { MAWS_E2E_REPLAY_ROW_MS: ROW_MS };
+  const dd = (scope: Locator, term: string) => scope.getByRole('term').filter({ hasText: new RegExp(`^${term}$`) }).locator('xpath=following-sibling::dd[1]');
   const transcriptRows = async (page: Page) => page.locator('[data-region="main"] [data-row-id]').evaluateAll((rows) => rows.map((r) => (r.getAttribute('data-row-id') ?? '').split(':')[0]!)); // the row's kind (its id's head; the rest names this run's turn)
   const settledRows = async (page: Page) => {
     let last = '';
@@ -424,13 +427,14 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch ca
     const run = await s.launch(pace);
     await s.ready(run.page);
     const id = await s.record(run.page);
-    await startTurn(run.page, s, id);
+    await startTurn(run.page, s, id, tailFixture(s.root));
     // shown once the launch is live, as the relaunched window first shows it: a window attached to a live launch
     // hydrates the launch's events, and only one attached before it also holds the record's disk history
     await showSession(run.page, id);
     const requested = await untilRequested(run.page, id);
     value(await invoke(run.page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
     await finished(run.page, id);
+    expect((await attentionOf(run.page, id, 'error')).map((i) => i.summary), 'the fixture’s failure raises its item with the app open').toEqual([`Background task failed: ${TASK_FAILED}`]);
     const events = await eventsOf(run.page, id);
     control.order = fixtureOrder(events);
     control.suffixes = events.map((e) => suffix(e.id));
@@ -440,26 +444,28 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch ca
   });
 
   await withScratch('keep', async (s) => {
-    const log: string[] = ['E10 G2: a kept session across a quit and a relaunch (e2e/supervisor.spec.ts case (b))', `fixture ${PERMISSION}, MAWS_E2E_REPLAY_ROW_MS=${ROW_MS}`, ''];
+    const log: string[] = ['E10 G2: a kept session across a quit and a relaunch (e2e/supervisor.spec.ts case (b))', `fixture ${PERMISSION} with one background task failure inserted before its request, MAWS_E2E_REPLAY_ROW_MS=${ROW_MS}`, ''];
     const first = await s.launch({ ...pace, MAWS_E2E_QUIT_ANSWER: 'keep' });
     const pid = (await s.ready(first.page)).supervisor!.pid;
     const id = await s.record(first.page);
-    await startTurn(first.page, s, id);
+    await startTurn(first.page, s, id, tailFixture(s.root));
     await showSession(first.page, id);
     await expect.poll(async () => (await eventsOf(first.page, id)).length, { message: 'a few rows have streamed' }).toBeGreaterThan(5);
     const seenBeforeQuit = (await eventsOf(first.page, id)).length;
-    expect((await eventsOf(first.page, id)).some((e) => e.kind === 'permission.requested'), 'the request comes after the quit').toBe(false);
     await s.quit(first);
     const keepLine = first.quitLines().find((l) => l.includes('auto-answered keep'));
     expect(keepLine).toBe('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
     expect(isAlive(pid), 'the supervisor outlives the app').toBe(true);
-    log.push(`first run: supervisor pid ${pid}; ${seenBeforeQuit} events seen before the quit`, keepLine!, `after the app exited: pid ${pid} alive ${isAlive(pid)}`);
+    // the precondition, read once the app has exited: neither the failure nor the request is journaled yet
+    const atQuit = s.journal(id);
+    const seqAtQuit = Math.max(...atQuit.map((r) => r.seq));
+    expect(atQuit.filter((r) => isTaskFailureRow(r) || isRequestRow(r)), 'the failure and the request come after the app has exited').toEqual([]);
+    log.push(`first run: supervisor pid ${pid}; ${seenBeforeQuit} events read just before ⌘Q`, keepLine!, `after the app exited: pid ${pid} alive ${isAlive(pid)}; journal at seq ${seqAtQuit}, holding neither the task failure nor the permission request`);
 
-    // unobserved: the replay streams on and its permission request lands while no app is connected
-    const journalLength = s.journal(id).length;
-    await expect.poll(() => s.journal(id).some((r) => r.direction === 'in' && (r.frame.request as { subtype?: string } | undefined)?.subtype === 'can_use_tool'), { timeout: 30_000, message: 'the request reaches the journal while the app is closed' }).toBe(true);
-    const unobservedRows = s.journal(id).length - journalLength;
-    log.push(`while closed: ${unobservedRows} journal rows written, the permission request among them`);
+    // unobserved: the replay streams on; the failure and the request land while no app is connected
+    await expect.poll(() => s.journal(id).some(isRequestRow), { timeout: 30_000, message: 'the request reaches the journal while the app is closed' }).toBe(true);
+    const closed = s.journal(id);
+    log.push(`while closed: ${closed.length - atQuit.length} journal rows written, the task failure (seq ${closed.find(isTaskFailureRow)!.seq}) and the permission request (seq ${closed.find(isRequestRow)!.seq}) among them`);
 
     const second = await s.launch(pace);
     const status = await s.ready(second.page);
@@ -472,53 +478,83 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch ca
       window.maws.on('session.eventBatch', (batch) => seen.push(...batch.events.map((e) => `${batch.appSessionId}|${e.id}`)));
     });
     const atRelaunch = await eventsOf(second.page, id);
-    expect(atRelaunch.length).toBeGreaterThan(seenBeforeQuit);
+    const seqOf = (e: SessionEvent) => Number(suffix(e.id).split(':')[0]);
+    const afterExit = atRelaunch.filter((e) => seqOf(e) > seqAtQuit).length;
+    expect(afterExit, 'events from rows journaled after the app had exited').toBeGreaterThan(0);
     const live = await statusOf(second.page, id);
     expect(live).toMatchObject({ process: 'ready', turn: expect.anything() });
-    log.push('', `relaunch: the same supervisor pid ${status.supervisor!.pid}; ${atRelaunch.length} events in the launch at the connect, ${atRelaunch.length - seenBeforeQuit} of them streamed while the app was closed`);
+    log.push('', `relaunch: the same supervisor pid ${status.supervisor!.pid}; ${atRelaunch.length} events in the launch at the connect; between ${afterExit} (from rows journaled after the app had exited) and ${atRelaunch.length - seenBeforeQuit} (all after the last read before ⌘Q) streamed while the app was closed`);
 
-    // the derived effect from inside the absence: the request's Needs-you item, exactly once
+    // the undelivered tail reached main's `session.eventBatch` listeners: the failure's error item, which only the
+    // attention service's derivation of the live tail raises (the first app never saw the event; the resync folds the
+    // digest only), from the event journaled while the app was closed; one item (derived items are keyed by event id)
+    const failure = atRelaunch.find((e) => e.kind === 'task.notification')!;
+    expect(seqOf(failure), 'the failure event was journaled after the app had exited').toBeGreaterThan(seqAtQuit);
+    await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.id), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`${id}:error:${failure.id}`]);
+    const [errorItem] = await attentionOf(second.page, id, 'error');
+    expect(errorItem!.summary).toBe(`Background task failed: ${TASK_FAILED}`);
+    // the request's item comes from the burst's broker items (host-held state re-listed at the connect)
     await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the Needs-you item of the request raised while away' }).toBe(1);
     const row = await showSession(second.page, id);
-    await expect(glyphOf(row)).toHaveAttribute('aria-label', 'Needs approval');
+    await expect(glyphOf(row), 'the sidebar shows the tail’s error item, which outranks the pending request').toHaveAttribute('aria-label', 'Needs you: error');
     await expect(submitOf(second.page), 'the renderer reads the turn open').toHaveAttribute('data-submit-state', 'stop');
     await new Promise((r) => setTimeout(r, 1_000));
     const items = await pendingPermissions(second.page, id);
-    expect(items.map((i) => i.state), 'one Needs-you item, not two').toEqual(['pending']);
+    expect(items.map((i) => i.state), 'one Needs-you item for the request').toEqual(['pending']);
     const requested = atRelaunch.find((e) => e.kind === 'permission.requested') as Extract<SessionEvent, { kind: 'permission.requested' }>;
     expect(items[0]!.request.requestId).toBe(requested.requestId);
-    log.push(`Needs-you items for the request after the relaunch: ${items.length} (${items[0]!.state}); sidebar glyph "Needs approval"`);
+    expect(await attentionOf(second.page, id, 'error'), 'still one error item after a settle').toHaveLength(1);
+    log.push(
+      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item; the sidebar glyph "Needs you: error"`,
+      `the request's Needs-you item (from the host's re-listed broker items): ${items.length} (${items[0]!.state})`,
+    );
+
+    // G4: the memory budget answers from the kept supervisor, counting its session, and the renderer's store holds it
+    const budget = value(await invoke(second.page, 'engine.budget', undefined));
+    expect(budget.blocked.length + budget.settling + budget.candidates, 'engine.budget counts the kept session').toBe(1);
+    const panel = second.page.locator('[data-region="panel"]');
+    await panel.getByRole('button', { name: 'Add a tool' }).click();
+    await second.page.getByRole('menuitem', { name: 'Session info' }).click();
+    const budgetRow = dd(second.page.locator(`[data-session-info="${id}"]`), 'Memory budget');
+    await expect(budgetRow, 'Session info reads the budget the renderer holds').toHaveText(/ · 1 session$/);
+    log.push(`engine.budget after the relaunch: ${JSON.stringify(budget)}; Session info's Memory budget "${await budgetRow.textContent()}"`);
 
     // answered, rows keep arriving
     value(await invoke(second.page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
-    await expect(glyphOf(row)).toHaveAttribute('aria-label', 'Working');
+    await expect.poll(async () => (await pendingPermissions(second.page, id)).filter((i) => i.state === 'pending'), { message: 'the answer retires the request' }).toEqual([]);
     const arrived = () => second.page.evaluate((id) => (window as unknown as { __e10: string[] }).__e10.filter((k) => k.startsWith(`${id}|`)).length, id);
     await expect.poll(arrived, { message: 'rows arrive live after the relaunch' }).toBeGreaterThan(5);
     await finished(second.page, id);
     const received = await second.page.evaluate((id) => (window as unknown as { __e10: string[] }).__e10.filter((k) => k.startsWith(`${id}|`)), id);
-    expect(new Set(received).size, 'no event reached the window twice').toBe(received.length);
+    expect(new Set(received).size, 'no event reached the window twice in its live batches').toBe(received.length);
 
-    // the finished transcript equals the control's: the same `seq:i` ids, the same rendered rows
+    // the finished stream equals the control's in fixture order (the host's own stream: the same whether or not a
+    // client was connected), and the rendered rows equal the control's
     const events = await eventsOf(second.page, id);
     const suffixes = events.map((e) => suffix(e.id));
     expect(new Set(suffixes).size, 'no event id twice').toBe(suffixes.length);
     const seqs = suffixes.map((x) => Number(x.split(':')[0]));
     expect(seqs.every((seq, k) => k === 0 || seq >= seqs[k - 1]!), 'ids in journal order').toBe(true);
     const order = fixtureOrder(events);
-    expect(order, 'the events equal the control run’s, in order (no duplicate, no gap)').toEqual(control.order);
-    const reads = (rows: { direction: string; frame: Record<string, unknown> }[]) => rows.filter((r) => r.direction === 'meta' && r.frame.event === 'replay_unrecorded_read').length;
+    expect(order, 'the host’s stream equals the control run’s, in fixture order (no duplicate, no gap in the stream)').toEqual(control.order);
+    const reads = (rows: JournalRow[]) => rows.filter((r) => r.direction === 'meta' && r.frame.event === 'replay_unrecorded_read').length;
     const rows = await settledRows(second.page);
     expect(rows, 'the rendered transcript equals the control run’s').toEqual(control.rows);
-    expect((await pendingPermissions(second.page, id)).filter((i) => i.state === 'pending')).toEqual([]);
     expect(second.maws.consoleErrors()).toEqual([]);
     log.push(
-      `rows received live by the window after the relaunch: ${received.length}, none twice`,
+      `rows received live by the window once its listener was installed (after the connect's burst): ${received.length}, none twice`,
       '',
-      `finished: ${events.length} events, equal in fixture order (journal row rank:i kind) to the control run's ${control.order.length}: ${JSON.stringify(order) === JSON.stringify(control.order)}`,
+      `finished: the host's stream for the launch holds ${events.length} events, equal in fixture order (journal row rank:i kind) to the control run's ${control.order.length}: ${JSON.stringify(order) === JSON.stringify(control.order)}`,
       `  raw seq:i equal: ${JSON.stringify(suffixes) === JSON.stringify(control.suffixes)} (journal rows ${s.journal(id).length} here, ${control.journal} in the control; the app's own reads are journaled where they fell, ${reads(s.journal(id))} unrecorded-read rows here)`,
       `  this run's seq:i: ${suffixes.join(' ')}`,
       `  control's seq:i:  ${control.suffixes.join(' ')}`,
       `rendered transcript rows: ${rows.length} [${rows.join(', ')}], equal to the control run's ${control.rows.length}: ${JSON.stringify(rows) === JSON.stringify(control.rows)}`,
+      '',
+      'What this proves: the session kept, the supervisor surviving the app, the same pid at the relaunch, its state re-listed',
+      '(status, broker items, budget), the undelivered tail reaching main\'s session.eventBatch listeners (the error item only',
+      'it raises), the host\'s stream equal to the control\'s, no event twice in the window\'s live batches. That no tail',
+      'event reaches a listener twice rests on the delivered cursor\'s units (Task 2.1) and the live probe\'s Q6: derived',
+      'items are keyed by event id and rendered rows by row id, so neither would show a doubled event.',
       '',
       'host.log (the supervisor across both app runs):',
       ...s.log().split('\n').filter(Boolean).map((l) => `  ${l}`),
@@ -562,7 +598,7 @@ test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the sess
     expect(sessions.filter((st) => st.appSessionId === id && st.process !== 'exited'), 'the new supervisor holds no live row of it').toEqual([]);
 
     const strip = await openDiagnostics(run.maws);
-    const supervisorRow = strip.getByRole('status', { name: 'supervisor' }).or(strip.locator('output[aria-label="supervisor"]'));
+    const supervisorRow = strip.getByRole('status', { name: 'supervisor' });
     await expect(supervisorRow).toContainText(`pid ${fresh}`);
     await expect(supervisorRow).toContainText(/last unexpected exit \d\d:\d\d \(SIGKILL\) · 1 interrupted/);
     const rowText = (await supervisorRow.textContent())!;
@@ -621,13 +657,26 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
   const t0 = Date.now();
   const at = () => `+${((Date.now() - t0) / 1000).toFixed(1)} s`;
   const released = (s: Scratch, id: string) => s.journal(id).find((r) => r.direction === 'meta' && r.frame.event === 'exit');
-  const ended = (s: Scratch, id: string) => s.journal(id).some((r) => r.direction === 'in' && r.frame.type === 'command_lifecycle' && r.frame.state === 'completed');
-  const goneAfterIdle = async (s: Scratch, pid: number) => {
+  const completion = (s: Scratch, id: string) => s.journal(id).findIndex((r) => r.direction === 'in' && r.frame.type === 'command_lifecycle' && r.frame.state === 'completed');
+  const ended = (s: Scratch, id: string) => completion(s, id) >= 0;
+  // host.log's timestamp of the last line matching `pattern`
+  const loggedAt = (s: Scratch, pattern: RegExp) => {
+    const line = s.log().split('\n').filter((l) => pattern.test(l)).at(-1);
+    return line === undefined ? null : Date.parse(line.slice(0, line.indexOf(' ')));
+  };
+  // The supervisor exits by itself, and not before the idle time has passed since the later of the last client's
+  // disconnect and the last idle release (host.log's own clock; 250 ms for the order of a timer's arming and its line)
+  const goneAfterIdle = async (s: Scratch, pid: number): Promise<number> => {
     const { socketPath } = s.lock()!; // the profile's path, or its $TMPDIR fallback past 103 bytes
     await expect.poll(() => isAlive(pid), { timeout: IDLE_MS + 15_000, message: 'the supervisor exits by itself' }).toBe(false);
     expect(existsSync(s.file('host.lock')), 'the lock is unlinked').toBe(false);
     expect(existsSync(socketPath), 'the socket is unlinked').toBe(false);
-    expect(s.log()).toContain('exiting (idle)');
+    const exited = loggedAt(s, /exiting \(idle\)$/);
+    expect(exited, 'host.log: exiting (idle)').not.toBeNull();
+    const idleSince = Math.max(loggedAt(s, /client disconnected$/) ?? 0, loggedAt(s, /idle release of /) ?? 0);
+    const waited = exited! - idleSince;
+    expect(waited, 'the supervisor waited the idle time before exiting').toBeGreaterThanOrEqual(IDLE_MS - 250);
+    return waited;
   };
 
   await withScratch('idle-keep', async (s) => {
@@ -649,15 +698,17 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
     const second = await s.launch(env);
     expect((await s.ready(second.page)).supervisor!.pid).toBe(pid);
     expect(await statusOf(second.page, id)).toMatchObject({ process: 'exited', exit: { reason: 'idle' } });
+    const exits = (await eventsOf(second.page, id)).filter((e) => e.kind === 'process.exited');
+    expect(exits.map((e) => (e as Extract<SessionEvent, { kind: 'process.exited' }>).reason), 'session.events ends the launch with process.exited, reason idle').toEqual(['idle']);
     const row = await rowOf(second.page, id);
     await expect(row.locator('[data-released-mark]')).toHaveAttribute('title', /while idle/);
-    lines.push(`  ${at()} relaunched: the same pid ${pid}; session.status exit.reason idle; the sidebar's mark "${await row.locator('[data-released-mark]').getAttribute('title')}"`);
+    lines.push(`  ${at()} relaunched: the same pid ${pid}; session.status exit.reason idle; session.events' process.exited reason idle; the sidebar's mark "${await row.locator('[data-released-mark]').getAttribute('title')}"`);
 
     // the app killed: with no client and nothing live, the supervisor exits after the idle time
     await s.killApp(second);
     lines.push(`  ${at()} the app killed with SIGKILL; supervisor alive ${isAlive(pid)}`);
-    await goneAfterIdle(s, pid);
-    lines.push(`  ${at()} the supervisor exited by itself; lock and socket unlinked`, '  host.log:', ...s.log().split('\n').filter(Boolean).map((l) => `    ${l}`));
+    const waited = await goneAfterIdle(s, pid);
+    lines.push(`  ${at()} the supervisor exited by itself ${waited} ms after the app's disconnect; lock and socket unlinked`, '  host.log:', ...s.log().split('\n').filter(Boolean).map((l) => `    ${l}`));
   });
 
   await withScratch('idle-kill', async (s) => {
@@ -666,16 +717,18 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
     const pid = (await s.ready(run.page)).supervisor!.pid;
     const id = await s.record(run.page);
     await startTurn(run.page, s, id, fixture, 'turn 1');
-    const before = s.journal(id).length;
     await s.killApp(run);
-    lines.push('', 'kill -9 of the app mid-turn:', `  ${at()} the app killed with SIGKILL mid-turn (pid ${pid} alive ${isAlive(pid)})`);
+    const before = s.journal(id).length; // read once the app has exited
+    expect(ended(s, id), 'the kill landed mid-turn').toBe(false);
+    lines.push('', 'kill -9 of the app mid-turn:', `  ${at()} the app killed with SIGKILL mid-turn (pid ${pid} alive ${isAlive(pid)}; ${before} journal rows, no completion)`);
     await expect.poll(() => ended(s, id), { timeout: 30_000, message: 'the turn goes on and ends with no app' }).toBe(true);
+    expect(completion(s, id), 'the completion was journaled after the app had exited').toBeGreaterThanOrEqual(before);
     expect(isAlive(pid), 'the supervisor serves on').toBe(true);
-    lines.push(`  ${at()} the turn ended with no app connected (${s.journal(id).length - before} journal rows after the kill)`);
+    lines.push(`  ${at()} the turn ended with no app connected (${s.journal(id).length - before} journal rows after the kill, the completion at row ${completion(s, id) + 1})`);
     await expect.poll(() => released(s, id)?.frame.reason, { timeout: IDLE_MS + 15_000 }).toBe('idle');
     lines.push(`  ${at()} the row was released: journal ${JSON.stringify(released(s, id)!.frame)}`);
-    await goneAfterIdle(s, pid);
-    lines.push(`  ${at()} the supervisor exited by itself; lock and socket unlinked`, '  host.log:', ...s.log().split('\n').filter(Boolean).map((l) => `    ${l}`));
+    const waited = await goneAfterIdle(s, pid);
+    lines.push(`  ${at()} the supervisor exited by itself ${waited} ms after the idle release; lock and socket unlinked`, '  host.log:', ...s.log().split('\n').filter(Boolean).map((l) => `    ${l}`));
   });
   evidence('idle.txt', lines);
 });
