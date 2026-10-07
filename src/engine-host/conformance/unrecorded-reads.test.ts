@@ -12,6 +12,7 @@ type Held = { type: string; request?: { subtype?: string }; message?: { content:
 describe('replay: a read the fixture never recorded', () => {
   it('arrives mid-replay, is answered empty and journaled, and the run continues through the recorded rows', async () => {
     const outcomes: Record<string, unknown> = {};
+    const logs: string[] = [];
     const run = await replayedSession('pass1', 'reads', (row, { session, ready, transport }) => {
       const frame = row.frame as Held;
       if (frame.type === 'user') {
@@ -29,7 +30,7 @@ describe('replay: a read the fixture never recorded', () => {
         outcomes.rules = await listPermissionRules(control, {}).catch((error: unknown) => error);
         outcomes.usage = await getUsage(control, {});
       })();
-    });
+    }, { session: { log: (line) => void logs.push(line) } });
 
     const meta = run.journal.rows.filter((r) => r.direction === 'meta').map((r) => r.frame as { event: string; subtype?: string });
     expect(meta.filter((m) => m.event === 'replay_mismatch')).toEqual([]);
@@ -37,6 +38,9 @@ describe('replay: a read the fixture never recorded', () => {
     // the empty answer reaches the caller as a read that failed its schema, never as a crash of the replay
     expect(outcomes.listModels).toBeInstanceOf(ControlError);
     expect(outcomes.rules).toBeInstanceOf(ControlError);
+    // E11 (tracker row E10 "host.log expected traffic as errors"): the replay's own stand-in answer is expected, so it
+    // logs no schema warning (the meta row records it); a recorded answer failing its schema still would
+    expect(logs.filter((line) => line.includes('failed its schema'))).toEqual([]);
     // the recorded read after them still matched its row and got the recorded answer
     expect(outcomes.usage).toMatchObject({ session: { total_cost_usd: expect.any(Number) as unknown }, rate_limits_available: false });
     expect(run.events.filter((e) => e.kind === 'error.raised')).toEqual([]);

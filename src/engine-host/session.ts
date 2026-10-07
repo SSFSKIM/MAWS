@@ -959,6 +959,7 @@ export class EngineSession {
         return;
       case 'replay_unrecorded_read': // not a problem: the replay answered a read its fixture never recorded (no event)
         this.record('meta', { event: 'replay_unrecorded_read', message: problem.message, ...(problem.read ?? {}) });
+        if (problem.read) this.client?.answeredByStandIn(problem.read.requestId); // E11: its empty answer warns nothing
         return;
       case 'stalled_write':
         this.record('meta', { event: 'transport_error', message: problem.message, code: 'stalled_write' });
