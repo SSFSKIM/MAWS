@@ -527,6 +527,7 @@ void startWithProfileLock(app, () => {
   // C12 end
   // ---- end C5 ----
   app.on('activate', () => {
+    if (shutdown.quitting()) return; // W-B review M6: the services are stopped or stopping (the keep-quit hold)
     if (appWindows().length === 0) openWindow(); // E2: a capture window is not the app's
   });
   // E10: kills the pty host and a utility engine host; a detached engine host's socket closes with no exit, so after a

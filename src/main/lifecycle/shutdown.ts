@@ -7,6 +7,8 @@
 // any answered a promise, the quit is held (will-quit prevented) until each has settled or `boundMs` has passed, and
 // ends with `app.exit(0)`, which runs Electron's own shutdown without emitting will-quit again. A will-quit that comes
 // meanwhile is held too and runs nothing twice.
+// W-B review M6: `quitting()` reads true from the moment the steps begin, so what may open a window (the dock's
+// activate) does not, during the hold, over services already stopped.
 
 export interface ShutdownApp {
   on(event: 'will-quit', listener: (event: { preventDefault(): void }) => void): unknown;
@@ -15,14 +17,17 @@ export interface ShutdownApp {
 
 export interface ShutdownSteps {
   add(name: string, step: () => void | Promise<void>): void;
+  quitting(): boolean;
 }
 
 export function shutdownSteps(app: ShutdownApp, boundMs: number): ShutdownSteps {
   const steps: { name: string; step: () => void | Promise<void> }[] = [];
   const failed = (name: string) => (error: unknown) => console.error(`[shutdown] ${name} failed; going on`, error);
   let holding = false;
+  let quitting = false;
   app.on('will-quit', (event) => {
     if (holding) return event.preventDefault();
+    quitting = true;
     const waits: Promise<void>[] = [];
     for (const { name, step } of steps) {
       try {
@@ -43,5 +48,5 @@ export function shutdownSteps(app: ShutdownApp, boundMs: number): ShutdownSteps 
       app.exit(0);
     });
   });
-  return { add: (name, step) => void steps.push({ name, step }) };
+  return { add: (name, step) => void steps.push({ name, step }), quitting: () => quitting };
 }

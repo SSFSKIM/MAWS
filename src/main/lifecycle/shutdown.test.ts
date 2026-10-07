@@ -112,6 +112,21 @@ describe('the shutdown list', () => {
     expect(app.exit).toHaveBeenCalledOnce();
   });
 
+  // W-B review M6: the dock's activate during the keep-quit hold must not open a window over stopped services
+  it('reads quitting from the moment the steps begin, through the hold', async () => {
+    vi.useFakeTimers();
+    const { app, quit } = fakeApp();
+    const steps = shutdownSteps(app, BOUND_MS);
+    const seen: boolean[] = [];
+    steps.add('index', () => void seen.push(steps.quitting()));
+    steps.add('hosts', () => new Promise<void>(() => {}));
+    expect(steps.quitting()).toBe(false);
+    quit();
+    expect(seen).toEqual([true]);
+    await vi.advanceTimersByTimeAsync(BOUND_MS / 2);
+    expect(steps.quitting()).toBe(true);
+  });
+
   it('a step whose promise rejects is logged by name, and the quit still exits', async () => {
     const { app, quit } = fakeApp();
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
