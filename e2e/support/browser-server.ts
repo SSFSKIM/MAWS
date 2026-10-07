@@ -45,7 +45,7 @@ const A_SCRIPT = `
 function copyNow() {
   navigator.clipboard.writeText('e4a').then(
     () => (document.getElementById('clipboard').textContent = 'copied'),
-    (error) => (document.getElementById('clipboard').textContent = 'refused: ' + error.name),
+    (error) => (document.getElementById('clipboard').textContent = 'refused: ' + error.name + ': ' + error.message),
   );
 }
 window.copyLater = () => setTimeout(copyNow, 50);

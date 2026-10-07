@@ -199,8 +199,25 @@ export async function offPaneAfterFrames(s: Scene, tabId: string, pane: Locator)
   return view?.visible && view.bounds && within1(view.bounds, rect) ? null : JSON.stringify({ bounds: view?.bounds, visible: view?.visible, rect });
 }
 
+// The app window resized by dx × dy, once `pane` has re-laid out (setSize returns before the renderer does, so a check
+// right after it could pass on the old rect): the pane's new rect.
+export async function resizeWindow(s: Scene, pane: Locator, dx: number, dy: number): Promise<Rect> {
+  const before = await paneRect(pane);
+  await s.maws.app.evaluate(
+    ({ BrowserWindow }, [dx, dy]) => {
+      const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!; // the app's one window
+      const [width, height] = win.getSize();
+      win.setSize(width! + dx!, height! + dy!);
+    },
+    [dx, dy],
+  );
+  let after = before;
+  await expect.poll(async () => JSON.stringify((after = await paneRect(pane))), { message: 'the pane re-laid out after the resize' }).not.toBe(JSON.stringify(before));
+  return after;
+}
+
 // How long main took to hide the view after `act` ran in main (one evaluate, so no round trip is counted): ms, or null
-// if it stayed visible for 2 s.
+// if the menu item is missing or disabled, or the view stayed visible for 2 s.
 export async function hiddenAfter(s: Scene, tabId: string, act: 'palette' | 'overview'): Promise<number | null> {
   const id = act === 'palette' ? 'palette.open' : 'tab.overview';
   return s.maws.app.evaluate(
@@ -208,7 +225,7 @@ export async function hiddenAfter(s: Scene, tabId: string, act: 'palette' | 'ove
       new Promise<number | null>((resolve) => {
         const browser = (globalThis as unknown as { __maws_browser: BrowserInspector }).__maws_browser;
         const item = Menu.getApplicationMenu()?.getMenuItemById(id);
-        if (!item?.enabled) return resolve(-1);
+        if (!item?.enabled) return resolve(null);
         const start = performance.now();
         item.click();
         const check = () => {

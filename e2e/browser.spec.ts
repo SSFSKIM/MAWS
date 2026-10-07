@@ -17,7 +17,7 @@ import { closeScene, scratchProject, seamLines, show, type Scene } from './suppo
 import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
 import {
-  address, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn,
+  address, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn, resizeWindow,
   shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
 } from './support/browser-scene';
 
@@ -97,11 +97,7 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
     await expect(paneIn(panel).locator('[data-browser-page="elsewhere"]')).toHaveText(/Shown in another pane/);
     await expectOnPane(s, a, paneIn(main), 'main');
     // a window resize moves the view with the main tab's pane, not the panel's
-    await s.maws.app.evaluate(({ BrowserWindow }) => {
-      const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!; // the app's one window
-      const [width, height] = win.getSize();
-      win.setSize(width! + 100, height! + 60);
-    });
+    await resizeWindow(s, paneIn(main), 100, 60);
     await expectOnPane(s, a, paneIn(main), 'main');
     // Show here takes it back into the panel
     await paneIn(panel).getByRole('button', { name: 'Show here' }).click();
@@ -177,6 +173,7 @@ test('error pages: refused, dns, generic, each with Codex’s summary and Reload
     // a name that does not resolve: dns (or offline, on a Mac with no network)
     await address(panel, 'http://e4a.invalid/');
     await expect(errorPage(panel)).toHaveAttribute('data-browser-page', /^error-(dns|offline)$/);
+    await expect(errorPage(panel).getByRole('button', { name: 'Reload' })).toBeVisible();
     await expect(errorPage(panel)).toContainText(/e4a\.invalid('s server IP address could not be found| could not be loaded because the computer is offline)/);
 
     // an empty response: generic, and Reload asks the server again
@@ -368,14 +365,8 @@ test('placement: the panel resized by the keyboard and by a 40-step drag, and th
     await expectOnPane(s, t, pane, 'panel');
     const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
     const width = async () => Number(await resizer.getAttribute('aria-valuenow'));
-    const grow = (dx: number, dy: number) =>
-      s.maws.app.evaluate(({ BrowserWindow }, [dx, dy]) => {
-        const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
-        const [w, h] = win.getSize();
-        win.setSize(w! + dx!, h! + dy!);
-      }, [dx, dy]);
     // room for the panel to grow by 160 px past the main column's 480 px floor
-    await grow(200, 0);
+    await resizeWindow(s, pane, 200, 0);
     await expect(resizer).toHaveAttribute('aria-valuemax', '640');
     await expectOnPane(s, t, pane, 'panel');
 
@@ -401,7 +392,7 @@ test('placement: the panel resized by the keyboard and by a 40-step drag, and th
     expect(await width()).toBeLessThan(before + 160);
 
     // the window resized by 100 × 60
-    await grow(100, 60);
+    await resizeWindow(s, pane, 100, 60);
     await expectOnPane(s, t, pane, 'panel', 1_000);
     expect(await offPaneAfterFrames(s, t, pane)).toBeNull();
   });
@@ -506,7 +497,8 @@ test('the page’s guards: a permission request denied with the line; the clipbo
     // the clipboard: a write from a timer with no input is refused; the page's Copy button, really clicked, writes
     await withNativeClipboard(s.maws.app, ['e4a'], async () => {
       await pageA.evaluate(() => (window as unknown as { copyLater(): void }).copyLater());
-      await expect(clipboardLine).toHaveText(/^refused: NotAllowedError/);
+      // Chromium's own refusal when the permission is denied (MAWS's carve-out), not a focus or availability failure
+      await expect(clipboardLine).toHaveText(/^refused: NotAllowedError: .*Write permission denied\.$/);
       await pageA.locator('#copy').click();
       await expect(clipboardLine).toHaveText('copied', { timeout: 2_000 });
       expect(await s.maws.app.evaluate(({ clipboard }) => clipboard.readText())).toBe('e4a');
