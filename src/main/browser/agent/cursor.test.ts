@@ -6,6 +6,7 @@ import { BROWSER_CURSOR_CHANNEL, type AgentCursorMessage } from '@shared/browser
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import { BROWSER_AGENT_IDLE_MS } from '@shared/maws/browser';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
+import { TabDebugger } from '../debugger';
 import { TabStore, type TabEntry } from '../tabs';
 import { TabControls } from './control';
 import { AgentCursor } from './cursor';
@@ -64,6 +65,7 @@ function harness() {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -123,6 +125,27 @@ describe('the agent cursor in main (Design §9)', () => {
       [BROWSER_CURSOR_CHANNEL, { kind: 'hide' }],
       [BROWSER_CURSOR_CHANNEL, { kind: 'hide' }],
     ]);
+  });
+
+  it("lets go of a view's debugger when the view goes (suspended or closed), so nothing keeps a closed tab", async () => {
+    const original = TabDebugger.prototype.onCommand;
+    const released: TabDebugger[] = [];
+    vi.spyOn(TabDebugger.prototype, 'onCommand').mockImplementation(function (this: TabDebugger, observer) {
+      const off = original.call(this, observer);
+      return () => {
+        released.push(this);
+        off();
+      };
+    });
+    const h = harness();
+    const suspended = h.open();
+    const closed = h.open();
+    const [first, second] = [suspended.debugger!, closed.debugger!];
+    h.store.suspend(suspended.tab.tabId);
+    h.store.close(closed.tab.tabId);
+    expect(released).toEqual([first, second]);
+    h.cursor.dispose();
+    expect(released).toEqual([first, second]); // nothing else was held
   });
 
   it('a new view of the tab is followed too, and a destroyed page is sent nothing', async () => {

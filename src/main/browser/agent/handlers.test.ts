@@ -8,6 +8,7 @@ import { TOOL_ERRORS } from '@shared/maws/tools';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { Navigator } from '../navigation';
 import { TabStore, type TabEntry } from '../tabs';
+import { personHolds } from './control';
 import { BrowserHandlers, type AgentControl, type BrowserCall, type DownloadRefusal } from './handlers';
 
 // browser_tabs and browser_navigate (E4c Design §6, §11; Decision Log 5, 6, 15, 22, 29) over E4a's real TabStore and
@@ -75,6 +76,7 @@ function harness() {
     }),
     actionEnded: vi.fn((entry: TabEntry) => void calls.push(`ended ${entry.tab.tabId}`)),
     requestPending: vi.fn(),
+    personHolds: (entry: TabEntry) => personHolds(entry, clock),
   };
   const refusals = new Set<(refusal: DownloadRefusal) => void>();
   const handlers = new BrowserHandlers({

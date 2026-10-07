@@ -35,6 +35,14 @@ interface TabControlState {
   handBack: ReturnType<typeof setTimeout> | null;
   agentIdle: ReturnType<typeof setTimeout> | null;
   releases: Set<() => void>; // waits at a pause point, released when control leaves `human`
+  unsubscribe(): void; // from the tab's input seam
+}
+
+// The person is using the tab (Design §6 step 3, §8): they hold it, or touched it within the hand-back window though no
+// agent held it. The one statement of the rule: the pause point, and the handlers' "leave the person's tab selected".
+export function personHolds(entry: TabEntry, now: number): boolean {
+  const { lastHumanAt } = entry.input;
+  return entry.tab.control === 'human' || (lastHumanAt !== null && now - lastHumanAt < BROWSER_HANDBACK_IDLE_MS);
 }
 
 // Told after every control transition (`from`: the state it left) and every change of the pending count (`from` is
@@ -44,27 +52,27 @@ export type ControlListener = (entry: TabEntry, from: BrowserControl) => void;
 export class TabControls implements AgentControl {
   private readonly states = new WeakMap<TabEntry, TabControlState>();
   private readonly listeners = new Set<ControlListener>();
-  private readonly unhook: (() => void)[] = [];
+  private readonly unhook: (() => void)[];
   private readonly now: () => number;
 
   constructor(private readonly deps: TabControlsDeps) {
     this.now = deps.now ?? Date.now;
     const { store } = deps;
     for (const entry of store.all()) this.attach(entry);
-    this.unhook.push(
+    this.unhook = [
       store.onViewCreated((entry) => this.attach(entry)),
       store.onUpdated((entry) => this.observe(entry)),
       // a closed tab (or one whose session was deleted): nothing may fire into it; a request waiting on it is aborted by
       // its controller (index.ts) and answers tabClosed
       store.onViewDestroying((entry) => queueMicrotask(() => store.entry(entry.tab.tabId) !== entry && this.forget(entry))),
-    );
+    ];
   }
 
   // `attachControl`: the tab's input seam, subscribed once per tab (the seam outlives the tab's views).
   attach(entry: TabEntry): void {
-    if (this.states.has(entry)) return;
-    this.states.set(entry, { seen: entry.tab.control, pending: 0, handBack: null, agentIdle: null, releases: new Set() });
-    this.unhook.push(entry.input.on((emission) => this.input(entry, emission)));
+    if (this.states.has(entry) || this.deps.store.entry(entry.tab.tabId) !== entry) return;
+    const unsubscribe = entry.input.on((emission) => this.input(entry, emission));
+    this.states.set(entry, { seen: entry.tab.control, pending: 0, handBack: null, agentIdle: null, releases: new Set(), unsubscribe });
   }
 
   onChange(listener: ControlListener): () => void {
@@ -122,7 +130,7 @@ export class TabControls implements AgentControl {
   }
 
   actionEnded(entry: TabEntry): void {
-    if (entry.tab.control !== 'agent') return;
+    if (entry.tab.control !== 'agent' || this.deps.store.entry(entry.tab.tabId) !== entry) return; // a closed tab lapses nowhere
     const state = this.stateOf(entry);
     clear(state, 'agentIdle');
     state.agentIdle = setTimeout(() => {
@@ -137,18 +145,17 @@ export class TabControls implements AgentControl {
     this.tell(entry, entry.tab.control);
   }
 
+  // The person is using the tab now (the rule `personHolds` states).
+  personHolds(entry: TabEntry): boolean {
+    return personHolds(entry, this.now());
+  }
+
   dispose(): void {
     for (const unhook of this.unhook.splice(0)) unhook();
     for (const entry of this.deps.store.all()) this.forget(entry);
   }
 
   // ---- internals ----------------------------------------------------------------------------------------------------
-
-  // The person is using the tab: they hold it, or touched it within the hand-back window though no agent held it.
-  private personHolds(entry: TabEntry): boolean {
-    const { lastHumanAt } = entry.input;
-    return entry.tab.control === 'human' || (lastHumanAt !== null && this.now() - lastHumanAt < BROWSER_HANDBACK_IDLE_MS);
-  }
 
   private input(entry: TabEntry, { source }: InputEmission): void {
     if (source !== 'human' || this.deps.store.entry(entry.tab.tabId) !== entry) return;
@@ -193,11 +200,14 @@ export class TabControls implements AgentControl {
     );
   }
 
+  // A tab gone (closed, or at dispose): its timers cleared and its input seam let go, so nothing holds it.
   private forget(entry: TabEntry): void {
     const state = this.states.get(entry);
     if (!state) return;
+    this.states.delete(entry);
     clear(state, 'handBack');
     clear(state, 'agentIdle');
+    state.unsubscribe();
   }
 
   private tell(entry: TabEntry, from: BrowserControl): void {
@@ -210,9 +220,10 @@ export class TabControls implements AgentControl {
     }
   }
 
+  // A tab the store no longer has gets a state of its own that nothing keeps (a late call for a closed tab).
   private stateOf(entry: TabEntry): TabControlState {
     this.attach(entry);
-    return this.states.get(entry)!;
+    return this.states.get(entry) ?? { seen: entry.tab.control, pending: 0, handBack: null, agentIdle: null, releases: new Set(), unsubscribe: () => {} };
   }
 }
 

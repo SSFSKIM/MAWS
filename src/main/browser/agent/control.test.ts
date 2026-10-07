@@ -4,8 +4,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_HANDBACK_IDLE_MS, DEFAULT_PARTITION, type BrowserControl } from '@shared/browser/tab';
 import { BROWSER_AGENT_IDLE_MS, type BrowserWaitReason } from '@shared/maws/browser';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
+import { TabInputSeam } from '../input';
 import { TabStore, type TabEntry } from '../tabs';
-import { TabControls } from './control';
+import { personHolds, TabControls } from './control';
 
 // Design §8's table, row by row, over E4a's real TabStore and input seam with vitest's fake clock: who drives the page,
 // the two timers, the pause point's wait (`pause`, `whenReleased`), background throttling while the agent acts, and
@@ -47,7 +48,24 @@ function harness() {
 
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
+// Every subscription to a tab's input seam, and every unsubscription, per seam (set before the tabs are made).
+function inputSubscriptions() {
+  const original = TabInputSeam.prototype.on;
+  const subscribed: TabInputSeam[] = [];
+  const unsubscribed: TabInputSeam[] = [];
+  vi.spyOn(TabInputSeam.prototype, 'on').mockImplementation(function (this: TabInputSeam, listener) {
+    subscribed.push(this);
+    const off = original.call(this, listener);
+    return () => {
+      unsubscribed.push(this);
+      off();
+    };
+  });
+  return { subscribed, unsubscribed };
+}
+
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -268,8 +286,23 @@ describe('the agent (Design §8 rows 6 to 8; Design §9 throttling)', () => {
   });
 });
 
+describe('personHolds (Design §6 step 3, §8): the one statement of the rule', () => {
+  it('holds while human, and within 3 s of the person\'s last input whatever the state', () => {
+    const h = harness();
+    const entry = h.open();
+    expect(personHolds(entry, Date.now())).toBe(false);
+    h.human(entry);
+    expect(personHolds(entry, Date.now() + BROWSER_HANDBACK_IDLE_MS - 1)).toBe(true);
+    expect(personHolds(entry, Date.now() + BROWSER_HANDBACK_IDLE_MS)).toBe(false);
+    h.store.setControl(entry.tab.tabId, 'human');
+    expect(personHolds(entry, Date.now() + 60_000)).toBe(true);
+    expect(h.controls.personHolds(entry)).toBe(true);
+  });
+});
+
 describe('a closed tab (Design §8 last row, §11)', () => {
-  it('clears its timers: nothing fires into a tab the store no longer has', () => {
+  it('clears its timers and lets go of its input seam: nothing fires into, or keeps, a tab the store no longer has', async () => {
+    const subscriptions = inputSubscriptions();
     const h = harness();
     const human = h.open();
     h.controls.requestPending(human, 1);
@@ -277,9 +310,14 @@ describe('a closed tab (Design §8 last row, §11)', () => {
     const agent = h.open();
     h.controls.markActing(agent);
     h.controls.actionEnded(agent);
+    expect(vi.getTimerCount()).toBe(2);
     h.store.close(human.tab.tabId);
     h.store.close(agent.tab.tabId);
-    expect(() => vi.advanceTimersByTime(BROWSER_AGENT_IDLE_MS)).not.toThrow();
+    await Promise.resolve(); // the close is known once the store has dropped the entry
+    expect(vi.getTimerCount()).toBe(0);
+    expect(subscriptions.unsubscribed).toEqual([human.input, agent.input]);
+    h.controls.actionEnded(agent); // a late call for the closed tab subscribes nothing again
+    expect(subscriptions.subscribed).toEqual([human.input, agent.input]);
     expect(h.changed()).toEqual(['human', 'agent']);
   });
 
@@ -296,11 +334,15 @@ describe('a closed tab (Design §8 last row, §11)', () => {
     await flush();
   });
 
-  it('a suspended and resumed tab keeps one input subscription', () => {
+  it('a suspended and resumed tab keeps one input subscription', async () => {
+    const subscriptions = inputSubscriptions();
     const h = harness();
     const entry = h.open();
     h.store.suspend(entry.tab.tabId);
+    await Promise.resolve();
     h.store.load(entry.tab.tabId, 'https://a.test/');
+    expect(subscriptions.subscribed).toEqual([entry.input]);
+    expect(subscriptions.unsubscribed).toEqual([]);
     h.controls.requestPending(entry, 1);
     h.human(entry);
     expect(h.changed()).toEqual(['human']);

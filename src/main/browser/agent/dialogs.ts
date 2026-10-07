@@ -145,7 +145,9 @@ export class PageDialogs implements AgentDialogs {
   }
 
   private handle(entry: TabEntry, contents: WebContents, info: RunDialogInfo, callback: RunDialogCallback, native: (callback: RunDialogCallback) => void): void {
-    if (this.deps.store.entry(entry.tab.tabId) !== entry || entry.view?.webContents !== contents) return native(callback);
+    // a page no longer the tab's has no pane and may have no owner window: Electron's dialog would be the parentless modal
+    // that blocks main, so it is dismissed
+    if (this.deps.store.entry(entry.tab.tabId) !== entry || entry.view?.webContents !== contents) return callback(false, '');
     const state = this.stateOf(entry);
     const now = this.now();
     state.ended = state.ended.filter((at) => now - at < DIALOG_BOUND_WINDOW_MS);

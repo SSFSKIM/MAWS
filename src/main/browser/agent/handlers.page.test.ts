@@ -9,6 +9,7 @@ import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { Navigator } from '../navigation';
 import { TabStore, type TabEntry } from '../tabs';
 import type { Driver } from './driver';
+import { personHolds } from './control';
 import { BrowserHandlers, type AgentControl, type BrowserCall, type DownloadRefusal, type Waited } from './handlers';
 import { FakePage } from './page.fake';
 
@@ -82,6 +83,7 @@ function harness({ withCursor = false }: { withCursor?: boolean } = {}) {
     }),
     actionEnded: vi.fn(() => void log.push('ended')),
     requestPending: vi.fn(),
+    personHolds: (entry: TabEntry) => personHolds(entry, Date.now()),
   };
   const dialogs = { take: vi.fn<(tabId: string) => BrowserDialog[]>(() => []) };
   const cursor = { aim: vi.fn((_entry: TabEntry, box: object) => void log.push(`aim ${JSON.stringify(box)}`)) };
@@ -545,6 +547,25 @@ describe("browser_act: the agent's cursor (Design §9; Decision Log 68)", () => 
     await h.run('browser_act', { tabId, action: 'fill', target: 'e5', value: 'Ada' });
     expect(h.log).toEqual(['pause', 'acting', 'aim {"x":10,"y":20,"width":30,"height":40}', 'fill', 'ended']);
     expect(h.cursor.aim).toHaveBeenCalledWith(h.store.entry(tabId), { x: 10, y: 20, width: 30, height: 40 });
+  });
+
+  it('goes back through the pause point when the person takes the page while the agent aims, then aims and acts', async () => {
+    const h = harness({ withCursor: true });
+    const tabId = h.open();
+    h.page.counts.set('aria-ref=e5', 1);
+    let aims = 0;
+    h.page.boxes.set('aria-ref=e5', () => {
+      if (aims++ === 0) {
+        h.store.setControl(tabId, 'human'); // the person's click lands during the aim
+        const gate = h.hold();
+        void Promise.resolve().then(() => gate.resolve({ waitedFor: 'human', waitedMs: 700 }));
+      }
+      return { x: 0, y: 0, width: 2, height: 2 };
+    });
+    const answer = await h.run('browser_act', { tabId, action: 'click', target: 'e5' });
+    const aim = 'aim {"x":0,"y":0,"width":2,"height":2}';
+    expect(h.log).toEqual(['pause', 'acting', aim, 'pause', 'acting', aim, 'click', 'ended']);
+    expect(answer).toMatchObject({ ok: true, result: { waitedFor: 'human', waitedMs: 700 } });
   });
 
   it('acts without the cursor when the box cannot be read, and never after an abort that came while it was read', async () => {

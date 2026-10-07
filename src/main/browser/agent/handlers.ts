@@ -15,7 +15,7 @@
 import type { WebContents } from 'electron';
 import type { Locator } from 'playwright-core';
 import type { AppSessionId } from '@shared/graph/ids';
-import { BROWSER_HANDBACK_IDLE_MS, type BrowserTab } from '@shared/browser/tab';
+import type { BrowserTab } from '@shared/browser/tab';
 import { cutSnapshot } from '@shared/browser/snapshot';
 import { validateBrowserUrl } from '@shared/browser/url';
 import type { MawsBrowserAnswerResult } from '@shared/ipc/schema/maws';
@@ -69,6 +69,7 @@ export interface AgentControl {
   markActing(entry: TabEntry): void; // an action passed its pause point, or a load starts: `control: 'agent'`
   actionEnded(entry: TabEntry): void; // the agent-idle timer runs from here
   requestPending(entry: TabEntry, delta: 1 | -1): void; // a request for the tab was queued (1) or finished (-1)
+  personHolds(entry: TabEntry): boolean; // the person is using the tab now (control.ts `personHolds`)
 }
 
 // The page dialogs the `-run-dialog` wrap (dialogs.ts) answered for the agent, per tab, until a result reports them: `take`
@@ -307,8 +308,7 @@ export class BrowserHandlers {
           if (isTimeout(error) && !ctx.signal.aborted) throw new BrowserToolError(BROWSER_TOOL_ERRORS.actionTimeout(tool, args.action, target, BROWSER_ACTION_TIMEOUT_MS));
           throw error;
         }
-        const paused = await this.pause(entry, ctx);
-        if (paused.waitedFor !== null) waited = { waitedFor: paused.waitedFor, waitedMs: (waited.waitedMs ?? 0) + (paused.waitedMs ?? 0) };
+        waited = withPersonWait(waited, await this.pause(entry, ctx));
       } while (entry.tab.covered); // a sheet came up while the person held the page: wait it out again
       if (waited.waitedFor === null && coveredMs > 0) waited = { waitedFor: 'cover', waitedMs: Math.round(coveredMs) };
 
@@ -317,6 +317,12 @@ export class BrowserHandlers {
       const navigation = watchCallNavigation(entry, ctx.signal);
       try {
         await this.aim(entry, locator, ctx.signal);
+        // the person took the page while the agent aimed (nothing page-changing has left yet): their pause point again
+        while (entry.tab.control !== 'agent') {
+          waited = withPersonWait(waited, await this.pause(entry, ctx));
+          control.markActing(entry);
+          await this.aim(entry, locator, ctx.signal);
+        }
         const before = page.url();
         await dispatch(page, locator, args.action, args.value, ctx.signal);
         // a navigation the action started: its load, briefly; a download it started answers at once
@@ -488,11 +494,8 @@ export class BrowserHandlers {
     throw new BrowserToolError(BROWSER_TOOL_ERRORS.actionFailed(tool, action, target, why));
   }
 
-  // The person is using the tab: they hold it, or touched it within the hand-back window though no agent held it
-  // (Design §6 step 3, §8).
   private personHolds(entry: TabEntry): boolean {
-    const { lastHumanAt } = entry.input;
-    return entry.tab.control === 'human' || (lastHumanAt !== null && this.now() - lastHumanAt < BROWSER_HANDBACK_IDLE_MS);
+    return this.deps.control.personHolds(entry);
   }
 
   private personHoldsSelection(appSessionId: AppSessionId): boolean {
@@ -525,6 +528,13 @@ export class BrowserHandlers {
   private ms(ctx: CallContext): number {
     return Math.max(0, Math.round(this.now() - ctx.startedAt)); // integers (Decision Log 44 (b))
   }
+}
+
+// A wait at the pause point added to an action's waits: the person's waits sum, and win over a cover's (Decision Log 64).
+function withPersonWait(waited: Waited, paused: Waited): Waited {
+  if (paused.waitedFor === null) return waited;
+  const before = waited.waitedFor === paused.waitedFor ? (waited.waitedMs ?? 0) : 0;
+  return { waitedFor: paused.waitedFor, waitedMs: before + (paused.waitedMs ?? 0) };
 }
 
 // The action and target an unexpected error's `actionFailed` names.

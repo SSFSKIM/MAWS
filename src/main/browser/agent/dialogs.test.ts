@@ -223,13 +223,16 @@ describe('PageDialogs: the person\'s tabs (A-42 conditions 1 and 3; Decision Log
     expect(wc.native).not.toHaveBeenCalled();
   });
 
-  it('a dialog from a view no longer the tab\'s goes to Electron untouched', () => {
+  it("a dialog from a view no longer the tab's is dismissed: it has no pane, and Electron's would be the parentless modal", () => {
     const h = harness();
     const { entry, wc } = h.open();
     h.store.setControl(entry.tab.tabId, 'agent');
     h.store.suspend(entry.tab.tabId);
-    wc.dialog('alert');
-    expect(wc.native).toHaveBeenCalledTimes(1);
+    expect(wc.dialog('alert')).toHaveBeenCalledWith(false, '');
+    expect(wc.dialog('confirm')).toHaveBeenCalledWith(false, '');
+    expect(wc.native).not.toHaveBeenCalled();
+    expect(h.dialogs.take(entry.tab.tabId)).toEqual([]);
+    expect(h.notices()).toEqual([]);
   });
 });
 

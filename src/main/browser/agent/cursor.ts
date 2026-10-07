@@ -14,23 +14,24 @@ import type { TabControls } from './control';
 const MOUSE: Record<string, 'move' | 'press' | 'release'> = { mouseMoved: 'move', mousePressed: 'press', mouseReleased: 'release' };
 
 export interface AgentCursorDeps {
-  store: Pick<TabStore, 'all' | 'onViewCreated'>;
+  store: Pick<TabStore, 'all' | 'onViewCreated' | 'onViewDestroying'>;
   controls: Pick<TabControls, 'onChange'>;
 }
 
 export class AgentCursor {
-  private readonly watched = new WeakSet<TabDebugger>();
+  private readonly watched = new Map<TabDebugger, () => void>(); // each live view's debugger: its observer's unhook
   private readonly counts = new WeakMap<TabEntry, number>();
-  private readonly unhook: (() => void)[] = [];
+  private readonly unhook: (() => void)[];
 
   constructor(deps: AgentCursorDeps) {
     for (const entry of deps.store.all()) this.watch(entry);
-    this.unhook.push(
+    this.unhook = [
       deps.store.onViewCreated((entry) => this.watch(entry)),
+      deps.store.onViewDestroying((entry) => this.unwatch(entry.debugger)), // the view goes: nothing keeps it
       deps.controls.onChange((entry, from) => {
         if (from === 'agent' && entry.tab.control !== 'agent') this.hide(entry);
       }),
-    );
+    ];
   }
 
   // Before an action: the pointer to the element's centre, then the element outlined.
@@ -52,14 +53,20 @@ export class AgentCursor {
 
   dispose(): void {
     for (const unhook of this.unhook.splice(0)) unhook();
+    for (const tabDebugger of [...this.watched.keys()]) this.unwatch(tabDebugger);
   }
 
   // Each view has its own TabDebugger: followed once, for as long as it lives (a later view of the tab is followed anew).
   private watch(entry: TabEntry): void {
     const tabDebugger = entry.debugger;
     if (!tabDebugger || this.watched.has(tabDebugger)) return;
-    this.watched.add(tabDebugger);
-    this.unhook.push(tabDebugger.onCommand((phase) => this.observe(entry, tabDebugger, phase)));
+    this.watched.set(tabDebugger, tabDebugger.onCommand((phase) => this.observe(entry, tabDebugger, phase)));
+  }
+
+  private unwatch(tabDebugger: TabDebugger | null): void {
+    if (!tabDebugger) return;
+    this.watched.get(tabDebugger)?.();
+    this.watched.delete(tabDebugger);
   }
 
   private observe(entry: TabEntry, tabDebugger: TabDebugger, phase: CommandPhase): void {
