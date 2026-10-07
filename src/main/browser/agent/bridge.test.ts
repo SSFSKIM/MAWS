@@ -27,9 +27,8 @@ class FakeElectronDebugger extends EventEmitter {
   }
   sendCommand(method: string, params?: unknown, sessionId?: string): Promise<unknown> {
     if (!this.attachedTo) return Promise.reject(new Error('No target available'));
-    if (method === 'Page.getFrameTree') return Promise.resolve({ frameTree: { frame: { id: 'FRAME-MAIN' } } });
-    this.sent.push({ method, params, sessionId });
-    const answer = { echoed: method };
+    const answer = method === 'Page.getFrameTree' ? { frameTree: { frame: { id: 'FRAME-MAIN' } } } : { echoed: method };
+    if (method !== 'Page.getFrameTree') this.sent.push({ method, params, sessionId });
     if (this.hold?.(method)) return new Promise((resolve) => this.held.push(() => resolve(answer)));
     return Promise.resolve(answer);
   }
@@ -56,13 +55,19 @@ class Client {
   private nextId = 1;
   private readonly waiting = new Map<number, (reply: Reply) => void>();
   readonly events: Reply[] = [];
+  readonly order: string[] = []; // every message as it arrived: `reply <id>` or `event <method>`
+  onEvent: ((event: Reply) => void) | null = null;
   closedWith: string | null = null;
 
   constructor(private readonly transport: ConnectOverCDPTransport) {
     transport.onmessage = (message) => {
       const reply = message as Reply;
+      this.order.push(reply.id !== undefined ? `reply ${reply.id}` : `event ${reply.method}`);
       if (reply.id !== undefined) this.waiting.get(reply.id)?.(reply);
-      else this.events.push(reply);
+      else {
+        this.events.push(reply);
+        this.onEvent?.(reply);
+      }
     };
     transport.onclose = (reason) => void (this.closedWith = reason ?? '');
   }
@@ -257,6 +262,40 @@ describe('startCdpBridge: the browser-level answers', () => {
     expect(reply.error?.code).toBe(-32000);
     expect(tabDebugger.attached).toBe(false); // a stale connection never revives the attachment (M0's surprise)
     expect(raw.sent).toEqual([]);
+  });
+});
+
+describe('startCdpBridge: one message per turn, as a socket', () => {
+  // A socket hands a client each message in its own task, so what the client does on one (a promise's continuation)
+  // runs before the next arrives. Playwright relies on it: it listens for a frame's execution contexts in the
+  // continuation of Page.getFrameTree's answer, and its own Runtime.enable reports the main world right after; handed
+  // over in one batch, that report reached no listener and every main-world evaluate (browser_eval, a locator's box)
+  // waited forever (found by M4's e2e).
+  it('lets the microtasks a message starts run before the next message', async () => {
+    const { connect, raw } = await harness();
+    const client = await connect();
+    const seen: string[] = [];
+    client.onEvent = (event) => {
+      seen.push(`event ${String(event.params?.n)}`);
+      queueMicrotask(() => seen.push(`after ${String(event.params?.n)}`));
+    };
+    raw.event('Runtime.executionContextCreated', { n: 1 });
+    raw.event('Runtime.executionContextCreated', { n: 2 });
+    raw.event('Runtime.executionContextCreated', { n: 3 });
+    await vi.waitFor(() => expect(seen).toEqual(['event 1', 'after 1', 'event 2', 'after 2', 'event 3', 'after 3']));
+  });
+
+  it('an answer and the event after it: the answer’s continuation runs first', async () => {
+    const { connect, PAGE, raw } = await harness();
+    const client = await connect();
+    raw.hold = (method) => method === 'Page.getFrameTree';
+    const tree = client.call('Page.getFrameTree', {}, PAGE);
+    void tree.then(() => client.order.push('listening'));
+    await settle();
+    raw.release();
+    for (let k = 0; k < 20; k++) await Promise.resolve(); // the answer reaches the bridge's outbox, still undelivered
+    raw.event('Runtime.executionContextCreated', { n: 4 });
+    await vi.waitFor(() => expect(client.order).toEqual(['reply 1', 'listening', 'event Runtime.executionContextCreated']));
   });
 });
 

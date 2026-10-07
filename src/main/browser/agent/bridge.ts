@@ -84,13 +84,18 @@ export async function startCdpBridge(dbg: BridgeDebugger, page: BridgePage, { lo
   const stats: BridgeStats = { forwarded: 0, browserLevel: 0, events: 0, errors: 0, blocked: [], unknownBrowserMethods: new Set() };
   let client: ConnectOverCDPTransport | null = null;
 
-  // Every message reaches Playwright on a later turn, in order, as a socket's would: Playwright registers a command's
-  // callback only after `send` returns, so an answer delivered inside `send` would be lost.
+  // Every message reaches Playwright on a later turn, in order, and each on a turn of its own, as a socket's would:
+  // Playwright registers a command's callback only after `send` returns, so an answer delivered inside `send` would be
+  // lost; and it acts on an answer in a promise continuation, which must run before the next message arrives (it
+  // listens for a frame's execution contexts once Page.getFrameTree has answered, and the main world's report follows
+  // that answer at once: handed over in one batch, it reached no listener and every main-world evaluate waited forever).
   const outbox: { to: ConnectOverCDPTransport; message: object }[] = [];
   let flushing = false;
   const flush = () => {
-    flushing = false;
-    for (const { to, message } of outbox.splice(0)) if (client === to) to.onmessage?.(message);
+    const next = outbox.shift();
+    if (next && client === next.to) next.to.onmessage?.(next.message);
+    if (outbox.length > 0) setImmediate(flush);
+    else flushing = false;
   };
   const deliverTo = (to: ConnectOverCDPTransport, message: object) => {
     outbox.push({ to, message });
