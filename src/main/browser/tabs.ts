@@ -36,12 +36,14 @@ export interface TabPlacement {
   rect: { x: number; y: number; width: number; height: number };
 }
 
-// What the input seam (input.ts `TabInputSeam`, Design §11) is read for: when the page last saw input attributed to the
-// human, and to anyone (the human or the agent), in epoch ms; null until the first. `attachInputSeams` writes it; the
-// clipboard carve-out (permissions.ts) and the `window.open` gate (window-open.ts) read it.
+// What the input seam (input.ts `TabInputSeam`, Design §11) is read for, each in epoch ms and null until the first:
+// the human's last input of any kind (wheels included; E4c's hand-back timer), the human's last activation (a key or a
+// mouse press; the clipboard carve-out, permissions.ts), and anyone's last activation, the human's or the agent's (the
+// `window.open` gate, window-open.ts). A wheel is never an activation, as in Chrome (Decision Log 45).
 export interface TabInput {
   lastHumanAt: number | null;
-  lastInputAt: number | null;
+  lastHumanActivationAt: number | null;
+  lastActivationAt: number | null;
 }
 
 export interface TabEntry {

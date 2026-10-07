@@ -14,7 +14,9 @@
 //     coordinates enter the match (zoom and iframes put the hooks in other spaces than the command).
 //
 // Moves and derived gestures are not events of record. Each attribution is emitted on the tab's input seam, which keeps
-// `lastHumanAt` (the clipboard carve-out, E4c's hand-back timer) and `lastInputAt` (the `window.open` gate). The bit is
+// `lastHumanAt` (any human input, wheels included: E4c's hand-back timer), `lastHumanActivationAt` (a human key or mouse
+// press: the clipboard carve-out) and `lastActivationAt` (anyone's key or mouse press: the `window.open` gate); a wheel
+// is never an activation, as in Chrome, so scrolling opens neither gate (Decision Log 45). The bit is
 // undocumented and slated for removal upstream; input.test.ts pins it to the Electron the recordings were made on, and
 // E4c carries A-33's fallbacks.
 import type { Event, Input, InputEvent, MouseInputEvent } from 'electron';
@@ -68,12 +70,17 @@ export interface InputEmission {
 // A tab's input seam: the last input times its readers check, and the emissions E4c's control transitions consume.
 export class TabInputSeam implements TabInput {
   lastHumanAt: number | null = null;
-  lastInputAt: number | null = null;
+  lastHumanActivationAt: number | null = null;
+  lastActivationAt: number | null = null;
   private readonly listeners = new Set<(emission: InputEmission) => void>();
 
   emit(emission: InputEmission): void {
-    this.lastInputAt = emission.at;
-    if (emission.source === 'human') this.lastHumanAt = emission.at;
+    const human = emission.source === 'human';
+    if (human) this.lastHumanAt = emission.at;
+    if (emission.kind !== 'wheel') {
+      this.lastActivationAt = emission.at;
+      if (human) this.lastHumanActivationAt = emission.at;
+    }
     for (const listener of [...this.listeners]) {
       try {
         listener(emission);

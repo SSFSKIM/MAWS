@@ -8,7 +8,7 @@ import { TabStore, type TabEntry } from './tabs';
 
 const A = 'App-A' as AppSessionId;
 const NOW = 1_000_000;
-const human = (at: number | null) => ({ lastHumanAt: at, lastInputAt: at });
+const human = (at: number | null) => ({ lastHumanAt: at, lastHumanActivationAt: at, lastActivationAt: at });
 
 describe('permissionGranted: deny-all with the human clipboard write (E4a Design §8, Decision Log 12)', () => {
   it('denies every permission whatever the input', () => {
@@ -24,7 +24,7 @@ describe('permissionGranted: deny-all with the human clipboard write (E4a Design
     expect(permissionGranted(write, { control: 'idle' }, human(NOW - CLIPBOARD_HUMAN_INPUT_MS - 1), NOW)).toBe(false);
     expect(permissionGranted(write, { control: 'idle' }, human(null), NOW)).toBe(false); // no input yet
     expect(permissionGranted(write, { control: 'agent' }, human(NOW - 10), NOW)).toBe(false);
-    expect(permissionGranted(write, { control: 'idle' }, { lastHumanAt: null, lastInputAt: NOW }, NOW)).toBe(false); // the agent's input
+    expect(permissionGranted(write, { control: 'idle' }, { lastHumanActivationAt: null, lastActivationAt: NOW, lastHumanAt: NOW }, NOW)).toBe(false); // the agent's press, the human's wheel
   });
 
   it('withDenied keeps one line per (host, permission), the newest eight', () => {
@@ -80,7 +80,7 @@ describe('preparePermissions: the partition\'s handlers', () => {
     const h = harness();
     expect(h.request('clipboard-sanitized-write')).toBe(false);
     expect(h.check('clipboard-sanitized-write')).toBe(false);
-    h.entry.input.lastHumanAt = NOW;
+    h.entry.input.lastHumanActivationAt = NOW;
     expect(h.request('clipboard-sanitized-write')).toBe(true);
     expect(h.check('clipboard-sanitized-write')).toBe(true);
     expect(h.check('clipboard-read')).toBe(false);

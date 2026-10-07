@@ -494,7 +494,7 @@ describe('TabStore: adopting a page\'s window.open child (Design §14, Decision 
     const entry = h.entry(open(h, 'https://a.test/').tab.tabId);
     expect(h.store.entryOf(entry.view!.webContents)).toBe(entry);
     expect(h.store.entryOf(child() as never)).toBeUndefined();
-    expect(entry.input).toMatchObject({ lastHumanAt: null, lastInputAt: null });
+    expect(entry.input).toMatchObject({ lastHumanAt: null, lastHumanActivationAt: null, lastActivationAt: null });
     expect(entry.findOpen).toBe(false);
   });
 });

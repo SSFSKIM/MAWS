@@ -1,8 +1,9 @@
 // Page permissions (E4a execution document, Design §8; A-31; Decision Log 12): every request a page makes is denied and
 // shown in the chrome's banner (one line per host and permission, cleared on the next navigation), with one carve-out:
-// `clipboard-sanitized-write` is granted within 2 s of the human's own input to that page while the agent does not hold
-// it, since Chrome grants it on user activation without a prompt and a site's Copy button would otherwise fail on every
-// page; the agent never gets it, and `clipboard-read` stays denied. Checks answer the same; devices and screen capture
+// `clipboard-sanitized-write` is granted within 2 s of the human's own activation of that page (a key or a mouse press,
+// never a wheel: a write triggered by scrolling is the pastejacking pattern; Decision Log 45) while the agent does not
+// hold it, since Chrome grants it on user activation without a prompt and a site's Copy button would otherwise fail on
+// every page; the agent never gets it, and `clipboard-read` stays denied. Checks answer the same; devices and screen capture
 // are refused; a fullscreen request is a denied permission like any other. HTTP authentication is cancelled (the page
 // shows the server's 401). The context menu's Copy and ⌘C are native and untouched.
 import type { Session } from 'electron';
@@ -15,8 +16,8 @@ export const CLIPBOARD_HUMAN_INPUT_MS = 2000;
 
 // The one permission a page may get, and when.
 export function permissionGranted(permission: string, tab: Pick<BrowserTab, 'control'>, input: TabInput, now: number): boolean {
-  if (permission !== 'clipboard-sanitized-write' || tab.control === 'agent' || input.lastHumanAt === null) return false;
-  const since = now - input.lastHumanAt;
+  if (permission !== 'clipboard-sanitized-write' || tab.control === 'agent' || input.lastHumanActivationAt === null) return false;
+  const since = now - input.lastHumanActivationAt;
   return since >= 0 && since <= CLIPBOARD_HUMAN_INPUT_MS;
 }
 

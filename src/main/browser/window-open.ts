@@ -23,7 +23,7 @@ export interface WindowOpenRequest {
   url: string;
   disposition: string; // HandlerDetails' `default`, `foreground-tab`, `background-tab`, `new-window` or `other`
   now: number;
-  lastInputAt: number | null; // the page's last attributed input (entry.input)
+  lastActivationAt: number | null; // the page's last attributed activation, the human's or the agent's (entry.input)
   recentOpens: readonly number[]; // when the opens honoured so far happened
   linkTarget: LinkTarget;
   hasRoom: boolean; // the loaded-tab cap can take one more (TabStore.hasRoomForView)
@@ -31,8 +31,8 @@ export interface WindowOpenRequest {
 
 const BLOCKED: WindowOpenDecision = { action: 'deny', blocked: true };
 
-export function decideWindowOpen({ url, disposition, now, lastInputAt, recentOpens, linkTarget, hasRoom }: WindowOpenRequest): WindowOpenDecision {
-  if (lastInputAt === null || now - lastInputAt > WINDOW_OPEN_INPUT_MS) return BLOCKED;
+export function decideWindowOpen({ url, disposition, now, lastActivationAt, recentOpens, linkTarget, hasRoom }: WindowOpenRequest): WindowOpenDecision {
+  if (lastActivationAt === null || now - lastActivationAt > WINDOW_OPEN_INPUT_MS) return BLOCKED;
   if (recentOpens.filter((at) => now - at < WINDOW_OPEN_INPUT_MS).length >= WINDOW_OPEN_BURST) return BLOCKED;
   if (/^mailto:/i.test(url)) return { action: 'external' };
   const web = validateBrowserUrl(url).ok;
@@ -78,7 +78,7 @@ export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, chi
     if (store.entry(tabId) !== entry || entry.view !== view) return { action: 'deny' };
     const at = now();
     opens = opens.filter((when) => at - when < WINDOW_OPEN_INPUT_MS);
-    const decision = decideWindowOpen({ url, disposition, now: at, lastInputAt: entry.input.lastInputAt, recentOpens: opens, linkTarget: linkTarget(), hasRoom: store.hasRoomForView() });
+    const decision = decideWindowOpen({ url, disposition, now: at, lastActivationAt: entry.input.lastActivationAt, recentOpens: opens, linkTarget: linkTarget(), hasRoom: store.hasRoomForView() });
     switch (decision.action) {
       case 'deny':
         store.update(tabId, { blockedPopups: entry.tab.blockedPopups + 1 });

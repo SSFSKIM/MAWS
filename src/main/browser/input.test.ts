@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { TabDebugger } from './debugger';
 import { attachInputSeams, classify, FROM_DEBUGGER, TabInputSeam, type InputEmission } from './input';
+import { permissionGranted } from './permissions';
+import { decideWindowOpen } from './window-open';
 import type { TabEntry } from './tabs';
 
 // E4-0's recordings (`spikes/browser-probe/results/pass2/input.json`, `input2.json`; findings-pass2.txt:72-170): every
@@ -196,17 +198,36 @@ describe('the input seams over E4-0\'s recordings (findings-pass2.txt:72-170)', 
 });
 
 describe('TabInputSeam and attachInputSeams', () => {
-  it('records when the human, and when anyone, last gave input, and tells its listeners', async () => {
+  it('records the human\'s last input, the human\'s last activation and anyone\'s last activation, and tells its listeners', async () => {
     let clock = 100;
     const tab = await tabWithSeams(() => clock);
-    expect(tab.entry.input).toMatchObject({ lastHumanAt: null, lastInputAt: null });
+    expect(tab.entry.input).toMatchObject({ lastHumanAt: null, lastHumanActivationAt: null, lastActivationAt: null });
     tab.webContents.emit('input-event', {}, { type: 'keyDown', _modifiers: FROM_DEBUGGER });
-    expect(tab.entry.input).toMatchObject({ lastHumanAt: null, lastInputAt: 100 });
+    expect(tab.entry.input).toMatchObject({ lastHumanAt: null, lastHumanActivationAt: null, lastActivationAt: 100 });
     clock = 250;
     tab.webContents.emit('before-mouse-event', {}, { type: 'mouseDown' });
-    expect(tab.entry.input).toMatchObject({ lastHumanAt: 250, lastInputAt: 250 });
+    expect(tab.entry.input).toMatchObject({ lastHumanAt: 250, lastHumanActivationAt: 250, lastActivationAt: 250 });
+    clock = 400;
+    tab.webContents.emit('input-event', {}, { type: 'mouseWheel', _modifiers: 0 }); // a human wheel: input, not activation
+    expect(tab.entry.input).toMatchObject({ lastHumanAt: 400, lastHumanActivationAt: 250, lastActivationAt: 250 });
     tab.webContents.emit('before-mouse-event', {}, { type: 'mouseMove' });
-    expect(tab.emissions).toEqual(['key/agent', 'mouse/human']);
+    expect(tab.emissions).toEqual(['key/agent', 'mouse/human', 'wheel/human']);
+  });
+
+  it('a human wheel opens neither gate; a human press opens both, an agent press only window.open (Decision Log 45)', async () => {
+    let clock = 1000;
+    const tab = await tabWithSeams(() => clock);
+    const gates = () => ({
+      clipboard: permissionGranted('clipboard-sanitized-write', { control: 'idle' }, tab.entry.input, clock),
+      windowOpen: decideWindowOpen({ url: 'https://a.test/', disposition: 'foreground-tab', now: clock, lastActivationAt: tab.entry.input.lastActivationAt, recentOpens: [], linkTarget: 'in-app', hasRoom: true }).action,
+    });
+    tab.webContents.emit('input-event', {}, { type: 'mouseWheel', _modifiers: 0 });
+    expect(gates()).toEqual({ clipboard: false, windowOpen: 'deny' });
+    tab.webContents.emit('input-event', {}, { type: 'keyDown', _modifiers: FROM_DEBUGGER });
+    expect(gates()).toEqual({ clipboard: false, windowOpen: 'adopt' });
+    clock += 10_000;
+    tab.webContents.emit('before-input-event', {}, { type: 'keyDown' });
+    expect(gates()).toEqual({ clipboard: true, windowOpen: 'adopt' });
   });
 
   it('a listener can unsubscribe, and a throwing one stops neither the record nor the others', () => {
@@ -221,7 +242,7 @@ describe('TabInputSeam and attachInputSeams', () => {
     stop();
     seam.emit({ kind: 'key', source: 'agent', at: 6 });
     expect(heard).toEqual(['human']);
-    expect(seam).toMatchObject({ lastHumanAt: 5, lastInputAt: 6 });
+    expect(seam).toMatchObject({ lastHumanAt: 5, lastHumanActivationAt: 5, lastActivationAt: 6 });
     expect(error).toHaveBeenCalledTimes(2);
     error.mockRestore();
   });
