@@ -1,8 +1,9 @@
 // The browser's side of main (E4a execution document, Design §1, §2, §9; Interfaces "Main"), started from
 // `src/main/index.ts` once the index is open: the tab store over `<userData>/browser/tabs.json`, the partitions, the
 // views, each view's navigation (history and favicons included), the page's guards (permissions, downloads,
-// `window.open`, the context menu, the keyboard) and `browser.*`. Tabs belong to sessions (P-21): a session whose record is deleted closes its tabs, and at boot a
-// tab whose session the index does not know is dropped from the file. Main never waits on the renderer.
+// `window.open`, the context menu, the keyboard) and `browser.*`. Tabs belong to sessions (P-21): a session whose record
+// is deleted closes its tabs, and at boot a tab whose session the index does not know is dropped from the file. Main
+// never waits on the renderer.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, session } from 'electron';
