@@ -8,9 +8,9 @@
 // chip and image, the thread header's page button reusing the parent's tab; (3) G2 without E4c: every target's anchor
 // resolves with E4c's own expression in the view's page; (4) an area pick; (5) Esc in the page and in the chrome; (6)
 // the context menu's pick (through the seam's `pickAt`); (7) a navigation disarms, a stale report is dropped; (7b) a
-// tab whose preload never acknowledges the arm is refused (7c: an adopted window.open tab, expected to fail until E4a's
-// fix); (8) a frame, a shadow host and a top-layer dialog; (9) disk-form replay
-// parity and the chip opening the page; (10) the agent's control gate; (11) both-theme evidence under MAWS_E4D_SHOTS=1.
+// tab whose preload never acknowledges the arm is refused; (7c) a tab adopted from window.open arms and shields; (8) a
+// frame, a shadow host and a top-layer dialog; (9) disk-form replay parity and the chip opening the page; (10) the
+// agent's control gate; (11) both-theme evidence under MAWS_E4D_SHOTS=1.
 // Runs under `pnpm e2e:browser-comment` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -689,10 +689,9 @@ test('7b. armed means acknowledged: a tab whose preload never confirms the arm i
   });
 });
 
-// A tab adopted from a page's window.open (E4a's `adoptChild`): Electron 44.4.5 loads no browser preload there under
-// E4a's per-view `webPreferences.preload` (Decision Log 33), so today it is the real page with no preload, refused as
-// above. E4a's fix (the preload registered per session) makes adopted tabs acknowledge: then delete the adopted variant
-// of 7b (7b covers the defence durably) and drop 7c's `test.fail`.
+// A tab adopted from a page's window.open (E4a's `adoptChild`): the browser preload reaches it only because E4a registers
+// it on the partition's session (E4a's Decision Log 56; under a per-view `webPreferences.preload` it never ran there,
+// E4d's Decision Log 33), so it acknowledges the arm like any tab; 7b covers the defence for a page that does not.
 async function adoptedTab(s: BrowserScene): Promise<{ view: Locator; tabId: string; page: Page }> {
   const [id] = s.ids as [AppSessionId];
   await show(s, id);
@@ -708,16 +707,7 @@ async function adoptedTab(s: BrowserScene): Promise<{ view: Locator; tabId: stri
   return { view, tabId, page };
 }
 
-test('7b (adopted). today’s preload-less page, an adopted window.open tab, is refused as unavailable (delete when E4a’s per-session preload lands)', async () => {
-  await commentScene({ titles: ['E4d: adopted, refused'] }, async (s) => {
-    const { view, tabId, page } = await adoptedTab(s);
-    await expectRefusedArm(s, view, tabId, page);
-  });
-});
-
-test('7c. a tab adopted from window.open arms and shields (expected to fail until E4a’s per-session preload lands)', async () => {
-  // E4a's fix makes this pass; remove the mark then (Decision Log 33, 34).
-  test.fail(true, 'E4a: an adopted window.open tab runs no browser preload (Decision Log 33)');
+test('7c. a tab adopted from window.open arms and shields (E4a’s per-session preload)', async () => {
   await commentScene({ titles: ['E4d: adopted'] }, async (s) => {
     const { view, tabId, page } = await adoptedTab(s);
     await toggleOf(view).click();
