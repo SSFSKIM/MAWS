@@ -8,6 +8,7 @@ import { askSteerText } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
+import { artifactHeading, deliveryHeading } from './copy'; // E11
 import { isPersistentRow, rowsOf, withAllExpanded } from './derive';
 import { rowId } from './keys';
 import { applyEvents, createState } from './reduce';
@@ -242,6 +243,38 @@ describe('the delivery row', () => {
     refused.toolUse('toolu_e', SEND_FILE, { files: ['missing.txt'] });
     refused.result('toolu_e', 'send_file: not a file: /repo/missing.txt', { isError: true });
     expect(ofKind(expandedRows(refused.events), 'delivery')[0]).toMatchObject({ files: [{ path: 'missing.txt', name: 'missing.txt', id: null }], error: 'send_file: not a file: /repo/missing.txt' });
+  });
+
+  // E11 (W-C; E2 Decision Log 36): the turn's closed state is the only sign a call went unanswered (a session that
+  // ended between the call and its result), so a closed turn's pending delivery and artifact rows say so
+  it('a delivery and an artifact whose turn ended between the call and its result read never answered', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_d', SEND_FILE, { files: ['out/report.pdf'] });
+    b.toolUse('toolu_a', 'mcp__maws__artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' });
+    const open = expandedRows(b.events);
+    expect(deliveryHeading(ofKind(open, 'delivery')[0])).toBe('Delivering report.pdf');
+    expect(artifactHeading(ofKind(open, 'artifact')[0])).toBe('Registering artifact Dashboard…');
+    b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null });
+    const closed = expandedRows(b.events);
+    const [delivery] = ofKind(closed, 'delivery');
+    const [artifact] = ofKind(closed, 'artifact');
+    expect(delivery).toMatchObject({ files: [{ id: null }], error: null, neverAnswered: true });
+    expect(artifact).toMatchObject({ version: null, error: null, answered: false, neverAnswered: true });
+    expect(deliveryHeading(delivery)).toBe('Delivering report.pdf was never answered');
+    expect(artifactHeading(artifact)).toBe('Registering artifact Dashboard was never answered');
+
+    const answered = builder(); // a result, or the host's event, before the end: answered
+    answered.turn('u1');
+    answered.toolUse('toolu_d', SEND_FILE, { files: ['a.txt'] });
+    answered.emit('maws.delivery.file', { toolUseId: tool('toolu_d'), requestId: request('r1'), deliverables: [{ id: 'd-1', path: '/repo/a.txt', name: 'a.txt' }], caption: null, urgency: 'normal' });
+    answered.toolUse('toolu_a', 'mcp__maws__artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' });
+    answered.result('toolu_a', 'artifact_create: refused', { isError: true });
+    answered.end(['u1']);
+    const rows = expandedRows(answered.events);
+    expect(ofKind(rows, 'delivery')[0]).not.toHaveProperty('neverAnswered');
+    expect(ofKind(rows, 'artifact')[0]).not.toHaveProperty('neverAnswered');
+    expect(deliveryHeading(ofKind(rows, 'delivery')[0])).toBe('Delivered a.txt');
   });
 
   it('stays in view when its turn folds', () => {

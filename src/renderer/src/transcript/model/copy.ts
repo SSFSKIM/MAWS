@@ -417,9 +417,18 @@ export const DELIVERY = {
   delivered: (files: readonly { name: string }[]) => `Delivered ${deliveredSubject(files)}`,
   delivering: (files: readonly { name: string }[]) => `Delivering ${deliveredSubject(files)}`,
   failed: (files: readonly { name: string }[]) => `Could not deliver ${deliveredSubject(files)}`,
+  neverAnswered: (files: readonly { name: string }[]) => `Delivering ${deliveredSubject(files)} was never answered`, // E11
   openExternally: 'Open externally',
   reveal: 'Reveal in Finder',
 } as const;
+
+// E11 (W-C): the delivery row's one line: its refusal, else Delivering until the files are recorded (or never answered
+// when its turn closed first), else Delivered.
+export function deliveryHeading(row: { files: readonly { name: string; id: string | null }[]; error: string | null; neverAnswered?: true }): string {
+  if (row.error !== null) return DELIVERY.failed(row.files);
+  if (row.neverAnswered) return DELIVERY.neverAnswered(row.files);
+  return row.files.some((file) => file.id === null) ? DELIVERY.delivering(row.files) : DELIVERY.delivered(row.files);
+}
 
 // A `show_pane` cell's line: what opened (a panel tool's title, a file's name), or why nothing did.
 export const PANE_CELL = {
@@ -482,6 +491,7 @@ export const ARTIFACT = {
   created: (name: string, version: number | null) => (version === null ? `Artifact ${name}` : `Artifact ${name} · v${version}`),
   updated: (name: string, version: number | null) => (version === null ? `Updated artifact ${name}` : `Updated artifact ${name} · v${version}`),
   registering: (name: string) => `Registering artifact ${name}…`,
+  neverAnswered: (name: string) => `Registering artifact ${name} was never answered`, // E11
   failed: (name: string, error: string) => `Could not register artifact ${name}: ${error}`,
   open: 'Open',
 } as const;
@@ -490,11 +500,12 @@ export const ARTIFACT = {
 // reads the reason alone, as the artifact cells show theirs.
 const refusalForHuman = (error: string) => error.replace(/^artifact_(create|update): /, '').replace(/; use artifact_(create|update)$/, '');
 
-// The row's one line: its refusal, else Registering until the result is in, else the version it registered (without a
-// version when the result named none).
-export function artifactHeading(row: { action: 'create' | 'update'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean }): string {
+// The row's one line: its refusal, else Registering until the result is in (never answered when its turn closed first,
+// E11), else the version it registered (without a version when the result named none).
+export function artifactHeading(row: { action: 'create' | 'update'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true }): string {
   const name = row.title ?? row.artifactId;
   if (row.error !== null) return ARTIFACT.failed(name, refusalForHuman(row.error));
+  if (row.neverAnswered) return ARTIFACT.neverAnswered(name);
   if (row.version === null && !row.answered) return ARTIFACT.registering(name);
   return (row.action === 'create' ? ARTIFACT.created : ARTIFACT.updated)(name, row.version);
 }

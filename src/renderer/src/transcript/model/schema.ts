@@ -108,7 +108,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
   }),
   z.strictObject({
     ...base, kind: z.literal('delivery'), toolUseId: z.string(), files: z.array(z.strictObject({ path: z.string(), name: z.string(), id: nullable(z.string()) })), caption: nullable(z.string()),
-    urgency: z.enum(['normal', 'high']), error: nullable(z.string()),
+    urgency: z.enum(['normal', 'high']), error: nullable(z.string()), neverAnswered: z.literal(true).optional() /* E11 */,
   }),
   // E1 end
   // E3 start
@@ -127,7 +127,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
   // E2 start
   z.strictObject({
     ...base, kind: z.literal('artifact'), toolUseId: z.string(), action: z.enum(['create', 'update']), artifactId: z.string(), title: nullable(z.string()), htmlPath: z.string(),
-    deliverableId: nullable(z.string()), version: nullable(z.number()), error: nullable(z.string()), answered: z.boolean(),
+    deliverableId: nullable(z.string()), version: nullable(z.number()), error: nullable(z.string()), answered: z.boolean(), neverAnswered: z.literal(true).optional() /* E11 */,
   }),
   // E2 end
   // E4c start

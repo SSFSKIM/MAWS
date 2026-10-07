@@ -237,6 +237,7 @@ interface DeliveryRecord {
   caption: string | null | undefined; // undefined: no `maws.delivery.file` said
   urgency: 'normal' | 'high' | null;
   error: string | null;
+  resulted: boolean; // E11: the call's result is in
 }
 // E1 end
 // E2 start: what a turn's events say about one `artifact_create` or `artifact_update` call (its artifact row): the call
@@ -442,7 +443,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           items.push({ kind: 'ask', toolUseId: event.toolUseId });
         } else if (presentation === 'delivery') { // E1
           const input = SendFileInputSchema.safeParse(event.input);
-          deliveries.set(event.toolUseId, { use: event, input: input.success ? input.data : null, delivered: null, caption: undefined, urgency: null, error: null });
+          deliveries.set(event.toolUseId, { use: event, input: input.success ? input.data : null, delivered: null, caption: undefined, urgency: null, error: null, resulted: false });
           items.push({ kind: 'delivery', toolUseId: event.toolUseId });
         } else if (presentation === 'agent_list') { // E7
           items.push({ kind: 'later', row: () => agentListRow(event, results.get(event.toolUseId), turn.id) });
@@ -707,14 +708,14 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push({ kind: 'row', row: askRow(asks.get(item.toolUseId)!, turn.id, context, turn.askSteers) });
         break;
       case 'delivery':
-        resolved.push({ kind: 'row', row: deliveryRow(deliveries.get(item.toolUseId)!, turn.id) });
+        resolved.push({ kind: 'row', row: deliveryRow(deliveries.get(item.toolUseId)!, turn.id, context) });
         break;
       // E1 end
       case 'later': // E7
         resolved.push({ kind: 'row', row: item.row() });
         break;
       case 'artifact': // E2
-        resolved.push({ kind: 'row', row: artifactRow(artifacts.get(item.toolUseId)!, turn.id) });
+        resolved.push({ kind: 'row', row: artifactRow(artifacts.get(item.toolUseId)!, turn.id, context) });
         break;
       case 'browser_action': // E4c
         resolved.push({ kind: 'row', row: browserActionRow(browserActions.get(item.toolUseId)!, turn.id, context) });
@@ -1009,6 +1010,7 @@ function resultOfAsk(ask: AskRecord, result: Event<'tool.result'>): void {
 }
 
 function resultOfDelivery(delivery: DeliveryRecord, result: Event<'tool.result'>): void {
+  delivery.resulted = true;
   if (result.isError) {
     delivery.error = toolErrorText(resultText(result.content));
     return;
@@ -1037,12 +1039,15 @@ function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: Re
   };
 }
 
-function deliveryRow(delivery: DeliveryRecord, turnId: TurnId): RowOf<'delivery'> {
+// A call whose turn closed with no result and no event was never answered (E11): the turn's closed state is the only
+// sign of it (a session that ended between the call and its result).
+function deliveryRow(delivery: DeliveryRecord, turnId: TurnId, context: TurnContext): RowOf<'delivery'> {
   const { use, input } = delivery;
   const files = delivery.delivered?.map(({ path, name, id }) => ({ path, name, id })) ?? input?.files.map((path) => ({ path, name: baseName(path), id: null })) ?? [];
   return {
     id: rowId.delivery(use.toolUseId), turnId, at: use.at, kind: 'delivery', toolUseId: use.toolUseId, files,
     caption: delivery.caption !== undefined ? delivery.caption : (input?.caption ?? null), urgency: delivery.urgency ?? input?.urgency ?? 'normal', error: delivery.error,
+    ...(context.closed && !delivery.resulted && delivery.delivered === null && { neverAnswered: true as const }),
   };
 }
 // E1 end
@@ -1211,12 +1216,13 @@ function resultOfArtifact(artifact: ArtifactRecord, result: Event<'tool.result'>
   if (parsed.success) Object.assign(artifact, { deliverableId: parsed.data.deliverableId, version: parsed.data.version, title: parsed.data.title });
 }
 
-function artifactRow(artifact: ArtifactRecord, turnId: TurnId): RowOf<'artifact'> {
+function artifactRow(artifact: ArtifactRecord, turnId: TurnId, context: TurnContext): RowOf<'artifact'> {
   const { use } = artifact;
   return {
     id: rowId.artifact(use.toolUseId), turnId, at: use.at, kind: 'artifact', toolUseId: use.toolUseId, action: artifact.action, artifactId: artifact.artifactId,
     title: artifact.title, htmlPath: artifact.htmlPath, deliverableId: artifact.deliverableId, version: artifact.version, error: artifact.error,
     answered: artifact.answered,
+    ...(context.closed && !artifact.answered && !artifact.announced && { neverAnswered: true as const }), // E11: as the delivery row's
   };
 }
 // E2 end

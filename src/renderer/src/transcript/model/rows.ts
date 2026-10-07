@@ -82,7 +82,7 @@ export type Row = RowBase &
     // E1 start: the `maws` server's rows (E1 execution document, Interfaces "The renderer"): an `ask` call's capsule and
     // a `send_file` call's delivery row, derived from the calls themselves and refined by the `maws.*` events
     | { kind: 'ask'; toolUseId: ToolUseId; askId: string; title: string | null; context: string | null; blocking: boolean; questions: AskQuestion[]; state: 'pending' | 'asked' | 'answered' | 'cancelled' | 'error'; answers: AskAnswer[] | null; error: string | null; cancelReason: AskCancelReason | null /* why a cancelled ask was cancelled, when an event said; else null */ }
-    | { kind: 'delivery'; toolUseId: ToolUseId; files: { path: string; name: string; id: string | null }[]; caption: string | null; urgency: 'normal' | 'high'; error: string | null }
+    | { kind: 'delivery'; toolUseId: ToolUseId; files: { path: string; name: string; id: string | null }[]; caption: string | null; urgency: 'normal' | 'high'; error: string | null; neverAnswered?: true /* E11: its turn closed with no result and no event */ }
     // E1 end
     // E3 start: a side thread opened from this session (E3 execution document, Design §5 and §6): one row per child, in
     // the turn or loose block its first event landed in, updated in place by each summary. `label`, `anchorKind` and
@@ -101,7 +101,7 @@ export type Row = RowBase &
     // filled by its result and refined by `maws.delivery.artifact`; `title` null until a source names it (an update may
     // carry none), `deliverableId` and `version` null until the version is registered; `answered` once the call's result
     // is in (a result that does not parse leaves the version null on an answered row)
-    | { kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean }
+    | { kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true /* E11: as the delivery row's */ }
     // E2 end
     // E4c start: a browser tool call's row (E4c execution document, Design §10): from the call (`action`, `tabId`,
     // `target` as `maws.browser.action` names them; `value`: a select's option, a key, a check or a scroll amount, never
