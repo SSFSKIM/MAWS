@@ -95,6 +95,9 @@ import { browserTool } from './tools/browser/BrowserTool';
 import { BrowserTab } from './tools/browser/BrowserTab';
 import { connectBrowser } from './tools/browser/store';
 // E4a end
+// E4b start
+import { connectBrowserImport } from './tools/browser/import/store';
+// E4b end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -239,6 +242,10 @@ export function App() {
   }, []);
   useEffect(() => connectBrowser(), []);
   // E4a end
+  // E4b start: the Chrome profile import's mirror (the run's progress and end, the imported records), app-wide so a run
+  // that ends with no sheet mounted still makes its profile the active one
+  useEffect(() => connectBrowserImport(), []);
+  // E4b end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
