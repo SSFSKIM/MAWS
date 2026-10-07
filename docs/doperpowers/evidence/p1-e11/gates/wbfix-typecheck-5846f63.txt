@@ -1,0 +1,9 @@
+command: pnpm typecheck
+head: 5846f6377dfe3beb0805a0c1f113cc1975b12e3a
+started (UTC): 2026-10-07T19:08:01Z
+load at start: { 9.33 11.32 8.97 }
+slot: none (not a heavy command)
+ended (UTC): 2026-10-07T19:08:44Z
+--- summary lines
+$ tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false
+--- exit code: 0

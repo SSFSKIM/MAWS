@@ -1,0 +1,9 @@
+command: pnpm e2e:c12
+head: 5846f6377dfe3beb0805a0c1f113cc1975b12e3a
+started (UTC): 2026-10-07T19:13:54Z
+load at start: { 6.02 10.85 9.87 }
+slot: eligible: load 6.02 after 0s
+ended (UTC): 2026-10-07T19:14:31Z
+--- summary lines
+  4 passed (11.1s)
+--- exit code: 0
