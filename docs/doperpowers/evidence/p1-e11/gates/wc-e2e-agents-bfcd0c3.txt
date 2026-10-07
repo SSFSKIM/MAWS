@@ -1,0 +1,9 @@
+command: pnpm e2e:agents
+head: bfcd0c334f785f21093817aa824d53146ced0aa3
+started (UTC): 2026-10-07T18:39:17Z
+load at start: { 5.76 9.55 10.52 }
+slot: eligible: load 5.76 after 0s
+ended (UTC): 2026-10-07T18:40:39Z
+--- summary lines
+  23 passed (54.5s)
+--- exit code: 0

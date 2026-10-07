@@ -1,0 +1,9 @@
+command: pnpm e2e:supervisor
+head: bfcd0c334f785f21093817aa824d53146ced0aa3
+started (UTC): 2026-10-07T18:42:24Z
+load at start: { 5.26 7.52 9.46 }
+slot: eligible: load 5.26 after 0s
+ended (UTC): 2026-10-07T18:45:01Z
+--- summary lines
+  8 passed (2.2m)
+--- exit code: 0

@@ -1,0 +1,9 @@
+command: pnpm lint
+head: bfcd0c334f785f21093817aa824d53146ced0aa3
+started (UTC): 2026-10-07T18:29:46Z
+load at start: { 9.85 7.75 7.51 }
+slot: none (not a heavy command)
+ended (UTC): 2026-10-07T18:30:12Z
+--- summary lines
+$ eslint .
+--- exit code: 0
