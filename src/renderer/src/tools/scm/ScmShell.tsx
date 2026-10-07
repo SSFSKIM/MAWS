@@ -11,8 +11,6 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
-import { ipc } from '../../ipc/client';
-import { queryClient } from '../../ipc/query';
 import { NOT_A_REPOSITORY } from '../../sessions/branch-label';
 import { useGit } from '../../stores/git';
 import { openFile } from '../code/open-file';
@@ -27,7 +25,7 @@ import { PrSheet } from './PrSheet';
 import { PushSheet } from './PushSheet';
 import { RemoteActions } from './RemoteActions';
 import { ScmDiff } from './ScmDiff';
-import { SCM_STATUS_QUERIES, useScmStatus } from './queries';
+import { useScmStatus } from './queries';
 import { useScm } from './store';
 import { applyRequest, followSelection, selectFile, toggleCollapsed, type ScmUi } from './view-state';
 
@@ -49,14 +47,13 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
   const entry = useGit((s) => s.entries.get(directory));
   const status = entry?.status ?? null;
   const gitError = status === null ? (entry?.error ?? null) : null;
-  const scm = useScmStatus(appSessionId, status?.repoRoot ?? null);
+  const scm = useScmStatus(appSessionId);
   // Known from `scm.status`, or null while it is read; a failed read is said and gates the actions as untrusted would.
-  const trusted = scm.data ? scm.data.trusted : scm.isError ? false : null;
   // Trust is recorded in main by a session's setup (C10's Trust and start, the `trusting` phase), which the renderer
-  // learns of only through `session.setup`: every phase re-reads `scm.status` (its query is shared with the summary's
-  // row), so the untrusted notice clears without a remount. A re-shown tool (the host remounts it) and the window coming
-  // back into view (TanStack v5 listens to `visibilitychange`, not to window focus) re-read a stale query too.
-  useEffect(() => ipc.on('session.setup', () => void queryClient.invalidateQueries({ queryKey: SCM_STATUS_QUERIES })), []);
+  // learns of only through `session.setup`: every phase re-reads `scm.status` (the app-level listener, E11 W-D), so the
+  // untrusted notice clears without a remount. A re-shown tool (the host remounts it) and the window coming back into
+  // view (TanStack v5 listens to `visibilitychange`, not to window focus) re-read a stale query too.
+  const trusted = scm.data ? scm.data.trusted : scm.isError ? false : null;
   const groups = useMemo(() => groupsOf(status), [status]);
 
   // An open() waiting is applied once the status is known; a watch that failed consumes it.

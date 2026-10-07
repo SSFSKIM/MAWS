@@ -14,6 +14,8 @@ import { ipc } from './client';
 // C8a start
 import { useGit } from '../stores/git';
 import { queryClient } from './query';
+import type { ScmStatus } from '@shared/ipc/schema/scm';
+import { invalidateScmQueries, SCM_STATUS_QUERIES, scmStatusKey } from '../tools/scm/queries';
 // C8a end
 // C8c start
 import { useFiles } from '../tools/code/files/store';
@@ -194,13 +196,28 @@ export function connectShell(
 
 // C8a start: the panel summary's pushed facts (C8a execution document, Repository map). A separate connection, mounted
 // by App.tsx's C8a block and by the `#panel` harness: C4's `git.changed` into the git store, and `fs.workflowChanged`
-// invalidating that session's cached `fs.workflows` (a disk-only session's Background work).
+// invalidating that session's cached `fs.workflows` (a disk-only session's Background work). E11 W-D: the one listener
+// for the scm queries the summary's push row and the Source control tool share (tools/scm/queries.ts): a head or refs
+// move re-reads both for every session whose checkout is in that repository, and a session's setup (trust recorded in
+// main) re-reads every session's `scm.status`.
 export function connectPanelEvents(client: MawsBridge = ipc): () => void {
   const offs = [
-    client.on('git.changed', (event) => useGit.getState().applyChanged(event)),
+    client.on('git.changed', (event) => {
+      useGit.getState().applyChanged(event);
+      if (event.reason === 'head' || event.reason === 'refs') invalidateScmQueries((appSessionId) => repoRootOf(appSessionId) === event.repoRoot);
+    }),
+    client.on('session.setup', () => invalidateScmQueries(() => true, [SCM_STATUS_QUERIES])),
     client.on('fs.workflowChanged', ({ appSessionId }) => void queryClient.invalidateQueries({ queryKey: ['maws', 'fs.workflows', { appSessionId }] })),
   ];
   return () => offs.forEach((off) => off());
+}
+
+// The repository a session's checkout is in, as the git store knows it (the surfaces that read the scm queries watch
+// the checkout): the checkout from the session's record, else from its `scm.status` answer.
+function repoRootOf(appSessionId: AppSessionId): string | null {
+  const record = useSessions.getState().records.get(appSessionId);
+  const checkout = record ? (record.worktree?.path ?? record.directory) : queryClient.getQueryData<ScmStatus>(scmStatusKey(appSessionId))?.directory;
+  return checkout === undefined ? null : (useGit.getState().entries.get(checkout)?.status?.repoRoot ?? null);
 }
 // C8a end
 

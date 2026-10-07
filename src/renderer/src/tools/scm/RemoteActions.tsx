@@ -30,7 +30,7 @@ interface Props {
 }
 
 export function RemoteActions({ appSessionId, ui, status, directory, scm, trusted }: Props) {
-  const prState = usePrState(appSessionId, { root: status.repoRoot, branch: status.branch, scm: scm.data });
+  const prState = usePrState(appSessionId, { branch: status.branch, scm: scm.data });
   const remotes = scm.data ? scm.data.remotes.map((remote) => remote.name) : null;
   const input = { status, remotes, trusted };
   const pr = openPrOf(prState.data);

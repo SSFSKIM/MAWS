@@ -56,7 +56,7 @@ function SessionSummary({ appSessionId, record }: { appSessionId: AppSessionId; 
       </h2>
       <Environment appSessionId={appSessionId} record={record} directory={directory} />
       <Plugins appSessionId={appSessionId} />
-      <PushState directory={directory} />
+      <PushState directory={directory} appSessionId={appSessionId} />
       <Subagents appSessionId={appSessionId} />
       <BackgroundWork appSessionId={appSessionId} />
       <Sources appSessionId={appSessionId} directory={directory} />
