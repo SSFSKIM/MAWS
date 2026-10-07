@@ -1,0 +1,64 @@
+E4b M4 Task 4.2 gates (2026-10-07), branch worktree-agent-aab7566306456aa98.
+Every heavy command ran as /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh <cmd> (MAWS_E2E_QUIET=1 from the slot script),
+one at a time, with pnpm_config_verify_deps_before_run=false. Logs under /tmp/maws-review/gates/.
+
+Pass 1, code head e1e4eff9e4dc949d5a19705b9f37df54915b64b8 (Task 4.1 landed):
+  pnpm typecheck                          exit 0                                  e4b-typecheck.log
+  pnpm lint                               exit 0                                  e4b-lint.log
+  pnpm test --maxWorkers=4                1 failed | 8975 passed | 1 skipped       e4b-unit.log
+      the one failure: src/engine-host/bundle-guard.test.ts "has no dynamic import()" read two E4b schema comments
+      ("at import (P-21)", "after import (P-21)") in the built engine-host chunk as `import (`; fixed at 0e26f44e
+  MAWS_E4B_SHOTS=1 pnpm e2e:browser-import 6 passed (30.7s)                        e4b-e2e-browser-import.log (wrote the eight shots here)
+  pnpm e2e:browser                        8 passed (20.2s)                         e4b-e2e-browser.log
+  pnpm e2e:settings                       9 passed (16.7s)                         e4b-e2e-settings.log
+  pnpm e2e:tools                          8 passed (15.0s)                         e4b-e2e-tools.log
+  pnpm e2e:deliverables                   10 passed (1.2m)                         e4b-e2e-deliverables.log
+
+Pass 2, final code head 0e26f44e745aee3b16e501c7e01ed2ea38c4dcd9 (the only change since pass 1: two comments in
+src/shared/browser/{import,profiles}.ts):
+  pnpm typecheck                          exit 0                                  e4b-typecheck-2.log
+  pnpm lint                               exit 0                                  e4b-lint-2.log
+  pnpm build                              exit 0 (a fresh out/, so the bundle guard reads this head)   e4b-build-2.log
+  pnpm test --maxWorkers=4                663 files passed | 1 skipped; 8976 tests passed | 1 skipped (209.6s)   e4b-unit-2.log
+The e2e groups were not re-run for the comment change.
+
+Development runs of e2e:browser-import before the gate (e4b-dev-browser-import-{1..4}.log, e4b-shots.log):
+  run 1: 4 passed, 2 failed (the fails extension read "background running": Playwright's attached debugger keeps a
+         worker that threw at evaluation alive; the loader now reads an evaluation error first, db366918)
+  run 2: 5 passed, 1 failed (the Settings menu item not yet enabled just after launch; the scene now waits for it)
+  run 3: 5 passed, 1 failed (the stream check required import lines from a launch that imported nothing; now it
+         checks this launch's own import lines)
+  run 4: 6 passed
+  shots run (MAWS_E4B_SHOTS=1, e4b-shots.log): 5 passed, 1 failed, timing only: after case 1's relaunch the sidebar's
+         project row stayed collapsed after its click (support/sidebar.ts expandRow); passed in the gate run
+
+Pass 3, the merged head 8d5647d8 (master 5073c21a with E4d merged; script /tmp/maws-review/e4b-final-gates.sh,
+logs /tmp/maws-review/gates/e4b-final-*.log), each first try:
+  pnpm typecheck                          exit 0
+  pnpm lint                               exit 0
+  pnpm test --maxWorkers=4                676 files passed | 1 skipped; 9270 tests passed | 1 skipped
+  pnpm e2e:browser-import                 6 passed (31.1s)
+  pnpm e2e:browser                        8 passed (24.2s)
+  pnpm e2e:settings                       9 passed (22.0s)
+  pnpm e2e:tools                          8 passed (14.8s)
+  pnpm e2e:deliverables                   10 passed (52.0s)
+
+Pass 4, head e1d0a588 (the whole-branch review's fix wave 92f16a10..d1357c8d; logs /tmp/maws-review/gates/e4b-final2-*.log):
+  pnpm typecheck                          exit 0
+  pnpm lint                               exit 0
+  pnpm test --maxWorkers=4                676 files passed | 1 skipped; 9276 tests passed | 1 skipped
+  MAWS_E4B_SHOTS=1 pnpm e2e:browser-import try 1: 5 passed, 1 failed (case 1: an import-log line of the relaunch,
+      "extension <id> loaded background=failed", in the mirror file but not yet received from main's stdout pipe when
+      the cross-check ran; a timing-only failure of the test's own check, never a leak); try 2: 6 passed (32.1s),
+      writing the eight shots in this directory
+  pnpm e2e:browser                        8 passed (20.7s)
+  pnpm e2e:settings                       9 passed (20.9s)
+  pnpm e2e:tools                          8 passed (20.9s)
+  pnpm e2e:deliverables                   10 passed (49.2s)
+
+Pass 5, final code head 64722478 (the only change since pass 4: e2e/support/browser-import-scene.ts and
+e2e/browser-import.spec.ts, the stdout cross-check now waiting up to 5 s for the pipe to catch up with the mirror):
+  pnpm typecheck                          exit 0
+  eslint on the two files                 clean
+  pnpm e2e:browser-import                 6 passed (29.0s)
+No src/ file changed after pass 4, so the unit suite and the other e2e groups stand at pass 4.

@@ -165,3 +165,34 @@ describe('the partition (E4a Design §9, Decision Log 8)', () => {
     });
   });
 });
+
+// E4b start
+describe('Partitions.registerPreparer (E4b Decision Log 32, 35)', () => {
+  const opener = () => {
+    const sessions = new Map<string, ReturnType<typeof fakeSession>>();
+    return (name: string) => sessions.get(name) ?? sessions.set(name, fakeSession()).get(name)!;
+  };
+
+  it('runs a registered step once per partition, after E4a\'s preparers and before the partition counts as opened', () => {
+    const order: string[] = [];
+    const partitions = new Partitions(opener(), [() => void order.push('e4a')]);
+    const step = vi.fn((_ses: Session, partition: string) => void order.push(`e4b ${partition}`));
+    partitions.registerPreparer(step);
+    const ses = partitions.session(profilePartition('Default'));
+    partitions.session(profilePartition('Default'));
+    expect(order.slice(0, 2)).toEqual(['e4a', `e4b ${profilePartition('Default')}`]);
+    expect(step).toHaveBeenCalledWith(ses, profilePartition('Default'));
+  });
+
+  it('runs a late registration at once for every partition already opened, and stops after unregistering', () => {
+    const partitions = new Partitions(opener());
+    const opened = partitions.session(DEFAULT_PARTITION);
+    const step = vi.fn();
+    const unregister = partitions.registerPreparer(step);
+    expect(step).toHaveBeenCalledExactlyOnceWith(opened, DEFAULT_PARTITION);
+    unregister();
+    partitions.session(profilePartition('Default'));
+    expect(step).toHaveBeenCalledTimes(1);
+  });
+});
+// E4b end

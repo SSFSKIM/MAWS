@@ -49,6 +49,9 @@ import * as host from './schema/host';
 // E4a start
 import * as browser from './schema/browser';
 // E4a end
+// E4b start
+import { DONE_REPORT, PROBE_EXTENSION } from '../../../test/support/import-reports';
+// E4b end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
 const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */ } satisfies Record<
@@ -1113,14 +1116,14 @@ describe('ipc schema validates both directions', () => {
     };
 
     it('adds the browser namespace, main-owned throughout, every name bridged', () => {
-      expect(Object.keys(browser.commands)).toEqual([
+      expect(Object.keys(browser.commands).filter((name) => !name.startsWith('browser.import.')) /* E4b: its block is pinned below */).toEqual([
         'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select', 'browser.tabs.navigate', 'browser.tabs.zoom',
         'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload', 'browser.view.place',
         'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
         'browser.comment.set' /* E4d */,
       ]);
       for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
-      expect(Object.keys(browser.events)).toEqual([
+      expect(Object.keys(browser.events).filter((name) => !name.startsWith('browser.import.')) /* E4b */).toEqual([
         'browser.tabs.changed', 'browser.view.covered', 'browser.control.changed', 'browser.chrome.command', 'browser.download.refused', 'browser.notice',
         'browser.comment.changed', 'browser.comment.picked' /* E4d */,
         'browser.agent.acting', // E4c
@@ -1241,6 +1244,108 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E4d end
+  // E4b start: the Chrome profile import's commands and events (E4b execution document, Interfaces "IPC `browser.import.*`")
+  describe('E4b entries', () => {
+    const profile = { profileDir: 'Default', name: 'Person 1', gaiaName: 'Probe Owner', userName: null, lastUsed: true, imported: false };
+    const record = {
+      profileDir: 'Default', name: 'Person 1', partition: 'persist:maws-chrome-Default', importedAt: '2026-10-06T10:00:05.000Z',
+      storageDirName: 'maws-chrome-default', userDataDir: '/tmp/chrome', extensions: [PROBE_EXTENSION], report: DONE_REPORT,
+    };
+    const ID = '0b5f2c1e-8d4a-4f7b-9c3e-2a1d6e8f9b0c';
+    const EXT = 'cddgipniephaglaopjjeihjehogcpggh';
+    const importNames = (keys: string[]) => keys.filter((name) => name.startsWith('browser.import.'));
+
+    it('appends browser.import.* after E4a’s entries, main-owned, every name bridged', () => {
+      const added = importNames(Object.keys(browser.commands));
+      expect(added).toEqual([
+        'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
+        'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
+      ]);
+      expect(Object.keys(browser.commands).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
+      for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
+      const events = importNames(Object.keys(browser.events));
+      expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
+      expect(Object.keys(browser.events).filter((name) => name !== 'browser.agent.acting' /* E4c, appended after E4b */).slice(-events.length)).toEqual(events);
+      expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
+      expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
+    });
+
+    it('refuses a relative Chrome folder, a profile directory that is a path, and a malformed extension id', () => {
+      expect(validateCommandInput('browser.import.profiles', { userDataDir: null }).ok).toBe(true);
+      expect(validateCommandInput('browser.import.profiles', { userDataDir: '/Users/x/Library/Application Support/Google/Chrome' }).ok).toBe(true);
+      for (const userDataDir of ['Library/Chrome', '~/Library/Chrome', './Chrome', '', `/${'x'.repeat(1024)}`]) {
+        expect(validateCommandInput('browser.import.profiles', { userDataDir }).ok, userDataDir).toBe(false);
+        expect(validateCommandInput('browser.import.inspect', { userDataDir, profileDir: 'Default' }).ok, userDataDir).toBe(false);
+      }
+      expect(validateCommandInput('browser.import.inspect', { userDataDir: '/c', profileDir: 'Profile 1' }).ok).toBe(true);
+      for (const profileDir of ['../Default', 'a/b', '', '.', '..', '.Default', 'Default\\x']) {
+        expect(validateCommandInput('browser.import.inspect', { userDataDir: '/c', profileDir }).ok, profileDir).toBe(false);
+        expect(validateCommandInput('browser.import.remove', { profileDir }).ok, profileDir).toBe(false);
+        expect(validateCommandInput('browser.import.setExtension', { profileDir, extensionId: EXT, enabled: true }).ok, profileDir).toBe(false);
+      }
+      const start = { inspectionId: ID, categories: { history: true, cookies: true, extensions: true }, extensionIds: [EXT], allowUnverifiedExtensions: true };
+      expect(validateCommandInput('browser.import.start', start).ok).toBe(true);
+      expect(validateCommandInput('browser.import.setExtension', { profileDir: 'Default', extensionId: EXT, enabled: false }).ok).toBe(true);
+      for (const extensionId of ['probe', EXT.toUpperCase(), `${EXT}a`, '../ddgipniephaglaopjjeihjehogcpggh', 'zddgipniephaglaopjjeihjehogcpggh']) {
+        expect(validateCommandInput('browser.import.start', { ...start, extensionIds: [extensionId] }).ok, extensionId).toBe(false);
+        expect(validateCommandInput('browser.import.setExtension', { profileDir: 'Default', extensionId, enabled: true }).ok, extensionId).toBe(false);
+      }
+      expect(validateCommandInput('browser.import.start', { ...start, categories: { ...start.categories, passwords: true } }).ok).toBe(false);
+      expect(validateCommandInput('browser.import.start', { ...start, inspectionId: '../x' }).ok).toBe(false);
+      expect(validateCommandInput('browser.import.start', { ...start, profileDir: 'Default' }).ok).toBe(false);
+    });
+
+    it('validates the picker, the inspection and the run', () => {
+      const listing = { userDataDir: '/c', found: true, chromeRunning: false, profiles: [profile], error: null };
+      expect(validateCommandOutput('browser.import.profiles', listing).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.profiles', { ...listing, found: false, profiles: [], error: 'No Local State' }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.profiles', { ...listing, profiles: [{ ...profile, avatar: 'x' }] }).ok).toBe(false);
+      expect(validateCommandInput('browser.import.chooseUserData', undefined).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.chooseUserData', { userDataDir: null }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.chooseUserData', { userDataDir: 'relative' }).ok).toBe(false);
+      const candidate = {
+        id: EXT, name: 'Probe', version: '1.0', manifestVersion: 3, background: 'service_worker', contentScripts: 1, unsupportedPermissions: ['cookies'],
+        wallet: false, chromeState: 'enabled', sizeBytes: 10, error: null,
+      };
+      const inspection = { inspectionId: ID, profile, chromeRunning: true, history: { rows: 6 }, cookies: { rows: 5, partitioned: 1, storeVersion: 24 }, extensions: [candidate] };
+      expect(validateCommandOutput('browser.import.inspect', inspection).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.inspect', { ...inspection, history: { error: 'History couldn’t be read' }, cookies: { error: 'Cookies couldn’t be read' } }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.inspect', { ...inspection, cookies: { rows: 5 } }).ok).toBe(false);
+      expect(validateCommandOutput('browser.import.inspect', { ...inspection, history: { rows: 6, error: 'x' } }).ok).toBe(false);
+      expect(validateCommandInput('browser.import.discard', { inspectionId: ID }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.start', { importId: ID }).ok).toBe(true);
+      expect(validateCommandInput('browser.import.cancel', { importId: ID }).ok).toBe(true);
+      expect(validateCommandInput('browser.import.cancel', { importId: 'i1' }).ok).toBe(false);
+    });
+
+    it('validates the records, the removal and the toggle', () => {
+      expect(validateCommandInput('browser.import.list', undefined).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.list', { profiles: [record], fileBroken: false, running: null }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.list', { profiles: [], fileBroken: true, running: null }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.list', { profiles: [], fileBroken: false, running: { importId: ID, profileDir: 'Default', phase: 'keychain' } }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.list', { profiles: [], fileBroken: false, running: { importId: ID, profileDir: 'Default', phase: null } }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.list', { profiles: [], fileBroken: false, running: { importId: ID, profileDir: 'Default', phase: 'paused' } }).ok).toBe(false);
+      expect(validateCommandOutput('browser.import.list', { profiles: [], fileBroken: false }).ok).toBe(false);
+      expect(validateCommandOutput('browser.import.list', { profiles: [] }).ok).toBe(false);
+      expect(validateCommandOutput('browser.import.list', { profiles: [{ ...record, partition: 'persist:maws-browser' }], fileBroken: false, running: null }).ok).toBe(false);
+      expect(validateCommandInput('browser.import.remove', { profileDir: 'Profile 1' }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.remove', { removed: { tabs: 1, historyRows: 4, extensions: 3 } }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.remove', { removed: { tabs: -1, historyRows: 4, extensions: 3 } }).ok).toBe(false);
+      expect(validateCommandOutput('browser.import.setExtension', { extension: PROBE_EXTENSION }).ok).toBe(true);
+      expect(validateCommandOutput('browser.import.setExtension', { extension: { ...PROBE_EXTENSION, path: '/x' } }).ok).toBe(false);
+    });
+
+    it('validates the events, and leaves browser.notice’s kinds as E4a landed them (Decision Log 35)', () => {
+      expect(validateEventPayload('browser.import.progress', { importId: ID, phase: 'cookies', done: 200, total: 5112 }).ok).toBe(true);
+      expect(validateEventPayload('browser.import.progress', { importId: ID, phase: 'passwords', done: 0, total: 1 }).ok).toBe(false);
+      expect(validateEventPayload('browser.import.finished', { importId: ID, report: DONE_REPORT }).ok).toBe(true);
+      expect(validateEventPayload('browser.import.finished', { importId: ID, report: { ...DONE_REPORT, outcome: 'partial' } }).ok).toBe(false);
+      expect(validateEventPayload('browser.import.changed', { profiles: [record] }).ok).toBe(true);
+      expect(validateEventPayload('browser.import.changed', { profiles: [record], fileBroken: false }).ok).toBe(false);
+      expect(validateEventPayload('browser.notice', { appSessionId: 'a', tabId: null, kind: 'profilesFileBroken' }).ok).toBe(false);
+    });
+  });
+  // E4b end
   // E4c start: the browser tools' bridge between the engine host and main, the waiting line, the acting tab (P1 ledger
   // §5; E4c execution document, Interfaces "IPC")
   describe('E4c entries', () => {

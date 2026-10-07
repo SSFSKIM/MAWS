@@ -48,7 +48,8 @@ describe('useCommand is for reads only', () => {
     const e6 = ['scm.status', 'scm.pr.state']; // E6: the Source control tool's and the push-state row's reads
     const e2 = ['deliverables.list', 'deliverables.listAll', 'deliverables.get']; // E2: the deliverable store's reads
     const e4a = ['browser.tabs.list', 'browser.history.suggest', 'browser.profiles.list']; // E4a: the browser's tab list, suggestions, profiles
-    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11, ...w3, ...e9, ...e6, ...e2, ...e4a].sort());
+    const e4b = ['browser.import.profiles', 'browser.import.list']; // E4b: the import sheet's picker, the imported records
+    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11, ...w3, ...e9, ...e6, ...e2, ...e4a, ...e4b].sort());
   });
 
   // Compile-time: writes and void-output commands are not queries (checked by `pnpm typecheck`); they go through

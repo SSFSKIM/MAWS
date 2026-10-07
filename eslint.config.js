@@ -19,4 +19,16 @@ module.exports = defineConfig(
     languageOptions: { globals: globals.browser },
     ...reactHooks.configs.flat.recommended,
   },
+  // E4b start: the Chrome import logs only through its typed logger (E4b Design §16), so nothing logs a value.
+  {
+    files: ['src/main/browser/import/**/*.{ts,tsx}'],
+    ignores: ['src/main/browser/import/log.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        { selector: "MemberExpression[object.name='console']", message: 'Log through importLog in src/main/browser/import/log.ts: nothing under the import logs a value.' },
+      ],
+    },
+  },
+  // E4b end
 );

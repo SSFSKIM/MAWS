@@ -15,6 +15,9 @@ import { useCommand } from '../ipc/query';
 import { toast } from '../stores/notices';
 import { BROWSER } from './copy';
 import { INPUT, Segment, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
+// E4b start
+import { BrowserImport } from './BrowserImport';
+// E4b end
 
 const DEFAULT_PROFILE = ''; // the select's value for `profile: null`
 const DEFAULT_SEARCH = SETTINGS_DEFAULTS_V11.browser.searchUrl;
@@ -33,6 +36,9 @@ export function BrowserSection({ settings }: { settings: Settings }) {
       <Setting label={BROWSER.links} note={linkTarget === 'in-app' ? BROWSER.linksNote : undefined}>
         <Segment label={BROWSER.links} value={linkTarget} options={LINK_TARGETS} onChange={(next) => void writeSettings({ browser: { linkTarget: next } })} />
       </Setting>
+      {/* E4b start: the imported Chrome profiles, their extension toggles and removal */}
+      <BrowserImport />
+      {/* E4b end */}
     </>
   );
 }

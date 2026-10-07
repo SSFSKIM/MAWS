@@ -102,6 +102,9 @@ import { openBrowserUrl } from './tools/browser/comment/actions';
 import { registerChromeExtra } from './tools/browser/extras';
 import { registerTranscriptActions as registerBrowserTranscriptActions } from './transcript';
 // E4d end
+// E4b start
+import { connectBrowserImport } from './tools/browser/import/store';
+// E4b end
 // E4c start
 import { openBrowserTab } from './tools/browser/agent/actions';
 import { connectBrowserAgent } from './tools/browser/agent/connect';
@@ -259,6 +262,10 @@ export function App() {
   useEffect(() => connectBrowserComment(), []);
   useEffect(() => registerBrowserTranscriptActions({ openBrowserUrl }), []);
   // E4d end
+  // E4b start: the Chrome profile import's mirror (the run's progress and end, the imported records), app-wide so a run
+  // that ends with no sheet mounted still makes its profile the active one
+  useEffect(() => connectBrowserImport(), []);
+  // E4b end
   // E4c start: the browser tools' rows (E4c execution document, Design §10): main's waiting reports for the row's line,
   // and the row's Open tab; the Browser tool following the agent into the tab it acts on
   useEffect(() => connectBrowserProgress(), []);

@@ -129,6 +129,10 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'browser.tabs.list':
         return { tabs: [], selected: {} };
       // E4a end
+      // E4b start: the import store's records at connect (none imported)
+      case 'browser.import.list':
+        return { profiles: [], fileBroken: false, running: null };
+      // E4b end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':

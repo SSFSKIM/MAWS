@@ -66,6 +66,23 @@ export class Partitions {
     };
   }
 
+  // E4b start: preparation steps registered after construction (E4b execution document, Decision Log 32, 35): the import
+  // registers its per-boot extension loading here once startBrowser has returned. A step runs inside `session()`, after
+  // E4a's preparers and before the partition counts as opened, so it is handed the session and must not call
+  // `session()` for its own partition; it must not throw either (a throw would fail the partition's opening). A step
+  // registered late runs at once for every partition already opened.
+  private readonly registered: PreparePartition[] = [];
+
+  registerPreparer(step: PreparePartition): () => void {
+    this.registered.push(step);
+    for (const [partition, ses] of this.opened) step(ses, partition);
+    return () => {
+      const at = this.registered.indexOf(step);
+      if (at >= 0) this.registered.splice(at, 1);
+    };
+  }
+  // E4b end
+
   // Opens and prepares the partition; throws when Electron cannot open it.
   session(partition: string): Session {
     let ses = this.opened.get(partition);
@@ -73,6 +90,7 @@ export class Partitions {
       ses = this.fromPartition(partition);
       preparePartition(ses, partition, this.rules);
       for (const step of this.prepare) step(ses, partition);
+      for (const step of [...this.registered]) step(ses, partition); // E4b: the steps registered after construction
       this.opened.set(partition, ses);
     }
     return ses;
