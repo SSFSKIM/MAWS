@@ -31,7 +31,7 @@ export const ImportedProfileSchema = z
     importedAt: z.iso.datetime(),
     storageDirName: StorageDirNameSchema,
     userDataDir: AbsolutePathSchema.max(IMPORT_TEXT_MAX), // the Chrome folder the profile came from
-    extensions: z.array(ImportedExtensionSchema), // the toggles' state, updated after import (P-21)
+    extensions: z.array(ImportedExtensionSchema), // the toggles' state, updated after the import; P-21
     report: ImportReportSchema,
   })
   // Removal clears `partition`: a record naming the default or another profile's partition must never parse, nor one

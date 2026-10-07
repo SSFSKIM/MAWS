@@ -112,7 +112,7 @@ export const ImportedExtensionSchema = z.strictObject({
   chromeId: ExtensionIdSchema.nullable(), // Chrome's directory id when Electron derived another (Decision Log 20)
   name: ImportNameSchema,
   version: ImportNameSchema,
-  enabled: z.boolean(), // the owner's toggle; `!wallet` at import (P-21)
+  enabled: z.boolean(), // the owner's toggle, `!wallet` when imported; P-21
   wallet: z.boolean(),
   unsupportedPermissions: z.array(ImportNameSchema),
   status: z.enum(['loaded', 'off', 'loadFailed', 'copyFailed']),
