@@ -291,7 +291,7 @@ describe('Transcript', () => {
 // E11 (W-C; E1's blocking-ask screenshots): the viewport changing height with no scroll and no row change (the composer
 // below growing with an attention notice) moves the end out of view; a following reader is kept at the end.
 describe('follow mode across a change of the viewport’s height', () => {
-  const resized: (() => void)[] = [];
+  const resized: ((height: number) => void)[] = [];
   const Native = globalThis.ResizeObserver;
   beforeAll(() => {
     globalThis.ResizeObserver = class {
@@ -299,7 +299,7 @@ describe('follow mode across a change of the viewport’s height', () => {
       constructor(private readonly callback: ResizeObserverCallback) {}
       observe(target: Element) {
         this.targets.push(target);
-        if (target.hasAttribute('data-transcript-scroller')) resized.push(() => this.callback([{ target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry], this));
+        if (target.hasAttribute('data-transcript-scroller')) resized.push((height) => this.callback([{ target, contentRect: { height } } as ResizeObserverEntry], this));
       }
       unobserve() {}
       disconnect() {
@@ -326,7 +326,9 @@ describe('follow mode across a change of the viewport’s height', () => {
     const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
     const scrolls: unknown[] = [];
     scroller.scrollTo = ((options: ScrollToOptions) => void scrolls.push(options)) as typeof scroller.scrollTo;
-    act(() => resized.forEach((fire) => fire()));
+    act(() => resized.forEach((fire) => fire(2000))); // the first report: the height it opened at
+    expect(scrolls).toEqual([]);
+    act(() => resized.forEach((fire) => fire(1800))); // the composer grew
     expect(scrolls).not.toEqual([]); // following: pinned to the end again
 
     let top = 18_000; // happy-dom has no scroll metrics: the scroller's, by hand, the reader at the end
@@ -340,7 +342,7 @@ describe('follow mode across a change of the viewport’s height', () => {
     });
     await screen.findByRole('button', { name: 'Jump to latest' });
     scrolls.length = 0;
-    act(() => resized.forEach((fire) => fire()));
+    act(() => resized.forEach((fire) => fire(1600)));
     expect(scrolls).toEqual([]);
   });
 });
