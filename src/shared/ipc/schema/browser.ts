@@ -15,6 +15,10 @@ import {
 } from '../../browser/tab';
 import { validateBrowserUrl } from '../../browser/url';
 import type { CommandSpec } from './common';
+// E4d start
+import { AnchorSchema } from '../../anchor/anchor';
+import { CommentDisarmReasonSchema } from '../../browser/comment';
+// E4d end
 
 // An address a command may load: what `validateBrowserUrl` admits (http or https, parseable), and with no whitespace,
 // which a typed or agent-given string loses through that check's `url`. A refinement over the shared rule rather than
@@ -45,6 +49,22 @@ export const BrowserNoticeSchema = z.strictObject({
   count: z.number().int().min(0).optional(),
 });
 export type BrowserNotice = z.infer<typeof BrowserNoticeSchema>;
+
+// E4d start: comment mode (E4d execution document, Design §2, §6, §8; Interfaces "IPC `browser.comment.*`"). The toggle
+// arms one tab at a time; main answers `on: false` with the reason when it cannot (no error). The pick goes to the
+// window whose pane owns the tab, as an anchor main built and validated (X10), with what became of its crop.
+export const BrowserCommentSetResultSchema = z.strictObject({ on: z.boolean(), reason: z.enum(['ok', 'unknownTab', 'suspended', 'notPlaced', 'noPage', 'agent']) });
+export type BrowserCommentSetResult = z.infer<typeof BrowserCommentSetResultSchema>;
+export const BrowserCommentChangedSchema = z.strictObject({ tabId: BrowserTabIdSchema, on: z.boolean(), reason: z.enum([...CommentDisarmReasonSchema.options, 'armed']) });
+export type BrowserCommentChanged = z.infer<typeof BrowserCommentChangedSchema>;
+export const BrowserCommentPickedSchema = z.strictObject({
+  tabId: BrowserTabIdSchema,
+  appSessionId: AppSessionIdSchema,
+  anchor: AnchorSchema,
+  crop: z.enum(['attached', 'none', 'tooLarge', 'failed']),
+});
+export type BrowserCommentPicked = z.infer<typeof BrowserCommentPickedSchema>;
+// E4d end
 
 export const commands = {
   // Every tab, or one session's, with each session's selected tab.
@@ -120,6 +140,9 @@ export const commands = {
     output: z.strictObject({ profiles: z.array(z.strictObject({ profileDir: z.string(), name: z.string() })) }),
     owner: 'main',
   },
+  // E4d start
+  'browser.comment.set': { input: z.strictObject({ tabId: BrowserTabIdSchema, on: z.boolean() }), output: BrowserCommentSetResultSchema, owner: 'main' },
+  // E4d end
 } as const satisfies Record<`browser.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -133,4 +156,8 @@ export const events = {
   'browser.chrome.command': BrowserChromeCommandSchema,
   'browser.download.refused': z.strictObject({ tabId: BrowserTabIdSchema, url: z.string(), filename: z.string() }), // an agent-started download, cancelled
   'browser.notice': BrowserNoticeSchema,
+  // E4d start
+  'browser.comment.changed': BrowserCommentChangedSchema,
+  'browser.comment.picked': BrowserCommentPickedSchema, // to the owner window only (Design §8)
+  // E4d end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;
