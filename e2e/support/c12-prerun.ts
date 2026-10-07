@@ -5,6 +5,7 @@
 // themes, the pinned engine run as a terminal would run it (`claude -p`, and interactively in a PTY that can stay live),
 // and spend from every journal and every terminal run. Never the owner's ~/.claude or ~/.claude.json, which are only
 // read by the owner-file check (and, for the real-store case alone, by the app itself, read only).
+import { withoutClaudeVariables } from '../../test/support/claude-env';
 import { isolatedGitEnv } from '../../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
@@ -146,15 +147,16 @@ export async function captureLoginShell(): Promise<string[]> {
   return Object.keys(loginShell).filter((k) => k.startsWith('CLAUDE_')).sort();
 }
 
-// The terminal's environment for the pinned engine: the owner's login shell (so the owner's `CLAUDE_*` switches apply
-// as they do in the owner's terminal) without anything a parent Claude or Electron process injects, then the scratch
-// home, the relay and its marker token, and Haiku for subagents (spend).
+// The terminal's environment for the pinned engine: the owner's login shell without anything a parent Claude or
+// Electron process injects and without any CLAUDE* variable (E11 W-E, Decision Log 22: the capture inherits this
+// runner's, a parent Claude session's plugin dirs among them), then the scratch home, the relay and its marker token,
+// and Haiku for subagents (spend).
 export function terminalEnv(config: string, extra: Record<string, string> = {}): Record<string, string> {
   const env: Record<string, string> = { TERM: 'xterm-256color', LANG: process.env.LANG ?? 'en_US.UTF-8' };
   for (const key of ['PATH', 'HOME', 'USER', 'SHELL', 'TMPDIR']) if (process.env[key]) env[key] = process.env[key]!;
   for (const [key, v] of Object.entries(process.env)) if (key.startsWith('ANTHROPIC_DEFAULT_') && v) env[key] = v;
   const injected = /^(CLAUDECODE|CLAUDE_CODE_(SESSION_ID|CHILD_SESSION|SESSION_ATTENDED|MESSAGING_SOCKET|MESSAGING_TOKEN|EXECPATH|ENTRYPOINT|SSE_PORT)|CLAUDE_PID|CLAUDE_EFFORT|ELECTRON_.*|NODE_OPTIONS|GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE)$/;
-  for (const [key, v] of Object.entries(loginShell)) if (!injected.test(key)) env[key] = v;
+  for (const [key, v] of Object.entries(withoutClaudeVariables(loginShell))) if (!injected.test(key)) env[key] = v;
   env.TERM = 'xterm-256color';
   return { ...env, CLAUDE_CONFIG_DIR: config, ANTHROPIC_BASE_URL: RELAY_URL, ANTHROPIC_AUTH_TOKEN: GATEWAY_AUTH_TOKEN, CLAUDE_CODE_SUBAGENT_MODEL: 'haiku', ...extra };
 }

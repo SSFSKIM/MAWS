@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron, test as base, type ElectronApplication, type Page } from '@playwright/test';
+import { withoutClaudeVariables } from '../../test/support/claude-env';
 import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeScratchShellHome } from '../../test/support/shell-home';
 
@@ -72,8 +73,10 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'maws-e2e-')); // C5: an existing profile when given
   // C5: a relaunch over a given profile still starts from an empty engine store, which C4's block below creates anew.
   if (!ownsUserData && !opts.keepConfigHome /* E10 */) rmSync(join(userData, 'claude-config'), { recursive: true, force: true });
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
+  // E11 W-E (Decision Log 22): the runner's environment without its CLAUDE* variables (a parent Claude session's
+  // plugin dirs, ids, model and effort would reach every engine the app starts through the hosts' login-shell capture);
+  // CLAUDE_CONFIG_DIR is set below, and a test's `env` may name others on purpose.
+  const env: Record<string, string> = withoutClaudeVariables(process.env);
   // A shell inherited from `electron-vite dev` or an editor must not turn the app into a dev-server client or a Node.
   delete env.ELECTRON_RENDERER_URL;
   delete env.ELECTRON_RUN_AS_NODE;

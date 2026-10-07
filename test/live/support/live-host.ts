@@ -20,6 +20,7 @@ import { HostHookRegistry } from '../../../src/engine-host/host-hooks';
 import { JOURNAL_MAX_BYTES, JournalWriter } from '../../../src/engine-host/journal';
 import { buildLaunch, RELAY_URL, setBinaryConfig } from '../../../src/engine-host/launch';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../support/engine-pin'; // W13
+import { withoutClaudeVariables } from '../../support/claude-env';
 import { journalDir } from '../../../src/engine-host/launcher';
 import { EngineSession } from '../../../src/engine-host/session';
 import { FileSessionStateStore } from '../../../src/engine-host/store/file-session-state-store';
@@ -66,7 +67,8 @@ export class LiveHost {
     assertConfigHomeSafe({ configHome, controls });
     this.controls = new Set(controls);
     this.configHome = configHome ?? ownerConfigHome();
-    const captureEnv = configHome === null ? ipcDeps.captureEnv : async () => ({ ...(await (ipcDeps.captureEnv ?? (() => captureShellEnvironment()))()), CLAUDE_CONFIG_DIR: configHome });
+    // E11 W-E (Decision Log 22): the capture's inherited CLAUDE* variables are dropped; the scratch home is set back
+    const captureEnv = configHome === null ? ipcDeps.captureEnv : async () => ({ ...withoutClaudeVariables(await (ipcDeps.captureEnv ?? (() => captureShellEnvironment()))()), CLAUDE_CONFIG_DIR: configHome });
     let ipc!: EngineIpc;
     let fs: FsService | null = null;
     const runtime = createHostRuntime((on, emit) => {
@@ -189,7 +191,7 @@ export class LiveHost {
 export async function startDirectSession(userData: string, spec: LaunchSpec, hooks: HostHookRegistry): Promise<{ session: EngineSession; events: SessionEvent[] }> {
   const configHome = process.env.CLAUDE_CONFIG_DIR ?? null;
   assertConfigHomeSafe({ configHome, controls: [] });
-  const captured = { ...(await captureShellEnvironment()), CLAUDE_CONFIG_DIR: configHome! };
+  const captured = { ...withoutClaudeVariables(await captureShellEnvironment()), CLAUDE_CONFIG_DIR: configHome! }; // E11 W-E: no inherited CLAUDE*
   const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION }); // W13: the fixtures' engine
   const session = new EngineSession({
     spec, plan, hooks, appVersion: '0.0.0-live', store: new FileSessionStateStore(userData),

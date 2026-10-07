@@ -25,6 +25,7 @@ import { buildEnvironment, RELAY_URL } from '../../src/engine-host/launch';
 import { checkRelay } from '../../src/engine-host/relay-health';
 import { exportFixture, journalCost, liveSpec, redactJournal, type Provenance } from './support/live';
 import { LiveHost } from './support/live-host';
+import { withoutClaudeVariables } from '../support/claude-env';
 
 const TURN_MS = 300_000; // the machine is heavily loaded: generous waits, and a case that only timed out is re-run
 const CASE_MS = 600_000;
@@ -308,7 +309,7 @@ describe('the maws tool server, live (E1 M2)', () => {
     const g = live(ctx);
     if (case1 === null) ctx.skip('case 1 did not record a session');
     const { repo, engineSessionId } = case1!;
-    const captured = { ...(await captureShellEnvironment()), CLAUDE_CONFIG_DIR: g.home };
+    const captured = { ...withoutClaudeVariables(await captureShellEnvironment()), CLAUDE_CONFIG_DIR: g.home }; // E11 W-E: no inherited CLAUDE*
     const env = buildEnvironment(liveSpec(repo, { subagentModel: null }), captured, RELAY_URL);
     delete env.CLAUDE_CODE_ENTRYPOINT; // a terminal launch, not the SDK's
     const prompt = 'Reply with the names of the tools you have whose names start with mcp__maws, or NONE if there are none.';
