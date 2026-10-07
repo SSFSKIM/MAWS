@@ -66,6 +66,10 @@ export const QUERY_COMMANDS = [
   'browser.history.suggest',
   'browser.profiles.list',
   // E4a end
+  // E4b start: the import sheet's profile picker (a read of Chrome's Local State) and the imported records
+  'browser.import.profiles',
+  'browser.import.list',
+  // E4b end
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
 

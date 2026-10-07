@@ -15,6 +15,21 @@ import {
 } from '../../browser/tab';
 import { validateBrowserUrl } from '../../browser/url';
 import type { CommandSpec } from './common';
+// E4b start
+import {
+  ChromeProfileDirSchema,
+  ChromeProfileSchema,
+  ExtensionCandidateSchema,
+  ExtensionIdSchema,
+  IMPORT_TEXT_MAX,
+  ImportCategoriesSchema,
+  ImportedExtensionSchema,
+  ImportPhaseSchema,
+  ImportReportSchema,
+} from '../../browser/import';
+import { ImportedProfileSchema } from '../../browser/profiles';
+import { AbsolutePathSchema } from './settings';
+// E4b end
 
 // An address a command may load: what `validateBrowserUrl` admits (http or https, parseable), and with no whitespace,
 // which a typed or agent-given string loses through that check's `url`. A refinement over the shared rule rather than
@@ -45,6 +60,23 @@ export const BrowserNoticeSchema = z.strictObject({
   count: z.number().int().min(0).optional(),
 });
 export type BrowserNotice = z.infer<typeof BrowserNoticeSchema>;
+
+// E4b start: the Chrome profile import (E4b execution document, Interfaces "IPC `browser.import.*`"). Main re-validates
+// the Chrome folder and the profile directory against the disk and `Local State`; these schemas only keep a path out.
+const ChromeFolderSchema = AbsolutePathSchema.max(IMPORT_TEXT_MAX);
+const ImportIdSchema = z.uuid(); // main's randomUUID() for an inspection or a run
+const ImportCount = z.number().int().min(0);
+const StoreErrorSchema = z.strictObject({ error: z.string().max(IMPORT_TEXT_MAX) }); // the category cannot be imported
+export const BrowserImportInspectionSchema = z.strictObject({
+  inspectionId: ImportIdSchema,
+  profile: ChromeProfileSchema,
+  chromeRunning: z.boolean(), // `SingletonLock` exists: a hint, never a block
+  history: z.union([z.strictObject({ rows: ImportCount }), StoreErrorSchema]),
+  cookies: z.union([z.strictObject({ rows: ImportCount, partitioned: ImportCount, storeVersion: z.number().int() }), StoreErrorSchema]),
+  extensions: z.array(ExtensionCandidateSchema),
+});
+export type BrowserImportInspection = z.infer<typeof BrowserImportInspectionSchema>;
+// E4b end
 
 export const commands = {
   // Every tab, or one session's, with each session's selected tab.
@@ -120,6 +152,41 @@ export const commands = {
     output: z.strictObject({ profiles: z.array(z.strictObject({ profileDir: z.string(), name: z.string() })) }),
     owner: 'main',
   },
+  // E4b start: the import. One inspection and one run at a time, app-wide; `start` while one runs answers invalid_input.
+  // `userDataDir: null` lists Chrome's default folder (under e2e, MAWS_E2E_CHROME_USER_DATA).
+  'browser.import.profiles': {
+    input: z.strictObject({ userDataDir: ChromeFolderSchema.nullable() }),
+    output: z.strictObject({ userDataDir: ChromeFolderSchema, found: z.boolean(), chromeRunning: z.boolean(), profiles: z.array(ChromeProfileSchema), error: z.string().max(IMPORT_TEXT_MAX).nullable() }),
+    owner: 'main',
+  },
+  'browser.import.chooseUserData': { input: z.void(), output: z.strictObject({ userDataDir: ChromeFolderSchema.nullable() }), owner: 'main' }, // null: the dialog was cancelled
+  // Stages the two stores and lists the extensions, for the consent sheet's counts; a second inspection discards the first.
+  'browser.import.inspect': {
+    input: z.strictObject({ userDataDir: ChromeFolderSchema, profileDir: ChromeProfileDirSchema }),
+    output: BrowserImportInspectionSchema,
+    owner: 'main',
+  },
+  'browser.import.discard': { input: z.strictObject({ inspectionId: ImportIdSchema }), output: z.void(), owner: 'main' },
+  // `allowUnverifiedExtensions`: the owner checked the unverified-files acknowledgement; extensions are refused without it.
+  'browser.import.start': {
+    input: z.strictObject({ inspectionId: ImportIdSchema, categories: ImportCategoriesSchema, extensionIds: z.array(ExtensionIdSchema), allowUnverifiedExtensions: z.boolean() }),
+    output: z.strictObject({ importId: ImportIdSchema }),
+    owner: 'main',
+  },
+  'browser.import.cancel': { input: z.strictObject({ importId: ImportIdSchema }), output: z.void(), owner: 'main' },
+  // `fileBroken`: this boot moved an unreadable profiles.json aside (Decision Log 35); the renderer raises one banner.
+  'browser.import.list': { input: z.void(), output: z.strictObject({ profiles: z.array(ImportedProfileSchema), fileBroken: z.boolean() }), owner: 'main' },
+  'browser.import.remove': {
+    input: z.strictObject({ profileDir: ChromeProfileDirSchema }),
+    output: z.strictObject({ removed: z.strictObject({ tabs: ImportCount, historyRows: ImportCount, extensions: ImportCount }) }),
+    owner: 'main',
+  },
+  'browser.import.setExtension': {
+    input: z.strictObject({ profileDir: ChromeProfileDirSchema, extensionId: ExtensionIdSchema, enabled: z.boolean() }),
+    output: z.strictObject({ extension: ImportedExtensionSchema }),
+    owner: 'main',
+  },
+  // E4b end
 } as const satisfies Record<`browser.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -133,4 +200,9 @@ export const events = {
   'browser.chrome.command': BrowserChromeCommandSchema,
   'browser.download.refused': z.strictObject({ tabId: BrowserTabIdSchema, url: z.string(), filename: z.string() }), // an agent-started download, cancelled
   'browser.notice': BrowserNoticeSchema,
+  // E4b start: a run's progress (at most every 100 ms per phase, plus each phase's first and last), its end, the records
+  'browser.import.progress': z.strictObject({ importId: ImportIdSchema, phase: ImportPhaseSchema, done: ImportCount, total: ImportCount }),
+  'browser.import.finished': z.strictObject({ importId: ImportIdSchema, report: ImportReportSchema }),
+  'browser.import.changed': z.strictObject({ profiles: z.array(ImportedProfileSchema) }),
+  // E4b end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;
