@@ -1,11 +1,12 @@
 // "Remove imported profile" (E4b Design §12; Decision Log 18): everything an import brought, gone from MAWS, in order.
 // First the profile is withdrawn from the profiles new tabs may browse as, so a tab opened while the steps run browses
-// with the default profile instead of landing in the partition being emptied; then (1) the profile's tabs closed through E4a's store, each page's destruction awaited; (2) its extensions unloaded;
-// (3) the partition's storage, cache and auth cache cleared and the cookie store flushed; (4) the partition folder (the
-// extensions' files) deleted; (5) its history rows counted and deleted; (6) the record dropped. A step that fails is
-// logged and the next one runs: the record is dropped whatever else failed, and the boot sweep removes anything an
-// unlisted profile left (its storage directory, which Electron cannot delete while the session lives, among them).
-// Refused while any import runs; Chrome is never touched.
+// with the default profile instead of landing in the partition being emptied; then (1) the profile's tabs closed
+// through E4a's store, each page's destruction awaited; (2) its extensions unloaded; (3) the partition's storage, cache
+// and auth cache cleared and the cookie store flushed; (4) the partition folder (the extensions' files) deleted; (5) its
+// history rows counted and deleted; (6) the record dropped. A step that fails is logged and the next one runs: the
+// record is dropped whatever else failed, and the boot sweep removes anything an unlisted profile left (its storage
+// directory, which Electron cannot delete while the session lives, among them). Refused while any import runs; Chrome
+// is never touched.
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { WebContents } from 'electron';
