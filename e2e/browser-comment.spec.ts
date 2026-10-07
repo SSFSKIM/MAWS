@@ -197,9 +197,29 @@ async function cancel(s: BrowserScene, t: CommentTab, sheet: Locator): Promise<v
   await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');
 }
 
-// What the page's own recorder heard (every pointer and mouse event type, in the capture phase on `window`), emptied.
-const pageLog = (page: Page) => page.locator('#log');
+// What the page's own recorder heard (every pointer, mouse and wheel event type, in the capture phase on `window`), each
+// with whether MAWS's shield was in the page then; emptied by `clearLog`.
+type Heard = { type: string; shielded: boolean };
+const heard = (page: Page): Promise<Heard[]> =>
+  page.evaluate(() =>
+    (document.getElementById('log')!.textContent ?? '')
+      .split(',')
+      .filter(Boolean)
+      .map((entry) => ({ type: entry.replace(/^\*/, ''), shielded: entry.startsWith('*') })),
+  );
 const clearLog = (page: Page) => page.evaluate(() => void (document.getElementById('log')!.textContent = ''));
+const CLICK_TYPES = new Set(['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'auxclick', 'dblclick', 'contextmenu']);
+// The press-and-release types heard (moves and boundary events apart: a pointer moving over an unarmed page is the page's).
+const clicksHeard = async (page: Page) =>
+  (await heard(page))
+    .filter((e) => CLICK_TYPES.has(e.type))
+    .map((e) => e.type)
+    .join(',');
+// Nothing reached the page while the shield was up (any type, moves and the wheel included), and no press or click at all.
+async function expectPageHeardNothing(page: Page, what = 'no pointer, mouse or wheel event reached the page while armed'): Promise<void> {
+  expect((await heard(page)).filter((e) => e.shielded).map((e) => e.type), what).toEqual([]);
+  expect(await clicksHeard(page), 'no press or click reached the page').toBe('');
+}
 
 // The crops main wrote, and a PNG's size from its IHDR.
 const cropsOf = (s: BrowserScene): string[] => {
@@ -223,12 +243,14 @@ test('1. the Comment toggle arms the page: the hover outline names the button, a
     // unarmed, the preload has put nothing in the page, and the page's recorder hears a click (so its silence later counts)
     await expect(commentNodes(page)).toHaveCount(0);
     await clickAt(page, centre(await rectOf(page.locator('header h1'))));
-    await expect(pageLog(page)).toHaveText('pointerdown,mousedown,pointerup,mouseup,click');
+    await expect.poll(() => clicksHeard(page)).toBe('pointerdown,mousedown,pointerup,mouseup,click');
+    expect((await heard(page)).map((e) => e.type), 'the recorder hears moves and boundary events too').toEqual(expect.arrayContaining(['pointermove', 'pointerover', 'mousemove', 'mouseover']));
     await clearLog(page);
 
     await arm(s, t);
     const shield = await rectOf(page.locator('maws-comment-shield'));
-    const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    // the viewport without classic scrollbars, which a `position: fixed; inset: 0` box does not cover
+    const viewport = await page.evaluate(() => ({ width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }));
     expect(shield, 'the shield covers the viewport').toEqual({ x: 0, y: 0, ...viewport });
 
     // hover: the outline lies on the button within 1 px; the badge names it, the arm's first hover with the hint
@@ -266,7 +288,7 @@ test('1. the Comment toggle arms the page: the hover outline names the button, a
     // one pick per arm: the toggle is off, the page holds none of MAWS's nodes, and the page heard nothing of the pick
     await expect(toggleOf(t.panel)).toHaveAttribute('aria-pressed', 'false');
     await expect(commentNodes(page)).toHaveCount(0);
-    await expect(pageLog(page), 'no pointer or mouse event reached the page').toHaveText('');
+    await expectPageHeardNothing(page, 'the hover and the pick: no pointer, mouse or wheel event reached the page while armed');
     // the sheet covers the page: E4a's cover hides the view while it is open
     await expect.poll(async () => (await tabState(s, t.tabId)).tab?.covered).toBe(true);
     expect((await viewOf(s, t.tabId))?.visible).toBe(false);
@@ -275,7 +297,7 @@ test('1. the Comment toggle arms the page: the hover outline names the button, a
     await chip.getByRole('button', { name: 'Remove screenshot' }).click();
     await expect(chip).toHaveCount(0);
     await cancel(s, t, sheet);
-    await expect(pageLog(page)).toHaveText('');
+    await expectPageHeardNothing(page);
     expect(await page.evaluate(() => document.getElementById('count')!.textContent)).toBe('0');
   });
 });
@@ -509,8 +531,13 @@ test('4. a drag picks an area: the smallest element holding the marquee is named
     const dpr = await page.evaluate(() => window.devicePixelRatio);
     const [, w, h] = /Screenshot · (\d+) × (\d+)/.exec((await sheet.locator('[data-comment-screenshot]').textContent())!)!;
     expect(near(Number(w), marquee.width * dpr, 2) && near(Number(h), marquee.height * dpr, 2), `crop ${w}×${h} for the marquee ${marquee.width}×${marquee.height} at DPR ${dpr}`).toBe(true);
+    // G2's expression on the one anchor with a role and no name (`getByRole(role, {})`): css alone, then css and role
+    const byCss = page.locator(`css=${anchor.css}`);
+    await expect(byCss).toHaveCount(1);
+    expect(await byCss.getAttribute('data-target')).toBe('list');
+    await expect(byCss.and(page.getByRole('list'))).toHaveCount(1);
     await cancel(s, t, sheet);
-    await expect(pageLog(page)).toHaveText('');
+    await expectPageHeardNothing(page);
   });
 });
 
@@ -586,13 +613,23 @@ test('7. a navigation disarms; a report from the earlier arm is dropped and coun
     expect(after.armed).toBe(false);
     expect(after.epoch, 'the navigation moved the epoch').toBeGreaterThan(armed.epoch);
 
-    // the old arm's report, fed through the gate: dropped, counted, nothing opened, nothing disarmed or emitted
+    // armed again on the new page, the old arm's report fed through the gate: the epoch alone drops it (the tab is
+    // armed and awaiting its one report), counted, the arm untouched, nothing opened or emitted
+    await toggleOf(t.panel).click();
+    await expect(toggleOf(t.panel)).toHaveAttribute('aria-pressed', 'true');
+    const rearmed = await stateOf(s, t.tabId);
+    expect(rearmed.armed).toBe(true);
+    expect(rearmed.epoch).toBeGreaterThan(after.epoch);
     const changes = (await recorded(s)).changed.length;
     expect(await replayReport(s, t.tabId, reportFor(armed.epoch))).toBe(true);
-    expect((await stateOf(s, t.tabId)).dropped - after.dropped).toBe(1);
+    const stale = await stateOf(s, t.tabId);
+    expect(stale.dropped - rearmed.dropped).toBe(1);
+    expect(stale.armed, 'still armed: a stale report ends nothing').toBe(true);
     expect((await recorded(s)).picked).toEqual([]);
     expect((await recorded(s)).changed).toHaveLength(changes);
     await expect(s.page.getByRole('dialog')).toHaveCount(0);
+    await toggleOf(t.panel).click();
+    await expect(toggleOf(t.panel)).toHaveAttribute('aria-pressed', 'false');
   });
 });
 
@@ -627,7 +664,8 @@ test('7b. armed means acknowledged: a tab whose preload never confirms the arm i
     await expectRefusedArm(s, t.panel, t.tabId, t.page);
     // the mode is off, so the page is the person's again: a click reaches its recorder
     await clickAt(t.page, centre(await rectOf(t.page.locator('header h1'))));
-    await expect(pageLog(t.page)).toHaveText('pointerdown,mousedown,pointerup,mouseup,click');
+    await expect.poll(() => clicksHeard(t.page)).toBe('pointerdown,mousedown,pointerup,mouseup,click');
+    expect((await heard(t.page)).filter((e) => e.shielded), 'no shield was up when the page heard it').toEqual([]);
     await clearLog(t.page);
     // the same tab, its acknowledgements heard again: it arms and shields, and a pick reaches nothing in the page
     await s.maws.app.evaluate((_electron, id) => (globalThis as unknown as { __maws_browser_comment: CommentSeam }).__maws_browser_comment.ignoreAcks(id, false), t.tabId);
@@ -635,7 +673,7 @@ test('7b. armed means acknowledged: a tab whose preload never confirms the arm i
     await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
     const sheet = sheetOf(s, INCREMENT_LABEL);
     await expect(sheet).toBeVisible();
-    await expect(pageLog(t.page)).toHaveText('');
+    await expectPageHeardNothing(t.page);
     await cancel(s, t, sheet);
   });
 });
@@ -713,12 +751,13 @@ test('8. a frame is picked as its element and its page hears nothing; a shadow t
     await page.mouse.down();
     await page.mouse.up();
     let picked = await lastPicked(s, 1);
-    expect(picked.anchor.label.startsWith('iframe'), picked.anchor.label).toBe(true);
+    expect(picked.anchor.label, 'a frame is named by its title (Design §8)').toBe('iframe “Frame B”');
+    expect(picked.anchor.role, 'a frame has no role').toBeUndefined();
     let sheet = sheetOf(s, picked.anchor.label);
     await expect(sheet).toBeVisible();
     await expect(page.locator(`css=${picked.anchor.css}`)).toHaveAttribute('data-target', 'frame');
     expect(await frame!.evaluate(() => (window as unknown as { __heard: string[] }).__heard), 'the frame’s page heard no pointer event at all').toEqual([]);
-    await expect(pageLog(page)).toHaveText('');
+    await expectPageHeardNothing(page);
     await cancel(s, t, sheet);
 
     // the shadow host: a click over its inner button names the host
@@ -730,7 +769,7 @@ test('8. a frame is picked as its element and its page hears nothing; a shadow t
     expect(picked.anchor.css).toBe('#shadow-host');
     sheet = sheetOf(s, picked.anchor.label);
     await expect(sheet).toHaveAttribute('data-anchor-locator', '#shadow-host');
-    await expect(pageLog(page)).toHaveText('');
+    await expectPageHeardNothing(page);
     await cancel(s, t, sheet);
 
     // the top layer: a modal dialog paints above the shield; its button is still picked, and the page hears nothing
@@ -743,8 +782,8 @@ test('8. a frame is picked as its element and its page hears nothing; a shadow t
     expect(picked.anchor).toMatchObject({ css: '#modal-confirm', role: 'button', name: 'Confirm', label: 'button “Confirm”' });
     sheet = sheetOf(s, 'button “Confirm”');
     await expect(sheet).toBeVisible();
-    await expect(pageLog(page), 'no event reached the page through the top layer').toHaveText('');
-    expect(await page.evaluate(() => (document.getElementById('modal') as HTMLDialogElement).open), 'the dialog is still open: its button was not pressed').toBe(true);
+    await expectPageHeardNothing(page, 'no event reached the page through the top layer');
+    expect(await page.evaluate(() => (document.getElementById('modal') as HTMLDialogElement).open), 'the dialog is still open: its button (which closes it) was not pressed').toBe(true);
     await cancel(s, t, sheet);
   });
 });
