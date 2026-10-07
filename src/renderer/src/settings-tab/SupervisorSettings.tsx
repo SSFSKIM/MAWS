@@ -9,11 +9,12 @@ import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } f
 import type { Settings } from '@shared/ipc/schema';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { MAX_IDLE_MINUTES } from '@shared/ipc/schema/settings';
+import { restartSupervisor } from '../app/supervisor-notices';
 import { clockTime } from '../budget/copy';
 import { ipc } from '../ipc/client';
 import { DANGER } from '../sessions/ui';
 import { useHosts } from '../stores/hosts';
-import { toast } from '../stores/notices';
+import { toast, useNotices } from '../stores/notices';
 import { SUPERVISOR } from './copy';
 import { INPUT, Segment, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 
@@ -41,11 +42,9 @@ function describe(status: HostStatus | null): { text: string; restart: boolean; 
   return { text: SUPERVISOR.running(clockTime(s.startedAt), s.pid, s.liveSessions, exit), restart: false, note };
 }
 
-// `host.restart {stopSessions: true}`: Stop all and Restart now are the same act; a refusal is a warning toast.
-async function restart(failed: (why: string) => string): Promise<void> {
-  const result = await ipc.invoke('host.restart', { stopSessions: true });
-  if (!result.ok) toast({ level: 'warning', text: failed(result.error.message), actions: [], dismissible: true });
-}
+// `host.restart {stopSessions: true}`: Stop all and Restart now are the same act (the app's `restartSupervisor`); a
+// refusal is a warning toast, Restart now's in the banners' words.
+const restart = (failed?: (why: string) => string) => restartSupervisor(ipc, useNotices, failed);
 
 // After an action removes or disables the control that had focus, focus would fall to the page: it goes to `preferred`
 // when that is still there and enabled, else to the group's heading. Focus the owner moved elsewhere is left alone.
@@ -99,7 +98,7 @@ function StatusRow({ status, keepFocus }: { status: HostStatus | null; keepFocus
   const restartNow = () => {
     acted.current = true;
     setBusy(true);
-    void restart(SUPERVISOR.restartFailed).finally(() => setBusy(false));
+    void restart().finally(() => setBusy(false));
   };
   return (
     <Setting label={SUPERVISOR.status} note={note}>

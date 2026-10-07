@@ -90,7 +90,6 @@ export const SUPERVISOR = {
   waitingNote: "This version of MAWS cannot use it. Restart now stops those sessions and starts this version's supervisor; Send resumes each from its transcript.",
   restartNow: 'Restart now',
   statusNote: 'Sessions run in this background process, so they can keep running after MAWS quits.',
-  restartFailed: (why: string) => `The supervisor was not restarted · ${why}`,
   idle: 'Exit when idle',
   idleField: 'Minutes before the supervisor exits when idle',
   idleNever: 'never', // the empty field's placeholder
