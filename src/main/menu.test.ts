@@ -205,7 +205,7 @@ describe('File ▸ Save file', () => {
     expect(file.map((item) => item.id ?? item.type)).toEqual(['session.new', 'separator', 'tab.close', 'tab.reopen', 'separator', 'file.save', 'file.commentLine']);
     expect(byId(file, 'file.save')).toMatchObject({ label: 'Save file', accelerator: 'Cmd+S' });
     expect(byId(file, 'file.commentLine')).toMatchObject({ label: 'Comment on this line' }); // E11: unbound by default
-    expect(byId(file, 'file.commentLine').accelerator).toBeUndefined();
+    expect(byId(file, 'file.commentLine')?.accelerator).toBeUndefined();
   });
 });
 // E5 end
