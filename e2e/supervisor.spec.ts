@@ -15,7 +15,8 @@
 //   (g) an incompatible update (another wire): the banner, launches refused, Restart now, a new pid;
 //   (h) G4: a restored terminal after a keep-quit says its shell closed; a new one does not.
 // The evidence (`relaunch.txt`, `crash.txt`, `idle.txt`, the screenshots in both themes) is written from what the cases
-// observe. Run by `pnpm e2e:supervisor` (MAWS_SUPERVISOR_E2E=1), part of `pnpm verify`.
+// observe, under MAWS_E10_SHOTS=1 only (E11 W-E: a gate run leaves the committed evidence alone; the both-themes token
+// scans run either way). Run by `pnpm e2e:supervisor` (MAWS_SUPERVISOR_E2E=1), part of `pnpm verify`.
 import { execFileSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -38,7 +39,7 @@ test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1', 'the supervisor e2e runs unde
 // answered, ~40 more rows to the turn's result (seq 93), then a hold at the next prompt. Unpaced, the turn stays open at
 // the request for as long as nobody answers it, which is how the cases below keep a session mid-turn.
 const PERMISSION = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
-const EVIDENCE = join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e10');
+const EVIDENCE = process.env.MAWS_E10_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e10') : null;
 const ROW_MS = '250'; // (b): about 11 s from the prompt to the request, 10 s from the answer to the result
 
 function firstPrompt(fixture: string): string {
@@ -323,6 +324,7 @@ const submitOf = (page: Page) => page.locator('[data-region="main"] [data-submit
 // ---- evidence ---------------------------------------------------------------------------------------------------------
 
 function evidence(name: string, lines: string[]): void {
+  if (EVIDENCE === null) return;
   mkdirSync(EVIDENCE, { recursive: true });
   writeFileSync(join(EVIDENCE, name), `${lines.join('\n')}\n`);
 }
@@ -330,11 +332,12 @@ function evidence(name: string, lines: string[]): void {
 // `target` in both themes (light last, the default), each checked for the other theme's colours first.
 async function shots(maws: MawsLaunch, name: string, target: () => Locator | null): Promise<void> {
   const { page } = maws;
-  mkdirSync(EVIDENCE, { recursive: true });
+  if (EVIDENCE !== null) mkdirSync(EVIDENCE, { recursive: true });
   for (const theme of ['dark', 'light'] as const) {
     await menu(maws, `theme.${theme}`);
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     expect(await otherThemeColours(page, { paintedOnly: true }), `${theme}: ${name}`).toEqual([]); // xterm's hidden IME view keeps fixed colours
+    if (EVIDENCE === null) continue;
     const path = join(EVIDENCE, `${name}-${theme}.png`);
     const element = target();
     if (element) await element.screenshot({ path });

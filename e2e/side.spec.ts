@@ -22,7 +22,9 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SIDE_QUESTION_ROWS, SideJournal, solidPng, transcript } from './support/side-replay';
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
 
-const SHOTS = join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e3/shots');
+// E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
+// both-themes token scans run either way.
+const SHOTS = process.env.MAWS_E3_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e3/shots') : null;
 
 // The engine ids the journals pin: the parent, its side thread, a thread promoted from side questions.
 const PARENT = 'e3e30000-0000-4000-8000-000000000001';
@@ -666,12 +668,12 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     for (const theme of ['light', 'dark'] as const) {
       await menu(maws, `theme.${theme}`);
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-      const dir = join(SHOTS, theme);
-      mkdirSync(dir, { recursive: true });
+      const dir = SHOTS === null ? null : join(SHOTS, theme);
+      if (dir !== null) mkdirSync(dir, { recursive: true });
       const shoot = async (target: Locator, name: string) => {
         await page.mouse.move(1, 1);
         expect(await otherThemeColours(page), `${theme}: ${name}`).toEqual([]);
-        await target.screenshot({ path: join(dir, `${name}.png`) });
+        if (dir !== null) await target.screenshot({ path: join(dir, `${name}.png`) });
       };
 
       // the sheet, over the file's tab

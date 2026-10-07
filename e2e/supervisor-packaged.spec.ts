@@ -1,8 +1,9 @@
 // E10's packaged check (E10 execution document, M4 Task 4.3 and Task 4.4; §Design 1 "The binary"): the packaged app,
 // launched through the launcher with the engine host detached, runs its supervisor from its own binary in Node mode
 // (`ELECTRON_RUN_AS_NODE=1`, which needs the `runAsNode` fuse enabled), named `maws-supervisor` in `ps`, with the
-// engine-host chunk read from inside `app.asar`. It writes `docs/doperpowers/evidence/p1-e10/packaged.txt` whole, so a
-// rerun changes only the run's own values (the gate results belong in the execution document's Concrete Steps).
+// engine-host chunk read from inside `app.asar`. Under MAWS_E10_SHOTS=1 (E11 W-E: a gate run leaves the committed
+// evidence alone) it writes `docs/doperpowers/evidence/p1-e10/packaged.txt` whole, so a rerun changes only the run's
+// own values (the gate results belong in the execution document's Concrete Steps).
 // Runs only over a packaged executable with the supervisor gate on, so neither the plain smoke, nor `pnpm e2e:packaged`,
 // nor `pnpm e2e:supervisor` (which names its own spec) runs it:
 //   pnpm build:app && pnpm e2e:supervisor:packaged
@@ -19,7 +20,7 @@ import { tmpSocketDirOf } from './support/supervisor-socket';
 const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? realpathOr(resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE)) : null;
 test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1' || EXECUTABLE === null, 'the packaged supervisor check runs under pnpm e2e:supervisor:packaged (a packaged MAWS_E2E_EXECUTABLE and MAWS_SUPERVISOR_E2E=1)');
 
-const EVIDENCE = join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e10');
+const EVIDENCE = process.env.MAWS_E10_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e10') : null;
 
 function realpathOr(path: string): string {
   try {
@@ -118,36 +119,38 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
     await exited;
     await expect.poll(() => isAlive(lock.pid), { timeout: 10_000, message: 'the supervisor exits with an unbusy quit' }).toBe(false);
 
-    mkdirSync(EVIDENCE, { recursive: true });
-    writeFileSync(
-      join(EVIDENCE, 'packaged.txt'),
-      [
-        'E10 Task 4.3: the packaged check (e2e/supervisor-packaged.spec.ts, pnpm e2e:supervisor:packaged; unsigned build:app).',
-        "Written whole by the spec on every run; the gate results are in the execution document's Concrete Steps.",
-        `Executable: ${exe}`,
-        '',
-        `electron-fuses read --app ${bundle}:`,
-        fuses,
-        '',
-        'The packaged app launched through launchMaws with MAWS_HOST_MODE=detached (scratch userData):',
-        `  host.status.transport: ${s.transport}`,
-        `  host.status.supervisor.mode: ${s.supervisor!.mode}`,
-        `  host.status.state: ${s.state}; matches: ${s.matches}`,
-        `  supervisor pid (host.status and supervisor/host.lock): ${lock.pid}; app pid ${appPid}; pgid ${pgid}`,
-        `  ps -o command=: ${command}`,
-        `  ps -o comm= (follows argv0): ${comm}`,
-        `  ps -o ucomm= (the kernel's name, the executable's): ${ucomm}`,
-        `  executable (lsof -d txt, realpath): ${binary}`,
-        '',
-        'Results (every assertion held):',
-        '  RunAsNode is Enabled',
-        "  transport === 'detached' and supervisor.mode === 'detached'",
-        '  argv0 is maws-supervisor; the chunk is under MAWS.app/Contents/Resources/app.asar/',
-        '  the executable lies inside MAWS.app/Contents/MacOS/ and is the app binary itself',
-        '  the supervisor leads its own process group; no console error',
-        '  an unbusy quit stopped the supervisor (pid gone)',
-      ].join('\n') + '\n',
-    );
+    if (EVIDENCE !== null) {
+      mkdirSync(EVIDENCE, { recursive: true });
+      writeFileSync(
+        join(EVIDENCE, 'packaged.txt'),
+        [
+          'E10 Task 4.3: the packaged check (e2e/supervisor-packaged.spec.ts, pnpm e2e:supervisor:packaged; unsigned build:app).',
+          "Written whole by the spec on every run under MAWS_E10_SHOTS=1; the gate results are in the execution document's Concrete Steps.",
+          `Executable: ${exe}`,
+          '',
+          `electron-fuses read --app ${bundle}:`,
+          fuses,
+          '',
+          'The packaged app launched through launchMaws with MAWS_HOST_MODE=detached (scratch userData):',
+          `  host.status.transport: ${s.transport}`,
+          `  host.status.supervisor.mode: ${s.supervisor!.mode}`,
+          `  host.status.state: ${s.state}; matches: ${s.matches}`,
+          `  supervisor pid (host.status and supervisor/host.lock): ${lock.pid}; app pid ${appPid}; pgid ${pgid}`,
+          `  ps -o command=: ${command}`,
+          `  ps -o comm= (follows argv0): ${comm}`,
+          `  ps -o ucomm= (the kernel's name, the executable's): ${ucomm}`,
+          `  executable (lsof -d txt, realpath): ${binary}`,
+          '',
+          'Results (every assertion held):',
+          '  RunAsNode is Enabled',
+          "  transport === 'detached' and supervisor.mode === 'detached'",
+          '  argv0 is maws-supervisor; the chunk is under MAWS.app/Contents/Resources/app.asar/',
+          '  the executable lies inside MAWS.app/Contents/MacOS/ and is the app binary itself',
+          '  the supervisor leads its own process group; no console error',
+          '  an unbusy quit stopped the supervisor (pid gone)',
+        ].join('\n') + '\n',
+      );
+    }
   } finally {
     if (maws) await maws.cleanup().catch((error: unknown) => console.error(error));
     for (const pid of new Set([...(supervisorPid !== null ? [supervisorPid] : []), ...processesNaming(root)])) {
