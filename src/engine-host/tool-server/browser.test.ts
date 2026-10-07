@@ -233,5 +233,20 @@ describe('the browser tools in the host (E4c Design §3)', () => {
       expect(reads).toEqual([path]);
       expect(existsSync(path)).toBe(true);
     });
+
+    // E11 scale review A scalpel-2#1: the server drops the answer of a call withdrawn after main answered, so the picture
+    // never reaches the model and no record may name it
+    it('writes no record for a call withdrawn while the picture was being read, and removes the file main wrote', async () => {
+      const controller = new AbortController();
+      tools = new Map(browserTools({ bridge, deliverables: store, userData, newId: () => UUID, readFile: async () => (controller.abort('withdrawn'), PNG) }).map((tool) => [tool.name, tool]));
+      const context = ctx(controller.signal);
+      const pending = tools.get('browser_screenshot')!.call({ tabId: TAB }, context);
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      expect(bridge.answer(context.requestId, answerWith()(sent[0]!))).toBe('delivered');
+      expect((await pending).isError).toBe(true);
+      expect(written).toEqual([]);
+      expect(await store.get(A, UUID)).toBeNull();
+      expect(existsSync(screenshotPath(userData, A, UUID, 'png'))).toBe(false);
+    });
   });
 });
