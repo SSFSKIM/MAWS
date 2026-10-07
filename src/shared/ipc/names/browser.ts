@@ -8,4 +8,5 @@ export const commands = [
 
 export const events = [
   'browser.tabs.changed', 'browser.view.covered', 'browser.control.changed', 'browser.chrome.command', 'browser.download.refused', 'browser.notice',
+  'browser.agent.acting', // E4c
 ] as const;

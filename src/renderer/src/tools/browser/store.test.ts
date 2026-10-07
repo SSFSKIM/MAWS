@@ -139,6 +139,23 @@ describe('the chrome’s notices', () => {
     dismissNotice(browser.getState().notices[0]!.id);
     expect(browser.getState().notices.map((notice) => notice.kind)).toEqual(['downloadRefusedAgent']);
   });
+
+  // E4c start: a page dialog MAWS answered on a tab nobody had placed (A-42) keeps its kind and excerpt for the line
+  it('main’s dialogAnswered notice keeps the dialog’s type and excerpt, and its line says what MAWS answered', async () => {
+    fake.event('browser.notice', { appSessionId: A, tabId: T1, kind: 'dialogAnswered', dialogType: 'confirm', excerpt: 'Leave this page?' });
+    fake.event('browser.notice', { appSessionId: A, tabId: T1, kind: 'dialogAnswered', dialogType: 'alert', excerpt: '' });
+    expect(browser.getState().notices.map(({ kind, dialogType, excerpt }) => ({ kind, dialogType, excerpt }))).toEqual([
+      { kind: 'dialogAnswered', dialogType: 'confirm', excerpt: 'Leave this page?' },
+      { kind: 'dialogAnswered', dialogType: 'alert', excerpt: '' },
+    ]);
+    const { noticeText } = await import('./chrome/Notices');
+    expect(noticeText({ kind: 'dialogAnswered', dialogType: 'confirm', excerpt: 'Leave this page?' })).toBe(BROWSER_COPY.dialogAnswered('confirm', 'Leave this page?'));
+    expect(BROWSER_COPY.dialogAnswered('confirm', 'Leave this page?')).toBe('While this tab was hidden the page asked “Leave this page?”; MAWS answered Cancel');
+    expect(BROWSER_COPY.dialogAnswered('alert', 'Saved.')).toBe('While this tab was hidden the page showed an alert, which MAWS closed: “Saved.”');
+    expect(BROWSER_COPY.dialogAnswered('alert', '')).toBe('While this tab was hidden the page showed an alert, which MAWS closed');
+    expect(BROWSER_COPY.dialogAnswered('confirm', '')).toBe('While this tab was hidden the page asked for a confirmation; MAWS answered Cancel');
+  });
+  // E4c end
 });
 
 describe('tabTitle', () => {

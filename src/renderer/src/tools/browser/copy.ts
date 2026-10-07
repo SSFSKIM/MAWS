@@ -109,6 +109,12 @@ export const BROWSER_COPY = {
   downloadRefusedAgent: 'A download the agent started was refused; downloads are yours to start',
   urlCopied: 'URL copied to clipboard', // Codex's `thread.browser.url.copied`
   tabsFileBroken: 'The saved browser tabs could not be read; the file was set aside',
+  // E4c start: a dialog a never-placed tab's page raised, which MAWS answered with the page's default (A-42)
+  dialogAnswered: (type: 'alert' | 'confirm', excerpt: string) =>
+    type === 'confirm'
+      ? `While this tab was hidden the page asked ${excerpt === '' ? 'for a confirmation' : `“${excerpt}”`}; MAWS answered Cancel`
+      : `While this tab was hidden the page showed an alert, which MAWS closed${excerpt === '' ? '' : `: “${excerpt}”`}`,
+  // E4c end
 
   // ---- Session info (Task 3.4; Design §12): the app's loaded pages beside the engine's memory budget ----
   sessionInfoLabel: 'Browser tabs',

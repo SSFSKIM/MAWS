@@ -40,9 +40,19 @@ export type BrowserChromeCommand = z.infer<typeof BrowserChromeCommandSchema>;
 export const BrowserNoticeSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   tabId: BrowserTabIdSchema.nullable(),
-  kind: z.enum(['tabsCap', 'profileMissing', 'partitionFallback', 'downloadRefusedAgent', 'tabsFileBroken', 'refusedScheme']),
+  kind: z.enum([
+    'tabsCap', 'profileMissing', 'partitionFallback', 'downloadRefusedAgent', 'tabsFileBroken', 'refusedScheme',
+    // E4c start: a never-placed tab's page raised a dialog nobody could see; MAWS answered it with the page's default and
+    // tells the person when they select the tab (A-42)
+    'dialogAnswered',
+    // E4c end
+  ]),
   name: z.string().optional(),
   count: z.number().int().min(0).optional(),
+  // E4c start: `dialogAnswered`'s dialog kind and the start of its message, page text shown as plain text
+  dialogType: z.enum(['alert', 'confirm']).optional(),
+  excerpt: z.string().max(200).optional(),
+  // E4c end
 });
 export type BrowserNotice = z.infer<typeof BrowserNoticeSchema>;
 
@@ -133,4 +143,8 @@ export const events = {
   'browser.chrome.command': BrowserChromeCommandSchema,
   'browser.download.refused': z.strictObject({ tabId: BrowserTabIdSchema, url: z.string(), filename: z.string() }), // an agent-started download, cancelled
   'browser.notice': BrowserNoticeSchema,
+  // E4c start: an agent's action targets this tab (E4c Design §6 step 1); a window showing the session opens the Browser
+  // tool on it once
+  'browser.agent.acting': z.strictObject({ appSessionId: AppSessionIdSchema, tabId: BrowserTabIdSchema }),
+  // E4c end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;

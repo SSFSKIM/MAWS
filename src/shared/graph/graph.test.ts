@@ -81,9 +81,10 @@ describe('graph schemas accept and reject', () => {
 
     it('lists every event kind once and the union covers each', () => {
       expect(new Set(EVENT_KINDS).size).toBe(EVENT_KINDS.length);
-      expect(EVENT_KINDS).toHaveLength(67); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds; E7: peer.message; E2: maws.delivery.artifact
-      expect(EVENT_KINDS.at(-2)).toBe('peer.message'); // E7: appended after E1's block (X1 is append-only)
-      expect(EVENT_KINDS.at(-1)).toBe('maws.delivery.artifact'); // E2: appended after E7's (landing order)
+      expect(EVENT_KINDS).toHaveLength(68); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds; E7: peer.message; E2: maws.delivery.artifact; E4c: maws.browser.action
+      expect(EVENT_KINDS.at(-3)).toBe('peer.message'); // E7: appended after E1's block (X1 is append-only)
+      expect(EVENT_KINDS.at(-2)).toBe('maws.delivery.artifact'); // E2: appended after E7's (landing order)
+      expect(EVENT_KINDS.at(-1)).toBe('maws.browser.action'); // E4c: after E2's, in ledger order
       const covered = SessionEventSchema.options.map((option) => option.shape.kind.value).sort();
       expect(covered).toEqual([...EVENT_KINDS].sort());
     });
@@ -195,6 +196,12 @@ describe('graph schemas accept and reject', () => {
         // E2 start: an artifact version (X9 artifact_create, artifact_update)
         'maws.delivery.artifact': { toolUseId: 'toolu_4', requestId: 'r', action: 'update', artifactId: 'dash', deliverableId: '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f', version: 2, title: 'Dashboard' },
         // E2 end
+        // E4c start: one browser tool call (X9 browser_*), mapped from its answer
+        'maws.browser.action': {
+          toolUseId: 'toolu_5', requestId: 'r', tool: 'browser_act', action: 'click', tabId: 'b_000000000001', target: 'e12', url: 'http://127.0.0.1:17391/done.html', title: 'Thanks',
+          ms: 40, deliverableId: null, error: null, waitedFor: 'human', waitedMs: 3012,
+        },
+        // E4c end
       };
       expect(Object.keys(samples).sort()).toEqual([...EVENT_KINDS].sort());
       for (const [kind, payload] of Object.entries(samples)) {
@@ -204,6 +211,16 @@ describe('graph schemas accept and reject', () => {
         if (result.success) expect(result.data).toEqual(event);
       }
     });
+
+    // E4c start: the browser action's tool is one of the six, its waits one of two reasons
+    it('maws.browser.action names one of the six browser tools and nothing else', () => {
+      const action = { ...base, kind: 'maws.browser.action', toolUseId: null, requestId: 'r', tool: 'browser_screenshot', action: 'screenshot', tabId: 'b_000000000001', target: 'page', url: null, title: null, ms: null, deliverableId: '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f', error: null, waitedFor: null, waitedMs: null };
+      expect(SessionEventSchema.safeParse(action).success).toBe(true);
+      expect(SessionEventSchema.safeParse({ ...action, tool: 'artifact_screenshot' }).success).toBe(false);
+      expect(SessionEventSchema.safeParse({ ...action, waitedFor: 'sheet' }).success).toBe(false);
+      expect(SessionEventSchema.safeParse({ ...action, error: undefined }).success).toBe(false); // required, nullable
+    });
+    // E4c end
 
     it('rejects an unknown kind and wrong-typed payload fields', () => {
       expect(SessionEventSchema.safeParse({ ...base, kind: 'tool.exploded' }).success).toBe(false);

@@ -20,6 +20,9 @@ import { PaneRosterSchema, PromptFillModeSchema, SURFACE_ASKS } from '../engine/
 import { PaneSchema } from '../maws/panes';
 import { AskAnswerSchema, AskQuestionSchema, DeliveredFileSchema, ShowPaneOpenedSchema } from '../maws/tools';
 // E1 end
+// E4c start
+import { BROWSER_TOOL_NAMES } from '../maws/browser';
+// E4c end
 // E3 start
 import { AnchorSchema } from '../anchor/anchor';
 import { AppSessionIdSchema } from './ids';
@@ -110,6 +113,9 @@ export const EVENT_KINDS = [
   // E2 start: an artifact version the maws server registered (P1 X9 `artifact_create`, `artifact_update`)
   'maws.delivery.artifact',
   // E2 end
+  // E4c start: one browser tool call the maws server answered (P1 X9 `browser_*`)
+  'maws.browser.action',
+  // E4c end
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -296,6 +302,16 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   // is the agent's short name, `deliverableId` the record's uuid.
   event('maws.delivery.artifact', { toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, action: z.enum(['create', 'update']), artifactId: z.string(), deliverableId: z.string(), version: z.number().int(), title: z.string() }),
   // E2 end
+  // E4c start (E4c execution document, Design §10): mapped from an admitted `browser_*` call and its answer (E1 residue
+  // 1's rule), so a journal rebuild reproduces it; a refusal yields none. `action` is the tabs or act action, navigate's
+  // `back`/`forward`/`reload`/`url`, else the tool's noun; `target` the ref or css, the URL, the snapshot's root or the
+  // screenshot's `page`/`fullPage`; the rest from the answer's first JSON block, `error` its isError text.
+  event('maws.browser.action', {
+    toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, tool: z.enum(BROWSER_TOOL_NAMES), action: z.string(), tabId: nullableString(), target: nullableString(),
+    url: nullableString(), title: nullableString(), ms: z.number().int().min(0).nullable(), deliverableId: nullableString(), error: nullableString(),
+    waitedFor: z.enum(['human', 'cover']).nullable(), waitedMs: z.number().int().min(0).nullable(),
+  }),
+  // E4c end
 ]);
 
 export type SessionEvent = z.infer<typeof SessionEventSchema>;

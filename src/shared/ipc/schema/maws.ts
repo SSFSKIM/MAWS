@@ -10,6 +10,11 @@ import { PendingAskSchema } from '../../maws/ask';
 import { PaneSchema } from '../../maws/panes';
 import { AskAnswerSchema, ShowPaneOpenedSchema } from '../../maws/tools';
 import type { CommandSpec } from './common';
+// E4c start
+import { ToolUseIdSchema } from '../../graph/ids';
+import { BrowserTabIdSchema } from '../../browser/tab';
+import { BROWSER_TOOL_NAMES } from '../../maws/browser';
+// E4c end
 
 export const MawsPaneShowSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
@@ -47,6 +52,53 @@ export const MawsArtifactCapturedResultSchema = z.discriminatedUnion('ok', [
 export type MawsArtifactCapturedResult = z.infer<typeof MawsArtifactCapturedResultSchema>;
 // E2 end
 
+// E4c start (E4c execution document, Design §1, §3 and Interfaces "IPC `maws.*`"): the browser tools' bridge. The host
+// parses a call and asks main once (`maws.browser.request`, an IPC event no window acts on); main runs it on the
+// session's tab and answers through `maws.browser.answer` (a screenshot travels as the path of the file main wrote, never
+// as bytes), reports a wait on the person or a cover through `maws.browser.waiting` (the host pauses its deadline) and
+// the windows' waiting line through `maws.browser.progress`; the host's `maws.browser.cancel` stops a request it
+// abandoned. `args` is validated per tool in main, with the schema the host parsed it with.
+export const MawsBrowserRequestSchema = z.strictObject({
+  appSessionId: AppSessionIdSchema,
+  requestId: RequestIdSchema, // the engine's `mcp_message` request the answer goes back to
+  toolUseId: ToolUseIdSchema.nullable(),
+  tool: z.enum(BROWSER_TOOL_NAMES),
+  args: z.unknown(),
+  deliverableId: z.uuid().optional(), // browser_screenshot: the record's id, which names the file
+  path: z.string().optional(), // browser_screenshot: the `.png` path the host derived; main may write the `.jpg` beside it
+});
+export type MawsBrowserRequest = z.infer<typeof MawsBrowserRequestSchema>;
+
+export const MawsBrowserCancelSchema = z.strictObject({ appSessionId: AppSessionIdSchema, requestId: RequestIdSchema });
+export type MawsBrowserCancel = z.infer<typeof MawsBrowserCancelSchema>;
+
+export const BrowserWaitingSchema = z.enum(['human', 'cover']).nullable(); // null: no longer waiting
+export const MawsBrowserProgressSchema = z.strictObject({
+  appSessionId: AppSessionIdSchema,
+  toolUseId: ToolUseIdSchema.nullable(),
+  tabId: BrowserTabIdSchema,
+  tool: z.enum(BROWSER_TOOL_NAMES),
+  waiting: BrowserWaitingSchema,
+  since: z.string(), // ISO: when the wait began
+});
+export type MawsBrowserProgress = z.infer<typeof MawsBrowserProgressSchema>;
+
+// `result`: the tool's result JSON, which the host checks against the tool's result schema; `text`: browser_snapshot's
+// second text block; `image`: the file browser_screenshot wrote. `error`: a BROWSER_TOOL_ERRORS text, written as is.
+export const MawsBrowserAnswerResultSchema = z.discriminatedUnion('ok', [
+  z.strictObject({
+    ok: z.literal(true),
+    result: z.record(z.string(), z.unknown()),
+    text: z.string().optional(),
+    image: z
+      .strictObject({ path: z.string(), mimeType: z.enum(['image/png', 'image/jpeg']), width: z.number().int().min(0), height: z.number().int().min(0), bytes: z.number().int().min(0) })
+      .optional(),
+  }),
+  z.strictObject({ ok: z.literal(false), error: z.string() }),
+]);
+export type MawsBrowserAnswerResult = z.infer<typeof MawsBrowserAnswerResultSchema>;
+// E4c end
+
 export const commands = {
   // The session's pending asks (none for a session this host does not hold).
   'maws.asks.list': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ asks: z.array(PendingAskSchema) }), owner: 'engine-host' },
@@ -70,9 +122,27 @@ export const commands = {
     owner: 'engine-host',
   },
   // E2 end
+  // E4c start: main's answer to `maws.browser.request`, and its report that the request waits on the person or a cover
+  // (null: it no longer does); `not_pending` when the call ended or was answered already.
+  'maws.browser.answer': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, requestId: RequestIdSchema, result: MawsBrowserAnswerResultSchema }),
+    output: z.strictObject({ outcome: z.enum(['delivered', 'not_pending']) }),
+    owner: 'engine-host',
+  },
+  'maws.browser.waiting': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, requestId: RequestIdSchema, waiting: BrowserWaitingSchema }),
+    output: z.strictObject({ outcome: z.enum(['delivered', 'not_pending']) }),
+    owner: 'engine-host',
+  },
+  // E4c end
 } as const satisfies Record<`maws.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'maws.pane.show': MawsPaneShowSchema,
   'maws.artifact.capture': MawsArtifactCaptureSchema, // E2
+  // E4c start: the first two host-emitted (main handles them), the third main-emitted to the windows
+  'maws.browser.request': MawsBrowserRequestSchema,
+  'maws.browser.cancel': MawsBrowserCancelSchema,
+  'maws.browser.progress': MawsBrowserProgressSchema,
+  // E4c end
 } as const satisfies Record<`maws.${string}`, z.ZodType>;
