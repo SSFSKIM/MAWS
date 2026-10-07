@@ -48,7 +48,9 @@
   },
   "dependencies": {
     "node-pty": "1.1.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "playwright-core": "1.63.0",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@codemirror/commands": "6.11.1",
