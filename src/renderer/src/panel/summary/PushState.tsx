@@ -49,9 +49,10 @@ export function PushState({ directory, appSessionId }: { directory: string; appS
         }
       >
         {toolRegistered ? (
+          // A-28 (WCAG 2.5.3): named by the text it shows; what it does is its title, the accessible description
           <button
             type="button"
-            aria-label={SUMMARY_COPY.openSourceControl}
+            title={SUMMARY_COPY.openSourceControl}
             className="block w-full truncate rounded-sm text-left outline-accent hover:text-accent focus-visible:outline-2"
             onClick={() => panelHost.addTool(SCM_TOOL_ID, { appSessionId })}
           >

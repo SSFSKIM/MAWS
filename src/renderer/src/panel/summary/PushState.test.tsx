@@ -248,16 +248,17 @@ describe('push state row shows PR state, install and sign-in states and opens th
     });
   });
 
+  // A-28 (WCAG 2.5.3, label in name): the button is named by the text it shows; what it does is its description
   it('the push text opens Source control in the shown session once the tool is registered, and is plain text before', async () => {
     const user = userEvent.setup();
     const view = await mount();
-    expect(within(push()).queryByRole('button', { name: 'Open Source control' })).toBeNull();
-    expect(within(push()).getByText('Up to date with origin/feature')).toBeTruthy();
+    expect(within(push()).queryByRole('button', { name: 'Up to date with origin/feature' })).toBeNull();
+    expect(within(push()).getByText('Up to date with origin/feature').tagName).toBe('SPAN');
     view.unmount();
     const addTool = vi.spyOn(panelHost, 'addTool');
     registerPanelTool(probeTool('source-control', { multiInstance: false }).tool);
     await mount();
-    const open = within(push()).getByRole('button', { name: 'Open Source control' });
+    const open = within(push()).getByRole('button', { name: 'Up to date with origin/feature', description: 'Open Source control' });
     expect(open.textContent).toBe('Up to date with origin/feature');
     await user.click(open);
     expect(addTool).toHaveBeenCalledWith('source-control', { appSessionId: A });
@@ -319,7 +320,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
     );
     await lineReads('PR #12 Open · 2 passed, 1 pending');
     expect(fake.calls.slice(before).filter((call) => call.startsWith('on '))).toEqual([]);
-    await user.click(within(push()).getByRole('button', { name: 'Open Source control' }));
+    await user.click(within(push()).getByRole('button', { name: 'Up to date with origin/feature' }));
     expect(addTool).toHaveBeenCalledWith('source-control', { appSessionId: A });
   });
 });
