@@ -6,8 +6,9 @@
 // - `MAWS_E2E_CHROME_USER_DATA` names the fixture as the picker's default folder; `MAWS_E2E_KEYCHAIN` answers the
 //   Keychain step (`file:<the fixture's password file>`, a wrong one, or `deny`); `MAWS_E2E_IMPORT_LOG` mirrors the
 //   import's log lines into the scratch;
-// - `collectMainOutput` reads main's own stdout and stderr (Playwright launches Electron with piped stdio), and the scene
-//   keeps every console message of the app window, so `expectNothingLogged` can assert that none of the fixture's
+// - `collectMainOutput` reads main's own stdout and stderr (Playwright launches Electron with piped stdio) from the moment
+//   the launch resolves (launch.ts's `onLaunched`), so the boot's sweep and eager extension load are read too, and the
+//   scene keeps every console message of the app window, so `expectNothingLogged` can assert that none of the fixture's
 //   sentinels (cookie values, history paths and titles, the passwords) reached any of them (Design §16);
 // - `openSettingsBrowser`, `importThrough` and `report` drive Settings › Browser and the import sheet as the owner does;
 // - `shootImport` writes `e4b-<state>-<theme>.png` under docs/doperpowers/evidence/p1-e4b/ when MAWS_E4B_SHOTS=1.
@@ -22,12 +23,12 @@ import { launchBrowserScene, type BrowserScene } from './browser-scene';
 import type { BrowserServer } from './browser-server';
 import { invoke, value } from './c7-replay';
 import { clearToasts, scratchProject, type Scratch } from './deliverables-scene';
-import { REPO_ROOT } from './launch';
+import { onLaunched, REPO_ROOT } from './launch';
 import { menu } from './menu';
 
 export interface ImportScene extends BrowserScene {
   chrome: ChromeUserData;
-  mainOutput(): string; // main's stdout and stderr since the scene launched
+  mainOutput(): string; // main's stdout and stderr since the process started
   appConsole(): string[]; // every console message and uncaught error of the app window since its first load
   importLog: string; // the MAWS_E2E_IMPORT_LOG mirror (one file across a scratch's launches)
   importLogFrom: number; // its length when this launch started
@@ -50,18 +51,18 @@ export async function launchImportScene(scratch: Scratch, server: BrowserServer,
   const vars = { MAWS_E2E_CHROME_USER_DATA: chrome.dir, MAWS_E2E_KEYCHAIN: seams.keychain, MAWS_E2E_IMPORT_LOG: importLog };
   const before = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]));
   Object.assign(process.env, vars);
+  const importLogFrom = existsSync(importLog) ? readFileSync(importLog, 'utf8').length : 0;
+  let mainOutput = (): string => '';
   let s: BrowserScene;
   try {
-    s = await launchBrowserScene(scratch, server, known);
+    s = await onLaunched((app) => (mainOutput = collectMainOutput(app)), () => launchBrowserScene(scratch, server, known));
   } finally {
     for (const [key, was] of Object.entries(before)) {
       if (was === undefined) delete process.env[key];
       else process.env[key] = was;
     }
   }
-  const mainOutput = collectMainOutput(s.maws.app);
   const appConsole = await collectAppConsole(s.page);
-  const importLogFrom = existsSync(importLog) ? readFileSync(importLog, 'utf8').length : 0;
   return Object.assign(s, { chrome, mainOutput, appConsole, importLog, importLogFrom });
 }
 

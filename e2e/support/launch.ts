@@ -48,6 +48,20 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
 }
 // C5 end
 
+// E4b start: a hook run on the app the moment `_electron.launch` resolves, before anything waits for a window, so a
+// scene can read main's stdout and stderr from launch to close (E4b Design §16). The scenes between a spec and
+// launchMaws pass no launch options through, so a scene sets the hook around its launch, as it sets its environment.
+let launchedHook: ((app: ElectronApplication) => void) | null = null;
+export async function onLaunched<T>(hook: (app: ElectronApplication) => void, launch: () => Promise<T>): Promise<T> {
+  launchedHook = hook;
+  try {
+    return await launch();
+  } finally {
+    launchedHook = null;
+  }
+}
+// E4b end
+
 export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLaunch> {
   const executable = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;
   if (executable && !existsSync(executable)) throw new Error(`MAWS_E2E_EXECUTABLE does not exist: ${executable} (run pnpm build:app)`);
@@ -103,6 +117,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     app = executable
       ? await _electron.launch({ executablePath: executable, env, cwd: REPO_ROOT })
       : await _electron.launch({ args: [main], env, cwd: REPO_ROOT });
+    launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();
     const consoleErrors = await collectConsoleErrors(page);
