@@ -18,7 +18,7 @@ import { ipc } from '../../ipc/client';
 import { connectPanelEvents } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
 import { runAction } from '../../keymap/actions-runtime';
-import { connectPanelHost, instanceIds, instanceOf, isRestoredLog, panelHost, pendingAdds, registerPanelTool, togglePinned, usePanelHost } from '../../panel/host';
+import { connectPanelHost, instanceIds, instanceOf, isRestoredLog, panelHost, pendingAdds, registerPanelTool, shownSession, togglePinned, usePanelHost } from '../../panel/host';
 import { PanelHost } from '../../panel/PanelHost';
 import { PanelRegion } from '../../panel/PanelRegion';
 import { persistLayout, useLayout } from '../../stores/layout';
@@ -117,7 +117,6 @@ function bootstrap(): () => void {
   return () => offs.reverse().forEach((off) => off());
 }
 
-const shownSession = (): AppSessionId | null => sessionOfTab(activeTab(useLayout.getState().main));
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 function tabTitle(tabId: string, toolId: string): string {
@@ -185,7 +184,7 @@ const api: PanelHarnessApi = {
     await nextFrame(); // the restored tabs' instances are created before paint
     return adopted;
   },
-  session: shownSession,
+  session: () => shownSession(),
   sessions: { A: fakeId('A'), B: fakeId('B') },
   inputGuard,
   // C9 end
@@ -247,7 +246,7 @@ export function PanelHarness() {
 const buttonClass = 'rounded-sm border border-border px-2 py-0.5 text-ui hover:bg-bg-hover aria-pressed:bg-bg-active aria-pressed:text-fg';
 
 function Controls() {
-  const shown = useLayout((s) => sessionOfTab(activeTab(s.main)));
+  const shown = useLayout((s) => shownSession(s.main));
   const collapsed = useLayout((s) => s.regions.panel.collapsed);
   const { resolvedTheme, setTheme } = useHarnessTheme();
   return (

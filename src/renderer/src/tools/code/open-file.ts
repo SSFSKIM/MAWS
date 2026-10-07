@@ -4,9 +4,8 @@
 // two-argument form, filling the session from the focused pane (C5's Pane focuses on pointerdown, so at click time it
 // is the transcript's).
 import type { AppSessionId } from '@shared/graph/ids';
-import { panelHost } from '../../panel/host';
+import { panelHost, shownSession } from '../../panel/host';
 import { useLayout } from '../../stores/layout';
-import { activeTab, sessionOfTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore, type TranscriptActions, type TurnId } from '../../transcript';
 
@@ -33,9 +32,6 @@ export function openFile(appSessionId: AppSessionId | null, path: string, line?:
   useLayout.getState().openTab({ kind: 'file', path: normalizeLexically(path), line: line ?? null, appSessionId });
 }
 
-// The session the panel follows: the focused pane's active tab's.
-export const sessionOfFocusedPane = (): AppSessionId | null => sessionOfTab(activeTab(useLayout.getState().main));
-
 // The session a turn belongs to, for a call outside a click: the transcript store key whose state holds the turn, the
 // session's own (`<appSessionId>`) or a child agent's (`<appSessionId>:<agentId>`), when the session is known.
 export function sessionOfTurn(turnId: TurnId): AppSessionId | null {
@@ -54,9 +50,9 @@ export function sessionOfTurn(turnId: TurnId): AppSessionId | null {
 // block: a receipt's "Review changes" (and a file row of it) opens Review on the turn, a path chip opens the viewer.
 export const codeTranscriptActions: Pick<TranscriptActions, 'reviewChanges' | 'openFile'> = {
   reviewChanges(turnId, path) {
-    const appSessionId = sessionOfFocusedPane() ?? sessionOfTurn(turnId);
+    const appSessionId = shownSession() ?? sessionOfTurn(turnId);
     if (appSessionId === null) return;
     panelHost.addTool('review', { appSessionId, params: { scope: 'turn', turnId, ...(path ? { path } : {}) } });
   },
-  openFile: (path, line) => openFile(sessionOfFocusedPane(), path, line),
+  openFile: (path, line) => openFile(shownSession(), path, line),
 };

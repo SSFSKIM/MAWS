@@ -2,10 +2,10 @@
 // Review, Files and the viewer draw, from their DOM (the chips, the list, the counter, the tree rows, the notices) and
 // the stores behind it (the hunk texts, the viewer's text), and drives them with the clicks a reader would make.
 import type { AppSessionId } from '@shared/graph/ids';
-import { instanceOf } from '../../panel/host';
+import { instanceOf, shownSession } from '../../panel/host';
 import { useGit } from '../../stores/git';
 import { useLayout } from '../../stores/layout';
-import { activeTab, sessionOfTab } from '../../stores/layout-model';
+import { activeTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { gitScopeFiles, parseRef, receiptOf, turnScopeFiles, type ReviewFile, type ReviewScope } from '../../tools/code/review/review-model';
 import { diffOf, fileDiffOf, turnKeyOf, useReview, type DiffTarget } from '../../tools/code/review/review-store';
@@ -68,7 +68,7 @@ function targetOf(root: HTMLElement): ReviewTarget | null {
     appSessionId = shown?.kind === 'diff' ? shown.appSessionId : null;
     turnId = parseRef(tab.dataset.diffTab ?? '')?.turnId ?? null;
   } else {
-    appSessionId = sessionOfTab(activeTab(useLayout.getState().main));
+    appSessionId = shownSession();
     const selected = appSessionId ? useLayout.getState().panelBySession.get(appSessionId)?.activeTabId : null;
     const pinned = useLayout.getState().panelPinned.find((t) => t.toolId === 'review')?.id;
     const tabId = selected && instanceOf(selected)?.tool.id === 'review' ? selected : (pinned ?? null);

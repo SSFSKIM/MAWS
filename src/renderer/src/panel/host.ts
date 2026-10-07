@@ -10,7 +10,7 @@
 // `hydrate` replaces the panel lists wholesale.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { PanelTabRef } from '@shared/ipc/schema/layout';
+import type { LayoutMain, PanelTabRef } from '@shared/ipc/schema/layout';
 import { currentTabRetention } from '../keymap/actions-runtime';
 import { pinSelection, useLayout, type LayoutState } from '../stores/layout';
 import { activeTab, sessionOfTab } from '../stores/layout-model';
@@ -79,8 +79,9 @@ const LOG_TOOL = 'log';
 const layout = () => useLayout.getState();
 const bump = () => usePanelHost.setState((s) => ({ version: s.version + 1 }));
 
-// The session the panel shows, as C5's region derives it: the focused pane's active tab's session.
-const shownSession = (): AppSessionId | null => sessionOfTab(activeTab(layout().main));
+// The session the panel shows, as C5's region derives it: the focused pane's active tab's session (a file tab's
+// included). The one definition every module imports; `main` for a caller holding a layout state of its own.
+export const shownSession = (main: LayoutMain = layout().main): AppSessionId | null => sessionOfTab(activeTab(main));
 
 const selectionOf = (appSessionId: AppSessionId | null): string | null =>
   appSessionId === null ? layout().panelActiveNoSession : (layout().panelBySession.get(appSessionId)?.activeTabId ?? null);

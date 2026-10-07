@@ -16,14 +16,11 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
 import { ipc } from '../../../ipc/client';
-import { panelHost, usePanelHost } from '../../../panel/host';
+import { panelHost, shownSession, usePanelHost } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
-import { activeTab, sessionOfTab } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
 import type { AskSheetParams } from '../actions';
 import { applyAskEvents, askSheet, reloadAsks } from './store';
-
-const shownSession = (): AppSessionId | null => sessionOfTab(activeTab(useLayout.getState().main));
 
 // With the session shown, `activate` selects the tab without opening any session (the panel host opens one only for a
 // target not on screen).
@@ -69,8 +66,8 @@ export function connectAsks(client: MawsBridge = ipc): () => void {
       if (host.state === 'ready') reloadAsks(client);
     }),
     useLayout.subscribe((state, before) => {
-      const now = sessionOfTab(activeTab(state.main));
-      if (now !== null && now !== sessionOfTab(activeTab(before.main)) && waiting.has(now)) queueMicrotask(() => shown(now));
+      const now = shownSession(state.main);
+      if (now !== null && now !== shownSession(before.main) && waiting.has(now)) queueMicrotask(() => shown(now));
     }),
   ];
   return () => {

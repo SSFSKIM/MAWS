@@ -20,9 +20,8 @@ import type { SessionRecord } from '@shared/graph/session';
 import { AttachTabsSchema, type AttachTab } from '@shared/ipc/schema/layout';
 import { attachCommand } from '@shared/sessions/attach';
 import { ipc } from '../ipc/client';
-import { panelHost } from '../panel/host';
+import { panelHost, shownSession } from '../panel/host';
 import { useLayout } from '../stores/layout';
-import { activeTab, sessionOfTab } from '../stores/layout-model';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { terminals, type TerminalId } from '../terminal/registry';
@@ -173,7 +172,7 @@ function showPanel(): void {
 // The remembered tab on screen, as a new tab would be: the session in the main area, the panel open, the tab selected.
 function showTab(appSessionId: AppSessionId, tabId: string): void {
   showPanel();
-  if (sessionOfTab(activeTab(useLayout.getState().main)) !== appSessionId) useLayout.getState().openSession(appSessionId);
+  if (shownSession() !== appSessionId) useLayout.getState().openSession(appSessionId);
   panelHost.selectTab(tabId);
 }
 

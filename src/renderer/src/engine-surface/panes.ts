@@ -9,16 +9,13 @@ import type { PaneRoster } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
-import { instanceOf, panelHost, registerPanelTool, setTitle } from '../panel/host';
+import { instanceOf, panelHost, registerPanelTool, setTitle, shownSession } from '../panel/host';
 import { useLayout } from '../stores/layout';
-import { activeTab, sessionOfTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { panesClient, setPanesClient, usePaneRosters } from './pane-roster';
 import { markGone, PLUGIN_PANE_TOOL, pluginPaneTool, type PluginPaneState } from './PaneTool';
 
 export { usePaneRoster, usePanes } from './pane-roster';
-
-const shownSession = (): AppSessionId | null => sessionOfTab(activeTab(useLayout.getState().main));
 
 const paneTabs = (appSessionId: AppSessionId) => (useLayout.getState().panelBySession.get(appSessionId)?.tabs ?? []).filter((t) => t.toolId === PLUGIN_PANE_TOOL);
 const stateOf = (tabId: string) => instanceOf(tabId)?.state as PluginPaneState | undefined;
