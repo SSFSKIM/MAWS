@@ -1,0 +1,41 @@
+E4d gates on the final head (M4 Task 4.2's gate list), after merging master's E4a corrective
+=========================================================================================
+
+Head:   cbd5892be80b1a712a17e1272dcb3cf0cb0bae36 (branch worktree-agent-ac181b47cbff847ea)
+        the merge of master 5c761cba (E4a's corrective ffad3a3a: the browser preload registered once per partition
+        session, registerPreloadScript type 'frame'; and its record) into E4d dc0a02d3, no conflicts; the same commit
+        flips e2e/browser-comment.spec.ts: case "7b (adopted)" deleted (it asserted the refusal on an adopted tab, now
+        false by design), case 7c's test.fail mark and its comment removed (an adopted window.open tab arms and shields).
+Date:   2026-10-07 (Asia/Seoul), 02:21 to 02:37
+Machine gate: each command through /tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh, one at a time.
+Command form: env pnpm_config_verify_deps_before_run=false pnpm <cmd>   (cwd the worktree)
+
+Pre-gate checks on the merge, run directly (not slotted):
+  pnpm typecheck                                                         pass
+  pnpm test src/shared/browser src/preload src/main/browser src/renderer/src/tools/browser
+                                                                         49 files, 715 tests passed
+
+gate                          start     load (1/5/15 min) at start   duration   result
+----------------------------  --------  ---------------------------  ---------  ------------------------------------------
+typecheck                     02:21:24  19.50 24.34 23.38            45 s       pass (exit 0)
+lint                          02:22:09  16.89 22.93 22.91            27 s       pass (exit 0, no problems)
+test --maxWorkers=4           02:22:36  14.31 21.84 22.52            203 s      651 files passed, 1 skipped; 8934 tests passed, 1 skipped
+e2e:browser-comment           02:27:29  19.41 22.95 23.03            60 s       13 passed (28.6 s), 7c a genuine pass (1.5 s)
+e2e:browser                   02:28:29  18.27 22.09 22.71            53 s       8 passed (22.0 s)
+e2e:side                      02:29:22  18.00 21.39 22.41            65 s       8 passed (31.8 s)
+e2e:code                      02:30:57  18.34 21.04 22.20            125 s      35 passed (1.6 m)
+e2e:panel                     02:35:03  15.28 19.65 21.35            77 s       23 passed (42.1 s)
+MAWS_E4D_SHOTS=1 e2e:browser-comment
+                              02:36:20  16.77 19.11 21.00            63 s       13 passed (30.8 s); the six shots in this
+                                                                                    directory rewritten (chrome armed, sheet,
+                                                                                    transcript chip; light and dark)
+
+Durations are wall time including the slot wait and the electron-vite build; the parenthesised times are Playwright's.
+Retries: none (no failure, timing-only or otherwise).
+e2e:browser-comment's count went from 14 (12 passed, 7b (adopted) passed, 7c expected-failure) to 13: 7b (adopted) is
+deleted, 7c passes as an ordinary test.
+
+Logs: /tmp/maws-review/gates/e4d-typecheck.log, e4d-lint.log, e4d-test.log, e4d-e2e-browser-comment.log,
+      e4d-e2e-browser.log, e4d-e2e-side.log, e4d-e2e-code.log, e4d-e2e-panel.log, e4d-e2e-browser-comment-shots.log;
+      the run summary /tmp/maws-review/gates/e4d-summary.txt; the driver /tmp/maws-review/e4d-t7-gates.sh.
+Other children's evidence the e2e groups rewrote (p1-e3/shots, p1-e5/shots) was restored from HEAD before commit.
