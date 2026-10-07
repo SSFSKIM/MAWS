@@ -51,9 +51,11 @@ export const BrowserNoticeSchema = z.strictObject({
 export type BrowserNotice = z.infer<typeof BrowserNoticeSchema>;
 
 // E4d start: comment mode (E4d execution document, Design §2, §6, §8; Interfaces "IPC `browser.comment.*`"). The toggle
-// arms one tab at a time; main answers `on: false` with the reason when it cannot (no error). The pick goes to the
-// window whose pane owns the tab, as an anchor main built and validated (X10), with what became of its crop.
-export const BrowserCommentSetResultSchema = z.strictObject({ on: z.boolean(), reason: z.enum(['ok', 'unknownTab', 'suspended', 'notPlaced', 'noPage', 'agent']) });
+// arms one tab at a time; main answers `on: false` with the reason when it cannot (no error), and `arming` while it
+// waits for the page's preload to confirm the shield is up (Decision Log 34): only `changed {on: true}` presses the
+// toggle. The pick goes to the window whose pane owns the tab, as an anchor main built and validated (X10), with what
+// became of its crop.
+export const BrowserCommentSetResultSchema = z.strictObject({ on: z.boolean(), reason: z.enum(['ok', 'unknownTab', 'suspended', 'notPlaced', 'noPage', 'agent', 'arming']) });
 export type BrowserCommentSetResult = z.infer<typeof BrowserCommentSetResultSchema>;
 export const BrowserCommentChangedSchema = z.strictObject({ tabId: BrowserTabIdSchema, on: z.boolean(), reason: z.enum([...CommentDisarmReasonSchema.options, 'armed']) });
 export type BrowserCommentChanged = z.infer<typeof BrowserCommentChangedSchema>;

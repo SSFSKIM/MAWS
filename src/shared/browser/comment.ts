@@ -5,7 +5,7 @@
 // before anyone sees it.
 import * as z from 'zod';
 import { AnchorSchema, type Anchor, type AnchorScreenshot } from '../anchor/anchor';
-import { elementLabel, oneLine, REPORT_A11Y_MAX, REPORT_NAME_MAX, REPORT_TOKEN_MAX, type PickRefused, type PickReport } from './comment-protocol';
+import { elementLabel, oneLine, REPORT_A11Y_MAX, REPORT_NAME_MAX, REPORT_TOKEN_MAX, type PickArmed, type PickRefused, type PickReport } from './comment-protocol';
 import { CSS_PATH, CSS_PATH_MAX } from './describe';
 import { BrowserLocatorSchema } from './locator';
 import { validateBrowserUrl } from './url';
@@ -22,7 +22,8 @@ export const CROP_FILES_MAX = 200;
 const LABEL_MAX = 200; // X10's
 const PAGE_URL_MAX = 2000; // X10's
 
-export const CommentDisarmReasonSchema = z.enum(['toggle', 'picked', 'escape', 'navigated', 'agent', 'closed', 'crashed', 'refused', 'other']);
+// `unavailable`: the page never confirmed an arm, or never answered a context-menu pick (Decision Log 34)
+export const CommentDisarmReasonSchema = z.enum(['toggle', 'picked', 'escape', 'navigated', 'agent', 'closed', 'crashed', 'refused', 'other', 'unavailable']);
 export type CommentDisarmReason = z.infer<typeof CommentDisarmReasonSchema>;
 
 const ElementDescriptionSchema = z.strictObject({
@@ -56,7 +57,9 @@ export const PickRefusedSchema = z.strictObject({
   reason: z.enum(['tooDeep', 'noElement']),
 }) satisfies z.ZodType<PickRefused>;
 
-export const PreloadMessageSchema = z.discriminatedUnion('type', [PickReportSchema, PickRefusedSchema]);
+export const PickArmedSchema = z.strictObject({ type: z.literal('armed'), epoch: Epoch }) satisfies z.ZodType<PickArmed>;
+
+export const PreloadMessageSchema = z.discriminatedUnion('type', [PickReportSchema, PickRefusedSchema, PickArmedSchema]);
 
 // main's URL for the anchor: as it is within X10's cap, else its origin and path, else none (the anchor stays valid
 // without it; the lead then reads `element <css>`). Null for a URL that is not http or https.

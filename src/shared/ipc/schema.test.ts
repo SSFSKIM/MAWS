@@ -1219,12 +1219,12 @@ describe('ipc schema validates both directions', () => {
       for (const tabId of ['b_0123', 'tab-1', '', 7]) expect(validateCommandInput('browser.comment.set', { tabId, on: true }).ok, String(tabId)).toBe(false);
       expect(validateCommandInput('browser.comment.set', { tabId: TAB_ID, on: 'yes' }).ok).toBe(false);
       expect(validateCommandInput('browser.comment.set', { tabId: TAB_ID, on: true, mode: 'area' }).ok).toBe(false);
-      for (const reason of ['ok', 'unknownTab', 'suspended', 'notPlaced', 'noPage', 'agent']) expect(validateCommandOutput('browser.comment.set', { on: reason === 'ok', reason }).ok, reason).toBe(true);
+      for (const reason of ['ok', 'unknownTab', 'suspended', 'notPlaced', 'noPage', 'agent', 'arming']) expect(validateCommandOutput('browser.comment.set', { on: reason === 'ok', reason }).ok, reason).toBe(true);
       expect(validateCommandOutput('browser.comment.set', { on: false, reason: 'busy' }).ok).toBe(false);
     });
 
     it('validates the mode’s change and the pick', () => {
-      for (const reason of ['armed', 'toggle', 'picked', 'escape', 'navigated', 'agent', 'closed', 'crashed', 'refused', 'other'])
+      for (const reason of ['armed', 'toggle', 'picked', 'escape', 'navigated', 'agent', 'closed', 'crashed', 'refused', 'other', 'unavailable'])
         expect(validateEventPayload('browser.comment.changed', { tabId: TAB_ID, on: reason === 'armed', reason }).ok, reason).toBe(true);
       expect(validateEventPayload('browser.comment.changed', { tabId: TAB_ID, on: false, reason: 'blurred' }).ok).toBe(false);
       expect(validateEventPayload('browser.comment.changed', { tabId: 'nope', on: false, reason: 'toggle' }).ok).toBe(false);

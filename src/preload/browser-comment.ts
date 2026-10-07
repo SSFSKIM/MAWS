@@ -3,10 +3,12 @@
 //
 // Armed by main, it puts two nodes of its own under the page's root: a transparent shield over the viewport, which is
 // what the pointer is over wherever it goes (a frame or a shadow host included), and an outline with a badge naming the
-// element under the pointer. A click picks that element; a drag past `DRAG_THRESHOLD_PX` picks the area and the
-// smallest element that holds it. The pick hides the outline, waits two frames so the presented frame carries none of
-// it, re-measures, and sends main one report of geometry and names; main decides whether it counts (A-33). Esc is
-// main's (`before-input-event`), and so is the URL; the crosshair is main's `insertCSS`, repeated on the shield.
+// element under the pointer, and tells main the shield is up (main shows the tab armed from that answer alone, so a
+// page with no preload is never shown armed). A click picks that element; a drag past `DRAG_THRESHOLD_PX` picks the
+// area and the smallest element that holds it. The pick hides the outline, waits two frames so the presented frame
+// carries none of it, re-measures, and sends main one report of geometry and names; main decides whether it counts
+// (A-33). Esc is main's (`before-input-event`), and so is the URL; the crosshair is main's `insertCSS`, repeated on the
+// shield.
 //
 // What the page sees of it: two nodes it can observe or remove, and nothing else. The shield carries no listener: it is
 // a hit-test sink, so the pointer is over a MAWS node and never over a page element, frame or shadow host. Every trusted
@@ -324,6 +326,8 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     ui = { shield, overlay, badge };
     epoch = next;
     page.addEventListener('wheel', onWheel, WHEEL);
+    // the shield is up: main counts the tab armed from this answer alone (Decision Log 34)
+    send({ type: 'armed', epoch: next });
   };
 
   // --- the page's pointer events, while armed ---

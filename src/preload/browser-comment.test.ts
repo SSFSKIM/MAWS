@@ -62,11 +62,14 @@ function fakeIpc() {
     send: vi.fn<(channel: string, message: PreloadMessage) => void>(),
   };
   const deliver = (message: ToPreload | unknown) => listeners.get(COMMENT_CHANNEL.toPreload)?.({}, message);
-  const sent = () => ipc.send.mock.calls.map(([channel, message]) => {
+  const all = () => ipc.send.mock.calls.map(([channel, message]) => {
     expect(channel).toBe(COMMENT_CHANNEL.fromPreload);
     return message;
   });
-  return { ipc: ipc as PreloadIpc & typeof ipc, deliver, sent, listeners };
+  // the reports and refusals; the arm's acknowledgements apart (Decision Log 34)
+  const sent = () => all().filter((message) => message.type !== 'armed');
+  const acks = () => all().filter((message) => message.type === 'armed');
+  return { ipc: ipc as PreloadIpc & typeof ipc, deliver, sent, acks, listeners };
 }
 
 function trusted<T extends HappyEvent>(event: T, isTrusted = true): T {
@@ -212,6 +215,20 @@ describe('arming', () => {
     expect(shown(overlay())).toBe(false);
     for (const node of [top, overlay()!, badge()!]) expect(node.hasAttribute(COMMENT_NODES.marker)).toBe(true);
     expect(doc().querySelectorAll('style')).toHaveLength(0); // no style element: inline CSSOM writes only
+  });
+
+  it('acknowledges each arm with its epoch once the shield is in the page, and nothing else (Decision Log 34)', () => {
+    expect(ipc.acks()).toEqual([]);
+    const order: string[] = [];
+    ipc.ipc.send.mockImplementation((_channel, message) => void order.push(`${message.type}:${shield() !== null}`));
+    ipc.deliver({ type: 'arm', epoch: 3 });
+    expect(ipc.acks()).toEqual([{ type: 'armed', epoch: 3 }]);
+    expect(order).toEqual(['armed:true']); // sent after the shield went up
+    ipc.deliver({ type: 'arm', epoch: 4 });
+    expect(ipc.acks()).toEqual([{ type: 'armed', epoch: 3 }, { type: 'armed', epoch: 4 }]);
+    ipc.deliver({ type: 'disarm' });
+    ipc.deliver({ type: 'pickAt', x: 250, y: 40, requestId: 'r1', epoch: 4 });
+    expect(ipc.acks()).toHaveLength(2); // a disarm and a pickAt are never acknowledged
   });
 
   it('disarm removes the shield, the overlay and the badge, and the page receives pointer events again', () => {

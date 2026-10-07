@@ -131,6 +131,12 @@ describe('PickReportSchema', () => {
     for (const [index, value] of bad.entries()) expect(PickReportSchema.safeParse(value).success, String(index)).toBe(false);
   });
 
+  it('reads the arm\'s acknowledgement, the epoch alone (Decision Log 34)', () => {
+    expect(PreloadMessageSchema.parse({ type: 'armed', epoch: 3 })).toEqual({ type: 'armed', epoch: 3 });
+    for (const bad of [{ type: 'armed' }, { type: 'armed', epoch: -1 }, { type: 'armed', epoch: '3' }, { type: 'armed', epoch: 3, requestId: null }])
+      expect(PreloadMessageSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+  });
+
   it('reads a preload message as a pick or a refusal', () => {
     expect(PreloadMessageSchema.parse({ type: 'refused', epoch: 2, requestId: null, reason: 'tooDeep' })).toEqual({ type: 'refused', epoch: 2, requestId: null, reason: 'tooDeep' });
     expect(PreloadMessageSchema.safeParse({ type: 'refused', epoch: 2, requestId: 'r', reason: 'other' }).success).toBe(false);

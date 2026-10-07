@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   A11Y_SEGMENT_NAME_MAX,
+  ARM_ACK_MS,
   COMMENT_CHANNEL,
   COMMENT_NODES,
   COMMENT_WORDS,
@@ -68,6 +69,6 @@ describe('the protocol’s names and bounds', () => {
     expect(COMMENT_CHANNEL).toEqual({ toPreload: 'browser:preload:comment', fromPreload: 'browser:preload:pick' });
     expect(COMMENT_NODES).toEqual({ shield: 'maws-comment-shield', overlay: 'maws-comment-overlay', badge: 'maws-comment-badge', marker: 'data-maws-comment' });
     expect(COMMENT_WORDS).toEqual({ menu: 'Comment', hint: 'Click to comment · drag for an area · Esc leaves' });
-    expect([REPORT_NAME_MAX, REPORT_A11Y_MAX, A11Y_SEGMENT_NAME_MAX, REPORT_TOKEN_MAX, CSS_PATH_MAX, DRAG_THRESHOLD_PX, PICK_AT_MS]).toEqual([200, 300, 40, 64, 2000, 6, 2000]);
+    expect([REPORT_NAME_MAX, REPORT_A11Y_MAX, A11Y_SEGMENT_NAME_MAX, REPORT_TOKEN_MAX, CSS_PATH_MAX, DRAG_THRESHOLD_PX, PICK_AT_MS, ARM_ACK_MS]).toEqual([200, 300, 40, 64, 2000, 6, 2000, 2000]);
   });
 });

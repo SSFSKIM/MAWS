@@ -36,13 +36,17 @@ export type PickReport = {
 };
 // A pick the preload could not name: no css within `CSS_PATH_MAX` (`tooDeep`), nothing at a `pickAt` point (`noElement`).
 export type PickRefused = { type: 'refused'; epoch: number; requestId: string | null; reason: 'tooDeep' | 'noElement' };
-export type PreloadMessage = PickReport | PickRefused;
+// The arm's acknowledgement: the shield is in the page. Main counts the tab armed only from here (Decision Log 34), so a
+// page with no preload (an adopted `window.open` tab) is never shown as armed.
+export type PickArmed = { type: 'armed'; epoch: number };
+export type PreloadMessage = PickReport | PickRefused | PickArmed;
 
 export const REPORT_NAME_MAX = 200; // X10's label cap; a longer name is cut and flagged, and the anchor omits it
 export const REPORT_A11Y_MAX = A11Y_PATH_MAX; // 300: page text in the person's prompt, kept small (Design §9)
 export const REPORT_TOKEN_MAX = 64; // `role` (E4c's cap) and `tag`
 export const DRAG_THRESHOLD_PX = 6; // a pointer moved further with the button down is an area pick
 export const PICK_AT_MS = 2000; // how long main waits for the report a `pickAt` asked for
+export const ARM_ACK_MS = 2000; // how long main waits for the arm's acknowledgement (the preload shares the page's main thread)
 
 // The description bounded to the report's caps, so a long page string never makes a legitimate pick fail main's schema.
 export function trimDescription(description: ElementDescription): { description: ElementDescription; nameOverLong: boolean } {
