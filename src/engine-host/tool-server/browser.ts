@@ -8,7 +8,7 @@
 // (X12, `sourceUrl` additive) through the session's deliverable writer, which outlives the app (X13). The browser tools
 // never read the engine's working directory.
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat, unlink } from 'node:fs/promises';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { MawsBrowserAnswerResult } from '@shared/ipc/schema/maws';
 import { hostOf } from '@shared/browser/url';
@@ -70,7 +70,8 @@ async function callBrowserTool(tool: BrowserToolName, args: unknown, ctx: Parame
 }
 
 // The picture main wrote, checked to be the file the host named for this record (the `.png`, or the `.jpg` beside it
-// after the JPEG fallback), read and capped, then recorded. A record is written only for a picture the model receives.
+// after the JPEG fallback), capped by its size before it is read (a refused one is removed: no record will name it),
+// then read and recorded. A record is written only for a picture the model receives.
 async function screenshotAnswer(
   result: BrowserScreenshotResult,
   answer: Extract<MawsBrowserAnswerResult, { ok: true }>,
@@ -85,11 +86,15 @@ async function screenshotAnswer(
   if (image.path !== path) return malformed('browser_screenshot');
   let bytes: Buffer;
   try {
+    const { size } = await stat(path);
+    if (size > BROWSER_SCREENSHOT_MAX_BYTES) {
+      await unlink(path).catch(() => {}); // best effort: the answer is the refusal either way
+      return toolError(TOOL_ERRORS.screenshotTooLarge(size));
+    }
     bytes = await (deps.readFile ?? readFile)(path);
   } catch (error) {
     return toolError(TOOL_ERRORS.screenshotFailed(`the picture MAWS wrote could not be read (${messageOf(error)})`));
   }
-  if (bytes.length > BROWSER_SCREENSHOT_MAX_BYTES) return toolError(TOOL_ERRORS.screenshotTooLarge(bytes.length));
   const at = (deps.now?.() ?? new Date()).toISOString();
   const title = result.title || hostOf(result.url);
   const toolUseId = ctx.toolUseId ?? undefined;

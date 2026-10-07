@@ -3,7 +3,7 @@
 // formats main's answer: JSON first; a snapshot's text as a second block; a screenshot's image before its JSON, the file
 // read from the path the host named and its `screenshot` record written (X12, `sourceUrl` additive). A malformed answer
 // is an error, never a success the model would trust.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -212,6 +212,26 @@ describe('the browser tools in the host (E4c Design §3)', () => {
       };
       expect((await run('browser_screenshot', { tabId: TAB }, huge)).result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.screenshotTooLarge(BROWSER_SCREENSHOT_MAX_BYTES + 1) }], isError: true });
       expect(written).toEqual([]);
+    });
+
+    // E11 (tracker row E4c "host reads the screenshot before the cap; orphan file"): the size is the file's, checked
+    // before any read, and a picture refused for its size leaves no file under deliverables/<id>/screenshots/.
+    it('refuses an oversized picture by its size without reading it, and removes the file main wrote', async () => {
+      const reads: string[] = [];
+      tools = new Map(browserTools({ bridge, deliverables: store, userData, newId: () => UUID, readFile: async (path) => (reads.push(path), PNG) }).map((tool) => [tool.name, tool]));
+      const path = screenshotPath(userData, A, UUID, 'png');
+      const huge = (): MawsBrowserAnswerResult => {
+        write(path, Buffer.alloc(BROWSER_SCREENSHOT_MAX_BYTES + 1));
+        return { ok: true, result: shot(path), image: { path, mimeType: 'image/png', width: 1, height: 1, bytes: 1 } };
+      };
+      expect((await run('browser_screenshot', { tabId: TAB }, huge)).result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.screenshotTooLarge(BROWSER_SCREENSHOT_MAX_BYTES + 1) }], isError: true });
+      expect(reads).toEqual([]);
+      expect(existsSync(path)).toBe(false);
+      expect(written).toEqual([]);
+      // a picture within the cap is read once and kept
+      await run('browser_screenshot', { tabId: TAB }, answerWith());
+      expect(reads).toEqual([path]);
+      expect(existsSync(path)).toBe(true);
     });
   });
 });
