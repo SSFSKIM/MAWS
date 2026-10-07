@@ -17,7 +17,7 @@ export interface SocketPortOptions {
 }
 
 // How long close() waits for the peer to finish the close before it destroys the socket.
-const CLOSE_GRACE_MS = 1_000;
+export const CLOSE_GRACE_MS = 1_000; // E11: also the bound main's quit waits for a draining close
 
 type MessageListener = (event: { data: unknown }) => void;
 

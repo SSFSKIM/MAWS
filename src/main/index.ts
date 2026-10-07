@@ -98,6 +98,7 @@ import { engineQuitDeps } from './lifecycle/engine-quit';
 // E10 end
 // E11 start
 import { shutdownSteps } from './lifecycle/shutdown';
+import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
 // E11 end
 // E4a start
 import { startBrowser } from './browser';
@@ -129,8 +130,9 @@ void startWithProfileLock(app, () => {
   const hosts = createHosts();
   installRouter({ appUrl, dispatchToHost: hosts.dispatch });
   const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
-  // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners")
-  const shutdown = shutdownSteps(app);
+  // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
+  // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace
+  const shutdown = shutdownSteps(app, CLOSE_GRACE_MS);
   // C3 start: the engine host's userData travels in the environment it is forked with (the host protocol's hello carries
   // no fields), and main's attention service answers `attention.*` over the hosts' events (C3 execution document, M5).
   process.env.MAWS_USER_DATA = app.getPath('userData');
@@ -528,7 +530,8 @@ void startWithProfileLock(app, () => {
     if (appWindows().length === 0) openWindow(); // E2: a capture window is not the app's
   });
   // E10: kills the pty host and a utility engine host; a detached engine host's socket closes with no exit, so after a
-  // keep the supervisor serves its sessions on (after any other quit it has already stopped them and is exiting)
+  // keep the supervisor serves its sessions on (after any other quit it has already stopped them and is exiting). E11:
+  // that close drains what the supervisor wrote before it saw the end, and the quit waits for it (the shutdown's bound)
   shutdown.add('hosts', () => hosts.stop());
   // E9 start: push-to-talk dictation (E9 execution document, M2): voice.* over the bundled helper, spawned on first use
   // (or, under the harness, the scripted backend or the probe-only helper); the helper is asked to quit at will-quit.
