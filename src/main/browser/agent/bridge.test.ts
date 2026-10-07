@@ -91,10 +91,11 @@ async function harness() {
   const raw = new FakeElectronDebugger();
   const tabDebugger = new TabDebugger({ debugger: raw, isDestroyed: () => false } as never);
   const send = vi.spyOn(tabDebugger, 'send');
-  const bridge = await startCdpBridge(tabDebugger, page);
+  const logged: string[] = [];
+  const bridge = await startCdpBridge(tabDebugger, page, { log: (line) => void logged.push(line) });
   opened.push({ bridge });
   const connect = async () => new Client(bridge.connect());
-  return { raw, tabDebugger, send, bridge, connect, PAGE: bridge.pageSessionId };
+  return { raw, tabDebugger, send, bridge, connect, logged, PAGE: bridge.pageSessionId };
 }
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -285,6 +286,20 @@ describe('startCdpBridge: one message per turn, as a socket', () => {
     await vi.waitFor(() => expect(seen).toEqual(['event 1', 'after 1', 'event 2', 'after 2', 'event 3', 'after 3']));
   });
 
+  it('keeps delivering after a client that throws on a message, and logs the throw', async () => {
+    const { connect, raw, logged } = await harness();
+    const client = await connect();
+    const seen: unknown[] = [];
+    client.onEvent = (event) => {
+      seen.push(event.params?.n);
+      if (event.params?.n === 1) throw new Error('the client broke');
+    };
+    raw.event('Page.lifecycleEvent', { n: 1 });
+    raw.event('Page.lifecycleEvent', { n: 2 });
+    await vi.waitFor(() => expect(seen).toEqual([1, 2]));
+    expect(logged.some((line) => line.includes('the client broke'))).toBe(true);
+  });
+
   it('an answer and the event after it: the answer’s continuation runs first', async () => {
     const { connect, PAGE, raw } = await harness();
     const client = await connect();
@@ -336,6 +351,16 @@ describe('startCdpBridge: no socket (G3, Decision Log 57)', () => {
     await settle();
     await settle();
     expect(late).toBe(false); // an ended transport is answered nothing
+  });
+
+  it("answers Browser.close before it ends the transport, however many messages wait ahead of the answer (Decision Log 58)", async () => {
+    const { connect, raw } = await harness();
+    const client = await connect();
+    for (let n = 0; n < 5; n++) raw.event('Page.lifecycleEvent', { n });
+    const closed = client.call('Browser.close');
+    expect((await closed).result).toEqual({});
+    await vi.waitFor(() => expect(client.closedWith).toBe('Browser.close'));
+    expect(client.order).toEqual([...Array.from({ length: 5 }, () => 'event Page.lifecycleEvent'), 'reply 1']);
   });
 
   it("ends the transport on the client's close and on Browser.close", async () => {

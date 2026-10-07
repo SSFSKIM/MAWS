@@ -89,21 +89,31 @@ export async function startCdpBridge(dbg: BridgeDebugger, page: BridgePage, { lo
   // lost; and it acts on an answer in a promise continuation, which must run before the next message arrives (it
   // listens for a frame's execution contexts once Page.getFrameTree has answered, and the main world's report follows
   // that answer at once: handed over in one batch, it reached no listener and every main-world evaluate waited forever).
-  const outbox: { to: ConnectOverCDPTransport; message: object }[] = [];
+  // An entry is for one transport (a later one never receives it); `close` ends that transport in its turn, behind the
+  // messages queued before it (Browser.close's answer included, Decision Log 58). A client that throws on a message is
+  // logged and the next message still goes.
+  const outbox: ({ to: ConnectOverCDPTransport; message: object } | { to: ConnectOverCDPTransport; close: string })[] = [];
   let flushing = false;
   const flush = () => {
     const next = outbox.shift();
-    if (next && client === next.to) next.to.onmessage?.(next.message);
-    if (outbox.length > 0) setImmediate(flush);
-    else flushing = false;
+    try {
+      if (next && 'close' in next) end(next.to, next.close);
+      else if (next && client === next.to) next.to.onmessage?.(next.message);
+    } catch (error) {
+      log(`the CDP bridge's client threw on a message: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (outbox.length > 0) setImmediate(flush);
+      else flushing = false;
+    }
   };
-  const deliverTo = (to: ConnectOverCDPTransport, message: object) => {
-    outbox.push({ to, message });
+  const enqueue = (entry: (typeof outbox)[number]) => {
+    outbox.push(entry);
     if (!flushing) {
       flushing = true;
       setImmediate(flush);
     }
   };
+  const deliverTo = (to: ConnectOverCDPTransport, message: object) => enqueue({ to, message });
   const deliver = (message: object) => {
     if (client) deliverTo(client, message);
   };
@@ -207,7 +217,7 @@ export async function startCdpBridge(dbg: BridgeDebugger, page: BridgePage, { lo
         return reply({});
       case 'Browser.close':
         reply({});
-        setImmediate(() => end(transport, 'Browser.close'));
+        enqueue({ to: transport, close: 'Browser.close' }); // after its answer
         return;
       default:
         stats.unknownBrowserMethods.add(method);
