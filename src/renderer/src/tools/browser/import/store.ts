@@ -44,7 +44,7 @@ export type ImportStage =
 export interface BrowserImportState {
   stage: ImportStage;
   busy: boolean; // an inspect or a start is in flight
-  listed: boolean; // the records came from main (a list answer or a change)
+  listed: boolean; // this connection's records came from main (a list answer or a change)
   records: ImportedProfile[];
 }
 
@@ -63,6 +63,7 @@ const stage = () => browserImport.getState().stage;
 // ---- main's events ---------------------------------------------------------------------------------------------------
 
 export function connectBrowserImport(client: MawsBridge = ipc, queries: QueryClient = queryClient): () => void {
+  set({ listed: false }); // this connection's list answer applies unless a change lands first
   const offs = [
     client.on('browser.import.progress', ({ importId, phase, done, total }) => {
       if (ended.has(importId)) return;
@@ -125,6 +126,7 @@ export async function inspect(userDataDir: string, profileDir: string, client: M
   set({ busy: true });
   const result = await client.invoke('browser.import.inspect', { userDataDir, profileDir });
   if (mine !== ticket || stage().kind !== 'pick') {
+    if (mine === ticket) set({ busy: false }); // a run adopted meanwhile; a newer inspect is still out otherwise
     if (result.ok) void client.invoke('browser.import.discard', { inspectionId: result.value.inspectionId }); // the sheet moved on meanwhile
     return;
   }

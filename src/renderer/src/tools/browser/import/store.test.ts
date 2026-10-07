@@ -9,7 +9,7 @@ import { ipc } from '../../../ipc/client';
 import { useNotices } from '../../../stores/notices';
 import { useSettings } from '../../../stores/settings';
 import { CHROME, DONE, IMPORT_ID, importBridge, INSPECTION, OTHER_IMPORT_ID, RECORD, type ImportBridge } from '../../../test-support/browser-import';
-import { browserImport, cancel, connectBrowserImport, inspect, openImport, PROFILES_FILE_BROKEN_BANNER, removeProfile, resetBrowserImport, start } from './store';
+import { browserImport, cancel, connectBrowserImport, discard, inspect, openImport, PROFILES_FILE_BROKEN_BANNER, removeProfile, resetBrowserImport, start } from './store';
 
 let b: ImportBridge;
 let queries: QueryClient;
@@ -117,6 +117,32 @@ describe('the sheet’s stages', () => {
     await start(CHOICE);
     expect(stage()).toEqual({ kind: 'failed', message: 'an import is running' });
     expect(names()).toContain('browser.import.discard');
+  });
+
+  it('an inspection that answers after the sheet closed, or after another run was adopted, is discarded on arrival', async () => {
+    connect();
+    let answer!: () => void;
+    const invoke = b.bridge.invoke;
+    b.bridge.invoke = (async (name: string, input: unknown) => {
+      if (name === 'browser.import.inspect') await new Promise<void>((resolve) => (answer = resolve));
+      return invoke(name as never, input as never);
+    }) as MawsBridge['invoke'];
+    let inspecting = inspect(CHROME, 'Default');
+    await expect.poll(() => typeof answer).toBe('function');
+    discard(); // the sheet closed in pick
+    answer();
+    await inspecting;
+    expect(stage()).toEqual({ kind: 'pick' });
+    expect(browserImport.getState().busy).toBe(false);
+
+    inspecting = inspect(CHROME, 'Default');
+    await expect.poll(() => browserImport.getState().busy).toBe(true);
+    b.emit('browser.import.progress', { importId: OTHER_IMPORT_ID, phase: 'copying', done: 0, total: 1 }); // another window's run
+    answer();
+    await inspecting;
+    expect(stage()).toMatchObject({ kind: 'running', importId: OTHER_IMPORT_ID });
+    expect(browserImport.getState().busy).toBe(false);
+    expect(b.calls.filter((c) => c.name === 'browser.import.discard')).toHaveLength(2);
   });
 
   it('opening the sheet again over a standing inspection discards it and starts at the picker', async () => {
